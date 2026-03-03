@@ -1,24 +1,18 @@
-//! 兼容入口：std runtime 实现已拆分到 `runtime/std/*`。
+//! std runtime — Runtime backed by Zig standard library.
+//!
+//! const std_rt = @import("runtime/std.zig");
+//! var rt = try std_rt.init(allocator);
+//! defer rt.deinit();
 
+const std = @import("std");
+const runtime = @import("runtime.zig");
 const root = @import("std/root.zig");
 
-pub const StdTime = root.StdTime;
-pub const StdLog = root.StdLog;
-pub const StdRng = root.StdRng;
-pub const StdMutex = root.StdMutex;
-pub const StdCondition = root.StdCondition;
-pub const StdNotify = root.StdNotify;
-pub const StdThread = root.StdThread;
-pub const StdSystem = root.StdSystem;
-pub const StdFs = root.StdFs;
-pub const StdIO = root.StdIO;
-pub const StdSocket = root.StdSocket;
-pub const StdNetIf = root.StdNetIf;
-pub const StdOtaBackend = root.StdOtaBackend;
-pub const StdCrypto = root.StdCrypto;
+pub const Runtime = runtime.Runtime(root.StdRuntimeDecl);
 
-pub const StdRuntimeDecl = root.StdRuntimeDecl;
-pub const StdRuntime = root.StdRuntime;
+pub fn init(allocator: std.mem.Allocator) anyerror!Runtime {
+    return Runtime.init(allocator);
+}
 
 test {
     _ = @import("std/tests.zig");

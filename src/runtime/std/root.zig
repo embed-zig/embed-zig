@@ -1,4 +1,4 @@
-//! std runtime 子模块入口。
+//! std runtime submodule root.
 
 const runtime = @import("../runtime.zig");
 const time = @import("time.zig");
