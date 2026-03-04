@@ -1,7 +1,7 @@
 const std = @import("std");
-const runtime = @import("../runtime.zig");
+const runtime = @import("../root.zig");
 
-pub const StdFs = struct {
+pub const Fs = struct {
     const FileCtx = struct {
         file: std.fs.File,
     };

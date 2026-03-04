@@ -1,12 +1,12 @@
 const std = @import("std");
-const runtime = @import("../runtime.zig");
+const runtime = @import("../root.zig");
 
 fn nowNs() u64 {
     const ts = std.time.nanoTimestamp();
     return if (ts <= 0) 0 else @intCast(ts);
 }
 
-pub const StdMutex = struct {
+pub const Mutex = struct {
     raw: std.Thread.Mutex = .{},
 
     pub fn init() @This() {
@@ -24,10 +24,10 @@ pub const StdMutex = struct {
     }
 };
 
-pub const StdCondition = struct {
+pub const Condition = struct {
     raw: std.Thread.Condition = .{},
 
-    pub const MutexType = StdMutex;
+    pub const MutexType = Mutex;
 
     pub fn init() @This() {
         return .{};
@@ -35,7 +35,7 @@ pub const StdCondition = struct {
 
     pub fn deinit(_: *@This()) void {}
 
-    pub fn wait(self: *@This(), mutex: *StdMutex) void {
+    pub fn wait(self: *@This(), mutex: *Mutex) void {
         self.raw.wait(&mutex.raw);
     }
 
@@ -47,7 +47,7 @@ pub const StdCondition = struct {
         self.raw.broadcast();
     }
 
-    pub fn timedWait(self: *@This(), mutex: *StdMutex, timeout_ns: u64) runtime.sync.types.TimedWaitResult {
+    pub fn timedWait(self: *@This(), mutex: *Mutex, timeout_ns: u64) runtime.sync.types.TimedWaitResult {
         self.raw.timedWait(&mutex.raw, timeout_ns) catch {
             return .timed_out;
         };
@@ -55,9 +55,9 @@ pub const StdCondition = struct {
     }
 };
 
-pub const StdNotify = struct {
-    mutex: StdMutex = StdMutex.init(),
-    cond: StdCondition = StdCondition.init(),
+pub const Notify = struct {
+    mutex: Mutex = Mutex.init(),
+    cond: Condition = Condition.init(),
     pending: u32 = 0,
 
     pub fn init() @This() {

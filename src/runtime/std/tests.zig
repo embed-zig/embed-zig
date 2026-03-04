@@ -12,10 +12,10 @@ const netif = @import("netif.zig");
 const ota_backend = @import("ota_backend.zig");
 const root = @import("root.zig");
 
-const std_time: time.StdTime = .{};
-const std_rng: rng.StdRng = .{};
-const std_system: system.StdSystem = .{};
-const std_netif: netif.StdNetIf = .{};
+const std_time: time.Time = .{};
+const std_rng: rng.Rng = .{};
+const std_system: system.System = .{};
+const std_netif: netif.NetIf = .{};
 
 var unique_counter = std.atomic.Value(u64).init(0);
 
@@ -30,7 +30,7 @@ fn markDone(ctx: ?*anyopaque) void {
 }
 
 fn notifyAfterDelay(ctx: ?*anyopaque) void {
-    const n: *sync.StdNotify = @ptrCast(@alignCast(ctx.?));
+    const n: *sync.Notify = @ptrCast(@alignCast(ctx.?));
     std_time.sleepMs(20);
     n.signal();
 }
@@ -44,7 +44,7 @@ fn ioReadReady(ctx: ?*anyopaque, fd: std.posix.fd_t) void {
 
 fn tcpServerEcho(ctx: ?*anyopaque) void {
     const Ctx = struct {
-        server: *socket.StdSocket,
+        server: *socket.Socket,
         ok: *std.atomic.Value(u32),
     };
 
@@ -61,25 +61,22 @@ fn tcpServerEcho(ctx: ?*anyopaque) void {
     _ = c.ok.fetchAdd(1, .seq_cst);
 }
 
-test "std runtime init creates instance" {
-    var rt = try root.StdRuntime.init(std.testing.allocator);
-    defer rt.deinit();
-
-    const now = rt.time.nowMs();
+test "std time nowMs returns positive value" {
+    const now = std_time.nowMs();
     try std.testing.expect(now > 0);
 }
 
 test "std thread spawn/join executes task" {
     var counter = std.atomic.Value(u32).init(0);
-    var th = try thread.StdThread.spawn(.{}, markDone, @ptrCast(&counter));
+    var th = try thread.Thread.spawn(.{}, markDone, @ptrCast(&counter));
     th.join();
     try std.testing.expectEqual(@as(u32, 1), counter.load(.seq_cst));
 }
 
 test "std condition wait/signal works" {
     const Ctx = struct {
-        mutex: sync.StdMutex,
-        cond: sync.StdCondition,
+        mutex: sync.Mutex,
+        cond: sync.Condition,
         ready: bool,
     };
 
@@ -94,11 +91,11 @@ test "std condition wait/signal works" {
         }
     };
 
-    var ctx = Ctx{ .mutex = sync.StdMutex.init(), .cond = sync.StdCondition.init(), .ready = false };
+    var ctx = Ctx{ .mutex = sync.Mutex.init(), .cond = sync.Condition.init(), .ready = false };
     defer ctx.cond.deinit();
     defer ctx.mutex.deinit();
 
-    var th = try thread.StdThread.spawn(.{}, waiter.run, @ptrCast(&ctx));
+    var th = try thread.Thread.spawn(.{}, waiter.run, @ptrCast(&ctx));
     std_time.sleepMs(10);
 
     ctx.mutex.lock();
@@ -111,10 +108,10 @@ test "std condition wait/signal works" {
 }
 
 test "std notify timedWait" {
-    var notify = sync.StdNotify.init();
+    var notify = sync.Notify.init();
     defer notify.deinit();
 
-    var th = try thread.StdThread.spawn(.{}, notifyAfterDelay, @ptrCast(&notify));
+    var th = try thread.Thread.spawn(.{}, notifyAfterDelay, @ptrCast(&notify));
 
     const early = notify.timedWait(5 * std.time.ns_per_ms);
     try std.testing.expect(!early);
@@ -139,7 +136,7 @@ test "std system getCpuCount" {
 }
 
 test "std fs read/write roundtrip" {
-    var fs_impl = fs.StdFs{};
+    var fs_impl = fs.Fs{};
 
     var path_buf: [256]u8 = undefined;
     const path = makeTmpPath("fs", ".bin", &path_buf);
@@ -158,7 +155,7 @@ test "std fs read/write roundtrip" {
 }
 
 test "std io registerRead and poll" {
-    var io_impl = try io.StdIO.init(std.testing.allocator);
+    var io_impl = try io.IO.init(std.testing.allocator);
     defer io_impl.deinit();
 
     const p = try std.posix.pipe();
@@ -179,7 +176,7 @@ test "std io registerRead and poll" {
 }
 
 test "std io wake drains buffered wake bytes" {
-    var io_impl = try io.StdIO.init(std.testing.allocator);
+    var io_impl = try io.IO.init(std.testing.allocator);
     defer io_impl.deinit();
 
     var i: usize = 0;
@@ -193,7 +190,7 @@ test "std io wake drains buffered wake bytes" {
 }
 
 test "std socket tcp loopback echo" {
-    var server = try socket.StdSocket.tcp();
+    var server = try socket.Socket.tcp();
     defer server.close();
 
     try server.bind(.{ 127, 0, 0, 1 }, 0);
@@ -202,14 +199,14 @@ test "std socket tcp loopback echo" {
 
     var ok = std.atomic.Value(u32).init(0);
     const Ctx = struct {
-        server: *socket.StdSocket,
+        server: *socket.Socket,
         ok: *std.atomic.Value(u32),
     };
     var ctx = Ctx{ .server = &server, .ok = &ok };
 
-    var th = try thread.StdThread.spawn(.{}, tcpServerEcho, @ptrCast(&ctx));
+    var th = try thread.Thread.spawn(.{}, tcpServerEcho, @ptrCast(&ctx));
 
-    var client = try socket.StdSocket.tcp();
+    var client = try socket.Socket.tcp();
     defer client.close();
     client.setRecvTimeout(1000);
     client.setSendTimeout(1000);
@@ -226,7 +223,7 @@ test "std socket tcp loopback echo" {
 }
 
 test "std socket udp recvFrom/sendTo" {
-    var server = try socket.StdSocket.udp();
+    var server = try socket.Socket.udp();
     defer server.close();
     server.setRecvTimeout(1000);
     server.setSendTimeout(1000);
@@ -234,7 +231,7 @@ test "std socket udp recvFrom/sendTo" {
     try server.bind(.{ 127, 0, 0, 1 }, 0);
     const server_port = try server.getBoundPort();
 
-    var client = try socket.StdSocket.udp();
+    var client = try socket.Socket.udp();
     defer client.close();
     client.setRecvTimeout(1000);
     client.setSendTimeout(1000);
@@ -280,7 +277,7 @@ test "std ota backend begin/write/finalize" {
     defer std.fs.deleteFileAbsolute(stage_path) catch {};
     defer std.fs.deleteFileAbsolute(final_path) catch {};
 
-    var ota = try ota_backend.StdOtaBackend.init();
+    var ota = try ota_backend.OtaBackend.init();
     ota.stage_path = stage_path;
     ota.final_path = final_path;
 

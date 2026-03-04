@@ -1,7 +1,7 @@
 const std = @import("std");
-const runtime = @import("../runtime.zig");
+const runtime = @import("../root.zig");
 
-pub const StdSocket = struct {
+pub const Socket = struct {
     fd: ?std.posix.fd_t = null,
     is_udp: bool = false,
     recv_timeout_ms: u32 = 0,

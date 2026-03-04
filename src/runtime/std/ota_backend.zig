@@ -1,7 +1,7 @@
 const std = @import("std");
-const runtime = @import("../runtime.zig");
+const runtime = @import("../root.zig");
 
-pub const StdOtaBackend = struct {
+pub const OtaBackend = struct {
     file: ?std.fs.File = null,
     expected_size: u32 = 0,
     written_size: u32 = 0,

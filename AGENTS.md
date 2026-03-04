@@ -86,7 +86,7 @@ zig test src/root.zig
 
 ### 4.4 Naming
 - File names: lowercase snake_case.
-- Public types: PascalCase (`StdSocket`, `DnsServers`).
+- Public types: PascalCase (`Socket`, `DnsServers`).
 - Functions/methods: lowerCamelCase (`setNonBlocking`, `parseIpv4`).
 - Tests: behavior-oriented names.
 

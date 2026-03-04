@@ -1,8 +1,8 @@
 const std = @import("std");
-const runtime = @import("../runtime.zig");
+const runtime = @import("../root.zig");
 
-pub const StdRng = struct {
-    pub fn fill(_: StdRng, buf: []u8) runtime.rng.Error!void {
+pub const Rng = struct {
+    pub fn fill(_: Rng, buf: []u8) runtime.rng.Error!void {
         std.crypto.random.bytes(buf);
     }
 };

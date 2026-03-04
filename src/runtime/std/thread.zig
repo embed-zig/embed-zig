@@ -1,7 +1,7 @@
 const std = @import("std");
-const runtime = @import("../runtime.zig");
+const runtime = @import("../root.zig");
 
-pub const StdThread = struct {
+pub const Thread = struct {
     handle: ?std.Thread = null,
 
     pub fn spawn(config: runtime.thread.types.SpawnConfig, task: runtime.thread.types.TaskFn, ctx: ?*anyopaque) anyerror!@This() {

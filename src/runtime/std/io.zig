@@ -1,7 +1,7 @@
 const std = @import("std");
-const runtime = @import("../runtime.zig");
+const runtime = @import("../root.zig");
 
-pub const StdIO = struct {
+pub const IO = struct {
     pub const ReadyCallback = runtime.io.ReadyCallback;
 
     const WatchEntry = struct {
