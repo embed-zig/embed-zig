@@ -1,0 +1,87 @@
+const std = @import("std");
+const Certificate = std.crypto.Certificate;
+const Bundle = Certificate.Bundle;
+
+pub const CaStore = struct {
+    bundle: Bundle,
+    allocator: std.mem.Allocator,
+
+    pub fn initSystem(allocator: std.mem.Allocator) !CaStore {
+        var bundle: Bundle = .{};
+        try bundle.rescan(allocator);
+        return .{ .bundle = bundle, .allocator = allocator };
+    }
+
+    pub fn deinit(self: *CaStore) void {
+        self.bundle.deinit(self.allocator);
+    }
+};
+
+pub const VerifyError = error{
+    CertificateVerificationFailed,
+    CertificateHostMismatch,
+    CertificateParseError,
+    CertificateChainTooShort,
+};
+
+/// Verify a DER-encoded certificate chain against a CA store.
+///
+/// - `chain`: leaf certificate first, intermediates follow, root optional.
+/// - `hostname`: if non-null, the leaf's SAN / CN is checked.
+/// - `store`: system CA bundle loaded via `CaStore.initSystem`.
+/// - `now_sec`: current UNIX timestamp for validity window checks.
+pub fn verifyChain(
+    chain: []const []const u8,
+    hostname: ?[]const u8,
+    store: CaStore,
+    now_sec: i64,
+) VerifyError!void {
+    if (chain.len == 0) return error.CertificateChainTooShort;
+
+    const leaf_cert = Certificate{ .buffer = chain[0], .index = 0 };
+    const leaf = leaf_cert.parse() catch return error.CertificateParseError;
+
+    if (hostname) |host| {
+        leaf.verifyHostName(host) catch return error.CertificateHostMismatch;
+    }
+
+    const now: i64 = if (now_sec == 0) ts: {
+        const t = std.time.timestamp();
+        break :ts if (t <= 0) 0 else t;
+    } else now_sec;
+
+    var subject = leaf;
+    var i: usize = 1;
+    while (i < chain.len) : (i += 1) {
+        const issuer_cert = Certificate{ .buffer = chain[i], .index = 0 };
+        const issuer = issuer_cert.parse() catch return error.CertificateParseError;
+        subject.verify(issuer, now) catch return error.CertificateVerificationFailed;
+        subject = issuer;
+    }
+
+    store.bundle.verify(subject, now) catch return error.CertificateVerificationFailed;
+}
+
+test "CaStore initSystem loads certificates" {
+    var store = CaStore.initSystem(std.testing.allocator) catch return;
+    defer store.deinit();
+
+    try std.testing.expect(store.bundle.bytes.items.len > 0);
+}
+
+test "verifyChain rejects empty chain" {
+    var store = CaStore.initSystem(std.testing.allocator) catch return;
+    defer store.deinit();
+
+    const empty: []const []const u8 = &.{};
+    try std.testing.expectError(error.CertificateChainTooShort, verifyChain(empty, null, store, 0));
+}
+
+test "verifyChain rejects garbage DER" {
+    var store = CaStore.initSystem(std.testing.allocator) catch return;
+    defer store.deinit();
+
+    const garbage = [_]u8{0xFF} ** 32;
+    const chain: []const []const u8 = &.{&garbage};
+    try std.testing.expectError(error.CertificateParseError, verifyChain(chain, null, store, 0));
+}

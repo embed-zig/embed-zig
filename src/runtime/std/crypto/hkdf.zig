@@ -7,8 +7,10 @@ pub const HkdfSha256 = struct {
         return std.crypto.kdf.hkdf.HkdfSha256.extract(salt orelse &[_]u8{}, ikm);
     }
 
-    pub fn expand(prk: *const [prk_length]u8, info: []const u8, out: []u8) void {
-        std.crypto.kdf.hkdf.HkdfSha256.expand(out, info, prk.*);
+    pub fn expand(prk: *const [prk_length]u8, info: []const u8, comptime len: usize) [len]u8 {
+        var out: [len]u8 = undefined;
+        std.crypto.kdf.hkdf.HkdfSha256.expand(&out, info, prk.*);
+        return out;
     }
 };
 
@@ -20,8 +22,10 @@ pub const HkdfSha384 = struct {
         return Inner.extract(salt orelse &[_]u8{}, ikm);
     }
 
-    pub fn expand(prk: *const [prk_length]u8, info: []const u8, out: []u8) void {
-        Inner.expand(out, info, prk.*);
+    pub fn expand(prk: *const [prk_length]u8, info: []const u8, comptime len: usize) [len]u8 {
+        var out: [len]u8 = undefined;
+        Inner.expand(&out, info, prk.*);
+        return out;
     }
 };
 
@@ -32,8 +36,10 @@ pub const HkdfSha512 = struct {
         return std.crypto.kdf.hkdf.HkdfSha512.extract(salt orelse &[_]u8{}, ikm);
     }
 
-    pub fn expand(prk: *const [prk_length]u8, info: []const u8, out: []u8) void {
-        std.crypto.kdf.hkdf.HkdfSha512.expand(out, info, prk.*);
+    pub fn expand(prk: *const [prk_length]u8, info: []const u8, comptime len: usize) [len]u8 {
+        var out: [len]u8 = undefined;
+        std.crypto.kdf.hkdf.HkdfSha512.expand(&out, info, prk.*);
+        return out;
     }
 };
 
@@ -51,7 +57,6 @@ test "hkdf sha256 RFC5869 test case 1" {
     const prk = HkdfSha256.extract(&salt, &ikm);
     try expectHex(&prk, "077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5");
 
-    var okm: [42]u8 = undefined;
-    HkdfSha256.expand(&prk, &info, &okm);
+    const okm = HkdfSha256.expand(&prk, &info, 42);
     try expectHex(&okm, "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865");
 }

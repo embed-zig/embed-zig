@@ -1,0 +1,438 @@
+const std = @import("std");
+const common = @import("common.zig");
+
+const ExtensionType = common.ExtensionType;
+const NamedGroup = common.NamedGroup;
+const SignatureScheme = common.SignatureScheme;
+const ProtocolVersion = common.ProtocolVersion;
+const CipherSuite = common.CipherSuite;
+const PskKeyExchangeMode = common.PskKeyExchangeMode;
+
+pub const ExtensionError = error{
+    BufferTooSmall,
+    InvalidExtension,
+    ExtensionTooLarge,
+    MissingRequiredExtension,
+    DuplicateExtension,
+    UnsupportedExtension,
+};
+
+pub const ExtensionBuilder = struct {
+    buffer: []u8,
+    pos: usize,
+
+    pub fn init(buffer: []u8) ExtensionBuilder {
+        return .{ .buffer = buffer, .pos = 0 };
+    }
+
+    pub fn addExtension(self: *ExtensionBuilder, ext_type: ExtensionType, data: []const u8) !void {
+        const needed = 4 + data.len;
+        if (self.pos + needed > self.buffer.len) return error.BufferTooSmall;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(ext_type), .big);
+        self.pos += 2;
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(data.len), .big);
+        self.pos += 2;
+        @memcpy(self.buffer[self.pos..][0..data.len], data);
+        self.pos += data.len;
+    }
+
+    pub fn addServerName(self: *ExtensionBuilder, hostname: []const u8) !void {
+        if (hostname.len > 255) return error.ExtensionTooLarge;
+
+        const ext_len = 2 + 1 + 2 + hostname.len;
+        const needed = 4 + ext_len;
+        if (self.pos + needed > self.buffer.len) return error.BufferTooSmall;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(ExtensionType.server_name), .big);
+        self.pos += 2;
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(ext_len), .big);
+        self.pos += 2;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(1 + 2 + hostname.len), .big);
+        self.pos += 2;
+
+        self.buffer[self.pos] = 0;
+        self.pos += 1;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(hostname.len), .big);
+        self.pos += 2;
+        @memcpy(self.buffer[self.pos..][0..hostname.len], hostname);
+        self.pos += hostname.len;
+    }
+
+    pub fn addSupportedVersions(self: *ExtensionBuilder, versions: []const ProtocolVersion) !void {
+        const list_len = versions.len * 2;
+        const ext_len = 1 + list_len;
+        const needed = 4 + ext_len;
+        if (self.pos + needed > self.buffer.len) return error.BufferTooSmall;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(ExtensionType.supported_versions), .big);
+        self.pos += 2;
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(ext_len), .big);
+        self.pos += 2;
+
+        self.buffer[self.pos] = @intCast(list_len);
+        self.pos += 1;
+
+        for (versions) |v| {
+            std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(v), .big);
+            self.pos += 2;
+        }
+    }
+
+    pub fn addEcPointFormats(self: *ExtensionBuilder) !void {
+        const needed = 4 + 2;
+        if (self.pos + needed > self.buffer.len) return error.BufferTooSmall;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(ExtensionType.ec_point_formats), .big);
+        self.pos += 2;
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], 2, .big);
+        self.pos += 2;
+        self.buffer[self.pos] = 1;
+        self.pos += 1;
+        self.buffer[self.pos] = 0;
+        self.pos += 1;
+    }
+
+    pub fn addSupportedGroups(self: *ExtensionBuilder, groups: []const NamedGroup) !void {
+        const list_len = groups.len * 2;
+        const ext_len = 2 + list_len;
+        const needed = 4 + ext_len;
+        if (self.pos + needed > self.buffer.len) return error.BufferTooSmall;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(ExtensionType.supported_groups), .big);
+        self.pos += 2;
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(ext_len), .big);
+        self.pos += 2;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(list_len), .big);
+        self.pos += 2;
+
+        for (groups) |g| {
+            std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(g), .big);
+            self.pos += 2;
+        }
+    }
+
+    pub fn addSignatureAlgorithms(self: *ExtensionBuilder, algorithms: []const SignatureScheme) !void {
+        const list_len = algorithms.len * 2;
+        const ext_len = 2 + list_len;
+        const needed = 4 + ext_len;
+        if (self.pos + needed > self.buffer.len) return error.BufferTooSmall;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(ExtensionType.signature_algorithms), .big);
+        self.pos += 2;
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(ext_len), .big);
+        self.pos += 2;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(list_len), .big);
+        self.pos += 2;
+
+        for (algorithms) |a| {
+            std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(a), .big);
+            self.pos += 2;
+        }
+    }
+
+    pub fn addKeyShareClient(self: *ExtensionBuilder, entries: []const KeyShareEntry) !void {
+        var list_len: usize = 0;
+        for (entries) |e| {
+            list_len += 4 + e.key_exchange.len;
+        }
+
+        const ext_len = 2 + list_len;
+        const needed = 4 + ext_len;
+        if (self.pos + needed > self.buffer.len) return error.BufferTooSmall;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(ExtensionType.key_share), .big);
+        self.pos += 2;
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(ext_len), .big);
+        self.pos += 2;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(list_len), .big);
+        self.pos += 2;
+
+        for (entries) |e| {
+            std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(e.group), .big);
+            self.pos += 2;
+            std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(e.key_exchange.len), .big);
+            self.pos += 2;
+            @memcpy(self.buffer[self.pos..][0..e.key_exchange.len], e.key_exchange);
+            self.pos += e.key_exchange.len;
+        }
+    }
+
+    pub fn addPskKeyExchangeModes(self: *ExtensionBuilder, modes: []const PskKeyExchangeMode) !void {
+        const ext_len = 1 + modes.len;
+        const needed = 4 + ext_len;
+        if (self.pos + needed > self.buffer.len) return error.BufferTooSmall;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(ExtensionType.psk_key_exchange_modes), .big);
+        self.pos += 2;
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(ext_len), .big);
+        self.pos += 2;
+
+        self.buffer[self.pos] = @intCast(modes.len);
+        self.pos += 1;
+
+        for (modes) |m| {
+            self.buffer[self.pos] = @intFromEnum(m);
+            self.pos += 1;
+        }
+    }
+
+    pub fn addAlpn(self: *ExtensionBuilder, protocols: []const []const u8) !void {
+        var list_len: usize = 0;
+        for (protocols) |p| {
+            list_len += 1 + p.len;
+        }
+
+        const ext_len = 2 + list_len;
+        const needed = 4 + ext_len;
+        if (self.pos + needed > self.buffer.len) return error.BufferTooSmall;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intFromEnum(ExtensionType.application_layer_protocol_negotiation), .big);
+        self.pos += 2;
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(ext_len), .big);
+        self.pos += 2;
+
+        std.mem.writeInt(u16, self.buffer[self.pos..][0..2], @intCast(list_len), .big);
+        self.pos += 2;
+
+        for (protocols) |p| {
+            self.buffer[self.pos] = @intCast(p.len);
+            self.pos += 1;
+            @memcpy(self.buffer[self.pos..][0..p.len], p);
+            self.pos += p.len;
+        }
+    }
+
+    pub fn getData(self: *ExtensionBuilder) []const u8 {
+        return self.buffer[0..self.pos];
+    }
+};
+
+pub const KeyShareEntry = struct {
+    group: NamedGroup,
+    key_exchange: []const u8,
+};
+
+pub const Extension = struct {
+    ext_type: ExtensionType,
+    data: []const u8,
+};
+
+pub fn parseExtensions(data: []const u8, allocator: std.mem.Allocator) ![]Extension {
+    var exts = std.ArrayList(Extension).init(allocator);
+    errdefer exts.deinit();
+
+    var pos: usize = 0;
+    while (pos + 4 <= data.len) {
+        const ext_type: ExtensionType = @enumFromInt(std.mem.readInt(u16, data[pos..][0..2], .big));
+        pos += 2;
+        const ext_len = std.mem.readInt(u16, data[pos..][0..2], .big);
+        pos += 2;
+
+        if (pos + ext_len > data.len) return error.InvalidExtension;
+
+        try exts.append(.{
+            .ext_type = ext_type,
+            .data = data[pos..][0..ext_len],
+        });
+        pos += ext_len;
+    }
+
+    return exts.toOwnedSlice();
+}
+
+pub fn parseServerName(data: []const u8) !?[]const u8 {
+    if (data.len < 5) return error.InvalidExtension;
+
+    const list_len = std.mem.readInt(u16, data[0..2], .big);
+    if (list_len + 2 > data.len) return error.InvalidExtension;
+
+    var pos: usize = 2;
+    while (pos < 2 + list_len) {
+        const name_type = data[pos];
+        pos += 1;
+        const name_len = std.mem.readInt(u16, data[pos..][0..2], .big);
+        pos += 2;
+
+        if (name_type == 0) {
+            if (pos + name_len > data.len) return error.InvalidExtension;
+            return data[pos..][0..name_len];
+        }
+        pos += name_len;
+    }
+
+    return null;
+}
+
+pub fn parseSupportedVersion(data: []const u8) !ProtocolVersion {
+    if (data.len < 2) return error.InvalidExtension;
+    return @enumFromInt(std.mem.readInt(u16, data[0..2], .big));
+}
+
+pub fn parseKeyShareServer(data: []const u8) !KeyShareEntry {
+    if (data.len < 4) return error.InvalidExtension;
+
+    const group: NamedGroup = @enumFromInt(std.mem.readInt(u16, data[0..2], .big));
+    const key_len = std.mem.readInt(u16, data[2..4], .big);
+
+    if (data.len < 4 + key_len) return error.InvalidExtension;
+
+    return KeyShareEntry{
+        .group = group,
+        .key_exchange = data[4..][0..key_len],
+    };
+}
+
+test "ExtensionBuilder server name" {
+    var buf: [256]u8 = undefined;
+    var builder = ExtensionBuilder.init(&buf);
+
+    try builder.addServerName("example.com");
+
+    const data = builder.getData();
+    try std.testing.expect(data.len > 0);
+
+    const ext_type = std.mem.readInt(u16, data[0..2], .big);
+    try std.testing.expectEqual(@as(u16, 0), ext_type);
+}
+
+test "ExtensionBuilder supported versions" {
+    var buf: [256]u8 = undefined;
+    var builder = ExtensionBuilder.init(&buf);
+
+    const versions = [_]ProtocolVersion{ .tls_1_3, .tls_1_2 };
+    try builder.addSupportedVersions(&versions);
+
+    const data = builder.getData();
+    try std.testing.expect(data.len > 0);
+}
+
+test "parseServerName" {
+    var buf: [256]u8 = undefined;
+    var builder = ExtensionBuilder.init(&buf);
+    try builder.addServerName("test.example.com");
+
+    const ext_data = builder.getData()[4..];
+    const hostname = try parseServerName(ext_data);
+    try std.testing.expectEqualStrings("test.example.com", hostname.?);
+}
+
+test "ExtensionBuilder buffer overflow" {
+    var buf: [4]u8 = undefined;
+    var builder = ExtensionBuilder.init(&buf);
+    try std.testing.expectError(error.BufferTooSmall, builder.addServerName("this-hostname-is-way-too-long-for-a-4-byte-buffer.example.com"));
+}
+
+test "ExtensionBuilder addSupportedGroups" {
+    var buf: [256]u8 = undefined;
+    var builder = ExtensionBuilder.init(&buf);
+
+    const groups = [_]NamedGroup{ .x25519, .secp256r1 };
+    try builder.addSupportedGroups(&groups);
+
+    const data = builder.getData();
+    try std.testing.expect(data.len > 0);
+
+    const ext_type = std.mem.readInt(u16, data[0..2], .big);
+    try std.testing.expectEqual(@as(u16, @intFromEnum(ExtensionType.supported_groups)), ext_type);
+}
+
+test "ExtensionBuilder addSignatureAlgorithms" {
+    var buf: [256]u8 = undefined;
+    var builder = ExtensionBuilder.init(&buf);
+
+    const sig_algs = [_]SignatureScheme{
+        .ecdsa_secp256r1_sha256,
+        .rsa_pss_rsae_sha256,
+    };
+    try builder.addSignatureAlgorithms(&sig_algs);
+
+    const data = builder.getData();
+    try std.testing.expect(data.len > 0);
+
+    const ext_type = std.mem.readInt(u16, data[0..2], .big);
+    try std.testing.expectEqual(@as(u16, @intFromEnum(ExtensionType.signature_algorithms)), ext_type);
+}
+
+test "parseSupportedVersion" {
+    var data: [2]u8 = undefined;
+    std.mem.writeInt(u16, &data, @intFromEnum(ProtocolVersion.tls_1_3), .big);
+    const version = try parseSupportedVersion(&data);
+    try std.testing.expectEqual(ProtocolVersion.tls_1_3, version);
+}
+
+test "parseSupportedVersion too small" {
+    const data: [1]u8 = .{0};
+    try std.testing.expectError(error.InvalidExtension, parseSupportedVersion(&data));
+}
+
+test "parseKeyShareServer" {
+    var data: [36]u8 = undefined;
+    std.mem.writeInt(u16, data[0..2], @intFromEnum(NamedGroup.x25519), .big);
+    std.mem.writeInt(u16, data[2..4], 32, .big);
+    @memset(data[4..36], 0xAA);
+
+    const entry = try parseKeyShareServer(&data);
+    try std.testing.expectEqual(NamedGroup.x25519, entry.group);
+    try std.testing.expectEqual(@as(usize, 32), entry.key_exchange.len);
+}
+
+test "parseKeyShareServer too small header" {
+    const data: [3]u8 = .{ 0, 0, 0 };
+    try std.testing.expectError(error.InvalidExtension, parseKeyShareServer(&data));
+}
+
+test "parseKeyShareServer truncated key data" {
+    var data: [6]u8 = undefined;
+    std.mem.writeInt(u16, data[0..2], @intFromEnum(NamedGroup.x25519), .big);
+    std.mem.writeInt(u16, data[2..4], 32, .big);
+    try std.testing.expectError(error.InvalidExtension, parseKeyShareServer(&data));
+}
+
+test "ExtensionBuilder multiple extensions" {
+    var buf: [512]u8 = undefined;
+    var builder = ExtensionBuilder.init(&buf);
+
+    try builder.addServerName("example.com");
+    const after_sni = builder.getData().len;
+
+    const versions = [_]ProtocolVersion{ .tls_1_3, .tls_1_2 };
+    try builder.addSupportedVersions(&versions);
+    const after_versions = builder.getData().len;
+
+    try std.testing.expect(after_versions > after_sni);
+}
+
+test "parseServerName too short data" {
+    const data: [2]u8 = .{ 0, 0 };
+    try std.testing.expectError(error.InvalidExtension, parseServerName(&data));
+}
+
+test "parseServerName empty list" {
+    var data: [5]u8 = undefined;
+    std.mem.writeInt(u16, data[0..2], 3, .big);
+    data[2] = 0;
+    std.mem.writeInt(u16, data[3..5], 0, .big);
+    const result = try parseServerName(&data);
+    try std.testing.expect(result != null);
+    try std.testing.expectEqual(@as(usize, 0), result.?.len);
+}
+
+test "ExtensionBuilder addPskKeyExchangeModes" {
+    var buf: [256]u8 = undefined;
+    var builder = ExtensionBuilder.init(&buf);
+
+    const modes = [_]PskKeyExchangeMode{.psk_dhe_ke};
+    try builder.addPskKeyExchangeModes(&modes);
+
+    const data = builder.getData();
+    try std.testing.expect(data.len > 0);
+
+    const ext_type = std.mem.readInt(u16, data[0..2], .big);
+    try std.testing.expectEqual(@as(u16, @intFromEnum(ExtensionType.psk_key_exchange_modes)), ext_type);
+}
