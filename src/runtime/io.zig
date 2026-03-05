@@ -1,7 +1,7 @@
 //! Runtime IO Contract (unified register/poll/wake model)
 
 const std = @import("std");
-const fd_t = std.posix.fd_t;
+pub const fd_t = std.posix.fd_t;
 
 /// Shared callback type for I/O readiness notifications.
 pub const ReadyCallback = struct {

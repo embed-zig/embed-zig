@@ -5,8 +5,10 @@ pub const OtaBackend = struct {
     file: ?std.fs.File = null,
     expected_size: u32 = 0,
     written_size: u32 = 0,
+    confirmed: bool = true,
     stage_path: []const u8 = ".runtime_ota_stage.bin",
     final_path: []const u8 = ".runtime_ota_applied.bin",
+    confirm_path: []const u8 = ".runtime_ota_confirmed",
 
     pub fn init() runtime.ota_backend.Error!@This() {
         return .{};
@@ -42,6 +44,8 @@ pub const OtaBackend = struct {
 
         deleteFileAt(self.final_path);
         renameAt(self.stage_path, self.final_path) catch return error.FinalizeFailed;
+        deleteFileAt(self.confirm_path);
+        self.confirmed = false;
     }
 
     pub fn abort(self: *@This()) void {
@@ -50,6 +54,33 @@ pub const OtaBackend = struct {
             self.file = null;
         }
         deleteFileAt(self.stage_path);
+    }
+
+    pub fn confirm(self: *@This()) runtime.ota_backend.Error!void {
+        if (self.confirmed) return;
+        _ = createFileAt(self.confirm_path) catch return error.ConfirmFailed;
+        self.confirmed = true;
+    }
+
+    pub fn rollback(self: *@This()) runtime.ota_backend.Error!void {
+        deleteFileAt(self.final_path);
+        deleteFileAt(self.confirm_path);
+        self.confirmed = true;
+    }
+
+    pub fn getState(self: *@This()) runtime.ota_backend.State {
+        if (!fileExists(self.final_path)) return .unknown;
+        if (self.confirmed or fileExists(self.confirm_path)) return .valid;
+        return .pending_verify;
+    }
+
+    fn fileExists(path: []const u8) bool {
+        if (std.fs.path.isAbsolute(path)) {
+            std.fs.accessAbsolute(path, .{}) catch return false;
+            return true;
+        }
+        std.fs.cwd().access(path, .{}) catch return false;
+        return true;
     }
 
     fn createFileAt(path: []const u8) !std.fs.File {
