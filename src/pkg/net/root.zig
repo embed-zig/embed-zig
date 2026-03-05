@@ -4,6 +4,7 @@ pub const url = @import("url/root.zig");
 pub const dns = @import("dns/root.zig");
 pub const ntp = @import("ntp/root.zig");
 pub const http = @import("http/root.zig");
+pub const ws = @import("ws/root.zig");
 
 pub const Conn = conn.from;
 pub const SocketConn = conn.SocketConn;
@@ -15,4 +16,5 @@ test {
     _ = dns;
     _ = ntp;
     _ = http;
+    _ = ws;
 }
