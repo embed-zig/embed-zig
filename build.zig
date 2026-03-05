@@ -197,6 +197,10 @@ pub fn build(b: *std.Build) void {
     });
     const run_async_tests = b.addRunArtifact(async_tests);
 
+    const hal_mod = b.createModule(.{
+        .root_source_file = b.path("src/hal/root.zig"),
+    });
+
     const event_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/pkg/event/root.zig"),
@@ -204,6 +208,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "runtime", .module = runtime_mod },
+                .{ .name = "hal", .module = hal_mod },
             },
         }),
     });
@@ -213,15 +218,9 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/pkg/event/root.zig"),
         .imports = &.{
             .{ .name = "runtime", .module = runtime_mod },
+            .{ .name = "hal", .module = hal_mod },
         },
     });
-    const button_gesture_mod = b.createModule(.{
-        .root_source_file = b.path("src/pkg/input/button/gesture.zig"),
-        .imports = &.{
-            .{ .name = "runtime", .module = runtime_mod },
-        },
-    });
-    button_gesture_mod.addImport("event", event_mod);
 
     const event_integration_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -231,7 +230,6 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "runtime", .module = runtime_mod },
                 .{ .name = "event", .module = event_mod },
-                .{ .name = "button_gesture", .module = button_gesture_mod },
             },
         }),
     });
@@ -320,6 +318,46 @@ pub fn build(b: *std.Build) void {
     });
     const run_audio_override_buffer_tests = b.addRunArtifact(audio_override_buffer_tests);
 
+    const ble_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/pkg/ble/root.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "runtime", .module = runtime_mod },
+            },
+        }),
+    });
+    const run_ble_tests = b.addRunArtifact(ble_tests);
+
+    const ui_render_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/pkg/ui/render/framebuffer/root.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_ui_render_tests = b.addRunArtifact(ui_render_tests);
+
+    const embed_zig_mod = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+    });
+
+    const firmware_101_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/firmware/101-hello_world/app.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "embed_zig", .module = embed_zig_mod },
+            },
+        }),
+    });
+    const run_firmware_101_tests = b.addRunArtifact(firmware_101_tests);
+
+    const firmware_test_step = b.step("test-firmware", "Run firmware tests");
+    firmware_test_step.dependOn(&run_firmware_101_tests.step);
+
     const audio_test_step = b.step("test-audio", "Run audio package tests");
     audio_test_step.dependOn(&run_audio_resampler_tests.step);
     audio_test_step.dependOn(&run_audio_mixer_tests.step);
@@ -327,6 +365,16 @@ pub fn build(b: *std.Build) void {
 
     const net_test_step = b.step("test-net", "Run net package tests");
     net_test_step.dependOn(&run_net_tests.step);
+
+    const ble_test_step = b.step("test-ble", "Run BLE package tests");
+    ble_test_step.dependOn(&run_ble_tests.step);
+
+    const ui_test_step = b.step("test-ui", "Run UI render tests");
+    ui_test_step.dependOn(&run_ui_render_tests.step);
+
+    const event_test_step = b.step("test-event", "Run event package tests");
+    event_test_step.dependOn(&run_event_tests.step);
+    event_test_step.dependOn(&run_event_integration_tests.step);
 
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_runtime_std_tests.step);
@@ -338,14 +386,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_audio_mixer_tests.step);
     test_step.dependOn(&run_audio_override_buffer_tests.step);
     test_step.dependOn(&run_net_tests.step);
+    test_step.dependOn(&run_ble_tests.step);
+    test_step.dependOn(&run_ui_render_tests.step);
+    test_step.dependOn(&run_firmware_101_tests.step);
 
     // ESP compile-only checks.
     // Uses addObject because extern symbols from espz can't link on host.
     const espz_dep = b.dependency("espz", .{});
     const esp_mod = espz_dep.module("espz");
-    const hal_mod = b.createModule(.{
-        .root_source_file = b.path("src/hal/root.zig"),
-    });
     const es7210_driver_mod = b.createModule(.{
         .root_source_file = b.path("src/pkg/drivers/es7210/src.zig"),
         .target = target,
@@ -391,6 +439,7 @@ pub fn build(b: *std.Build) void {
     const check_step = b.step("check-esp", "Compile-check ESP modules");
     check_step.dependOn(&esp_runtime_check.step);
     check_step.dependOn(&esp_hal_check.step);
+
 }
 
 fn ensurePortaudioSource(b: *std.Build) *std.Build.Step {

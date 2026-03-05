@@ -1,7 +1,6 @@
 //! Shared HAL marker types for board-side peripheral classification.
 
 pub const Kind = enum {
-    button,
     led,
     led_strip,
     display,
@@ -20,7 +19,6 @@ pub const Kind = enum {
     hci,
     kvs,
     rtc,
-    motion,
     board,
 };
 

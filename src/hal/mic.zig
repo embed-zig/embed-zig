@@ -23,6 +23,15 @@ pub const Config = struct {
     bits_per_sample: u8 = 16,
 };
 
+/// One capture frame used by audio-engine style pipelines.
+///
+/// - `mic_matrix[i]` is the i-th microphone channel frame
+/// - `ref` is optional speaker-reference frame for AEC
+pub const Frame = struct {
+    mic_matrix: []const []const i16,
+    ref: ?[]const i16 = null,
+};
+
 pub fn is(comptime T: type) bool {
     if (@typeInfo(T) != .@"struct") return false;
     if (!@hasDecl(T, "_hal_marker")) return false;
@@ -41,12 +50,16 @@ pub fn from(comptime spec: type) type {
     };
 
     const has_spec_config = comptime @hasDecl(spec, "config");
+    const has_frame_read = comptime @hasDecl(BaseDriver, "readFrame");
 
     comptime {
         _ = @as(*const fn (*BaseDriver, []i16) Error!usize, &BaseDriver.read);
         _ = @as(*const fn (*BaseDriver, i8) Error!void, &BaseDriver.setGain);
         _ = @as(*const fn (*BaseDriver) Error!void, &BaseDriver.start);
         _ = @as(*const fn (*BaseDriver) Error!void, &BaseDriver.stop);
+        if (has_frame_read) {
+            _ = @as(*const fn (*BaseDriver) Error!?Frame, &BaseDriver.readFrame);
+        }
 
         _ = @as([]const u8, spec.meta.id);
         if (has_spec_config) {
@@ -79,6 +92,20 @@ pub fn from(comptime spec: type) type {
             return self.driver.read(buffer);
         }
 
+        /// Read one matrix frame + optional reference frame.
+        ///
+        /// Returns:
+        /// - `null` when no frame is currently available (non-blocking path)
+        /// - `Frame` when one aligned frame is available
+        ///
+        /// If the driver does not implement `readFrame`, returns `error.InvalidState`.
+        pub fn readFrame(self: *Self) Error!?Frame {
+            if (comptime has_frame_read) {
+                return self.driver.readFrame();
+            }
+            return error.InvalidState;
+        }
+
         pub fn setGain(self: *Self, gain_db: i8) Error!void {
             return self.driver.setGain(gain_db);
         }
@@ -97,6 +124,10 @@ pub fn from(comptime spec: type) type {
 
         pub fn supportsStartStop() bool {
             return true;
+        }
+
+        pub fn supportsFrameRead() bool {
+            return has_frame_read;
         }
 
         pub fn samplesForMs(duration_ms: u32) u32 {

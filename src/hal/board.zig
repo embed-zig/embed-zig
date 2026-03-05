@@ -1,70 +1,13 @@
-//! HAL Board aggregation and unified event queue.
+//! HAL Board — peripheral aggregation and auto-initialization.
 //!
-//! 参考旧版 board：
-//! - 自动发现 HAL 外设类型（基于 `_hal_marker`）
-//! - 自动初始化 driver 与 wrapper
-//! - 提供统一事件队列（nextEvent/sendEvent）
-//! - 在 `nextEvent()` 前自动轮询可轮询外设（button/wifi/ble）
+//! Discovers HAL peripheral types from a spec (via `_hal_marker`),
+//! auto-initializes drivers and wrappers, and exposes typed accessors.
+//!
+//! Event handling is NOT part of the board. Use `pkg/event.Bus` for that.
 
 const std = @import("std");
 const hal_marker = @import("marker.zig");
-const event_mod = @import("event.zig");
 const rtc_mod = @import("rtc.zig");
-
-// ============================================================================
-// Queue
-// ============================================================================
-
-pub fn SimpleQueue(comptime T: type, comptime capacity: usize) type {
-    return struct {
-        const Self = @This();
-
-        buffer: [capacity]T = undefined,
-        head: usize = 0,
-        tail: usize = 0,
-        size: usize = 0,
-
-        pub fn init() Self {
-            return .{};
-        }
-
-        pub fn deinit(_: *Self) void {}
-
-        pub fn trySend(self: *Self, item: T) bool {
-            if (self.size >= capacity) return false;
-            self.buffer[self.tail] = item;
-            self.tail = (self.tail + 1) % capacity;
-            self.size += 1;
-            return true;
-        }
-
-        pub fn tryReceive(self: *Self) ?T {
-            if (self.size == 0) return null;
-            const item = self.buffer[self.head];
-            self.head = (self.head + 1) % capacity;
-            self.size -= 1;
-            return item;
-        }
-
-        pub fn count(self: *const Self) usize {
-            return self.size;
-        }
-
-        pub fn isEmpty(self: *const Self) bool {
-            return self.size == 0;
-        }
-
-        pub fn reset(self: *Self) void {
-            self.head = 0;
-            self.tail = 0;
-            self.size = 0;
-        }
-    };
-}
-
-// ============================================================================
-// Comptime helpers
-// ============================================================================
 
 fn getMarkedKind(comptime T: type) ?hal_marker.Kind {
     if (@typeInfo(T) != .@"struct") return null;
@@ -116,7 +59,6 @@ fn findRtcReaderType(comptime spec: type) type {
         if (getMarkedKind(Candidate)) |kind| {
             if (kind != .rtc) continue;
 
-            // 仅接受 reader 能力（uptime/nowMs）
             if (!@hasDecl(Candidate, "uptime") or !@hasDecl(Candidate, "nowMs")) continue;
 
             _ = @as(*const fn (*Candidate) u64, &Candidate.uptime);
@@ -170,7 +112,6 @@ fn validatePeripheralType(comptime PeripheralType: type, comptime expected_kind:
         @compileError("driver type must expose init() for board auto-init");
     }
 
-    // 允许 `init() Driver` 或 `init() !Driver`
     const init_ret = @typeInfo(@TypeOf(DriverType.init)).@"fn".return_type orelse
         @compileError("driver init must have a return type");
 
@@ -192,107 +133,6 @@ fn validatePeripheralType(comptime PeripheralType: type, comptime expected_kind:
     }
 }
 
-fn optionalChildOrVoid(comptime T: type) type {
-    return switch (@typeInfo(T)) {
-        .optional => |o| o.child,
-        else => void,
-    };
-}
-
-const PollStyle = enum {
-    none,
-    poll_event_noarg,
-    poll_event_noarg_err,
-    poll_i32,
-    poll_i32_err,
-    poll_u64,
-    poll_u64_err,
-};
-
-fn eventPayloadFromReturnType(comptime Ret: type) type {
-    return switch (@typeInfo(Ret)) {
-        .optional => |o| o.child,
-        .error_union => |eu| switch (@typeInfo(eu.payload)) {
-            .optional => |o| o.child,
-            else => void,
-        },
-        else => void,
-    };
-}
-
-fn getPollStyle(comptime PeripheralType: type) PollStyle {
-    if (PeripheralType == void) return .none;
-
-    if (@hasDecl(PeripheralType, "pollEvent")) {
-        const fn_info = @typeInfo(@TypeOf(PeripheralType.pollEvent)).@"fn";
-        if (fn_info.params.len == 1) {
-            if (fn_info.return_type) |ret| {
-                return switch (@typeInfo(ret)) {
-                    .optional => if (optionalChildOrVoid(ret) != void) .poll_event_noarg else .none,
-                    .error_union => |eu| switch (@typeInfo(eu.payload)) {
-                        .optional => |o| if (o.child != void) .poll_event_noarg_err else .none,
-                        else => .none,
-                    },
-                    else => .none,
-                };
-            }
-        }
-    }
-
-    if (@hasDecl(PeripheralType, "poll")) {
-        const fn_info = @typeInfo(@TypeOf(PeripheralType.poll)).@"fn";
-        if (fn_info.params.len == 2) {
-            const p1 = fn_info.params[1].type orelse return .none;
-            const ret = fn_info.return_type orelse return .none;
-
-            const is_opt = switch (@typeInfo(ret)) {
-                .optional => true,
-                .error_union => |eu| switch (@typeInfo(eu.payload)) {
-                    .optional => true,
-                    else => false,
-                },
-                else => false,
-            };
-            if (!is_opt) return .none;
-            if (eventPayloadFromReturnType(ret) == void) return .none;
-
-            const is_err = @typeInfo(ret) == .error_union;
-            if (p1 == i32) return if (is_err) .poll_i32_err else .poll_i32;
-            if (p1 == u64) return if (is_err) .poll_u64_err else .poll_u64;
-        }
-    }
-
-    return .none;
-}
-
-fn pollPayloadType(comptime PeripheralType: type) type {
-    if (PeripheralType == void) return void;
-
-    if (@hasDecl(PeripheralType, "pollEvent")) {
-        const fn_info = @typeInfo(@TypeOf(PeripheralType.pollEvent)).@"fn";
-        if (fn_info.params.len == 1) {
-            if (fn_info.return_type) |ret| {
-                return eventPayloadFromReturnType(ret);
-            }
-        }
-    }
-
-    if (@hasDecl(PeripheralType, "poll")) {
-        const fn_info = @typeInfo(@TypeOf(PeripheralType.poll)).@"fn";
-        if (fn_info.params.len == 2) {
-            if (fn_info.return_type) |ret| {
-                return eventPayloadFromReturnType(ret);
-            }
-        }
-    }
-
-    return void;
-}
-
-fn typeOrEmpty(comptime T: type) type {
-    return if (T == void) event_mod.Empty else T;
-}
-
 fn driverInit(comptime DriverType: type) !DriverType {
     return DriverType.init();
 }
@@ -303,25 +143,15 @@ fn driverDeinit(comptime DriverType: type, driver: *DriverType) void {
     }
 }
 
-// ============================================================================
-// Board
-// ============================================================================
-
 pub fn Board(comptime spec: type) type {
     comptime {
         if (!@hasDecl(spec, "meta")) {
             @compileError("spec must define meta.id");
         }
         _ = @as([]const u8, spec.meta.id);
-
-        if (@hasDecl(spec, "queue_capacity")) {
-            const cap = @as(usize, spec.queue_capacity);
-            if (cap == 0) @compileError("spec.queue_capacity must be > 0");
-        }
     }
 
     const RtcType = findRtcReaderType(spec);
-    const ButtonType = findPeripheralType(spec, .button);
     const LedType = findPeripheralType(spec, .led);
     const LedStripType = findPeripheralType(spec, .led_strip);
     const DisplayType = findPeripheralType(spec, .display);
@@ -339,11 +169,9 @@ pub fn Board(comptime spec: type) type {
     const BleType = findPeripheralType(spec, .ble);
     const HciType = findPeripheralType(spec, .hci);
     const KvsType = findPeripheralType(spec, .kvs);
-    const MotionType = findPeripheralType(spec, .motion);
 
     comptime {
         validatePeripheralType(RtcType, .rtc);
-        validatePeripheralType(ButtonType, .button);
         validatePeripheralType(LedType, .led);
         validatePeripheralType(LedStripType, .led_strip);
         validatePeripheralType(DisplayType, .display);
@@ -361,11 +189,9 @@ pub fn Board(comptime spec: type) type {
         validatePeripheralType(BleType, .ble);
         validatePeripheralType(HciType, .hci);
         validatePeripheralType(KvsType, .kvs);
-        validatePeripheralType(MotionType, .motion);
     }
 
     const RtcDriverType = driverTypeOf(RtcType);
-    const ButtonDriverType = driverTypeOf(ButtonType);
     const LedDriverType = driverTypeOf(LedType);
     const LedStripDriverType = driverTypeOf(LedStripType);
     const DisplayDriverType = driverTypeOf(DisplayType);
@@ -383,9 +209,7 @@ pub fn Board(comptime spec: type) type {
     const BleDriverType = driverTypeOf(BleType);
     const HciDriverType = driverTypeOf(HciType);
     const KvsDriverType = driverTypeOf(KvsType);
-    const MotionDriverType = driverTypeOf(MotionType);
 
-    const HasButton = ButtonType != void;
     const HasLed = LedType != void;
     const HasLedStrip = LedStripType != void;
     const HasDisplay = DisplayType != void;
@@ -403,38 +227,15 @@ pub fn Board(comptime spec: type) type {
     const HasBle = BleType != void;
     const HasHci = HciType != void;
     const HasKvs = KvsType != void;
-    const HasMotion = MotionType != void;
 
     const has_led_strip_clear = comptime HasLedStrip and @hasDecl(LedStripType, "clear");
     const has_led_off = comptime HasLed and @hasDecl(LedType, "off");
     const has_rtc_now = comptime @hasDecl(RtcType, "now");
 
-    const ButtonEventPayload = pollPayloadType(ButtonType);
-    const WifiEventPayload = pollPayloadType(WifiType);
-    const BleEventPayload = pollPayloadType(BleType);
-    const MotionEventPayload = pollPayloadType(MotionType);
-
-    const DefaultEvent = event_mod.UnifiedEvent(
-        typeOrEmpty(ButtonEventPayload),
-        typeOrEmpty(WifiEventPayload),
-        typeOrEmpty(BleEventPayload),
-        event_mod.Empty,
-        typeOrEmpty(MotionEventPayload),
-    );
-
-    const EventType = if (@hasDecl(spec, "EventType")) spec.EventType else DefaultEvent;
-    const UsesDefaultEvent = !@hasDecl(spec, "EventType");
-
-    const QueueCapacity = if (@hasDecl(spec, "queue_capacity")) @as(usize, spec.queue_capacity) else 64;
-    const QueueFactory = if (@hasDecl(spec, "Queue")) spec.Queue else SimpleQueue;
-    const EventQueueType = QueueFactory(EventType, QueueCapacity);
-
     return struct {
         const Self = @This();
 
         pub const meta = spec.meta;
-        pub const Event = EventType;
-        pub const Queue = EventQueueType;
 
         pub const log = if (@hasDecl(spec, "log")) spec.log else void;
         pub const time = if (@hasDecl(spec, "time")) spec.time else void;
@@ -448,7 +249,6 @@ pub fn Board(comptime spec: type) type {
             }.always;
 
         pub const rtc = RtcType;
-        pub const button = ButtonType;
         pub const led = LedType;
         pub const led_strip = LedStripType;
         pub const display = DisplayType;
@@ -466,18 +266,10 @@ pub fn Board(comptime spec: type) type {
         pub const ble = BleType;
         pub const hci = HciType;
         pub const kvs = KvsType;
-        pub const motion = MotionType;
-
-        events: EventQueueType,
-        queue_inited: bool = false,
 
         rtc_driver: RtcDriverType,
         rtc_dev: RtcType,
         init_rtc: bool = false,
-
-        button_driver: if (HasButton) ButtonDriverType else void,
-        button_dev: if (HasButton) ButtonType else void,
-        init_button: bool = false,
 
         led_driver: if (HasLed) LedDriverType else void,
         led_dev: if (HasLed) LedType else void,
@@ -547,16 +339,8 @@ pub fn Board(comptime spec: type) type {
         kvs_dev: if (HasKvs) KvsType else void,
         init_kvs: bool = false,
 
-        motion_driver: if (HasMotion) MotionDriverType else void,
-        motion_dev: if (HasMotion) MotionType else void,
-        init_motion: bool = false,
-
         pub fn init(self: *Self) !void {
-            self.events = EventQueueType.init();
-            self.queue_inited = true;
-
             self.init_rtc = false;
-            self.init_button = false;
             self.init_led = false;
             self.init_led_strip = false;
             self.init_display = false;
@@ -574,19 +358,12 @@ pub fn Board(comptime spec: type) type {
             self.init_ble = false;
             self.init_hci = false;
             self.init_kvs = false;
-            self.init_motion = false;
 
             errdefer self.deinit();
 
             self.rtc_driver = try driverInit(RtcDriverType);
             self.rtc_dev = RtcType.init(&self.rtc_driver);
             self.init_rtc = true;
-
-            if (HasButton) {
-                self.button_driver = try driverInit(ButtonDriverType);
-                self.button_dev = ButtonType.init(&self.button_driver);
-                self.init_button = true;
-            }
 
             if (HasLed) {
                 self.led_driver = try driverInit(LedDriverType);
@@ -689,19 +466,9 @@ pub fn Board(comptime spec: type) type {
                 self.kvs_dev = KvsType.init(&self.kvs_driver);
                 self.init_kvs = true;
             }
-
-            if (HasMotion) {
-                self.motion_driver = try driverInit(MotionDriverType);
-                self.motion_dev = MotionType.init(&self.motion_driver);
-                self.init_motion = true;
-            }
         }
 
         pub fn deinit(self: *Self) void {
-            if (HasMotion and self.init_motion) {
-                driverDeinit(MotionDriverType, &self.motion_driver);
-                self.init_motion = false;
-            }
             if (HasKvs and self.init_kvs) {
                 driverDeinit(KvsDriverType, &self.kvs_driver);
                 self.init_kvs = false;
@@ -776,37 +543,10 @@ pub fn Board(comptime spec: type) type {
                 driverDeinit(LedDriverType, &self.led_driver);
                 self.init_led = false;
             }
-            if (HasButton and self.init_button) {
-                driverDeinit(ButtonDriverType, &self.button_driver);
-                self.init_button = false;
-            }
             if (self.init_rtc) {
                 driverDeinit(RtcDriverType, &self.rtc_driver);
                 self.init_rtc = false;
             }
-            if (self.queue_inited) {
-                self.events.deinit();
-                self.queue_inited = false;
-            }
-        }
-
-        pub fn sendEvent(self: *Self, event: EventType) bool {
-            return self.events.trySend(event);
-        }
-
-        pub fn hasEvents(self: *const Self) bool {
-            return !self.events.isEmpty();
-        }
-
-        pub fn nextEvent(self: *Self) ?EventType {
-            if (UsesDefaultEvent) {
-                self.pollPeripherals();
-            }
-            return self.events.tryReceive();
-        }
-
-        pub fn getEventQueue(self: *Self) *EventQueueType {
-            return &self.events;
         }
 
         pub fn uptime(self: *Self) u64 {
@@ -819,58 +559,6 @@ pub fn Board(comptime spec: type) type {
             }
             return null;
         }
-
-        fn pollPeripherals(self: *Self) void {
-            if (HasButton and self.init_button) {
-                self.pollOne("button", ButtonType, &self.button_dev);
-            }
-            if (HasWifi and self.init_wifi) {
-                self.pollOne("wifi", WifiType, &self.wifi_dev);
-            }
-            if (HasBle and self.init_ble) {
-                self.pollOne("ble", BleType, &self.ble_dev);
-            }
-            if (HasMotion and self.init_motion) {
-                self.pollOne("motion", MotionType, &self.motion_dev);
-            }
-        }
-
-        fn pollOne(self: *Self, comptime tag: []const u8, comptime PeripheralType: type, peripheral: *PeripheralType) void {
-            const style = comptime getPollStyle(PeripheralType);
-            switch (style) {
-                .poll_event_noarg => {
-                    if (peripheral.pollEvent()) |ev| {
-                        _ = self.events.trySend(@unionInit(EventType, tag, ev));
-                    }
-                },
-                .poll_event_noarg_err => {
-                    if (peripheral.pollEvent() catch null) |ev| {
-                        _ = self.events.trySend(@unionInit(EventType, tag, ev));
-                    }
-                },
-                .poll_i32 => {
-                    if (peripheral.poll(0)) |ev| {
-                        _ = self.events.trySend(@unionInit(EventType, tag, ev));
-                    }
-                },
-                .poll_i32_err => {
-                    if (peripheral.poll(0) catch null) |ev| {
-                        _ = self.events.trySend(@unionInit(EventType, tag, ev));
-                    }
-                },
-                .poll_u64 => {
-                    if (peripheral.poll(self.uptime())) |ev| {
-                        _ = self.events.trySend(@unionInit(EventType, tag, ev));
-                    }
-                },
-                .poll_u64_err => {
-                    if (peripheral.poll(self.uptime()) catch null) |ev| {
-                        _ = self.events.trySend(@unionInit(EventType, tag, ev));
-                    }
-                },
-                .none => {},
-            }
-        }
     };
 }
 
@@ -878,23 +566,7 @@ pub fn from(comptime spec: type) type {
     return Board(spec);
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
-test "SimpleQueue basic operations" {
-    var q = SimpleQueue(u32, 4).init();
-
-    try std.testing.expect(q.isEmpty());
-    try std.testing.expect(q.trySend(1));
-    try std.testing.expect(q.trySend(2));
-    try std.testing.expectEqual(@as(usize, 2), q.count());
-    try std.testing.expectEqual(@as(?u32, 1), q.tryReceive());
-    try std.testing.expectEqual(@as(?u32, 2), q.tryReceive());
-    try std.testing.expectEqual(@as(?u32, null), q.tryReceive());
-}
-
-test "Board init/deinit and ble event polling" {
+test "Board init/deinit with rtc and led" {
     const rtc_driver = struct {
         pub fn init() !@This() {
             return .{};
@@ -937,53 +609,10 @@ test "Board init/deinit and ble event polling" {
     };
     const Led = led_mod.from(led_spec);
 
-    const ble_mod = @import("ble.zig");
-    const ble_driver = struct {
-        state: ble_mod.State = .idle,
-        pending: ?ble_mod.BleEvent = null,
-
-        pub fn init() !@This() {
-            return .{};
-        }
-        pub fn deinit(_: *@This()) void {}
-        pub fn start(self: *@This()) ble_mod.Error!void {
-            self.state = .idle;
-        }
-        pub fn stop(self: *@This()) void {
-            self.state = .uninitialized;
-        }
-        pub fn startAdvertising(self: *@This(), _: ble_mod.AdvConfig) ble_mod.Error!void {
-            self.state = .advertising;
-        }
-        pub fn stopAdvertising(self: *@This()) ble_mod.Error!void {
-            self.state = .idle;
-        }
-        pub fn poll(self: *@This(), _: i32) ?ble_mod.BleEvent {
-            const ev = self.pending;
-            self.pending = null;
-            return ev;
-        }
-        pub fn getState(self: *const @This()) ble_mod.State {
-            return self.state;
-        }
-        pub fn disconnect(_: *@This(), _: u16, _: u8) ble_mod.Error!void {}
-        pub fn notify(_: *@This(), _: u16, _: u16, _: []const u8) void {}
-        pub fn indicate(_: *@This(), _: u16, _: u16, _: []const u8) void {}
-        pub fn getConnHandle(_: *const @This()) ?u16 {
-            return 1;
-        }
-    };
-    const ble_spec = struct {
-        pub const Driver = ble_driver;
-        pub const meta = .{ .id = "ble.test" };
-    };
-    const Ble = ble_mod.from(ble_spec);
-
     const board_spec = struct {
         pub const meta = .{ .id = "board.test" };
         pub const rtc = Rtc;
         pub const led = Led;
-        pub const ble = Ble;
     };
 
     const TestBoard = Board(board_spec);
@@ -991,114 +620,8 @@ test "Board init/deinit and ble event polling" {
     var board: TestBoard = undefined;
     try board.init();
     defer board.deinit();
-
-    // 注入一个 BLE 事件，验证 nextEvent 自动轮询
-    board.ble_driver.pending = .{ .advertising_started = {} };
-
-    const ev = board.nextEvent() orelse return error.ExpectedEvent;
-    switch (ev) {
-        .ble => |b| {
-            switch (b) {
-                .advertising_started => {},
-                else => return error.UnexpectedEvent,
-            }
-        },
-        else => return error.UnexpectedEvent,
-    }
 
     try std.testing.expectEqual(@as(u64, 123), board.uptime());
     const now_ts = board.now() orelse return error.ExpectedNow;
     try std.testing.expectEqual(@as(i64, 1_769_427_296), now_ts.toEpoch());
-}
-
-test "Board motion event polling" {
-    const rtc_driver = struct {
-        ticks: u64 = 0,
-
-        pub fn init() !@This() {
-            return .{};
-        }
-        pub fn deinit(_: *@This()) void {}
-        pub fn uptime(self: *@This()) u64 {
-            self.ticks += 50;
-            return self.ticks;
-        }
-        pub fn nowMs(_: *@This()) ?i64 {
-            return null;
-        }
-    };
-
-    const rtc_spec = struct {
-        pub const Driver = rtc_driver;
-        pub const meta = .{ .id = "rtc.motion" };
-    };
-    const Rtc = rtc_mod.reader.from(rtc_spec);
-
-    const imu_mod = @import("imu.zig");
-    const motion_mod = @import("motion.zig");
-    const motion_driver = struct {
-        samples: [4]imu_mod.AccelData = .{
-            .{ .x = 0, .y = 0, .z = 1 },
-            .{ .x = 1.5, .y = 0, .z = 1 },
-            .{ .x = -1.5, .y = 0, .z = 1 },
-            .{ .x = 1.6, .y = 0, .z = 1 },
-        },
-        idx: usize = 0,
-
-        pub fn init() !@This() {
-            return .{};
-        }
-        pub fn deinit(_: *@This()) void {}
-        pub fn readAccel(self: *@This()) motion_mod.Error!imu_mod.AccelData {
-            const i = @min(self.idx, self.samples.len - 1);
-            const s = self.samples[i];
-            if (self.idx + 1 < self.samples.len) self.idx += 1;
-            return s;
-        }
-        pub fn readGyro(_: *@This()) motion_mod.Error!imu_mod.GyroData {
-            return .{ .x = 0, .y = 0, .z = 0 };
-        }
-    };
-
-    const Motion = motion_mod.from(struct {
-        pub const Driver = motion_driver;
-        pub const meta = .{ .id = "motion.board" };
-        pub const thresholds = motion_mod.Thresholds{
-            .shake_delta_g = 1.0,
-            .shake_window_ms = 300,
-            .shake_min_pulses = 3,
-            .tap_peak_g = 10,
-            .tilt_threshold_deg = 179,
-            .freefall_threshold_g = 0.05,
-        };
-    });
-
-    const board_spec = struct {
-        pub const meta = .{ .id = "board.motion" };
-        pub const rtc = Rtc;
-        pub const motion = Motion;
-    };
-
-    const TestBoard = Board(board_spec);
-    var board: TestBoard = undefined;
-    try board.init();
-    defer board.deinit();
-
-    var saw_motion = false;
-    var i: usize = 0;
-    while (i < 8) : (i += 1) {
-        if (board.nextEvent()) |ev| {
-            switch (ev) {
-                .motion => |m| {
-                    switch (m.action) {
-                        .shake => saw_motion = true,
-                        else => {},
-                    }
-                },
-                else => {},
-            }
-        }
-    }
-
-    try std.testing.expect(saw_motion);
 }
