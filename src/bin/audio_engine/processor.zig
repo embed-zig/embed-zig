@@ -1,4 +1,5 @@
-const engine_mod = @import("engine");
+const embed = @import("embed");
+const engine_mod = embed.pkg.audio.engine;
 const speexdsp = @import("speexdsp");
 
 pub const SpeexAecNs = struct {

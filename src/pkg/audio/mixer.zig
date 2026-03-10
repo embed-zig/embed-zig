@@ -8,8 +8,8 @@
 //! while using a simpler in-memory queue strategy for deterministic bring-up.
 
 const std = @import("std");
-const resampler_mod = @import("resampler");
-const runtime = @import("runtime");
+const resampler_mod = @import("../../mod.zig").pkg.audio.resampler;
+const runtime = @import("../../mod.zig").runtime;
 
 const Allocator = std.mem.Allocator;
 const Resampler = resampler_mod.Resampler;
@@ -326,7 +326,7 @@ pub fn Mixer(comptime MutexImpl: type, comptime CondImpl: type) type {
             owner: *Self,
             label: []const u8,
             gain_bits: u32 = @bitCast(@as(f32, 1.0)),
-            read_bytes_val: i64 = 0,
+            read_bytes_val: usize = 0,
             fade_out_ms_val: i32 = 0,
             closed: bool = false,
             errored: bool = false,
@@ -362,8 +362,8 @@ pub fn Mixer(comptime MutexImpl: type, comptime CondImpl: type) type {
                 return self.label;
             }
 
-            pub fn readBytes(self: *TrackCtrl) i64 {
-                return @atomicLoad(i64, &self.read_bytes_val, .acquire);
+            pub fn readBytes(self: *TrackCtrl) usize {
+                return @atomicLoad(usize, &self.read_bytes_val, .acquire);
             }
 
             pub fn setFadeOutDuration(self: *TrackCtrl, ms: u32) void {
@@ -428,7 +428,7 @@ pub fn Mixer(comptime MutexImpl: type, comptime CondImpl: type) type {
                     mixed[i] = @intFromFloat(std.math.clamp(sum, -32768.0, 32767.0));
                 }
                 self.buffer.consumeLocked(n);
-                _ = @atomicRmw(i64, &self.read_bytes_val, .Add, @intCast(n * @sizeOf(i16)), .acq_rel);
+                _ = @atomicRmw(usize, &self.read_bytes_val, .Add, n * @sizeOf(i16), .acq_rel);
                 return n;
             }
         };
@@ -763,7 +763,7 @@ test "mix: single track passthrough and readBytes" {
     // After the read() that drained the track, ctrl is still valid for one
     // more cycle — the two-phase removal only marks it as drained, and the
     // actual destroy happens on the *next* read().
-    try testing.expectEqual(@as(i64, 32), h.ctrl.readBytes());
+    try testing.expectEqual(@as(usize, 32), h.ctrl.readBytes());
 }
 
 test "mix: two tracks exact sum" {

@@ -1,8 +1,9 @@
 const std = @import("std");
-const runtime = @import("runtime");
+const embed = @import("embed");
+const runtime = embed.runtime;
 const portaudio = @import("portaudio");
-const engine_mod = @import("engine");
-const mixer_mod = @import("mixer");
+const engine_mod = embed.pkg.audio.engine;
+const mixer_mod = embed.pkg.audio.mixer;
 const songs = @import("songs.zig");
 
 const EngineType = engine_mod.Engine(runtime.std.Mutex, runtime.std.Condition, runtime.std.Thread, runtime.std.Time);

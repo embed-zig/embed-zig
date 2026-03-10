@@ -9,7 +9,7 @@
 //! consumer can afford to wait.
 
 const std = @import("std");
-const runtime = @import("runtime");
+const runtime = @import("../../mod.zig").runtime;
 
 pub fn OverrideBuffer(
     comptime T: type,
@@ -101,20 +101,11 @@ pub fn OverrideBuffer(
                 return self.copyOutLocked(out, out.len);
             }
 
-            const start = nowNs();
-            const deadline = if (timeout_ns > std.math.maxInt(u64) - start)
-                std.math.maxInt(u64)
-            else
-                start + timeout_ns;
-
-            while (self.len < out.len) {
-                if (self.closed) return self.drainLocked(out);
-
-                const now = nowNs();
-                if (now >= deadline) break;
-
-                _ = self.cond.timedWait(&self.mutex, deadline - now);
+            if (!self.closed) {
+                _ = self.cond.timedWait(&self.mutex, timeout_ns);
             }
+
+            if (self.closed) return self.drainLocked(out);
 
             const n = @min(self.len, out.len);
             return self.copyOutLocked(out, n);
@@ -163,11 +154,6 @@ pub fn OverrideBuffer(
             return self.copyOutLocked(out, n);
         }
     };
-}
-
-fn nowNs() u64 {
-    const ts = std.time.nanoTimestamp();
-    return if (ts <= 0) 0 else @intCast(ts);
 }
 
 // ============================================================================
