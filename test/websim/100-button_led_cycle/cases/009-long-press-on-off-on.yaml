@@ -1,0 +1,28 @@
+name: long press toggles on-off-on
+tracks:
+  gpio:
+    # long press 1: off -> white
+    - send: {"dev":"gpio","pin":0,"voltage":0}
+    - wait: 600
+    - send: {"dev":"gpio","pin":0,"voltage":3.3}
+    - wait: 2000
+    # long press 2: white -> off
+    - send: {"dev":"gpio","pin":0,"voltage":0}
+    - wait: 600
+    - send: {"dev":"gpio","pin":0,"voltage":3.3}
+    - wait: 2000
+    # long press 3: off -> white
+    - send: {"dev":"gpio","pin":0,"voltage":0}
+    - wait: 600
+    - send: {"dev":"gpio","pin":0,"voltage":3.3}
+  led_strip:
+    # fade 1: to white
+    - wait: 1000
+    - match_until:
+        target: {"dev":"led_strip","pixels":[{"r":255,"g":255,"b":255}]}
+    # fade 2: to black
+    - match_until:
+        target: {"dev":"led_strip","pixels":[{"r":0,"g":0,"b":0}]}
+    # fade 3: to white again
+    - match_until:
+        target: {"dev":"led_strip","pixels":[{"r":255,"g":255,"b":255}]}

@@ -1,0 +1,17 @@
+.{
+    .name = .bleterm_103,
+    .version = "0.1.0",
+    .fingerprint = 0xbe9d9aa805464d6b,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .esp = .{
+            .path = "../../../../esp-zig1",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "board",
+    },
+}

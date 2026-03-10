@@ -1,0 +1,17 @@
+.{
+    .name = .websim_lcd_hello_world_106,
+    .version = "0.1.0",
+    .fingerprint = 0x18d16fc696b45b7d,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .embed_zig = .{
+            .path = "../../..",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "board",
+    },
+}

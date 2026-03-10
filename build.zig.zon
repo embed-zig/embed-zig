@@ -7,12 +7,9 @@
         "build.zig",
         "build.zig.zon",
         "src",
+        "third_party",
+        "tools",
         "test/firmware",
     },
-    .dependencies = .{
-        .espz = .{
-            // github.com/embed-zig/esp-zig
-            .path = "../esp-zig1",
-        },
-    },
+    .dependencies = .{},
 }

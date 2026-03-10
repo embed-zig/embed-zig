@@ -1,0 +1,7 @@
+name: smoke test - firmware starts and stops
+tracks:
+  gpio:
+    - send: {"dev":"gpio","pin":0,"voltage":0}
+    - wait: 100
+    - send: {"dev":"gpio","pin":0,"voltage":3.3}
+    - wait: 100

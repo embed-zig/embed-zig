@@ -1,0 +1,17 @@
+.{
+    .name = .lcd_hello_world_106,
+    .version = "0.1.0",
+    .fingerprint = 0xfef4ec32fcf0ecfd,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .esp = .{
+            .path = "../../../../esp-zig1",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "board",
+    },
+}

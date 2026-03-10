@@ -1,0 +1,17 @@
+name: single click fade goes through intermediate steps
+tracks:
+  gpio:
+    - send: {"dev":"gpio","pin":0,"voltage":0}
+    - wait: 50
+    - send: {"dev":"gpio","pin":0,"voltage":3.3}
+  led_strip:
+    - wait: 800
+    - match_until:
+        target: {"dev":"led_strip","pixels":[{"r":50,"g":0,"b":0}]}
+        count: 10
+    - match_until:
+        target: {"dev":"led_strip","pixels":[{"r":125,"g":0,"b":0}]}
+        count: 15
+    - match_until:
+        target: {"dev":"led_strip","pixels":[{"r":255,"g":0,"b":0}]}
+        count: 26

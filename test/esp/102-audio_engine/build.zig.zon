@@ -1,0 +1,20 @@
+.{
+    .name = .audio_engine_102,
+    .version = "0.1.0",
+    .fingerprint = 0x46cb6ddacb390864,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .espz = .{
+            .path = "../../../../esp-zig1",
+        },
+        .embed_zig = .{
+            .path = "../../..",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "board",
+    },
+}

@@ -1,0 +1,17 @@
+.{
+    .name = .websim_button_led_cycle_100,
+    .version = "0.1.0",
+    .fingerprint = 0x2bd1c0d45529ae52,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .embed_zig = .{
+            .path = "../../..",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "board",
+    },
+}
