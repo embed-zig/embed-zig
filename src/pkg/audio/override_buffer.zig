@@ -9,7 +9,10 @@
 //! consumer can afford to wait.
 
 const std = @import("std");
-const runtime = @import("../../mod.zig").runtime;
+const runtime = struct {
+    pub const sync = @import("../../runtime/sync.zig");
+    pub const std = @import("../../runtime/std.zig");
+};
 
 pub fn OverrideBuffer(
     comptime T: type,

@@ -1,5 +1,7 @@
 const std = @import("std");
-const runtime = @import("../../mod.zig").runtime;
+const runtime = struct {
+    pub const netif = @import("../netif.zig");
+};
 
 pub const NetIf = struct {
     const MaxRoutes = 16;

@@ -24,10 +24,15 @@
 //!   [speaker_ring]  (OverrideBuffer — circular overwrite, also serves as ref)
 
 const std = @import("std");
-const mixer_mod = @import("../../mod.zig").pkg.audio.mixer;
-const obuf_mod = @import("../../mod.zig").pkg.audio.override_buffer;
-const resampler_mod = @import("../../mod.zig").pkg.audio.resampler;
-const runtime = @import("../../mod.zig").runtime;
+const mixer_mod = @import("mixer.zig");
+const obuf_mod = @import("override_buffer.zig");
+const resampler_mod = @import("resampler.zig");
+const runtime = struct {
+    pub const sync = @import("../../runtime/sync.zig");
+    pub const thread = @import("../../runtime/thread.zig");
+    pub const time = @import("../../runtime/time.zig");
+    pub const std = @import("../../runtime/std.zig");
+};
 
 const Allocator = std.mem.Allocator;
 const Format = resampler_mod.Format;

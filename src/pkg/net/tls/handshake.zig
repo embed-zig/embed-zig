@@ -1,5 +1,7 @@
 const std = @import("std");
-const runtime = @import("../../../mod.zig").runtime;
+const runtime = struct {
+    pub const std = @import("../../../runtime/std.zig");
+};
 const common = @import("common.zig");
 const extensions = @import("extensions.zig");
 const record = @import("record.zig");

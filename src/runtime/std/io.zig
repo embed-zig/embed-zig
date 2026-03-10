@@ -1,5 +1,7 @@
 const std = @import("std");
-const runtime = @import("../../mod.zig").runtime;
+const runtime = struct {
+    pub const io = @import("../io.zig");
+};
 const Channel = runtime.io.Channel;
 
 pub const IO = struct {

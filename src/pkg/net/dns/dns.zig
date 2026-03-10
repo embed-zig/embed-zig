@@ -21,9 +21,17 @@
 //!   const ip = try resolver.resolve("www.google.com");
 
 const std = @import("std");
-const runtime = @import("../../../mod.zig").runtime;
+const runtime = struct {
+    pub const socket = @import("../../../runtime/socket.zig");
+    pub const sync = @import("../../../runtime/sync.zig");
+    pub const std = @import("../../../runtime/std.zig");
+};
 const conn_mod = @import("../conn.zig");
-const tls = @import("../../../mod.zig").pkg.net.tls;
+const tls = struct {
+    pub fn Client(comptime Conn: type, comptime Crypto: type, comptime Mutex: type) type {
+        return @import("../tls/client.zig").Client(Conn, Crypto, Mutex);
+    }
+};
 
 pub const Ipv4Address = [4]u8;
 

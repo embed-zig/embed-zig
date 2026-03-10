@@ -28,7 +28,10 @@
 //!   const resp = try client.query(nonce);
 
 const std = @import("std");
-const runtime = @import("../../../mod.zig").runtime;
+const runtime = struct {
+    pub const socket = @import("../../../runtime/socket.zig");
+    pub const std = @import("../../../runtime/std.zig");
+};
 
 pub const Ipv4Address = [4]u8;
 

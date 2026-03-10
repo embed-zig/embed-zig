@@ -13,9 +13,16 @@
 //! not on `Transport` directly — enabling mock transports for testing.
 
 const std = @import("std");
-const runtime = @import("../../../mod.zig").runtime;
+const runtime = struct {
+    pub const socket = @import("../../../runtime/socket.zig");
+    pub const std = @import("../../../runtime/std.zig");
+};
 const conn_mod = @import("../conn.zig");
-const tls_mod = @import("../../../mod.zig").pkg.net.tls;
+const tls_mod = struct {
+    pub fn Client(comptime Conn: type, comptime Crypto: type, comptime Mutex: type) type {
+        return @import("../tls/client.zig").Client(Conn, Crypto, Mutex);
+    }
+};
 const dns_mod = @import("../dns/dns.zig");
 const url_mod = @import("../url/url.zig");
 const request_mod = @import("request.zig");

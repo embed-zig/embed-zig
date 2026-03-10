@@ -1,5 +1,7 @@
 const std = @import("std");
-const runtime = @import("../../mod.zig").runtime;
+const runtime = struct {
+    pub const sync = @import("../sync.zig");
+};
 
 fn nowNs() u64 {
     const ts = std.time.nanoTimestamp();

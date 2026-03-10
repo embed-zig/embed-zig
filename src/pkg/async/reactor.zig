@@ -1,6 +1,9 @@
 const std = @import("std");
 const timer_mod = @import("timer.zig");
-const runtime = @import("../../mod.zig").runtime;
+const runtime = struct {
+    pub const io = @import("../../runtime/io.zig");
+    pub const std = @import("../../runtime/std.zig");
+};
 
 /// Event-loop reactor parameterized on an IO implementation type.
 /// Borrows `*IO` to access IO operations directly, and owns

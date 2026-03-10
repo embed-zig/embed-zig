@@ -1,5 +1,7 @@
 const std = @import("std");
-const runtime = @import("../../mod.zig").runtime;
+const runtime = struct {
+    pub const fs = @import("../fs.zig");
+};
 
 pub const Fs = struct {
     const FileCtx = struct {

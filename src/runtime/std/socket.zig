@@ -1,5 +1,7 @@
 const std = @import("std");
-const runtime = @import("../../mod.zig").runtime;
+const runtime = struct {
+    pub const socket = @import("../socket.zig");
+};
 
 pub const Socket = struct {
     fd: ?std.posix.fd_t = null,

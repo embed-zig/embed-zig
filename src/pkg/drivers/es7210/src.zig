@@ -18,7 +18,7 @@
 //!   try adc.setGain(.@"30dB");
 
 const std = @import("std");
-const i2c = @import("../../../mod.zig").hal.i2c;
+const i2c = @import("../../../hal/i2c.zig");
 const es7210 = @This();
 
 /// ES7210 I2C address (7-bit, depends on AD1/AD0 pins)

@@ -1,5 +1,7 @@
 const std = @import("std");
-const runtime = @import("../../mod.zig").runtime;
+const runtime = struct {
+    pub const thread = @import("../thread.zig");
+};
 
 const SpawnConfig = runtime.thread.SpawnConfig;
 

@@ -8,8 +8,11 @@
 //! while using a simpler in-memory queue strategy for deterministic bring-up.
 
 const std = @import("std");
-const resampler_mod = @import("../../mod.zig").pkg.audio.resampler;
-const runtime = @import("../../mod.zig").runtime;
+const resampler_mod = @import("resampler.zig");
+const runtime = struct {
+    pub const sync = @import("../../runtime/sync.zig");
+    pub const std = @import("../../runtime/std.zig");
+};
 
 const Allocator = std.mem.Allocator;
 const Resampler = resampler_mod.Resampler;
