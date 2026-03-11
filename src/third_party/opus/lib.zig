@@ -153,33 +153,48 @@ pub fn addTo(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-) build_tools.ExternalStaticLibraryModule {
-    const opus = build_tools.addStaticLibraryModule(b, "opus", .{
-        .c_repo_src = .{
-            .git_repo = repo,
-            .commit = pinned_commit,
-        },
-        .library = .{
-            .name = "opus",
-            .root_module = b.createModule(.{
-                .target = target,
-                .optimize = optimize,
-                .link_libc = true,
-            }),
-        },
-        .module = .{
-            .root_source_file = b.path("third_party/opus/src.zig"),
+) *std.Build.Step.Compile {
+    const repo_dep = build_tools.downloadSource(b, .{
+        .git_repo = repo,
+        .commit = pinned_commit,
+    });
+    const user_define = b.option([]const u8, "opus_define", "Optional user C macro for opus; pass with -Dopus_define=NAME or -Dopus_define=NAME=VALUE");
+
+    const lib = b.addLibrary(.{
+        .name = "opus",
+        .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
             .link_libc = true,
-        },
-        .include_dirs = include_dirs,
-        .user_define_option = .{
-            .name = "opus_define",
-            .description = "Optional user C macro for opus; pass with -Dopus_define=NAME or -Dopus_define=NAME=VALUE",
-            .macro_defines = macro_defines,
-        },
-        .c_sources = c_sources,
+        }),
     });
-    return opus;
+    for (include_dirs) |dir| {
+        lib.addIncludePath(repo_dep.includePath(b, dir));
+    }
+    for (c_sources) |src| {
+        lib.addCSourceFile(.{ .file = repo_dep.sourcePath(b, src) });
+    }
+    for (macro_defines) |define| {
+        lib.root_module.addCMacro(define.name, define.value);
+    }
+    build_tools.applyUserDefine(lib.root_module, user_define);
+    lib.step.dependOn(repo_dep.ensure_step);
+
+    return lib;
+}
+
+pub fn configureModule(
+    b: *std.Build,
+    module: *std.Build.Module,
+) void {
+    const repo_dep = build_tools.downloadSource(b, .{
+        .git_repo = repo,
+        .commit = pinned_commit,
+    });
+    for (include_dirs) |dir| {
+        module.addIncludePath(repo_dep.includePath(b, dir));
+    }
+    for (macro_defines) |define| {
+        module.addCMacro(define.name, define.value);
+    }
 }

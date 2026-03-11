@@ -7,8 +7,6 @@
         "build.zig",
         "build.zig.zon",
         "src",
-        "third_party",
-        "tools",
         "test/firmware",
     },
     .dependencies = .{},

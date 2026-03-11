@@ -1,0 +1,16 @@
+.{
+    .name = .audio_engine,
+    .version = "0.1.0",
+    .fingerprint = 0xeaa71b2b584d35f2,
+    .minimum_zig_version = "0.15.0",
+    .dependencies = .{
+        .embed_zig = .{
+            .path = "../..",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

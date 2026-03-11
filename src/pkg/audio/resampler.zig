@@ -1,8 +1,7 @@
 //! Audio resampling and channel conversion helpers.
 
 const std = @import("std");
-const builtin = @import("builtin");
-const has_speexdsp = builtin.os.tag != .freestanding;
+const speexdsp = @import("../../third_party/speexdsp/src.zig");
 
 pub const Format = struct {
     rate: u32,
@@ -48,7 +47,7 @@ pub fn monoToStereo(input: []const i16, output: []i16) usize {
 }
 
 pub const Resampler = struct {
-    inner: if (has_speexdsp) @import("speexdsp").Resampler else void,
+    inner: speexdsp.Resampler,
     channels: u32,
     in_rate: u32,
     out_rate: u32,
@@ -69,26 +68,21 @@ pub const Resampler = struct {
         if (config.channels == 0) return error.InvalidChannels;
         if (config.in_rate == 0 or config.out_rate == 0) return error.InvalidRate;
 
-        if (has_speexdsp) {
-            const inner = try @import("speexdsp").Resampler.init(
-                config.channels,
-                config.in_rate,
-                config.out_rate,
-                @as(c_int, @intCast(config.quality)),
-            );
-            return .{ .inner = inner, .channels = config.channels, .in_rate = config.in_rate, .out_rate = config.out_rate };
-        }
-
-        if (config.in_rate != config.out_rate) return error.ResamplingNotSupported;
-        return .{ .inner = {}, .channels = config.channels, .in_rate = config.in_rate, .out_rate = config.out_rate };
+        const inner = try speexdsp.Resampler.init(
+            config.channels,
+            config.in_rate,
+            config.out_rate,
+            @as(c_int, @intCast(config.quality)),
+        );
+        return .{ .inner = inner, .channels = config.channels, .in_rate = config.in_rate, .out_rate = config.out_rate };
     }
 
     pub fn deinit(self: *Resampler) void {
-        if (has_speexdsp) self.inner.deinit();
+        self.inner.deinit();
     }
 
     pub fn reset(self: *Resampler) void {
-        if (has_speexdsp) self.inner.reset() catch {};
+        self.inner.reset() catch {};
     }
 
     pub fn process(self: *Resampler, in_buf: []const i16, out_buf: []i16) !Result {
@@ -104,12 +98,8 @@ pub const Resampler = struct {
             return .{ .in_consumed = @intCast(copy_samples), .out_produced = @intCast(copy_samples) };
         }
 
-        if (has_speexdsp) {
-            const res = try self.inner.processInterleavedInt(in_buf, out_buf);
-            return .{ .in_consumed = res.in_consumed, .out_produced = res.out_written };
-        }
-
-        return error.ResamplingNotSupported;
+        const res = try self.inner.processInterleavedInt(in_buf, out_buf);
+        return .{ .in_consumed = res.in_consumed, .out_produced = res.out_written };
     }
 };
 

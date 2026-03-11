@@ -7,7 +7,7 @@
 //! Works on macOS/Linux (native libc), ESP32 (newlib), WASM (wasi-libc).
 
 const font_mod = @import("font.zig");
-const c = @import("stb_truetype").c;
+const c = @import("../../../../third_party/stb_truetype/src.zig").c;
 
 pub const Glyph = struct {
     bitmap: [*]const u8,

@@ -1,0 +1,16 @@
+.{
+    .name = .bleterm,
+    .version = "0.1.0",
+    .fingerprint = 0x2bea8d3fd7c46898,
+    .minimum_zig_version = "0.15.0",
+    .dependencies = .{
+        .embed_zig = .{
+            .path = "../..",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

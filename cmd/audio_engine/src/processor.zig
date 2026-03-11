@@ -1,6 +1,6 @@
 const embed = @import("embed");
 const engine_mod = embed.pkg.audio.engine;
-const speexdsp = @import("speexdsp");
+const speexdsp = embed.third_party.speexdsp;
 
 pub const SpeexAecNs = struct {
     aec: speexdsp.EchoCanceller,

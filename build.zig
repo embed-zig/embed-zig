@@ -1,40 +1,65 @@
 const std = @import("std");
-const portaudio_pkg = @import("third_party/portaudio/lib.zig");
-const speexdsp_pkg = @import("third_party/speexdsp/lib.zig");
-const opus_pkg = @import("third_party/opus/lib.zig");
-const ogg_pkg = @import("third_party/ogg/lib.zig");
-const stb_truetype_pkg = @import("third_party/stb_truetype/lib.zig");
-const audio_engine_build = @import("src/bin/audio_engine/build.zig");
-const bleterm_build = @import("src/bin/bleterm/build.zig");
+const portaudio_pkg = @import("src/third_party/portaudio/lib.zig");
+const speexdsp_pkg = @import("src/third_party/speexdsp/lib.zig");
+const opus_pkg = @import("src/third_party/opus/lib.zig");
+const ogg_pkg = @import("src/third_party/ogg/lib.zig");
+const stb_truetype_pkg = @import("src/third_party/stb_truetype/lib.zig");
+
+pub const LinkOptions = struct {
+    portaudio: bool = false,
+    speexdsp: bool = false,
+    opus: bool = false,
+    ogg: bool = false,
+    stb_truetype: bool = false,
+
+    pub fn withBuildOptions(
+        self: @This(),
+        target: std.Build.ResolvedTarget,
+        optimize: std.builtin.OptimizeMode,
+    ) Options {
+        return .{
+            .target = target,
+            .optimize = optimize,
+            .portaudio = self.portaudio,
+            .speexdsp = self.speexdsp,
+            .opus = self.opus,
+            .ogg = self.ogg,
+            .stb_truetype = self.stb_truetype,
+        };
+    }
+};
+
+pub const Options = struct {
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    portaudio: bool = false,
+    speexdsp: bool = false,
+    opus: bool = false,
+    ogg: bool = false,
+    stb_truetype: bool = false,
+};
+
+pub fn readEmbedOptions(b: *std.Build) LinkOptions {
+    return .{
+        .portaudio = b.option(bool, "portaudio", "Enable portaudio in exported embed link") orelse false,
+        .speexdsp = b.option(bool, "speexdsp", "Enable speexdsp in exported embed link") orelse false,
+        .opus = b.option(bool, "opus", "Enable opus in exported embed link") orelse false,
+        .ogg = b.option(bool, "ogg", "Enable ogg in exported embed link") orelse false,
+        .stb_truetype = b.option(bool, "stb_truetype", "Enable stb_truetype in exported embed link") orelse false,
+    };
+}
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const export_options = readEmbedOptions(b);
 
     // -- Third-party (module + static library) --
     const pa = portaudio_pkg.addTo(b, target, optimize);
     const spx = speexdsp_pkg.addTo(b, target, optimize);
     const opus = opus_pkg.addTo(b, target, optimize);
-    const ogg = ogg_pkg.addTo(b, target, optimize);
+    const ogg = ogg_pkg.addLibrary(b, target, optimize);
     const stb_tt = stb_truetype_pkg.addTo(b, target, optimize);
-    const fonts_mod = b.addModule("fonts", .{
-        .root_source_file = b.path("third_party/fonts/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const third_party_mod = b.addModule("third_party", .{
-        .root_source_file = b.path("third_party/mod.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    third_party_mod.addImport("portaudio", pa.module);
-    third_party_mod.addImport("speexdsp", spx.module);
-    third_party_mod.addImport("opus", opus.module);
-    third_party_mod.addImport("ogg", ogg.module);
-    third_party_mod.addImport("stb_truetype", stb_tt.module);
-    third_party_mod.addImport("fonts", fonts_mod);
-
     // ===================================================================
     // Project module
     // ===================================================================
@@ -44,11 +69,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-
-    embed_mod.addImport("third_party", third_party_mod);
-    embed_mod.addImport("speexdsp", spx.module);
-    embed_mod.addImport("fonts", fonts_mod);
-    embed_mod.addImport("stb_truetype", stb_tt.module);
+    portaudio_pkg.configureModule(b, embed_mod, target);
+    speexdsp_pkg.configureModule(b, embed_mod);
+    opus_pkg.configureModule(b, embed_mod);
+    ogg_pkg.configureModule(b, embed_mod);
+    stb_truetype_pkg.configureModule(b, embed_mod);
 
     const files = b.addWriteFiles();
     const empty_root = files.add("empty.zig", "");
@@ -62,17 +87,23 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
         .root_module = embed_link_root,
     });
-    embed_link.linkLibrary(spx.lib);
-    embed_link.linkLibrary(stb_tt.lib);
-
-    embed_link.step.dependOn(spx.repo.ensure_step);
+    if (export_options.portaudio) {
+        embed_link.linkLibrary(pa);
+    }
+    if (export_options.speexdsp) {
+        embed_link.linkLibrary(spx);
+    }
+    if (export_options.opus) {
+        embed_link.linkLibrary(opus);
+    }
+    if (export_options.ogg) {
+        embed_link.linkLibrary(ogg);
+    }
+    if (export_options.stb_truetype) {
+        embed_link.linkLibrary(stb_tt);
+    }
 
     b.installArtifact(embed_link);
-    b.installArtifact(pa.lib);
-    b.installArtifact(spx.lib);
-    b.installArtifact(opus.lib);
-    b.installArtifact(ogg.lib);
-    b.installArtifact(stb_tt.lib);
 
     // ===================================================================
     // Tests
@@ -83,26 +114,18 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-
-    project_tests_root.addImport("third_party", third_party_mod);
-    project_tests_root.addImport("speexdsp", spx.module);
-    project_tests_root.addImport("fonts", fonts_mod);
-    project_tests_root.addImport("stb_truetype", stb_tt.module);
+    portaudio_pkg.configureModule(b, project_tests_root, target);
+    speexdsp_pkg.configureModule(b, project_tests_root);
+    opus_pkg.configureModule(b, project_tests_root);
+    ogg_pkg.configureModule(b, project_tests_root);
+    stb_truetype_pkg.configureModule(b, project_tests_root);
 
     const project_tests = b.addTest(.{
         .root_module = project_tests_root,
     });
-    project_tests.linkLibrary(spx.lib);
-    project_tests.linkLibrary(stb_tt.lib);
-    project_tests.step.dependOn(spx.repo.ensure_step);
+    project_tests.linkLibrary(spx);
+    project_tests.linkLibrary(stb_tt);
     const run_project_tests = b.addRunArtifact(project_tests);
-
-    // ===================================================================
-    // Executables
-    // ===================================================================
-
-    audio_engine_build.addSteps(b, target, optimize, pa, spx);
-    bleterm_build.addSteps(b, target, optimize);
 
     // ===================================================================
     // Steps

@@ -282,7 +282,14 @@ pub const pkg = struct {
     pub const app = @import("pkg/app/app_runtime.zig");
 };
 
-pub const third_party = @import("third_party");
+pub const third_party = struct {
+    pub const portaudio = @import("third_party/portaudio/src.zig");
+    pub const speexdsp = @import("third_party/speexdsp/src.zig");
+    pub const opus = @import("third_party/opus/src.zig");
+    pub const ogg = @import("third_party/ogg/src.zig");
+    pub const stb_truetype = @import("third_party/stb_truetype/src.zig");
+    pub const fonts = @import("third_party/fonts/mod.zig");
+};
 
 pub const websim = struct {
     pub const server = @import("websim/server.zig");

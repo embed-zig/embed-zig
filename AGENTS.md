@@ -1,154 +1,209 @@
 # AGENTS.md
-Guidance for coding agents operating in this repository.
-Scope: reliable Zig workflows, strict contracts, and behavior-first testing.
 
----
+Guidance for coding agents working in this repository. The goal is to help agents understand the current directory structure, build flow, architectural boundaries, and testing expectations, while preserving cross-platform abstractions and behavioral consistency.
 
-## 1) Repo snapshot
-- Language: Zig (0.15.x in local environment).
-- Main code roots:
-  - `src/runtime/` (runtime contracts + std implementation)
-  - `src/hal/` (hardware abstraction contracts)
-  - `src/root.zig` (top-level exports)
-- Architecture docs:
-  - `openteam/docs/runtime.md`
-  - `openteam/docs/hal.md`
-  - `openteam/docs/structure.md`
-  - `openteam/docs/test_strategy.md`
-- No repository-level `build.zig` pipeline is present.
-- Default workflow is `zig test <file>`.
+## TOC
 
-## 2) Cursor/Copilot rule files
-- Checked locations:
-  - `.cursor/rules/`
-  - `.cursorrules`
-  - `.github/copilot-instructions.md`
-- Current status: **none found**.
-- If these files are added later, treat them as authoritative and update this file.
+- [Repository Overview](#repository-overview)
+- [Directory Structure](#directory-structure)
+- [Build And Test Commands](#build-and-test-commands)
+- [Code Style And Architectural Constraints](#code-style-and-architectural-constraints)
+- [Testing Expectations For Agents](#testing-expectations-for-agents)
+- [Commit And Documentation Sync](#commit-and-documentation-sync)
+- [Pre-Handoff Checklist](#pre-handoff-checklist)
+- [Quick Commands](#quick-commands)
 
-## 3) Build, lint, and test commands
+## Repository Overview
 
-### 3.1 Format
+- Language: Zig, with `0.15.x` as the main local environment
+- Package name: `embed_zig`
+- Default exported module name: `embed`
+- The repository root has a shared `build.zig`
+- The top-level export file is `src/mod.zig`, not `src/root.zig`
+
+Project positioning:
+
+- `embed-zig` uses `comptime` to compose `hal` and `runtime` adaptation layers for different hardware platforms and host environments
+- Target platforms include ESP, BK, and host environments
+- It provides cross-platform capabilities such as an event bus, app stage management, flux/reducer, UI rendering, audio processing, BLE, networking, and async execution
+- The intended workflow is: develop firmware or app logic -> validate in `websim` -> adapt to multiple hardware targets -> release
+- This repository is also designed for Agentic Coding workflows, emphasizing fast development, fast verification, and fast testing
+
+## Directory Structure
+
+- `src/mod.zig`: top-level export entrypoint
+- `src/runtime/`: runtime abstractions and standard implementations
+- `src/hal/`: HAL abstractions
+- `src/pkg/`: higher-level cross-platform modules
+- `src/websim/`: web simulation, remote HAL, and test runner
+- `src/third_party/`: third-party libraries and font assets
+- `cmd/audio_engine/`: host-side audio example
+- `cmd/bleterm/`: host-side BLE terminal tool
+- `test/firmware/`: platform-agnostic firmware/app test assets
+- `test/websim/`: test cases built around `websim`
+- `test/esp/`: ESP platform adaptation and build examples
+
+What agents should assume about the structure:
+
+- Exported entrypoints are centralized in `src/mod.zig`
+- Platform differences should be pushed down into `hal` / `runtime` adaptation layers whenever possible
+- Cross-platform logic should generally live in `pkg`
+- If a change affects test examples or platform-specific directories, also check `test/websim/` and `test/esp/`
+
+## Build And Test Commands
+
+### Format
+
 ```bash
-zig fmt src/**/*.zig
+zig fmt src/**/*.zig cmd/**/*.zig test/**/*.zig
 ```
-- If `**` is not expanded by your shell, run with explicit file paths.
 
-### 3.2 Lint baseline
-- No dedicated linter is configured.
-- Required baseline = `zig fmt` + `zig test`.
+If your shell does not expand `**`, use explicit file paths instead.
 
-### 3.3 Full runtime behavior suite
+### Baseline
+
+- There is no dedicated linter
+- The minimum validation baseline is `zig fmt` plus relevant `zig test` / `zig build test`
+
+### Root build
+
+Common commands from the repository root:
+
 ```bash
+zig build test
+zig build test-runtime-std
+zig build test-async
+zig build test-audio
+zig build test-net
+zig build test-ble
+zig build test-ui
+zig build test-event
+zig build test-app
+```
+
+### Single file tests
+
+```bash
+zig test src/mod.zig
 zig test src/runtime/std.zig
-```
-- Run this after runtime/std changes.
-
-### 3.4 Single file tests
-```bash
-zig test src/runtime/socket.zig
-zig test src/runtime/std/crypto/pki.zig
+zig test src/runtime/io.zig
 zig test src/hal/wifi.zig
+zig test src/pkg/audio/resampler.zig
 ```
 
-### 3.5 Single test case (important)
+### Filtered tests
+
 ```bash
 zig test src/runtime/std.zig --test-filter "socket tcp loopback echo"
 zig test src/runtime/std/crypto/hkdf.zig --test-filter "RFC5869"
 ```
 
-### 3.6 Compile-only contract checks
-- Contract files may report `All 0 tests passed`; still run them.
+### Example apps
+
+Run host-side example apps from their own directories:
+
 ```bash
-zig test src/runtime/profile.zig
-zig test src/runtime/io.zig
-zig test src/runtime/runtime.zig
-zig test src/runtime/root.zig
-zig test src/root.zig
+zig build run
 ```
 
-## 4) Code style and architecture rules
+## Code Style And Architectural Constraints
 
-### 4.1 Imports
-- Put `const std = @import("std");` first when used.
-- Then import local modules.
-- Remove unused imports.
+### Imports
 
-### 4.2 Formatting
-- Always run `zig fmt` before handoff.
-- Keep files focused by domain.
+- Put `const std = @import("std");` first when used
+- Import local modules after that
+- Remove unused imports
 
-### 4.3 File/module organization
-- Entry file name is `root.zig`.
-- Runtime std implementation lives in `src/runtime/std/*`.
-- Crypto algorithms live in `src/runtime/std/crypto/*`.
-- Algorithm tests should live with algorithm files.
+### Formatting
 
-### 4.4 Naming
-- File names: lowercase snake_case.
-- Public types: PascalCase (`Socket`, `DnsServers`).
-- Functions/methods: lowerCamelCase (`setNonBlocking`, `parseIpv4`).
-- Tests: behavior-oriented names.
+- Always run `zig fmt` before handoff
+- Keep files organized by domain and avoid mixing unrelated responsibilities
 
-### 4.5 Types
-- Use exact scalar types in contracts (`u32`, `u64`, `[]const u8`, `bool`).
-- Avoid loose substitutes or inferred alternatives in contract surfaces.
-- Prefer named shared types for semantic tuples.
-  - Example: `runtime.netif.types.DnsServers { primary, secondary }`.
+### File and module organization
 
-### 4.6 Contract checks (mandatory)
-- Required functions: use exact signature checks with
-  - `@as(*const fn(...), &Impl.method)`
-- Do not rely on `@hasDecl` alone for required function checks.
-- Optional modules: `@hasDecl` + strict `from(...)` validation when declared.
-- Keep profile model as `minimal/threaded/evented` + declaration presence.
+- The top-level export entrypoint is `src/mod.zig`
+- Runtime standard implementations mainly live under `src/runtime/std*`
+- Higher-level cross-platform capabilities mainly live under `src/pkg/`
+- `websim` logic lives under `src/websim/`
+- Keep algorithm tests close to their implementation files when practical
 
-### 4.7 Error handling
-- Do not silently swallow critical errors.
-- Do not hide failures behind sentinel values.
-- Map platform errors to contract-level errors explicitly.
-- Avoid unnecessary `anyerror` for stable required APIs.
+### Naming
 
-### 4.8 Layer boundaries
-- `hal` must not depend on `runtime`.
-- `runtime` may depend on `hal` contracts when needed.
-- `pkg` (if present) may depend on both `runtime` and `hal`.
+- File names: lowercase snake_case
+- Public types: PascalCase
+- Functions and methods: lowerCamelCase
+- Test names: describe behavior, not implementation details
 
-### 4.9 Runtime conventions
-- IO contract remains unified: `registerRead/registerWrite/unregister/poll/wake`.
-- Wake path should be non-blocking safe and drain logic robust.
-- Socket error set should match real capabilities.
-- OTA backend trait stays in `runtime/ota_backend.zig`; orchestration belongs above runtime.
+### Types
 
-## 5) Testing expectations for agents
-- For every change, run:
-  1. modified file tests
-  2. affected aggregate suite
-  3. top-level compile check
-- For runtime std changes, always run:
-  - `zig test src/runtime/std.zig`
-- For crypto changes:
-  - add/adjust vectors in the changed algorithm file
-  - include positive + negative behavior tests where practical
-- If a contract file has no runtime tests, still run `zig test` on it.
+- Use exact types in contract surfaces, such as `u32`, `u64`, `[]const u8`, and `bool`
+- Avoid vague substitute types in public contracts
+- Prefer named types for semantically meaningful grouped values
 
-## 6) Commit hygiene
-- Keep commits scoped and intention-revealing.
-- Do not commit placeholders/stubs.
-- Keep working tree clean except intended files.
-- Sync docs when contracts/behavior change.
+### Contract checks
 
-## 7) Pre-handoff checklist
-- [ ] `zig fmt` executed
-- [ ] relevant `zig test` commands passed
-- [ ] strict contract checks preserved (signature + type)
-- [ ] no TODO stubs or silent-failure regressions introduced
+- Required functions must use exact signature checks: `@as(*const fn(...), &Impl.method)`
+- Do not rely on `@hasDecl` alone for required interfaces
+- Optional modules should use `@hasDecl` plus strict `from(...)` validation
+- Keep the profile model aligned with `minimal` / `threaded` / `evented`
 
-## 8) Quick command recap
+### Layer boundaries
+
+- `hal` must not depend on `runtime`
+- `runtime` may depend on `hal` contracts
+- `pkg` may depend on both `hal` and `runtime`
+- When adding platform-specific logic, first decide whether it belongs in the adaptation layer or in an upper-level module
+
+### Error handling
+
+- Do not silently swallow critical errors
+- Do not hide real failures behind sentinel values
+- Map platform errors explicitly into contract-level errors
+- Avoid unnecessary `anyerror` in stable APIs
+
+### Runtime conventions
+
+- Keep the IO contract unified: `registerRead/registerWrite/unregister/poll/wake`
+- The wake path must support non-blocking behavior and robust draining
+- Socket error sets should match real capabilities
+- `runtime/ota_backend.zig` should remain a trait-level definition, with orchestration above runtime
+
+## Testing Expectations For Agents
+
+For every change, cover at least:
+1. direct tests for the modified file
+2. an affected aggregate test or build step
+3. one top-level compile or integration check
+
+- When changing `runtime/std`, always run `zig test src/runtime/std.zig`
+- When changing crypto-related code:
+  - add or update test vectors in the relevant algorithm file
+  - cover both positive and negative behavior when practical
+- If a contract file reports `0 tests passed`, still run `zig test` on it
+- If docs reference directories, module names, commands, or workflow behavior that changed, update them too
+
+## Commit And Documentation Sync
+
+- Keep commits scoped to a single intent
+- Do not commit placeholder implementations or TODO stubs
+- When changing contracts, directory structure, build commands, or workflow, update both `README.md` and this file
+- Do not assume platform integration is identical across targets, especially between host environments and `esp-zig`
+
+## Pre-Handoff Checklist
+
+- [ ] `zig fmt` has been run
+- [ ] Relevant tests or build steps have been run
+- [ ] Strict contract checks still hold
+- [ ] No silent failures or temporary stub code were introduced
+- [ ] Documentation is in sync with the current directory structure and commands
+
+## Quick Commands
+
 ```bash
-zig fmt src/**/*.zig
+zig build test
+zig build test-audio
+zig build test-ble
+zig test src/mod.zig
 zig test src/runtime/std.zig
 zig test src/runtime/std.zig --test-filter "io wake drains buffered wake bytes"
-zig test src/runtime/runtime.zig
-zig test src/root.zig
 ```
