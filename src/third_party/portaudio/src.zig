@@ -312,18 +312,3 @@ pub const AudioIO = struct {
         }
     }
 };
-
-test "version metadata is available" {
-    try std.testing.expect(getVersion() > 0);
-    const text = std.mem.span(getVersionText());
-    try std.testing.expect(text.len > 0);
-}
-
-test "known error maps to typed Zig error" {
-    try std.testing.expectError(Error.InvalidDevice, check(c.paInvalidDevice));
-}
-
-test "error text is non-empty for known code" {
-    const text = std.mem.span(getErrorText(c.paInvalidSampleRate));
-    try std.testing.expect(text.len > 0);
-}

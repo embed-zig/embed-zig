@@ -26,26 +26,3 @@ pub fn Sha384(comptime Impl: type) type {
 pub fn Sha512(comptime Impl: type) type {
     return from(Impl, 64);
 }
-
-test "hash contract with mock" {
-    const MockHash = struct {
-        pub const digest_length = 32;
-
-        pub fn init() @This() {
-            return .{};
-        }
-
-        pub fn update(_: *@This(), _: []const u8) void {}
-
-        pub fn final(_: *@This()) [32]u8 {
-            return [_]u8{0} ** 32;
-        }
-
-        pub fn hash(_: []const u8, out: *[32]u8) void {
-            out.* = [_]u8{1} ** 32;
-        }
-    };
-
-    const H = Sha256(MockHash);
-    _ = H;
-}

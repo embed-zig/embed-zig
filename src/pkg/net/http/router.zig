@@ -79,59 +79,23 @@ const testing = std.testing;
 fn dummyHandler(_: *Request, _: *Response) void {}
 fn dummyHandler2(_: *Request, _: *Response) void {}
 
-test "exact match" {
-    const routes = [_]Route{
-        get("/api/status", dummyHandler),
-        post("/api/data", dummyHandler2),
+pub const test_exports = blk: {
+    const __test_export_0 = mem;
+    const __test_export_1 = request_mod;
+    const __test_export_2 = response_mod;
+    const __test_export_3 = Request;
+    const __test_export_4 = Response;
+    const __test_export_5 = Method;
+    const __test_export_6 = dummyHandler;
+    const __test_export_7 = dummyHandler2;
+    break :blk struct {
+        pub const mem = __test_export_0;
+        pub const request_mod = __test_export_1;
+        pub const response_mod = __test_export_2;
+        pub const Request = __test_export_3;
+        pub const Response = __test_export_4;
+        pub const Method = __test_export_5;
+        pub const dummyHandler = __test_export_6;
+        pub const dummyHandler2 = __test_export_7;
     };
-
-    const m = match(&routes, .GET, "/api/status");
-    try testing.expectEqual(MatchResult.found, m.result);
-    try testing.expect(m.handler != null);
-}
-
-test "prefix match" {
-    const routes = [_]Route{
-        prefix("/static/", dummyHandler),
-    };
-
-    const m1 = match(&routes, .GET, "/static/app.js");
-    try testing.expectEqual(MatchResult.found, m1.result);
-
-    const m2 = match(&routes, .GET, "/static/css/style.css");
-    try testing.expectEqual(MatchResult.found, m2.result);
-
-    const m3 = match(&routes, .GET, "/api/other");
-    try testing.expectEqual(MatchResult.not_found, m3.result);
-}
-
-test "prefix matches any method" {
-    const routes = [_]Route{
-        prefix("/api/", dummyHandler),
-    };
-
-    try testing.expectEqual(MatchResult.found, match(&routes, .GET, "/api/foo").result);
-    try testing.expectEqual(MatchResult.found, match(&routes, .POST, "/api/foo").result);
-    try testing.expectEqual(MatchResult.found, match(&routes, .PUT, "/api/foo").result);
-    try testing.expectEqual(MatchResult.found, match(&routes, .DELETE, "/api/foo").result);
-}
-
-test "404 no match" {
-    const routes = [_]Route{
-        get("/api/status", dummyHandler),
-    };
-
-    const m = match(&routes, .GET, "/unknown");
-    try testing.expectEqual(MatchResult.not_found, m.result);
-    try testing.expect(m.handler == null);
-}
-
-test "method mismatch — 405" {
-    const routes = [_]Route{
-        get("/api/status", dummyHandler),
-    };
-
-    const m = match(&routes, .POST, "/api/status");
-    try testing.expectEqual(MatchResult.method_not_allowed, m.result);
-    try testing.expect(m.handler == null);
-}
+};

@@ -256,12 +256,13 @@ pub fn packetGetFrames(data: []const u8) Error!u32 {
     return @intCast(try checkedPositive(c.opus_packet_get_nb_frames(data.ptr, @intCast(data.len))));
 }
 
-test "maps opus negative code to typed error" {
-    try std.testing.expectError(Error.BadArg, checkError(c.OPUS_BAD_ARG));
-    try std.testing.expectError(Error.InvalidState, checkError(c.OPUS_INVALID_STATE));
-}
-
-test "accepts non-negative return codes" {
-    try checkError(0);
-    try checkError(3);
-}
+pub const test_exports = blk: {
+    const __test_export_0 = checkError;
+    const __test_export_1 = c.OPUS_BAD_ARG;
+    const __test_export_2 = c.OPUS_INVALID_STATE;
+    break :blk struct {
+        pub const checkError = __test_export_0;
+        pub const OPUS_BAD_ARG = __test_export_1;
+        pub const OPUS_INVALID_STATE = __test_export_2;
+    };
+};

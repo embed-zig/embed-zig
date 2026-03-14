@@ -376,128 +376,23 @@ fn buildServerFrame(allocator: std.mem.Allocator, opcode: frame.Opcode, payload:
     return buf;
 }
 
-test "MockConn send + recv roundtrip" {
-    const allocator = std.testing.allocator;
-
-    const server_frame = try buildServerFrame(allocator, .text, "hello");
-    defer allocator.free(server_frame);
-
-    var mock = MockConn.initMock(server_frame);
-    var client = try Client(MockConn).initRaw(allocator, &mock, .{ .rng_fill = deterministicRng });
-    defer client.deinit();
-
-    try client.sendText("hello");
-
-    const msg = (try client.recv()) orelse return error.InvalidResponse;
-    try std.testing.expectEqual(MessageType.text, msg.type);
-    try std.testing.expectEqualSlices(u8, "hello", msg.payload);
-}
-
-test "sendBinary + recv binary" {
-    const allocator = std.testing.allocator;
-    const binary_data = [_]u8{ 0x00, 0x01, 0x02, 0xFF, 0xFE };
-
-    const server_frame = try buildServerFrame(allocator, .binary, &binary_data);
-    defer allocator.free(server_frame);
-
-    var mock = MockConn.initMock(server_frame);
-    var client = try Client(MockConn).initRaw(allocator, &mock, .{ .rng_fill = deterministicRng });
-    defer client.deinit();
-
-    try client.sendBinary(&binary_data);
-
-    const msg = (try client.recv()) orelse return error.InvalidResponse;
-    try std.testing.expectEqual(MessageType.binary, msg.type);
-    try std.testing.expectEqualSlices(u8, &binary_data, msg.payload);
-}
-
-test "auto pong on ping" {
-    const allocator = std.testing.allocator;
-
-    const ping_frame = try buildServerFrame(allocator, .ping, "");
-    defer allocator.free(ping_frame);
-
-    const text_frame = try buildServerFrame(allocator, .text, "after_ping");
-    defer allocator.free(text_frame);
-
-    const combined = try allocator.alloc(u8, ping_frame.len + text_frame.len);
-    defer allocator.free(combined);
-    @memcpy(combined[0..ping_frame.len], ping_frame);
-    @memcpy(combined[ping_frame.len..], text_frame);
-
-    var mock = MockConn.initMock(combined);
-    var client = try Client(MockConn).initRaw(allocator, &mock, .{ .rng_fill = deterministicRng });
-    defer client.deinit();
-
-    const ping_msg = (try client.recv()) orelse return error.InvalidResponse;
-    try std.testing.expectEqual(MessageType.ping, ping_msg.type);
-
-    const sent = mock.sent_buf[0..mock.sent_len];
-    try std.testing.expect(sent.len > 0);
-    try std.testing.expectEqual(@as(u8, 0x8A), sent[0]);
-
-    const text_msg = (try client.recv()) orelse return error.InvalidResponse;
-    try std.testing.expectEqual(MessageType.text, text_msg.type);
-    try std.testing.expectEqualSlices(u8, "after_ping", text_msg.payload);
-}
-
-test "recv close returns null" {
-    const allocator = std.testing.allocator;
-
-    const close_payload = [2]u8{ 0x03, 0xE8 };
-    const close_frame = try buildServerFrame(allocator, .close, &close_payload);
-    defer allocator.free(close_frame);
-
-    var mock = MockConn.initMock(close_frame);
-    var client = try Client(MockConn).initRaw(allocator, &mock, .{ .rng_fill = deterministicRng });
-    defer client.deinit();
-
-    const result = try client.recv();
-    try std.testing.expectEqual(@as(?Message, null), result);
-}
-
-test "sendClose sends correct close frame" {
-    const allocator = std.testing.allocator;
-
-    var mock = MockConn.initMock("");
-    var client = try Client(MockConn).initRaw(allocator, &mock, .{ .rng_fill = deterministicRng });
-    defer client.deinit();
-
-    try client.sendClose(1000);
-
-    const sent = mock.sent_buf[0..mock.sent_len];
-    try std.testing.expect(sent.len >= 2);
-
-    try std.testing.expectEqual(@as(u8, 0x88), sent[0]);
-    try std.testing.expectEqual(@as(u8, 0x82), sent[1]);
-
-    const mask_key = sent[2..6].*;
-    var status_bytes = [2]u8{ sent[6], sent[7] };
-    frame.applyMask(&status_bytes, mask_key);
-
-    const status = @as(u16, status_bytes[0]) << 8 | @as(u16, status_bytes[1]);
-    try std.testing.expectEqual(@as(u16, 1000), status);
-}
-
-test "recv on closed client returns null" {
-    const allocator = std.testing.allocator;
-
-    var mock = MockConn.initMock("");
-    var client = try Client(MockConn).initRaw(allocator, &mock, .{ .rng_fill = deterministicRng });
-    defer client.deinit();
-
-    client.close();
-    const result = try client.recv();
-    try std.testing.expectEqual(@as(?Message, null), result);
-}
-
-test "sendText on closed client returns error" {
-    const allocator = std.testing.allocator;
-
-    var mock = MockConn.initMock("");
-    var client = try Client(MockConn).initRaw(allocator, &mock, .{ .rng_fill = deterministicRng });
-    defer client.deinit();
-
-    client.state = .closed;
-    try std.testing.expectError(error.Closed, client.sendText("hello"));
-}
+pub const test_exports = blk: {
+    const __test_export_0 = Allocator;
+    const __test_export_1 = frame;
+    const __test_export_2 = handshake_mod;
+    const __test_export_3 = writeAll;
+    const __test_export_4 = conn_mod;
+    const __test_export_5 = MockConn;
+    const __test_export_6 = deterministicRng;
+    const __test_export_7 = buildServerFrame;
+    break :blk struct {
+        pub const Allocator = __test_export_0;
+        pub const frame = __test_export_1;
+        pub const handshake_mod = __test_export_2;
+        pub const writeAll = __test_export_3;
+        pub const conn_mod = __test_export_4;
+        pub const MockConn = __test_export_5;
+        pub const deterministicRng = __test_export_6;
+        pub const buildServerFrame = __test_export_7;
+    };
+};

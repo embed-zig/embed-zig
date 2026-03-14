@@ -1361,90 +1361,31 @@ fn MockHci() type {
     };
 }
 
-test "Host start reads buffer size and initializes credits" {
-    const Rt = runtime.std;
-    const Mock = MockHci();
-
-    var hci_driver = Mock{};
-    hci_driver.injectInitSequence();
-
-    const TestHost = Host(Rt.Mutex, Rt.Condition, Rt.Thread, Mock, &.{});
-    var host = TestHost.init(&hci_driver, std.testing.allocator);
-    defer host.deinit();
-
-    try host.start(.{});
-    std.Thread.sleep(10 * std.time.ns_per_ms);
-
-    try std.testing.expectEqual(@as(u16, 251), host.acl_max_len);
-    try std.testing.expectEqual(@as(u16, 12), host.acl_max_slots);
-    try std.testing.expectEqual(@as(u32, 12), host.getAclCredits());
-    try std.testing.expectEqual(@as(u8, 0x52), host.bd_addr[0]);
-    try std.testing.expectEqual(@as(u8, 0x11), host.bd_addr[2]);
-    try std.testing.expect(hci_driver.written_count.load(.acquire) >= 5);
-
-    host.stop();
-}
-
-test "Host writeLoop respects ACL credits" {
-    const Rt = runtime.std;
-    const Mock = MockHci();
-
-    var hci_driver = Mock{};
-    hci_driver.injectInitSequence();
-
-    const TestHost = Host(Rt.Mutex, Rt.Condition, Rt.Thread, Mock, &.{});
-    var host = TestHost.init(&hci_driver, std.testing.allocator);
-    defer host.deinit();
-
-    try host.start(.{});
-    std.Thread.sleep(10 * std.time.ns_per_ms);
-
-    const written_before = hci_driver.written_count.load(.acquire);
-
-    try host.sendData(0x0040, l2cap_mod.CID_ATT, "test data");
-
-    std.Thread.sleep(50 * std.time.ns_per_ms);
-
-    const written_after = hci_driver.written_count.load(.acquire);
-    try std.testing.expect(written_after > written_before);
-    try std.testing.expect(host.getAclCredits() < 12);
-
-    host.stop();
-}
-
-test "Host NCP event releases credits" {
-    const Rt = runtime.std;
-    const Mock = MockHci();
-
-    var hci_driver = Mock{};
-    hci_driver.injectInitSequence();
-
-    const TestHost = Host(Rt.Mutex, Rt.Condition, Rt.Thread, Mock, &.{});
-    var host = TestHost.init(&hci_driver, std.testing.allocator);
-    defer host.deinit();
-
-    try host.start(.{});
-    std.Thread.sleep(10 * std.time.ns_per_ms);
-
-    try host.sendData(0x0040, l2cap_mod.CID_ATT, "test");
-    std.Thread.sleep(50 * std.time.ns_per_ms);
-    const credits_after_send = host.getAclCredits();
-
-    hci_driver.injectPacket(&[_]u8{
-        @intFromEnum(hci_mod.PacketType.event),
-        0x13,
-        0x05,
-        0x01,
-        0x40,
-        0x00,
-        0x05,
-        0x00,
-    });
-
-    std.Thread.sleep(200 * std.time.ns_per_ms);
-
-    const credits_after_ncp = host.getAclCredits();
-    try std.testing.expect(credits_after_ncp > credits_after_send);
-
-    host.stop();
-}
+pub const test_exports = blk: {
+    const __test_export_0 = runtime;
+    const __test_export_1 = hci_mod;
+    const __test_export_2 = acl_mod;
+    const __test_export_3 = commands;
+    const __test_export_4 = events_mod;
+    const __test_export_5 = l2cap_mod;
+    const __test_export_6 = att_mod;
+    const __test_export_7 = gap_mod;
+    const __test_export_8 = gatt_server;
+    const __test_export_9 = gatt_client;
+    const __test_export_10 = AclCredits;
+    const __test_export_11 = MockHci;
+    break :blk struct {
+        pub const runtime = __test_export_0;
+        pub const hci_mod = __test_export_1;
+        pub const acl_mod = __test_export_2;
+        pub const commands = __test_export_3;
+        pub const events_mod = __test_export_4;
+        pub const l2cap_mod = __test_export_5;
+        pub const att_mod = __test_export_6;
+        pub const gap_mod = __test_export_7;
+        pub const gatt_server = __test_export_8;
+        pub const gatt_client = __test_export_9;
+        pub const AclCredits = __test_export_10;
+        pub const MockHci = __test_export_11;
+    };
+};

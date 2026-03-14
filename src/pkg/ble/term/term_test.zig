@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 const shell_mod = @import("shell.zig");
 const transport_mod = @import("transport.zig");
 const xfer = @import("../xfer/api.zig");

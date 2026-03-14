@@ -61,27 +61,11 @@ pub fn verifyChain(
 
     store.bundle.verify(subject, now) catch return error.CertificateVerificationFailed;
 }
-
-test "CaStore initSystem loads certificates" {
-    var store = CaStore.initSystem(std.testing.allocator) catch return;
-    defer store.deinit();
-
-    try std.testing.expect(store.bundle.bytes.items.len > 0);
-}
-
-test "verifyChain rejects empty chain" {
-    var store = CaStore.initSystem(std.testing.allocator) catch return;
-    defer store.deinit();
-
-    const empty: []const []const u8 = &.{};
-    try std.testing.expectError(error.CertificateChainTooShort, verifyChain(empty, null, store, 0));
-}
-
-test "verifyChain rejects garbage DER" {
-    var store = CaStore.initSystem(std.testing.allocator) catch return;
-    defer store.deinit();
-
-    const garbage = [_]u8{0xFF} ** 32;
-    const chain: []const []const u8 = &.{&garbage};
-    try std.testing.expectError(error.CertificateParseError, verifyChain(chain, null, store, 0));
-}
+pub const test_exports = blk: {
+    const __test_export_0 = Certificate;
+    const __test_export_1 = Bundle;
+    break :blk struct {
+        pub const Certificate = __test_export_0;
+        pub const Bundle = __test_export_1;
+    };
+};

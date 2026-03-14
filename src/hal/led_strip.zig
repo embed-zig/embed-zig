@@ -1,6 +1,5 @@
 //! RGB LED strip HAL wrapper.
 
-const std = @import("std");
 const hal_marker = @import("marker.zig");
 
 pub const Color = packed struct {
@@ -146,36 +145,9 @@ pub fn from(comptime spec: type) type {
         }
     };
 }
-
-test "led strip wrapper" {
-    const Mock = struct {
-        pixels: [8]Color = [_]Color{.black} ** 8,
-        refresh_count: u32 = 0,
-
-        pub fn setPixel(self: *@This(), index: u32, color: Color) void {
-            self.pixels[index] = color;
-        }
-        pub fn getPixelCount(_: *@This()) u32 {
-            return 8;
-        }
-        pub fn refresh(self: *@This()) void {
-            self.refresh_count += 1;
-        }
+pub const test_exports = blk: {
+    const __test_export_0 = hal_marker;
+    break :blk struct {
+        pub const hal_marker = __test_export_0;
     };
-
-    const Strip = from(struct {
-        pub const Driver = Mock;
-        pub const meta = .{ .id = "ledstrip.test" };
-    });
-
-    var d = Mock{};
-    var strip = Strip.init(&d);
-    strip.setColor(.red);
-    try std.testing.expectEqual(Color.red, d.pixels[0]);
-    strip.setBrightness(128);
-    strip.setColor(.white);
-    try std.testing.expect(d.pixels[0].r < 200);
-    strip.setEnabled(false);
-    try std.testing.expectEqual(Color.black, d.pixels[0]);
-    try std.testing.expect(d.refresh_count > 0);
-}
+};

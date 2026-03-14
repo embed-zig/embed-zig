@@ -46,18 +46,3 @@ pub const LedStrip = struct {
         bus.emit(fbs.getWritten());
     }
 };
-
-test "websim led_strip satisfies hal contract" {
-    const LedStripHal = embed.hal.led_strip.from(struct {
-        pub const Driver = LedStrip;
-        pub const meta = .{ .id = "led_strip.websim" };
-    });
-
-    var drv = LedStrip.init();
-    var strip = LedStripHal.init(&drv);
-
-    try std.testing.expectEqual(@as(u32, 1), strip.getPixelCount());
-
-    strip.setPixel(0, Color.red);
-    try std.testing.expectEqual(Color.red, drv.pixels[0]);
-}

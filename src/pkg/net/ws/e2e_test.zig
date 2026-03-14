@@ -6,6 +6,7 @@
 //! large frames, and latency measurement.
 
 const std = @import("std");
+const testing = std.testing;
 const conn_mod = @import("../conn.zig");
 const ws_client = @import("client.zig");
 const frame = @import("frame.zig");

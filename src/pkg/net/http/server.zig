@@ -192,75 +192,6 @@ fn testHandler(_: *Request, resp: *Response) void {
     resp.send("Hello");
 }
 
-test "full request-response cycle" {
-    const raw = "GET /hello HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
-    var state = MockConn.State{ .input = raw };
-    const conn = MockConn{ .state = &state };
-
-    const routes = [_]Route{
-        router_mod.get("/hello", testHandler),
-    };
-
-    const TestServer = Server(MockConn, .{ .read_buf_size = 1024, .write_buf_size = 512 });
-    const server = TestServer.init(testing.allocator, &routes);
-    server.serveConn(conn);
-
-    const out = state.getOutput();
-    try testing.expect(mem.startsWith(u8, out, "HTTP/1.1 200 OK\r\n"));
-    try testing.expect(mem.indexOf(u8, out, "Content-Type: text/plain\r\n") != null);
-    try testing.expect(mem.endsWith(u8, out, "Hello"));
-    try testing.expect(state.closed);
-}
-
-test "keep-alive — multiple requests" {
-    const raw =
-        "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n" ++
-        "GET /hello HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
-    var state = MockConn.State{ .input = raw };
-    const conn = MockConn{ .state = &state };
-
-    const routes = [_]Route{
-        router_mod.get("/hello", testHandler),
-    };
-
-    const TestServer = Server(MockConn, .{ .read_buf_size = 2048, .write_buf_size = 512 });
-    const server = TestServer.init(testing.allocator, &routes);
-    server.serveConn(conn);
-
-    const out = state.getOutput();
-    var count: usize = 0;
-    var pos: usize = 0;
-    while (mem.indexOfPos(u8, out, pos, "HTTP/1.1 200 OK")) |idx| {
-        count += 1;
-        pos = idx + 1;
-    }
-    try testing.expectEqual(@as(usize, 2), count);
-}
-
-test "Connection: close terminates" {
-    const raw = "GET /hello HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
-    var state = MockConn.State{ .input = raw };
-    const conn = MockConn{ .state = &state };
-
-    const routes = [_]Route{
-        router_mod.get("/hello", testHandler),
-    };
-
-    const TestServer = Server(MockConn, .{ .read_buf_size = 1024, .write_buf_size = 512 });
-    const server = TestServer.init(testing.allocator, &routes);
-    server.serveConn(conn);
-
-    try testing.expect(state.closed);
-    const out = state.getOutput();
-    var count: usize = 0;
-    var pos: usize = 0;
-    while (mem.indexOfPos(u8, out, pos, "HTTP/1.1 200 OK")) |idx| {
-        count += 1;
-        pos = idx + 1;
-    }
-    try testing.expectEqual(@as(usize, 1), count);
-}
-
 // =========================================================================
 // Real TCP loopback concurrency tests
 // =========================================================================
@@ -381,197 +312,55 @@ fn httpPost(port: u16, path: []const u8, body: []const u8, buf: []u8) ![]const u
     return buf[0..total];
 }
 
-test "TCP loopback: single GET" {
-    var port: u16 = 0;
-    var listener = try startTestServer(&port);
-    defer listener.close();
-
-    const t = try std.Thread.spawn(.{}, serveOne, .{&listener});
-
-    var buf: [4096]u8 = undefined;
-    const resp = try httpGet(port, "/echo", &buf);
-    try testing.expect(mem.indexOf(u8, resp, "HTTP/1.1 200 OK") != null);
-    try testing.expect(mem.endsWith(u8, resp, "/echo"));
-
-    t.join();
-}
-
-test "TCP loopback: POST with body" {
-    var port: u16 = 0;
-    var listener = try startTestServer(&port);
-    defer listener.close();
-
-    const t = try std.Thread.spawn(.{}, serveOne, .{&listener});
-
-    var buf: [4096]u8 = undefined;
-    const resp = try httpPost(port, "/echo", "hello world", &buf);
-    try testing.expect(mem.indexOf(u8, resp, "HTTP/1.1 200 OK") != null);
-    try testing.expect(mem.endsWith(u8, resp, "hello world"));
-
-    t.join();
-}
-
-test "TCP loopback: JSON endpoint" {
-    var port: u16 = 0;
-    var listener = try startTestServer(&port);
-    defer listener.close();
-
-    const t = try std.Thread.spawn(.{}, serveOne, .{&listener});
-
-    var buf: [4096]u8 = undefined;
-    const resp = try httpGet(port, "/json", &buf);
-    try testing.expect(mem.indexOf(u8, resp, "application/json") != null);
-    try testing.expect(mem.endsWith(u8, resp, "{\"ok\":true}"));
-
-    t.join();
-}
-
-test "TCP loopback: 404 for unknown path" {
-    var port: u16 = 0;
-    var listener = try startTestServer(&port);
-    defer listener.close();
-
-    const t = try std.Thread.spawn(.{}, serveOne, .{&listener});
-
-    var buf: [4096]u8 = undefined;
-    const resp = try httpGet(port, "/nonexistent", &buf);
-    try testing.expect(mem.indexOf(u8, resp, "HTTP/1.1 404") != null);
-
-    t.join();
-}
-
-test "TCP loopback: concurrent clients — 8 threads" {
-    var port: u16 = 0;
-    var listener = try startTestServer(&port);
-    defer listener.close();
-
-    const N = 8;
-
-    var server_threads: [N]std.Thread = undefined;
-    for (0..N) |i| {
-        server_threads[i] = try std.Thread.spawn(.{}, serveOne, .{&listener});
-    }
-
-    const results = struct {
-        var success: [N]bool = .{false} ** N;
+pub const test_exports = blk: {
+    const __test_export_0 = mem;
+    const __test_export_1 = Allocator;
+    const __test_export_2 = request_mod;
+    const __test_export_3 = response_mod;
+    const __test_export_4 = router_mod;
+    const __test_export_5 = Request;
+    const __test_export_6 = Response;
+    const __test_export_7 = Route;
+    const __test_export_8 = Handler;
+    const __test_export_9 = connWriteFn;
+    const __test_export_10 = MockConn;
+    const __test_export_11 = MockConn.State;
+    const __test_export_12 = testHandler;
+    const __test_export_13 = runtime;
+    const __test_export_14 = Socket;
+    const __test_export_15 = SocketConn;
+    const __test_export_16 = echoHandler;
+    const __test_export_17 = jsonHandler;
+    const __test_export_18 = slowHandler;
+    const __test_export_19 = test_routes;
+    const __test_export_20 = startTestServer;
+    const __test_export_21 = serveOne;
+    const __test_export_22 = httpGet;
+    const __test_export_23 = httpPost;
+    break :blk struct {
+        pub const mem = __test_export_0;
+        pub const Allocator = __test_export_1;
+        pub const request_mod = __test_export_2;
+        pub const response_mod = __test_export_3;
+        pub const router_mod = __test_export_4;
+        pub const Request = __test_export_5;
+        pub const Response = __test_export_6;
+        pub const Route = __test_export_7;
+        pub const Handler = __test_export_8;
+        pub const connWriteFn = __test_export_9;
+        pub const MockConn = __test_export_10;
+        pub const MockState = __test_export_11;
+        pub const testHandler = __test_export_12;
+        pub const runtime = __test_export_13;
+        pub const Socket = __test_export_14;
+        pub const SocketConn = __test_export_15;
+        pub const echoHandler = __test_export_16;
+        pub const jsonHandler = __test_export_17;
+        pub const slowHandler = __test_export_18;
+        pub const test_routes = __test_export_19;
+        pub const startTestServer = __test_export_20;
+        pub const serveOne = __test_export_21;
+        pub const httpGet = __test_export_22;
+        pub const httpPost = __test_export_23;
     };
-
-    const ClientWorker = struct {
-        fn run(p: u16, idx: usize) void {
-            var buf: [4096]u8 = undefined;
-            const resp = httpGet(p, "/echo", &buf) catch return;
-            if (mem.indexOf(u8, resp, "HTTP/1.1 200 OK") != null) {
-                results.success[idx] = true;
-            }
-        }
-    };
-
-    var client_threads: [N]std.Thread = undefined;
-    for (0..N) |i| {
-        client_threads[i] = try std.Thread.spawn(.{}, ClientWorker.run, .{ port, i });
-    }
-    for (&client_threads) |*t| t.join();
-    for (&server_threads) |*t| t.join();
-
-    for (results.success) |s| {
-        try testing.expect(s);
-    }
-}
-
-test "TCP loopback: concurrent mixed GET+POST — 6 threads" {
-    var port: u16 = 0;
-    var listener = try startTestServer(&port);
-    defer listener.close();
-
-    const N = 6;
-
-    var server_threads: [N]std.Thread = undefined;
-    for (0..N) |i| {
-        server_threads[i] = try std.Thread.spawn(.{}, serveOne, .{&listener});
-    }
-
-    const results = struct {
-        var success: [N]bool = .{false} ** N;
-    };
-
-    const MixedWorker = struct {
-        fn run(p: u16, idx: usize) void {
-            var buf: [4096]u8 = undefined;
-            if (idx % 2 == 0) {
-                const resp = httpGet(p, "/json", &buf) catch return;
-                if (mem.indexOf(u8, resp, "200 OK") != null) results.success[idx] = true;
-            } else {
-                const body = "payload";
-                const resp = httpPost(p, "/echo", body, &buf) catch return;
-                if (mem.endsWith(u8, resp, body)) results.success[idx] = true;
-            }
-        }
-    };
-
-    var client_threads: [N]std.Thread = undefined;
-    for (0..N) |i| {
-        client_threads[i] = try std.Thread.spawn(.{}, MixedWorker.run, .{ port, i });
-    }
-    for (&client_threads) |*t| t.join();
-    for (&server_threads) |*t| t.join();
-
-    for (results.success) |s| {
-        try testing.expect(s);
-    }
-}
-
-test "TCP loopback: rapid sequential requests on same port" {
-    var port: u16 = 0;
-    var listener = try startTestServer(&port);
-    defer listener.close();
-
-    for (0..5) |_| {
-        const t = try std.Thread.spawn(.{}, serveOne, .{&listener});
-
-        var buf: [4096]u8 = undefined;
-        const resp = httpGet(port, "/echo", &buf) catch break;
-        try testing.expect(mem.indexOf(u8, resp, "200 OK") != null);
-
-        t.join();
-    }
-}
-
-test "TCP loopback: concurrent slow + fast handlers" {
-    var port: u16 = 0;
-    var listener = try startTestServer(&port);
-    defer listener.close();
-
-    var s1 = try std.Thread.spawn(.{}, serveOne, .{&listener});
-    var s2 = try std.Thread.spawn(.{}, serveOne, .{&listener});
-
-    const results = struct {
-        var fast_done: bool = false;
-        var slow_done: bool = false;
-    };
-
-    const FastWorker = struct {
-        fn run(p: u16) void {
-            var buf: [4096]u8 = undefined;
-            const resp = httpGet(p, "/echo", &buf) catch return;
-            if (mem.indexOf(u8, resp, "200 OK") != null) results.fast_done = true;
-        }
-    };
-    const SlowWorker = struct {
-        fn run(p: u16) void {
-            var buf: [4096]u8 = undefined;
-            const resp = httpGet(p, "/slow", &buf) catch return;
-            if (mem.endsWith(u8, resp, "slow")) results.slow_done = true;
-        }
-    };
-
-    var c1 = try std.Thread.spawn(.{}, SlowWorker.run, .{port});
-    std.Thread.sleep(2 * std.time.ns_per_ms);
-    var c2 = try std.Thread.spawn(.{}, FastWorker.run, .{port});
-
-    c1.join();
-    c2.join();
-    s1.join();
-    s2.join();
-
-    try testing.expect(results.fast_done or results.slow_done);
-}
+};

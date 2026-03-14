@@ -208,7 +208,7 @@ const BufWriter = struct {
 
     const WriteError = error{ResponseTooLarge};
 
-    fn writeSlice(self: *BufWriter, data: []const u8) WriteError!void {
+    pub fn writeSlice(self: *BufWriter, data: []const u8) WriteError!void {
         if (self.pos + data.len > self.buf.len) return error.ResponseTooLarge;
         @memcpy(self.buf[self.pos..][0..data.len], data);
         self.pos += data.len;
@@ -220,60 +220,6 @@ const BufWriter = struct {
 // ==========================================================================
 
 const std = @import("std");
-
-test "buildRequest basic" {
-    var buf: [512]u8 = undefined;
-    const req = try buildRequest(&buf, "echo.websocket.org", "/", "dGhlIHNhbXBsZSBub25jZQ==", null);
-
-    try std.testing.expect(contains(req, "GET / HTTP/1.1\r\n"));
-    try std.testing.expect(contains(req, "Host: echo.websocket.org\r\n"));
-    try std.testing.expect(contains(req, "Upgrade: websocket\r\n"));
-    try std.testing.expect(contains(req, "Connection: Upgrade\r\n"));
-    try std.testing.expect(contains(req, "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"));
-    try std.testing.expect(contains(req, "Sec-WebSocket-Version: 13\r\n"));
-    try std.testing.expect(endsWith(req, "\r\n\r\n"));
-}
-
-test "validateResponse 101" {
-    var expected_accept: [28]u8 = undefined;
-    computeAcceptKey("dGhlIHNhbXBsZSBub25jZQ==", &expected_accept);
-
-    var response_buf: [256]u8 = undefined;
-    var writer = BufWriter{ .buf = &response_buf };
-    try writer.writeSlice("HTTP/1.1 101 Switching Protocols\r\n");
-    try writer.writeSlice("Upgrade: websocket\r\n");
-    try writer.writeSlice("Connection: Upgrade\r\n");
-    try writer.writeSlice("Sec-WebSocket-Accept: ");
-    try writer.writeSlice(&expected_accept);
-    try writer.writeSlice("\r\n\r\n");
-
-    const consumed = try validateResponse(response_buf[0..writer.pos], &expected_accept);
-    try std.testing.expectEqual(writer.pos, consumed);
-}
-
-test "validateResponse non-101 error" {
-    const resp = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n";
-    try std.testing.expectError(error.HandshakeFailed, validateResponse(resp, "dummy_accept_value_1234567"));
-}
-
-test "buildRequest extra headers" {
-    var buf: [1024]u8 = undefined;
-    const headers = [_][2][]const u8{
-        .{ "X-Api-App-Key", "test-key" },
-        .{ "X-Custom", "value" },
-    };
-    const req = try buildRequest(&buf, "api.example.com", "/ws", "dGhlIHNhbXBsZSBub25jZQ==", &headers);
-
-    try std.testing.expect(contains(req, "X-Api-App-Key: test-key\r\n"));
-    try std.testing.expect(contains(req, "X-Custom: value\r\n"));
-    try std.testing.expect(contains(req, "GET /ws HTTP/1.1\r\n"));
-}
-
-test "computeAcceptKey RFC 6455 example" {
-    var accept: [28]u8 = undefined;
-    computeAcceptKey("dGhlIHNhbXBsZSBub25jZQ==", &accept);
-    try std.testing.expectEqualSlices(u8, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", &accept);
-}
 
 fn contains(haystack: []const u8, needle: []const u8) bool {
     if (needle.len > haystack.len) return false;
@@ -287,3 +233,34 @@ fn endsWith(haystack: []const u8, suffix: []const u8) bool {
     if (haystack.len < suffix.len) return false;
     return eql(haystack[haystack.len - suffix.len ..], suffix);
 }
+
+pub const test_exports = blk: {
+    const __test_export_0 = sha1;
+    const __test_export_1 = base64;
+    const __test_export_2 = client_mod;
+    const __test_export_3 = ws_guid;
+    const __test_export_4 = findHeaderEnd;
+    const __test_export_5 = findHeaderValue;
+    const __test_export_6 = eql;
+    const __test_export_7 = eqlIgnoreCase;
+    const __test_export_8 = toLower;
+    const __test_export_9 = startsWith;
+    const __test_export_10 = BufWriter;
+    const __test_export_11 = contains;
+    const __test_export_12 = endsWith;
+    break :blk struct {
+        pub const sha1 = __test_export_0;
+        pub const base64 = __test_export_1;
+        pub const client_mod = __test_export_2;
+        pub const ws_guid = __test_export_3;
+        pub const findHeaderEnd = __test_export_4;
+        pub const findHeaderValue = __test_export_5;
+        pub const eql = __test_export_6;
+        pub const eqlIgnoreCase = __test_export_7;
+        pub const toLower = __test_export_8;
+        pub const startsWith = __test_export_9;
+        pub const BufWriter = __test_export_10;
+        pub const contains = __test_export_11;
+        pub const endsWith = __test_export_12;
+    };
+};

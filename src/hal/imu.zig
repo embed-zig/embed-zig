@@ -1,6 +1,5 @@
 //! IMU HAL wrapper.
 
-const std = @import("std");
 const hal_marker = @import("marker.zig");
 
 pub const Error = error{
@@ -90,32 +89,9 @@ pub fn from(comptime spec: type) type {
         }
     };
 }
-
-test "imu 6-axis wrapper" {
-    const Mock = struct {
-        pub fn readAccel(_: *@This()) Error!AccelData {
-            return .{ .x = 0.1, .y = 0.2, .z = 1.0 };
-        }
-        pub fn readGyro(_: *@This()) Error!GyroData {
-            return .{ .x = 10, .y = 20, .z = 30 };
-        }
-        pub fn readMag(_: *@This()) Error!MagData {
-            return .{ .x = 1, .y = 2, .z = 3 };
-        }
-        pub fn isDataReady(_: *@This()) Error!bool {
-            return true;
-        }
+pub const test_exports = blk: {
+    const __test_export_0 = hal_marker;
+    break :blk struct {
+        pub const hal_marker = __test_export_0;
     };
-
-    const Imu = from(struct {
-        pub const Driver = Mock;
-        pub const meta = .{ .id = "imu.test" };
-    });
-
-    var d = Mock{};
-    var imu = Imu.init(&d);
-    const acc = try imu.readAccel();
-    const gyr = try imu.readGyro();
-    try std.testing.expectApproxEqAbs(@as(f32, 1.0), acc.z, 0.001);
-    try std.testing.expectApproxEqAbs(@as(f32, 10.0), gyr.x, 0.001);
-}
+};

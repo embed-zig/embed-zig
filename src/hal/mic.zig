@@ -1,6 +1,5 @@
 //! Microphone HAL wrapper.
 
-const std = @import("std");
 const hal_marker = @import("marker.zig");
 
 pub const Error = error{
@@ -139,34 +138,9 @@ pub fn from(comptime spec: type) type {
         }
     };
 }
-
-test "mic wrapper" {
-    const MockDriver = struct {
-        sample_value: i16 = 1234,
-
-        pub fn read(self: *@This(), buffer: []i16) Error!usize {
-            for (buffer) |*s| s.* = self.sample_value;
-            return buffer.len;
-        }
-
-        pub fn setGain(_: *@This(), _: i8) Error!void {}
-        pub fn start(_: *@This()) Error!void {}
-        pub fn stop(_: *@This()) Error!void {}
+pub const test_exports = blk: {
+    const __test_export_0 = hal_marker;
+    break :blk struct {
+        pub const hal_marker = __test_export_0;
     };
-
-    const Mic = from(struct {
-        pub const Driver = MockDriver;
-        pub const meta = .{ .id = "mic.test" };
-        pub const config = Config{ .sample_rate = 16000 };
-    });
-
-    var d = MockDriver{};
-    var mic = Mic.init(&d);
-
-    var buffer: [16]i16 = undefined;
-    const n = try mic.read(&buffer);
-    try std.testing.expectEqual(@as(usize, 16), n);
-    try std.testing.expectEqual(@as(i16, 1234), buffer[0]);
-    try std.testing.expect(Mic.supportsGain());
-    try std.testing.expectEqual(@as(u32, 160), Mic.samplesForMs(10));
-}
+};

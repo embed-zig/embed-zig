@@ -41,14 +41,3 @@ pub fn assertTaggedUnion(comptime T: type) void {
     if (info != .@"union") @compileError("EventType must be a union(enum), got " ++ @typeName(T));
     if (info.@"union".tag_type == null) @compileError("EventType must be a tagged union (union(enum))");
 }
-
-test "PeriphEvent can be instantiated" {
-    const ev = PeriphEvent{ .id = "btn.test", .code = 2, .data = 3 };
-    try std.testing.expectEqualStrings("btn.test", ev.id);
-    try std.testing.expectEqual(@as(u16, 2), ev.code);
-}
-
-test "assertTaggedUnion accepts tagged union" {
-    const Good = union(enum) { a: u32, b: f32 };
-    comptime assertTaggedUnion(Good);
-}

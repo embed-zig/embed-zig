@@ -30,20 +30,3 @@ pub fn Sha384(comptime Impl: type) type {
 pub fn Sha512(comptime Impl: type) type {
     return from(Impl, 64);
 }
-
-test "hkdf contract with mock" {
-    const MockHkdf = struct {
-        pub const prk_length = 32;
-
-        pub fn extract(_: ?[]const u8, _: []const u8) [32]u8 {
-            return [_]u8{3} ** 32;
-        }
-
-        pub fn expand(_: *const [32]u8, _: []const u8, comptime len: usize) [len]u8 {
-            return [_]u8{0x33} ** len;
-        }
-    };
-
-    const H = Sha256(MockHkdf);
-    _ = H;
-}

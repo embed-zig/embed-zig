@@ -11,6 +11,7 @@
 //! Test naming: "BLE X.Y: <layer>: <description>"
 
 const std = @import("std");
+const testing = std.testing;
 const runtime_std = @import("../../runtime/std.zig");
 const hci = @import("host/hci/hci.zig");
 const commands = @import("host/hci/commands.zig");

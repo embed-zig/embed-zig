@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 const chunk = @import("chunk.zig");
 const read_x = @import("read_x.zig");
 const write_x = @import("write_x.zig");

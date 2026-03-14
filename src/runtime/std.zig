@@ -72,34 +72,43 @@ pub const Crypto = struct {
     pub const x509 = std_crypto_x509;
 };
 
-const time_mod = @import("time.zig");
-const log_mod = @import("log.zig");
-const rng_mod = @import("rng.zig");
-const sync_mod = @import("sync.zig");
-const thread_mod = @import("thread.zig");
-const system_mod = @import("system.zig");
-const socket_mod = @import("socket.zig");
-const fs_mod = @import("fs.zig");
-const netif_mod = @import("netif.zig");
-const ota_backend_mod = @import("ota_backend.zig");
-const crypto_mod = @import("crypto/suite.zig");
-
-test "std implementations satisfy all runtime contracts" {
-    _ = time_mod.from(Time);
-    _ = log_mod.from(Log);
-    _ = rng_mod.from(Rng);
-    _ = sync_mod.Mutex(Mutex);
-    _ = sync_mod.ConditionWithMutex(Condition, Mutex);
-    _ = sync_mod.Notify(Notify);
-    _ = thread_mod.from(Thread);
-    _ = system_mod.from(System);
-    _ = socket_mod.from(Socket);
-    _ = fs_mod.from(Fs);
-    _ = netif_mod.from(NetIf);
-    _ = ota_backend_mod.from(OtaBackend);
-    _ = crypto_mod.from(Crypto);
-}
-
-test {
-    _ = @import("std/tests.zig");
-}
+pub const test_exports = blk: {
+    const __test_export_0 = std_time;
+    const __test_export_1 = std_log;
+    const __test_export_2 = std_rng;
+    const __test_export_3 = std_sync;
+    const __test_export_4 = std_thread;
+    const __test_export_5 = std_system;
+    const __test_export_6 = std_fs;
+    const __test_export_7 = std_socket;
+    const __test_export_8 = std_netif;
+    const __test_export_9 = std_ota_backend;
+    const __test_export_10 = std_crypto_hash;
+    const __test_export_11 = std_crypto_hmac;
+    const __test_export_12 = std_crypto_hkdf;
+    const __test_export_13 = std_crypto_aead;
+    const __test_export_14 = std_crypto_pki;
+    const __test_export_15 = std_crypto_rsa;
+    const __test_export_16 = std_crypto_kex;
+    const __test_export_17 = std_crypto_x509;
+    break :blk struct {
+        pub const std_time = __test_export_0;
+        pub const std_log = __test_export_1;
+        pub const std_rng = __test_export_2;
+        pub const std_sync = __test_export_3;
+        pub const std_thread = __test_export_4;
+        pub const std_system = __test_export_5;
+        pub const std_fs = __test_export_6;
+        pub const std_socket = __test_export_7;
+        pub const std_netif = __test_export_8;
+        pub const std_ota_backend = __test_export_9;
+        pub const std_crypto_hash = __test_export_10;
+        pub const std_crypto_hmac = __test_export_11;
+        pub const std_crypto_hkdf = __test_export_12;
+        pub const std_crypto_aead = __test_export_13;
+        pub const std_crypto_pki = __test_export_14;
+        pub const std_crypto_rsa = __test_export_15;
+        pub const std_crypto_kex = __test_export_16;
+        pub const std_crypto_x509 = __test_export_17;
+    };
+};

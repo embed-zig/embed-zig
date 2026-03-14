@@ -1,6 +1,5 @@
 //! ADC HAL wrapper.
 
-const std = @import("std");
 const hal_marker = @import("marker.zig");
 
 pub const Error = error{
@@ -100,26 +99,9 @@ pub fn from(comptime spec: type) type {
         }
     };
 }
-
-test "adc wrapper" {
-    const Mock = struct {
-        pub fn read(_: *@This(), channel: u8) Error!u16 {
-            return 100 + channel;
-        }
-        pub fn readMv(self: *@This(), channel: u8) Error!u16 {
-            const raw = try self.read(channel);
-            return @intCast((@as(u32, raw) * 3300) / 4095);
-        }
+pub const test_exports = blk: {
+    const __test_export_0 = hal_marker;
+    break :blk struct {
+        pub const hal_marker = __test_export_0;
     };
-
-    const Adc = from(struct {
-        pub const Driver = Mock;
-        pub const meta = .{ .id = "adc.test" };
-        pub const config = Config{ .resolution = .bits_12, .vref_mv = 3300 };
-    });
-
-    var d = Mock{};
-    var adc = Adc.init(&d);
-    try std.testing.expectEqual(@as(u16, 101), try adc.read(1));
-    try std.testing.expect((try adc.readMv(0)) > 0);
-}
+};

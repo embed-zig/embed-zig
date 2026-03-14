@@ -36,19 +36,3 @@ pub const cmn_ca_bundle: []const u8 = @embedFile("cmn_ca_bundle.pem");
 /// Use this when you need broad compatibility with any public HTTPS server.
 /// Warning: ~235 KB - consider cmn_ca_bundle or a specific root if flash space is tight.
 pub const mozilla_ca_bundle: []const u8 = @embedFile("mozilla_ca_bundle.pem");
-
-test "embedded certs are non-empty PEM" {
-    const std = @import("std");
-    const certs = [_][]const u8{
-        isrg_root_x1,
-        amazon_root_ca1,
-        digicert_global_root_g2,
-        cmn_ca_bundle,
-        mozilla_ca_bundle,
-    };
-    for (certs) |pem| {
-        try std.testing.expect(pem.len > 0);
-        try std.testing.expect(std.mem.startsWith(u8, pem, "-----BEGIN CERTIFICATE-----") or
-            std.mem.startsWith(u8, pem, "##"));
-    }
-}

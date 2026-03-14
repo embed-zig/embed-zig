@@ -61,11 +61,3 @@ pub const rsa = struct {
         }
     };
 };
-
-test "rsa wrapper invalid key path" {
-    const pk = try rsa.PublicKey.fromBytes(&[_]u8{1}, &[_]u8{1});
-    try std.testing.expectError(
-        error.CertificatePublicKeyInvalid,
-        rsa.PKCS1v1_5Signature.verify(64, [_]u8{0} ** 64, "msg", pk, .sha256),
-    );
-}

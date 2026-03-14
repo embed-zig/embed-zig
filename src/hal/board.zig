@@ -588,63 +588,25 @@ pub fn Board(comptime spec: type) type {
 pub fn from(comptime spec: type) type {
     return Board(spec);
 }
-
-test "Board init/deinit with rtc and led" {
-    const rtc_driver = struct {
-        pub fn init() !@This() {
-            return .{};
-        }
-        pub fn deinit(_: *@This()) void {}
-        pub fn uptime(_: *@This()) u64 {
-            return 123;
-        }
-        pub fn nowMs(_: *@This()) ?i64 {
-            return 1_769_427_296_987;
-        }
+pub const test_exports = blk: {
+    const __test_export_0 = hal_marker;
+    const __test_export_1 = rtc_mod;
+    const __test_export_2 = getMarkedKind;
+    const __test_export_3 = findPeripheralType;
+    const __test_export_4 = findRtcReaderType;
+    const __test_export_5 = driverTypeOf;
+    const __test_export_6 = validatePeripheralType;
+    const __test_export_7 = driverInit;
+    const __test_export_8 = driverDeinit;
+    break :blk struct {
+        pub const hal_marker = __test_export_0;
+        pub const rtc_mod = __test_export_1;
+        pub const getMarkedKind = __test_export_2;
+        pub const findPeripheralType = __test_export_3;
+        pub const findRtcReaderType = __test_export_4;
+        pub const driverTypeOf = __test_export_5;
+        pub const validatePeripheralType = __test_export_6;
+        pub const driverInit = __test_export_7;
+        pub const driverDeinit = __test_export_8;
     };
-
-    const rtc_spec = struct {
-        pub const Driver = rtc_driver;
-        pub const meta = .{ .id = "rtc.test" };
-    };
-    const Rtc = rtc_mod.reader.from(rtc_spec);
-
-    const led_mod = @import("led.zig");
-    const led_driver = struct {
-        duty: u16 = 0,
-        pub fn init() !@This() {
-            return .{};
-        }
-        pub fn deinit(_: *@This()) void {}
-        pub fn setDuty(self: *@This(), duty: u16) void {
-            self.duty = duty;
-        }
-        pub fn getDuty(self: *const @This()) u16 {
-            return self.duty;
-        }
-        pub fn fade(self: *@This(), duty: u16, _: u32) void {
-            self.duty = duty;
-        }
-    };
-    const led_spec = struct {
-        pub const Driver = led_driver;
-        pub const meta = .{ .id = "led.test" };
-    };
-    const Led = led_mod.from(led_spec);
-
-    const board_spec = struct {
-        pub const meta = .{ .id = "board.test" };
-        pub const rtc = Rtc;
-        pub const led = Led;
-    };
-
-    const TestBoard = Board(board_spec);
-
-    var board: TestBoard = undefined;
-    try board.init();
-    defer board.deinit();
-
-    try std.testing.expectEqual(@as(u64, 123), board.uptime());
-    const now_ts = board.now() orelse return error.ExpectedNow;
-    try std.testing.expectEqual(@as(i64, 1_769_427_296), now_ts.toEpoch());
-}
+};

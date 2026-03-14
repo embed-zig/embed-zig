@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 const runtime_std = @import("../../../runtime/std.zig");
 const conn_mod = @import("../conn.zig");
 const record = @import("record.zig");

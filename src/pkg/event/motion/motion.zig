@@ -59,8 +59,3 @@ pub const gyroFrom = types.gyroFrom;
 // Re-export detector
 pub const detector = @import("detector.zig");
 pub const Detector = detector.Detector;
-
-test {
-    _ = types;
-    _ = detector;
-}

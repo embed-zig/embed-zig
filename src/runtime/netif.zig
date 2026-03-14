@@ -84,10 +84,3 @@ pub fn ifName(name: []const u8) IfName {
     @memcpy(out[0..n], name[0..n]);
     return out;
 }
-
-test "ifName helper" {
-    const n = ifName("sta");
-    try std.testing.expectEqual(@as(u8, 's'), n[0]);
-    try std.testing.expectEqual(@as(u8, 't'), n[1]);
-    try std.testing.expectEqual(@as(u8, 'a'), n[2]);
-}

@@ -84,18 +84,18 @@ zig build test-app
 ### Single file tests
 
 ```bash
-zig test src/mod.zig
-zig test src/runtime/std.zig
+zig test src/mod_test.zig
+zig test src/runtime/std_test.zig
 zig test src/runtime/io.zig
-zig test src/hal/wifi.zig
-zig test src/pkg/audio/resampler.zig
+zig test src/hal/wifi_test.zig
+zig test src/pkg/audio/resampler_test.zig
 ```
 
 ### Filtered tests
 
 ```bash
-zig test src/runtime/std.zig --test-filter "socket tcp loopback echo"
-zig test src/runtime/std/crypto/hkdf.zig --test-filter "RFC5869"
+zig test src/runtime/std_test.zig --test-filter "socket tcp loopback echo"
+zig test src/runtime/std/crypto/hkdf_test.zig --test-filter "RFC5869"
 ```
 
 ### Example apps
@@ -175,7 +175,7 @@ For every change, cover at least:
 2. an affected aggregate test or build step
 3. one top-level compile or integration check
 
-- When changing `runtime/std`, always run `zig test src/runtime/std.zig`
+- When changing `runtime/std`, always run `zig test src/runtime/std_test.zig`
 - When changing crypto-related code:
   - add or update test vectors in the relevant algorithm file
   - cover both positive and negative behavior when practical
@@ -203,7 +203,7 @@ For every change, cover at least:
 zig build test
 zig build test-audio
 zig build test-ble
-zig test src/mod.zig
-zig test src/runtime/std.zig
-zig test src/runtime/std.zig --test-filter "io wake drains buffered wake bytes"
+zig test src/mod_test.zig
+zig test src/runtime/std_test.zig
+zig test src/runtime/std_test.zig --test-filter "io wake drains buffered wake bytes"
 ```
