@@ -94,7 +94,6 @@ test {
     _ = @import("runtime/crypto/hkdf_test.zig");
     _ = @import("runtime/crypto/hmac_test.zig");
     _ = @import("runtime/fs_test.zig");
-    _ = @import("runtime/netif_test.zig");
     _ = @import("runtime/socket_test.zig");
     _ = @import("runtime/std/crypto/aead_test.zig");
     _ = @import("runtime/std/crypto/hash_test.zig");

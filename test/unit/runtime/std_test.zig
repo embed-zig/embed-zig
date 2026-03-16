@@ -11,7 +11,6 @@ const Thread = module.Thread;
 const System = module.System;
 const Fs = module.Fs;
 const Socket = module.Socket;
-const NetIf = module.NetIf;
 const OtaBackend = module.OtaBackend;
 const Crypto = module.Crypto;
 const std_time = module.std_time;
@@ -22,7 +21,6 @@ const std_thread = module.std_thread;
 const std_system = module.std_system;
 const std_fs = module.std_fs;
 const std_socket = module.std_socket;
-const std_netif = module.std_netif;
 const std_ota_backend = module.std_ota_backend;
 const std_crypto_hash = module.std_crypto_hash;
 const std_crypto_hmac = module.std_crypto_hmac;
@@ -42,7 +40,6 @@ const thread_mod = embed.runtime.thread;
 const system_mod = embed.runtime.system;
 const socket_mod = embed.runtime.socket;
 const fs_mod = embed.runtime.fs;
-const netif_mod = embed.runtime.netif;
 const ota_backend_mod = embed.runtime.ota_backend;
 const crypto_mod = embed.runtime.crypto.suite;
 
@@ -57,7 +54,6 @@ test "std implementations satisfy all runtime contracts" {
     _ = system_mod.from(System);
     _ = socket_mod.from(Socket);
     _ = fs_mod.from(Fs);
-    _ = netif_mod.from(NetIf);
     _ = ota_backend_mod.from(OtaBackend);
     _ = crypto_mod.from(Crypto);
 }

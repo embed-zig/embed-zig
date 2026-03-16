@@ -9,7 +9,6 @@ pub const runtime = struct {
     pub const fs = @import("runtime/fs.zig");
     pub const log = @import("runtime/log.zig");
     pub const rng = @import("runtime/rng.zig");
-    pub const netif = @import("runtime/netif.zig");
     pub const ota_backend = @import("runtime/ota_backend.zig");
     pub const std = @import("runtime/std.zig");
 

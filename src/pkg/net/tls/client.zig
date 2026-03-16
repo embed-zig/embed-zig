@@ -36,9 +36,10 @@ pub fn Config(comptime Crypto: type) type {
 ///
 /// Type parameters:
 ///   - `Conn`:   underlying transport (must satisfy `net.conn.from` contract)
-///   - `Crypto`: crypto primitives (must satisfy `runtime.crypto` contract, includes `Rng`)
+///   - `Crypto`: crypto primitives (must satisfy `runtime.crypto.suite` contract)
+///   - `Rng`:    random number generator (must satisfy `runtime.rng` contract)
 ///   - `Mutex`:  mutex type (must satisfy `runtime.sync.Mutex` contract)
-pub fn Client(comptime Conn: type, comptime Crypto: type, comptime Mutex: type) type {
+pub fn Client(comptime Conn: type, comptime Crypto: type, comptime Rng: type, comptime Mutex: type) type {
     comptime {
         _ = conn_mod.from(Conn);
         _ = runtime.sync.Mutex(Mutex);
@@ -65,6 +66,11 @@ pub fn Client(comptime Conn: type, comptime Crypto: type, comptime Mutex: type) 
 
         pub const crypto = Crypto;
 
+        fn rngFill(buf: []u8) void {
+            const rng: Rng = .{};
+            rng.fill(buf) catch {};
+        }
+
         pub fn init(conn: *Conn, config: Config(Crypto)) !Self {
             const read_buffer = try config.allocator.alloc(u8, common.MAX_CIPHERTEXT_LEN + 256);
             errdefer config.allocator.free(read_buffer);
@@ -84,6 +90,7 @@ pub fn Client(comptime Conn: type, comptime Crypto: type, comptime Mutex: type) 
                     config.hostname,
                     config.allocator,
                     hs_ca_store,
+                    &rngFill,
                 ),
                 .connected = false,
                 .received_close_notify = false,
@@ -239,12 +246,13 @@ pub const Error = error{
 pub fn connect(
     comptime Conn: type,
     comptime Crypto: type,
+    comptime Rng: type,
     comptime Mutex: type,
     conn: *Conn,
     hostname: []const u8,
     allocator: std.mem.Allocator,
-) !Client(Conn, Crypto, Mutex) {
-    var tls_client = try Client(Conn, Crypto, Mutex).init(conn, .{
+) !Client(Conn, Crypto, Rng, Mutex) {
+    var tls_client = try Client(Conn, Crypto, Rng, Mutex).init(conn, .{
         .allocator = allocator,
         .hostname = hostname,
     });

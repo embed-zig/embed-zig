@@ -28,8 +28,8 @@ const runtime = struct {
 };
 const conn_mod = @import("../conn.zig");
 const tls = struct {
-    pub fn Client(comptime Conn: type, comptime Crypto: type, comptime Mutex: type) type {
-        return @import("../tls/client.zig").Client(Conn, Crypto, Mutex);
+    pub fn Client(comptime Conn: type, comptime Crypto: type, comptime Rng: type, comptime Mutex: type) type {
+        return @import("../tls/client.zig").Client(Conn, Crypto, Rng, Mutex);
     }
 };
 
@@ -130,13 +130,14 @@ pub fn Resolver(comptime Socket: type, comptime DomainResolver: type) type {
 ///
 /// Type parameters:
 ///   - `Socket`: must satisfy `runtime.socket.from` contract
-///   - `Crypto`: crypto primitives (must satisfy `runtime.crypto` contract)
+///   - `Crypto`: crypto primitives (must satisfy `runtime.crypto.suite` contract)
+///   - `Rng`:    random number generator (must provide `fill([]u8) void`)
 ///   - `Mutex`:  mutex type (must satisfy `runtime.sync.Mutex` contract)
 ///   - `DomainResolver`: custom resolver consulted before upstream DNS.
 ///     Pass `void` to disable (zero overhead).
-pub fn ResolverWithTls(comptime Socket: type, comptime Crypto: type, comptime Mutex: type, comptime DomainResolver: type) type {
+pub fn ResolverWithTls(comptime Socket: type, comptime Crypto: type, comptime Rng: type, comptime Mutex: type, comptime DomainResolver: type) type {
     const SConn = conn_mod.SocketConn(Socket);
-    return ResolverImpl(Socket, tls.Client(SConn, Crypto, Mutex), Crypto, DomainResolver);
+    return ResolverImpl(Socket, tls.Client(SConn, Crypto, Rng, Mutex), Crypto, DomainResolver);
 }
 
 /// Validate DomainResolver interface at comptime.
