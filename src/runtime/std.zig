@@ -7,6 +7,7 @@ const runtime_log = @import("log.zig");
 const runtime_mutex = @import("sync/mutex.zig");
 const runtime_condition = @import("sync/condition.zig");
 const runtime_notify = @import("sync/notify.zig");
+const runtime_fs = @import("fs.zig");
 const runtime_channel_factory = @import("channel_factory.zig");
 
 pub const std_time = @import("std/time.zig");
@@ -41,7 +42,7 @@ pub const Condition = runtime_condition.Condition(std_sync.Condition, std_sync.M
 pub const Notify = runtime_notify.Notify(std_sync.Notify);
 pub const Thread = runtime_thread.Thread(std_thread.Thread);
 pub const System = std_system.System;
-pub const Fs = std_fs.Fs;
+pub const Fs = runtime_fs.Fs(std_fs.Fs);
 pub const ChannelFactory = runtime_channel_factory.ChannelFactory(std_channel_factory.ChannelFactory);
 pub const Socket = std_socket.Socket;
 pub const OtaBackend = std_ota_backend.OtaBackend;
