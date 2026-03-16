@@ -1,17 +1,38 @@
 //! Runtime Time Contract
 
-/// Time contract:
-/// - `nowMs(self) -> u64`
-/// - `sleepMs(self, ms: u32) -> void`
+pub const Seal = struct {};
+
+/// Construct a Time wrapper from an Impl type.
+/// Impl must provide:
+///   pub fn nowMs(Impl) u64
+///   pub fn sleepMs(Impl, u32) void
+pub fn Time(comptime Impl: type) type {
+    comptime {
+        _ = @as(*const fn (Impl) u64, &Impl.nowMs);
+        _ = @as(*const fn (Impl, u32) void, &Impl.sleepMs);
+    }
+    const TimeType = struct {
+        const impl: Impl = .{};
+        pub const seal: Seal = .{};
+
+        pub fn nowMs(_: @This()) u64 {
+            return impl.nowMs();
+        }
+
+        pub fn sleepMs(_: @This(), ms: u32) void {
+            impl.sleepMs(ms);
+        }
+    };
+    return from(TimeType);
+}
+
+/// Validate that Impl satisfies the Time contract and return it.
 pub fn from(comptime Impl: type) type {
     comptime {
-        const BaseType = switch (@typeInfo(Impl)) {
-            .pointer => |p| p.child,
-            else => Impl,
-        };
-
-        _ = @as(*const fn (BaseType) u64, &BaseType.nowMs);
-        _ = @as(*const fn (BaseType, u32) void, &BaseType.sleepMs);
+        if (!@hasDecl(Impl, "seal") or @TypeOf(Impl.seal) != Seal) {
+            @compileError("Impl must have pub const seal: time.Seal — use time.Time(Backend) to construct");
+        }
     }
+
     return Impl;
 }

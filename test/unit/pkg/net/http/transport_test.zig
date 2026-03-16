@@ -222,10 +222,10 @@ test "HTTP GET to IP address (no DNS)" {
 
     var buf: [4096]u8 = undefined;
     const resp = t.roundTrip(.{
-        .host = "93.184.215.14",
+        .host = "223.5.5.5",
         .port = 80,
         .path = "/",
-        .timeout_ms = 10000,
+        .timeout_ms = 5000,
     }, &buf) catch |err| switch (err) {
         error.ConnectionFailed, error.Timeout, error.ReceiveFailed => return,
         else => return err,

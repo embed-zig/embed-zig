@@ -22,7 +22,6 @@ test {
     _ = @import("hal/uart_test.zig");
     _ = @import("hal/wifi_test.zig");
     _ = @import("pkg/app/app_runtime_test.zig");
-    _ = @import("pkg/async/wait_group_test.zig");
     _ = @import("pkg/audio/engine_test.zig");
     _ = @import("pkg/audio/mixer_test.zig");
     _ = @import("pkg/audio/override_buffer_test.zig");

@@ -1,6 +1,9 @@
 //! std runtime — validates all std implementations against runtime contracts.
 
 const std = @import("std");
+const runtime_thread = @import("thread.zig");
+const runtime_time = @import("time.zig");
+const runtime_log = @import("log.zig");
 
 pub const std_time = @import("std/time.zig");
 pub const std_log = @import("std/log.zig");
@@ -10,7 +13,6 @@ pub const std_thread = @import("std/thread.zig");
 pub const std_system = @import("std/system.zig");
 pub const std_fs = @import("std/fs.zig");
 pub const std_channel = @import("std/channel.zig");
-pub const std_select = @import("std/select.zig");
 pub const std_socket = @import("std/socket.zig");
 pub const std_netif = @import("std/netif.zig");
 pub const std_ota_backend = @import("std/ota_backend.zig");
@@ -23,17 +25,16 @@ pub const std_crypto_rsa = @import("std/crypto/rsa.zig");
 pub const std_crypto_kex = @import("std/crypto/kex.zig");
 pub const std_crypto_x509 = @import("std/crypto/x509.zig");
 
-pub const Time = std_time.Time;
-pub const Log = std_log.Log;
+pub const Time = runtime_time.Time(std_time.Time);
+pub const Log = runtime_log.Log(std_log.Log);
 pub const Rng = std_rng.Rng;
 pub const Mutex = std_sync.Mutex;
 pub const Condition = std_sync.Condition;
 pub const Notify = std_sync.Notify;
-pub const Thread = std_thread.Thread;
+pub const Thread = runtime_thread.Thread(std_thread.Thread);
 pub const System = std_system.System;
 pub const Fs = std_fs.Fs;
 pub const Channel = std_channel.Channel;
-pub const Selector = std_select.Selector;
 pub const Socket = std_socket.Socket;
 pub const NetIf = std_netif.NetIf;
 pub const OtaBackend = std_ota_backend.OtaBackend;

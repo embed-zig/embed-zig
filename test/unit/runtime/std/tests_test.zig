@@ -10,5 +10,4 @@ test {
     _ = @import("netif_test.zig");
     _ = @import("ota_backend_test.zig");
     _ = @import("channel_test.zig");
-    _ = @import("select_test.zig");
 }
