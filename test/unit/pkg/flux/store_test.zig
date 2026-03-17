@@ -8,7 +8,6 @@ const Store = module.Store;
 // Tests
 // ============================================================================
 
-
 const TestState = struct {
     count: u32 = 0,
     name: [8]u8 = .{0} ** 8,

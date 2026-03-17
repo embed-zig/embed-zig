@@ -49,16 +49,8 @@
 //! ```
 
 const std = @import("std");
-const runtime = struct {
-    pub const sync = struct {
-        pub const mutex = @import("../../../runtime/sync/mutex.zig");
-        pub const condition = @import("../../../runtime/sync/condition.zig");
-        pub const isMutex = mutex.is;
-        pub const isCondition = condition.is;
-    };
-    pub const thread = @import("../../../runtime/thread.zig");
-    pub const std = @import("../../../runtime/std.zig");
-};
+const runtime_suite = @import("../../../runtime/runtime.zig");
+const thread_mod = @import("../../../runtime/thread.zig");
 
 const hci_mod = @import("hci/hci.zig");
 const acl_mod = @import("hci/acl.zig");
@@ -105,20 +97,20 @@ pub const TxPacket = struct {
 // ACL Credits — counting semaphore for HCI flow control
 // ============================================================================
 
-/// Counting semaphore for HCI flow control, parameterized on runtime sync types.
-pub fn AclCredits(comptime Mutex: type, comptime Cond: type) type {
+/// Counting semaphore for HCI flow control, parameterized on Runtime.
+pub fn AclCredits(comptime Runtime: type) type {
     return struct {
         const Self = @This();
 
-        mutex: Mutex,
-        cond: Cond,
+        mutex: Runtime.Mutex,
+        cond: Runtime.Condition,
         count: u32,
         closed: bool,
 
         pub fn init(initial: u32) Self {
             return .{
-                .mutex = Mutex.init(),
-                .cond = Cond.init(),
+                .mutex = Runtime.Mutex.init(),
+                .cond = Runtime.Condition.init(),
                 .count = initial,
                 .closed = false,
             };
@@ -172,20 +164,14 @@ pub fn AclCredits(comptime Mutex: type, comptime Cond: type) type {
 // ============================================================================
 
 pub fn Host(
-    comptime Mutex: type,
-    comptime Cond: type,
-    comptime Thread: type,
+    comptime Runtime: type,
     comptime HciTransport: type,
     comptime service_table: []const gatt_server.ServiceDef,
 ) type {
-    comptime {
-        _ = runtime.sync.mutex.is(Mutex);
-        _ = runtime.sync.condition.is(Cond);
-        _ = runtime.thread.is(Thread);
-    }
+    comptime _ = runtime_suite.is(Runtime);
 
-    const Credits = AclCredits(Mutex, Cond);
-    const GattServerType = gatt_server.GattServer(Thread, service_table);
+    const Credits = AclCredits(Runtime);
+    const GattServerType = gatt_server.GattServer(Runtime, service_table);
 
     return struct {
         const Self = @This();
@@ -193,15 +179,15 @@ pub fn Host(
         pub const NotificationFn = *const fn (conn_handle: u16, attr_handle: u16, data: []const u8) void;
 
         const ResponseSlot = struct {
-            mutex: Mutex,
-            cond: Cond,
+            mutex: Runtime.Mutex,
+            cond: Runtime.Condition,
             value: ?gatt_client.AttResponse = null,
             closed: bool = false,
 
             fn init() ResponseSlot {
                 return .{
-                    .mutex = Mutex.init(),
-                    .cond = Cond.init(),
+                    .mutex = Runtime.Mutex.init(),
+                    .cond = Runtime.Condition.init(),
                 };
             }
 
@@ -329,15 +315,15 @@ pub fn Host(
                 tail: usize = 0,
                 len: usize = 0,
                 closed: bool = false,
-                mutex: Mutex,
-                not_empty: Cond,
-                not_full: Cond,
+                mutex: Runtime.Mutex,
+                not_empty: Runtime.Condition,
+                not_full: Runtime.Condition,
 
                 fn init() QSelf {
                     return .{
-                        .mutex = Mutex.init(),
-                        .not_empty = Cond.init(),
-                        .not_full = Cond.init(),
+                        .mutex = Runtime.Mutex.init(),
+                        .not_empty = Runtime.Condition.init(),
+                        .not_full = Runtime.Condition.init(),
                     };
                 }
 
@@ -417,8 +403,8 @@ pub fn Host(
         acl_credits: Credits,
         cmd_credits: Credits,
         cancelled: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-        read_thread: ?Thread = null,
-        write_thread: ?Thread = null,
+        read_thread: ?Runtime.Thread = null,
+        write_thread: ?Runtime.Thread = null,
 
         // ================================================================
         // Protocol layers (owned by readLoop)
@@ -587,13 +573,13 @@ pub fn Host(
 
             // --- 8. Spawn loops ---
             self.cancelled.store(false, .release);
-            const spawn_cfg: runtime.thread.SpawnConfig = .{
+            const spawn_cfg: thread_mod.SpawnConfig = .{
                 .allocator = self.allocator,
                 .stack_size = 8192,
                 .name = "ble-host",
             };
-            self.read_thread = try Thread.spawn(spawn_cfg, readLoopEntry, @ptrCast(self));
-            self.write_thread = try Thread.spawn(spawn_cfg, writeLoopEntry, @ptrCast(self));
+            self.read_thread = try Runtime.Thread.spawn(spawn_cfg, readLoopEntry, @ptrCast(self));
+            self.write_thread = try Runtime.Thread.spawn(spawn_cfg, writeLoopEntry, @ptrCast(self));
         }
 
         pub fn stop(self: *Self) void {

@@ -19,10 +19,13 @@ pub const GattTransport = transport_mod.GattTransport;
 
 const std = @import("std");
 const xfer = @import("../xfer/api.zig");
-const runtime_thread = @import("../../../runtime/thread.zig");
+const runtime_suite = @import("../../../runtime/runtime.zig");
+const thread_mod = @import("../../../runtime/thread.zig");
 
-pub fn Server(comptime Thread: type, comptime Mutex: type, comptime Cond: type) type {
-    const Transport = GattTransport(Mutex, Cond);
+pub fn Server(comptime Runtime: type) type {
+    comptime _ = runtime_suite.is(Runtime);
+
+    const Transport = GattTransport(Runtime);
     const WX = xfer.WriteX(Transport);
     const RX = xfer.ReadX(Transport);
 
@@ -34,7 +37,7 @@ pub fn Server(comptime Thread: type, comptime Mutex: type, comptime Cond: type) 
             recv_buf_size: usize = 8192,
             resp_buf_size: usize = 4096,
             send_redundancy: u8 = 2,
-            spawn_config: runtime_thread.SpawnConfig = .{},
+            spawn_config: thread_mod.SpawnConfig = .{},
         };
 
         transport: *Transport,
@@ -42,9 +45,9 @@ pub fn Server(comptime Thread: type, comptime Mutex: type, comptime Cond: type) 
         options: Options,
 
         cancel_token: CancellationToken = .{},
-        handler_thread: ?Thread = null,
+        handler_thread: ?Runtime.Thread = null,
         handler_done: std.atomic.Value(bool) = std.atomic.Value(bool).init(true),
-        loop_thread: ?Thread = null,
+        loop_thread: ?Runtime.Thread = null,
         stopped: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
         handler_ctx: HandlerTaskCtx = .{},
         response_buf: [8192]u8 = undefined,
@@ -60,7 +63,7 @@ pub fn Server(comptime Thread: type, comptime Mutex: type, comptime Cond: type) 
 
         pub fn start(self: *Self) !void {
             self.stopped.store(false, .release);
-            self.loop_thread = try Thread.spawn(self.options.spawn_config, loopEntry, @ptrCast(self));
+            self.loop_thread = try Runtime.Thread.spawn(self.options.spawn_config, loopEntry, @ptrCast(self));
         }
 
         pub fn run(self: *Self) void {
@@ -126,7 +129,7 @@ pub fn Server(comptime Thread: type, comptime Mutex: type, comptime Cond: type) 
                     .id = parsed.id,
                 };
 
-                self.handler_thread = Thread.spawn(self.options.spawn_config, handlerEntry, @ptrCast(&self.handler_ctx)) catch {
+                self.handler_thread = Runtime.Thread.spawn(self.options.spawn_config, handlerEntry, @ptrCast(&self.handler_ctx)) catch {
                     self.runHandler();
                     self.sendResponse();
                     continue;

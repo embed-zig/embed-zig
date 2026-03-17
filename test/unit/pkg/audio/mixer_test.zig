@@ -4,16 +4,17 @@ const module = embed.pkg.audio.mixer;
 const Buffer = module.Buffer;
 const Mixer = module.Mixer;
 const resampler_mod = module.resampler_mod;
-const runtime = module.runtime;
 const Allocator = module.Allocator;
 const Resampler = module.Resampler;
+
+const StdRuntime = embed.runtime.std;
 
 // ---------------------------------------------------------------------------
 // MixerBuffer tests
 // ---------------------------------------------------------------------------
 
 const testing = std.testing;
-const TestBuf = Buffer(runtime.std.Mutex, runtime.std.Condition);
+const TestBuf = Buffer(StdRuntime);
 
 test "mixer buffer write and read roundtrip" {
     var buf = try TestBuf.init(testing.allocator, 64);
@@ -128,10 +129,10 @@ test "mixer buffer write blocks then unblocks on read" {
 // Mixer tests
 // ---------------------------------------------------------------------------
 
-const TestMx = Mixer(runtime.std.Mutex, runtime.std.Condition);
+const TestMx = Mixer(StdRuntime);
 
 fn newMixer(config: TestMx.Config) TestMx {
-    return TestMx.init(testing.allocator, config, runtime.std.Mutex.init());
+    return TestMx.init(testing.allocator, config, StdRuntime.Mutex.init());
 }
 
 fn readAll(mx: *TestMx, allocator: Allocator) ![]i16 {
@@ -578,13 +579,13 @@ test "concurrency: stalled track does not block active track output" {
 
 const MockSock = struct {
     allocator: Allocator,
-    mutex: runtime.std.Mutex,
+    mutex: StdRuntime.Mutex,
     bytes: std.ArrayList(u8),
 
     fn init(allocator: Allocator) MockSock {
         return .{
             .allocator = allocator,
-            .mutex = runtime.std.Mutex.init(),
+            .mutex = StdRuntime.Mutex.init(),
             .bytes = .empty,
         };
     }

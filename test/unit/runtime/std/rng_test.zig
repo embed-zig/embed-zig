@@ -1,8 +1,8 @@
 const std = @import("std");
 const embed = @import("embed");
-const rng = embed.runtime.std.std_rng;
+const Rng = embed.runtime.std.Rng;
 
-const std_rng: rng.Rng = .{};
+const std_rng = Rng.init();
 
 test "std rng fills bytes" {
     var a: [32]u8 = undefined;

@@ -12,6 +12,7 @@ const hal = struct {
 const bus_mod = @import("../bus.zig");
 const detector_mod = @import("detector.zig");
 const motion_types = @import("types.zig");
+const runtime_suite = @import("../../../runtime/runtime.zig");
 
 pub const Config = struct {
     id: []const u8 = "imu",
@@ -21,9 +22,10 @@ pub const Config = struct {
 
 pub fn MotionPeripheral(
     comptime Sensor: type,
-    comptime Time: type,
+    comptime Runtime: type,
 ) type {
     comptime {
+        _ = runtime_suite.is(Runtime);
         if (!hal.imu.is(Sensor)) @compileError("Sensor must be a hal.imu type");
     }
     const Det = detector_mod.Detector(Sensor);
@@ -37,13 +39,13 @@ pub fn MotionPeripheral(
         pub const Event = Action;
 
         sensor: *Sensor,
-        time: Time,
+        time: Runtime.Time,
         config: Config,
         injector: Injector,
         detector: Det,
         running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
-        pub fn init(sensor: *Sensor, time: Time, config: Config, injector: Injector) Self {
+        pub fn init(sensor: *Sensor, time: Runtime.Time, config: Config, injector: Injector) Self {
             return .{
                 .sensor = sensor,
                 .time = time,

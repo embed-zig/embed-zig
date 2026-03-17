@@ -33,24 +33,24 @@ test "RecordHeader parse and serialize" {
 }
 
 test "CipherState initialization" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key_128: [16]u8 = [_]u8{0} ** 16;
     const iv: [12]u8 = [_]u8{0} ** 12;
 
-    const state = try CipherState(Crypto).init(.TLS_AES_128_GCM_SHA256, &key_128, &iv);
+    const state = try CipherState(Runtime).init(.TLS_AES_128_GCM_SHA256, &key_128, &iv);
     try std.testing.expect(state == .aes_128_gcm);
 }
 
 test "AES-128-GCM encrypt/decrypt round trip" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [16]u8 = [_]u8{0x01} ** 16;
     const iv: [12]u8 = [_]u8{0x02} ** 12;
     const plaintext = "Hello, TLS Record Layer!";
     const ad = "additional data";
 
-    var state = try AesGcmState(Crypto, 16).init(&key, &iv);
+    var state = try AesGcmState(Runtime, 16).init(&key, &iv);
 
     var ciphertext: [plaintext.len]u8 = undefined;
     var tag: [16]u8 = undefined;
@@ -63,14 +63,14 @@ test "AES-128-GCM encrypt/decrypt round trip" {
 }
 
 test "ChaCha20-Poly1305 encrypt/decrypt round trip" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [32]u8 = [_]u8{0x05} ** 32;
     const iv: [12]u8 = [_]u8{0x06} ** 12;
     const plaintext = "ChaCha20-Poly1305 record test";
     const ad = "associated data";
 
-    var state = try ChaChaState(Crypto).init(&key, &iv);
+    var state = try ChaChaState(Runtime).init(&key, &iv);
 
     var ciphertext: [plaintext.len]u8 = undefined;
     var tag: [16]u8 = undefined;
@@ -83,14 +83,14 @@ test "ChaCha20-Poly1305 encrypt/decrypt round trip" {
 }
 
 test "Decryption with wrong sequence number fails" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [16]u8 = [_]u8{0x07} ** 16;
     const iv: [12]u8 = [_]u8{0x08} ** 12;
     const plaintext = "Sequence number test";
     const ad = "aad";
 
-    var state = try AesGcmState(Crypto, 16).init(&key, &iv);
+    var state = try AesGcmState(Runtime, 16).init(&key, &iv);
 
     var ciphertext: [plaintext.len]u8 = undefined;
     var tag: [16]u8 = undefined;
@@ -105,25 +105,25 @@ test "Decryption with wrong sequence number fails" {
 }
 
 test "CipherState unsupported cipher suite" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [16]u8 = [_]u8{0} ** 16;
     const iv: [12]u8 = [_]u8{0} ** 12;
 
     const unknown_suite: CipherSuite = @enumFromInt(0xFFFF);
-    const result = CipherState(Crypto).init(unknown_suite, &key, &iv);
+    const result = CipherState(Runtime).init(unknown_suite, &key, &iv);
     try std.testing.expectError(error.UnsupportedCipherSuite, result);
 }
 
 test "AES-256-GCM encrypt/decrypt round trip" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [32]u8 = [_]u8{0xAB} ** 32;
     const iv: [12]u8 = [_]u8{0xCD} ** 12;
     const plaintext = "AES-256-GCM test payload for TLS";
     const ad = "aes256 additional data";
 
-    var state = try AesGcmState(Crypto, 32).init(&key, &iv);
+    var state = try AesGcmState(Runtime, 32).init(&key, &iv);
 
     var ciphertext: [plaintext.len]u8 = undefined;
     var tag: [16]u8 = undefined;
@@ -135,7 +135,7 @@ test "AES-256-GCM encrypt/decrypt round trip" {
 }
 
 test "CipherState init all supported suites" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key16: [16]u8 = [_]u8{0} ** 16;
     const key32: [32]u8 = [_]u8{0} ** 32;
@@ -147,7 +147,7 @@ test "CipherState init all supported suites" {
         .TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
     };
     for (suites_16) |suite| {
-        const s = try CipherState(Crypto).init(suite, &key16, &iv);
+        const s = try CipherState(Runtime).init(suite, &key16, &iv);
         try std.testing.expect(s == .aes_128_gcm);
     }
 
@@ -157,7 +157,7 @@ test "CipherState init all supported suites" {
         .TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
     };
     for (suites_32_aes) |suite| {
-        const s = try CipherState(Crypto).init(suite, &key32, &iv);
+        const s = try CipherState(Runtime).init(suite, &key32, &iv);
         try std.testing.expect(s == .aes_256_gcm);
     }
 
@@ -167,45 +167,45 @@ test "CipherState init all supported suites" {
         .TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
     };
     for (suites_chacha) |suite| {
-        const s = try CipherState(Crypto).init(suite, &key32, &iv);
+        const s = try CipherState(Runtime).init(suite, &key32, &iv);
         try std.testing.expect(s == .chacha20_poly1305);
     }
 }
 
 test "AesGcmState invalid key length" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const bad_key: [15]u8 = [_]u8{0} ** 15;
     const iv: [12]u8 = [_]u8{0} ** 12;
-    try std.testing.expectError(error.InvalidKeyLength, AesGcmState(Crypto, 16).init(&bad_key, &iv));
+    try std.testing.expectError(error.InvalidKeyLength, AesGcmState(Runtime, 16).init(&bad_key, &iv));
 }
 
 test "AesGcmState invalid IV length" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [16]u8 = [_]u8{0} ** 16;
     const bad_iv: [8]u8 = [_]u8{0} ** 8;
-    try std.testing.expectError(error.InvalidIvLength, AesGcmState(Crypto, 16).init(&key, &bad_iv));
+    try std.testing.expectError(error.InvalidIvLength, AesGcmState(Runtime, 16).init(&key, &bad_iv));
 }
 
 test "ChaChaState invalid key length" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const bad_key: [16]u8 = [_]u8{0} ** 16;
     const iv: [12]u8 = [_]u8{0} ** 12;
-    try std.testing.expectError(error.InvalidKeyLength, ChaChaState(Crypto).init(&bad_key, &iv));
+    try std.testing.expectError(error.InvalidKeyLength, ChaChaState(Runtime).init(&bad_key, &iv));
 }
 
 test "ChaChaState invalid IV length" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [32]u8 = [_]u8{0} ** 32;
     const bad_iv: [8]u8 = [_]u8{0} ** 8;
-    try std.testing.expectError(error.InvalidIvLength, ChaChaState(Crypto).init(&key, &bad_iv));
+    try std.testing.expectError(error.InvalidIvLength, ChaChaState(Runtime).init(&key, &bad_iv));
 }
 
 test "AES-128-GCM TLS 1.2 explicit nonce encrypt/decrypt" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [16]u8 = [_]u8{0x11} ** 16;
     const iv: [12]u8 = [_]u8{0x22} ** 12;
@@ -214,7 +214,7 @@ test "AES-128-GCM TLS 1.2 explicit nonce encrypt/decrypt" {
     var explicit_nonce: [8]u8 = undefined;
     std.mem.writeInt(u64, &explicit_nonce, 42, .big);
 
-    var state = try AesGcmState(Crypto, 16).init(&key, &iv);
+    var state = try AesGcmState(Runtime, 16).init(&key, &iv);
 
     var ciphertext: [plaintext.len]u8 = undefined;
     var tag: [16]u8 = undefined;
@@ -226,7 +226,7 @@ test "AES-128-GCM TLS 1.2 explicit nonce encrypt/decrypt" {
 }
 
 test "ChaCha20 TLS 1.2 explicit nonce encrypt/decrypt" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [32]u8 = [_]u8{0x33} ** 32;
     const iv: [12]u8 = [_]u8{0x44} ** 12;
@@ -235,7 +235,7 @@ test "ChaCha20 TLS 1.2 explicit nonce encrypt/decrypt" {
     var explicit_nonce: [8]u8 = undefined;
     std.mem.writeInt(u64, &explicit_nonce, 99, .big);
 
-    var state = try ChaChaState(Crypto).init(&key, &iv);
+    var state = try ChaChaState(Runtime).init(&key, &iv);
 
     var ciphertext: [plaintext.len]u8 = undefined;
     var tag: [16]u8 = undefined;
@@ -247,14 +247,14 @@ test "ChaCha20 TLS 1.2 explicit nonce encrypt/decrypt" {
 }
 
 test "Decryption with tampered ciphertext fails" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [16]u8 = [_]u8{0xAA} ** 16;
     const iv: [12]u8 = [_]u8{0xBB} ** 12;
     const plaintext = "tamper test";
     const ad = "aad";
 
-    var state = try AesGcmState(Crypto, 16).init(&key, &iv);
+    var state = try AesGcmState(Runtime, 16).init(&key, &iv);
 
     var ciphertext: [plaintext.len]u8 = undefined;
     var tag: [16]u8 = undefined;
@@ -267,14 +267,14 @@ test "Decryption with tampered ciphertext fails" {
 }
 
 test "Decryption with tampered tag fails" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [32]u8 = [_]u8{0xCC} ** 32;
     const iv: [12]u8 = [_]u8{0xDD} ** 12;
     const plaintext = "tag tamper test";
     const ad = "aad";
 
-    var state = try AesGcmState(Crypto, 32).init(&key, &iv);
+    var state = try AesGcmState(Runtime, 32).init(&key, &iv);
 
     var ciphertext: [plaintext.len]u8 = undefined;
     var tag: [16]u8 = undefined;
@@ -287,13 +287,13 @@ test "Decryption with tampered tag fails" {
 }
 
 test "Decryption with wrong additional data fails" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [16]u8 = [_]u8{0xEE} ** 16;
     const iv: [12]u8 = [_]u8{0xFF} ** 12;
     const plaintext = "ad tamper test";
 
-    var state = try AesGcmState(Crypto, 16).init(&key, &iv);
+    var state = try AesGcmState(Runtime, 16).init(&key, &iv);
 
     var ciphertext: [plaintext.len]u8 = undefined;
     var tag: [16]u8 = undefined;
@@ -304,15 +304,15 @@ test "Decryption with wrong additional data fails" {
 }
 
 test "Nonce computation XORs sequence number correctly" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const key: [16]u8 = [_]u8{0} ** 16;
     const iv: [12]u8 = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
     const plaintext = "nonce xor test";
     const ad = "aad";
 
-    var state0 = try AesGcmState(Crypto, 16).init(&key, &iv);
-    var state1 = try AesGcmState(Crypto, 16).init(&key, &iv);
+    var state0 = try AesGcmState(Runtime, 16).init(&key, &iv);
+    var state1 = try AesGcmState(Runtime, 16).init(&key, &iv);
 
     var ct0: [plaintext.len]u8 = undefined;
     var tag0: [16]u8 = undefined;
@@ -368,10 +368,10 @@ test "RecordHeader max length" {
 }
 
 test "RecordLayer plaintext write and read round trip" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     var mock = MockConn{};
-    var rl = RecordLayer(MockConn, Crypto).init(&mock);
+    var rl = RecordLayer(MockConn, Runtime).init(&mock);
 
     const plaintext = "hello record layer";
     var buffer: [256]u8 = undefined;
@@ -390,16 +390,16 @@ test "RecordLayer plaintext write and read round trip" {
 }
 
 test "RecordLayer encrypted TLS 1.3 write and read round trip" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     var mock = MockConn{};
-    var rl = RecordLayer(MockConn, Crypto).init(&mock);
+    var rl = RecordLayer(MockConn, Runtime).init(&mock);
     rl.version = .tls_1_3;
 
     const key: [16]u8 = [_]u8{0x42} ** 16;
     const iv: [12]u8 = [_]u8{0x43} ** 12;
-    const write_cipher = try CipherState(Crypto).init(.TLS_AES_128_GCM_SHA256, &key, &iv);
-    const read_cipher = try CipherState(Crypto).init(.TLS_AES_128_GCM_SHA256, &key, &iv);
+    const write_cipher = try CipherState(Runtime).init(.TLS_AES_128_GCM_SHA256, &key, &iv);
+    const read_cipher = try CipherState(Runtime).init(.TLS_AES_128_GCM_SHA256, &key, &iv);
     rl.setWriteCipher(write_cipher);
 
     const plaintext = "encrypted TLS 1.3 payload";
@@ -420,16 +420,16 @@ test "RecordLayer encrypted TLS 1.3 write and read round trip" {
 }
 
 test "RecordLayer encrypted TLS 1.2 write and read round trip" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     var mock = MockConn{};
-    var rl = RecordLayer(MockConn, Crypto).init(&mock);
+    var rl = RecordLayer(MockConn, Runtime).init(&mock);
     rl.version = .tls_1_2;
 
     const key: [16]u8 = [_]u8{0x50} ** 16;
     const iv: [12]u8 = [_]u8{0x51} ** 12;
-    const write_cipher = try CipherState(Crypto).init(.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, &key, &iv);
-    const read_cipher = try CipherState(Crypto).init(.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, &key, &iv);
+    const write_cipher = try CipherState(Runtime).init(.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, &key, &iv);
+    const read_cipher = try CipherState(Runtime).init(.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, &key, &iv);
     rl.setWriteCipher(write_cipher);
 
     const plaintext = "encrypted TLS 1.2 payload";
@@ -450,10 +450,10 @@ test "RecordLayer encrypted TLS 1.2 write and read round trip" {
 }
 
 test "RecordLayer rejects record too large" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     var mock = MockConn{};
-    var rl = RecordLayer(MockConn, Crypto).init(&mock);
+    var rl = RecordLayer(MockConn, Runtime).init(&mock);
 
     var big_data: [common.MAX_PLAINTEXT_LEN + 1]u8 = undefined;
     @memset(&big_data, 0x41);
@@ -462,10 +462,10 @@ test "RecordLayer rejects record too large" {
 }
 
 test "RecordLayer sendAlert" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     var mock = MockConn{};
-    var rl = RecordLayer(MockConn, Crypto).init(&mock);
+    var rl = RecordLayer(MockConn, Runtime).init(&mock);
 
     var buffer: [256]u8 = undefined;
     try rl.sendAlert(.fatal, .handshake_failure, &buffer);
@@ -483,10 +483,10 @@ test "RecordLayer sendAlert" {
 }
 
 test "RecordLayer change_cipher_spec passthrough" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     var mock = MockConn{};
-    var rl = RecordLayer(MockConn, Crypto).init(&mock);
+    var rl = RecordLayer(MockConn, Runtime).init(&mock);
 
     const ccs_payload = [_]u8{1};
     var buffer: [256]u8 = undefined;
@@ -504,15 +504,15 @@ test "RecordLayer change_cipher_spec passthrough" {
 }
 
 test "RecordLayer sequence numbers increment" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     var mock = MockConn{};
-    var rl = RecordLayer(MockConn, Crypto).init(&mock);
+    var rl = RecordLayer(MockConn, Runtime).init(&mock);
     rl.version = .tls_1_3;
 
     const key: [16]u8 = [_]u8{0x60} ** 16;
     const iv: [12]u8 = [_]u8{0x61} ** 12;
-    const cipher = try CipherState(Crypto).init(.TLS_AES_128_GCM_SHA256, &key, &iv);
+    const cipher = try CipherState(Runtime).init(.TLS_AES_128_GCM_SHA256, &key, &iv);
     rl.setWriteCipher(cipher);
 
     try std.testing.expectEqual(@as(u64, 0), rl.write_seq);
@@ -527,22 +527,22 @@ test "RecordLayer sequence numbers increment" {
 }
 
 test "RecordLayer setWriteCipher resets sequence" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     var mock = MockConn{};
-    var rl = RecordLayer(MockConn, Crypto).init(&mock);
+    var rl = RecordLayer(MockConn, Runtime).init(&mock);
     rl.version = .tls_1_3;
 
     const key: [16]u8 = [_]u8{0x70} ** 16;
     const iv: [12]u8 = [_]u8{0x71} ** 12;
-    var cipher = try CipherState(Crypto).init(.TLS_AES_128_GCM_SHA256, &key, &iv);
+    var cipher = try CipherState(Runtime).init(.TLS_AES_128_GCM_SHA256, &key, &iv);
     rl.setWriteCipher(cipher);
 
     var buffer: [512]u8 = undefined;
     _ = try rl.writeRecord(.application_data, "msg", &buffer);
     try std.testing.expectEqual(@as(u64, 1), rl.write_seq);
 
-    cipher = try CipherState(Crypto).init(.TLS_AES_128_GCM_SHA256, &key, &iv);
+    cipher = try CipherState(Runtime).init(.TLS_AES_128_GCM_SHA256, &key, &iv);
     rl.setWriteCipher(cipher);
     try std.testing.expectEqual(@as(u64, 0), rl.write_seq);
 }

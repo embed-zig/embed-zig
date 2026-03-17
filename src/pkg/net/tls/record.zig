@@ -1,6 +1,9 @@
 const std = @import("std");
-const crypto_suite = @import("../../../runtime/crypto/suite.zig");
+const runtime_suite = @import("../../../runtime/runtime.zig");
 pub const common = @import("common.zig");
+pub const runtime = struct {
+    pub const std = @import("../../../runtime/std.zig");
+};
 
 pub const ContentType = common.ContentType;
 pub const ProtocolVersion = common.ProtocolVersion;
@@ -32,15 +35,15 @@ pub const RecordHeader = struct {
     }
 };
 
-pub fn CipherState(comptime Crypto: type) type {
+pub fn CipherState(comptime Runtime: type) type {
     comptime {
-        _ = crypto_suite.is(Crypto);
+        _ = runtime_suite.is(Runtime);
     }
     return union(enum) {
         none,
-        aes_128_gcm: AesGcmState(Crypto, 16),
-        aes_256_gcm: AesGcmState(Crypto, 32),
-        chacha20_poly1305: ChaChaState(Crypto),
+        aes_128_gcm: AesGcmState(Runtime, 16),
+        aes_256_gcm: AesGcmState(Runtime, 32),
+        chacha20_poly1305: ChaChaState(Runtime),
 
         const Self = @This();
 
@@ -49,17 +52,17 @@ pub fn CipherState(comptime Crypto: type) type {
                 .TLS_AES_128_GCM_SHA256,
                 .TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
                 .TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-                => .{ .aes_128_gcm = try AesGcmState(Crypto, 16).init(key, iv) },
+                => .{ .aes_128_gcm = try AesGcmState(Runtime, 16).init(key, iv) },
 
                 .TLS_AES_256_GCM_SHA384,
                 .TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
                 .TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-                => .{ .aes_256_gcm = try AesGcmState(Crypto, 32).init(key, iv) },
+                => .{ .aes_256_gcm = try AesGcmState(Runtime, 32).init(key, iv) },
 
                 .TLS_CHACHA20_POLY1305_SHA256,
                 .TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
                 .TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
-                => .{ .chacha20_poly1305 = try ChaChaState(Crypto).init(key, iv) },
+                => .{ .chacha20_poly1305 = try ChaChaState(Runtime).init(key, iv) },
 
                 else => return error.UnsupportedCipherSuite,
             };
@@ -67,16 +70,16 @@ pub fn CipherState(comptime Crypto: type) type {
     };
 }
 
-pub fn AesGcmState(comptime Crypto: type, comptime key_len: usize) type {
+pub fn AesGcmState(comptime Runtime: type, comptime key_len: usize) type {
     comptime {
-        _ = crypto_suite.is(Crypto);
+        _ = runtime_suite.is(Runtime);
     }
     return struct {
         key: [key_len]u8,
         iv: [12]u8,
 
         const Self = @This();
-        const AEAD = if (key_len == 16) Crypto.Aead.Aes128Gcm() else Crypto.Aead.Aes256Gcm();
+        const AEAD = if (key_len == 16) Runtime.Crypto.Aead.Aes128Gcm() else Runtime.Crypto.Aead.Aes256Gcm();
 
         pub fn init(key: []const u8, iv: []const u8) !Self {
             if (key.len != key_len) return error.InvalidKeyLength;
@@ -122,16 +125,16 @@ pub fn AesGcmState(comptime Crypto: type, comptime key_len: usize) type {
     };
 }
 
-pub fn ChaChaState(comptime Crypto: type) type {
+pub fn ChaChaState(comptime Runtime: type) type {
     comptime {
-        _ = crypto_suite.is(Crypto);
+        _ = runtime_suite.is(Runtime);
     }
     return struct {
         key: [32]u8,
         iv: [12]u8,
 
         const Self = @This();
-        const AEAD = Crypto.Aead.ChaCha20Poly1305();
+        const AEAD = Runtime.Crypto.Aead.ChaCha20Poly1305();
 
         pub fn init(key: []const u8, iv: []const u8) !Self {
             if (key.len != 32) return error.InvalidKeyLength;
@@ -193,14 +196,14 @@ pub const RecordError = error{
 /// TLS Record Layer — reads/writes TLS records over a `Conn`.
 ///
 /// `Conn` must satisfy the `net.conn.from` contract (`read`/`write`/`close`).
-pub fn RecordLayer(comptime Conn: type, comptime Crypto: type) type {
+pub fn RecordLayer(comptime Conn: type, comptime Runtime: type) type {
     comptime {
-        _ = crypto_suite.is(Crypto);
+        _ = runtime_suite.is(Runtime);
     }
     return struct {
         conn: *Conn,
-        read_cipher: CipherState(Crypto),
-        write_cipher: CipherState(Crypto),
+        read_cipher: CipherState(Runtime),
+        write_cipher: CipherState(Runtime),
         read_seq: u64,
         write_seq: u64,
         version: ProtocolVersion,
@@ -218,12 +221,12 @@ pub fn RecordLayer(comptime Conn: type, comptime Crypto: type) type {
             };
         }
 
-        pub fn setReadCipher(self: *Self, cipher: CipherState(Crypto)) void {
+        pub fn setReadCipher(self: *Self, cipher: CipherState(Runtime)) void {
             self.read_cipher = cipher;
             self.read_seq = 0;
         }
 
-        pub fn setWriteCipher(self: *Self, cipher: CipherState(Crypto)) void {
+        pub fn setWriteCipher(self: *Self, cipher: CipherState(Runtime)) void {
             self.write_cipher = cipher;
             self.write_seq = 0;
         }

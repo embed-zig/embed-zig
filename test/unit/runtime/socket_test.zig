@@ -1,9 +1,6 @@
-const module = @import("embed").runtime.socket;
-const Ipv4Address = module.Ipv4Address;
-const Error = module.Error;
-const RecvFromResult = module.RecvFromResult;
-const from = module.from;
-const parseIpv4 = module.parseIpv4;
+const embed = @import("embed");
+const Ipv4Address = embed.runtime.socket.Ipv4Address;
+const parseIpv4 = embed.runtime.socket.parseIpv4;
 
 const std = @import("std");
 const testing = std.testing;

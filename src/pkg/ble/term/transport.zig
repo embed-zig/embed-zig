@@ -4,11 +4,14 @@
 //! GATT write handler pushes data into rx_queue; xfer's recv() blocks on it.
 //! xfer's send() calls the provided notify function.
 //!
-//! Parameterized on Mutex/Cond for runtime portability (std vs ESP).
+//! Parameterized on Runtime for portability (std vs ESP).
 
 const std = @import("std");
+const runtime_suite = @import("../../../runtime/runtime.zig");
 
-pub fn GattTransport(comptime Mutex: type, comptime Cond: type) type {
+pub fn GattTransport(comptime Runtime: type) type {
+    comptime _ = runtime_suite.is(Runtime);
+
     return struct {
         const Self = @This();
 
@@ -30,8 +33,8 @@ pub fn GattTransport(comptime Mutex: type, comptime Cond: type) type {
         tail: usize = 0,
         len: usize = 0,
         closed: bool = false,
-        mutex: Mutex,
-        cond: Cond,
+        mutex: Runtime.Mutex,
+        cond: Runtime.Condition,
 
         pub fn init(
             notify_fn: *const fn (ctx: ?*anyopaque, data: []const u8) anyerror!void,
@@ -40,8 +43,8 @@ pub fn GattTransport(comptime Mutex: type, comptime Cond: type) type {
             return .{
                 .notify_fn = notify_fn,
                 .notify_ctx = notify_ctx,
-                .mutex = Mutex.init(),
-                .cond = Cond.init(),
+                .mutex = Runtime.Mutex.init(),
+                .cond = Runtime.Condition.init(),
             };
         }
 
@@ -134,6 +137,8 @@ pub const TestMutex = if (builtin.os.tag == .freestanding) void else struct {
     }
 };
 
+const condition_mod = @import("../../../runtime/sync/condition.zig");
+
 pub const TestCond = if (builtin.os.tag == .freestanding) void else struct {
     raw: std.Thread.Condition = .{},
     pub fn init() @This() {
@@ -149,10 +154,28 @@ pub const TestCond = if (builtin.os.tag == .freestanding) void else struct {
     pub fn broadcast(self: *@This()) void {
         self.raw.broadcast();
     }
-    pub fn timedWait(self: *@This(), mutex: *TestMutex, timeout_ns: u64) enum { signaled, timed_out } {
+    pub fn timedWait(self: *@This(), mutex: *TestMutex, timeout_ns: u64) condition_mod.TimedWaitResult {
         self.raw.timedWait(&mutex.raw, timeout_ns) catch return .timed_out;
         return .signaled;
     }
 };
 
 pub fn testNotify(_: ?*anyopaque, _: []const u8) anyerror!void {}
+
+/// Test runtime using TestMutex/TestCond for GattTransport unit tests.
+/// Only available when not freestanding (requires std.Thread).
+pub const TestRuntime = if (builtin.os.tag == .freestanding) void else runtime_suite.Make(struct {
+    pub const Time = @import("../../../runtime/std/time.zig").Time;
+    pub const Log = @import("../../../runtime/std/log.zig").Log;
+    pub const Rng = @import("../../../runtime/std/rng.zig").Rng;
+    pub const Mutex = TestMutex;
+    pub const Condition = TestCond;
+    pub const Notify = @import("../../../runtime/std/sync/notify.zig").Notify;
+    pub const Thread = @import("../../../runtime/std/thread.zig").Thread;
+    pub const System = @import("../../../runtime/std/system.zig").System;
+    pub const Fs = @import("../../../runtime/std/fs.zig").Fs;
+    pub const ChannelFactory = @import("../../../runtime/std/channel_factory.zig").ChannelFactory;
+    pub const Socket = @import("../../../runtime/std/socket.zig").Socket;
+    pub const OtaBackend = @import("../../../runtime/std/ota_backend.zig").OtaBackend;
+    pub const Crypto = @import("../../../runtime/std/crypto/suite.zig");
+});

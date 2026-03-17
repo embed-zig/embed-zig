@@ -1,8 +1,8 @@
 const std = @import("std");
 const embed = @import("embed");
-const system = embed.runtime.std.std_system;
+const System = embed.runtime.std.System;
 
-const std_system: system.System = .{};
+const std_system: System = .{};
 
 test "std system getCpuCount" {
     const cpu = try std_system.getCpuCount();

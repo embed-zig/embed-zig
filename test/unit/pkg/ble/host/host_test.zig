@@ -24,7 +24,7 @@ test "Host start reads buffer size and initializes credits" {
     var hci_driver = Mock{};
     hci_driver.injectInitSequence();
 
-    const TestHost = Host(Rt.Mutex, Rt.Condition, Rt.Thread, Mock, &.{});
+    const TestHost = Host(Rt, Mock, &.{});
     var host = TestHost.init(&hci_driver, std.testing.allocator);
     defer host.deinit();
 
@@ -48,7 +48,7 @@ test "Host writeLoop respects ACL credits" {
     var hci_driver = Mock{};
     hci_driver.injectInitSequence();
 
-    const TestHost = Host(Rt.Mutex, Rt.Condition, Rt.Thread, Mock, &.{});
+    const TestHost = Host(Rt, Mock, &.{});
     var host = TestHost.init(&hci_driver, std.testing.allocator);
     defer host.deinit();
 
@@ -75,7 +75,7 @@ test "Host NCP event releases credits" {
     var hci_driver = Mock{};
     hci_driver.injectInitSequence();
 
-    const TestHost = Host(Rt.Mutex, Rt.Condition, Rt.Thread, Mock, &.{});
+    const TestHost = Host(Rt, Mock, &.{});
     var host = TestHost.init(&hci_driver, std.testing.allocator);
     defer host.deinit();
 

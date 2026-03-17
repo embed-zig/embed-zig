@@ -69,4 +69,3 @@ pub fn is(comptime Impl: type) type {
     }
     return Impl;
 }
- 

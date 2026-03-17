@@ -1,6 +1,8 @@
 const std = @import("std");
-const crypto_suite = @import("../../../runtime/crypto/suite.zig");
-const rng_contract = @import("../../../runtime/rng.zig");
+const runtime_suite = @import("../../../runtime/runtime.zig");
+pub const runtime = struct {
+    pub const std = @import("../../../runtime/std.zig");
+};
 pub const common = @import("common.zig");
 pub const extensions = @import("extensions.zig");
 pub const record = @import("record.zig");
@@ -34,21 +36,20 @@ pub const HandshakeHeader = struct {
     }
 };
 
-pub fn KeyExchange(comptime Crypto: type, comptime Rng: type) type {
+pub fn KeyExchange(comptime Runtime: type) type {
     comptime {
-        _ = crypto_suite.is(Crypto);
-        _ = rng_contract.is(Rng);
+        _ = runtime_suite.is(Runtime);
     }
     return union(enum) {
-        x25519: X25519KeyExchange(Crypto, Rng),
-        secp256r1: P256KeyExchange(Crypto, Rng),
+        x25519: X25519KeyExchange(Runtime),
+        secp256r1: P256KeyExchange(Runtime),
 
         const Self = @This();
 
-        pub fn generate(group: NamedGroup, rng: Rng) !Self {
+        pub fn generate(group: NamedGroup, rng: Runtime.Rng) !Self {
             return switch (group) {
-                .x25519 => .{ .x25519 = try X25519KeyExchange(Crypto, Rng).generate(rng) },
-                .secp256r1 => .{ .secp256r1 = try P256KeyExchange(Crypto, Rng).generate(rng) },
+                .x25519 => .{ .x25519 = try X25519KeyExchange(Runtime).generate(rng) },
+                .secp256r1 => .{ .secp256r1 = try P256KeyExchange(Runtime).generate(rng) },
                 else => error.UnsupportedGroup,
             };
         }
@@ -69,10 +70,9 @@ pub fn KeyExchange(comptime Crypto: type, comptime Rng: type) type {
     };
 }
 
-pub fn X25519KeyExchange(comptime Crypto: type, comptime Rng: type) type {
+pub fn X25519KeyExchange(comptime Runtime: type) type {
     comptime {
-        _ = crypto_suite.is(Crypto);
-        _ = rng_contract.is(Rng);
+        _ = runtime_suite.is(Runtime);
     }
     return struct {
         secret_key: [32]u8,
@@ -81,21 +81,21 @@ pub fn X25519KeyExchange(comptime Crypto: type, comptime Rng: type) type {
 
         const Self = @This();
 
-        pub fn generate(rng: Rng) !Self {
+        pub fn generate(rng: Runtime.Rng) !Self {
             var self = Self{
                 .secret_key = [_]u8{0} ** 32,
                 .public_key = [_]u8{0} ** 32,
                 .shared_secret = [_]u8{0} ** 32,
             };
             try rng.fill(&self.secret_key);
-            const kp = try Crypto.X25519.generateDeterministic(self.secret_key);
+            const kp = try Runtime.Crypto.X25519.generateDeterministic(self.secret_key);
             self.public_key = kp.public_key;
             return self;
         }
 
         pub fn computeSharedSecret(self: *Self, peer_public: []const u8) ![]const u8 {
             if (peer_public.len != 32) return error.InvalidPublicKey;
-            self.shared_secret = try Crypto.X25519.scalarmult(
+            self.shared_secret = try Runtime.Crypto.X25519.scalarmult(
                 self.secret_key,
                 peer_public[0..32].*,
             );
@@ -104,10 +104,9 @@ pub fn X25519KeyExchange(comptime Crypto: type, comptime Rng: type) type {
     };
 }
 
-pub fn P256KeyExchange(comptime Crypto: type, comptime Rng: type) type {
+pub fn P256KeyExchange(comptime Runtime: type) type {
     comptime {
-        _ = crypto_suite.is(Crypto);
-        _ = rng_contract.is(Rng);
+        _ = runtime_suite.is(Runtime);
     }
     return struct {
         secret_key: [32]u8,
@@ -116,7 +115,7 @@ pub fn P256KeyExchange(comptime Crypto: type, comptime Rng: type) type {
 
         const Self = @This();
 
-        pub fn generate(rng: Rng) !Self {
+        pub fn generate(rng: Runtime.Rng) !Self {
             var self = Self{
                 .secret_key = [_]u8{0} ** 32,
                 .public_key = [_]u8{0} ** 65,
@@ -124,7 +123,7 @@ pub fn P256KeyExchange(comptime Crypto: type, comptime Rng: type) type {
             };
             try rng.fill(&self.secret_key);
 
-            self.public_key = Crypto.P256.computePublicKey(self.secret_key) catch {
+            self.public_key = Runtime.Crypto.P256.computePublicKey(self.secret_key) catch {
                 return error.IdentityElement;
             };
 
@@ -136,7 +135,7 @@ pub fn P256KeyExchange(comptime Crypto: type, comptime Rng: type) type {
                 return error.InvalidPublicKey;
             }
 
-            self.shared_secret = Crypto.P256.ecdh(self.secret_key, peer_public[0..65].*) catch {
+            self.shared_secret = Runtime.Crypto.P256.ecdh(self.secret_key, peer_public[0..65].*) catch {
                 return error.IdentityElement;
             };
 
@@ -158,11 +157,11 @@ pub const HandshakeState = enum {
     wait_server_hello_done,
 };
 
-pub fn TranscriptHash(comptime Crypto: type) type {
+pub fn TranscriptHash(comptime Runtime: type) type {
     comptime {
-        _ = crypto_suite.is(Crypto);
+        _ = runtime_suite.is(Runtime);
     }
-    const Sha256 = Crypto.Hash.Sha256();
+    const Sha256 = Runtime.Crypto.Hash.Sha256();
     return struct {
         sha256: Sha256,
 
@@ -187,11 +186,11 @@ pub fn TranscriptHash(comptime Crypto: type) type {
     };
 }
 
-pub fn Tls12Prf(comptime Crypto: type) type {
+pub fn Tls12Prf(comptime Runtime: type) type {
     comptime {
-        _ = crypto_suite.is(Crypto);
+        _ = runtime_suite.is(Runtime);
     }
-    const HmacSha256 = Crypto.Hmac.Sha256();
+    const HmacSha256 = Runtime.Crypto.Hmac.Sha256();
     return struct {
         pub fn prf(out: []u8, secret: []const u8, label: []const u8, seed: []const u8) void {
             var label_seed: [128]u8 = undefined;
@@ -220,16 +219,15 @@ pub fn Tls12Prf(comptime Crypto: type) type {
 }
 
 /// Client handshake state machine.
-/// Generic over `Conn` (transport) and `Crypto` (sealed crypto suite).
-pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng: type) type {
+/// Generic over `Conn` (transport) and `Runtime` (sealed runtime suite).
+pub fn ClientHandshake(comptime Conn: type, comptime Runtime: type) type {
     comptime {
-        _ = crypto_suite.is(Crypto);
-        _ = rng_contract.is(Rng);
+        _ = runtime_suite.is(Runtime);
     }
 
-    const HkdfSha256 = Crypto.Hkdf.Sha256();
-    const HmacSha256 = Crypto.Hmac.Sha256();
-    const Sha256 = Crypto.Hash.Sha256();
+    const HkdfSha256 = Runtime.Crypto.Hkdf.Sha256();
+    const HmacSha256 = Runtime.Crypto.Hmac.Sha256();
+    const Sha256 = Runtime.Crypto.Hash.Sha256();
 
     return struct {
         state: HandshakeState,
@@ -239,7 +237,7 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
         client_random: [32]u8,
         server_random: [32]u8,
 
-        key_exchange: ?KeyExchange(Crypto, Rng),
+        key_exchange: ?KeyExchange(Runtime),
 
         handshake_secret: [48]u8,
         master_secret: [48]u8,
@@ -255,15 +253,15 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
         server_cert_der: [4096]u8,
         server_cert_der_len: u16,
 
-        transcript_hash: TranscriptHash(Crypto),
+        transcript_hash: TranscriptHash(Runtime),
 
-        records: record.RecordLayer(Conn, Crypto),
+        records: record.RecordLayer(Conn, Runtime),
 
         hostname: []const u8,
         allocator: std.mem.Allocator,
         skip_verify: bool,
 
-        rng: Rng,
+        rng: Runtime.Rng,
 
         const Self = @This();
 
@@ -272,7 +270,7 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
             hostname: []const u8,
             allocator: std.mem.Allocator,
             skip_verify: bool,
-            rng: Rng,
+            rng: Runtime.Rng,
         ) !Self {
             var self = Self{
                 .state = .initial,
@@ -292,8 +290,8 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
                 .tls12_named_group = .x25519,
                 .server_cert_der = [_]u8{0} ** 4096,
                 .server_cert_der_len = 0,
-                .transcript_hash = TranscriptHash(Crypto).init(),
-                .records = record.RecordLayer(Conn, Crypto).init(conn),
+                .transcript_hash = TranscriptHash(Runtime).init(),
+                .records = record.RecordLayer(Conn, Runtime).init(conn),
                 .hostname = hostname,
                 .allocator = allocator,
                 .skip_verify = skip_verify,
@@ -370,7 +368,7 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
             };
             try ext_builder.addSignatureAlgorithms(&sig_algs);
 
-            self.key_exchange = try KeyExchange(Crypto, Rng).generate(.x25519, self.rng);
+            self.key_exchange = try KeyExchange(Runtime).generate(.x25519, self.rng);
             const key_share_entries = [_]extensions.KeyShareEntry{
                 .{ .group = .x25519, .key_exchange = self.key_exchange.?.publicKey() },
             };
@@ -603,7 +601,7 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
                 else
                     std.time.timestamp();
 
-                var store = Crypto.X509.init(self.allocator) catch {
+                var store = Runtime.Crypto.X509.init(self.allocator) catch {
                     return error.CertificateVerificationFailed;
                 };
                 defer store.deinit();
@@ -665,7 +663,7 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
 
             try verifySignature(sig_scheme, signed_data[0..total_len], signature, parsed);
 
-            self.key_exchange = try KeyExchange(Crypto, Rng).generate(named_group, self.rng);
+            self.key_exchange = try KeyExchange(Runtime).generate(named_group, self.rng);
 
             if (pubkey_len > self.tls12_server_pubkey.len) return error.InvalidPublicKey;
 
@@ -758,7 +756,7 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
         }
 
         fn deriveTls12Keys(self: *Self, pre_master_secret: []const u8) !void {
-            const Prf = Tls12Prf(Crypto);
+            const Prf = Tls12Prf(Runtime);
 
             var seed: [64]u8 = undefined;
             @memcpy(seed[0..32], &self.client_random);
@@ -789,8 +787,8 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
             @memcpy(server_iv[0..iv_len], server_write_iv);
             @memset(server_iv[iv_len..], 0);
 
-            const write_cipher = try record.CipherState(Crypto).init(self.cipher_suite, client_write_key, &client_iv);
-            const read_cipher = try record.CipherState(Crypto).init(self.cipher_suite, server_write_key, &server_iv);
+            const write_cipher = try record.CipherState(Runtime).init(self.cipher_suite, client_write_key, &client_iv);
+            const read_cipher = try record.CipherState(Runtime).init(self.cipher_suite, server_write_key, &server_iv);
 
             self.records.setWriteCipher(write_cipher);
             self.records.setReadCipher(read_cipher);
@@ -799,7 +797,7 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
         }
 
         fn computeVerifyData(self: *Self, is_client: bool) [12]u8 {
-            const Prf = Tls12Prf(Crypto);
+            const Prf = Tls12Prf(Runtime);
             const label = if (is_client) "client finished" else "server finished";
 
             const transcript = self.transcript_hash.peek();
@@ -846,27 +844,27 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
         ) !void {
             switch (sig_scheme) {
                 0x0403 => {
-                    if (!Crypto.Pki.verifyEcdsaP256(signature, content, parsed_cert.pubKey()))
+                    if (!Runtime.Crypto.Pki.verifyEcdsaP256(signature, content, parsed_cert.pubKey()))
                         return error.SignatureVerificationFailed;
                 },
                 0x0503 => {
-                    if (!Crypto.Pki.verifyEcdsaP384(signature, content, parsed_cert.pubKey()))
+                    if (!Runtime.Crypto.Pki.verifyEcdsaP384(signature, content, parsed_cert.pubKey()))
                         return error.SignatureVerificationFailed;
                 },
                 0x0401 => {
-                    Crypto.Rsa.verifyPKCS1v1_5(signature, content, parsed_cert.pubKey(), .sha256) catch
+                    Runtime.Crypto.Rsa.verifyPKCS1v1_5(signature, content, parsed_cert.pubKey(), .sha256) catch
                         return error.SignatureVerificationFailed;
                 },
                 0x0501 => {
-                    Crypto.Rsa.verifyPKCS1v1_5(signature, content, parsed_cert.pubKey(), .sha384) catch
+                    Runtime.Crypto.Rsa.verifyPKCS1v1_5(signature, content, parsed_cert.pubKey(), .sha384) catch
                         return error.SignatureVerificationFailed;
                 },
                 0x0804 => {
-                    Crypto.Rsa.verifyPSS(signature, content, parsed_cert.pubKey(), .sha256) catch
+                    Runtime.Crypto.Rsa.verifyPSS(signature, content, parsed_cert.pubKey(), .sha256) catch
                         return error.SignatureVerificationFailed;
                 },
                 0x0805 => {
-                    Crypto.Rsa.verifyPSS(signature, content, parsed_cert.pubKey(), .sha384) catch
+                    Runtime.Crypto.Rsa.verifyPSS(signature, content, parsed_cert.pubKey(), .sha384) catch
                         return error.SignatureVerificationFailed;
                 },
                 else => {
@@ -961,7 +959,7 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
                 12,
             );
 
-            const write_cipher = try record.CipherState(Crypto).init(self.cipher_suite, client_key_buf[0..key_len], &client_iv);
+            const write_cipher = try record.CipherState(Runtime).init(self.cipher_suite, client_key_buf[0..key_len], &client_iv);
             self.records.setWriteCipher(write_cipher);
 
             var write_buf: [128]u8 = undefined;
@@ -982,7 +980,7 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
                 "",
                 12,
             );
-            const app_write_cipher = try record.CipherState(Crypto).init(self.cipher_suite, app_client_key_buf[0..key_len], &app_client_iv);
+            const app_write_cipher = try record.CipherState(Runtime).init(self.cipher_suite, app_client_key_buf[0..key_len], &app_client_iv);
             self.records.setWriteCipher(app_write_cipher);
         }
 
@@ -1040,7 +1038,7 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
                 12,
             );
 
-            const cipher = try record.CipherState(Crypto).init(self.cipher_suite, server_key_buf[0..key_len], &server_iv);
+            const cipher = try record.CipherState(Runtime).init(self.cipher_suite, server_key_buf[0..key_len], &server_iv);
             self.records.setReadCipher(cipher);
 
             self.records.version = .tls_1_3;
@@ -1102,8 +1100,8 @@ pub fn ClientHandshake(comptime Conn: type, comptime Crypto: type, comptime Rng:
                 12,
             );
 
-            const write_cipher = try record.CipherState(Crypto).init(self.cipher_suite, client_key_buf[0..key_len], &client_iv);
-            const read_cipher = try record.CipherState(Crypto).init(self.cipher_suite, server_key_buf[0..key_len], &server_iv);
+            const write_cipher = try record.CipherState(Runtime).init(self.cipher_suite, client_key_buf[0..key_len], &client_iv);
+            const read_cipher = try record.CipherState(Runtime).init(self.cipher_suite, server_key_buf[0..key_len], &server_iv);
 
             self.records.setWriteCipher(write_cipher);
             self.records.setReadCipher(read_cipher);

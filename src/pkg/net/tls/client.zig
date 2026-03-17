@@ -1,8 +1,9 @@
 const std = @import("std");
-const crypto_suite = @import("../../../runtime/crypto/suite.zig");
-const mutex_contract = @import("../../../runtime/sync/mutex.zig");
-const rng_contract = @import("../../../runtime/rng.zig");
+const runtime_suite = @import("../../../runtime/runtime.zig");
 pub const conn_mod = @import("../conn.zig");
+pub const runtime = struct {
+    pub const std = @import("../../../runtime/std.zig");
+};
 pub const common = @import("common.zig");
 pub const record = @import("record.zig");
 pub const handshake = @import("handshake.zig");
@@ -26,27 +27,23 @@ pub const Config = struct {
 /// Thread-safe: `send` and `recv` can be called concurrently.
 ///
 /// Type parameters:
-///   - `Conn`:   underlying transport (must satisfy `net.conn` contract)
-///   - `Crypto`: crypto suite (must satisfy `runtime.crypto.suite` contract)
-///   - `Rng`:    random number generator (must satisfy `runtime.rng` contract)
-///   - `Mutex`:  mutex type (must satisfy `runtime.sync.mutex` contract)
-pub fn Client(comptime Conn: type, comptime Crypto: type, comptime Rng: type, comptime Mutex: type) type {
+///   - `Conn`:    underlying transport (must satisfy `net.conn` contract)
+///   - `Runtime`: sealed runtime suite (must satisfy `runtime.suite.is`)
+pub fn Client(comptime Conn: type, comptime Runtime: type) type {
     comptime {
         _ = conn_mod.from(Conn);
-        _ = crypto_suite.is(Crypto);
-        _ = mutex_contract.is(Mutex);
-        _ = rng_contract.is(Rng);
+        _ = runtime_suite.is(Runtime);
     }
 
     return struct {
         config: Config,
         conn: *Conn,
-        hs: handshake.ClientHandshake(Conn, Crypto, Rng),
+        hs: handshake.ClientHandshake(Conn, Runtime),
         connected: bool,
         received_close_notify: bool,
 
-        write_mutex: Mutex,
-        read_mutex: Mutex,
+        write_mutex: Runtime.Mutex,
+        read_mutex: Runtime.Mutex,
 
         read_buffer: []u8,
         write_buffer: []u8,
@@ -57,7 +54,7 @@ pub fn Client(comptime Conn: type, comptime Crypto: type, comptime Rng: type, co
 
         const Self = @This();
 
-        pub const crypto = Crypto;
+        pub const crypto = Runtime.Crypto;
 
         pub fn init(conn: *Conn, config: Config) !Self {
             const read_buffer = try config.allocator.alloc(u8, common.MAX_CIPHERTEXT_LEN + 256);
@@ -69,17 +66,17 @@ pub fn Client(comptime Conn: type, comptime Crypto: type, comptime Rng: type, co
             return Self{
                 .config = config,
                 .conn = conn,
-                .hs = try handshake.ClientHandshake(Conn, Crypto, Rng).init(
+                .hs = try handshake.ClientHandshake(Conn, Runtime).init(
                     conn,
                     config.hostname,
                     config.allocator,
                     config.skip_verify,
-                    Rng.init(),
+                    Runtime.Rng.init(),
                 ),
                 .connected = false,
                 .received_close_notify = false,
-                .write_mutex = Mutex.init(),
-                .read_mutex = Mutex.init(),
+                .write_mutex = Runtime.Mutex.init(),
+                .read_mutex = Runtime.Mutex.init(),
                 .read_buffer = read_buffer,
                 .write_buffer = write_buffer,
             };
@@ -223,20 +220,16 @@ pub const Error = error{
 
 pub fn connect(
     comptime Conn: type,
-    comptime Crypto: type,
-    comptime Rng: type,
-    comptime Mutex: type,
+    comptime Runtime: type,
     conn: *Conn,
     hostname: []const u8,
     allocator: std.mem.Allocator,
-) !Client(Conn, Crypto, Rng, Mutex) {
+) !Client(Conn, Runtime) {
     comptime {
         _ = conn_mod.from(Conn);
-        _ = crypto_suite.is(Crypto);
-        _ = mutex_contract.is(Mutex);
-        _ = rng_contract.is(Rng);
+        _ = runtime_suite.is(Runtime);
     }
-    var tls_client = try Client(Conn, Crypto, Rng, Mutex).init(conn, .{
+    var tls_client = try Client(Conn, Runtime).init(conn, .{
         .allocator = allocator,
         .hostname = hostname,
     });

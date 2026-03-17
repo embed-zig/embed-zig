@@ -10,7 +10,6 @@ const decodeUtf8 = module.decodeUtf8;
 // Tests
 // ============================================================================
 
-
 const test_font_data = [_]u8{
     // A
     0x60, 0x90, 0xF0, 0x90,

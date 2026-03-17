@@ -12,6 +12,7 @@
 //!   bus.use(gp);
 
 const button_event = @import("event.zig");
+const runtime_suite = @import("../../../runtime/runtime.zig");
 
 pub const RawEvent = button_event.RawEvent;
 pub const RawEventCode = button_event.RawEventCode;
@@ -22,12 +23,14 @@ pub const GestureConfig = struct {
     multi_click_window_ms: u64 = 300,
 };
 
-pub fn ButtonGesture(comptime Time: type, comptime config: GestureConfig) type {
+pub fn ButtonGesture(comptime Runtime: type, comptime config: GestureConfig) type {
+    comptime _ = runtime_suite.is(Runtime);
+
     return struct {
         const Self = @This();
         const YieldFn = *const fn (?*anyopaque, GestureEvent) void;
 
-        time: Time,
+        time: Runtime.Time,
         current_id: []const u8 = "",
         pending_press: ?PendingPress = null,
         pending_clicks: ?PendingClicks = null,

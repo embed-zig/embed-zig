@@ -749,7 +749,7 @@ test "BLE 4.0: GAP: mutual exclusion of states" {
 // ============================================================================
 
 test "BLE 4.0: GATT: comptime service table attr count" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{
+    const S = gatt.GattServer(runtime_std, &.{
         gatt.Service(0x180D, &.{
             gatt.Char(0x2A37, .{ .read = true, .notify = true }),
             gatt.Char(0x2A38, .{ .read = true }),
@@ -761,14 +761,14 @@ test "BLE 4.0: GATT: comptime service table attr count" {
 }
 
 test "BLE 4.0: GATT: handle assignment sequential starting at 1" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{
+    const S = gatt.GattServer(runtime_std, &.{
         gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })}),
     });
     try std.testing.expectEqual(@as(u16, 3), S.getValueHandle(0x180D, 0x2A37));
 }
 
 test "BLE 4.0: GATT: multi-service handle assignment" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{
+    const S = gatt.GattServer(runtime_std, &.{
         gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })}), // 1,2,3
         gatt.Service(0xFFE0, &.{gatt.Char(0xFFE1, .{ .write = true })}), // 4,5,6
     });
@@ -777,7 +777,7 @@ test "BLE 4.0: GATT: multi-service handle assignment" {
 }
 
 test "BLE 4.0: GATT: CCCD adds one handle for notify char" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{
+    const S = gatt.GattServer(runtime_std, &.{
         gatt.Service(0x180D, &.{
             gatt.Char(0x2A37, .{ .read = true, .notify = true }), // decl=2, val=3, cccd=4
             gatt.Char(0x2A38, .{ .read = true }), // decl=5, val=6
@@ -788,7 +788,7 @@ test "BLE 4.0: GATT: CCCD adds one handle for notify char" {
 }
 
 test "BLE 4.0: GATT: read dispatch calls handler" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{
+    const S = gatt.GattServer(runtime_std, &.{
         gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })}),
     });
     var server = S.init();
@@ -808,7 +808,7 @@ test "BLE 4.0: GATT: read dispatch calls handler" {
 }
 
 test "BLE 4.0: GATT: write dispatch calls handler" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{
+    const S = gatt.GattServer(runtime_std, &.{
         gatt.Service(0xFFE0, &.{gatt.Char(0xFFE1, .{ .write = true })}),
     });
     var server = S.init();
@@ -829,7 +829,7 @@ test "BLE 4.0: GATT: write dispatch calls handler" {
 }
 
 test "BLE 4.0: GATT: MTU exchange response" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })})});
+    const S = gatt.GattServer(runtime_std, &.{gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })})});
     var server = S.init();
 
     var req: [3]u8 = undefined;
@@ -842,7 +842,7 @@ test "BLE 4.0: GATT: MTU exchange response" {
 }
 
 test "BLE 4.0: GATT: CCCD write enables notify" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{
+    const S = gatt.GattServer(runtime_std, &.{
         gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true, .notify = true })}),
     });
     var server = S.init();
@@ -862,7 +862,7 @@ test "BLE 4.0: GATT: CCCD write enables notify" {
 }
 
 test "BLE 4.0: GATT: CCCD write disables notify" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{
+    const S = gatt.GattServer(runtime_std, &.{
         gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true, .notify = true })}),
     });
     var server = S.init();
@@ -886,7 +886,7 @@ test "BLE 4.0: GATT: CCCD write disables notify" {
 }
 
 test "BLE 4.0: GATT: service discovery via Read By Group Type" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{
+    const S = gatt.GattServer(runtime_std, &.{
         gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })}),
         gatt.Service(0xFFE0, &.{gatt.Char(0xFFE1, .{ .write = true })}),
     });
@@ -906,7 +906,7 @@ test "BLE 4.0: GATT: service discovery via Read By Group Type" {
 }
 
 test "BLE 4.0: GATT: unsupported opcode returns error" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })})});
+    const S = gatt.GattServer(runtime_std, &.{gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })})});
     var server = S.init();
 
     var req: [5]u8 = .{ 0x0E, 0x03, 0x00, 0x04, 0x00 }; // Read Multiple (unsupported)
@@ -916,7 +916,7 @@ test "BLE 4.0: GATT: unsupported opcode returns error" {
 }
 
 test "BLE 4.0: GATT: read unknown handle returns attribute not found" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })})});
+    const S = gatt.GattServer(runtime_std, &.{gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })})});
     var server = S.init();
 
     var req: [3]u8 = undefined;
@@ -1192,7 +1192,7 @@ test "BLE 4.2: DLE: MTU 512 ATT payload fits in 3 DLE fragments" {
 }
 
 test "BLE 4.2: DLE: MTU exchange to 512" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })})});
+    const S = gatt.GattServer(runtime_std, &.{gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })})});
     var server = S.init();
     var req: [3]u8 = undefined;
     req[0] = 0x02; // Exchange MTU Request
@@ -1204,7 +1204,7 @@ test "BLE 4.2: DLE: MTU exchange to 512" {
 }
 
 test "BLE 4.2: DLE: MTU exchange clamped to MAX_MTU" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })})});
+    const S = gatt.GattServer(runtime_std, &.{gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })})});
     var server = S.init();
     var req: [3]u8 = undefined;
     req[0] = 0x02;
@@ -1215,7 +1215,7 @@ test "BLE 4.2: DLE: MTU exchange clamped to MAX_MTU" {
 }
 
 test "BLE 4.2: DLE: MTU exchange minimum is DEFAULT_MTU" {
-    const S = gatt.GattServer(runtime_std.Thread, &.{gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })})});
+    const S = gatt.GattServer(runtime_std, &.{gatt.Service(0x180D, &.{gatt.Char(0x2A37, .{ .read = true })})});
     var server = S.init();
     var req: [3]u8 = undefined;
     req[0] = 0x02;

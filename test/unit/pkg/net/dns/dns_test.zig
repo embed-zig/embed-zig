@@ -15,10 +15,11 @@ const buildQuery = module.buildQuery;
 const parseResponse = module.parseResponse;
 const formatIpv4 = module.formatIpv4;
 const runtime = embed.runtime;
-const conn_mod = module.conn_mod;
+const Std = runtime.std;
 const tls = module.tls;
 const validateDomainResolver = module.validateDomainResolver;
 const ResolverImpl = module.ResolverImpl;
+const TestRuntime = module.TestRuntime;
 const findHttpBody = module.findHttpBody;
 const parseIpv4String = module.parseIpv4String;
 const TestMockSocket = module.TestMockSocket;
@@ -105,7 +106,7 @@ test "validateDomainResolver: valid resolver" {
 }
 
 test "Resolver with void DomainResolver: custom_resolver is void (zero overhead)" {
-    const R = Resolver(TestMockSocket, void);
+    const R = Resolver(TestRuntime, void);
     const fields = @typeInfo(R).@"struct".fields;
     comptime {
         for (fields) |f| {
@@ -126,14 +127,13 @@ test "Resolver with DomainResolver has custom_resolver field" {
         }
     };
 
-    const R = Resolver(TestMockSocket, MockResolver);
+    const R = Resolver(TestRuntime, MockResolver);
     try std.testing.expect(@hasField(R, "custom_resolver"));
 }
 
 test "UDP resolve dns.alidns.com via 223.5.5.5" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
     const resolver = R{ .server = Servers.alidns, .protocol = .udp, .timeout_ms = 5000 };
     const ip = try resolver.resolve("dns.alidns.com");
     try std.testing.expect(isAliDnsIp(ip));
@@ -141,8 +141,7 @@ test "UDP resolve dns.alidns.com via 223.5.5.5" {
 
 test "TCP resolve dns.alidns.com via 223.5.5.5" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
     const resolver = R{ .server = Servers.alidns, .protocol = .tcp, .timeout_ms = 5000 };
     const ip = try resolver.resolve("dns.alidns.com");
     try std.testing.expect(isAliDnsIp(ip));
@@ -150,8 +149,7 @@ test "TCP resolve dns.alidns.com via 223.5.5.5" {
 
 test "UDP and TCP resolve dns.alidns.com return same result" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
     const udp_resolver = R{ .server = Servers.alidns, .protocol = .udp, .timeout_ms = 5000 };
     const tcp_resolver = R{ .server = Servers.alidns, .protocol = .tcp, .timeout_ms = 5000 };
     const udp_ip = try udp_resolver.resolve("dns.alidns.com");
@@ -162,8 +160,7 @@ test "UDP and TCP resolve dns.alidns.com return same result" {
 
 test "UDP resolve www.baidu.com returns valid IPv4" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
     const resolver = R{ .server = Servers.alidns, .protocol = .udp, .timeout_ms = 5000 };
     const ip = try resolver.resolve("www.baidu.com");
     try std.testing.expect(ip[0] != 0);
@@ -171,8 +168,7 @@ test "UDP resolve www.baidu.com returns valid IPv4" {
 
 test "TCP resolve www.baidu.com returns valid IPv4" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
     const resolver = R{ .server = Servers.alidns, .protocol = .tcp, .timeout_ms = 5000 };
     const ip = try resolver.resolve("www.baidu.com");
     try std.testing.expect(ip[0] != 0);
@@ -180,8 +176,7 @@ test "TCP resolve www.baidu.com returns valid IPv4" {
 
 test "UDP resolve via Google DNS 8.8.8.8" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
     const resolver = R{ .server = Servers.google, .protocol = .udp, .timeout_ms = 5000 };
     const ip = try resolver.resolve("dns.google");
     try std.testing.expect(ip[0] == 8 and ip[1] == 8);
@@ -189,8 +184,7 @@ test "UDP resolve via Google DNS 8.8.8.8" {
 
 test "UDP resolve nonexistent domain returns error" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
     const resolver = R{ .server = Servers.alidns, .protocol = .udp, .timeout_ms = 5000 };
     if (resolver.resolve("this.domain.does.not.exist.invalid")) |_| {
         return error.ExpectedError;
@@ -201,8 +195,7 @@ test "UDP resolve nonexistent domain returns error" {
 
 test "UDP resolve multiple domains sequentially" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
     const resolver = R{ .server = Servers.alidns, .protocol = .udp, .timeout_ms = 5000 };
 
     const domains = [_][]const u8{ "www.google.com", "www.baidu.com", "github.com" };
@@ -214,14 +207,13 @@ test "UDP resolve multiple domains sequentially" {
 
 test "DomainResolver intercepts before upstream" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
     const FakeResolver = struct {
         pub fn resolve(_: *const @This(), host: []const u8) ?[4]u8 {
             if (std.mem.eql(u8, host, "fake.local")) return .{ 10, 0, 0, 99 };
             return null;
         }
     };
-    const R = Resolver(Socket, FakeResolver);
+    const R = Resolver(Std, FakeResolver);
     const custom = FakeResolver{};
     const resolver = R{
         .server = Servers.alidns,
@@ -239,8 +231,7 @@ test "DomainResolver intercepts before upstream" {
 
 test "UDP resolve via Cloudflare DNS 1.1.1.1" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
     const resolver = R{ .server = Servers.cloudflare, .protocol = .udp, .timeout_ms = 5000 };
     const ip = try resolver.resolve("cloudflare.com");
     try std.testing.expect(ip[0] != 0);
@@ -248,8 +239,7 @@ test "UDP resolve via Cloudflare DNS 1.1.1.1" {
 
 test "TCP resolve via Cloudflare DNS 1.1.1.1" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
     const resolver = R{ .server = Servers.cloudflare, .protocol = .tcp, .timeout_ms = 5000 };
     const ip = try resolver.resolve("cloudflare.com");
     try std.testing.expect(ip[0] != 0);
@@ -257,8 +247,7 @@ test "TCP resolve via Cloudflare DNS 1.1.1.1" {
 
 test "UDP resolve dns.google via Google DNS returns 8.8.x.x" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
     const resolver = R{ .server = Servers.google, .protocol = .udp, .timeout_ms = 5000 };
     const ip = try resolver.resolve("dns.google");
     try std.testing.expect(ip[0] == 8 and ip[1] == 8);
@@ -347,8 +336,7 @@ test "ServerLists have entries" {
 
 test "concurrent UDP resolves from multiple threads" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
 
     const Worker = struct {
         fn run(domain: []const u8) void {
@@ -368,8 +356,7 @@ test "concurrent UDP resolves from multiple threads" {
 
 test "concurrent TCP resolves from multiple threads" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
 
     const Worker = struct {
         fn run(domain: []const u8) void {
@@ -389,8 +376,7 @@ test "concurrent TCP resolves from multiple threads" {
 
 test "concurrent mixed UDP+TCP resolves" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
 
     const Worker = struct {
         fn run(proto: Protocol) void {
@@ -410,8 +396,7 @@ test "concurrent mixed UDP+TCP resolves" {
 
 test "concurrent resolves with different DNS servers" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const R = Resolver(Socket, void);
+    const R = Resolver(Std, void);
 
     const Worker = struct {
         fn run(server: Ipv4Address) void {
@@ -431,11 +416,7 @@ test "concurrent resolves with different DNS servers" {
 
 test "DoH resolve dns.alidns.com via AliDNS" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
-    const R = ResolverWithTls(Socket, Crypto, Rng, Mutex, void);
+    const R = ResolverWithTls(Std, void);
     const resolver = R{
         .server = Servers.alidns,
         .protocol = .https,
@@ -454,11 +435,7 @@ test "DoH resolve dns.alidns.com via AliDNS" {
 
 test "DoH resolve www.baidu.com via AliDNS" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
-    const R = ResolverWithTls(Socket, Crypto, Rng, Mutex, void);
+    const R = ResolverWithTls(Std, void);
     const resolver = R{
         .server = Servers.alidns,
         .protocol = .https,
@@ -477,11 +454,7 @@ test "DoH resolve www.baidu.com via AliDNS" {
 
 test "DoH resolve via Cloudflare" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
-    const R = ResolverWithTls(Socket, Crypto, Rng, Mutex, void);
+    const R = ResolverWithTls(Std, void);
     const resolver = R{
         .server = Servers.cloudflare,
         .protocol = .https,
@@ -500,11 +473,7 @@ test "DoH resolve via Cloudflare" {
 
 test "DoH resolve via Google" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
-    const R = ResolverWithTls(Socket, Crypto, Rng, Mutex, void);
+    const R = ResolverWithTls(Std, void);
     const resolver = R{
         .server = Servers.google,
         .protocol = .https,
@@ -523,11 +492,7 @@ test "DoH resolve via Google" {
 
 test "DoH nonexistent domain returns error" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
-    const R = ResolverWithTls(Socket, Crypto, Rng, Mutex, void);
+    const R = ResolverWithTls(Std, void);
     const resolver = R{
         .server = Servers.alidns,
         .protocol = .https,
@@ -547,11 +512,7 @@ test "DoH nonexistent domain returns error" {
 
 test "concurrent DoH resolves from multiple threads" {
     try requireLiveDnsTests();
-    const Socket = runtime.std.Socket;
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
-    const R = ResolverWithTls(Socket, Crypto, Rng, Mutex, void);
+    const R = ResolverWithTls(Std, void);
 
     const Worker = struct {
         fn run(domain: []const u8) void {

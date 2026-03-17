@@ -1,31 +1,39 @@
 pub const runtime = struct {
-    pub const sync = struct {
-        pub const mutex = @import("runtime/sync/mutex.zig");
-        pub const condition = @import("runtime/sync/condition.zig");
-        pub const notify = @import("runtime/sync/notify.zig");
-    };
-    pub const time = @import("runtime/time.zig");
-    pub const thread = @import("runtime/thread.zig");
-    pub const system = @import("runtime/system.zig");
-    pub const channel_factory = @import("runtime/channel_factory.zig");
-    pub const socket = @import("runtime/socket.zig");
-    pub const fs = @import("runtime/fs.zig");
-    pub const log = @import("runtime/log.zig");
-    pub const rng = @import("runtime/rng.zig");
-    pub const ota_backend = @import("runtime/ota_backend.zig");
-    pub const std = @import("runtime/std.zig");
+    pub const Make = @import("runtime/runtime.zig").Make;
+    pub const is = @import("runtime/runtime.zig").is;
+    pub const std = @import("runtime/std.zig").Std;
 
-    pub const test_runners = struct {
-        pub const channel = @import("runtime/channel_test_runner.zig");
+    pub const socket = struct {
+        pub const Ipv4Address = @import("runtime/socket.zig").Ipv4Address;
+        pub const parseIpv4 = @import("runtime/socket.zig").parseIpv4;
+        pub const RecvFromResult = @import("runtime/socket.zig").RecvFromResult;
+    };
+
+    pub const thread = struct {
+        pub const SpawnConfig = @import("runtime/thread.zig").SpawnConfig;
     };
 
     pub const crypto = struct {
-        pub const hash = @import("runtime/crypto/hash.zig");
-        pub const hmac = @import("runtime/crypto/hmac.zig");
-        pub const hkdf = @import("runtime/crypto/hkdf.zig");
-        pub const aead = @import("runtime/crypto/aead.zig");
-        pub const pki = @import("runtime/crypto/pki.zig");
-        pub const suite = @import("runtime/crypto/suite.zig");
+        pub const HashType = @import("runtime/crypto/rsa.zig").HashType;
+        pub const DerKey = @import("runtime/crypto/rsa.zig").DerKey;
+    };
+
+    pub const ota_backend = struct {
+        pub const State = @import("runtime/ota_backend.zig").State;
+    };
+
+    pub const sync = struct {
+        pub const TimedWaitResult = @import("runtime/sync/condition.zig").TimedWaitResult;
+    };
+
+    pub const fs = struct {
+        pub const File = @import("runtime/fs.zig").File;
+        pub const OpenMode = @import("runtime/fs.zig").OpenMode;
+        pub const Error = @import("runtime/fs.zig").Error;
+    };
+
+    pub const test_runners = struct {
+        pub const channel = @import("runtime/channel_test_runner.zig");
     };
 };
 

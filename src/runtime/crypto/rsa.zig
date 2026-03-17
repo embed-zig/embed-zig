@@ -4,11 +4,16 @@ const Seal = struct {};
 
 pub const HashType = enum { sha256, sha384, sha512 };
 
+pub const DerKey = struct {
+    modulus: []const u8,
+    exponent: []const u8,
+};
+
 pub fn Make(comptime Impl: type) type {
     comptime {
         _ = @as(*const fn ([]const u8, []const u8, []const u8, HashType) anyerror!void, &Impl.verifyPKCS1v1_5);
         _ = @as(*const fn ([]const u8, []const u8, []const u8, HashType) anyerror!void, &Impl.verifyPSS);
-        _ = @as(*const fn ([]const u8) anyerror!struct { modulus: []const u8, exponent: []const u8 }, &Impl.parseDer);
+        _ = @as(*const fn ([]const u8) anyerror!DerKey, &Impl.parseDer);
     }
 
     return struct {
@@ -23,7 +28,7 @@ pub fn Make(comptime Impl: type) type {
             return Impl.verifyPSS(sig, msg, pk, hash_type);
         }
 
-        pub fn parseDer(pub_key: []const u8) !struct { modulus: []const u8, exponent: []const u8 } {
+        pub fn parseDer(pub_key: []const u8) !DerKey {
             return Impl.parseDer(pub_key);
         }
     };

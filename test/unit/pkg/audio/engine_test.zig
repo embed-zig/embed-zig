@@ -10,19 +10,20 @@ const PassthroughProcessor = module.PassthroughProcessor;
 const mixer_mod = module.mixer_mod;
 const obuf_mod = module.obuf_mod;
 const resampler_mod = module.resampler_mod;
-const runtime = module.runtime;
 const Allocator = module.Allocator;
 const Format = module.Format;
+
+const StdRuntime = embed.runtime.std;
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 const testing = std.testing;
-const TestEngine = Engine(runtime.std.Mutex, runtime.std.Condition, runtime.std.Thread, runtime.std.Time);
+const TestEngine = Engine(StdRuntime);
 
 fn newEngine(config: TestEngine.Config) !TestEngine {
-    return TestEngine.init(testing.allocator, config, runtime.std.Mutex.init(), runtime.std.Time{});
+    return TestEngine.init(testing.allocator, config, StdRuntime.Mutex.init(), StdRuntime.Time{});
 }
 
 const test_frame_size: u32 = 8;

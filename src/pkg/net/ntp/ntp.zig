@@ -11,7 +11,7 @@
 //! Example (basic):
 //!   const ntp = @import("ntp");
 //!
-//!   const Client = ntp.Client(Socket);
+//!   const Client = ntp.Client(Runtime);
 //!   var client = Client{ .server = .{ 162, 159, 200, 1 } }; // time.cloudflare.com
 //!
 //!   const t1 = Board.time.nowMs();
@@ -28,10 +28,7 @@
 //!   const resp = try client.query(nonce);
 
 const std = @import("std");
-const runtime = struct {
-    pub const socket = @import("../../../runtime/socket.zig");
-    pub const std = @import("../../../runtime/std.zig");
-};
+const runtime_suite = @import("../../../runtime/runtime.zig");
 
 pub const Ipv4Address = [4]u8;
 
@@ -47,11 +44,14 @@ pub const NTP_UNIX_OFFSET: i64 = 2208988800;
 /// This makes the Origin Timestamp unpredictable, preventing off-path spoofing.
 ///
 /// Example:
-///   const nonce = ntp.generateNonce(Board.crypto.Rng);
+///   const nonce = ntp.generateNonce(Board.Runtime);
 ///   const resp = try client.query(nonce);
-pub fn generateNonce(comptime Rng: type) i64 {
+pub fn generateNonce(comptime Runtime: type) i64 {
+    comptime _ = runtime_suite.is(Runtime);
+
     var buf: [8]u8 = undefined;
-    Rng.fill(&buf);
+    var rng_inst = Runtime.Rng.init();
+    rng_inst.fill(&buf) catch return 1;
     // Convert to i64, ensure non-zero (0 is reserved)
     const raw = std.mem.readInt(i64, &buf, .little);
     return if (raw == 0) 1 else raw;
@@ -139,12 +139,12 @@ pub const ServerLists = struct {
     };
 };
 
-/// NTP Client - generic over socket type
+/// NTP Client - generic over runtime
 ///
 /// Type parameters:
-///   - `Socket`: must satisfy `runtime.socket.from` contract
-pub fn Client(comptime Socket: type) type {
-    comptime _ = runtime.socket.is(Socket);
+///   - `Runtime`: sealed runtime suite (provides Socket)
+pub fn Client(comptime Runtime: type) type {
+    comptime _ = runtime_suite.is(Runtime);
 
     return struct {
         const Self = @This();
@@ -170,7 +170,7 @@ pub fn Client(comptime Socket: type) type {
         /// Returns:
         ///   Response containing server receive (T2) and transmit (T3) timestamps
         pub fn query(self: *const Self, t1_local_ms: i64) NtpError!Response {
-            var sock = Socket.udp() catch return error.SocketError;
+            var sock = Runtime.Socket.udp() catch return error.SocketError;
             defer sock.close();
 
             sock.setRecvTimeout(self.timeout_ms);
@@ -222,7 +222,7 @@ pub fn Client(comptime Socket: type) type {
         pub fn queryRace(self: *const Self, t1_local_ms: i64, servers: []const Ipv4Address) NtpError!Response {
             if (servers.len == 0) return error.InvalidResponse;
 
-            var sock = Socket.udp() catch return error.SocketError;
+            var sock = Runtime.Socket.udp() catch return error.SocketError;
             defer sock.close();
 
             sock.setRecvTimeout(self.timeout_ms);
@@ -403,6 +403,51 @@ pub fn ntpToUnixMs(ntp: NtpTimestamp) i64 {
     const ms: i64 = (@as(i64, ntp.fraction) * 1000) >> 32;
     return unix_secs * 1000 + ms;
 }
+
+const rng_mod = @import("../../../runtime/rng.zig");
+
+/// Test runtimes for generateNonce unit tests.
+pub const MockRngRuntime = runtime_suite.Make(struct {
+    pub const Time = @import("../../../runtime/std/time.zig").Time;
+    pub const Log = @import("../../../runtime/std/log.zig").Log;
+    pub const Rng = struct {
+        pub fn fill(_: @This(), buf: []u8) rng_mod.Error!void {
+            for (buf, 0..) |*b, i| {
+                b.* = @truncate(i + 42);
+            }
+        }
+    };
+    pub const Mutex = @import("../../../runtime/std/sync/mutex.zig").Mutex;
+    pub const Condition = @import("../../../runtime/std/sync/condition.zig").Condition;
+    pub const Notify = @import("../../../runtime/std/sync/notify.zig").Notify;
+    pub const Thread = @import("../../../runtime/std/thread.zig").Thread;
+    pub const System = @import("../../../runtime/std/system.zig").System;
+    pub const Fs = @import("../../../runtime/std/fs.zig").Fs;
+    pub const ChannelFactory = @import("../../../runtime/std/channel_factory.zig").ChannelFactory;
+    pub const Socket = @import("../../../runtime/std/socket.zig").Socket;
+    pub const OtaBackend = @import("../../../runtime/std/ota_backend.zig").OtaBackend;
+    pub const Crypto = @import("../../../runtime/std/crypto/suite.zig");
+});
+
+pub const ZeroRngRuntime = runtime_suite.Make(struct {
+    pub const Time = @import("../../../runtime/std/time.zig").Time;
+    pub const Log = @import("../../../runtime/std/log.zig").Log;
+    pub const Rng = struct {
+        pub fn fill(_: @This(), buf: []u8) rng_mod.Error!void {
+            for (buf) |*b| b.* = 0;
+        }
+    };
+    pub const Mutex = @import("../../../runtime/std/sync/mutex.zig").Mutex;
+    pub const Condition = @import("../../../runtime/std/sync/condition.zig").Condition;
+    pub const Notify = @import("../../../runtime/std/sync/notify.zig").Notify;
+    pub const Thread = @import("../../../runtime/std/thread.zig").Thread;
+    pub const System = @import("../../../runtime/std/system.zig").System;
+    pub const Fs = @import("../../../runtime/std/fs.zig").Fs;
+    pub const ChannelFactory = @import("../../../runtime/std/channel_factory.zig").ChannelFactory;
+    pub const Socket = @import("../../../runtime/std/socket.zig").Socket;
+    pub const OtaBackend = @import("../../../runtime/std/ota_backend.zig").OtaBackend;
+    pub const Crypto = @import("../../../runtime/std/crypto/suite.zig");
+});
 
 /// Convert Unix milliseconds to NTP timestamp
 pub fn unixMsToNtp(unix_ms: i64) NtpTimestamp {

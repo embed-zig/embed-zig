@@ -9,6 +9,7 @@ const hal = struct {
 };
 const bus_mod = @import("../../bus.zig");
 const button_event = @import("../event.zig");
+const runtime_suite = @import("../../../../runtime/runtime.zig");
 
 pub const Event = button_event.RawEvent;
 pub const Code = button_event.RawEventCode;
@@ -25,10 +26,11 @@ pub const Config = struct {
 
 pub fn Button(
     comptime Gpio: type,
-    comptime Time: type,
+    comptime Runtime: type,
     comptime id: []const u8,
 ) type {
     comptime {
+        _ = runtime_suite.is(Runtime);
         if (!hal.gpio.is(Gpio)) @compileError("Gpio must be a hal.gpio type");
     }
 
@@ -36,7 +38,7 @@ pub fn Button(
         const Self = @This();
 
         gpio: *Gpio,
-        time: Time,
+        time: Runtime.Time,
         config: Config,
         injector: Injector,
         running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -48,7 +50,7 @@ pub fn Button(
 
         const State = enum { idle, debouncing };
 
-        pub fn init(gpio: *Gpio, time: Time, config: Config, injector: Injector) Self {
+        pub fn init(gpio: *Gpio, time: Runtime.Time, config: Config, injector: Injector) Self {
             return .{
                 .gpio = gpio,
                 .time = time,

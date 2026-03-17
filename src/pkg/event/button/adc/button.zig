@@ -16,6 +16,7 @@ const hal = struct {
 };
 const bus_mod = @import("../../bus.zig");
 const button_event = @import("../event.zig");
+const runtime_suite = @import("../../../../runtime/runtime.zig");
 
 pub const Event = button_event.RawEvent;
 pub const Code = button_event.RawEventCode;
@@ -38,9 +39,10 @@ pub const Config = struct {
 
 pub fn AdcButtonSet(
     comptime Adc: type,
-    comptime Time: type,
+    comptime Runtime: type,
 ) type {
     comptime {
+        _ = runtime_suite.is(Runtime);
         if (!hal.adc.is(Adc)) @compileError("Adc must be a hal.adc type");
     }
 
@@ -48,7 +50,7 @@ pub fn AdcButtonSet(
         const Self = @This();
 
         adc: *Adc,
-        time: Time,
+        time: Runtime.Time,
         config: Config,
         injector: Injector,
         running: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -57,7 +59,7 @@ pub fn AdcButtonSet(
         stable_count: u8 = 0,
         pending_button: ?usize = null,
 
-        pub fn init(adc: *Adc, time: Time, config: Config, injector: Injector) Self {
+        pub fn init(adc: *Adc, time: Runtime.Time, config: Config, injector: Injector) Self {
             return .{
                 .adc = adc,
                 .time = time,

@@ -2,20 +2,20 @@
 //!
 //! The Client depends only on the `RoundTripper` contract, not on any
 //! specific transport implementation. This enables:
-//!   - Real HTTP/HTTPS via `Transport(Socket, Crypto, Rng, Mutex, ...)`
+//!   - Real HTTP/HTTPS via `Transport(Socket, Runtime, ...)`
 //!   - Mock transports for unit testing
 //!
 //! Usage:
 //!
 //!   // Full-featured (HTTP + HTTPS + DNS)
-//!   const T = http.Transport(Socket, Crypto, Rng, Mutex, void);
+//!   const T = http.Transport(Socket, Runtime, void);
 //!   var transport = T{ .allocator = allocator };
 //!   var client = http.Client(T).init(&transport, allocator);
 //!   var buf: [8192]u8 = undefined;
 //!   const resp = try client.get("https://example.com/api", &buf);
 //!
 //!   // HTTP-only (no TLS)
-//!   const T = http.Transport(Socket, void, void, void, void);
+//!   const T = http.Transport(Socket, void, void);
 //!   var transport = T{ .allocator = allocator };
 //!   var client = http.Client(T).init(&transport, allocator);
 

@@ -1,8 +1,9 @@
 const std = @import("std");
-const crypto_suite = @import("../../../runtime/crypto/suite.zig");
-const mutex_contract = @import("../../../runtime/sync/mutex.zig");
-const rng_contract = @import("../../../runtime/rng.zig");
+const runtime_suite = @import("../../../runtime/runtime.zig");
 pub const conn_mod = @import("../conn.zig");
+pub const runtime = struct {
+    pub const std = @import("../../../runtime/std.zig");
+};
 pub const client_mod = @import("client.zig");
 pub const common = @import("common.zig");
 
@@ -16,16 +17,18 @@ pub const Options = struct {
 ///
 /// This is the primary high-level API: create a `Stream`, call `handshake`,
 /// then use `read`/`write`/`close` like any other `Conn`.
-pub fn Stream(comptime Conn: type, comptime Crypto: type, comptime Rng: type, comptime Mutex: type) type {
+///
+/// Type parameters:
+///   - `Conn`:    underlying transport (must satisfy `net.conn` contract)
+///   - `Runtime`: sealed runtime suite (must satisfy `runtime.suite.is`)
+pub fn Stream(comptime Conn: type, comptime Runtime: type) type {
     comptime {
         _ = conn_mod.from(Conn);
-        _ = crypto_suite.is(Crypto);
-        _ = mutex_contract.is(Mutex);
-        _ = rng_contract.is(Rng);
+        _ = runtime_suite.is(Runtime);
     }
 
     return struct {
-        client: ?client_mod.Client(Conn, Crypto, Rng, Mutex),
+        client: ?client_mod.Client(Conn, Runtime),
         conn: *Conn,
         allocator: std.mem.Allocator,
         hostname: []const u8,
@@ -52,7 +55,7 @@ pub fn Stream(comptime Conn: type, comptime Crypto: type, comptime Rng: type, co
 
         /// Perform TLS handshake, upgrading the underlying Conn.
         pub fn handshake(self: *Self) !void {
-            self.client = try client_mod.Client(Conn, Crypto, Rng, Mutex).init(self.conn, .{
+            self.client = try client_mod.Client(Conn, Runtime).init(self.conn, .{
                 .allocator = self.allocator,
                 .hostname = self.hostname,
                 .skip_verify = self.options.skip_cert_verify,

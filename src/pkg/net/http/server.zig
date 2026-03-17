@@ -199,7 +199,7 @@ pub fn testHandler(_: *Request, resp: *Response) void {
 pub const runtime = struct {
     pub const std = @import("../../../runtime/std.zig");
 };
-pub const Socket = runtime.std.Socket;
+pub const Socket = runtime.std.Std.Socket;
 
 pub const SocketConn = struct {
     sock: Socket,

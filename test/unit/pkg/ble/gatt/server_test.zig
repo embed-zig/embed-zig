@@ -15,7 +15,7 @@ const runtime = embed.runtime;
 const att = embed.pkg.ble.host.att.att;
 
 test "GattServer comptime service table" {
-    const MyServer = GattServer(runtime.std.Thread, &.{
+    const MyServer = GattServer(runtime.std, &.{
         Service(0x180D, &.{
             Char(0x2A37, .{ .read = true, .notify = true }),
             Char(0x2A38, .{ .read = true }),
@@ -30,7 +30,7 @@ test "GattServer comptime service table" {
 }
 
 test "GattServer handle registration and read dispatch" {
-    const MyServer = GattServer(runtime.std.Thread, &.{
+    const MyServer = GattServer(runtime.std, &.{
         Service(0x180D, &.{
             Char(0x2A37, .{ .read = true }),
         }),
@@ -60,7 +60,7 @@ test "GattServer handle registration and read dispatch" {
 }
 
 test "GattServer write dispatch with handler" {
-    const MyServer = GattServer(runtime.std.Thread, &.{
+    const MyServer = GattServer(runtime.std, &.{
         Service(0xFFE0, &.{
             Char(0xFFE1, .{ .write = true }),
         }),
@@ -91,7 +91,7 @@ test "GattServer write dispatch with handler" {
 }
 
 test "GattServer MTU exchange" {
-    const MyServer = GattServer(runtime.std.Thread, &.{
+    const MyServer = GattServer(runtime.std, &.{
         Service(0x180D, &.{
             Char(0x2A37, .{ .read = true }),
         }),
@@ -111,7 +111,7 @@ test "GattServer MTU exchange" {
 }
 
 test "GattServer service discovery" {
-    const MyServer = GattServer(runtime.std.Thread, &.{
+    const MyServer = GattServer(runtime.std, &.{
         Service(0x180D, &.{
             Char(0x2A37, .{ .read = true }),
         }),
@@ -137,7 +137,7 @@ test "GattServer service discovery" {
 }
 
 test "GattServer async handler dispatch - concurrent requests" {
-    const MyServer = GattServer(runtime.std.Thread, &.{
+    const MyServer = GattServer(runtime.std, &.{
         Service(0xFFE0, &.{
             Char(0xFFE1, .{ .read = true, .write = true }),
         }),
@@ -198,7 +198,7 @@ test "GattServer async handler dispatch - concurrent requests" {
 }
 
 test "GattServer async handler fallback on sync mode" {
-    const MyServer = GattServer(runtime.std.Thread, &.{
+    const MyServer = GattServer(runtime.std, &.{
         Service(0xFFE0, &.{
             Char(0xFFE1, .{ .read = true }),
         }),
@@ -230,7 +230,7 @@ test "GattServer async handler fallback on sync mode" {
 }
 
 test "GattServer async write handler receives data" {
-    const MyServer = GattServer(runtime.std.Thread, &.{
+    const MyServer = GattServer(runtime.std, &.{
         Service(0xFFE0, &.{
             Char(0xFFE1, .{ .write = true }),
         }),

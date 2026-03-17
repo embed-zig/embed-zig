@@ -7,7 +7,6 @@ const Image = module.Image;
 // Tests
 // ============================================================================
 
-
 test "Image.getPixel RGB565" {
     const data = [_]u8{
         0x34, 0x12, // (0,0) = 0x1234

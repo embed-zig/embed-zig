@@ -10,9 +10,7 @@ const common = module.common;
 const TestMockConn = module.TestMockConn;
 
 test "Stream satisfies Conn contract" {
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
+    const Runtime = runtime.std.Std;
 
     const MockConn = struct {
         const Self = @This();
@@ -25,29 +23,25 @@ test "Stream satisfies Conn contract" {
         pub fn close(_: *Self) void {}
     };
 
-    const TlsStream = Stream(MockConn, Crypto, Rng, Mutex);
+    const TlsStream = Stream(MockConn, Runtime);
     _ = conn_mod.from(TlsStream);
 }
 
 test "Stream init and deinit" {
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
+    const Runtime = runtime.std.Std;
 
     var conn = TestMockConn{};
-    var s = try Stream(TestMockConn, Crypto, Rng, Mutex).init(&conn, std.testing.allocator, "example.com", .{});
+    var s = try Stream(TestMockConn, Runtime).init(&conn, std.testing.allocator, "example.com", .{});
     defer s.deinit();
 
     try std.testing.expect(s.client == null);
 }
 
 test "Stream read before handshake returns Closed" {
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
+    const Runtime = runtime.std.Std;
 
     var conn = TestMockConn{};
-    var s = try Stream(TestMockConn, Crypto, Rng, Mutex).init(&conn, std.testing.allocator, "example.com", .{});
+    var s = try Stream(TestMockConn, Runtime).init(&conn, std.testing.allocator, "example.com", .{});
     defer s.deinit();
 
     var buf: [64]u8 = undefined;
@@ -55,24 +49,20 @@ test "Stream read before handshake returns Closed" {
 }
 
 test "Stream write before handshake returns Closed" {
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
+    const Runtime = runtime.std.Std;
 
     var conn = TestMockConn{};
-    var s = try Stream(TestMockConn, Crypto, Rng, Mutex).init(&conn, std.testing.allocator, "example.com", .{});
+    var s = try Stream(TestMockConn, Runtime).init(&conn, std.testing.allocator, "example.com", .{});
     defer s.deinit();
 
     try std.testing.expectError(conn_mod.Error.Closed, s.write("hello"));
 }
 
 test "Stream close before handshake is safe" {
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
+    const Runtime = runtime.std.Std;
 
     var conn = TestMockConn{};
-    var s = try Stream(TestMockConn, Crypto, Rng, Mutex).init(&conn, std.testing.allocator, "example.com", .{});
+    var s = try Stream(TestMockConn, Runtime).init(&conn, std.testing.allocator, "example.com", .{});
     defer s.deinit();
 
     s.close();
@@ -80,12 +70,10 @@ test "Stream close before handshake is safe" {
 }
 
 test "Stream deinit is idempotent" {
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
+    const Runtime = runtime.std.Std;
 
     var conn = TestMockConn{};
-    var s = try Stream(TestMockConn, Crypto, Rng, Mutex).init(&conn, std.testing.allocator, "example.com", .{});
+    var s = try Stream(TestMockConn, Runtime).init(&conn, std.testing.allocator, "example.com", .{});
 
     s.deinit();
     s.deinit();
@@ -107,12 +95,10 @@ test "Stream options custom" {
 }
 
 test "Stream preserves hostname and allocator" {
-    const Crypto = runtime.std.Crypto;
-    const Rng = runtime.std.Rng;
-    const Mutex = runtime.std.Mutex;
+    const Runtime = runtime.std.Std;
 
     var conn = TestMockConn{};
-    var s = try Stream(TestMockConn, Crypto, Rng, Mutex).init(&conn, std.testing.allocator, "my.host.com", .{});
+    var s = try Stream(TestMockConn, Runtime).init(&conn, std.testing.allocator, "my.host.com", .{});
     defer s.deinit();
 
     try std.testing.expectEqualStrings("my.host.com", s.hostname);

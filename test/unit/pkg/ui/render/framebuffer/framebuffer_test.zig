@@ -10,7 +10,6 @@ const Framebuffer = module.Framebuffer;
 // Tests
 // ============================================================================
 
-
 const TestFB = Framebuffer(16, 16, .rgb565);
 
 test "init fills buffer" {

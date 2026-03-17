@@ -10,7 +10,7 @@
 //!   var resolver = R{ .server = .{ 223, 5, 5, 5 }, .protocol = .udp };
 //!
 //!   // Create resolver with TLS support (UDP/TCP/HTTPS)
-//!   const R2 = dns.ResolverWithTls(Socket, Crypto, Mutex, void);
+//!   const R2 = dns.ResolverWithTls(Socket, Runtime, void);
 //!   var resolver_tls = R2{
 //!       .server = .{ 223, 5, 5, 5 },
 //!       .protocol = .https,
@@ -21,17 +21,12 @@
 //!   const ip = try resolver.resolve("www.google.com");
 
 const std = @import("std");
-const runtime = struct {
-    pub const socket = @import("../../../runtime/socket.zig");
-    pub const sync = struct {
-        pub const mutex = @import("../../../runtime/sync/mutex.zig");
-    };
-    pub const std = @import("../../../runtime/std.zig");
-};
+const runtime_suite = @import("../../../runtime/runtime.zig");
+const socket_mod = @import("../../../runtime/socket.zig");
 const conn_mod = @import("../conn.zig");
 const tls = struct {
-    pub fn Client(comptime Conn: type, comptime Crypto: type, comptime Rng: type, comptime Mutex: type) type {
-        return @import("../tls/client.zig").Client(Conn, Crypto, Rng, Mutex);
+    pub fn Client(comptime Conn: type, comptime Runtime: type) type {
+        return @import("../tls/client.zig").Client(Conn, Runtime);
     }
 };
 
@@ -116,30 +111,27 @@ pub const Protocol = enum {
     https,
 };
 
-/// DNS Resolver - generic over socket type (UDP/TCP only)
+/// DNS Resolver - generic over runtime (UDP/TCP only)
 ///
 /// Type parameters:
-///   - `Socket`: must satisfy `runtime.socket.from` contract
+///   - `Runtime`: sealed runtime suite (provides Socket)
 ///   - `DomainResolver`: custom resolver consulted before upstream DNS.
 ///     Pass `void` to disable (zero overhead).
 ///
 /// For DoH support, use `ResolverWithTls` instead.
-pub fn Resolver(comptime Socket: type, comptime DomainResolver: type) type {
-    return ResolverImpl(Socket, void, void, DomainResolver);
+pub fn Resolver(comptime Runtime: type, comptime DomainResolver: type) type {
+    return ResolverImpl(Runtime, void, DomainResolver);
 }
 
 /// DNS Resolver with TLS support (UDP/TCP/HTTPS)
 ///
 /// Type parameters:
-///   - `Socket`: must satisfy `runtime.socket.from` contract
-///   - `Crypto`: crypto primitives (must satisfy `runtime.crypto.suite` contract)
-///   - `Rng`:    random number generator (must provide `fill([]u8) void`)
-///   - `Mutex`:  mutex type (must satisfy `runtime.sync.mutex` contract)
+///   - `Runtime`: sealed runtime suite (provides Socket, Crypto)
 ///   - `DomainResolver`: custom resolver consulted before upstream DNS.
 ///     Pass `void` to disable (zero overhead).
-pub fn ResolverWithTls(comptime Socket: type, comptime Crypto: type, comptime Rng: type, comptime Mutex: type, comptime DomainResolver: type) type {
-    const SConn = conn_mod.SocketConn(Socket);
-    return ResolverImpl(Socket, tls.Client(SConn, Crypto, Rng, Mutex), Crypto, DomainResolver);
+pub fn ResolverWithTls(comptime Runtime: type, comptime DomainResolver: type) type {
+    const SConn = conn_mod.SocketConn(Runtime.Socket);
+    return ResolverImpl(Runtime, tls.Client(SConn, Runtime), DomainResolver);
 }
 
 /// Validate DomainResolver interface at comptime.
@@ -168,19 +160,13 @@ pub fn validateDomainResolver(comptime Impl: type) type {
     return Impl;
 }
 
-pub fn ResolverImpl(comptime Socket: type, comptime TlsClient: type, comptime Crypto: type, comptime DomainResolver: type) type {
-    comptime _ = runtime.socket.is(Socket);
+pub fn ResolverImpl(comptime Runtime: type, comptime TlsClient: type, comptime DomainResolver: type) type {
+    comptime _ = runtime_suite.is(Runtime);
     const has_tls = TlsClient != void;
     const has_custom_resolver = DomainResolver != void;
 
     // Validate DomainResolver at comptime
     const ValidatedResolver = validateDomainResolver(DomainResolver);
-
-    // Get CaStore type from Crypto if available (same logic as tls.Client)
-    const CaStore = if (Crypto != void and @hasDecl(Crypto, "x509") and @hasDecl(Crypto.x509, "CaStore"))
-        Crypto.x509.CaStore
-    else
-        void;
 
     return struct {
         /// DNS server address (for UDP/TCP)
@@ -203,10 +189,6 @@ pub fn ResolverImpl(comptime Socket: type, comptime TlsClient: type, comptime Cr
 
         /// Skip TLS certificate verification (for testing)
         skip_cert_verify: bool = false,
-
-        /// CA store for certificate verification (optional)
-        /// If null and skip_cert_verify is false, verification may fail
-        ca_store: if (CaStore != void) ?CaStore else void = if (CaStore != void) null else {},
 
         /// Custom domain resolver (consulted before upstream DNS)
         /// Only present when DomainResolver != void
@@ -232,7 +214,7 @@ pub fn ResolverImpl(comptime Socket: type, comptime TlsClient: type, comptime Cr
         }
 
         fn resolveUdp(self: *const Self, hostname: []const u8) DnsError!Ipv4Address {
-            var sock = Socket.udp() catch return error.SocketError;
+            var sock = Runtime.Socket.udp() catch return error.SocketError;
             defer sock.close();
 
             sock.setRecvTimeout(self.timeout_ms);
@@ -254,7 +236,7 @@ pub fn ResolverImpl(comptime Socket: type, comptime TlsClient: type, comptime Cr
         }
 
         fn resolveTcp(self: *const Self, hostname: []const u8) DnsError!Ipv4Address {
-            var sock = Socket.tcp() catch return error.SocketError;
+            var sock = Runtime.Socket.tcp() catch return error.SocketError;
             defer sock.close();
 
             sock.setRecvTimeout(self.timeout_ms);
@@ -315,23 +297,17 @@ pub fn ResolverImpl(comptime Socket: type, comptime TlsClient: type, comptime Cr
 
             const doh_ip = self.resolveDohServer() catch return error.HttpError;
 
-            var sock = Socket.tcp() catch return error.SocketError;
+            var sock = Runtime.Socket.tcp() catch return error.SocketError;
             errdefer sock.close();
 
             sock.setRecvTimeout(self.timeout_ms);
             sock.setSendTimeout(self.timeout_ms);
             sock.connect(doh_ip, self.doh_port) catch return error.SocketError;
 
-            const SConn = conn_mod.SocketConn(Socket);
+            const SConn = conn_mod.SocketConn(Runtime.Socket);
             var socket_conn = SConn.init(&sock);
 
-            var tls_client = TlsClient.init(&socket_conn, if (CaStore != void) .{
-                .allocator = allocator,
-                .hostname = self.doh_host,
-                .skip_verify = self.skip_cert_verify,
-                .ca_store = self.ca_store,
-                .timeout_ms = self.timeout_ms,
-            } else .{
+            var tls_client = TlsClient.init(&socket_conn, .{
                 .allocator = allocator,
                 .hostname = self.doh_host,
                 .skip_verify = self.skip_cert_verify,
@@ -372,7 +348,7 @@ pub fn ResolverImpl(comptime Socket: type, comptime TlsClient: type, comptime Cr
         fn resolveDohServer(self: *const Self) DnsError!Ipv4Address {
             if (parseIpv4String(self.doh_host)) |ip| return ip;
 
-            var sock = Socket.udp() catch return error.SocketError;
+            var sock = Runtime.Socket.udp() catch return error.SocketError;
             defer sock.close();
 
             sock.setRecvTimeout(self.timeout_ms);
@@ -612,25 +588,25 @@ pub fn formatIpv4(addr: Ipv4Address, buf: []u8) []const u8 {
 // DomainResolver Tests
 // ============================================================================
 
-pub const TestMockSocket = runtime.socket.Make(struct {
-    pub fn udp() runtime.socket.Error!@This() {
+const TestMockSocketBackend = struct {
+    pub fn udp() socket_mod.Error!@This() {
         return .{};
     }
-    pub fn tcp() runtime.socket.Error!@This() {
+    pub fn tcp() socket_mod.Error!@This() {
         return .{};
     }
     pub fn close(_: *@This()) void {}
-    pub fn connect(_: *@This(), _: [4]u8, _: u16) runtime.socket.Error!void {}
-    pub fn send(_: *@This(), _: []const u8) runtime.socket.Error!usize {
+    pub fn connect(_: *@This(), _: [4]u8, _: u16) socket_mod.Error!void {}
+    pub fn send(_: *@This(), _: []const u8) socket_mod.Error!usize {
         return 0;
     }
-    pub fn recv(_: *@This(), _: []u8) runtime.socket.Error!usize {
+    pub fn recv(_: *@This(), _: []u8) socket_mod.Error!usize {
         return 0;
     }
-    pub fn sendTo(_: *@This(), _: [4]u8, _: u16, _: []const u8) runtime.socket.Error!usize {
+    pub fn sendTo(_: *@This(), _: [4]u8, _: u16, _: []const u8) socket_mod.Error!usize {
         return 0;
     }
-    pub fn recvFrom(_: *@This(), _: []u8) runtime.socket.Error!runtime.socket.RecvFromResult {
+    pub fn recvFrom(_: *@This(), _: []u8) socket_mod.Error!socket_mod.RecvFromResult {
         return .{ .len = 0, .src_addr = .{ 0, 0, 0, 0 }, .src_port = 0 };
     }
     pub fn setRecvTimeout(_: *@This(), _: u32) void {}
@@ -639,15 +615,34 @@ pub const TestMockSocket = runtime.socket.Make(struct {
     pub fn getFd(_: *@This()) i32 {
         return 0;
     }
-    pub fn setNonBlocking(_: *@This(), _: bool) runtime.socket.Error!void {}
-    pub fn bind(_: *@This(), _: [4]u8, _: u16) runtime.socket.Error!void {}
-    pub fn getBoundPort(_: *@This()) runtime.socket.Error!u16 {
+    pub fn setNonBlocking(_: *@This(), _: bool) socket_mod.Error!void {}
+    pub fn bind(_: *@This(), _: [4]u8, _: u16) socket_mod.Error!void {}
+    pub fn getBoundPort(_: *@This()) socket_mod.Error!u16 {
         return 0;
     }
-    pub fn listen(_: *@This()) runtime.socket.Error!void {}
-    pub fn accept(_: *@This()) runtime.socket.Error!@This() {
+    pub fn listen(_: *@This()) socket_mod.Error!void {}
+    pub fn accept(_: *@This()) socket_mod.Error!@This() {
         return .{};
     }
+};
+
+pub const TestMockSocket = socket_mod.Make(TestMockSocketBackend);
+
+/// Test runtime with mock socket for unit tests.
+pub const TestRuntime = runtime_suite.Make(struct {
+    pub const Time = @import("../../../runtime/std/time.zig").Time;
+    pub const Log = @import("../../../runtime/std/log.zig").Log;
+    pub const Rng = @import("../../../runtime/std/rng.zig").Rng;
+    pub const Mutex = @import("../../../runtime/std/sync/mutex.zig").Mutex;
+    pub const Condition = @import("../../../runtime/std/sync/condition.zig").Condition;
+    pub const Notify = @import("../../../runtime/std/sync/notify.zig").Notify;
+    pub const Thread = @import("../../../runtime/std/thread.zig").Thread;
+    pub const System = @import("../../../runtime/std/system.zig").System;
+    pub const Fs = @import("../../../runtime/std/fs.zig").Fs;
+    pub const ChannelFactory = @import("../../../runtime/std/channel_factory.zig").ChannelFactory;
+    pub const Socket = TestMockSocketBackend;
+    pub const OtaBackend = @import("../../../runtime/std/ota_backend.zig").OtaBackend;
+    pub const Crypto = @import("../../../runtime/std/crypto/suite.zig");
 });
 
 // ============================================================================

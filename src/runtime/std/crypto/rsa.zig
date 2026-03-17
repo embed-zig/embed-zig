@@ -52,7 +52,7 @@ pub fn verifyPSS(sig: []const u8, msg: []const u8, pk_der: []const u8, hash_type
     }
 }
 
-pub fn parseDer(pub_key: []const u8) anyerror!struct { modulus: []const u8, exponent: []const u8 } {
+pub fn parseDer(pub_key: []const u8) anyerror!rsa_contract.DerKey {
     const result = StdRsa.PublicKey.parseDer(pub_key) catch return error.CertificatePublicKeyInvalid;
     return .{ .modulus = result.modulus, .exponent = result.exponent };
 }

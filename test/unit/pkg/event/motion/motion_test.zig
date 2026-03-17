@@ -20,7 +20,6 @@ const gyroFrom = module.gyroFrom;
 const detector = module.detector;
 const Detector = module.Detector;
 
-
 test {
     _ = types;
     _ = detector;

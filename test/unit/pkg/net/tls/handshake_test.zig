@@ -19,9 +19,6 @@ const NamedGroup = module.NamedGroup;
 const SignatureScheme = module.SignatureScheme;
 const ContentType = module.ContentType;
 
-fn testRngFill(buf: []u8) void {
-    std.crypto.random.bytes(buf);
-}
 const X25519KeyExchange = module.X25519KeyExchange;
 const P256KeyExchange = module.P256KeyExchange;
 const TranscriptHash = module.TranscriptHash;
@@ -42,9 +39,9 @@ test "HandshakeHeader parse and serialize" {
 }
 
 test "TranscriptHash" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
-    var hash = TranscriptHash(Crypto).init();
+    var hash = TranscriptHash(Runtime).init();
     hash.update("hello");
     hash.update("world");
 
@@ -55,42 +52,42 @@ test "TranscriptHash" {
 }
 
 test "TLS 1.2 PRF basic" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const secret = "secret";
     const label = "test label";
     const seed = "seed";
 
     var out: [32]u8 = undefined;
-    Tls12Prf(Crypto).prf(&out, secret, label, seed);
+    Tls12Prf(Runtime).prf(&out, secret, label, seed);
 
     var out2: [32]u8 = undefined;
-    Tls12Prf(Crypto).prf(&out2, secret, label, seed);
+    Tls12Prf(Runtime).prf(&out2, secret, label, seed);
     try std.testing.expectEqualSlices(u8, &out, &out2);
 
     var out3: [32]u8 = undefined;
-    Tls12Prf(Crypto).prf(&out3, "different", label, seed);
+    Tls12Prf(Runtime).prf(&out3, "different", label, seed);
     try std.testing.expect(!std.mem.eql(u8, &out, &out3));
 }
 
 test "TLS 1.2 PRF output length" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     const secret = "secret";
     const label = "label";
     const seed = "seed";
 
     var out12: [12]u8 = undefined;
-    Tls12Prf(Crypto).prf(&out12, secret, label, seed);
+    Tls12Prf(Runtime).prf(&out12, secret, label, seed);
 
     var out48: [48]u8 = undefined;
-    Tls12Prf(Crypto).prf(&out48, secret, label, seed);
+    Tls12Prf(Runtime).prf(&out48, secret, label, seed);
 
     try std.testing.expectEqualSlices(u8, &out12, out48[0..12]);
 }
 
 test "ClientHandshake init with Conn" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
     const conn_mod = embed.pkg.net.conn;
 
     const MockConn = struct {
@@ -105,9 +102,9 @@ test "ClientHandshake init with Conn" {
     };
 
     var conn = MockConn{};
-    const Hs = ClientHandshake(MockConn, Crypto);
+    const Hs = ClientHandshake(MockConn, Runtime);
 
-    const hs = Hs.init(&conn, "example.com", std.testing.allocator, null, &testRngFill);
+    const hs = try Hs.init(&conn, "example.com", std.testing.allocator, false, Runtime.Rng.init());
 
     try std.testing.expectEqualStrings("example.com", hs.hostname);
     try std.testing.expect(hs.state == .initial);
@@ -155,9 +152,9 @@ test "HandshakeHeader max length" {
 }
 
 test "TranscriptHash final differs from peek after more updates" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
-    var hash = TranscriptHash(Crypto).init();
+    var hash = TranscriptHash(Runtime).init();
     hash.update("part1");
     const peeked = hash.peek();
 
@@ -168,54 +165,54 @@ test "TranscriptHash final differs from peek after more updates" {
 }
 
 test "TranscriptHash empty input" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
-    var hash = TranscriptHash(Crypto).init();
+    var hash = TranscriptHash(Runtime).init();
     const result = hash.peek();
 
     var expected: [32]u8 = undefined;
-    Crypto.Sha256.hash("", &expected);
+    Runtime.Crypto.Hash.Sha256().hash("", &expected);
     try std.testing.expectEqualSlices(u8, &expected, &result);
 }
 
 test "TLS 1.2 PRF different labels produce different output" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     var out1: [32]u8 = undefined;
-    Tls12Prf(Crypto).prf(&out1, "secret", "label A", "seed");
+    Tls12Prf(Runtime).prf(&out1, "secret", "label A", "seed");
 
     var out2: [32]u8 = undefined;
-    Tls12Prf(Crypto).prf(&out2, "secret", "label B", "seed");
+    Tls12Prf(Runtime).prf(&out2, "secret", "label B", "seed");
 
     try std.testing.expect(!std.mem.eql(u8, &out1, &out2));
 }
 
 test "TLS 1.2 PRF different seeds produce different output" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     var out1: [32]u8 = undefined;
-    Tls12Prf(Crypto).prf(&out1, "secret", "label", "seed A");
+    Tls12Prf(Runtime).prf(&out1, "secret", "label", "seed A");
 
     var out2: [32]u8 = undefined;
-    Tls12Prf(Crypto).prf(&out2, "secret", "label", "seed B");
+    Tls12Prf(Runtime).prf(&out2, "secret", "label", "seed B");
 
     try std.testing.expect(!std.mem.eql(u8, &out1, &out2));
 }
 
 test "TLS 1.2 PRF large output" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     var out: [104]u8 = undefined;
-    Tls12Prf(Crypto).prf(&out, "master secret", "key expansion", "server_random" ++ "client_random");
+    Tls12Prf(Runtime).prf(&out, "master secret", "key expansion", "server_random" ++ "client_random");
 
     const all_zero = std.mem.allEqual(u8, &out, 0);
     try std.testing.expect(!all_zero);
 }
 
 test "KeyExchange X25519 generate and public key" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
-    var kx = try KeyExchange(Crypto).generate(.x25519, &testRngFill);
+    var kx = try KeyExchange(Runtime).generate(.x25519, Runtime.Rng.init());
     const pub_key = kx.publicKey();
     try std.testing.expectEqual(@as(usize, 32), pub_key.len);
 
@@ -224,19 +221,19 @@ test "KeyExchange X25519 generate and public key" {
 }
 
 test "KeyExchange unsupported group" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
     try std.testing.expectError(
         error.UnsupportedGroup,
-        KeyExchange(Crypto).generate(.x448, &testRngFill),
+        KeyExchange(Runtime).generate(.x448, Runtime.Rng.init()),
     );
 }
 
 test "X25519 shared secret computation" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
-    var kx_a = try KeyExchange(Crypto).generate(.x25519, &testRngFill);
-    var kx_b = try KeyExchange(Crypto).generate(.x25519, &testRngFill);
+    var kx_a = try KeyExchange(Runtime).generate(.x25519, Runtime.Rng.init());
+    var kx_b = try KeyExchange(Runtime).generate(.x25519, Runtime.Rng.init());
 
     const shared_a = try kx_a.computeSharedSecret(kx_b.publicKey());
     const shared_b = try kx_b.computeSharedSecret(kx_a.publicKey());
@@ -245,15 +242,15 @@ test "X25519 shared secret computation" {
 }
 
 test "X25519 invalid public key length" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
 
-    var kx = try KeyExchange(Crypto).generate(.x25519, &testRngFill);
+    var kx = try KeyExchange(Runtime).generate(.x25519, Runtime.Rng.init());
     const short_key: [16]u8 = [_]u8{0} ** 16;
     try std.testing.expectError(error.InvalidPublicKey, kx.computeSharedSecret(&short_key));
 }
 
 test "ClientHandshake init fills client_random" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
     const conn_mod = embed.pkg.net.conn;
 
     const MockConn2 = struct {
@@ -268,14 +265,14 @@ test "ClientHandshake init fills client_random" {
     };
 
     var conn = MockConn2{};
-    const hs = ClientHandshake(MockConn2, Crypto).init(&conn, "test.com", std.testing.allocator, null, &testRngFill);
+    const hs = try ClientHandshake(MockConn2, Runtime).init(&conn, "test.com", std.testing.allocator, false, Runtime.Rng.init());
 
     const all_zero = std.mem.allEqual(u8, &hs.client_random, 0);
     try std.testing.expect(!all_zero);
 }
 
 test "ClientHandshake initial state" {
-    const Crypto = runtime.std.Crypto;
+    const Runtime = runtime.std.Std;
     const conn_mod = embed.pkg.net.conn;
 
     const MockConn3 = struct {
@@ -290,7 +287,7 @@ test "ClientHandshake initial state" {
     };
 
     var conn = MockConn3{};
-    const hs = ClientHandshake(MockConn3, Crypto).init(&conn, "host.example.com", std.testing.allocator, null, &testRngFill);
+    const hs = try ClientHandshake(MockConn3, Runtime).init(&conn, "host.example.com", std.testing.allocator, false, Runtime.Rng.init());
 
     try std.testing.expectEqual(HandshakeState.initial, hs.state);
     try std.testing.expectEqual(ProtocolVersion.tls_1_3, hs.version);

@@ -13,6 +13,7 @@ const ServerLists = module.ServerLists;
 const Client = module.Client;
 const formatTime = module.formatTime;
 const runtime = embed.runtime;
+const Std = runtime.std;
 const buildRequest = module.buildRequest;
 const parseResponse = module.parseResponse;
 const NtpTimestamp = module.NtpTimestamp;
@@ -53,34 +54,18 @@ test "formatTime" {
 }
 
 test "generateNonce produces non-zero values" {
-    const MockRng = struct {
-        pub fn fill(buf: []u8) void {
-            // Fill with deterministic but varied pattern
-            for (buf, 0..) |*b, i| {
-                b.* = @truncate(i + 42);
-            }
-        }
-    };
-
-    const nonce = generateNonce(MockRng);
+    const nonce = generateNonce(module.MockRngRuntime);
     try std.testing.expect(nonce != 0);
 }
 
 test "generateNonce handles zero RNG output" {
-    const ZeroRng = struct {
-        pub fn fill(buf: []u8) void {
-            for (buf) |*b| b.* = 0;
-        }
-    };
-
     // When RNG returns all zeros, generateNonce should return 1
-    const nonce = generateNonce(ZeroRng);
+    const nonce = generateNonce(module.ZeroRngRuntime);
     try std.testing.expectEqual(@as(i64, 1), nonce);
 }
 
 test "query Aliyun NTP server" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
     const client = NtpClient{ .server = Servers.aliyun, .timeout_ms = 5000 };
 
     const t1 = nowMs();
@@ -99,8 +84,7 @@ test "query Aliyun NTP server" {
 }
 
 test "query Cloudflare NTP server" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
     const client = NtpClient{ .server = Servers.cloudflare, .timeout_ms = 5000 };
 
     const t1 = nowMs();
@@ -111,8 +95,7 @@ test "query Cloudflare NTP server" {
 }
 
 test "getTime returns reasonable epoch" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
     const client = NtpClient{ .server = Servers.aliyun, .timeout_ms = 5000 };
 
     const time_ms = try client.getTime(nowMs());
@@ -123,8 +106,7 @@ test "getTime returns reasonable epoch" {
 }
 
 test "queryRace with multiple servers" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
     const client = NtpClient{ .timeout_ms = 5000 };
 
     const servers = [_]Ipv4Address{ Servers.aliyun, Servers.cloudflare, Servers.google };
@@ -136,8 +118,7 @@ test "queryRace with multiple servers" {
 }
 
 test "getTimeRace returns reasonable epoch" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
     const client = NtpClient{ .timeout_ms = 5000 };
 
     const time_ms = try client.getTimeRace(nowMs());
@@ -148,8 +129,7 @@ test "getTimeRace returns reasonable epoch" {
 }
 
 test "two queries return consistent times" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
     const client = NtpClient{ .server = Servers.aliyun, .timeout_ms = 5000 };
 
     const t1 = try client.getTime(nowMs());
@@ -159,8 +139,7 @@ test "two queries return consistent times" {
 }
 
 test "formatTime on NTP result" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
     const client = NtpClient{ .server = Servers.aliyun, .timeout_ms = 5000 };
 
     const time_ms = try client.getTime(nowMs());
@@ -176,8 +155,7 @@ test "formatTime on NTP result" {
 }
 
 test "query Google NTP server" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
     const client = NtpClient{ .server = Servers.google, .timeout_ms = 8000 };
 
     const resp = client.query(nowMs()) catch |err| switch (err) {
@@ -189,8 +167,7 @@ test "query Google NTP server" {
 }
 
 test "query with offset calculation" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
     const client = NtpClient{ .server = Servers.aliyun, .timeout_ms = 5000 };
 
     const t1 = nowMs();
@@ -208,8 +185,7 @@ test "query with offset calculation" {
 }
 
 test "queryRace with china server list" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
     const client = NtpClient{ .timeout_ms = 5000 };
 
     const resp = try client.queryRace(nowMs(), &ServerLists.china);
@@ -218,8 +194,7 @@ test "queryRace with china server list" {
 }
 
 test "queryRace with overseas server list" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
     const client = NtpClient{ .timeout_ms = 8000 };
 
     const resp = client.queryRace(nowMs(), &ServerLists.overseas) catch |err| switch (err) {
@@ -285,8 +260,7 @@ test "buildRequest with zero origin has zero transmit timestamp" {
 }
 
 test "concurrent NTP queries from multiple threads" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
 
     const Worker = struct {
         fn run(server: Ipv4Address) void {
@@ -306,8 +280,7 @@ test "concurrent NTP queries from multiple threads" {
 }
 
 test "concurrent getTime from multiple threads" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
 
     const results = struct {
         var times: [4]i64 = .{ 0, 0, 0, 0 };
@@ -334,8 +307,7 @@ test "concurrent getTime from multiple threads" {
 }
 
 test "concurrent queryRace from multiple threads" {
-    const Socket = runtime.std.Socket;
-    const NtpClient = Client(Socket);
+    const NtpClient = Client(Std);
 
     const Worker = struct {
         fn run() void {
