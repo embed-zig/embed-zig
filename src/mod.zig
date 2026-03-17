@@ -53,7 +53,7 @@ pub const runtime = struct {
     };
 
     pub const test_runners = struct {
-        pub const channel = @import("runtime/channel_test_runner.zig");
+        pub const ChannelTestRunner = @import("runtime/channel_test_runner.zig").ChannelTestRunner;
     };
 };
 
