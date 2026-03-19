@@ -1,1 +1,3 @@
 openteam/
+.zig-cache/
+zig-out/
