@@ -18,10 +18,13 @@ pub const posix = @import("embed/posix.zig");
 const net = @import("embed/net.zig");
 const time = @import("embed/time.zig");
 const mem = @import("embed/mem.zig");
+const Io = @import("embed/Io.zig");
 const debug = @import("embed/debug.zig");
 const atomic = @import("embed/atomic.zig");
 pub const crypto = @import("embed/crypto.zig");
 const testing = @import("embed/testing.zig");
+const collections = @import("embed/collections.zig");
+
 pub const test_runner = struct {
     pub const std_compat = @import("embed/test_runner/std.zig");
     pub const channel = @import("embed/test_runner/channel.zig");
@@ -41,6 +44,7 @@ pub fn Make(comptime Impl: type) type {
         pub const posix = root.posix.make(Impl.posix);
         pub const time = root.time.make(Impl.time);
         pub const mem = root.mem;
+        pub const Io = root.Io;
         pub const debug = root.debug;
         pub const atomic = root.atomic;
         pub const testing = root.testing;
@@ -56,5 +60,60 @@ pub fn Make(comptime Impl: type) type {
             const channel_factory = root.channel.makeFactory(Impl.Channel);
             return channel_factory.Channel(T);
         }
+
+        // Platform-independent data structures (from std)
+        pub const array_list = collections.array_list;
+        pub fn ArrayList(comptime T: type) type {
+            return collections.ArrayList(T);
+        }
+        pub const ArrayListAligned = collections.ArrayListAligned;
+        pub const ArrayListAlignedUnmanaged = collections.ArrayListAlignedUnmanaged;
+        pub const ArrayListUnmanaged = ArrayList;
+
+        pub const MultiArrayList = collections.MultiArrayList;
+        pub const SegmentedList = collections.SegmentedList;
+
+        pub const hash_map = collections.hash_map;
+        pub const HashMap = collections.HashMap;
+        pub const HashMapUnmanaged = collections.HashMapUnmanaged;
+        pub const AutoHashMap = collections.AutoHashMap;
+        pub const AutoHashMapUnmanaged = collections.AutoHashMapUnmanaged;
+        pub const StringHashMap = collections.StringHashMap;
+        pub const StringHashMapUnmanaged = collections.StringHashMapUnmanaged;
+
+        pub const array_hash_map = collections.array_hash_map;
+        pub const ArrayHashMap = collections.ArrayHashMap;
+        pub const ArrayHashMapUnmanaged = collections.ArrayHashMapUnmanaged;
+        pub const AutoArrayHashMap = collections.AutoArrayHashMap;
+        pub const AutoArrayHashMapUnmanaged = collections.AutoArrayHashMapUnmanaged;
+        pub const StringArrayHashMap = collections.StringArrayHashMap;
+        pub const StringArrayHashMapUnmanaged = collections.StringArrayHashMapUnmanaged;
+
+        pub const BufMap = collections.BufMap;
+        pub const BufSet = collections.BufSet;
+
+        pub const PriorityQueue = collections.PriorityQueue;
+        pub const PriorityDequeue = collections.PriorityDequeue;
+
+        pub const bit_set = collections.bit_set;
+        pub const StaticBitSet = collections.StaticBitSet;
+        pub const DynamicBitSet = collections.DynamicBitSet;
+        pub const DynamicBitSetUnmanaged = collections.DynamicBitSetUnmanaged;
+
+        pub const DoublyLinkedList = collections.DoublyLinkedList;
+        pub const SinglyLinkedList = collections.SinglyLinkedList;
+
+        pub const Treap = collections.Treap;
+
+        pub const enums = collections.enums;
+        pub const EnumArray = collections.EnumArray;
+        pub const EnumMap = collections.EnumMap;
+        pub const EnumSet = collections.EnumSet;
+
+        pub const static_string_map = collections.static_string_map;
+        pub const StaticStringMap = collections.StaticStringMap;
+        pub const StaticStringMapWithEql = collections.StaticStringMapWithEql;
+
+        pub const BitStack = collections.BitStack;
     };
 }
