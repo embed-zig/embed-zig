@@ -3,14 +3,17 @@
 //! Builds and parses DNS wire-format packets (RFC 1035) directly.
 //! No libc getaddrinfo, fully portable across embed platforms.
 //!
-//! Strategy (mirrors Zig std's resMSendRc):
-//!   1. Build query packets (A, AAAA)
-//!   2. Open UDP sockets (one per address family)
-//!   3. Fan-out: send each query to ALL configured servers
-//!   4. Poll for responses; match by query ID
-//!   5. On SERVFAIL, retry up to `attempts` times
-//!   6. Retry unanswered queries at `timeout / attempts` intervals
-//!   7. Extract A/AAAA records from responses into caller buffer
+//! Strategy (worker pool):
+//!   1. Build query packets (A, AAAA depending on mode)
+//!   2. Create a task queue: one task per configured server
+//!   3. Spawn N worker threads (default 2); each worker:
+//!      a. Atomically claims the next server from the queue
+//!      b. Sends all query packets via the server's protocol (UDP/TCP)
+//!      c. Waits for responses with SO_RCVTIMEO
+//!      d. On success → writes result, sets done flag
+//!      e. On failure → loops back to (a) for next server
+//!   4. Main thread joins workers, returns first successful result
+//!   5. If all servers fail → Timeout
 
 const udp_conn = @import("UdpConn.zig");
 
@@ -19,6 +22,9 @@ pub fn Resolver(comptime lib: type) type {
     const Addr = lib.net.Address;
     const UdpConn = udp_conn.UdpConn(lib);
     const mem = lib.mem;
+    const Allocator = mem.Allocator;
+    const Thread = lib.Thread;
+    const Atomic = lib.atomic.Value;
 
     return struct {
         options: Options,
@@ -29,24 +35,60 @@ pub fn Resolver(comptime lib: type) type {
             udp = 0,
             tcp = 1,
             tls = 2,
-            doh = 3, // DNS-over-HTTPS (not yet implemented)
+            doh = 3,
         };
-
-        pub const ProtocolSet = lib.EnumSet(Protocol);
 
         pub const Server = struct {
             addr: Addr,
-            protocols: ProtocolSet = ProtocolSet.initMany(&.{ .udp, .tcp }),
+            protocol: Protocol = .udp,
+
+            pub fn init(comptime ip: []const u8, comptime protocol: Protocol) Server {
+                const port: u16 = comptime switch (protocol) {
+                    .udp, .tcp => 53,
+                    .tls => 853,
+                    .doh => 443,
+                };
+                return .{ .addr = comptime Addr.parseIp(ip, port) catch unreachable, .protocol = protocol };
+            }
+        };
+
+        pub const dns = struct {
+            pub const ali = struct {
+                pub const v4_1 = "223.5.5.5";
+                pub const v4_2 = "223.6.6.6";
+                pub const v6_1 = "2400:3200::1";
+                pub const v6_2 = "2400:3200:baba::1";
+            };
+            pub const google = struct {
+                pub const v4_1 = "8.8.8.8";
+                pub const v4_2 = "8.8.4.4";
+                pub const v6_1 = "2001:4860:4860::8888";
+                pub const v6_2 = "2001:4860:4860::8844";
+            };
+            pub const cloudflare = struct {
+                pub const v4_1 = "1.1.1.1";
+                pub const v4_2 = "1.0.0.1";
+                pub const v6_1 = "2606:4700:4700::1111";
+                pub const v6_2 = "2606:4700:4700::1001";
+            };
+            pub const quad9 = struct {
+                pub const v4_1 = "9.9.9.9";
+                pub const v4_2 = "149.112.112.112";
+            };
         };
 
         pub const Options = struct {
             servers: []const Server = &.{
-                .{ .addr = Addr.initIp4(.{ 8, 8, 8, 8 }, 53) },
-                .{ .addr = Addr.initIp4(.{ 1, 1, 1, 1 }, 53) },
+                Server.init(dns.ali.v4_1, .udp),
+                Server.init(dns.cloudflare.v4_1, .udp),
+                Server.init(dns.ali.v4_2, .udp),
+                Server.init(dns.cloudflare.v4_2, .udp),
             },
-            timeout_ms: u32 = 5000,
+            timeout_ms: u32 = 1000,
             attempts: u32 = 2,
             mode: QueryMode = .ipv4_and_ipv6,
+            concurrency: u32 = 2,
+            spawn_config: Thread.SpawnConfig = .{},
         };
 
         pub const QueryMode = enum {
@@ -57,21 +99,47 @@ pub fn Resolver(comptime lib: type) type {
 
         pub const LookupError = error{
             NameNotFound,
-            ServerFailure,
             Refused,
             Timeout,
             InvalidResponse,
             NoServerConfigured,
-            BufferTooSmall,
-        } || posix.SocketError || posix.SendToError || posix.RecvFromError || posix.PollError;
+            OutOfMemory,
+        } || posix.SocketError || posix.SendToError || posix.RecvFromError ||
+            posix.ConnectError || posix.SendError || posix.SetSockOptError ||
+            Thread.SpawnError;
 
         pub fn init(options: Options) Self {
             return .{ .options = options };
         }
 
-        /// Resolve hostname to IP addresses.
-        /// Returns the number of addresses written to `buf`.
-        pub fn lookupHost(self: Self, name: []const u8, buf: []Addr) LookupError!usize {
+        const MAX_ADDRS = 16;
+
+        const WorkerResult = struct {
+            addrs: [MAX_ADDRS]Addr = undefined,
+            count: usize = 0,
+            err: ?LookupError = null,
+            has_result: bool = false,
+        };
+
+        const SharedState = struct {
+            next_task: Atomic(usize),
+            done: Atomic(bool),
+            mutex: Thread.Mutex,
+            result: WorkerResult,
+            servers: []const Server,
+            query_pkts: []const QueryPkt,
+            timeout_ms: u32,
+            attempts: u32,
+        };
+
+        const QueryPkt = struct {
+            buf: [512]u8,
+            len: usize,
+            qtype: u16,
+            id: u16,
+        };
+
+        pub fn lookupHost(self: Self, allocator: Allocator, name: []const u8, buf: []Addr) LookupError!usize {
             if (self.options.servers.len == 0) return error.NoServerConfigured;
 
             const num_queries: usize = switch (self.options.mode) {
@@ -79,176 +147,240 @@ pub fn Resolver(comptime lib: type) type {
                 .ipv4_and_ipv6 => 2,
             };
 
-            var queries: [2]Query = undefined;
-            var query_bufs: [2][512]u8 = undefined;
-
-            queries[0] = .{
-                .qtype = if (self.options.mode == .ipv6_only) QTYPE_AAAA else QTYPE_A,
-                .id = randomId(),
-                .answered = false,
-                .rcode = 0,
-                .answer_len = 0,
-            };
-            queries[0].pkt_len = buildQuery(&query_bufs[0], name, queries[0].qtype, queries[0].id) catch
-                return error.InvalidResponse;
-
+            var query_pkts: [2]QueryPkt = undefined;
+            {
+                var qbuf: [512]u8 = undefined;
+                const qtype: u16 = if (self.options.mode == .ipv6_only) QTYPE_AAAA else QTYPE_A;
+                const id = randomId();
+                const len = buildQuery(&qbuf, name, qtype, id) catch return error.InvalidResponse;
+                query_pkts[0] = .{ .buf = qbuf, .len = len, .qtype = qtype, .id = id };
+            }
             if (num_queries == 2) {
-                queries[1] = .{
-                    .qtype = QTYPE_AAAA,
-                    .id = randomId(),
-                    .answered = false,
-                    .rcode = 0,
-                    .answer_len = 0,
-                };
-                queries[1].pkt_len = buildQuery(&query_bufs[1], name, queries[1].qtype, queries[1].id) catch
-                    return error.InvalidResponse;
+                var qbuf: [512]u8 = undefined;
+                const id = randomId();
+                const len = buildQuery(&qbuf, name, QTYPE_AAAA, id) catch return error.InvalidResponse;
+                query_pkts[1] = .{ .buf = qbuf, .len = len, .qtype = QTYPE_AAAA, .id = id };
             }
 
-            const has_v4 = self.hasUdpFamily(posix.AF.INET);
-            const has_v6 = self.hasUdpFamily(posix.AF.INET6);
-            if (!has_v4 and !has_v6) return error.NoServerConfigured;
+            var state = SharedState{
+                .next_task = Atomic(usize).init(0),
+                .done = Atomic(bool).init(false),
+                .mutex = .{},
+                .result = .{},
+                .servers = self.options.servers,
+                .query_pkts = query_pkts[0..num_queries],
+                .timeout_ms = self.options.timeout_ms,
+                .attempts = self.options.attempts,
+            };
 
-            var fd4: ?posix.socket_t = null;
-            var fd6: ?posix.socket_t = null;
-            defer {
-                if (fd4) |f| posix.close(f);
-                if (fd6) |f| posix.close(f);
-            }
-            if (has_v4) fd4 = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
-            if (has_v6) fd6 = try posix.socket(posix.AF.INET6, posix.SOCK.DGRAM, 0);
+            const n_workers: usize = @min(self.options.concurrency, @as(u32, @intCast(self.options.servers.len)));
+            if (n_workers == 0) return error.NoServerConfigured;
 
-            const interval_ms: i64 = @intCast(self.options.timeout_ms / self.options.attempts);
-            var retry: u32 = 0;
+            const workers = allocator.alloc(Thread, n_workers) catch return error.OutOfMemory;
+            defer allocator.free(workers);
 
-            while (retry < self.options.attempts) : (retry += 1) {
-                for (queries[0..num_queries]) |*q| {
-                    if (q.answered) continue;
-                    const pkt = query_bufs[q.slotIndex(queries[0..num_queries])][0..q.pkt_len];
-                    for (self.options.servers) |server| {
-                        if (!server.protocols.contains(.udp)) continue;
-                        const fd = if (server.addr.any.family == posix.AF.INET6) fd6 else fd4;
-                        if (fd) |f| {
-                            var uc = UdpConn.init(f);
-                            _ = uc.writeTo(pkt, @ptrCast(&server.addr.any), server.addr.getOsSockLen()) catch continue;
-                        }
-                    }
-                }
-
-                const attempt_start = lib.time.milliTimestamp();
-                const attempt_deadline = attempt_start + interval_ms;
-
-                while (true) {
-                    const now = lib.time.milliTimestamp();
-                    const remaining_ms = attempt_deadline - now;
-                    if (remaining_ms <= 0) break;
-
-                    var nfds: usize = 0;
-                    var pfds: [2]posix.pollfd = undefined;
-                    if (fd4) |f| {
-                        pfds[nfds] = .{ .fd = f, .events = posix.POLL.IN, .revents = 0 };
-                        nfds += 1;
-                    }
-                    if (fd6) |f| {
-                        pfds[nfds] = .{ .fd = f, .events = posix.POLL.IN, .revents = 0 };
-                        nfds += 1;
-                    }
-
-                    const ready = posix.poll(pfds[0..nfds], @intCast(remaining_ms)) catch break;
-                    if (ready == 0) break;
-
-                    for (pfds[0..nfds]) |pfd| {
-                        if (pfd.revents & posix.POLL.IN == 0) continue;
-                        var uc = UdpConn.init(pfd.fd);
-                        var recv_buf: [512]u8 = undefined;
-                        const result = uc.readFrom(&recv_buf) catch continue;
-                        if (result.bytes_read < 12) continue;
-                        const n = result.bytes_read;
-
-                        const resp_id = readU16(recv_buf[0..2]);
-                        const rcode: u4 = @truncate(recv_buf[3]);
-
-                        for (queries[0..num_queries]) |*q| {
-                            if (q.id == resp_id and !q.answered) {
-                                if (rcode == RCODE_SERVFAIL) {
-                                    q.id = randomId();
-                                    q.pkt_len = buildQuery(
-                                        &query_bufs[q.slotIndex(queries[0..num_queries])],
-                                        name,
-                                        q.qtype,
-                                        q.id,
-                                    ) catch continue;
-                                    break;
-                                }
-                                q.answered = true;
-                                q.rcode = rcode;
-                                q.answer_len = n;
-                                @memcpy(q.answer_buf[0..n], recv_buf[0..n]);
-                                break;
-                            }
-                        }
-                    }
-
-                    if (allAnswered(queries[0..num_queries])) break;
-                }
-
-                if (allAnswered(queries[0..num_queries])) break;
+            var spawned: usize = 0;
+            for (0..n_workers) |_| {
+                workers[spawned] = Thread.spawn(self.options.spawn_config, workerFn, .{&state}) catch continue;
+                spawned += 1;
             }
 
-            var count: usize = 0;
-            for (queries[0..num_queries]) |q| {
-                if (!q.answered) continue;
-                if (q.rcode == RCODE_NXDOMAIN) return error.NameNotFound;
-                if (q.rcode == RCODE_SERVFAIL) return error.ServerFailure;
-                if (q.rcode == RCODE_REFUSED) return error.Refused;
-                if (q.rcode != RCODE_NOERROR) return error.InvalidResponse;
+            if (spawned == 0) return error.NoServerConfigured;
 
-                count += parseResponse(q.answer_buf[0..q.answer_len], q.qtype, buf[count..]) catch
-                    return error.InvalidResponse;
-            }
+            for (workers[0..spawned]) |w| w.join();
 
-            if (count == 0) {
-                var any_answered = false;
-                for (queries[0..num_queries]) |q| {
-                    if (q.answered) {
-                        any_answered = true;
-                        break;
-                    }
-                }
-                if (!any_answered) return error.Timeout;
-            }
+            state.mutex.lock();
+            defer state.mutex.unlock();
 
+            if (!state.result.has_result) return error.Timeout;
+            if (state.result.err) |e| return e;
+
+            const count = @min(state.result.count, buf.len);
+            for (0..count) |i| buf[i] = state.result.addrs[i];
             return count;
         }
 
-        fn allAnswered(queries: []const Query) bool {
-            for (queries) |q| {
-                if (!q.answered) return false;
+        fn workerFn(state: *SharedState) void {
+            while (!state.done.load(.acquire)) {
+                const idx = state.next_task.fetchAdd(1, .acq_rel);
+                if (idx >= state.servers.len) return;
+
+                const server = state.servers[idx];
+                const result: ?WorkerResult = switch (server.protocol) {
+                    .udp => udpResolve(server, state),
+                    .tcp => tcpResolve(server, state),
+                    else => null,
+                };
+
+                if (result) |r| {
+                    state.mutex.lock();
+                    defer state.mutex.unlock();
+                    if (!state.done.load(.acquire)) {
+                        state.result = r;
+                        state.done.store(true, .release);
+                    }
+                    return;
+                }
             }
-            return true;
         }
 
-        fn hasUdpFamily(self: Self, family: u32) bool {
-            for (self.options.servers) |s| {
-                if (s.protocols.contains(.udp) and s.addr.any.family == family) return true;
-            }
-            return false;
+        fn setRecvTimeout(fd: posix.socket_t, ms: u32) void {
+            const tv = posix.timeval{
+                .sec = @intCast(ms / 1000),
+                .usec = @intCast((@as(u64, ms) % 1000) * 1000),
+            };
+            const bytes: []const u8 = @as([*]const u8, @ptrCast(&tv))[0..@sizeOf(posix.timeval)];
+            posix.setsockopt(fd, posix.SOL.SOCKET, posix.SO.RCVTIMEO, bytes) catch {};
         }
 
-        const Query = struct {
-            qtype: u16,
-            id: u16,
-            pkt_len: usize = 0,
-            answered: bool,
-            rcode: u4 = 0,
-            answer_buf: [512]u8 = undefined,
-            answer_len: usize = 0,
+        fn udpResolve(server: Server, state: *SharedState) ?WorkerResult {
+            const attempts = @max(state.attempts, 1);
+            const per_attempt_ms = state.timeout_ms / attempts;
 
-            fn slotIndex(self: *const Query, all: []const Query) usize {
-                return (@intFromPtr(self) - @intFromPtr(all.ptr)) / @sizeOf(Query);
+            const fd = posix.socket(
+                server.addr.any.family,
+                posix.SOCK.DGRAM,
+                0,
+            ) catch return null;
+            defer posix.close(fd);
+
+            setRecvTimeout(fd, per_attempt_ms);
+
+            var result = WorkerResult{};
+            var answered: usize = 0;
+
+            var attempt: u32 = 0;
+            while (attempt < attempts) : (attempt += 1) {
+                if (state.done.load(.acquire)) return null;
+
+                for (state.query_pkts) |qpkt| {
+                    var uc = UdpConn.init(fd);
+                    _ = uc.writeTo(
+                        qpkt.buf[0..qpkt.len],
+                        @ptrCast(&server.addr.any),
+                        server.addr.getOsSockLen(),
+                    ) catch continue;
+                }
+
+                var recv_tries: usize = 0;
+                while (recv_tries < state.query_pkts.len * 2) : (recv_tries += 1) {
+                    if (state.done.load(.acquire)) return null;
+
+                    var recv_buf: [512]u8 = undefined;
+                    var uc = UdpConn.init(fd);
+                    const rr = uc.readFrom(&recv_buf) catch break;
+                    if (rr.bytes_read < 12) continue;
+
+                    const resp_id = readU16(recv_buf[0..2]);
+                    const rcode: u4 = @truncate(recv_buf[3]);
+                    if (rcode == RCODE_SERVFAIL) break;
+                    if (rcode == RCODE_NXDOMAIN) {
+                        return WorkerResult{ .has_result = true, .err = error.NameNotFound };
+                    }
+                    if (rcode == RCODE_REFUSED) {
+                        return WorkerResult{ .has_result = true, .err = error.Refused };
+                    }
+                    if (rcode != RCODE_NOERROR) continue;
+
+                    for (state.query_pkts) |qpkt| {
+                        if (qpkt.id != resp_id) continue;
+                        const n = parseResponse(recv_buf[0..rr.bytes_read], qpkt.qtype, result.addrs[result.count..]) catch continue;
+                        if (n > 0) {
+                            result.count += n;
+                            answered += 1;
+                        }
+                        break;
+                    }
+
+                    if (answered >= state.query_pkts.len) {
+                        result.has_result = true;
+                        return result;
+                    }
+                }
             }
-        };
+            return null;
+        }
 
-        // --- DNS wire format constants ---
+        fn tcpResolve(server: Server, state: *SharedState) ?WorkerResult {
+            const attempts = @max(state.attempts, 1);
+            const per_attempt_ms = state.timeout_ms / attempts;
+
+            var attempt: u32 = 0;
+            while (attempt < attempts) : (attempt += 1) {
+                if (state.done.load(.acquire)) return null;
+                if (tcpAttempt(server, state, per_attempt_ms)) |r| return r;
+            }
+            return null;
+        }
+
+        fn tcpAttempt(server: Server, state: *SharedState, timeout_ms: u32) ?WorkerResult {
+            const fd = posix.socket(
+                server.addr.any.family,
+                posix.SOCK.STREAM,
+                0,
+            ) catch return null;
+            defer posix.close(fd);
+
+            posix.connect(fd, @ptrCast(&server.addr.any), server.addr.getOsSockLen()) catch return null;
+            setRecvTimeout(fd, timeout_ms);
+
+            for (state.query_pkts) |qpkt| {
+                if (state.done.load(.acquire)) return null;
+
+                var tcp_buf: [514]u8 = undefined;
+                tcp_buf[0] = @truncate(qpkt.len >> 8);
+                tcp_buf[1] = @truncate(qpkt.len);
+                @memcpy(tcp_buf[2..][0..qpkt.len], qpkt.buf[0..qpkt.len]);
+                _ = posix.send(fd, tcp_buf[0 .. 2 + qpkt.len], 0) catch return null;
+            }
+
+            var result = WorkerResult{};
+            var answered: usize = 0;
+
+            for (state.query_pkts) |qpkt| {
+                if (state.done.load(.acquire)) return null;
+
+                var len_buf: [2]u8 = undefined;
+                const ln = posix.recv(fd, &len_buf, 0) catch return null;
+                if (ln < 2) return null;
+
+                const msg_len = readU16(&len_buf);
+                if (msg_len < 12 or msg_len > 512) return null;
+
+                var recv_buf: [512]u8 = undefined;
+                var total: usize = 0;
+                while (total < msg_len) {
+                    if (state.done.load(.acquire)) return null;
+                    const r = posix.recv(fd, recv_buf[total..msg_len], 0) catch return null;
+                    if (r == 0) return null;
+                    total += r;
+                }
+
+                const rcode: u4 = @truncate(recv_buf[3]);
+                if (rcode == RCODE_NXDOMAIN) {
+                    return WorkerResult{ .has_result = true, .err = error.NameNotFound };
+                }
+                if (rcode == RCODE_REFUSED) {
+                    return WorkerResult{ .has_result = true, .err = error.Refused };
+                }
+                if (rcode == RCODE_SERVFAIL) return null;
+                if (rcode != RCODE_NOERROR) return null;
+
+                const n = parseResponse(recv_buf[0..msg_len], qpkt.qtype, result.addrs[result.count..]) catch return null;
+                if (n > 0) {
+                    result.count += n;
+                    answered += 1;
+                }
+            }
+
+            if (answered > 0) {
+                result.has_result = true;
+                return result;
+            }
+            return null;
+        }
+
+        // --- DNS wire format ---
 
         pub const QTYPE_A: u16 = 1;
         pub const QTYPE_AAAA: u16 = 28;
@@ -259,17 +391,17 @@ pub fn Resolver(comptime lib: type) type {
         const RCODE_SERVFAIL: u4 = 2;
         const RCODE_REFUSED: u4 = 5;
 
-        const FLAG_RD: u16 = 0x0100; // Recursion Desired
+        const FLAG_RD: u16 = 0x0100;
 
         pub fn buildQuery(out: *[512]u8, name: []const u8, qtype: u16, id: u16) !usize {
             var pos: usize = 0;
 
             writeU16(out, &pos, id);
             writeU16(out, &pos, FLAG_RD);
-            writeU16(out, &pos, 1); // QDCOUNT
-            writeU16(out, &pos, 0); // ANCOUNT
-            writeU16(out, &pos, 0); // NSCOUNT
-            writeU16(out, &pos, 0); // ARCOUNT
+            writeU16(out, &pos, 1);
+            writeU16(out, &pos, 0);
+            writeU16(out, &pos, 0);
+            writeU16(out, &pos, 0);
 
             var remaining = name;
             while (remaining.len > 0) {

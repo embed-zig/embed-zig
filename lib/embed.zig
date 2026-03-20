@@ -44,7 +44,6 @@ pub fn Make(comptime Impl: type) type {
         pub const debug = root.debug;
         pub const atomic = root.atomic;
         pub const testing = root.testing;
-        pub const EnumSet = @import("std").EnumSet;
         pub const net = struct {
             pub const Ip4Address = root.net.Ip4Address(Self.posix);
             pub const Ip6Address = root.net.Ip6Address(Self.posix);

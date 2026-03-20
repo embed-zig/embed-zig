@@ -120,51 +120,65 @@ pub fn run(comptime lib: type) void {
 
         test "options defaults" {
             const r = R.init(.{});
-            try testing.expectEqual(@as(u32, 5000), r.options.timeout_ms);
+            try testing.expectEqual(@as(u32, 1000), r.options.timeout_ms);
             try testing.expectEqual(@as(u32, 2), r.options.attempts);
             try testing.expectEqual(R.QueryMode.ipv4_and_ipv6, r.options.mode);
-            try testing.expectEqual(@as(usize, 2), r.options.servers.len);
+            try testing.expectEqual(@as(usize, 4), r.options.servers.len);
         }
 
-        test "ProtocolSet" {
-            const ps = R.ProtocolSet.initMany(&.{ .udp, .tcp });
-            try testing.expect(ps.contains(.udp));
-            try testing.expect(ps.contains(.tcp));
-            try testing.expect(!ps.contains(.tls));
-
-            const tls_only = R.ProtocolSet.initOne(.tls);
-            try testing.expect(tls_only.contains(.tls));
-            try testing.expect(!tls_only.contains(.udp));
+        test "Server protocol config" {
+            const s1 = R.Server.init(R.dns.ali.v4_1, .udp);
+            const s2 = R.Server.init(R.dns.ali.v4_2, .tls);
+            try testing.expectEqual(R.Protocol.udp, s1.protocol);
+            try testing.expectEqual(R.Protocol.tls, s2.protocol);
         }
 
-        test "Server per-protocol config" {
-            const servers = [_]R.Server{
-                .{ .addr = Addr.initIp4(.{ 8, 8, 8, 8 }, 53) },
-                .{ .addr = Addr.initIp4(.{ 1, 1, 1, 1 }, 853), .protocols = R.ProtocolSet.initOne(.tls) },
+        test "lookupHost real DNS (UDP)" {
+            var resolver = R.init(.{
+                .servers = &.{R.Server.init(R.dns.ali.v4_1, .udp)},
+                .mode = .ipv4_only,
+                .timeout_ms = 3000,
+                .attempts = 2,
+            });
+            var addrs: [8]Addr = undefined;
+            const count = resolver.lookupHost(testing.allocator, "public.alidns.com", &addrs) catch |err| {
+                lib.debug.print("DNS lookup skipped (no network?): {}\n", .{err});
+                return;
             };
-            try testing.expect(servers[0].protocols.contains(.udp));
-            try testing.expect(servers[0].protocols.contains(.tcp));
-            try testing.expect(!servers[1].protocols.contains(.udp));
-            try testing.expect(servers[1].protocols.contains(.tls));
+            try testing.expect(count > 0);
         }
 
-        test "lookupHost real DNS" {
+        test "lookupHost real DNS (TCP)" {
+            var resolver = R.init(.{
+                .servers = &.{R.Server.init(R.dns.ali.v4_1, .tcp)},
+                .mode = .ipv4_only,
+                .timeout_ms = 3000,
+                .attempts = 2,
+            });
+            var addrs: [8]Addr = undefined;
+            const count = resolver.lookupHost(testing.allocator, "public.alidns.com", &addrs) catch |err| {
+                lib.debug.print("DNS TCP lookup skipped (no network?): {}\n", .{err});
+                return;
+            };
+            try testing.expect(count > 0);
+        }
+
+        test "lookupHost UDP+TCP parallel" {
             var resolver = R.init(.{
                 .servers = &.{
-                    .{ .addr = Addr.initIp4(.{ 8, 8, 8, 8 }, 53) },
+                    R.Server.init(R.dns.ali.v4_1, .udp),
+                    R.Server.init(R.dns.ali.v4_2, .tcp),
                 },
                 .mode = .ipv4_only,
                 .timeout_ms = 3000,
                 .attempts = 2,
             });
             var addrs: [8]Addr = undefined;
-            const count = resolver.lookupHost("one.one.one.one", &addrs) catch |err| {
-                lib.debug.print("DNS lookup skipped (no network?): {}\n", .{err});
+            const count = resolver.lookupHost(testing.allocator, "public.alidns.com", &addrs) catch |err| {
+                lib.debug.print("DNS parallel lookup skipped (no network?): {}\n", .{err});
                 return;
             };
             try testing.expect(count > 0);
-            const ip: [4]u8 = @bitCast(addrs[0].in.sa.addr);
-            try testing.expect(ip[0] == 1);
         }
     };
 }
