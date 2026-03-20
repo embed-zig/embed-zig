@@ -6,7 +6,7 @@
 //! Impl must provide:
 //!
 //! Types:
-//!   fd_t, socket_t, sockaddr, socklen_t, pollfd,
+//!   fd_t, socket_t, sockaddr, socklen_t, pollfd, timeval,
 //!   AF, SOCK, IPPROTO, SOL, SO, POLL,
 //!   mode_t, O
 //!
@@ -84,6 +84,7 @@ pub fn make(comptime Impl: type) type {
         pub const SO = Impl.SO;
         pub const POLL = Impl.POLL;
         pub const ShutdownHow = root.ShutdownHow;
+        pub const timeval = Impl.timeval;
         pub const mode_t = Impl.mode_t;
         pub const O = Impl.O;
 

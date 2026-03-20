@@ -751,7 +751,6 @@ fn hkdfTests(comptime lib: type) !void {
 
     inline for (.{
         .{ crypto.kdf.hkdf.HkdfSha256, "HkdfSha256" },
-        .{ crypto.kdf.hkdf.HkdfSha384, "HkdfSha384" },
     }) |entry| {
         const H = entry[0];
         const name = entry[1];

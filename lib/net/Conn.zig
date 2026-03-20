@@ -19,9 +19,9 @@ pub const VTable = struct {
     read: *const fn (ptr: *anyopaque, buf: []u8) ReadError!usize,
     write: *const fn (ptr: *anyopaque, buf: []const u8) WriteError!usize,
     close: *const fn (ptr: *anyopaque) void,
-    deinit: ?*const fn (ptr: *anyopaque) void = null,
-    setReadTimeout: ?*const fn (ptr: *anyopaque, ms: ?u32) void = null,
-    setWriteTimeout: ?*const fn (ptr: *anyopaque, ms: ?u32) void = null,
+    deinit: *const fn (ptr: *anyopaque) void,
+    setReadTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
+    setWriteTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
 };
 
 pub const ReadError = error{
@@ -55,15 +55,15 @@ pub fn close(self: Conn) void {
 /// Close the connection and free the underlying heap allocation.
 pub fn deinit(self: Conn) void {
     self.close();
-    if (self.vtable.deinit) |f| f(self.ptr);
+    self.vtable.deinit(self.ptr);
 }
 
 pub fn setReadTimeout(self: Conn, ms: ?u32) void {
-    if (self.vtable.setReadTimeout) |f| f(self.ptr, ms);
+    self.vtable.setReadTimeout(self.ptr, ms);
 }
 
 pub fn setWriteTimeout(self: Conn, ms: ?u32) void {
-    if (self.vtable.setWriteTimeout) |f| f(self.ptr, ms);
+    self.vtable.setWriteTimeout(self.ptr, ms);
 }
 
 /// Read exactly buf.len bytes or return error.
@@ -111,9 +111,9 @@ pub fn init(pointer: anytype) Conn {
             .read = readFn,
             .write = writeFn,
             .close = closeFn,
-            .deinit = if (@hasDecl(Impl, "deinit")) deinitFn else null,
-            .setReadTimeout = if (@hasDecl(Impl, "setReadTimeout")) setReadTimeoutFn else null,
-            .setWriteTimeout = if (@hasDecl(Impl, "setWriteTimeout")) setWriteTimeoutFn else null,
+            .deinit = deinitFn,
+            .setReadTimeout = setReadTimeoutFn,
+            .setWriteTimeout = setWriteTimeoutFn,
         };
 
         fn deinitFn(ptr: *anyopaque) void {

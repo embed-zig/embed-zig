@@ -304,12 +304,12 @@ We adopt the same strategy but with a cleaner API.
 
 | Aspect                  | Zig std (`getAddressList`)            | embed `net.Resolver`                        |
 |-------------------------|---------------------------------------|---------------------------------------------|
-| Server config           | Parse `/etc/resolv.conf` (Linux only) | Explicit `[]const Addr` array               |
+| Server config           | Parse `/etc/resolv.conf` (Linux only) | Explicit `[]const Server` with per-server protocols |
 | Parallel queries        | A+AAAA sent to all NS in parallel     | Same: fan-out to all servers, A+AAAA        |
 | Result storage          | Heap `ArrayList(LookupAddr)`          | Caller-provided `[]Address` buffer          |
 | Timeout / retry         | From resolv.conf (`timeout`, `attempts`) | Explicit in `Options`                    |
 | Platform                | Linux-specific, musl port             | Platform-agnostic via `lib.posix`           |
-| Protocol                | UDP only (no TCP fallback)            | UDP + TCP fallback on truncation            |
+| Protocol                | UDP only (no TCP fallback)            | Per-server `ProtocolSet`: udp, tcp, tls, doh |
 
 ### Resolver struct
 
@@ -317,20 +317,32 @@ We adopt the same strategy but with a cleaner API.
 pub fn Resolver(comptime lib: type) type {
     const posix = lib.posix;
     const Addr = lib.net.Address;
-    const Allocator = lib.mem.Allocator;
 
     return struct {
-        allocator: Allocator,
         options: Options,
 
         const Self = @This();
 
+        pub const Protocol = enum(u3) {
+            udp = 0,
+            tcp = 1,
+            tls = 2,
+            doh = 3, // DNS-over-HTTPS (not yet implemented)
+        };
+
+        pub const ProtocolSet = lib.EnumSet(Protocol);
+
+        pub const Server = struct {
+            addr: Addr,
+            protocols: ProtocolSet = ProtocolSet.initMany(&.{ .udp, .tcp }),
+        };
+
         pub const Options = struct {
-            /// DNS server addresses. Queries are sent to ALL servers in parallel.
-            /// Default: Google DNS (8.8.8.8) + Cloudflare (1.1.1.1).
-            servers: []const Addr = &.{
-                Addr.initIp4(.{ 8, 8, 8, 8 }, 53),
-                Addr.initIp4(.{ 1, 1, 1, 1 }, 53),
+            /// DNS servers. Queries fan-out to ALL servers in parallel.
+            /// Each server declares which protocols it supports.
+            servers: []const Server = &.{
+                .{ .addr = Addr.initIp4(.{ 8, 8, 8, 8 }, 53) },                                       // Google: udp+tcp
+                .{ .addr = Addr.initIp4(.{ 1, 1, 1, 1 }, 853), .protocols = ProtocolSet.initOne(.tls) }, // Cloudflare: tls
             },
             /// Total timeout in milliseconds (default: 5000ms).
             timeout_ms: u32 = 5000,
@@ -355,8 +367,8 @@ pub fn Resolver(comptime lib: type) type {
             NoServerConfigured,
         } || posix.SocketError || posix.SendToError || posix.RecvFromError;
 
-        pub fn init(allocator: Allocator, options: Options) Self {
-            return .{ .allocator = allocator, .options = options };
+        pub fn init(options: Options) Self {
+            return .{ .options = options };
         }
 
         /// Resolve hostname to IP addresses.

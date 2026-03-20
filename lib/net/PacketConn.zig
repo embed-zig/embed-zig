@@ -20,7 +20,7 @@ pub const VTable = struct {
     readFrom: *const fn (ptr: *anyopaque, buf: []u8) ReadFromError!ReadFromResult,
     writeTo: *const fn (ptr: *anyopaque, buf: []const u8, addr: [*]const u8, addr_len: u32) WriteToError!usize,
     close: *const fn (ptr: *anyopaque) void,
-    deinit: ?*const fn (ptr: *anyopaque) void = null,
+    deinit: *const fn (ptr: *anyopaque) void,
 };
 
 pub const AddrStorage = [128]u8;
@@ -32,7 +32,6 @@ pub const ReadFromResult = struct {
 };
 
 pub const ReadFromError = error{
-    WouldBlock,
     ConnectionRefused,
     TimedOut,
     Unexpected,
@@ -60,7 +59,7 @@ pub fn close(self: PacketConn) void {
 
 pub fn deinit(self: PacketConn) void {
     self.close();
-    if (self.vtable.deinit) |f| f(self.ptr);
+    self.vtable.deinit(self.ptr);
 }
 
 /// Wrap a pointer to any concrete type that has readFrom/writeTo/close
@@ -91,7 +90,7 @@ pub fn init(pointer: anytype) PacketConn {
             .readFrom = readFromFn,
             .writeTo = writeToFn,
             .close = closeFn,
-            .deinit = if (@hasDecl(Impl, "deinit")) deinitFn else null,
+            .deinit = deinitFn,
         };
 
         fn deinitFn(ptr: *anyopaque) void {
