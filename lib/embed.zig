@@ -18,12 +18,19 @@ pub const posix = @import("embed/posix.zig");
 const net = @import("embed/net.zig");
 const time = @import("embed/time.zig");
 const mem = @import("embed/mem.zig");
+const debug = @import("embed/debug.zig");
 const atomic = @import("embed/atomic.zig");
+pub const crypto = @import("embed/crypto.zig");
 const testing = @import("embed/testing.zig");
 pub const test_runner = struct {
     pub const std_compat = @import("embed/test_runner/std.zig");
     pub const channel = @import("embed/test_runner/channel.zig");
+    pub const rsa = @import("embed/test_runner/rsa.zig");
 };
+
+test {
+    _ = @import("embed/test_runner/std.zig");
+}
 
 pub fn Make(comptime Impl: type) type {
     return struct {
@@ -33,11 +40,14 @@ pub fn Make(comptime Impl: type) type {
         pub const posix = root.posix.make(Impl.posix);
         pub const time = root.time.make(Impl.time);
         pub const mem = root.mem;
+        pub const debug = root.debug;
         pub const atomic = root.atomic;
         pub const testing = root.testing;
         pub const net = struct {
             pub const Ip4Address = root.net.Ip4Address(Self.posix);
         };
+
+        pub const crypto = root.crypto.make(Impl.crypto);
 
         pub fn Channel(comptime T: type) type {
             const channel_factory = root.channel.makeFactory(Impl.Channel);

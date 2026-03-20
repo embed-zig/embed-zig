@@ -1,4 +1,4 @@
-//! std compatibility test — exercises Thread, log, posix, net, time, atomic, mem.
+//! std compatibility test — exercises Thread, log, posix, net, time, atomic, mem, crypto.
 //!
 //! Accepts any type with the same shape as std (lib.Thread, lib.log, lib.posix).
 //! If this runs with std directly, it proves embed is a proper subset.
@@ -6,6 +6,9 @@
 //! Usage:
 //!   try @import("embed").test_runner.std_compat.run(std);
 //!   try @import("embed").test_runner.std_compat.run(embed);
+
+const std = @import("std");
+const mem = std.mem;
 
 pub fn run(comptime lib: type) !void {
     const log = lib.log.scoped(.test_runner);
@@ -25,6 +28,7 @@ pub fn run(comptime lib: type) !void {
     try timeTests(lib);
     try atomicTests(lib);
     try memTests(lib);
+    try cryptoTests(lib);
 
     log.info("=== test_runner done ===", .{});
 }
@@ -600,10 +604,315 @@ fn memTests(comptime lib: type) !void {
 }
 
 
+// ---------------------------------------------------------------------------
+// Crypto
+// ---------------------------------------------------------------------------
+
+fn cryptoTests(comptime lib: type) !void {
+    const log = lib.log.scoped(.crypto);
+
+    try hashTests(lib);
+    try hmacTests(lib);
+    try aeadTests(lib);
+    try randomTests(lib);
+    try hkdfTests(lib);
+    try ed25519Tests(lib);
+    try ecdsaTests(lib);
+    try x25519Tests(lib);
+    try eccTests(lib);
+    try aesBlockTests(lib);
+    try certificateTests(lib);
+
+    log.info("crypto done", .{});
+}
+
+fn hashTests(comptime lib: type) !void {
+    const log = lib.log.scoped(.crypto);
+    const crypto = lib.crypto;
+
+    inline for (.{
+        .{ crypto.hash.sha2.Sha256, 32, "sha256" },
+        .{ crypto.hash.sha2.Sha384, 48, "sha384" },
+        .{ crypto.hash.sha2.Sha512, 64, "sha512" },
+    }) |entry| {
+        const H = entry[0];
+        const expected_len = entry[1];
+        const name = entry[2];
+
+        if (H.digest_length != expected_len) return error.HashDigestLenMismatch;
+
+        var out: [H.digest_length]u8 = undefined;
+        H.hash("hello", &out, .{});
+        if (out[0] == 0 and out[1] == 0 and out[2] == 0 and out[3] == 0)
+            return error.HashOutputAllZero;
+
+        var h = H.init(.{});
+        h.update("hel");
+        h.update("lo");
+        var out2: [H.digest_length]u8 = undefined;
+
+        const peeked = h.peek();
+
+        h.final(&out2);
+
+        if (!mem.eql(u8, &out, &out2)) return error.HashStreamingMismatch;
+        if (!mem.eql(u8, &peeked, &out)) return error.HashPeekMismatch;
+
+        log.info("hash.sha2.{s}: digest_length={} one-shot+streaming+peek ok", .{ name, H.digest_length });
+    }
+}
+
+fn hmacTests(comptime lib: type) !void {
+    const log = lib.log.scoped(.crypto);
+    const crypto = lib.crypto;
+
+    inline for (.{
+        .{ crypto.auth.hmac.sha2.HmacSha256, 32, "HmacSha256" },
+        .{ crypto.auth.hmac.sha2.HmacSha384, 48, "HmacSha384" },
+        .{ crypto.auth.hmac.sha2.HmacSha512, 64, "HmacSha512" },
+    }) |entry| {
+        const H = entry[0];
+        const expected_len = entry[1];
+        const name = entry[2];
+
+        if (H.mac_length != expected_len) return error.HmacMacLenMismatch;
+
+        const key = "secret-key";
+        const msg = "hello world";
+
+        var out1: [H.mac_length]u8 = undefined;
+        H.create(&out1, msg, key);
+
+        var ctx = H.init(key);
+        ctx.update("hello ");
+        ctx.update("world");
+        var out2: [H.mac_length]u8 = undefined;
+        ctx.final(&out2);
+
+        if (!mem.eql(u8, &out1, &out2)) return error.HmacStreamingMismatch;
+
+        log.info("auth.hmac.sha2.{s}: mac_length={} create+streaming ok", .{ name, H.mac_length });
+    }
+}
+
+fn aeadTests(comptime lib: type) !void {
+    const log = lib.log.scoped(.crypto);
+    const crypto = lib.crypto;
+
+    inline for (.{
+        .{ crypto.aead.aes_gcm.Aes128Gcm, "Aes128Gcm" },
+        .{ crypto.aead.aes_gcm.Aes256Gcm, "Aes256Gcm" },
+        .{ crypto.aead.chacha_poly.ChaCha20Poly1305, "ChaCha20Poly1305" },
+    }) |entry| {
+        const A = entry[0];
+        const name = entry[1];
+
+        var key: [A.key_length]u8 = undefined;
+        var nonce: [A.nonce_length]u8 = undefined;
+        @memset(&key, 0x42);
+        @memset(&nonce, 0x24);
+
+        const plaintext = "crypto test msg!";
+        var ciphertext: [plaintext.len]u8 = undefined;
+        var tag: [A.tag_length]u8 = undefined;
+
+        A.encrypt(&ciphertext, &tag, plaintext, "", nonce, key);
+
+        var decrypted: [plaintext.len]u8 = undefined;
+        try A.decrypt(&decrypted, &ciphertext, tag, "", nonce, key);
+
+        if (!mem.eql(u8, plaintext, &decrypted)) return error.AeadDecryptMismatch;
+
+        tag[0] ^= 0xff;
+        if (A.decrypt(&decrypted, &ciphertext, tag, "", nonce, key)) |_| {
+            return error.AeadShouldFailBadTag;
+        } else |_| {}
+
+        log.info("aead.{s}: encrypt+decrypt+auth ok", .{name});
+    }
+}
+
+fn randomTests(comptime lib: type) !void {
+    const log = lib.log.scoped(.crypto);
+
+    var buf1: [32]u8 = undefined;
+    var buf2: [32]u8 = undefined;
+    lib.crypto.random.bytes(&buf1);
+    lib.crypto.random.bytes(&buf2);
+
+    if (mem.eql(u8, &buf1, &buf2)) return error.RandomNotRandom;
+
+    log.info("random: 32 bytes x2 differ ok", .{});
+}
+
+fn hkdfTests(comptime lib: type) !void {
+    const log = lib.log.scoped(.crypto);
+    const crypto = lib.crypto;
+
+    inline for (.{
+        .{ crypto.kdf.hkdf.HkdfSha256, "HkdfSha256" },
+        .{ crypto.kdf.hkdf.HkdfSha384, "HkdfSha384" },
+    }) |entry| {
+        const H = entry[0];
+        const name = entry[1];
+
+        const salt = "salt-value";
+        const ikm = "input-keying-material";
+        const prk = H.extract(salt, ikm);
+
+        if (prk.len != H.prk_length) return error.HkdfPrkLenMismatch;
+
+        var okm: [64]u8 = undefined;
+        H.expand(&okm, "info", prk);
+
+        var all_zero = true;
+        for (okm) |b| {
+            if (b != 0) {
+                all_zero = false;
+                break;
+            }
+        }
+        if (all_zero) return error.HkdfOutputAllZero;
+
+        log.info("kdf.hkdf.{s}: extract+expand ok", .{name});
+    }
+}
+
+fn ed25519Tests(comptime lib: type) !void {
+    const log = lib.log.scoped(.crypto);
+    const Ed = lib.crypto.sign.Ed25519;
+
+    if (Ed.noise_length != 32) return error.Ed25519NoiseLenWrong;
+    if (Ed.KeyPair.seed_length != 32) return error.Ed25519SeedLenWrong;
+    if (Ed.Signature.encoded_length != 64) return error.Ed25519SigLenWrong;
+    if (Ed.PublicKey.encoded_length != 32) return error.Ed25519PkLenWrong;
+    if (Ed.SecretKey.encoded_length != 64) return error.Ed25519SkLenWrong;
+
+    const kp = Ed.KeyPair.generate();
+    const msg = "sign this message";
+    const sig = kp.sign(msg, null) catch return error.Ed25519SignFailed;
+
+    sig.verify(msg, kp.public_key) catch return error.Ed25519VerifyFailed;
+
+    const sig_bytes = sig.toBytes();
+    const sig2 = Ed.Signature.fromBytes(sig_bytes);
+    if (!mem.eql(u8, &sig_bytes, &sig2.toBytes())) return error.Ed25519SigRoundtripFailed;
+
+    log.info("sign.Ed25519: generate+sign+verify+roundtrip ok", .{});
+}
+
+fn ecdsaTests(comptime lib: type) !void {
+    const log = lib.log.scoped(.crypto);
+    const crypto = lib.crypto;
+
+    inline for (.{
+        .{ crypto.sign.ecdsa.EcdsaP256Sha256, "EcdsaP256Sha256" },
+        .{ crypto.sign.ecdsa.EcdsaP384Sha384, "EcdsaP384Sha384" },
+    }) |entry| {
+        const E = entry[0];
+        const name = entry[1];
+
+        _ = E.KeyPair.seed_length;
+        _ = E.Signature.encoded_length;
+        _ = E.PublicKey.compressed_sec1_encoded_length;
+        _ = E.PublicKey.uncompressed_sec1_encoded_length;
+        _ = E.SecretKey.encoded_length;
+
+        const sig_bytes = [_]u8{0} ** E.Signature.encoded_length;
+        const sig = E.Signature.fromBytes(sig_bytes);
+        const rt = sig.toBytes();
+        if (!mem.eql(u8, &sig_bytes, &rt)) return error.EcdsaSigRoundtripFailed;
+
+        log.info("sign.ecdsa.{s}: constants+roundtrip ok", .{name});
+    }
+}
+
+fn x25519Tests(comptime lib: type) !void {
+    const log = lib.log.scoped(.crypto);
+    const X = lib.crypto.dh.X25519;
+
+    if (X.secret_length != 32) return error.X25519SecretLenWrong;
+    if (X.public_length != 32) return error.X25519PublicLenWrong;
+    if (X.shared_length != 32) return error.X25519SharedLenWrong;
+    if (X.seed_length != 32) return error.X25519SeedLenWrong;
+
+    const kp_a = X.KeyPair.generate();
+    const kp_b = X.KeyPair.generate();
+
+    const shared_a = try X.scalarmult(kp_a.secret_key, kp_b.public_key);
+    const shared_b = try X.scalarmult(kp_b.secret_key, kp_a.public_key);
+
+    if (!mem.eql(u8, &shared_a, &shared_b)) return error.X25519SharedMismatch;
+
+    const recovered = try X.recoverPublicKey(kp_a.secret_key);
+    if (!mem.eql(u8, &recovered, &kp_a.public_key)) return error.X25519RecoverMismatch;
+
+    log.info("dh.X25519: generate+scalarmult+recoverPublicKey ok", .{});
+}
+
+fn eccTests(comptime lib: type) !void {
+    const log = lib.log.scoped(.crypto);
+    const P = lib.crypto.ecc.P256;
+
+    _ = P.Fe;
+    _ = P.scalar;
+    _ = P.basePoint;
+
+    log.info("ecc.P256: Fe+scalar+basePoint present", .{});
+}
+
+fn aesBlockTests(comptime lib: type) !void {
+    const log = lib.log.scoped(.crypto);
+    const aes = lib.crypto.core.aes;
+
+    inline for (.{
+        .{ aes.Aes128, 128, "Aes128" },
+        .{ aes.Aes256, 256, "Aes256" },
+    }) |entry| {
+        const A = entry[0];
+        const expected_bits = entry[1];
+        const name = entry[2];
+
+        if (A.key_bits != expected_bits) return error.AesKeyBitsMismatch;
+
+        var key: [A.key_bits / 8]u8 = undefined;
+        @memset(&key, 0xAB);
+
+        const plaintext: [16]u8 = .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+        var encrypted: [16]u8 = undefined;
+        var decrypted: [16]u8 = undefined;
+
+        const enc_ctx = A.initEnc(key);
+        enc_ctx.encrypt(&encrypted, &plaintext);
+
+        const dec_ctx = A.initDec(key);
+        dec_ctx.decrypt(&decrypted, &encrypted);
+
+        if (!mem.eql(u8, &plaintext, &decrypted)) return error.AesBlockRoundtripFailed;
+
+        log.info("core.aes.{s}: encrypt+decrypt block ok", .{name});
+    }
+}
+
+fn certificateTests(comptime lib: type) !void {
+    const log = lib.log.scoped(.crypto);
+    const Cert = lib.crypto.Certificate;
+
+    _ = Cert.Version;
+    _ = Cert.Algorithm;
+    _ = Cert.AlgorithmCategory;
+    _ = Cert.NamedCurve;
+    _ = Cert.ExtensionId;
+    _ = Cert.Parsed;
+    _ = Cert.ParseError;
+    _ = Cert.Bundle;
+
+    log.info("Certificate: all types present", .{});
+}
+
 // Run the full test suite against std directly, proving that embed's
 // API surface is a proper subset of std. If this passes, any code written
 // against embed can switch to std with zero modifications.
 test "compact_test" {
-    const std = @import("std");
     try run(std);
 }
