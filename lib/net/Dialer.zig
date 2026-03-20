@@ -6,13 +6,13 @@
 //!   defer conn.deinit();
 
 const Conn = @import("Conn.zig");
-const socket_conn = @import("SocketConn.zig");
+const tcp_conn = @import("TcpConn.zig");
 
 pub fn Dialer(comptime lib: type) type {
     const posix = lib.posix;
     const Addr = lib.net.Address;
     const Allocator = lib.mem.Allocator;
-    const SC = socket_conn.SocketConn(lib);
+    const SC = tcp_conn.TcpConn(lib);
 
     return struct {
         allocator: Allocator,

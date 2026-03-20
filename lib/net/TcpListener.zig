@@ -5,13 +5,13 @@
 
 const Conn = @import("Conn.zig");
 const Listener = @import("Listener.zig");
-const socket_conn = @import("SocketConn.zig");
+const tcp_conn = @import("TcpConn.zig");
 
 pub fn TcpListener(comptime lib: type) type {
     const posix = lib.posix;
     const Addr = lib.net.Address;
     const Allocator = lib.mem.Allocator;
-    const SC = socket_conn.SocketConn(lib);
+    const SC = tcp_conn.TcpConn(lib);
 
     return struct {
         fd: posix.socket_t,
@@ -98,7 +98,7 @@ test "std_compat ipv4" {
     const dest = s.net.Ip4Address.init(.{ 127, 0, 0, 1 }, bound_port);
     try s.posix.connect(cli_fd, @ptrCast(&dest.sa), @sizeOf(@TypeOf(dest.sa)));
 
-    var client = socket_conn.SocketConn(s).init(cli_fd);
+    var client = tcp_conn.TcpConn(s).init(cli_fd);
     var cc = client.conn();
     defer cc.close();
 
@@ -135,7 +135,7 @@ test "std_compat ipv6" {
     const cli_fd = try s.posix.socket(s.posix.AF.INET6, s.posix.SOCK.STREAM, 0);
     try s.posix.connect(cli_fd, @ptrCast(&dest.any), dest.getOsSockLen());
 
-    var client = socket_conn.SocketConn(s).init(cli_fd);
+    var client = tcp_conn.TcpConn(s).init(cli_fd);
     var cc = client.conn();
     defer cc.close();
 

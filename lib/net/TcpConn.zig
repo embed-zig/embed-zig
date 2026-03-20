@@ -1,11 +1,11 @@
-//! SocketConn — adapts a posix socket fd into a Conn.
+//! TcpConn — Conn implementation over a TCP socket fd (like Go's net.TCPConn).
 //!
 //! Internal type used by Dialer and TcpListener.
 //! Users interact with the type-erased Conn interface.
 
 const Conn = @import("Conn.zig");
 
-pub fn SocketConn(comptime lib: type) type {
+pub fn TcpConn(comptime lib: type) type {
     const posix = lib.posix;
     const Allocator = lib.mem.Allocator;
 
@@ -60,7 +60,7 @@ pub fn SocketConn(comptime lib: type) type {
 test "std_compat" {
     const s = @import("std");
     const p = s.posix;
-    const SC = SocketConn(s);
+    const SC = TcpConn(s);
 
     const srv = try p.socket(p.AF.INET, p.SOCK.STREAM, 0);
     defer p.close(srv);
@@ -104,4 +104,56 @@ test "std_compat" {
     try ac.writeAll("echo");
     try cc.readAll(buf[0..4]);
     try s.testing.expectEqualStrings("echo", buf[0..4]);
+}
+
+test "std_compat ipv6" {
+    const s = @import("std");
+    const p = s.posix;
+    const Addr = s.net.Address;
+    const TC = TcpConn(s);
+
+    const loopback = comptime Addr.parseIp6("::1", 0) catch unreachable;
+
+    const srv = try p.socket(p.AF.INET6, p.SOCK.STREAM, 0);
+    defer p.close(srv);
+
+    const enable: [4]u8 = @bitCast(@as(i32, 1));
+    try p.setsockopt(srv, p.SOL.SOCKET, p.SO.REUSEADDR, &enable);
+
+    try p.bind(srv, @ptrCast(&loopback.any), loopback.getOsSockLen());
+    try p.listen(srv, 1);
+
+    var bound: p.sockaddr.in6 = undefined;
+    var bound_len: p.socklen_t = @sizeOf(p.sockaddr.in6);
+    try p.getsockname(srv, @ptrCast(&bound), &bound_len);
+    const port = s.mem.bigToNative(u16, bound.port);
+
+    var dest = loopback;
+    dest.setPort(port);
+
+    const cli_fd = try p.socket(p.AF.INET6, p.SOCK.STREAM, 0);
+    try p.connect(cli_fd, @ptrCast(&dest.any), dest.getOsSockLen());
+
+    var client = TC.init(cli_fd);
+    var cc = client.conn();
+    defer cc.close();
+
+    var peer_addr: p.sockaddr.storage = undefined;
+    var peer_len: p.socklen_t = @sizeOf(p.sockaddr.storage);
+    const acc_fd = try p.accept(srv, @ptrCast(&peer_addr), &peer_len, 0);
+
+    var accepted = TC.init(acc_fd);
+    var ac = accepted.conn();
+    defer ac.close();
+
+    const msg = "hello TcpConn v6";
+    try cc.writeAll(msg);
+
+    var buf: [64]u8 = undefined;
+    try ac.readAll(buf[0..msg.len]);
+    try s.testing.expectEqualStrings(msg, buf[0..msg.len]);
+
+    try ac.writeAll("v6ok");
+    try cc.readAll(buf[0..4]);
+    try s.testing.expectEqualStrings("v6ok", buf[0..4]);
 }
