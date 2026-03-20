@@ -21,6 +21,7 @@
 
 pub const Conn = @import("net/Conn.zig");
 pub const Listener = @import("net/Listener.zig");
+pub const url = @import("net/url.zig");
 
 const socket_conn = @import("net/SocketConn.zig");
 const tcp_listener = @import("net/TcpListener.zig");
@@ -53,6 +54,7 @@ test {
     _ = @import("net/SocketConn.zig");
     _ = @import("net/TcpListener.zig");
     _ = @import("net/Dialer.zig");
+    _ = @import("net/url.zig");
 }
 
 test "std_compat ipv4" {
