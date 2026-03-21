@@ -16,6 +16,8 @@
 //!   8. deinit() waits for all outstanding lookups to finish cleanup
 
 const dialer = @import("Dialer.zig");
+const context_mod = @import("context");
+const io = @import("io");
 const sync = @import("sync");
 
 pub fn Resolver(comptime lib: type) type {
@@ -25,7 +27,6 @@ pub fn Resolver(comptime lib: type) type {
     const mem = lib.mem;
     const Allocator = mem.Allocator;
     const Thread = lib.Thread;
-
     return struct {
         allocator: Allocator,
         options: Options,
@@ -203,7 +204,16 @@ pub fn Resolver(comptime lib: type) type {
             id: u16,
         };
 
-        pub fn lookupHost(self: *Self, name: []const u8, buf: []Addr) LookupError!usize {
+        /// Public resolver calls return `anyerror` so they can transparently
+        /// propagate arbitrary causes injected via `context.cancelWithCause(...)`.
+        pub fn lookupHost(self: *Self, name: []const u8, buf: []Addr) anyerror!usize {
+            const Context = context_mod.Make(lib);
+            var context_api = try Context.init(self.allocator);
+            defer context_api.deinit();
+            return self.lookupHostContext(context_api.background(), name, buf);
+        }
+
+        pub fn lookupHostContext(self: *Self, ctx: context_mod.Context, name: []const u8, buf: []Addr) anyerror!usize {
             try self.beginLookup();
             var needs_finish_lookup = true;
             errdefer if (needs_finish_lookup) self.finishLookup();
@@ -233,7 +243,8 @@ pub fn Resolver(comptime lib: type) type {
 
             const job = self.allocator.create(LookupJob) catch return error.OutOfMemory;
             var owns_job = false;
-            errdefer if (!owns_job) self.allocator.destroy(job);
+            var destroy_raw_job_on_error = true;
+            errdefer if (destroy_raw_job_on_error) self.allocator.destroy(job);
 
             job.* = .{
                 .resolver = self,
@@ -243,6 +254,7 @@ pub fn Resolver(comptime lib: type) type {
             };
             @memcpy(job.query_pkts[0..num_queries], query_pkts[0..num_queries]);
             job.racer = WorkerRacer.init(self.allocator) catch return error.OutOfMemory;
+            destroy_raw_job_on_error = false;
 
             owns_job = true;
             defer if (owns_job) self.destroyLookupJob(job);
@@ -262,7 +274,16 @@ pub fn Resolver(comptime lib: type) type {
 
             if (spawned == 0) return spawn_err orelse error.NoServerConfigured;
 
-            const result = switch (job.racer.race()) {
+            const race_result = job.racer.raceContext(ctx) catch |err| {
+                if (self.beginCleanup(job)) {
+                    owns_job = false;
+                } else {
+                    job.racer.wait();
+                }
+                return err;
+            };
+
+            const result = switch (race_result) {
                 .winner => |winner| winner,
                 .exhausted => return job.finalError(),
             };
@@ -281,7 +302,7 @@ pub fn Resolver(comptime lib: type) type {
             return count;
         }
 
-        fn serverTask(ctx: WorkerRacer.Context, job: *LookupJob, server: Server) void {
+        fn serverTask(ctx: WorkerRacer.State, job: *LookupJob, server: Server) void {
             const result: ?WorkerResult = switch (server.protocol) {
                 .udp => udpResolve(ctx, server, job),
                 .tcp => tcpResolve(ctx, server, job),
@@ -297,7 +318,7 @@ pub fn Resolver(comptime lib: type) type {
             }
         }
 
-        fn udpResolve(ctx: WorkerRacer.Context, server: Server, job: *LookupJob) ?WorkerResult {
+        fn udpResolve(ctx: WorkerRacer.State, server: Server, job: *LookupJob) ?WorkerResult {
             const attempts = @max(job.resolver.options.attempts, 1);
             const per_attempt_ms = job.resolver.options.timeout_ms / attempts;
 
@@ -383,7 +404,7 @@ pub fn Resolver(comptime lib: type) type {
             return null;
         }
 
-        fn tcpResolve(ctx: WorkerRacer.Context, server: Server, job: *LookupJob) ?WorkerResult {
+        fn tcpResolve(ctx: WorkerRacer.State, server: Server, job: *LookupJob) ?WorkerResult {
             const attempts = @max(job.resolver.options.attempts, 1);
             const per_attempt_ms = job.resolver.options.timeout_ms / attempts;
 
@@ -395,7 +416,7 @@ pub fn Resolver(comptime lib: type) type {
             return null;
         }
 
-        fn tcpAttempt(ctx: WorkerRacer.Context, server: Server, job: *LookupJob, timeout_ms: u32) ?WorkerResult {
+        fn tcpAttempt(ctx: WorkerRacer.State, server: Server, job: *LookupJob, timeout_ms: u32) ?WorkerResult {
             const d = Dialer.init(job.resolver.allocator, .{});
             var c = d.dial(.tcp, server.addr) catch return null;
             defer c.deinit();
@@ -410,7 +431,7 @@ pub fn Resolver(comptime lib: type) type {
                 tcp_buf[0] = @truncate(qpkt.len >> 8);
                 tcp_buf[1] = @truncate(qpkt.len);
                 @memcpy(tcp_buf[2..][0..qpkt.len], qpkt.buf[0..qpkt.len]);
-                c.writeAll(tcp_buf[0 .. 2 + qpkt.len]) catch return null;
+                io.writeAll(@TypeOf(c), &c, tcp_buf[0 .. 2 + qpkt.len]) catch return null;
             }
 
             var result = WorkerResult{};
@@ -423,13 +444,13 @@ pub fn Resolver(comptime lib: type) type {
                 if (ctx.done()) return null;
 
                 var len_buf: [2]u8 = undefined;
-                c.readAll(&len_buf) catch return null;
+                io.readFull(@TypeOf(c), &c, &len_buf) catch return null;
 
                 const msg_len = readU16(&len_buf);
                 if (msg_len < 12 or msg_len > 512) return null;
 
                 var recv_buf: [512]u8 = undefined;
-                c.readAll(recv_buf[0..msg_len]) catch return null;
+                io.readFull(@TypeOf(c), &c, recv_buf[0..msg_len]) catch return null;
 
                 const resp_id = readU16(recv_buf[0..2]);
                 const idx = job.queryIndexById(resp_id) orelse continue;
@@ -526,7 +547,7 @@ pub fn Resolver(comptime lib: type) type {
 
         const FLAG_RD: u16 = 0x0100;
 
-        pub fn buildQuery(out: *[512]u8, name: []const u8, qtype: u16, id: u16) !usize {
+        fn buildQuery(out: *[512]u8, name: []const u8, qtype: u16, id: u16) !usize {
             var pos: usize = 0;
 
             writeU16(out, &pos, id);
@@ -556,7 +577,7 @@ pub fn Resolver(comptime lib: type) type {
             return pos;
         }
 
-        pub fn parseResponse(pkt: []const u8, qtype: u16, out: []Addr) !usize {
+        fn parseResponse(pkt: []const u8, qtype: u16, out: []Addr) !usize {
             if (pkt.len < 12) return error.InvalidResponse;
 
             const ancount = readU16(pkt[6..8]);
@@ -612,13 +633,13 @@ pub fn Resolver(comptime lib: type) type {
             return error.InvalidResponse;
         }
 
-        pub fn writeU16(buf: *[512]u8, pos: *usize, val: u16) void {
+        fn writeU16(buf: *[512]u8, pos: *usize, val: u16) void {
             buf[pos.*] = @truncate(val >> 8);
             buf[pos.* + 1] = @truncate(val);
             pos.* += 2;
         }
 
-        pub fn readU16(bytes: *const [2]u8) u16 {
+        fn readU16(bytes: *const [2]u8) u16 {
             return @as(u16, bytes[0]) << 8 | bytes[1];
         }
 

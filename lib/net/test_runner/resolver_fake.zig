@@ -6,7 +6,9 @@
 //! Usage:
 //!   try @import("net/test_runner/resolver_fake.zig").run(lib);
 
+const io = @import("io");
 const net_mod = @import("../../net.zig");
+const context_mod = @import("context");
 const resolver_mod = @import("../Resolver.zig");
 const Conn = net_mod.Conn;
 
@@ -19,109 +21,6 @@ pub fn run(comptime lib: type) !void {
     const log = lib.log.scoped(.resolver_fake);
 
     const Runner = struct {
-        fn buildQueryRoundTrip() !void {
-            var buf: [512]u8 = undefined;
-            const len = try R.buildQuery(&buf, "example.com", R.QTYPE_A, 0x1234);
-
-            try testing.expectEqual(@as(u16, 0x1234), R.readU16(buf[0..2]));
-            try testing.expect(len > 12);
-
-            try testing.expectEqual(@as(u8, 7), buf[12]);
-            try testing.expectEqualStrings("example", buf[13..20]);
-            try testing.expectEqual(@as(u8, 3), buf[20]);
-            try testing.expectEqualStrings("com", buf[21..24]);
-            try testing.expectEqual(@as(u8, 0), buf[24]);
-        }
-
-        fn parseResponseARecord() !void {
-            var pkt: [512]u8 = @splat(0);
-            var pos: usize = 0;
-
-            R.writeU16(&pkt, &pos, 0xABCD);
-            R.writeU16(&pkt, &pos, 0x8180);
-            R.writeU16(&pkt, &pos, 1);
-            R.writeU16(&pkt, &pos, 1);
-            R.writeU16(&pkt, &pos, 0);
-            R.writeU16(&pkt, &pos, 0);
-
-            pkt[pos] = 7;
-            pos += 1;
-            @memcpy(pkt[pos..][0..7], "example");
-            pos += 7;
-            pkt[pos] = 3;
-            pos += 1;
-            @memcpy(pkt[pos..][0..3], "com");
-            pos += 3;
-            pkt[pos] = 0;
-            pos += 1;
-            R.writeU16(&pkt, &pos, R.QTYPE_A);
-            R.writeU16(&pkt, &pos, R.QCLASS_IN);
-
-            pkt[pos] = 0xC0;
-            pkt[pos + 1] = 0x0C;
-            pos += 2;
-            R.writeU16(&pkt, &pos, R.QTYPE_A);
-            R.writeU16(&pkt, &pos, R.QCLASS_IN);
-            R.writeU16(&pkt, &pos, 0);
-            R.writeU16(&pkt, &pos, 300);
-            R.writeU16(&pkt, &pos, 4);
-            pkt[pos] = 93;
-            pkt[pos + 1] = 184;
-            pkt[pos + 2] = 216;
-            pkt[pos + 3] = 34;
-            pos += 4;
-
-            var addrs: [4]Addr = undefined;
-            const count = try R.parseResponse(pkt[0..pos], R.QTYPE_A, &addrs);
-            try testing.expectEqual(@as(usize, 1), count);
-
-            const ip: [4]u8 = @bitCast(addrs[0].in.sa.addr);
-            try testing.expectEqual([4]u8{ 93, 184, 216, 34 }, ip);
-        }
-
-        fn parseResponseAaaaRecord() !void {
-            var pkt: [512]u8 = @splat(0);
-            var pos: usize = 0;
-
-            R.writeU16(&pkt, &pos, 0x5678);
-            R.writeU16(&pkt, &pos, 0x8180);
-            R.writeU16(&pkt, &pos, 1);
-            R.writeU16(&pkt, &pos, 1);
-            R.writeU16(&pkt, &pos, 0);
-            R.writeU16(&pkt, &pos, 0);
-
-            pkt[pos] = 4;
-            pos += 1;
-            @memcpy(pkt[pos..][0..4], "test");
-            pos += 4;
-            pkt[pos] = 7;
-            pos += 1;
-            @memcpy(pkt[pos..][0..7], "example");
-            pos += 7;
-            pkt[pos] = 0;
-            pos += 1;
-            R.writeU16(&pkt, &pos, R.QTYPE_AAAA);
-            R.writeU16(&pkt, &pos, R.QCLASS_IN);
-
-            pkt[pos] = 0xC0;
-            pkt[pos + 1] = 0x0C;
-            pos += 2;
-            R.writeU16(&pkt, &pos, R.QTYPE_AAAA);
-            R.writeU16(&pkt, &pos, R.QCLASS_IN);
-            R.writeU16(&pkt, &pos, 0);
-            R.writeU16(&pkt, &pos, 600);
-            R.writeU16(&pkt, &pos, 16);
-
-            const ipv6_bytes = [16]u8{ 0x26, 0x06, 0x28, 0x00, 0x02, 0x20, 0x00, 0x01, 0x02, 0x48, 0x18, 0x93, 0x25, 0xc8, 0x19, 0x46 };
-            @memcpy(pkt[pos..][0..16], &ipv6_bytes);
-            pos += 16;
-
-            var addrs: [4]Addr = undefined;
-            const count = try R.parseResponse(pkt[0..pos], R.QTYPE_AAAA, &addrs);
-            try testing.expectEqual(@as(usize, 1), count);
-            try testing.expectEqual(ipv6_bytes, addrs[0].in6.sa.addr);
-        }
-
         fn optionsDefaults() !void {
             var r = try R.init(testing.allocator, .{});
             defer r.deinit();
@@ -145,7 +44,7 @@ pub fn run(comptime lib: type) !void {
             });
             defer negative_pc.deinit();
 
-            const negative_impl = try negative_pc.as(Net.UdpConn.Inner);
+            const negative_impl = try negative_pc.as(Net.UdpConn);
             const negative_port = try negative_impl.boundPort();
             var negative_thread = try lib.Thread.spawn(.{}, struct {
                 fn run(server_pc: PacketConn) void {
@@ -165,7 +64,7 @@ pub fn run(comptime lib: type) !void {
             });
             defer positive_pc.deinit();
 
-            const positive_impl = try positive_pc.as(Net.UdpConn.Inner);
+            const positive_impl = try positive_pc.as(Net.UdpConn);
             const positive_port = try positive_impl.boundPort();
             var positive_thread = try lib.Thread.spawn(.{}, struct {
                 fn run(server_pc: PacketConn, ip: [4]u8) void {
@@ -206,7 +105,7 @@ pub fn run(comptime lib: type) !void {
             });
             defer pc.deinit();
 
-            const impl = try pc.as(Net.UdpConn.Inner);
+            const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
             var server_thread = try lib.Thread.spawn(.{}, struct {
                 fn run(server_pc: PacketConn) void {
@@ -239,7 +138,7 @@ pub fn run(comptime lib: type) !void {
             });
             defer pc.deinit();
 
-            const impl = try pc.as(Net.UdpConn.Inner);
+            const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
             var server_thread = try lib.Thread.spawn(.{}, struct {
                 fn run(server_pc: PacketConn) void {
@@ -278,7 +177,7 @@ pub fn run(comptime lib: type) !void {
                     defer conn.deinit();
 
                     var req_buf: [512]u8 = undefined;
-                    const req = readTcpDnsMessage(R, conn, &req_buf) catch return;
+                    const req = readTcpDnsMessage(conn, &req_buf) catch return;
 
                     var resp_buf: [512]u8 = undefined;
                     const resp_len = buildEmptySuccessResponse(R, req, &resp_buf) catch return;
@@ -306,7 +205,7 @@ pub fn run(comptime lib: type) !void {
             });
             defer pc.deinit();
 
-            const impl = try pc.as(Net.UdpConn.Inner);
+            const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
             var server_thread = try lib.Thread.spawn(.{}, struct {
                 fn run(server_pc: PacketConn, ip: [4]u8) void {
@@ -315,7 +214,7 @@ pub fn run(comptime lib: type) !void {
                         var req_buf: [512]u8 = undefined;
                         const req = server_pc.readFrom(&req_buf) catch return;
                         const req_pkt = req_buf[0..req.bytes_read];
-                        const qtype = queryTypeFromRequest(R, req_pkt) catch return;
+                        const qtype = queryTypeFromRequest(req_pkt) catch return;
 
                         var resp_buf: [512]u8 = undefined;
                         const resp_len = switch (qtype) {
@@ -351,7 +250,7 @@ pub fn run(comptime lib: type) !void {
             });
             defer pc.deinit();
 
-            const impl = try pc.as(Net.UdpConn.Inner);
+            const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
             var server_thread = try lib.Thread.spawn(.{}, struct {
                 fn run(server_pc: PacketConn, ip: [4]u8) void {
@@ -360,7 +259,7 @@ pub fn run(comptime lib: type) !void {
                         var req_buf: [512]u8 = undefined;
                         const req = server_pc.readFrom(&req_buf) catch return;
                         const req_pkt = req_buf[0..req.bytes_read];
-                        const qtype = queryTypeFromRequest(R, req_pkt) catch return;
+                        const qtype = queryTypeFromRequest(req_pkt) catch return;
 
                         var resp_buf: [512]u8 = undefined;
                         const resp_len = switch (qtype) {
@@ -396,7 +295,7 @@ pub fn run(comptime lib: type) !void {
             });
             defer pc.deinit();
 
-            const impl = try pc.as(Net.UdpConn.Inner);
+            const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
             var server_thread = try lib.Thread.spawn(.{}, struct {
                 fn run(server_pc: PacketConn) void {
@@ -405,7 +304,7 @@ pub fn run(comptime lib: type) !void {
                         var req_buf: [512]u8 = undefined;
                         const req = server_pc.readFrom(&req_buf) catch return;
                         const req_pkt = req_buf[0..req.bytes_read];
-                        const qtype = queryTypeFromRequest(R, req_pkt) catch return;
+                        const qtype = queryTypeFromRequest(req_pkt) catch return;
 
                         var resp_buf: [512]u8 = undefined;
                         const resp_len = switch (qtype) {
@@ -440,7 +339,7 @@ pub fn run(comptime lib: type) !void {
             });
             defer pc.deinit();
 
-            const impl = try pc.as(Net.UdpConn.Inner);
+            const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort6();
             var server_addr = loopback;
             server_addr.setPort(port);
@@ -487,19 +386,19 @@ pub fn run(comptime lib: type) !void {
                     defer conn.deinit();
 
                     var req1_buf: [512]u8 = undefined;
-                    const req1 = readTcpDnsMessage(R, conn, &req1_buf) catch return;
+                    const req1 = readTcpDnsMessage(conn, &req1_buf) catch return;
                     var req2_buf: [512]u8 = undefined;
-                    const req2 = readTcpDnsMessage(R, conn, &req2_buf) catch return;
+                    const req2 = readTcpDnsMessage(conn, &req2_buf) catch return;
 
                     var resp1_buf: [512]u8 = undefined;
-                    const resp1_len = switch (queryTypeFromRequest(R, req1) catch return) {
+                    const resp1_len = switch (queryTypeFromRequest(req1) catch return) {
                         R.QTYPE_A => buildAResponse(R, req1, ip4, &resp1_buf) catch return,
                         R.QTYPE_AAAA => buildAaaaResponse(R, req1, ip6, &resp1_buf) catch return,
                         else => return,
                     };
 
                     var resp2_buf: [512]u8 = undefined;
-                    const resp2_len = switch (queryTypeFromRequest(R, req2) catch return) {
+                    const resp2_len = switch (queryTypeFromRequest(req2) catch return) {
                         R.QTYPE_A => buildAResponse(R, req2, ip4, &resp2_buf) catch return,
                         R.QTYPE_AAAA => buildAaaaResponse(R, req2, ip6, &resp2_buf) catch return,
                         else => return,
@@ -579,7 +478,7 @@ pub fn run(comptime lib: type) !void {
             });
             defer fast_pc.deinit();
 
-            const fast_impl = try fast_pc.as(Net.UdpConn.Inner);
+            const fast_impl = try fast_pc.as(Net.UdpConn);
             const fast_port = try fast_impl.boundPort();
             var fast_thread = try lib.Thread.spawn(.{}, struct {
                 fn run(pc: PacketConn, accepted: *BoolAtomic, ip: [4]u8) void {
@@ -636,6 +535,102 @@ pub fn run(comptime lib: type) !void {
             wait_thread.join();
             fast_thread.join();
             slow_thread.join();
+        }
+
+        fn lookupHostContextReturnsCanceled() !void {
+            const Context = context_mod.Make(lib);
+            var context = try Context.init(testing.allocator);
+            defer context.deinit();
+
+            var pc = try Net.listenPacket(.{
+                .allocator = testing.allocator,
+                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+            });
+            defer pc.deinit();
+
+            const impl = try pc.as(Net.UdpConn);
+            const port = try impl.boundPort();
+
+            var resolver = try R.init(testing.allocator, .{
+                .servers = &.{.{ .addr = Addr.initIp4(.{ 127, 0, 0, 1 }, port), .protocol = .udp }},
+                .mode = .ipv4_only,
+                .timeout_ms = 50,
+                .attempts = 1,
+            });
+            defer resolver.deinit();
+
+            var cancel_ctx = try context.withCancel(context.background());
+            defer cancel_ctx.deinit();
+            cancel_ctx.cancel();
+
+            var addrs: [4]Addr = undefined;
+            try testing.expectError(error.Canceled, resolver.lookupHostContext(cancel_ctx, "canceled.test", &addrs));
+        }
+
+        fn lookupHostContextReturnsDeadlineExceeded() !void {
+            const Context = context_mod.Make(lib);
+            var context = try Context.init(testing.allocator);
+            defer context.deinit();
+
+            var pc = try Net.listenPacket(.{
+                .allocator = testing.allocator,
+                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+            });
+            defer pc.deinit();
+
+            const impl = try pc.as(Net.UdpConn);
+            const port = try impl.boundPort();
+
+            var resolver = try R.init(testing.allocator, .{
+                .servers = &.{.{ .addr = Addr.initIp4(.{ 127, 0, 0, 1 }, port), .protocol = .udp }},
+                .mode = .ipv4_only,
+                .timeout_ms = 50,
+                .attempts = 1,
+            });
+            defer resolver.deinit();
+
+            var timeout_ctx = try context.withTimeout(context.background(), 5);
+            defer timeout_ctx.deinit();
+
+            var addrs: [4]Addr = undefined;
+            try testing.expectError(error.DeadlineExceeded, resolver.lookupHostContext(timeout_ctx, "deadline.test", &addrs));
+        }
+
+        fn lookupHostContextReturnsCustomCause() !void {
+            const Context = context_mod.Make(lib);
+            var context = try Context.init(testing.allocator);
+            defer context.deinit();
+
+            var pc = try Net.listenPacket(.{
+                .allocator = testing.allocator,
+                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+            });
+            defer pc.deinit();
+
+            const impl = try pc.as(Net.UdpConn);
+            const port = try impl.boundPort();
+
+            var resolver = try R.init(testing.allocator, .{
+                .servers = &.{.{ .addr = Addr.initIp4(.{ 127, 0, 0, 1 }, port), .protocol = .udp }},
+                .mode = .ipv4_only,
+                .timeout_ms = 50,
+                .attempts = 1,
+            });
+            defer resolver.deinit();
+
+            var cancel_ctx = try context.withCancel(context.background());
+            defer cancel_ctx.deinit();
+
+            var cancel_thread = try lib.Thread.spawn(.{}, struct {
+                fn run(cc: *context_mod.Context, l: type) void {
+                    l.Thread.sleep(5 * l.time.ns_per_ms);
+                    cc.cancelWithCause(error.BrokenPipe);
+                }
+            }.run, .{ &cancel_ctx, lib });
+            defer cancel_thread.join();
+
+            var addrs: [4]Addr = undefined;
+            try testing.expectError(error.BrokenPipe, resolver.lookupHostContext(cancel_ctx, "custom-cause.test", &addrs));
         }
 
         fn lookupHostReturnsClosedAfterDeinitStarts() !void {
@@ -729,9 +724,6 @@ pub fn run(comptime lib: type) !void {
     };
 
     log.info("=== resolver fake test_runner start ===", .{});
-    try Runner.buildQueryRoundTrip();
-    try Runner.parseResponseARecord();
-    try Runner.parseResponseAaaaRecord();
     try Runner.optionsDefaults();
     try Runner.serverProtocolConfig();
     try Runner.lookupHostIgnoresEarlyNXDOMAINWhenLaterServerSucceeds();
@@ -744,60 +736,65 @@ pub fn run(comptime lib: type) !void {
     try Runner.lookupHostResolvesViaIpv6UdpServer();
     try Runner.lookupHostMatchesOutOfOrderTcpResponsesById();
     try Runner.lookupHostWaitBlocksUntilSlowWorkerCleanup();
+    try Runner.lookupHostContextReturnsCanceled();
+    try Runner.lookupHostContextReturnsDeadlineExceeded();
+    try Runner.lookupHostContextReturnsCustomCause();
     try Runner.lookupHostReturnsClosedAfterDeinitStarts();
     log.info("=== resolver fake test_runner done ===", .{});
 }
 
 fn buildAResponse(comptime R: type, req: []const u8, ip: [4]u8, out: *[512]u8) !usize {
-    var pos = try beginResponse(R, req, 0x8180, 1, out);
+    var pos = try beginResponse(req, 0x8180, 1, out);
     if (pos + 16 > out.len) return error.InvalidResponse;
 
     out[pos] = 0xC0;
     out[pos + 1] = 0x0C;
     pos += 2;
-    R.writeU16(out, &pos, R.QTYPE_A);
-    R.writeU16(out, &pos, R.QCLASS_IN);
+    writeU16(out, &pos, R.QTYPE_A);
+    writeU16(out, &pos, R.QCLASS_IN);
     writeU32(out, &pos, 300);
-    R.writeU16(out, &pos, 4);
+    writeU16(out, &pos, 4);
     @memcpy(out[pos..][0..4], &ip);
     pos += 4;
     return pos;
 }
 
 fn buildAaaaResponse(comptime R: type, req: []const u8, ip: [16]u8, out: *[512]u8) !usize {
-    var pos = try beginResponse(R, req, 0x8180, 1, out);
+    var pos = try beginResponse(req, 0x8180, 1, out);
     if (pos + 28 > out.len) return error.InvalidResponse;
 
     out[pos] = 0xC0;
     out[pos + 1] = 0x0C;
     pos += 2;
-    R.writeU16(out, &pos, R.QTYPE_AAAA);
-    R.writeU16(out, &pos, R.QCLASS_IN);
+    writeU16(out, &pos, R.QTYPE_AAAA);
+    writeU16(out, &pos, R.QCLASS_IN);
     writeU32(out, &pos, 300);
-    R.writeU16(out, &pos, 16);
+    writeU16(out, &pos, 16);
     @memcpy(out[pos..][0..16], &ip);
     pos += 16;
     return pos;
 }
 
 fn buildEmptySuccessResponse(comptime R: type, req: []const u8, out: *[512]u8) !usize {
-    return beginResponse(R, req, 0x8180, 0, out);
+    _ = R;
+    return beginResponse(req, 0x8180, 0, out);
 }
 
 fn buildErrorResponse(comptime R: type, req: []const u8, rcode: u4, out: *[512]u8) !usize {
-    return beginResponse(R, req, 0x8180 | @as(u16, rcode), 0, out);
+    _ = R;
+    return beginResponse(req, 0x8180 | @as(u16, rcode), 0, out);
 }
 
-fn beginResponse(comptime R: type, req: []const u8, flags: u16, ancount: u16, out: *[512]u8) !usize {
+fn beginResponse(req: []const u8, flags: u16, ancount: u16, out: *[512]u8) !usize {
     if (req.len < 12) return error.InvalidResponse;
 
     var pos: usize = 0;
-    R.writeU16(out, &pos, R.readU16(req[0..2]));
-    R.writeU16(out, &pos, flags);
-    R.writeU16(out, &pos, 1);
-    R.writeU16(out, &pos, ancount);
-    R.writeU16(out, &pos, 0);
-    R.writeU16(out, &pos, 0);
+    writeU16(out, &pos, readU16(req[0..2]));
+    writeU16(out, &pos, flags);
+    writeU16(out, &pos, 1);
+    writeU16(out, &pos, ancount);
+    writeU16(out, &pos, 0);
+    writeU16(out, &pos, 0);
 
     const question = req[12..];
     if (pos + question.len > out.len) return error.InvalidResponse;
@@ -806,28 +803,30 @@ fn beginResponse(comptime R: type, req: []const u8, flags: u16, ancount: u16, ou
     return pos;
 }
 
-fn queryTypeFromRequest(comptime R: type, req: []const u8) !u16 {
+fn queryTypeFromRequest(req: []const u8) !u16 {
     if (req.len < 4) return error.InvalidResponse;
-    return R.readU16(req[req.len - 4 ..][0..2]);
+    return readU16(req[req.len - 4 ..][0..2]);
 }
 
-fn readTcpDnsMessage(comptime R: type, conn: Conn, buf: *[512]u8) ![]const u8 {
+fn readTcpDnsMessage(conn: Conn, buf: *[512]u8) ![]const u8 {
+    var c = conn;
     var len_buf: [2]u8 = undefined;
-    try conn.readAll(&len_buf);
-    const msg_len = R.readU16(&len_buf);
+    try io.readFull(@TypeOf(c), &c, &len_buf);
+    const msg_len = readU16(&len_buf);
     if (msg_len > buf.len) return error.InvalidResponse;
-    try conn.readAll(buf[0..msg_len]);
+    try io.readFull(@TypeOf(c), &c, buf[0..msg_len]);
     return buf[0..msg_len];
 }
 
 fn writeTcpDnsMessage(conn: Conn, msg: []const u8) !void {
+    var c = conn;
     if (msg.len > 512) return error.InvalidResponse;
 
     var frame: [514]u8 = undefined;
     frame[0] = @truncate(msg.len >> 8);
     frame[1] = @truncate(msg.len);
     @memcpy(frame[2..][0..msg.len], msg);
-    try conn.writeAll(frame[0 .. 2 + msg.len]);
+    try io.writeAll(@TypeOf(c), &c, frame[0 .. 2 + msg.len]);
 }
 
 fn writeU32(out: *[512]u8, pos: *usize, value: u32) void {
@@ -836,6 +835,16 @@ fn writeU32(out: *[512]u8, pos: *usize, value: u32) void {
     out[pos.* + 2] = @truncate(value >> 8);
     out[pos.* + 3] = @truncate(value);
     pos.* += 4;
+}
+
+fn writeU16(buf: *[512]u8, pos: *usize, val: u16) void {
+    buf[pos.*] = @truncate(val >> 8);
+    buf[pos.* + 1] = @truncate(val);
+    pos.* += 2;
+}
+
+fn readU16(bytes: *const [2]u8) u16 {
+    return @as(u16, bytes[0]) << 8 | bytes[1];
 }
 
 fn waitForTrue(comptime lib: type, flag: *lib.atomic.Value(bool), timeout_ms: u64) !void {

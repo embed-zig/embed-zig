@@ -2,6 +2,7 @@
 //!
 //! Impl must provide:
 //!   fn wait(*Impl, *MutexImpl) void
+//!   fn timedWait(*Impl, *MutexImpl, u64) error{Timeout}!void
 //!   fn signal(*Impl) void
 //!   fn broadcast(*Impl) void
 
@@ -18,6 +19,10 @@ pub fn make(comptime Impl: type) type {
 
         pub fn wait(self: *Self, mutex: anytype) void {
             self.impl.wait(&mutex.impl);
+        }
+
+        pub fn timedWait(self: *Self, mutex: anytype, timeout_ns: u64) error{Timeout}!void {
+            return self.impl.timedWait(&mutex.impl, timeout_ns);
         }
 
         pub fn signal(self: *Self) void {

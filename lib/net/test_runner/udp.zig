@@ -23,7 +23,7 @@ pub fn run(comptime lib: type) void {
             });
             defer pc.deinit();
 
-            const udp_impl = try pc.as(Net.UdpConn.Inner);
+            const udp_impl = try pc.as(Net.UdpConn);
             const port = try udp_impl.boundPort();
             const dest = Addr.initIp4(.{ 127, 0, 0, 1 }, port);
             _ = try pc.writeTo("hello listenPacket", @ptrCast(&dest.any), dest.getOsSockLen());
@@ -42,7 +42,7 @@ pub fn run(comptime lib: type) void {
             });
             defer pc.deinit();
 
-            const uc = try pc.as(Net.UdpConn.Inner);
+            const uc = try pc.as(Net.UdpConn);
             const port = try uc.boundPort6();
             var dest = loopback;
             dest.setPort(port);
@@ -68,7 +68,7 @@ pub fn run(comptime lib: type) void {
 
             pc.setReadTimeout(null);
 
-            const impl = try pc.as(Net.UdpConn.Inner);
+            const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
             const dest = Addr.initIp4(.{ 127, 0, 0, 1 }, port);
 
@@ -86,11 +86,11 @@ pub fn run(comptime lib: type) void {
             });
             defer pc.deinit();
 
-            const udp_impl = try pc.as(Net.UdpConn.Inner);
+            const udp_impl = try pc.as(Net.UdpConn);
             try testing.expect(!udp_impl.closed);
             try testing.expect(udp_impl.fd != 0);
 
-            try testing.expectError(error.TypeMismatch, pc.as(TcpConnType.Inner));
+            try testing.expectError(error.TypeMismatch, pc.as(TcpConnType));
         }
 
         test "udp connected pair via Conn" {
@@ -120,10 +120,12 @@ pub fn run(comptime lib: type) void {
             defer ca.deinit();
             var cb = try Net.UdpConn.init(testing.allocator, fd_b);
             defer cb.deinit();
+            const ca_udp = try ca.as(Net.UdpConn);
+            const cb_udp = try cb.as(Net.UdpConn);
 
-            try ca.writeAll("via conn vtable");
+            try ca_udp.writeAll("via conn vtable");
             var buf: [15]u8 = undefined;
-            try cb.readAll(&buf);
+            try cb_udp.readAll(&buf);
             try testing.expectEqualStrings("via conn vtable", &buf);
         }
 
@@ -154,11 +156,13 @@ pub fn run(comptime lib: type) void {
             defer ca.deinit();
             var cb = try Net.UdpConn.init(testing.allocator, fd_b);
             defer cb.deinit();
+            const ca_udp = try ca.as(Net.UdpConn);
+            const cb_udp = try cb.as(Net.UdpConn);
 
-            try ca.writeAll("hi");
+            try ca_udp.writeAll("hi");
 
             var buf: [3]u8 = undefined;
-            try testing.expectError(error.ShortRead, cb.readAll(&buf));
+            try testing.expectError(error.ShortRead, cb_udp.readAll(&buf));
         }
 
         test "udp readAll empty buffer is no-op" {
@@ -188,14 +192,16 @@ pub fn run(comptime lib: type) void {
             defer ca.deinit();
             var cb = try Net.UdpConn.init(testing.allocator, fd_b);
             defer cb.deinit();
+            const ca_udp = try ca.as(Net.UdpConn);
+            const cb_udp = try cb.as(Net.UdpConn);
 
-            try ca.writeAll("hey");
+            try ca_udp.writeAll("hey");
 
             var empty: [0]u8 = .{};
-            try cb.readAll(&empty);
+            try cb_udp.readAll(&empty);
 
             var buf: [3]u8 = undefined;
-            try cb.readAll(&buf);
+            try cb_udp.readAll(&buf);
             try testing.expectEqualStrings("hey", &buf);
         }
 
@@ -211,10 +217,10 @@ pub fn run(comptime lib: type) void {
             var c = try Net.UdpConn.init(testing.allocator, fd);
             defer c.deinit();
 
-            const udp_impl = try c.as(Net.UdpConn.Inner);
+            const udp_impl = try c.as(Net.UdpConn);
             try testing.expect(!udp_impl.closed);
 
-            try testing.expectError(error.TypeMismatch, c.as(TcpConnType.Inner));
+            try testing.expectError(error.TypeMismatch, c.as(TcpConnType));
         }
 
     };

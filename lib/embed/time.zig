@@ -23,7 +23,9 @@ pub fn make(comptime Impl: type) type {
             started: i64,
             previous: i64,
 
-            pub fn start() Timer {
+            pub const Error = std.time.Timer.Error;
+
+            pub fn start() Error!Timer {
                 const now = Impl.milliTimestamp();
                 return .{ .started = now, .previous = now };
             }

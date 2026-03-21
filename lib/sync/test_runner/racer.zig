@@ -9,6 +9,7 @@
 //!   try @import("sync").test_runner.racer.run(embed);
 
 const root = @import("../../sync.zig");
+const context_mod = @import("context");
 
 pub fn run(comptime lib: type) !void {
     const log = lib.log.scoped(.racer);
@@ -17,6 +18,7 @@ pub fn run(comptime lib: type) !void {
 
     try spawnAllocatorTests(lib);
     try firstWinnerTests(lib);
+    try raceContextTests(lib);
     try doneAndWaitTests(lib);
     try exhaustedTests(lib);
     try initOomTests(lib);
@@ -32,14 +34,14 @@ fn firstWinnerTests(comptime lib: type) !void {
     defer racer.deinit();
 
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.Context, l: type, delay_ms: u64, value: u32) void {
+        fn run(ctx: R.State, l: type, delay_ms: u64, value: u32) void {
             l.Thread.sleep(delay_ms * l.time.ns_per_ms);
             _ = ctx.success(value);
         }
     }.run, .{ lib, 20, 2 });
 
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.Context, l: type, delay_ms: u64, value: u32) void {
+        fn run(ctx: R.State, l: type, delay_ms: u64, value: u32) void {
             l.Thread.sleep(delay_ms * l.time.ns_per_ms);
             _ = ctx.success(value);
         }
@@ -62,6 +64,141 @@ fn firstWinnerTests(comptime lib: type) !void {
     racer.wait();
 }
 
+fn raceContextTests(comptime lib: type) !void {
+    const testing = lib.testing;
+    const Context = context_mod.Make(lib);
+    var context = try Context.init(testing.allocator);
+    defer context.deinit();
+    const R = root.Racer(lib, u32);
+
+    {
+        var racer = try R.init(testing.allocator);
+        defer racer.deinit();
+
+        try racer.spawn(.{}, struct {
+            fn run(state: R.State, l: type) void {
+                l.Thread.sleep(5 * l.time.ns_per_ms);
+                _ = state.success(3);
+            }
+        }.run, .{lib});
+
+        switch (try racer.raceContext(context.background())) {
+            .winner => |value| try testing.expectEqual(@as(u32, 3), value),
+            .exhausted => return error.ExpectedWinner,
+        }
+    }
+
+    {
+        var racer = try R.init(testing.allocator);
+        defer racer.deinit();
+
+        try racer.spawn(.{}, struct {
+            fn run(state: R.State, l: type) void {
+                _ = state;
+                l.Thread.sleep(20 * l.time.ns_per_ms);
+            }
+        }.run, .{lib});
+
+        var cancel_ctx = try context.withCancel(context.background());
+        defer cancel_ctx.deinit();
+        cancel_ctx.cancel();
+
+        try testing.expectError(error.Canceled, racer.raceContext(cancel_ctx));
+    }
+
+    {
+        var racer = try R.init(testing.allocator);
+        defer racer.deinit();
+
+        try racer.spawn(.{}, struct {
+            fn run(state: R.State, l: type) void {
+                l.Thread.sleep(5 * l.time.ns_per_ms);
+                _ = state.success(11);
+            }
+        }.run, .{lib});
+
+        var timeout_ctx = try context.withTimeout(context.background(), 200);
+        defer timeout_ctx.deinit();
+
+        switch (try racer.raceContext(timeout_ctx)) {
+            .winner => |value| try testing.expectEqual(@as(u32, 11), value),
+            .exhausted => return error.ExpectedWinner,
+        }
+    }
+
+    {
+        var racer = try R.init(testing.allocator);
+        defer racer.deinit();
+
+        try racer.spawn(.{}, struct {
+            fn run(state: R.State, l: type) void {
+                l.Thread.sleep(5 * l.time.ns_per_ms);
+                _ = state.success(21);
+            }
+        }.run, .{lib});
+
+        switch (racer.race()) {
+            .winner => |value| try testing.expectEqual(@as(u32, 21), value),
+            .exhausted => return error.ExpectedWinner,
+        }
+
+        var cancel_ctx = try context.withCancel(context.background());
+        defer cancel_ctx.deinit();
+        cancel_ctx.cancelWithCause(error.BrokenPipe);
+
+        // This is intentional: an already-canceled external context takes
+        // precedence over a previously published winner for raceContext().
+        try testing.expectError(error.BrokenPipe, racer.raceContext(cancel_ctx));
+
+        switch (racer.race()) {
+            .winner => |value| try testing.expectEqual(@as(u32, 21), value),
+            .exhausted => return error.ExpectedWinner,
+        }
+    }
+
+    {
+        var racer = try R.init(testing.allocator);
+        defer racer.deinit();
+
+        try racer.spawn(.{}, struct {
+            fn run(state: R.State, l: type) void {
+                _ = state;
+                l.Thread.sleep(50 * l.time.ns_per_ms);
+            }
+        }.run, .{lib});
+
+        var timeout_ctx = try context.withTimeout(context.background(), 5);
+        defer timeout_ctx.deinit();
+
+        try testing.expectError(error.DeadlineExceeded, racer.raceContext(timeout_ctx));
+    }
+
+    {
+        var racer = try R.init(testing.allocator);
+        defer racer.deinit();
+
+        try racer.spawn(.{}, struct {
+            fn run(state: R.State, l: type) void {
+                _ = state;
+                l.Thread.sleep(20 * l.time.ns_per_ms);
+            }
+        }.run, .{lib});
+
+        var cancel_ctx = try context.withCancel(context.background());
+        defer cancel_ctx.deinit();
+
+        var cancel_thread = try lib.Thread.spawn(.{}, struct {
+            fn run(cc: *context_mod.Context, l: type) void {
+                l.Thread.sleep(5 * l.time.ns_per_ms);
+                cc.cancelWithCause(error.BrokenPipe);
+            }
+        }.run, .{ &cancel_ctx, lib });
+        defer cancel_thread.join();
+
+        try testing.expectError(error.BrokenPipe, racer.raceContext(cancel_ctx));
+    }
+}
+
 fn exhaustedTests(comptime lib: type) !void {
     const testing = lib.testing;
     const R = root.Racer(lib, u32);
@@ -70,7 +207,7 @@ fn exhaustedTests(comptime lib: type) !void {
     defer racer.deinit();
 
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.Context) void {
+        fn run(ctx: R.State) void {
             _ = ctx;
         }
     }.run, .{});
@@ -110,7 +247,7 @@ fn doneAndWaitTests(comptime lib: type) !void {
     var flags = Flags{};
 
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.Context, l: type, f: *Flags) void {
+        fn run(ctx: R.State, l: type, f: *Flags) void {
             while (!ctx.done()) {
                 l.Thread.sleep(l.time.ns_per_ms);
             }
@@ -127,7 +264,7 @@ fn doneAndWaitTests(comptime lib: type) !void {
     }.run, .{ lib, &flags });
 
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.Context, l: type) void {
+        fn run(ctx: R.State, l: type) void {
             l.Thread.sleep(5 * l.time.ns_per_ms);
             _ = ctx.success(7);
         }
@@ -169,7 +306,7 @@ fn spawnAllocatorTests(comptime lib: type) !void {
 
     CapturingThread.last_allocator = null;
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.Context) void {
+        fn run(ctx: R.State) void {
             _ = ctx;
         }
     }.run, .{});
@@ -182,7 +319,7 @@ fn spawnAllocatorTests(comptime lib: type) !void {
 
     CapturingThread.last_allocator = null;
     try racer.spawn(.{ .allocator = explicit_allocator }, struct {
-        fn run(ctx: R.Context) void {
+        fn run(ctx: R.State) void {
             _ = ctx;
         }
     }.run, .{});

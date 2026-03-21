@@ -6,6 +6,7 @@
 //!   const runner = @import("net/test_runner/tcp.zig");
 //!   test { runner.run(std); }
 
+const io = @import("io");
 const net = @import("../../net.zig");
 
 pub fn run(comptime lib: type) void {
@@ -27,14 +28,14 @@ pub fn run(comptime lib: type) void {
             defer ac.deinit();
 
             const msg = "hello net.dial";
-            try cc.writeAll(msg);
+            try io.writeAll(@TypeOf(cc), &cc, msg);
 
             var buf: [64]u8 = undefined;
-            try ac.readAll(buf[0..msg.len]);
+            try io.readFull(@TypeOf(ac), &ac, buf[0..msg.len]);
             try testing.expectEqualStrings(msg, buf[0..msg.len]);
 
-            try ac.writeAll("pong");
-            try cc.readAll(buf[0..4]);
+            try io.writeAll(@TypeOf(ac), &ac, "pong");
+            try io.readFull(@TypeOf(cc), &cc, buf[0..4]);
             try testing.expectEqualStrings("pong", buf[0..4]);
         }
 
@@ -56,14 +57,14 @@ pub fn run(comptime lib: type) void {
             defer ac.deinit();
 
             const msg = "hello net.dial v6";
-            try cc.writeAll(msg);
+            try io.writeAll(@TypeOf(cc), &cc, msg);
 
             var buf: [64]u8 = undefined;
-            try ac.readAll(buf[0..msg.len]);
+            try io.readFull(@TypeOf(ac), &ac, buf[0..msg.len]);
             try testing.expectEqualStrings(msg, buf[0..msg.len]);
 
-            try ac.writeAll("v6ok");
-            try cc.readAll(buf[0..4]);
+            try io.writeAll(@TypeOf(ac), &ac, "v6ok");
+            try io.readFull(@TypeOf(cc), &cc, buf[0..4]);
             try testing.expectEqualStrings("v6ok", buf[0..4]);
         }
 
@@ -86,12 +87,12 @@ pub fn run(comptime lib: type) void {
             try testing.expectError(error.TimedOut, result);
 
             ac.setReadTimeout(null);
-            try cc.writeAll("after timeout");
-            try ac.readAll(buf[0..13]);
+            try io.writeAll(@TypeOf(cc), &cc, "after timeout");
+            try io.readFull(@TypeOf(ac), &ac, buf[0..13]);
             try testing.expectEqualStrings("after timeout", buf[0..13]);
         }
 
-        test "tcp readAll" {
+        test "tcp readFull" {
             var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
             defer ln.close();
 
@@ -107,7 +108,7 @@ pub fn run(comptime lib: type) void {
             _ = try cc.write("llo");
 
             var buf: [5]u8 = undefined;
-            try ac.readAll(&buf);
+            try io.readFull(@TypeOf(ac), &ac, &buf);
             try testing.expectEqualStrings("hello", &buf);
         }
 
@@ -153,11 +154,11 @@ pub fn run(comptime lib: type) void {
             var ac = try ln.accept();
             defer ac.deinit();
 
-            const tcp_impl = try cc.as(TcpConnType.Inner);
+            const tcp_impl = try cc.as(TcpConnType);
             try testing.expect(!tcp_impl.closed);
             try testing.expect(tcp_impl.fd != 0);
 
-            try testing.expectError(error.TypeMismatch, cc.as(UdpConnType.Inner));
+            try testing.expectError(error.TypeMismatch, cc.as(UdpConnType));
         }
 
         test "tcp multiple accept" {

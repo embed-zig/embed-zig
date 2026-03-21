@@ -9,7 +9,7 @@ pub fn TcpConn(comptime lib: type) type {
     const posix = lib.posix;
     const Allocator = lib.mem.Allocator;
 
-    const Impl = struct {
+    return struct {
         fd: posix.socket_t,
         allocator: Allocator,
         closed: bool = false,
@@ -66,15 +66,11 @@ pub fn TcpConn(comptime lib: type) type {
             const bytes: [@sizeOf(posix.timeval)]u8 = @bitCast(tv);
             posix.setsockopt(fd, posix.SOL.SOCKET, optname, &bytes) catch {};
         }
-    };
-
-    return struct {
-        pub const Inner = Impl;
 
         pub fn init(allocator: Allocator, fd: posix.socket_t) Allocator.Error!Conn {
-            const impl = try allocator.create(Impl);
-            impl.* = .{ .fd = fd, .allocator = allocator };
-            return Conn.init(impl);
+            const self = try allocator.create(Self);
+            self.* = .{ .fd = fd, .allocator = allocator };
+            return Conn.init(self);
         }
     };
 }

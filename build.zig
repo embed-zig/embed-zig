@@ -2,9 +2,11 @@ const std = @import("std");
 
 const Lib = struct {
     embed: LibEntry = .{ .path = "lib/embed.zig" },
+    io: LibEntry = .{ .path = "lib/io.zig" },
     net: LibEntry = .{ .path = "lib/net.zig" },
     bt: LibEntry = .{ .path = "lib/bt.zig" },
     sync: LibEntry = .{ .path = "lib/sync.zig" },
+    context: LibEntry = .{ .path = "lib/context.zig" },
 };
 
 const Pkg = struct {
@@ -13,8 +15,10 @@ const Pkg = struct {
 
 const Tests = struct {
     embed: TestEntry = .{ .from = .lib },
+    io: TestEntry = .{ .from = .lib },
     net: TestEntry = .{ .from = .lib },
     sync: TestEntry = .{ .from = .lib },
+    context: TestEntry = .{ .from = .lib },
     core_bluetooth: TestEntry = .{ .from = .pkg, .os = &.{ .macos, .ios, .tvos, .watchos } },
 };
 
@@ -44,7 +48,7 @@ const Os = std.Target.Os.Tag;
 const host_os = @import("builtin").os.tag;
 
 const PkgEntry = struct { option: []const u8, desc: []const u8, enable: bool = false, mod: ?*std.Build.Module = null };
-const LibEntry = struct { path: []const u8, mod: ?*std.Build.Module = null };
+const LibEntry = struct { path: []const u8, mod: *std.Build.Module = undefined };
 const TestEntry = struct {
     from: enum { lib, pkg },
     os: []const Os = &.{},
@@ -62,7 +66,12 @@ fn createLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.buil
         entry.mod = m;
     }
 
+    lib.context.mod.addImport("embed", lib.embed.mod);
+    lib.io.mod.addImport("embed", lib.embed.mod);
+    lib.sync.mod.addImport("context", lib.context.mod);
     lib.net.mod.addImport("sync", lib.sync.mod);
+    lib.net.mod.addImport("context", lib.context.mod);
+    lib.net.mod.addImport("io", lib.io.mod);
 }
 
 fn createPkg(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, lib: *const Lib, pkg: *Pkg) void {
