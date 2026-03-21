@@ -9,14 +9,16 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const embed_mod = embed_dep.module("embed");
-
+    const sync_mod = embed_dep.module("sync");
+    const net_mod = embed_dep.module("net");
     const platform_mod = b.createModule(.{
         .root_source_file = b.path("platform.zig"),
         .target = target,
         .optimize = optimize,
     });
     platform_mod.addImport("embed", embed_mod);
-
+    platform_mod.addImport("sync", sync_mod);
+    platform_mod.addImport("net", net_mod);
     const tests = b.addTest(.{
         .name = "fake_platform_test",
         .root_module = platform_mod,

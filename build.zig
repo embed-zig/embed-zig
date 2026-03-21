@@ -4,6 +4,7 @@ const Lib = struct {
     embed: LibEntry = .{ .path = "lib/embed.zig" },
     net: LibEntry = .{ .path = "lib/net.zig" },
     bt: LibEntry = .{ .path = "lib/bt.zig" },
+    sync: LibEntry = .{ .path = "lib/sync.zig" },
 };
 
 const Pkg = struct {
@@ -13,6 +14,7 @@ const Pkg = struct {
 const Tests = struct {
     embed: TestEntry = .{ .from = .lib },
     net: TestEntry = .{ .from = .lib },
+    sync: TestEntry = .{ .from = .lib },
     core_bluetooth: TestEntry = .{ .from = .pkg, .os = &.{ .macos, .ios, .tvos, .watchos } },
 };
 
@@ -59,6 +61,8 @@ fn createLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.buil
         b.modules.put(f.name, m) catch @panic("OOM");
         entry.mod = m;
     }
+
+    lib.net.mod.addImport("sync", lib.sync.mod);
 }
 
 fn createPkg(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, lib: *const Lib, pkg: *Pkg) void {
@@ -72,7 +76,7 @@ fn createPkg(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.buil
         .target = target,
         .optimize = optimize,
     });
-    cb.addImport("bt", lib.bt.mod.?);
+    cb.addImport("bt", lib.bt.mod);
     cb.linkFramework("CoreBluetooth", .{});
     cb.linkFramework("Foundation", .{});
     cb.linkSystemLibrary("objc", .{});
@@ -87,13 +91,17 @@ fn runTests(b: *std.Build, lib: *const Lib, pkg: *const Pkg) void {
         if (entry.os.len == 0 or for (entry.os) |os| {
             if (os == host_os) break true;
         } else false) {
-            const mod = switch (entry.from) {
-                .lib => @field(lib, f.name).mod,
-                .pkg => @field(pkg, f.name).mod,
-            };
-            if (mod) |m| {
-                const t = b.addTest(.{ .root_module = m });
-                test_step.dependOn(&b.addRunArtifact(t).step);
+            switch (entry.from) {
+                .lib => {
+                    const t = b.addTest(.{ .root_module = @field(lib, f.name).mod });
+                    test_step.dependOn(&b.addRunArtifact(t).step);
+                },
+                .pkg => {
+                    if (@field(pkg, f.name).mod) |m| {
+                        const t = b.addTest(.{ .root_module = m });
+                        test_step.dependOn(&b.addRunArtifact(t).step);
+                    }
+                },
             }
         }
     }

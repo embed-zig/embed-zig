@@ -1,7 +1,7 @@
-//! TcpConn — Conn implementation over a TCP socket fd (like Go's net.TCPConn).
+//! TcpConn — constructs a Conn over a TCP socket fd (like Go's net.TCPConn).
 //!
-//! Internal type used by Dialer and TcpListener.
-//! Users interact with the type-erased Conn interface.
+//! Returns a Conn directly. The internal state is heap-allocated and
+//! freed on deinit().
 
 const Conn = @import("Conn.zig");
 
@@ -9,16 +9,12 @@ pub fn TcpConn(comptime lib: type) type {
     const posix = lib.posix;
     const Allocator = lib.mem.Allocator;
 
-    return struct {
+    const Impl = struct {
         fd: posix.socket_t,
-        allocator: ?Allocator = null,
+        allocator: Allocator,
         closed: bool = false,
 
         const Self = @This();
-
-        pub fn init(fd: posix.socket_t) Self {
-            return .{ .fd = fd };
-        }
 
         pub fn read(self: *Self, buf: []u8) Conn.ReadError!usize {
             if (self.closed) return error.EndOfStream;
@@ -50,7 +46,8 @@ pub fn TcpConn(comptime lib: type) type {
 
         pub fn deinit(self: *Self) void {
             self.close();
-            if (self.allocator) |a| a.destroy(self);
+            const a = self.allocator;
+            a.destroy(self);
         }
 
         pub fn setReadTimeout(self: *Self, ms: ?u32) void {
@@ -69,9 +66,15 @@ pub fn TcpConn(comptime lib: type) type {
             const bytes: [@sizeOf(posix.timeval)]u8 = @bitCast(tv);
             posix.setsockopt(fd, posix.SOL.SOCKET, optname, &bytes) catch {};
         }
+    };
 
-        pub fn conn(self: *Self) Conn {
-            return Conn.init(self);
+    return struct {
+        pub const Inner = Impl;
+
+        pub fn init(allocator: Allocator, fd: posix.socket_t) Allocator.Error!Conn {
+            const impl = try allocator.create(Impl);
+            impl.* = .{ .fd = fd, .allocator = allocator };
+            return Conn.init(impl);
         }
     };
 }

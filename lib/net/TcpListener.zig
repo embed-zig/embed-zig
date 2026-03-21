@@ -52,11 +52,9 @@ pub fn TcpListener(comptime lib: type) type {
                 error.SystemFdQuotaExceeded => error.SystemFdQuotaExceeded,
                 else => error.Unexpected,
             };
+            errdefer posix.close(client_fd);
 
-            const sc = self.allocator.create(SC) catch return error.Unexpected;
-            sc.* = SC.init(client_fd);
-            sc.allocator = self.allocator;
-            return sc.conn();
+            return SC.init(self.allocator, client_fd) catch return error.Unexpected;
         }
 
         pub fn close(self: *Self) void {
@@ -98,23 +96,22 @@ test "std_compat ipv4" {
     const dest = s.net.Ip4Address.init(.{ 127, 0, 0, 1 }, bound_port);
     try s.posix.connect(cli_fd, @ptrCast(&dest.sa), @sizeOf(@TypeOf(dest.sa)));
 
-    var client = tcp_conn.TcpConn(s).init(cli_fd);
-    var cc = client.conn();
-    defer cc.close();
+    var cc = try tcp_conn.TcpConn(s).init(s.testing.allocator, cli_fd);
+    defer cc.deinit();
 
     var ac = try ln.accept();
     defer ac.deinit();
 
     const msg = "hello Listener";
-    try cc.writeAll(msg);
+    _ = try cc.write(msg);
 
     var buf: [64]u8 = undefined;
-    try ac.readAll(buf[0..msg.len]);
-    try s.testing.expectEqualStrings(msg, buf[0..msg.len]);
+    var n = try ac.read(buf[0..]);
+    try s.testing.expectEqualStrings(msg, buf[0..n]);
 
-    try ac.writeAll("back");
-    try cc.readAll(buf[0..4]);
-    try s.testing.expectEqualStrings("back", buf[0..4]);
+    _ = try ac.write("back");
+    n = try cc.read(buf[0..]);
+    try s.testing.expectEqualStrings("back", buf[0..n]);
 }
 
 test "std_compat ipv6" {
@@ -135,17 +132,16 @@ test "std_compat ipv6" {
     const cli_fd = try s.posix.socket(s.posix.AF.INET6, s.posix.SOCK.STREAM, 0);
     try s.posix.connect(cli_fd, @ptrCast(&dest.any), dest.getOsSockLen());
 
-    var client = tcp_conn.TcpConn(s).init(cli_fd);
-    var cc = client.conn();
-    defer cc.close();
+    var cc = try tcp_conn.TcpConn(s).init(s.testing.allocator, cli_fd);
+    defer cc.deinit();
 
     var ac = try ln.accept();
     defer ac.deinit();
 
     const msg = "hello v6 Listener";
-    try cc.writeAll(msg);
+    _ = try cc.write(msg);
 
     var buf: [64]u8 = undefined;
-    try ac.readAll(buf[0..msg.len]);
-    try s.testing.expectEqualStrings(msg, buf[0..msg.len]);
+    const n = try ac.read(buf[0..]);
+    try s.testing.expectEqualStrings(msg, buf[0..n]);
 }

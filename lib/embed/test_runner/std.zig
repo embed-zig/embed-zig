@@ -537,7 +537,7 @@ fn timeTests(comptime lib: type) !void {
     if (t1 <= 0) return error.TimestampNonPositive;
 
     {
-        var timer = lib.time.Timer.start();
+        var timer = try lib.time.Timer.start();
         lib.Thread.sleep(10_000_000);
         const r1 = timer.read();
         if (r1 == 0) return error.TimerReadZero;
@@ -627,7 +627,6 @@ fn memTests(comptime lib: type) !void {
     if (back32 != val32) return error.Endian32RoundtripFailed;
     log.info("nativeToBig/bigToNative u32 roundtrip ok", .{});
 }
-
 
 // ---------------------------------------------------------------------------
 // Collections (platform-independent data structures)

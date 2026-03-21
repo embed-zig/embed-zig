@@ -13,6 +13,8 @@ const impl = struct {
 pub const embed = @import("embed").Make(impl);
 
 const test_runner = @import("embed").test_runner;
+const sync_test_runner = @import("sync").test_runner;
+const net_test_runner = @import("net").test_runner;
 
 test "fake_platform" {
     try test_runner.std_compat.run(embed);
@@ -20,5 +22,7 @@ test "fake_platform" {
     // RSA is tested separately because std has no public rsa API,
     // so compact_test (which runs against std directly) cannot cover it.
     try test_runner.rsa.run(embed);
+    try sync_test_runner.racer.run(embed);
+    try net_test_runner.resolver_fake.run(embed);
+    try net_test_runner.resolver_ali_dns.run(embed);
 }
-

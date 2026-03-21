@@ -1,13 +1,14 @@
 //! UDP test runner — integration tests for net.Make(lib) UDP path.
 //!
-//! Tests listenPacket, readFrom/writeTo over loopback for both IPv4 and IPv6,
-//! plus connected UDP via UdpConn.connectTo + Conn interface.
+//! Tests listenPacket (PacketConn), connected UDP (Conn), and as() downcast.
 //!
 //! Usage:
 //!   const runner = @import("net/test_runner/udp.zig");
 //!   test { runner.run(std); }
 
 const net = @import("../../net.zig");
+const PacketConn = net.PacketConn;
+const Conn = net.Conn;
 
 pub fn run(comptime lib: type) void {
     const Net = net.Make(lib);
@@ -16,74 +17,89 @@ pub fn run(comptime lib: type) void {
 
     _ = struct {
         test "udp ipv4 listenPacket" {
-            var uc = try Net.listenPacket(.{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
-            defer uc.close();
+            var pc = try Net.listenPacket(.{
+                .allocator = testing.allocator,
+                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+            });
+            defer pc.deinit();
 
-            const port = try boundPort(uc.fd);
+            const udp_impl = try pc.as(Net.UdpConn.Inner);
+            const port = try udp_impl.boundPort();
             const dest = Addr.initIp4(.{ 127, 0, 0, 1 }, port);
-            _ = try uc.writeTo("hello listenPacket", @ptrCast(&dest.any), dest.getOsSockLen());
+            _ = try pc.writeTo("hello listenPacket", @ptrCast(&dest.any), dest.getOsSockLen());
 
             var buf: [64]u8 = undefined;
-            const result = try uc.readFrom(&buf);
+            const result = try pc.readFrom(&buf);
             try testing.expectEqualStrings("hello listenPacket", buf[0..result.bytes_read]);
         }
 
         test "udp ipv6 listenPacket" {
             const loopback = comptime Addr.parseIp6("::1", 0) catch unreachable;
 
-            var uc = try Net.listenPacket(.{ .address = loopback });
-            defer uc.close();
+            var pc = try Net.listenPacket(.{
+                .allocator = testing.allocator,
+                .address = loopback,
+            });
+            defer pc.deinit();
 
-            const port = try boundPort6(uc.fd);
+            const uc = try pc.as(Net.UdpConn.Inner);
+            const port = try uc.boundPort6();
             var dest = loopback;
             dest.setPort(port);
-            _ = try uc.writeTo("udp v6 listenPacket", @ptrCast(&dest.any), dest.getOsSockLen());
+            _ = try pc.writeTo("udp v6 listenPacket", @ptrCast(&dest.any), dest.getOsSockLen());
 
             var buf: [64]u8 = undefined;
-            const r = try uc.readFrom(&buf);
+            const r = try pc.readFrom(&buf);
             try testing.expectEqualStrings("udp v6 listenPacket", buf[0..r.bytes_read]);
         }
 
-        test "udp packetConn vtable" {
-            var uc = try Net.listenPacket(.{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
-            defer uc.close();
-
-            const port = try boundPort(uc.fd);
-            const dest = Addr.initIp4(.{ 127, 0, 0, 1 }, port);
-
-            var pc = uc.packetConn();
-            _ = try pc.writeTo("via vtable", @ptrCast(&dest.any), dest.getOsSockLen());
-
-            var buf: [64]u8 = undefined;
-            const result = try pc.readFrom(&buf);
-            try testing.expectEqualStrings("via vtable", buf[0..result.bytes_read]);
-        }
-
         test "udp read timeout" {
-            var uc = try Net.listenPacket(.{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
-            defer uc.close();
+            var pc = try Net.listenPacket(.{
+                .allocator = testing.allocator,
+                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+            });
+            defer pc.deinit();
 
-            uc.setReadTimeout(1);
+            pc.setReadTimeout(1);
 
             var buf: [64]u8 = undefined;
-            const result = uc.readFrom(&buf);
+            const result = pc.readFrom(&buf);
             try testing.expectError(error.TimedOut, result);
 
-            uc.setReadTimeout(null);
+            pc.setReadTimeout(null);
 
-            const port = try boundPort(uc.fd);
+            const impl = try pc.as(Net.UdpConn.Inner);
+            const port = try impl.boundPort();
             const dest = Addr.initIp4(.{ 127, 0, 0, 1 }, port);
 
-            _ = try uc.writeTo("after clear", @ptrCast(&dest.any), dest.getOsSockLen());
-            const r = try uc.readFrom(&buf);
+            _ = try pc.writeTo("after clear", @ptrCast(&dest.any), dest.getOsSockLen());
+            const r = try pc.readFrom(&buf);
             try testing.expectEqualStrings("after clear", buf[0..r.bytes_read]);
+        }
+
+        test "udp packetConn.as downcast" {
+            const TcpConnType = @import("../TcpConn.zig").TcpConn(lib);
+
+            var pc = try Net.listenPacket(.{
+                .allocator = testing.allocator,
+                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+            });
+            defer pc.deinit();
+
+            const udp_impl = try pc.as(Net.UdpConn.Inner);
+            try testing.expect(!udp_impl.closed);
+            try testing.expect(udp_impl.fd != 0);
+
+            try testing.expectError(error.TypeMismatch, pc.as(TcpConnType.Inner));
         }
 
         test "udp connected pair via Conn" {
             const posix = lib.posix;
 
             const fd_a = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
+            errdefer posix.close(fd_a);
             const fd_b = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
+            errdefer posix.close(fd_b);
 
             const bind_addr = Addr.initIp4(.{ 127, 0, 0, 1 }, 0);
             try posix.bind(fd_a, @ptrCast(&bind_addr.any), bind_addr.getOsSockLen());
@@ -100,33 +116,107 @@ pub fn run(comptime lib: type) void {
             try posix.connect(fd_a, @ptrCast(&addr_b), @sizeOf(posix.sockaddr.in));
             try posix.connect(fd_b, @ptrCast(&addr_a), @sizeOf(posix.sockaddr.in));
 
-            var uc_a = Net.UdpConn.init(fd_a);
-            defer uc_a.close();
-            var uc_b = Net.UdpConn.init(fd_b);
-            defer uc_b.close();
+            var ca = try Net.UdpConn.init(testing.allocator, fd_a);
+            defer ca.deinit();
+            var cb = try Net.UdpConn.init(testing.allocator, fd_b);
+            defer cb.deinit();
 
-            var ca = uc_a.conn();
-            var cb = uc_b.conn();
-
-            _ = try ca.write("via conn vtable");
-            var buf: [64]u8 = undefined;
-            const n = try cb.read(&buf);
-            try testing.expectEqualStrings("via conn vtable", buf[0..n]);
+            try ca.writeAll("via conn vtable");
+            var buf: [15]u8 = undefined;
+            try cb.readAll(&buf);
+            try testing.expectEqualStrings("via conn vtable", &buf);
         }
 
-        fn boundPort(fd: lib.posix.socket_t) !u16 {
-            var bound: lib.posix.sockaddr.in = undefined;
-            var bound_len: lib.posix.socklen_t = @sizeOf(lib.posix.sockaddr.in);
-            try lib.posix.getsockname(fd, @ptrCast(&bound), &bound_len);
-            return lib.mem.bigToNative(u16, bound.port);
+        test "udp readAll short packet" {
+            const posix = lib.posix;
+
+            const fd_a = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
+            errdefer posix.close(fd_a);
+            const fd_b = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
+            errdefer posix.close(fd_b);
+
+            const bind_addr = Addr.initIp4(.{ 127, 0, 0, 1 }, 0);
+            try posix.bind(fd_a, @ptrCast(&bind_addr.any), bind_addr.getOsSockLen());
+            try posix.bind(fd_b, @ptrCast(&bind_addr.any), bind_addr.getOsSockLen());
+
+            var addr_a: posix.sockaddr.in = undefined;
+            var len_a: posix.socklen_t = @sizeOf(posix.sockaddr.in);
+            try posix.getsockname(fd_a, @ptrCast(&addr_a), &len_a);
+
+            var addr_b: posix.sockaddr.in = undefined;
+            var len_b: posix.socklen_t = @sizeOf(posix.sockaddr.in);
+            try posix.getsockname(fd_b, @ptrCast(&addr_b), &len_b);
+
+            try posix.connect(fd_a, @ptrCast(&addr_b), @sizeOf(posix.sockaddr.in));
+            try posix.connect(fd_b, @ptrCast(&addr_a), @sizeOf(posix.sockaddr.in));
+
+            var ca = try Net.UdpConn.init(testing.allocator, fd_a);
+            defer ca.deinit();
+            var cb = try Net.UdpConn.init(testing.allocator, fd_b);
+            defer cb.deinit();
+
+            try ca.writeAll("hi");
+
+            var buf: [3]u8 = undefined;
+            try testing.expectError(error.ShortRead, cb.readAll(&buf));
         }
 
-        fn boundPort6(fd: lib.posix.socket_t) !u16 {
-            var bound: lib.posix.sockaddr.in6 = undefined;
-            var bound_len: lib.posix.socklen_t = @sizeOf(lib.posix.sockaddr.in6);
-            try lib.posix.getsockname(fd, @ptrCast(&bound), &bound_len);
-            return lib.mem.bigToNative(u16, bound.port);
+        test "udp readAll empty buffer is no-op" {
+            const posix = lib.posix;
+
+            const fd_a = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
+            errdefer posix.close(fd_a);
+            const fd_b = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
+            errdefer posix.close(fd_b);
+
+            const bind_addr = Addr.initIp4(.{ 127, 0, 0, 1 }, 0);
+            try posix.bind(fd_a, @ptrCast(&bind_addr.any), bind_addr.getOsSockLen());
+            try posix.bind(fd_b, @ptrCast(&bind_addr.any), bind_addr.getOsSockLen());
+
+            var addr_a: posix.sockaddr.in = undefined;
+            var len_a: posix.socklen_t = @sizeOf(posix.sockaddr.in);
+            try posix.getsockname(fd_a, @ptrCast(&addr_a), &len_a);
+
+            var addr_b: posix.sockaddr.in = undefined;
+            var len_b: posix.socklen_t = @sizeOf(posix.sockaddr.in);
+            try posix.getsockname(fd_b, @ptrCast(&addr_b), &len_b);
+
+            try posix.connect(fd_a, @ptrCast(&addr_b), @sizeOf(posix.sockaddr.in));
+            try posix.connect(fd_b, @ptrCast(&addr_a), @sizeOf(posix.sockaddr.in));
+
+            var ca = try Net.UdpConn.init(testing.allocator, fd_a);
+            defer ca.deinit();
+            var cb = try Net.UdpConn.init(testing.allocator, fd_b);
+            defer cb.deinit();
+
+            try ca.writeAll("hey");
+
+            var empty: [0]u8 = .{};
+            try cb.readAll(&empty);
+
+            var buf: [3]u8 = undefined;
+            try cb.readAll(&buf);
+            try testing.expectEqualStrings("hey", &buf);
         }
+
+        test "udp conn.as downcast" {
+            const posix = lib.posix;
+            const TcpConnType = @import("../TcpConn.zig").TcpConn(lib);
+
+            const fd = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
+            errdefer posix.close(fd);
+            const bind_addr = Addr.initIp4(.{ 127, 0, 0, 1 }, 0);
+            try posix.bind(fd, @ptrCast(&bind_addr.any), bind_addr.getOsSockLen());
+
+            var c = try Net.UdpConn.init(testing.allocator, fd);
+            defer c.deinit();
+
+            const udp_impl = try c.as(Net.UdpConn.Inner);
+            try testing.expect(!udp_impl.closed);
+
+            try testing.expectError(error.TypeMismatch, c.as(TcpConnType.Inner));
+        }
+
     };
 }
 

@@ -68,9 +68,9 @@ lib/net/
   TcpConn.zig          Conn over TCP socket fd (Go's net.TCPConn)
   UdpConn.zig          PacketConn + Conn over UDP socket fd (Go's net.UDPConn)
   TcpListener.zig      Listener for TCP (Go's net.TCPListener)
-  Dialer.zig           Configurable TCP dialer (Go's net.Dialer)
+  Dialer.zig           Configurable network dialer (Go's net.Dialer)
   url.zig              Zero-alloc URL parser (RFC 3986)
-  Resolver.zig         Pure-Zig DNS resolver (RFC 1035, worker pool: UDP+TCP race)
+  Resolver.zig         Pure-Zig DNS resolver (RFC 1035, per-server racer)
   tls/
     stream.zig         TLS stream (Conn -> Conn)
     client.zig         TLS client state machine
@@ -162,25 +162,29 @@ const PacketConn = @This();
 
 ptr: *anyopaque,
 vtable: *const VTable,
+type_id: *const anyopaque,
 
 pub const VTable = struct {
-    readFrom:  *const fn (ptr: *anyopaque, buf: []u8) ReadFromError!ReadResult,
-    writeTo:   *const fn (ptr: *anyopaque, buf: []const u8, addr: *const posix.sockaddr, addr_len: posix.socklen_t) WriteToError!usize,
-    close:     *const fn (ptr: *anyopaque) void,
-    deinit:    ?*const fn (ptr: *anyopaque) void = null,
+    readFrom: *const fn (ptr: *anyopaque, buf: []u8) ReadFromError!ReadFromResult,
+    writeTo: *const fn (ptr: *anyopaque, buf: []const u8, addr: [*]const u8, addr_len: u32) WriteToError!usize,
+    close: *const fn (ptr: *anyopaque) void,
+    deinit: *const fn (ptr: *anyopaque) void,
 };
 
-pub const ReadResult = struct {
+pub const AddrStorage = [128]u8;
+
+pub const ReadFromResult = struct {
     bytes_read: usize,
-    src_addr: posix.sockaddr.storage,
-    addr_len: posix.socklen_t,
+    addr: AddrStorage,
+    addr_len: u32,
 };
 
-pub const ReadFromError = error{ WouldBlock, TimedOut, Unexpected };
-pub const WriteToError = error{ MessageTooLong, NetworkUnreachable, TimedOut, Unexpected };
+pub const ReadFromError = error{ ConnectionRefused, TimedOut, Unexpected };
+pub const WriteToError = error{ MessageTooLong, NetworkUnreachable, AccessDenied, TimedOut, Unexpected };
 
-pub fn readFrom(self: PacketConn, buf: []u8) ReadFromError!ReadResult { ... }
-pub fn writeTo(self: PacketConn, buf: []const u8, addr: Address) WriteToError!usize { ... }
+pub fn as(self: PacketConn, comptime T: type) error{TypeMismatch}!*T { ... }
+pub fn readFrom(self: PacketConn, buf: []u8) ReadFromError!ReadFromResult { ... }
+pub fn writeTo(self: PacketConn, buf: []const u8, addr: [*]const u8, addr_len: u32) WriteToError!usize { ... }
 pub fn close(self: PacketConn) void { ... }
 pub fn deinit(self: PacketConn) void { ... }
 
@@ -195,31 +199,16 @@ Concrete implementation: **UdpConn**.
 ```zig
 // UdpConn.zig
 pub fn UdpConn(comptime lib: type) type {
-    const posix = lib.posix;
-    const Addr = lib.net.Address;
     const Allocator = lib.mem.Allocator;
 
     return struct {
-        fd: posix.socket_t,
-        allocator: ?Allocator = null,
-        closed: bool = false,
+        pub const Inner = Impl;
 
-        pub fn init(fd: posix.socket_t) Self { ... }
+        /// Connected UDP -> Conn (read/write after connect).
+        pub fn init(allocator: Allocator, fd: posix.socket_t) Allocator.Error!Conn { ... }
 
-        /// Receive a datagram. Returns bytes read + source address.
-        pub fn readFrom(self: *Self, buf: []u8) PacketConn.ReadFromError!PacketConn.ReadResult { ... }
-
-        /// Send a datagram to the given address.
-        pub fn writeTo(self: *Self, buf: []const u8, addr: Addr) PacketConn.WriteToError!usize { ... }
-
-        pub fn close(self: *Self) void { ... }
-        pub fn deinit(self: *Self) void { ... }
-
-        /// Return the bound local address (useful after binding to port 0).
-        pub fn localAddr(self: *Self) !Addr { ... }
-
-        /// Type-erase into PacketConn.
-        pub fn packetConn(self: *Self) PacketConn { ... }
+        /// Unconnected UDP -> PacketConn (readFrom/writeTo).
+        pub fn initPacket(allocator: Allocator, fd: posix.socket_t) Allocator.Error!PacketConn { ... }
     };
 }
 ```
@@ -230,7 +219,7 @@ TCP convenience functions (already implemented):
 
 ```zig
 // Connect to a remote address (TCP):
-var conn = try net.dial(allocator, Addr.initIp4(.{127,0,0,1}, 80));
+var conn = try net.dial(allocator, .tcp, Addr.initIp4(.{127,0,0,1}, 80));
 defer conn.deinit();
 
 // Listen for TCP connections:
@@ -238,41 +227,36 @@ var ln = try net.listen(allocator, .{ .address = Addr.initIp4(.{0,0,0,0}, 8080) 
 defer ln.close();
 ```
 
-`dialHost` resolves a hostname via DNS before connecting:
-
-```zig
-var conn = try net.dialHost(allocator, "example.com", 443);
-defer conn.deinit();
-```
-
 ### ListenPacket
 
-Bind a UDP socket and return a UdpConn (Go's `net.ListenPacket`):
+Bind a UDP socket and return a `PacketConn` (Go's `net.ListenPacket`):
 
 ```zig
 // Listen for UDP datagrams on port 5353:
-var uc = try net.listenPacket(allocator, .{
+var pc = try net.listenPacket(.{
+    .allocator = allocator,
     .address = Addr.initIp4(.{ 0, 0, 0, 0 }, 5353),
 });
-defer uc.close();
+defer pc.deinit();
 
 // Receive a datagram:
 var buf: [512]u8 = undefined;
-const result = try uc.readFrom(&buf);
+const result = try pc.readFrom(&buf);
 const data = buf[0..result.bytes_read];
 
 // Send a response back to the sender:
-_ = try uc.writeTo("reply", result.srcAddr());
+_ = try pc.writeTo("reply", @ptrCast(&result.addr), result.addr_len);
 ```
 
 Also exposed as `net.listenPacket` in `Make`:
 
 ```zig
-pub fn listenPacket(allocator: Allocator, opts: ListenPacketOptions) !UdpConn {
+pub fn listenPacket(opts: ListenPacketOptions) !PacketConn {
     // socket(AF, DGRAM) + bind
 }
 
 pub const ListenPacketOptions = struct {
+    allocator: Allocator,
     address: Addr = Addr.initIp4(.{ 0, 0, 0, 0 }, 0),
     reuse_addr: bool = true,
 };
@@ -301,7 +285,7 @@ no CGO, fully portable across embed platforms.
 | Aspect                  | Zig std (`getAddressList`)            | embed `net.Resolver`                        |
 |-------------------------|---------------------------------------|---------------------------------------------|
 | Server config           | Parse `/etc/resolv.conf` (Linux only) | Explicit `[]const Server` with per-server protocol  |
-| Concurrency             | Single-threaded poll loop             | Worker pool: N threads race, first success wins |
+| Concurrency             | Single-threaded poll loop             | One detached task per server via `sync.Racer` |
 | Result storage          | Heap `ArrayList(LookupAddr)`          | Caller-provided `[]Address` buffer          |
 | Timeout / retry         | From resolv.conf (`timeout`, `attempts`) | Explicit in `Options`                    |
 | Platform                | Linux-specific, musl port             | Platform-agnostic via `lib.posix`           |
@@ -312,6 +296,7 @@ no CGO, fully portable across embed platforms.
 ```zig
 pub fn Resolver(comptime lib: type) type {
     return struct {
+        allocator: Allocator,
         options: Options,
 
         pub const Protocol = enum(u3) {
@@ -344,8 +329,7 @@ pub fn Resolver(comptime lib: type) type {
             },
             timeout_ms: u32 = 1000,
             attempts: u32 = 2,
-            mode: QueryMode = .ipv4_and_ipv6,
-            concurrency: u32 = 2,
+            mode: QueryMode = .ipv4_only,
             spawn_config: Thread.SpawnConfig = .{},
         };
 
@@ -355,46 +339,44 @@ pub fn Resolver(comptime lib: type) type {
             ipv4_and_ipv6,
         };
 
-        pub fn init(options: Options) Self;
-        pub fn lookupHost(self: Self, allocator: Allocator, name: []const u8, buf: []Addr) LookupError!usize;
+        pub fn init(allocator: Allocator, options: Options) Allocator.Error!Self;
+        pub fn deinit(self: *Self) void;
+        pub fn wait(self: *Self) void;
+        pub fn lookupHost(self: *Self, name: []const u8, buf: []Addr) LookupError!usize;
     };
 }
 ```
 
-### Worker pool strategy
+### Per-server race strategy
 
 ```
 lookupHost("example.com")
   │
-  ├─ Build query packets (A, AAAA)
+  ├─ Build query packets (A and/or AAAA)
   │
-  ├─ Task queue: [Server0/udp, Server1/tcp, Server2/udp, ...]
-  │                    ↑                ↑
-  │              Worker 0           Worker 1
-  │              (thread)           (thread)
+  ├─ Spawn one Racer task per configured server
+  │     Server0/udp   Server1/tcp   Server2/udp   ...
   │
-  ├─ Each worker loop:
-  │     idx = atomic.fetchAdd(next_task, 1)
-  │     if idx >= servers.len → exit
+  ├─ Each task:
   │     if done flag set → exit
-  │     server = servers[idx]
   │     result = switch (server.protocol) {
-  │         .udp → udpResolve(server)    // sendto + recvfrom with SO_RCVTIMEO
-  │         .tcp → tcpResolve(server)    // connect + 2-byte len prefix send/recv
+  │         .udp → udpResolve(server)
+  │         .tcp → tcpResolve(server)
   │     }
-  │     if success → lock mutex, write result, set done flag
-  │     if failure → continue to next task
+  │     if addresses found → publish through sync.Racer
+  │     if NXDOMAIN / REFUSED → record as fallback error
   │
-  ├─ Main thread: join all workers
+  ├─ Main thread waits on Racer.race()
   │
-  └─ Return first successful result, or Timeout
+  └─ Return first successful result, otherwise the recorded
+      DNS error or Timeout if everything was transient
 ```
 
 Key properties:
 - **True parallelism**: UDP and TCP queries run on separate threads simultaneously
-- **First success wins**: `atomic.Value(bool)` done flag, workers exit early
-- **Lock-free task dispatch**: `atomic.fetchAdd` on shared index, no queue contention
-- **Per-worker sockets**: each worker opens its own fd, no shared fd coordination
+- **First successful answer wins**: negative DNS replies do not short-circuit later successes
+- **Per-server sockets**: each task opens its own fd, no shared fd coordination
+- **Detached cleanup**: `lookupHost()` can return before lagging workers time out
 - **SO_RCVTIMEO**: blocking recv with kernel timeout, no poll loop needed
 
 ### DNS wire format (internal)
@@ -412,13 +394,14 @@ const Addr = embed.net.Address;
 
 const R = net.Resolver;
 
-// Default resolver (AliDNS + Cloudflare, 2 workers, A+AAAA)
-var r = R.init(.{});
+// Default resolver (AliDNS + Cloudflare, IPv4-only)
+var r = try R.init(allocator, .{});
+defer r.deinit();
 var addrs: [16]Addr = undefined;
-const n = try r.lookupHost(allocator, "example.com", &addrs);
+const n = try r.lookupHost("example.com", &addrs);
 
 // UDP + TCP racing with custom servers
-var r2 = R.init(.{
+var r2 = try R.init(allocator, .{
     .servers = &.{
         R.Server.init(R.dns.ali.v4_1, .udp),
         R.Server.init(R.dns.ali.v4_2, .tcp),
@@ -426,22 +409,7 @@ var r2 = R.init(.{
     .timeout_ms = 3000,
     .mode = .ipv4_only,
 });
-```
-
-### Convenience: `net.dialHost`
-
-Top-level helper that resolves + dials in one call:
-
-```zig
-pub fn dialHost(allocator: Allocator, host: []const u8, port: u16) !Conn {
-    var r = Resolver.init(.{});
-    var addrs: [8]Addr = undefined;
-    const n = try r.lookupHost(allocator, host, &addrs);
-    if (n == 0) return error.NameNotFound;
-    var addr = addrs[0];
-    addr.setPort(port);
-    return dial(allocator, addr);
-}
+defer r2.deinit();
 ```
 
 ## net/tls
@@ -451,7 +419,7 @@ encrypted Conn — the output type also satisfies the Conn contract,
 so protocol layers compose transparently.
 
 ```zig
-var tcp = try net.dial(.{ .host = ip, .port = 443 });
+var tcp = try net.dial(allocator, .tcp, ip);
 var tls = try net.tls.Stream.init(&tcp, allocator, "example.com", .{});
 try tls.handshake();
 defer tls.close();

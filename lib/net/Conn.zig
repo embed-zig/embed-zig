@@ -3,10 +3,10 @@
 //! Uses a VTable for runtime dispatch, same pattern as std.mem.Allocator.
 //! Any concrete type with read/write/close methods can be wrapped into a Conn.
 //!
-//! Usage:
-//!   const Addr = lib.net.Address;
-//!   var conn = try net.dial(allocator, Addr.initIp4(.{127,0,0,1}, 80));
+//!   var conn = try net.dial(allocator, .tcp, addr);
 //!   defer conn.deinit();
+//!
+//!   // raw I/O
 //!   _ = try conn.write("hello");
 //!   const n = try conn.read(&buf);
 
@@ -14,10 +14,13 @@ const Conn = @This();
 
 ptr: *anyopaque,
 vtable: *const VTable,
+type_id: *const anyopaque,
 
 pub const VTable = struct {
     read: *const fn (ptr: *anyopaque, buf: []u8) ReadError!usize,
     write: *const fn (ptr: *anyopaque, buf: []const u8) WriteError!usize,
+    readAll: ?*const fn (ptr: *anyopaque, buf: []u8) ReadError!void = null,
+    writeAll: ?*const fn (ptr: *anyopaque, buf: []const u8) WriteError!void = null,
     close: *const fn (ptr: *anyopaque) void,
     deinit: *const fn (ptr: *anyopaque) void,
     setReadTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
@@ -26,6 +29,7 @@ pub const VTable = struct {
 
 pub const ReadError = error{
     EndOfStream,
+    ShortRead,
     ConnectionReset,
     ConnectionRefused,
     BrokenPipe,
@@ -40,12 +44,66 @@ pub const WriteError = error{
     Unexpected,
 };
 
+/// Comptime type ID: each distinct type T gets a unique address.
+fn TypeIdHolder(comptime T: type) type {
+    return struct {
+        comptime _phantom: type = T,
+        var id: u8 = 0;
+    };
+}
+
+fn typeId(comptime T: type) *const anyopaque {
+    return @ptrCast(&TypeIdHolder(T).id);
+}
+
+/// Safe downcast: returns a pointer to the underlying impl if the type matches.
+pub fn as(self: Conn, comptime T: type) error{TypeMismatch}!*T {
+    if (self.type_id == typeId(T)) return @ptrCast(@alignCast(self.ptr));
+    return error.TypeMismatch;
+}
+
 pub fn read(self: Conn, buf: []u8) ReadError!usize {
     return self.vtable.read(self.ptr, buf);
 }
 
+fn readAllDefault(self: Conn, buf: []u8) ReadError!void {
+    var filled: usize = 0;
+    while (filled < buf.len) {
+        const n = try self.read(buf[filled..]);
+        if (n == 0) return error.EndOfStream;
+        filled += n;
+    }
+}
+
+/// Reads exactly `buf.len` bytes.
+/// Protocol-specific transports may override this via the vtable.
+pub fn readAll(self: Conn, buf: []u8) ReadError!void {
+    if (self.vtable.readAll) |read_all| return read_all(self.ptr, buf);
+    return readAllDefault(self, buf);
+}
+
+pub fn readFull(self: Conn, buf: []u8) ReadError!void {
+    return self.readAll(buf);
+}
+
 pub fn write(self: Conn, buf: []const u8) WriteError!usize {
     return self.vtable.write(self.ptr, buf);
+}
+
+fn writeAllDefault(self: Conn, buf: []const u8) WriteError!void {
+    var written: usize = 0;
+    while (written < buf.len) {
+        const n = try self.write(buf[written..]);
+        if (n == 0) return error.Unexpected;
+        written += n;
+    }
+}
+
+/// Writes exactly one logical payload.
+/// Protocol-specific transports may override this via the vtable.
+pub fn writeAll(self: Conn, buf: []const u8) WriteError!void {
+    if (self.vtable.writeAll) |write_all| return write_all(self.ptr, buf);
+    return writeAllDefault(self, buf);
 }
 
 pub fn close(self: Conn) void {
@@ -66,24 +124,6 @@ pub fn setWriteTimeout(self: Conn, ms: ?u32) void {
     self.vtable.setWriteTimeout(self.ptr, ms);
 }
 
-/// Read exactly buf.len bytes or return error.
-pub fn readAll(self: Conn, buf: []u8) ReadError!void {
-    var filled: usize = 0;
-    while (filled < buf.len) {
-        const n = try self.read(buf[filled..]);
-        if (n == 0) return error.EndOfStream;
-        filled += n;
-    }
-}
-
-/// Write all bytes or return error.
-pub fn writeAll(self: Conn, buf: []const u8) WriteError!void {
-    var written: usize = 0;
-    while (written < buf.len) {
-        written += try self.write(buf[written..]);
-    }
-}
-
 /// Wrap a pointer to any concrete type that has read/write/close into a Conn.
 pub fn init(pointer: anytype) Conn {
     const Ptr = @TypeOf(pointer);
@@ -102,6 +142,14 @@ pub fn init(pointer: anytype) Conn {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             return self.write(buf);
         }
+        fn readAllFn(ptr: *anyopaque, buf: []u8) ReadError!void {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            return self.readAll(buf);
+        }
+        fn writeAllFn(ptr: *anyopaque, buf: []const u8) WriteError!void {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            return self.writeAll(buf);
+        }
         fn closeFn(ptr: *anyopaque) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             self.close();
@@ -110,6 +158,8 @@ pub fn init(pointer: anytype) Conn {
         const vtable = VTable{
             .read = readFn,
             .write = writeFn,
+            .readAll = if (@hasDecl(Impl, "readAll")) readAllFn else null,
+            .writeAll = if (@hasDecl(Impl, "writeAll")) writeAllFn else null,
             .close = closeFn,
             .deinit = deinitFn,
             .setReadTimeout = setReadTimeoutFn,
@@ -133,5 +183,6 @@ pub fn init(pointer: anytype) Conn {
     return .{
         .ptr = pointer,
         .vtable = &gen.vtable,
+        .type_id = typeId(Impl),
     };
 }

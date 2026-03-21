@@ -3,12 +3,16 @@
 //! Impl must provide:
 //!   fn milliTimestamp() i64
 
+const std = @import("std");
+
 pub fn make(comptime Impl: type) type {
     comptime {
         _ = @as(*const fn () i64, &Impl.milliTimestamp);
     }
 
     return struct {
+        pub const ns_per_ms = std.time.ns_per_ms;
+
         pub fn milliTimestamp() i64 {
             return Impl.milliTimestamp();
         }

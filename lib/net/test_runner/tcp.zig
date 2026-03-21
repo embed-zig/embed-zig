@@ -20,7 +20,7 @@ pub fn run(comptime lib: type) void {
 
             const bound_port = try ln.port();
 
-            var cc = try Net.dial(testing.allocator, Addr.initIp4(.{ 127, 0, 0, 1 }, bound_port));
+            var cc = try Net.dial(testing.allocator, .tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, bound_port));
             defer cc.deinit();
 
             var ac = try ln.accept();
@@ -49,7 +49,7 @@ pub fn run(comptime lib: type) void {
             var dial_addr = loopback_v6;
             dial_addr.setPort(bound_port);
 
-            var cc = try Net.dial(testing.allocator, dial_addr);
+            var cc = try Net.dial(testing.allocator, .tcp, dial_addr);
             defer cc.deinit();
 
             var ac = try ln.accept();
@@ -73,7 +73,7 @@ pub fn run(comptime lib: type) void {
 
             const port = try ln.port();
 
-            var cc = try Net.dial(testing.allocator, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+            var cc = try Net.dial(testing.allocator, .tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
             defer cc.deinit();
 
             var ac = try ln.accept();
@@ -91,13 +91,33 @@ pub fn run(comptime lib: type) void {
             try testing.expectEqualStrings("after timeout", buf[0..13]);
         }
 
+        test "tcp readAll" {
+            var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
+            defer ln.close();
+
+            const port = try ln.port();
+
+            var cc = try Net.dial(testing.allocator, .tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+            defer cc.deinit();
+
+            var ac = try ln.accept();
+            defer ac.deinit();
+
+            _ = try cc.write("he");
+            _ = try cc.write("llo");
+
+            var buf: [5]u8 = undefined;
+            try ac.readAll(&buf);
+            try testing.expectEqualStrings("hello", &buf);
+        }
+
         test "tcp write timeout" {
             var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
             defer ln.close();
 
             const port = try ln.port();
 
-            var cc = try Net.dial(testing.allocator, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+            var cc = try Net.dial(testing.allocator, .tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
             defer cc.deinit();
 
             var ac = try ln.accept();
@@ -118,6 +138,28 @@ pub fn run(comptime lib: type) void {
             try testing.expect(timed_out);
         }
 
+        test "tcp conn.as downcast" {
+            const TcpConnType = @import("../TcpConn.zig").TcpConn(lib);
+            const UdpConnType = @import("../UdpConn.zig").UdpConn(lib);
+
+            var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
+            defer ln.close();
+
+            const port = try ln.port();
+
+            var cc = try Net.dial(testing.allocator, .tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+            defer cc.deinit();
+
+            var ac = try ln.accept();
+            defer ac.deinit();
+
+            const tcp_impl = try cc.as(TcpConnType.Inner);
+            try testing.expect(!tcp_impl.closed);
+            try testing.expect(tcp_impl.fd != 0);
+
+            try testing.expectError(error.TypeMismatch, cc.as(UdpConnType.Inner));
+        }
+
         test "tcp multiple accept" {
             var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
             defer ln.close();
@@ -125,25 +167,25 @@ pub fn run(comptime lib: type) void {
             const port = try ln.port();
             const dest = Addr.initIp4(.{ 127, 0, 0, 1 }, port);
 
-            var c1 = try Net.dial(testing.allocator, dest);
+            var c1 = try Net.dial(testing.allocator, .tcp, dest);
             defer c1.deinit();
             var a1 = try ln.accept();
             defer a1.deinit();
 
-            var c2 = try Net.dial(testing.allocator, dest);
+            var c2 = try Net.dial(testing.allocator, .tcp, dest);
             defer c2.deinit();
             var a2 = try ln.accept();
             defer a2.deinit();
 
-            try c1.writeAll("conn1");
-            try c2.writeAll("conn2");
+            _ = try c1.write("conn1");
+            _ = try c2.write("conn2");
 
             var buf: [64]u8 = undefined;
-            try a1.readAll(buf[0..5]);
-            try testing.expectEqualStrings("conn1", buf[0..5]);
+            const n1 = try a1.read(buf[0..]);
+            try testing.expectEqualStrings("conn1", buf[0..n1]);
 
-            try a2.readAll(buf[0..5]);
-            try testing.expectEqualStrings("conn2", buf[0..5]);
+            const n2 = try a2.read(buf[0..]);
+            try testing.expectEqualStrings("conn2", buf[0..n2]);
         }
     };
 }

@@ -5,12 +5,12 @@
 //!   const Addr = lib.net.Address;
 //!
 //!   // Quick dial (default options):
-//!   var conn = try net.dial(allocator, Addr.initIp4(.{127,0,0,1}, 80));
+//!   var conn = try net.dial(allocator, .tcp, Addr.initIp4(.{127,0,0,1}, 80));
 //!   defer conn.deinit();
 //!
 //!   // Configurable dialer (like Go's net.Dialer):
 //!   var d = net.Dialer.init(allocator, .{});
-//!   var conn = try d.dial(Addr.initIp4(.{127,0,0,1}, 80));
+//!   var conn = try d.dial(.tcp, Addr.initIp4(.{127,0,0,1}, 80));
 //!   defer conn.deinit();
 //!
 //!   // Listen on IPv4:
@@ -45,30 +45,23 @@ pub fn Make(comptime lib: type) type {
         pub const ListenOptions = TL.Options;
 
         pub const ListenPacketOptions = struct {
+            allocator: Allocator,
             address: Addr = Addr.initIp4(.{ 0, 0, 0, 0 }, 0),
             reuse_addr: bool = true,
         };
 
-        pub fn dial(allocator: Allocator, addr: Addr) !Conn {
+        pub const Network = Dialer.Network;
+
+        pub fn dial(allocator: Allocator, network: Network, addr: Addr) !Conn {
             const d = Dialer.init(allocator, .{});
-            return d.dial(addr);
+            return d.dial(network, addr);
         }
 
         pub fn listen(allocator: Allocator, opts: ListenOptions) !TL {
             return TL.init(allocator, opts);
         }
 
-        pub fn dialHost(allocator: Allocator, host: []const u8, port: u16) !Conn {
-            var resolver = Resolver.init(.{ .mode = .ipv4_only });
-            var addrs: [1]Addr = undefined;
-            const count = try resolver.lookupHost(host, &addrs);
-            if (count == 0) return error.NameNotFound;
-            addrs[0].setPort(port);
-            const d = Dialer.init(allocator, .{});
-            return d.dial(addrs[0]);
-        }
-
-        pub fn listenPacket(opts: ListenPacketOptions) !UC {
+        pub fn listenPacket(opts: ListenPacketOptions) !PacketConn {
             const posix = lib.posix;
             const fd = try posix.socket(opts.address.any.family, posix.SOCK.DGRAM, 0);
             errdefer posix.close(fd);
@@ -79,7 +72,7 @@ pub fn Make(comptime lib: type) type {
             }
 
             try posix.bind(fd, @ptrCast(&opts.address.any), opts.address.getOsSockLen());
-            return UC.init(fd);
+            return UC.initPacket(opts.allocator, fd);
         }
     };
 }
@@ -87,7 +80,8 @@ pub fn Make(comptime lib: type) type {
 pub const test_runner = struct {
     pub const tcp = @import("net/test_runner/tcp.zig");
     pub const udp = @import("net/test_runner/udp.zig");
-    pub const resolver = @import("net/test_runner/resolver.zig");
+    pub const resolver_fake = @import("net/test_runner/resolver_fake.zig");
+    pub const resolver_ali_dns = @import("net/test_runner/resolver_ali_dns.zig");
 };
 
 test {
@@ -102,5 +96,6 @@ test {
     _ = @import("net/url.zig");
     _ = @import("net/test_runner/tcp.zig");
     _ = @import("net/test_runner/udp.zig");
-    _ = @import("net/test_runner/resolver.zig");
+    _ = @import("net/test_runner/resolver_fake.zig");
+    _ = @import("net/test_runner/resolver_ali_dns.zig");
 }

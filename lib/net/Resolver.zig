@@ -2,32 +2,37 @@
 //!
 //! Builds and parses DNS wire-format packets (RFC 1035) directly.
 //! No libc getaddrinfo, fully portable across embed platforms.
+//! Resolver owns its allocator-backed state and any in-flight lookups; call
+//! deinit() to wait for outstanding racers/workers to finish cleanup.
 //!
-//! Strategy (worker pool):
+//! Strategy (Racer + cleanup):
 //!   1. Build query packets (A, AAAA depending on mode)
-//!   2. Create a task queue: one task per configured server
-//!   3. Spawn N worker threads (default 2); each worker:
-//!      a. Atomically claims the next server from the queue
-//!      b. Sends all query packets via the server's protocol (UDP/TCP)
-//!      c. Waits for responses with SO_RCVTIMEO
-//!      d. On success → writes result, sets done flag
-//!      e. On failure → loops back to (a) for next server
-//!   4. Main thread joins workers, returns first successful result
-//!   5. If all servers fail → Timeout
+//!   2. Create one Racer per lookup
+//!   3. Spawn one Racer task per configured server
+//!   4. Only successful address results are published through sync.Racer
+//!   5. Main thread returns as soon as Racer gets the first result
+//!   6. Negative DNS replies are recorded and returned only if all servers fail
+//!   7. Detached cleanup waits for lagging workers and frees lookup state
+//!   8. deinit() waits for all outstanding lookups to finish cleanup
 
-const udp_conn = @import("UdpConn.zig");
+const dialer = @import("Dialer.zig");
+const sync = @import("sync");
 
 pub fn Resolver(comptime lib: type) type {
     const posix = lib.posix;
     const Addr = lib.net.Address;
-    const UdpConn = udp_conn.UdpConn(lib);
+    const Dialer = dialer.Dialer(lib);
     const mem = lib.mem;
     const Allocator = mem.Allocator;
     const Thread = lib.Thread;
-    const Atomic = lib.atomic.Value;
 
     return struct {
+        allocator: Allocator,
         options: Options,
+        mutex: Thread.Mutex = .{},
+        cond: Thread.Condition = .{},
+        deiniting: bool = false,
+        active_lookups: usize = 0,
 
         const Self = @This();
 
@@ -86,8 +91,7 @@ pub fn Resolver(comptime lib: type) type {
             },
             timeout_ms: u32 = 1000,
             attempts: u32 = 2,
-            mode: QueryMode = .ipv4_and_ipv6,
-            concurrency: u32 = 2,
+            mode: QueryMode = .ipv4_only,
             spawn_config: Thread.SpawnConfig = .{},
         };
 
@@ -103,13 +107,41 @@ pub fn Resolver(comptime lib: type) type {
             Timeout,
             InvalidResponse,
             NoServerConfigured,
+            Closed,
             OutOfMemory,
         } || posix.SocketError || posix.SendToError || posix.RecvFromError ||
             posix.ConnectError || posix.SendError || posix.SetSockOptError ||
             Thread.SpawnError;
 
-        pub fn init(options: Options) Self {
-            return .{ .options = options };
+        pub fn init(allocator: Allocator, options: Options) Allocator.Error!Self {
+            const servers = try allocator.dupe(Server, options.servers);
+            var owned_options = options;
+            owned_options.servers = servers;
+            return .{
+                .allocator = allocator,
+                .options = owned_options,
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.mutex.lock();
+            self.deiniting = true;
+            while (self.active_lookups != 0) {
+                self.cond.wait(&self.mutex);
+            }
+            self.mutex.unlock();
+
+            self.allocator.free(self.options.servers);
+            self.* = undefined;
+        }
+
+        pub fn wait(self: *Self) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            while (self.active_lookups != 0) {
+                self.cond.wait(&self.mutex);
+            }
         }
 
         const MAX_ADDRS = 16;
@@ -121,15 +153,47 @@ pub fn Resolver(comptime lib: type) type {
             has_result: bool = false,
         };
 
-        const SharedState = struct {
-            next_task: Atomic(usize),
-            done: Atomic(bool),
-            mutex: Thread.Mutex,
-            result: WorkerResult,
-            servers: []const Server,
-            query_pkts: []const QueryPkt,
-            timeout_ms: u32,
-            attempts: u32,
+        const WorkerRacer = sync.Racer(lib, WorkerResult);
+
+        const LookupJob = struct {
+            resolver: *Self,
+            racer: WorkerRacer,
+            query_pkts: [2]QueryPkt,
+            query_count: usize,
+            failure_mutex: Thread.Mutex = .{},
+            saw_name_not_found: bool = false,
+            saw_refused: bool = false,
+
+            fn queryPkts(self: *const LookupJob) []const QueryPkt {
+                return self.query_pkts[0..self.query_count];
+            }
+
+            fn queryIndexById(self: *const LookupJob, id: u16) ?usize {
+                for (self.queryPkts(), 0..) |qpkt, idx| {
+                    if (qpkt.id == id) return idx;
+                }
+                return null;
+            }
+
+            fn recordFailure(self: *LookupJob, err: LookupError) void {
+                self.failure_mutex.lock();
+                defer self.failure_mutex.unlock();
+
+                switch (err) {
+                    error.NameNotFound => self.saw_name_not_found = true,
+                    error.Refused => self.saw_refused = true,
+                    else => {},
+                }
+            }
+
+            fn finalError(self: *LookupJob) LookupError {
+                self.failure_mutex.lock();
+                defer self.failure_mutex.unlock();
+
+                if (self.saw_name_not_found) return error.NameNotFound;
+                if (self.saw_refused) return error.Refused;
+                return error.Timeout;
+            }
         };
 
         const QueryPkt = struct {
@@ -139,7 +203,11 @@ pub fn Resolver(comptime lib: type) type {
             id: u16,
         };
 
-        pub fn lookupHost(self: Self, allocator: Allocator, name: []const u8, buf: []Addr) LookupError!usize {
+        pub fn lookupHost(self: *Self, name: []const u8, buf: []Addr) LookupError!usize {
+            try self.beginLookup();
+            var needs_finish_lookup = true;
+            errdefer if (needs_finish_lookup) self.finishLookup();
+
             if (self.options.servers.len == 0) return error.NoServerConfigured;
 
             const num_queries: usize = switch (self.options.mode) {
@@ -157,123 +225,128 @@ pub fn Resolver(comptime lib: type) type {
             }
             if (num_queries == 2) {
                 var qbuf: [512]u8 = undefined;
-                const id = randomId();
+                var id = randomId();
+                while (id == query_pkts[0].id) : (id = randomId()) {}
                 const len = buildQuery(&qbuf, name, QTYPE_AAAA, id) catch return error.InvalidResponse;
                 query_pkts[1] = .{ .buf = qbuf, .len = len, .qtype = QTYPE_AAAA, .id = id };
             }
 
-            var state = SharedState{
-                .next_task = Atomic(usize).init(0),
-                .done = Atomic(bool).init(false),
-                .mutex = .{},
-                .result = .{},
-                .servers = self.options.servers,
-                .query_pkts = query_pkts[0..num_queries],
-                .timeout_ms = self.options.timeout_ms,
-                .attempts = self.options.attempts,
+            const job = self.allocator.create(LookupJob) catch return error.OutOfMemory;
+            var owns_job = false;
+            errdefer if (!owns_job) self.allocator.destroy(job);
+
+            job.* = .{
+                .resolver = self,
+                .racer = undefined,
+                .query_pkts = undefined,
+                .query_count = num_queries,
             };
+            @memcpy(job.query_pkts[0..num_queries], query_pkts[0..num_queries]);
+            job.racer = WorkerRacer.init(self.allocator) catch return error.OutOfMemory;
 
-            const n_workers: usize = @min(self.options.concurrency, @as(u32, @intCast(self.options.servers.len)));
-            if (n_workers == 0) return error.NoServerConfigured;
-
-            const workers = allocator.alloc(Thread, n_workers) catch return error.OutOfMemory;
-            defer allocator.free(workers);
+            owns_job = true;
+            defer if (owns_job) self.destroyLookupJob(job);
+            needs_finish_lookup = false;
 
             var spawned: usize = 0;
-            for (0..n_workers) |_| {
-                workers[spawned] = Thread.spawn(self.options.spawn_config, workerFn, .{&state}) catch continue;
+            var spawn_err: ?Thread.SpawnError = null;
+            // TODO: Partial spawn failure currently degrades to a best-effort
+            // query using only the server tasks that started successfully.
+            for (self.options.servers) |server| {
+                job.racer.spawn(self.options.spawn_config, serverTask, .{ job, server }) catch |err| {
+                    if (spawn_err == null) spawn_err = err;
+                    continue;
+                };
                 spawned += 1;
             }
 
-            if (spawned == 0) return error.NoServerConfigured;
+            if (spawned == 0) return spawn_err orelse error.NoServerConfigured;
 
-            for (workers[0..spawned]) |w| w.join();
+            const result = switch (job.racer.race()) {
+                .winner => |winner| winner,
+                .exhausted => return job.finalError(),
+            };
 
-            state.mutex.lock();
-            defer state.mutex.unlock();
+            if (self.beginCleanup(job)) {
+                owns_job = false;
+            } else {
+                job.racer.wait();
+            }
 
-            if (!state.result.has_result) return error.Timeout;
-            if (state.result.err) |e| return e;
+            if (!result.has_result) return error.Timeout;
+            if (result.err) |e| return e;
 
-            const count = @min(state.result.count, buf.len);
-            for (0..count) |i| buf[i] = state.result.addrs[i];
+            const count = @min(result.count, buf.len);
+            for (0..count) |i| buf[i] = result.addrs[i];
             return count;
         }
 
-        fn workerFn(state: *SharedState) void {
-            while (!state.done.load(.acquire)) {
-                const idx = state.next_task.fetchAdd(1, .acq_rel);
-                if (idx >= state.servers.len) return;
+        fn serverTask(ctx: WorkerRacer.Context, job: *LookupJob, server: Server) void {
+            const result: ?WorkerResult = switch (server.protocol) {
+                .udp => udpResolve(ctx, server, job),
+                .tcp => tcpResolve(ctx, server, job),
+                else => null,
+            };
 
-                const server = state.servers[idx];
-                const result: ?WorkerResult = switch (server.protocol) {
-                    .udp => udpResolve(server, state),
-                    .tcp => tcpResolve(server, state),
-                    else => null,
-                };
-
-                if (result) |r| {
-                    state.mutex.lock();
-                    defer state.mutex.unlock();
-                    if (!state.done.load(.acquire)) {
-                        state.result = r;
-                        state.done.store(true, .release);
-                    }
-                    return;
+            if (result) |r| {
+                if (r.err) |err| {
+                    job.recordFailure(err);
+                } else if (r.has_result) {
+                    _ = ctx.success(r);
                 }
             }
         }
 
-        fn setRecvTimeout(fd: posix.socket_t, ms: u32) void {
-            const tv = posix.timeval{
-                .sec = @intCast(ms / 1000),
-                .usec = @intCast((@as(u64, ms) % 1000) * 1000),
-            };
-            const bytes: []const u8 = @as([*]const u8, @ptrCast(&tv))[0..@sizeOf(posix.timeval)];
-            posix.setsockopt(fd, posix.SOL.SOCKET, posix.SO.RCVTIMEO, bytes) catch {};
-        }
+        fn udpResolve(ctx: WorkerRacer.Context, server: Server, job: *LookupJob) ?WorkerResult {
+            const attempts = @max(job.resolver.options.attempts, 1);
+            const per_attempt_ms = job.resolver.options.timeout_ms / attempts;
 
-        fn udpResolve(server: Server, state: *SharedState) ?WorkerResult {
-            const attempts = @max(state.attempts, 1);
-            const per_attempt_ms = state.timeout_ms / attempts;
+            const d = Dialer.init(job.resolver.allocator, .{});
+            var c = d.dial(.udp, server.addr) catch return null;
+            defer c.deinit();
 
-            const fd = posix.socket(
-                server.addr.any.family,
-                posix.SOCK.DGRAM,
-                0,
-            ) catch return null;
-            defer posix.close(fd);
-
-            setRecvTimeout(fd, per_attempt_ms);
+            c.setReadTimeout(per_attempt_ms);
 
             var result = WorkerResult{};
-            var answered: usize = 0;
+            var replied = [2]bool{ false, false };
+            var replied_count: usize = 0;
 
             var attempt: u32 = 0;
             while (attempt < attempts) : (attempt += 1) {
-                if (state.done.load(.acquire)) return null;
+                if (ctx.done()) return null;
+                const outstanding = job.queryPkts().len - replied_count;
+                if (outstanding == 0) break;
+                var handled = replied;
+                var handled_count = replied_count;
 
-                for (state.query_pkts) |qpkt| {
-                    var uc = UdpConn.init(fd);
-                    _ = uc.writeTo(
-                        qpkt.buf[0..qpkt.len],
-                        @ptrCast(&server.addr.any),
-                        server.addr.getOsSockLen(),
-                    ) catch continue;
+                for (job.queryPkts(), 0..) |qpkt, idx| {
+                    if (replied[idx]) continue;
+                    // Each DNS UDP query is sent as a single datagram, so use one
+                    // write per packet rather than stream-style retry semantics.
+                    _ = c.write(qpkt.buf[0..qpkt.len]) catch continue;
                 }
 
                 var recv_tries: usize = 0;
-                while (recv_tries < state.query_pkts.len * 2) : (recv_tries += 1) {
-                    if (state.done.load(.acquire)) return null;
+                while (recv_tries < outstanding * 2) : (recv_tries += 1) {
+                    if (ctx.done()) return null;
+                    if (handled_count >= job.queryPkts().len) break;
 
                     var recv_buf: [512]u8 = undefined;
-                    var uc = UdpConn.init(fd);
-                    const rr = uc.readFrom(&recv_buf) catch break;
-                    if (rr.bytes_read < 12) continue;
+                    const recv_n = c.read(&recv_buf) catch break;
+                    if (recv_n < 12) continue;
 
                     const resp_id = readU16(recv_buf[0..2]);
+                    const idx = job.queryIndexById(resp_id) orelse continue;
+                    if (handled[idx]) continue;
+
+                    const qpkt = job.queryPkts()[idx];
                     const rcode: u4 = @truncate(recv_buf[3]);
-                    if (rcode == RCODE_SERVFAIL) break;
+                    if (rcode == RCODE_SERVFAIL) {
+                        handled[idx] = true;
+                        handled_count += 1;
+                        if (handled_count >= job.queryPkts().len) break;
+                        continue;
+                    }
                     if (rcode == RCODE_NXDOMAIN) {
                         return WorkerResult{ .has_result = true, .err = error.NameNotFound };
                     }
@@ -282,80 +355,87 @@ pub fn Resolver(comptime lib: type) type {
                     }
                     if (rcode != RCODE_NOERROR) continue;
 
-                    for (state.query_pkts) |qpkt| {
-                        if (qpkt.id != resp_id) continue;
-                        const n = parseResponse(recv_buf[0..rr.bytes_read], qpkt.qtype, result.addrs[result.count..]) catch continue;
-                        if (n > 0) {
-                            result.count += n;
-                            answered += 1;
+                    const n = parseResponse(recv_buf[0..recv_n], qpkt.qtype, result.addrs[result.count..]) catch continue;
+                    replied[idx] = true;
+                    replied_count += 1;
+                    handled[idx] = true;
+                    handled_count += 1;
+                    if (n > 0) {
+                        result.count += n;
+                    }
+
+                    if (handled_count >= job.queryPkts().len) {
+                        if (result.count > 0) {
+                            result.has_result = true;
+                            return result;
                         }
                         break;
                     }
-
-                    if (answered >= state.query_pkts.len) {
-                        result.has_result = true;
-                        return result;
-                    }
                 }
+            }
+            if (result.count > 0) {
+                result.has_result = true;
+                return result;
+            }
+            if (replied_count >= job.queryPkts().len) {
+                return WorkerResult{ .has_result = true, .err = error.NameNotFound };
             }
             return null;
         }
 
-        fn tcpResolve(server: Server, state: *SharedState) ?WorkerResult {
-            const attempts = @max(state.attempts, 1);
-            const per_attempt_ms = state.timeout_ms / attempts;
+        fn tcpResolve(ctx: WorkerRacer.Context, server: Server, job: *LookupJob) ?WorkerResult {
+            const attempts = @max(job.resolver.options.attempts, 1);
+            const per_attempt_ms = job.resolver.options.timeout_ms / attempts;
 
             var attempt: u32 = 0;
             while (attempt < attempts) : (attempt += 1) {
-                if (state.done.load(.acquire)) return null;
-                if (tcpAttempt(server, state, per_attempt_ms)) |r| return r;
+                if (ctx.done()) return null;
+                if (tcpAttempt(ctx, server, job, per_attempt_ms)) |r| return r;
             }
             return null;
         }
 
-        fn tcpAttempt(server: Server, state: *SharedState, timeout_ms: u32) ?WorkerResult {
-            const fd = posix.socket(
-                server.addr.any.family,
-                posix.SOCK.STREAM,
-                0,
-            ) catch return null;
-            defer posix.close(fd);
+        fn tcpAttempt(ctx: WorkerRacer.Context, server: Server, job: *LookupJob, timeout_ms: u32) ?WorkerResult {
+            const d = Dialer.init(job.resolver.allocator, .{});
+            var c = d.dial(.tcp, server.addr) catch return null;
+            defer c.deinit();
 
-            posix.connect(fd, @ptrCast(&server.addr.any), server.addr.getOsSockLen()) catch return null;
-            setRecvTimeout(fd, timeout_ms);
+            c.setReadTimeout(timeout_ms);
+            c.setWriteTimeout(timeout_ms);
 
-            for (state.query_pkts) |qpkt| {
-                if (state.done.load(.acquire)) return null;
+            for (job.queryPkts()) |qpkt| {
+                if (ctx.done()) return null;
 
                 var tcp_buf: [514]u8 = undefined;
                 tcp_buf[0] = @truncate(qpkt.len >> 8);
                 tcp_buf[1] = @truncate(qpkt.len);
                 @memcpy(tcp_buf[2..][0..qpkt.len], qpkt.buf[0..qpkt.len]);
-                _ = posix.send(fd, tcp_buf[0 .. 2 + qpkt.len], 0) catch return null;
+                c.writeAll(tcp_buf[0 .. 2 + qpkt.len]) catch return null;
             }
 
             var result = WorkerResult{};
-            var answered: usize = 0;
+            var replied = [2]bool{ false, false };
+            var replied_count: usize = 0;
+            var handled = [2]bool{ false, false };
+            var handled_count: usize = 0;
 
-            for (state.query_pkts) |qpkt| {
-                if (state.done.load(.acquire)) return null;
+            while (handled_count < job.queryPkts().len) {
+                if (ctx.done()) return null;
 
                 var len_buf: [2]u8 = undefined;
-                const ln = posix.recv(fd, &len_buf, 0) catch return null;
-                if (ln < 2) return null;
+                c.readAll(&len_buf) catch return null;
 
                 const msg_len = readU16(&len_buf);
                 if (msg_len < 12 or msg_len > 512) return null;
 
                 var recv_buf: [512]u8 = undefined;
-                var total: usize = 0;
-                while (total < msg_len) {
-                    if (state.done.load(.acquire)) return null;
-                    const r = posix.recv(fd, recv_buf[total..msg_len], 0) catch return null;
-                    if (r == 0) return null;
-                    total += r;
-                }
+                c.readAll(recv_buf[0..msg_len]) catch return null;
 
+                const resp_id = readU16(recv_buf[0..2]);
+                const idx = job.queryIndexById(resp_id) orelse continue;
+                if (handled[idx]) continue;
+
+                const qpkt = job.queryPkts()[idx];
                 const rcode: u4 = @truncate(recv_buf[3]);
                 if (rcode == RCODE_NXDOMAIN) {
                     return WorkerResult{ .has_result = true, .err = error.NameNotFound };
@@ -363,21 +443,74 @@ pub fn Resolver(comptime lib: type) type {
                 if (rcode == RCODE_REFUSED) {
                     return WorkerResult{ .has_result = true, .err = error.Refused };
                 }
-                if (rcode == RCODE_SERVFAIL) return null;
+                if (rcode == RCODE_SERVFAIL) {
+                    handled[idx] = true;
+                    handled_count += 1;
+                    continue;
+                }
                 if (rcode != RCODE_NOERROR) return null;
 
                 const n = parseResponse(recv_buf[0..msg_len], qpkt.qtype, result.addrs[result.count..]) catch return null;
+                replied[idx] = true;
+                replied_count += 1;
+                handled[idx] = true;
+                handled_count += 1;
                 if (n > 0) {
                     result.count += n;
-                    answered += 1;
                 }
             }
 
-            if (answered > 0) {
+            if (result.count > 0) {
                 result.has_result = true;
                 return result;
             }
+            if (replied_count >= job.queryPkts().len) {
+                return WorkerResult{ .has_result = true, .err = error.NameNotFound };
+            }
             return null;
+        }
+
+        fn beginLookup(self: *Self) error{Closed}!void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            if (self.deiniting) return error.Closed;
+            self.active_lookups += 1;
+        }
+
+        fn finishLookup(self: *Self) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            @import("std").debug.assert(self.active_lookups > 0);
+            self.active_lookups -= 1;
+            if (self.active_lookups == 0) self.cond.broadcast();
+        }
+
+        fn beginCleanup(self: *Self, job: *LookupJob) bool {
+            var t = Thread.spawn(self.cleanupSpawnConfig(), cleanupFn, .{job}) catch return false;
+            t.detach();
+            return true;
+        }
+
+        fn cleanupFn(job: *LookupJob) void {
+            job.resolver.destroyLookupJob(job);
+        }
+
+        fn destroyLookupJob(self: *Self, job: *LookupJob) void {
+            job.racer.deinit();
+            self.allocator.destroy(job);
+            self.finishLookup();
+        }
+
+        fn cleanupSpawnConfig(self: *Self) Thread.SpawnConfig {
+            var config = self.options.spawn_config;
+            if (@hasField(Thread.SpawnConfig, "allocator")) {
+                if (config.allocator == null) {
+                    config.allocator = self.allocator;
+                }
+            }
+            return config;
         }
 
         // --- DNS wire format ---
@@ -498,5 +631,6 @@ pub fn Resolver(comptime lib: type) type {
 }
 
 test {
-    _ = @import("test_runner/resolver.zig");
+    _ = @import("test_runner/resolver_fake.zig");
+    _ = @import("test_runner/resolver_ali_dns.zig");
 }

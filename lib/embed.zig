@@ -18,6 +18,7 @@ pub const posix = @import("embed/posix.zig");
 const net = @import("embed/net.zig");
 const time = @import("embed/time.zig");
 const mem = @import("embed/mem.zig");
+const meta = @import("embed/meta.zig");
 const Io = @import("embed/Io.zig");
 const debug = @import("embed/debug.zig");
 const atomic = @import("embed/atomic.zig");
@@ -44,6 +45,7 @@ pub fn Make(comptime Impl: type) type {
         pub const posix = root.posix.make(Impl.posix);
         pub const time = root.time.make(Impl.time);
         pub const mem = root.mem;
+        pub const meta = root.meta;
         pub const Io = root.Io;
         pub const debug = root.debug;
         pub const atomic = root.atomic;
