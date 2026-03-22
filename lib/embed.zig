@@ -8,6 +8,7 @@
 
 const root = @This();
 
+pub const ascii = @import("embed/ascii.zig");
 pub const collections = @import("embed/collections.zig");
 pub const crypto = @import("embed/crypto.zig");
 pub const fmt = @import("embed/fmt.zig");
@@ -16,9 +17,9 @@ pub const log = @import("embed/log.zig");
 pub const mem = @import("embed/mem.zig");
 pub const posix = @import("embed/posix.zig");
 pub const thread = @import("embed/Thread.zig");
+pub const time = @import("embed/time.zig");
 
 const net = @import("embed/net.zig");
-const time = @import("embed/time.zig");
 const meta = @import("embed/meta.zig");
 const debug = @import("embed/debug.zig");
 const atomic = @import("embed/atomic.zig");
@@ -35,6 +36,7 @@ pub fn Make(comptime Impl: type) type {
         pub const log = root.log.make(Impl.log);
         pub const posix = root.posix.make(Impl.posix);
         pub const time = root.time.make(Impl.time);
+        pub const ascii = root.ascii;
         pub const mem = root.mem;
         pub const fmt = root.fmt;
         pub const meta = root.meta;

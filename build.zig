@@ -4,6 +4,7 @@ const Lib = struct {
     embed: LibEntry = .{ .path = "lib/embed.zig" },
     io: LibEntry = .{ .path = "lib/io.zig" },
     net: LibEntry = .{ .path = "lib/net.zig" },
+    mime: LibEntry = .{ .path = "lib/mime.zig" },
     bt: LibEntry = .{ .path = "lib/bt.zig" },
     sync: LibEntry = .{ .path = "lib/sync.zig" },
     context: LibEntry = .{ .path = "lib/context.zig" },
@@ -17,6 +18,7 @@ const Tests = struct {
     embed: TestEntry = .{ .from = .lib },
     io: TestEntry = .{ .from = .lib },
     net: TestEntry = .{ .from = .lib },
+    mime: TestEntry = .{ .from = .lib },
     sync: TestEntry = .{ .from = .lib },
     context: TestEntry = .{ .from = .lib },
     core_bluetooth: TestEntry = .{ .from = .pkg, .os = &.{ .macos, .ios, .tvos, .watchos } },
@@ -68,6 +70,7 @@ fn createLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.buil
 
     lib.context.mod.addImport("embed", lib.embed.mod);
     lib.io.mod.addImport("embed", lib.embed.mod);
+    lib.mime.mod.addImport("embed", lib.embed.mod);
     lib.sync.mod.addImport("context", lib.context.mod);
     lib.net.mod.addImport("sync", lib.sync.mod);
     lib.net.mod.addImport("context", lib.context.mod);
