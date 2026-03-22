@@ -24,6 +24,8 @@ const std = @import("std");
 
 const root = @This();
 
+pub const errors = std.crypto.errors;
+
 pub fn make(comptime Impl: type) type {
     return struct {
         const HashSha2 = struct {
@@ -90,7 +92,7 @@ pub fn make(comptime Impl: type) type {
             };
         };
         pub const Certificate = makeCertificate(Impl.Certificate, HashSha2, ImplHashSha2);
-        pub const errors = std.crypto.errors;
+        pub const errors = root.errors;
     };
 }
 
