@@ -18,32 +18,27 @@
 //! DH:       X25519
 //! ECC:      P256
 //! Block:    Aes128, Aes256
-//! Cert:     Certificate
-//! RSA:      rsa
+//! Cert:     Certificate (including `Certificate.rsa`)
 
 const std = @import("std");
 
 const root = @This();
 
-/// Hash algorithm selector for RSA signature verification.
-pub const HashType = enum { sha256, sha384, sha512 };
-
-/// Parsed RSA public key components from a raw DER-encoded
-/// `RSAPublicKey` (RFC 8017 A.1.1): `SEQUENCE { INTEGER modulus, INTEGER exponent }`.
-/// This is the inner key structure, **not** an SPKI wrapper.
-pub const DerKey = struct {
-    modulus: []const u8,
-    exponent: []const u8,
-};
-
 pub fn make(comptime Impl: type) type {
     return struct {
+        const HashSha2 = struct {
+            pub const Sha256 = makeHash(Impl.Sha256);
+            pub const Sha384 = makeHash(Impl.Sha384);
+            pub const Sha512 = makeHash(Impl.Sha512);
+        };
+        const ImplHashSha2 = struct {
+            pub const Sha256 = Impl.Sha256;
+            pub const Sha384 = Impl.Sha384;
+            pub const Sha512 = Impl.Sha512;
+        };
+
         pub const hash = struct {
-            pub const sha2 = struct {
-                pub const Sha256 = makeHash(Impl.Sha256);
-                pub const Sha384 = makeHash(Impl.Sha384);
-                pub const Sha512 = makeHash(Impl.Sha512);
-            };
+            pub const sha2 = HashSha2;
         };
         pub const auth = struct {
             pub const hmac = struct {
@@ -89,8 +84,7 @@ pub fn make(comptime Impl: type) type {
                 pub const Aes256 = makeBlockCipher(Impl.Aes256, 256);
             };
         };
-        pub const Certificate = makeCertificate(Impl.Certificate);
-        pub const rsa = makeRsa(Impl.rsa);
+        pub const Certificate = makeCertificate(Impl.Certificate, HashSha2, ImplHashSha2);
         pub const errors = std.crypto.errors;
     };
 }
@@ -112,6 +106,7 @@ fn makeHash(comptime Impl: type) type {
     }
 
     return struct {
+        pub const Inner = Impl;
         pub const digest_length = Impl.digest_length;
         pub const block_length = Impl.block_length;
         pub const Options = Impl.Options;
@@ -401,19 +396,40 @@ fn makeBlockCipher(comptime Impl: type, comptime expected_key_bits: usize) type 
 // makeCertificate — X.509 Certificate
 // ---------------------------------------------------------------------------
 
-fn makeCertificate(comptime Impl: type) type {
+fn makeCertificate(comptime Impl: type, comptime HashSha2: type, comptime ImplHashSha2: type) type {
     comptime {
+        const Parsed = Impl.Parsed;
+        const Bundle = Impl.Bundle;
+        const ParseReturn = @typeInfo(@TypeOf(Impl.parse)).@"fn".return_type.?;
+        const VerifyReturn = @typeInfo(@TypeOf(Impl.verify)).@"fn".return_type.?;
+        const ParsedVerifyHostNameReturn = @typeInfo(@TypeOf(Parsed.verifyHostName)).@"fn".return_type.?;
+        const ParsedVerifyReturn = @typeInfo(@TypeOf(Parsed.verify)).@"fn".return_type.?;
+        const BundleVerifyReturn = @typeInfo(@TypeOf(Bundle.verify)).@"fn".return_type.?;
+        const BundleRescanReturn = @typeInfo(@TypeOf(Bundle.rescan)).@"fn".return_type.?;
         _ = Impl.Version;
         _ = Impl.Algorithm;
         _ = Impl.AlgorithmCategory;
         _ = Impl.NamedCurve;
         _ = Impl.ExtensionId;
-        _ = Impl.Parsed;
         _ = Impl.ParseError;
-        _ = Impl.Bundle;
+        _ = @as(*const fn (Impl) ParseReturn, &Impl.parse);
+        _ = @as(*const fn (Impl, Impl, i64) VerifyReturn, &Impl.verify);
+        _ = @as(*const fn (Parsed) []const u8, &Parsed.pubKey);
+        _ = @as(*const fn (Parsed, []const u8) ParsedVerifyHostNameReturn, &Parsed.verifyHostName);
+        _ = @as(*const fn (Parsed, Parsed, i64) ParsedVerifyReturn, &Parsed.verify);
+        _ = @as(*const fn (Bundle, Parsed, i64) BundleVerifyReturn, &Bundle.verify);
+        _ = @as(*const fn (*Bundle, std.mem.Allocator) BundleRescanReturn, &Bundle.rescan);
+        _ = @as(*const fn (*Bundle, std.mem.Allocator) void, &Bundle.deinit);
+        if (!@hasField(Impl, "buffer") or !@hasField(Impl, "index"))
+            @compileError("Certificate must expose std-compatible buffer/index fields");
+        _ = makeRsa(Impl.rsa, HashSha2, ImplHashSha2);
     }
 
     return struct {
+        buffer: []const u8,
+        index: u32,
+
+        pub const Inner = Impl;
         pub const Version = Impl.Version;
         pub const Algorithm = Impl.Algorithm;
         pub const AlgorithmCategory = Impl.AlgorithmCategory;
@@ -422,37 +438,146 @@ fn makeCertificate(comptime Impl: type) type {
         pub const Parsed = Impl.Parsed;
         pub const ParseError = Impl.ParseError;
         pub const Bundle = Impl.Bundle;
+        pub const rsa = makeRsa(Impl.rsa, HashSha2, ImplHashSha2);
+
+        const Self = @This();
+
+        pub fn parse(cert: Self) @typeInfo(@TypeOf(Impl.parse)).@"fn".return_type.? {
+            return Impl.parse(cert.toImpl());
+        }
+
+        pub fn verify(subject: Self, issuer: Self, now_sec: i64) @typeInfo(@TypeOf(Impl.verify)).@"fn".return_type.? {
+            return Impl.verify(subject.toImpl(), issuer.toImpl(), now_sec);
+        }
+
+        fn toImpl(cert: Self) Impl {
+            return .{
+                .buffer = cert.buffer,
+                .index = cert.index,
+            };
+        }
     };
 }
 
 // ---------------------------------------------------------------------------
-// makeRsa — RSA signature verification
+// makeRsa — std.crypto.Certificate.rsa-compatible namespace
 // ---------------------------------------------------------------------------
 
-fn makeRsa(comptime Impl: type) type {
-    // anyerror is intentional: std's RSA verify dispatches across multiple
-    // modulus lengths via inline switch, producing distinct error sets per
-    // branch that cannot be unified into a single inferred set.
+fn makeRsa(comptime Impl: type, comptime HashSha2: type, comptime ImplHashSha2: type) type {
+    const ImplPublicKey = Impl.PublicKey;
+    const ImplPssSignature = Impl.PSSSignature;
+    const ImplPkcs1Signature = Impl.PKCS1v1_5Signature;
+    const ParseDerReturn = @typeInfo(@TypeOf(ImplPublicKey.parseDer)).@"fn".return_type.?;
+    const FromBytesReturn = @typeInfo(@TypeOf(ImplPublicKey.fromBytes)).@"fn".return_type.?;
+
     comptime {
-        _ = @as(*const fn ([]const u8, []const u8, []const u8, root.HashType) anyerror!void, &Impl.verifyPKCS1v1_5);
-        _ = @as(*const fn ([]const u8, []const u8, []const u8, root.HashType) anyerror!void, &Impl.verifyPSS);
-        _ = @as(*const fn ([]const u8) anyerror!root.DerKey, &Impl.parseDer);
+        _ = @TypeOf(ImplPssSignature.VerifyError);
+        _ = @TypeOf(ImplPkcs1Signature.VerifyError);
+        _ = @TypeOf(ImplPublicKey.FromBytesError);
+        _ = @TypeOf(ImplPublicKey.ParseDerError);
+
+        _ = @as(*const fn ([]const u8) ParseDerReturn, &ImplPublicKey.parseDer);
+        _ = @as(*const fn ([]const u8, []const u8) FromBytesReturn, &ImplPublicKey.fromBytes);
+        _ = @TypeOf(ImplPssSignature.fromBytes);
+        _ = @TypeOf(ImplPssSignature.verify);
+        _ = @TypeOf(ImplPssSignature.concatVerify);
+        _ = @TypeOf(ImplPkcs1Signature.fromBytes);
+        _ = @TypeOf(ImplPkcs1Signature.verify);
+        _ = @TypeOf(ImplPkcs1Signature.concatVerify);
     }
 
     return struct {
-        pub const HashType = root.HashType;
-        pub const DerKey = root.DerKey;
+        pub const PublicKey = makeRsaPublicKey(ImplPublicKey);
+        pub const PSSSignature = makeRsaPssSignature(ImplPssSignature, PublicKey, HashSha2, ImplHashSha2);
+        pub const PKCS1v1_5Signature = makeRsaPkcs1v15Signature(ImplPkcs1Signature, PublicKey, HashSha2, ImplHashSha2);
+    };
+}
 
-        pub fn verifyPKCS1v1_5(sig: []const u8, msg: []const u8, pk: []const u8, hash_type: root.HashType) anyerror!void {
-            return Impl.verifyPKCS1v1_5(sig, msg, pk, hash_type);
+fn makeRsaPublicKey(comptime Impl: type) type {
+    const ParseDerReturn = @typeInfo(@TypeOf(Impl.parseDer)).@"fn".return_type.?;
+    const ParseDerPayload = @typeInfo(ParseDerReturn).error_union.payload;
+
+    return struct {
+        impl: Impl,
+
+        pub const FromBytesError = Impl.FromBytesError;
+        pub const ParseDerError = Impl.ParseDerError;
+
+        const Self = @This();
+
+        pub fn fromBytes(pub_bytes: []const u8, modulus_bytes: []const u8) FromBytesError!Self {
+            return .{ .impl = try Impl.fromBytes(pub_bytes, modulus_bytes) };
         }
 
-        pub fn verifyPSS(sig: []const u8, msg: []const u8, pk: []const u8, hash_type: root.HashType) anyerror!void {
-            return Impl.verifyPSS(sig, msg, pk, hash_type);
-        }
-
-        pub fn parseDer(pub_key: []const u8) anyerror!root.DerKey {
+        pub fn parseDer(pub_key: []const u8) ParseDerError!ParseDerPayload {
             return Impl.parseDer(pub_key);
         }
     };
+}
+
+fn makeRsaPssSignature(comptime Impl: type, comptime PublicKey: type, comptime HashSha2: type, comptime ImplHashSha2: type) type {
+    return struct {
+        pub const VerifyError = Impl.VerifyError;
+
+        pub fn fromBytes(comptime modulus_len: usize, msg: []const u8) [modulus_len]u8 {
+            return Impl.fromBytes(modulus_len, msg);
+        }
+
+        pub fn verify(
+            comptime modulus_len: usize,
+            sig: [modulus_len]u8,
+            msg: []const u8,
+            public_key: PublicKey,
+            comptime Hash: type,
+        ) VerifyError!void {
+            return Impl.verify(modulus_len, sig, msg, public_key.impl, rsaVerifyHashType(Hash, HashSha2, ImplHashSha2));
+        }
+
+        pub fn concatVerify(
+            comptime modulus_len: usize,
+            sig: [modulus_len]u8,
+            msg: []const []const u8,
+            public_key: PublicKey,
+            comptime Hash: type,
+        ) VerifyError!void {
+            return Impl.concatVerify(modulus_len, sig, msg, public_key.impl, rsaVerifyHashType(Hash, HashSha2, ImplHashSha2));
+        }
+    };
+}
+
+fn makeRsaPkcs1v15Signature(comptime Impl: type, comptime PublicKey: type, comptime HashSha2: type, comptime ImplHashSha2: type) type {
+    return struct {
+        pub const VerifyError = Impl.VerifyError;
+
+        pub fn fromBytes(comptime modulus_len: usize, msg: []const u8) [modulus_len]u8 {
+            return Impl.fromBytes(modulus_len, msg);
+        }
+
+        pub fn verify(
+            comptime modulus_len: usize,
+            sig: [modulus_len]u8,
+            msg: []const u8,
+            public_key: PublicKey,
+            comptime Hash: type,
+        ) VerifyError!void {
+            return Impl.verify(modulus_len, sig, msg, public_key.impl, rsaVerifyHashType(Hash, HashSha2, ImplHashSha2));
+        }
+
+        pub fn concatVerify(
+            comptime modulus_len: usize,
+            sig: [modulus_len]u8,
+            msg: []const []const u8,
+            public_key: PublicKey,
+            comptime Hash: type,
+        ) VerifyError!void {
+            return Impl.concatVerify(modulus_len, sig, msg, public_key.impl, rsaVerifyHashType(Hash, HashSha2, ImplHashSha2));
+        }
+    };
+}
+
+fn rsaVerifyHashType(comptime Hash: type, comptime HashSha2: type, comptime ImplHashSha2: type) type {
+    if (Hash == HashSha2.Sha256 or Hash == ImplHashSha2.Sha256) return ImplHashSha2.Sha256;
+    if (Hash == HashSha2.Sha384 or Hash == ImplHashSha2.Sha384) return ImplHashSha2.Sha384;
+    if (Hash == HashSha2.Sha512 or Hash == ImplHashSha2.Sha512) return ImplHashSha2.Sha512;
+    @compileError("RSA verification requires sha2.Sha256, sha2.Sha384, or sha2.Sha512");
 }

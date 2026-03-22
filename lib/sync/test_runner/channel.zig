@@ -1,6 +1,7 @@
 //! Channel 行为一致性测试运行器
 //!
-//! 本文件接受一个 ChannelFactory（通过 comptime 参数传入），内部实例化 Channel(u32)，
+//! 本文件接受一个 channel impl（通过 comptime 参数传入），
+//! 内部经由 `sync.ChannelFactory(...).Channel(u32)` 实例化测试对象，
 //! 运行全部测试，验证其行为与 Go channel 语义一致。
 //!
 //! 注意：本 runner 只使用 channel contract 暴露的 API（init/deinit/send/recv/close），
@@ -9,9 +10,7 @@
 //!
 //! 用法示例：
 //! ```
-//! const runner = @import("channel_test_runner.zig").ChannelTestRunner(MyChannelFactory);
-//! test { try runner.run(std.testing.allocator, .{}); }                  // 全部跑
-//! test { try runner.run(std.testing.allocator, .{ .long_running = false }); } // 只跑快速
+//! try @import("sync").test_runner.channel.run(embed, platform.Channel, std.testing.allocator);
 //! ```
 //!
 //! 以下是完整的测试要点清单：
@@ -133,13 +132,15 @@
 //!  45. 快速连续 close + recv 不 panic、不 hang
 //!  46. 快速连续 close + send 不 panic、不 hang
 
-pub fn run(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const Runner = TestRunner(lib);
+const root = @import("../../sync.zig");
+
+pub fn run(comptime lib: type, comptime channel_impl: fn (type) type, allocator: lib.mem.Allocator) !void {
+    const Runner = TestRunner(lib, channel_impl);
     return Runner.exec(allocator);
 }
 
-fn TestRunner(comptime lib: type) type {
-    const Ch = lib.Channel(u32);
+fn TestRunner(comptime lib: type, comptime channel_impl: fn (type) type) type {
+    const Ch = root.ChannelFactory(channel_impl).Channel(u32);
     const Thread = lib.Thread;
     const Allocator = lib.mem.Allocator;
     const Atomic = lib.atomic.Value;

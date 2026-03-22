@@ -1,7 +1,8 @@
 //! Channel contract — typed, bounded, multi-producer/multi-consumer.
 //!
-//! Usage (after embed.Make):
-//!   const IntChan = embed.Channel(u32);
+//! Usage:
+//!   const sync = @import("sync");
+//!   const IntChan = sync.ChannelFactory(platform.Channel).Channel(u32);
 //!   var ch = try IntChan.make(allocator, 16);
 //!   defer ch.deinit();
 //!   try ch.send(42);

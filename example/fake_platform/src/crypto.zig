@@ -1,5 +1,4 @@
 const std = @import("std");
-const embed_crypto = @import("embed").crypto;
 
 pub const Sha256 = std.crypto.hash.sha2.Sha256;
 pub const Sha384 = std.crypto.hash.sha2.Sha384;
@@ -44,56 +43,3 @@ pub const Aes256 = struct {
 };
 
 pub const Certificate = std.crypto.Certificate;
-
-pub const rsa = struct {
-    const StdRsa = Certificate.rsa;
-    const PublicKey = StdRsa.PublicKey;
-
-    fn withModulusLen(
-        sig: []const u8,
-        msg: []const u8,
-        pk_bytes: []const u8,
-        hash_type: embed_crypto.HashType,
-        comptime verifyFn: fn (comptime usize, []const u8, []const u8, PublicKey, comptime type) anyerror!void,
-    ) anyerror!void {
-        const pk_components = try StdRsa.PublicKey.parseDer(pk_bytes);
-        const modulus = pk_components.modulus;
-        const exponent = pk_components.exponent;
-
-        switch (modulus.len) {
-            inline 128, 256, 384, 512 => |modulus_len| {
-                const public_key = try StdRsa.PublicKey.fromBytes(exponent, modulus);
-                switch (hash_type) {
-                    .sha256 => try verifyFn(modulus_len, sig, msg, public_key, std.crypto.hash.sha2.Sha256),
-                    .sha384 => try verifyFn(modulus_len, sig, msg, public_key, std.crypto.hash.sha2.Sha384),
-                    .sha512 => try verifyFn(modulus_len, sig, msg, public_key, std.crypto.hash.sha2.Sha512),
-                }
-            },
-            else => return error.UnsupportedModulusLength,
-        }
-    }
-
-    fn dispatchPKCS1v1_5(comptime modulus_len: usize, sig: []const u8, msg: []const u8, pk: PublicKey, comptime Hash: type) anyerror!void {
-        return StdRsa.PKCS1v1_5Signature.verify(modulus_len, sig[0..modulus_len].*, msg, pk, Hash);
-    }
-
-    fn dispatchPSS(comptime modulus_len: usize, sig: []const u8, msg: []const u8, pk: PublicKey, comptime Hash: type) anyerror!void {
-        return StdRsa.PSSSignature.verify(modulus_len, sig[0..modulus_len].*, msg, pk, Hash);
-    }
-
-    pub fn verifyPKCS1v1_5(sig: []const u8, msg: []const u8, pk: []const u8, hash_type: embed_crypto.HashType) anyerror!void {
-        return withModulusLen(sig, msg, pk, hash_type, dispatchPKCS1v1_5);
-    }
-
-    pub fn verifyPSS(sig: []const u8, msg: []const u8, pk: []const u8, hash_type: embed_crypto.HashType) anyerror!void {
-        return withModulusLen(sig, msg, pk, hash_type, dispatchPSS);
-    }
-
-    pub fn parseDer(pub_key: []const u8) anyerror!embed_crypto.DerKey {
-        const components = try StdRsa.PublicKey.parseDer(pub_key);
-        return .{
-            .modulus = components.modulus,
-            .exponent = components.exponent,
-        };
-    }
-};

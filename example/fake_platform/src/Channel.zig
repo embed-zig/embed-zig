@@ -4,7 +4,7 @@
 //! adapted to embed v2 Channel contract.
 
 const std = @import("std");
-const channel = @import("embed").channel;
+const channel = @import("sync").channel;
 
 pub fn Channel(comptime T: type) type {
     return struct {

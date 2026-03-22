@@ -18,10 +18,7 @@ const net_test_runner = @import("net").test_runner;
 
 test "fake_platform" {
     try test_runner.std_compat.run(embed);
-    try test_runner.channel.run(embed, std.testing.allocator);
-    // RSA is tested separately because std has no public rsa API,
-    // so compact_test (which runs against std directly) cannot cover it.
-    try test_runner.rsa.run(embed);
+    try sync_test_runner.channel.run(embed, impl.Channel, std.testing.allocator);
     try sync_test_runner.racer.run(embed);
     try net_test_runner.resolver_fake.run(embed);
     try net_test_runner.resolver_ali_dns.run(embed);

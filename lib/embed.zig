@@ -5,37 +5,28 @@
 //!
 //!   var t = try embed.Thread.spawn(.{}, myFunc, .{ &state });
 //!   t.join();
-//!
-//!   const IntChan = embed.Channel(u32);
-//!   var ch = try IntChan.make(allocator, 16);
 
 const root = @This();
 
-pub const channel = @import("embed/Channel.zig");
-pub const thread = @import("embed/Thread.zig");
+pub const collections = @import("embed/collections.zig");
+pub const crypto = @import("embed/crypto.zig");
+pub const fmt = @import("embed/fmt.zig");
+pub const Io = @import("embed/Io.zig");
 pub const log = @import("embed/log.zig");
+pub const mem = @import("embed/mem.zig");
 pub const posix = @import("embed/posix.zig");
+pub const thread = @import("embed/Thread.zig");
+
 const net = @import("embed/net.zig");
 const time = @import("embed/time.zig");
-const mem = @import("embed/mem.zig");
 const meta = @import("embed/meta.zig");
-const Io = @import("embed/Io.zig");
 const debug = @import("embed/debug.zig");
 const atomic = @import("embed/atomic.zig");
-pub const crypto = @import("embed/crypto.zig");
 const testing = @import("embed/testing.zig");
-const collections = @import("embed/collections.zig");
 
 pub const test_runner = struct {
     pub const std_compat = @import("embed/test_runner/std.zig");
-    pub const channel = @import("embed/test_runner/channel.zig");
-    pub const rsa = @import("embed/test_runner/rsa.zig");
 };
-
-test {
-    _ = @import("embed/test_runner/std.zig");
-    _ = @import("embed/net.zig");
-}
 
 pub fn Make(comptime Impl: type) type {
     return struct {
@@ -45,6 +36,7 @@ pub fn Make(comptime Impl: type) type {
         pub const posix = root.posix.make(Impl.posix);
         pub const time = root.time.make(Impl.time);
         pub const mem = root.mem;
+        pub const fmt = root.fmt;
         pub const meta = root.meta;
         pub const Io = root.Io;
         pub const debug = root.debug;
@@ -55,13 +47,7 @@ pub fn Make(comptime Impl: type) type {
             pub const Ip6Address = root.net.Ip6Address(Self.posix);
             pub const Address = root.net.Address(Self.posix);
         };
-
         pub const crypto = root.crypto.make(Impl.crypto);
-
-        pub fn Channel(comptime T: type) type {
-            const channel_factory = root.channel.makeFactory(Impl.Channel);
-            return channel_factory.Channel(T);
-        }
 
         // Platform-independent data structures (from std)
         pub const array_list = collections.array_list;
@@ -118,4 +104,9 @@ pub fn Make(comptime Impl: type) type {
 
         pub const BitStack = collections.BitStack;
     };
+}
+
+test {
+    _ = @import("embed/test_runner/std.zig");
+    _ = @import("embed/net.zig");
 }
