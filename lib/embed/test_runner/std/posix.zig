@@ -1,8 +1,20 @@
 pub fn run(comptime lib: type) !void {
+    try typeSurfaceTest(lib);
     try fileTest(lib);
     try seekTests(lib);
     try tcpTest(lib);
     try udpTest(lib);
+}
+
+fn typeSurfaceTest(comptime lib: type) !void {
+    const log = lib.log.scoped(.posix);
+    const posix = lib.posix;
+
+    _ = posix.timeval;
+    _ = posix.timespec;
+    if (@sizeOf(posix.timespec) == 0) return error.TimespecTypeMissing;
+
+    log.info("posix types: timeval+timespec present", .{});
 }
 
 fn fileTest(comptime lib: type) !void {

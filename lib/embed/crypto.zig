@@ -13,11 +13,11 @@
 //! HMAC:     HmacSha256, HmacSha384, HmacSha512
 //! AEAD:     Aes128Gcm, Aes256Gcm, ChaCha20Poly1305
 //! Random:   random (std.Random value)
-//! KDF:      HkdfSha256, HkdfSha384
+//! KDF:      HkdfSha256, HkdfSha384, hkdf.Hkdf(...)
 //! Sign:     Ed25519, EcdsaP256Sha256, EcdsaP384Sha384
 //! DH:       X25519
 //! ECC:      P256
-//! Block:    Aes128, Aes256
+//! Block:    Aes128, Aes256, core.aes.has_hardware_support
 //! Cert:     Certificate (including `Certificate.rsa`)
 
 const std = @import("std");
@@ -63,6 +63,10 @@ pub fn make(comptime Impl: type) type {
             pub const hkdf = struct {
                 pub const HkdfSha256 = makeHkdf(Impl.HkdfSha256);
                 pub const HkdfSha384 = makeHkdf(Impl.HkdfSha384);
+
+                pub fn Hkdf(comptime Hmac: type) type {
+                    return makeHkdf(std.crypto.kdf.hkdf.Hkdf(unwrapInnerType(Hmac)));
+                }
             };
         };
         pub const sign = struct {
@@ -80,6 +84,7 @@ pub fn make(comptime Impl: type) type {
         };
         pub const core = struct {
             pub const aes = struct {
+                pub const has_hardware_support = Impl.has_hardware_support;
                 pub const Aes128 = makeBlockCipher(Impl.Aes128, 128);
                 pub const Aes256 = makeBlockCipher(Impl.Aes256, 256);
             };
@@ -157,6 +162,7 @@ fn makeHmac(comptime Impl: type) type {
     }
 
     return struct {
+        pub const Inner = Impl;
         pub const mac_length = Impl.mac_length;
         pub const key_length = Impl.key_length;
         pub const key_length_min = Impl.key_length_min;
@@ -181,6 +187,10 @@ fn makeHmac(comptime Impl: type) type {
             self.impl.final(out);
         }
     };
+}
+
+fn unwrapInnerType(comptime T: type) type {
+    return if (@hasDecl(T, "Inner")) T.Inner else T;
 }
 
 // ---------------------------------------------------------------------------

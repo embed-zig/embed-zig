@@ -2,12 +2,14 @@
 //!
 //! Impl must provide:
 //!   fn milliTimestamp() i64
+//!   fn nanoTimestamp() i128
 
 const std = @import("std");
 
 pub fn make(comptime Impl: type) type {
     comptime {
         _ = @as(*const fn () i64, &Impl.milliTimestamp);
+        _ = @as(*const fn () i128, &Impl.nanoTimestamp);
     }
 
     return struct {
@@ -17,20 +19,24 @@ pub fn make(comptime Impl: type) type {
             return Impl.milliTimestamp();
         }
 
-        /// Monotonic timer driven by milliTimestamp. Returns elapsed
-        /// milliseconds. Clamps to the last seen value on backward jumps.
+        pub fn nanoTimestamp() i128 {
+            return Impl.nanoTimestamp();
+        }
+
+        /// Monotonic timer driven by nanoTimestamp. Returns elapsed
+        /// nanoseconds. Clamps to the last seen value on backward jumps.
         pub const Timer = struct {
-            started: i64,
-            previous: i64,
+            started: i128,
+            previous: i128,
 
             pub const Error = std.time.Timer.Error;
 
             pub fn start() Error!Timer {
-                const now = Impl.milliTimestamp();
+                const now = Impl.nanoTimestamp();
                 return .{ .started = now, .previous = now };
             }
 
-            /// Milliseconds since start or last reset.
+            /// Nanoseconds since start or last reset.
             pub fn read(self: *Timer) u64 {
                 const current = self.sample();
                 return @intCast(current - self.started);
@@ -41,15 +47,15 @@ pub fn make(comptime Impl: type) type {
                 self.started = self.sample();
             }
 
-            /// Return milliseconds since start, then reset.
+            /// Return nanoseconds since start, then reset.
             pub fn lap(self: *Timer) u64 {
                 const current = self.sample();
                 defer self.started = current;
                 return @intCast(current - self.started);
             }
 
-            fn sample(self: *Timer) i64 {
-                const current = Impl.milliTimestamp();
+            fn sample(self: *Timer) i128 {
+                const current = Impl.nanoTimestamp();
                 if (current > self.previous) {
                     self.previous = current;
                 }

@@ -15,6 +15,7 @@ pub const SOL = posix.SOL;
 pub const SO = posix.SO;
 pub const POLL = posix.POLL;
 pub const timeval = posix.timeval;
+pub const timespec = posix.timespec;
 pub const mode_t = posix.mode_t;
 pub const O = posix.O;
 

@@ -25,6 +25,7 @@ pub const X25519 = std.crypto.dh.X25519;
 pub const P256 = std.crypto.ecc.P256;
 
 const StdAes = std.crypto.core.aes;
+pub const has_hardware_support = StdAes.has_hardware_support;
 pub const Aes128 = struct {
     pub const key_bits = StdAes.Aes128.key_bits;
     pub const block = StdAes.Aes128.block;

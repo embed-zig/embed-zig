@@ -139,9 +139,13 @@ fn randomTests(comptime lib: type) !void {
 fn hkdfTests(comptime lib: type) !void {
     const log = lib.log.scoped(.crypto);
     const crypto = lib.crypto;
+    const GenericHkdfSha256 = crypto.kdf.hkdf.Hkdf(crypto.auth.hmac.sha2.HmacSha256);
+    const GenericHkdfSha384 = crypto.kdf.hkdf.Hkdf(crypto.auth.hmac.sha2.HmacSha384);
 
     inline for (.{
         .{ crypto.kdf.hkdf.HkdfSha256, "HkdfSha256" },
+        .{ GenericHkdfSha256, "Hkdf(HmacSha256)" },
+        .{ GenericHkdfSha384, "Hkdf(HmacSha384)" },
     }) |entry| {
         const H = entry[0];
         const name = entry[1];
@@ -165,6 +169,20 @@ fn hkdfTests(comptime lib: type) !void {
         if (all_zero) return error.HkdfOutputAllZero;
 
         log.info("kdf.hkdf.{s}: extract+expand ok", .{name});
+    }
+
+    {
+        const salt = "salt-value";
+        const ikm = "input-keying-material";
+        const prk_a = crypto.kdf.hkdf.HkdfSha256.extract(salt, ikm);
+        const prk_b = GenericHkdfSha256.extract(salt, ikm);
+        if (!lib.mem.eql(u8, &prk_a, &prk_b)) return error.HkdfGenericExtractMismatch;
+
+        var okm_a: [64]u8 = undefined;
+        var okm_b: [64]u8 = undefined;
+        crypto.kdf.hkdf.HkdfSha256.expand(&okm_a, "info", prk_a);
+        GenericHkdfSha256.expand(&okm_b, "info", prk_b);
+        if (!lib.mem.eql(u8, &okm_a, &okm_b)) return error.HkdfGenericExpandMismatch;
     }
 }
 
@@ -254,6 +272,8 @@ fn eccTests(comptime lib: type) !void {
 fn aesBlockTests(comptime lib: type) !void {
     const log = lib.log.scoped(.crypto);
     const aes = lib.crypto.core.aes;
+
+    _ = aes.has_hardware_support;
 
     inline for (.{
         .{ aes.Aes128, 128, "Aes128" },

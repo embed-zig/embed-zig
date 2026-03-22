@@ -546,7 +546,7 @@ fn deadlineTests(comptime lib: type) !void {
 
         const cause = dc.wait(null) orelse return error.DeadlineSpuriousWakeMissing;
         if (cause != error.DeadlineExceeded) return error.DeadlineSpuriousWakeWrongCause;
-        if (timer.read() < 20) return error.DeadlineTriggeredTooEarlyAfterSpuriousWake;
+        if (timer.read() < 20 * lib.time.ns_per_ms) return error.DeadlineTriggeredTooEarlyAfterSpuriousWake;
     }
 
     {
@@ -635,7 +635,7 @@ fn waitTests(comptime lib: type) !void {
         defer t.join();
 
         if (ctx.wait(40) != null) return error.WaitSpuriousWakeShouldReturnNull;
-        if (timer.read() < 20) return error.WaitReturnedTooEarlyAfterSpuriousWake;
+        if (timer.read() < 20 * lib.time.ns_per_ms) return error.WaitReturnedTooEarlyAfterSpuriousWake;
     }
 
     {
