@@ -20,12 +20,11 @@ pub const Random = @import("embed/Random.zig");
 pub const thread = @import("embed/Thread.zig");
 pub const time = @import("embed/time.zig");
 pub const math = @import("embed/math.zig");
-
-const net = @import("embed/net.zig");
-const meta = @import("embed/meta.zig");
-const debug = @import("embed/debug.zig");
-const atomic = @import("embed/atomic.zig");
-const testing = @import("embed/testing.zig");
+pub const debug = @import("embed/debug.zig");
+pub const meta = @import("embed/meta.zig");
+pub const atomic = @import("embed/atomic.zig");
+pub const net = @import("embed/net.zig");
+pub const testing = @import("embed/testing.zig");
 
 pub const test_runner = struct {
     pub const std_compat = @import("embed/test_runner/std.zig");
