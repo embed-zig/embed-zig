@@ -6,5 +6,6 @@
 const std = @import("std");
 
 pub const allocPrint = std.fmt.allocPrint;
+pub const bufPrintZ = std.fmt.bufPrintZ;
 pub const bufPrint = std.fmt.bufPrint;
 pub const parseInt = std.fmt.parseInt;

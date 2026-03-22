@@ -8,7 +8,7 @@
 //!   try ch.send(42);
 //!   const result = try ch.recv();
 
-const std = @import("std");
+const embed = @import("embed");
 
 pub fn SendResult() type {
     return struct { ok: bool };
@@ -37,7 +37,7 @@ pub fn makeFactory(comptime impl: fn (type) type) type {
                 _ = @as(*const fn (*Ch) anyerror!RecvResult(T), &Ch.recv);
                 _ = @as(*const fn (*Ch) void, &Ch.close);
                 _ = @as(*const fn (*Ch) void, &Ch.deinit);
-                _ = @as(*const fn (std.mem.Allocator, usize) anyerror!Ch, &Ch.init);
+                _ = @as(*const fn (embed.mem.Allocator, usize) anyerror!Ch, &Ch.init);
             }
 
             return struct {
@@ -45,7 +45,7 @@ pub fn makeFactory(comptime impl: fn (type) type) type {
 
                 const Self = @This();
 
-                pub fn make(allocator: std.mem.Allocator, capacity: usize) !Self {
+                pub fn make(allocator: embed.mem.Allocator, capacity: usize) !Self {
                     return .{ .ch = try Ch.init(allocator, capacity) };
                 }
 

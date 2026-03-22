@@ -1,9 +1,6 @@
-const std = @import("std");
-const mem = std.mem;
-
 pub fn run(comptime lib: type) !void {
     const log = lib.log.scoped(.collections);
-    const allocator = std.testing.allocator;
+    const allocator = lib.testing.allocator;
 
     {
         var list: lib.ArrayList(u32) = .empty;
@@ -27,7 +24,7 @@ pub fn run(comptime lib: type) !void {
         try map.put(3, "three");
         if (map.count() != 3) return error.HashMapCountWrong;
         const val = map.get(2) orelse return error.HashMapGetFailed;
-        if (!mem.eql(u8, val, "two")) return error.HashMapValueWrong;
+        if (!lib.mem.eql(u8, val, "two")) return error.HashMapValueWrong;
         _ = map.remove(2);
         if (map.get(2) != null) return error.HashMapRemoveFailed;
         log.info("AutoHashMap: put+get+remove ok, count={}", .{map.count()});
@@ -62,10 +59,10 @@ pub fn run(comptime lib: type) !void {
         try map.put("port", "8080");
         if (map.count() != 2) return error.BufMapCountWrong;
         const host = map.get("host") orelse return error.BufMapGetFailed;
-        if (!mem.eql(u8, host, "localhost")) return error.BufMapValueWrong;
+        if (!lib.mem.eql(u8, host, "localhost")) return error.BufMapValueWrong;
         try map.put("host", "0.0.0.0");
         const updated = map.get("host") orelse return error.BufMapGetFailed2;
-        if (!mem.eql(u8, updated, "0.0.0.0")) return error.BufMapUpdateFailed;
+        if (!lib.mem.eql(u8, updated, "0.0.0.0")) return error.BufMapUpdateFailed;
         map.remove("port");
         if (map.get("port") != null) return error.BufMapRemoveFailed;
         log.info("BufMap: put+get+update+remove ok, count={}", .{map.count()});
@@ -86,8 +83,8 @@ pub fn run(comptime lib: type) !void {
 
     {
         var pq = lib.PriorityQueue(u32, void, struct {
-            fn cmp(_: void, a: u32, b: u32) std.math.Order {
-                return std.math.order(a, b);
+            fn cmp(_: void, a: u32, b: u32) lib.math.Order {
+                return lib.math.order(a, b);
             }
         }.cmp).init(allocator, {});
         defer pq.deinit();

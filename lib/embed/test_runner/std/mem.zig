@@ -1,5 +1,3 @@
-const std = @import("std");
-
 pub fn run(comptime lib: type) !void {
     const log = lib.log.scoped(.mem);
 
@@ -48,7 +46,7 @@ pub fn run(comptime lib: type) !void {
     }
 
     {
-        const trimmed = lib.mem.trim(u8, " \t  hello embed \n", &std.ascii.whitespace);
+        const trimmed = lib.mem.trim(u8, " \t  hello embed \n", &lib.ascii.whitespace);
         if (!lib.mem.eql(u8, trimmed, "hello embed")) return error.TrimFailed;
         log.info("trim ok", .{});
     }

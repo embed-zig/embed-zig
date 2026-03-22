@@ -1,5 +1,3 @@
-const mem = @import("std").mem;
-
 pub fn run(comptime lib: type) !void {
     const log = lib.log.scoped(.crypto);
 
@@ -48,8 +46,8 @@ fn hashTests(comptime lib: type) !void {
 
         h.final(&out2);
 
-        if (!mem.eql(u8, &out, &out2)) return error.HashStreamingMismatch;
-        if (!mem.eql(u8, &peeked, &out)) return error.HashPeekMismatch;
+        if (!lib.mem.eql(u8, &out, &out2)) return error.HashStreamingMismatch;
+        if (!lib.mem.eql(u8, &peeked, &out)) return error.HashPeekMismatch;
 
         log.info("hash.sha2.{s}: digest_length={} one-shot+streaming+peek ok", .{ name, H.digest_length });
     }
@@ -82,7 +80,7 @@ fn hmacTests(comptime lib: type) !void {
         var out2: [H.mac_length]u8 = undefined;
         ctx.final(&out2);
 
-        if (!mem.eql(u8, &out1, &out2)) return error.HmacStreamingMismatch;
+        if (!lib.mem.eql(u8, &out1, &out2)) return error.HmacStreamingMismatch;
 
         log.info("auth.hmac.sha2.{s}: mac_length={} create+streaming ok", .{ name, H.mac_length });
     }
@@ -114,7 +112,7 @@ fn aeadTests(comptime lib: type) !void {
         var decrypted: [plaintext.len]u8 = undefined;
         try A.decrypt(&decrypted, &ciphertext, tag, "", nonce, key);
 
-        if (!mem.eql(u8, plaintext, &decrypted)) return error.AeadDecryptMismatch;
+        if (!lib.mem.eql(u8, plaintext, &decrypted)) return error.AeadDecryptMismatch;
 
         tag[0] ^= 0xff;
         if (A.decrypt(&decrypted, &ciphertext, tag, "", nonce, key)) |_| {
@@ -133,7 +131,7 @@ fn randomTests(comptime lib: type) !void {
     lib.crypto.random.bytes(&buf1);
     lib.crypto.random.bytes(&buf2);
 
-    if (mem.eql(u8, &buf1, &buf2)) return error.RandomNotRandom;
+    if (lib.mem.eql(u8, &buf1, &buf2)) return error.RandomNotRandom;
 
     log.info("random: 32 bytes x2 differ ok", .{});
 }
@@ -188,7 +186,7 @@ fn ed25519Tests(comptime lib: type) !void {
 
     const sig_bytes = sig.toBytes();
     const sig2 = Ed.Signature.fromBytes(sig_bytes);
-    if (!mem.eql(u8, &sig_bytes, &sig2.toBytes())) return error.Ed25519SigRoundtripFailed;
+    if (!lib.mem.eql(u8, &sig_bytes, &sig2.toBytes())) return error.Ed25519SigRoundtripFailed;
 
     log.info("sign.Ed25519: generate+sign+verify+roundtrip ok", .{});
 }
@@ -213,7 +211,7 @@ fn ecdsaTests(comptime lib: type) !void {
         const sig_bytes = [_]u8{0} ** E.Signature.encoded_length;
         const sig = E.Signature.fromBytes(sig_bytes);
         const rt = sig.toBytes();
-        if (!mem.eql(u8, &sig_bytes, &rt)) return error.EcdsaSigRoundtripFailed;
+        if (!lib.mem.eql(u8, &sig_bytes, &rt)) return error.EcdsaSigRoundtripFailed;
 
         log.info("sign.ecdsa.{s}: constants+roundtrip ok", .{name});
     }
@@ -234,10 +232,10 @@ fn x25519Tests(comptime lib: type) !void {
     const shared_a = try X.scalarmult(kp_a.secret_key, kp_b.public_key);
     const shared_b = try X.scalarmult(kp_b.secret_key, kp_a.public_key);
 
-    if (!mem.eql(u8, &shared_a, &shared_b)) return error.X25519SharedMismatch;
+    if (!lib.mem.eql(u8, &shared_a, &shared_b)) return error.X25519SharedMismatch;
 
     const recovered = try X.recoverPublicKey(kp_a.secret_key);
-    if (!mem.eql(u8, &recovered, &kp_a.public_key)) return error.X25519RecoverMismatch;
+    if (!lib.mem.eql(u8, &recovered, &kp_a.public_key)) return error.X25519RecoverMismatch;
 
     log.info("dh.X25519: generate+scalarmult+recoverPublicKey ok", .{});
 }
@@ -280,7 +278,7 @@ fn aesBlockTests(comptime lib: type) !void {
         const dec_ctx = A.initDec(key);
         dec_ctx.decrypt(&decrypted, &encrypted);
 
-        if (!mem.eql(u8, &plaintext, &decrypted)) return error.AesBlockRoundtripFailed;
+        if (!lib.mem.eql(u8, &plaintext, &decrypted)) return error.AesBlockRoundtripFailed;
 
         log.info("core.aes.{s}: encrypt+decrypt block ok", .{name});
     }

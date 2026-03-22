@@ -5,6 +5,7 @@ const impl = struct {
     pub const Thread = @import("src/Thread.zig");
     pub const Channel = ch.Channel;
     pub const log = @import("src/log.zig");
+    pub const testing = @import("src/testing.zig");
     pub const posix = @import("src/posix.zig");
     pub const time = @import("src/time.zig");
     pub const crypto = @import("src/crypto.zig");

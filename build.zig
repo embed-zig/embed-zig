@@ -72,6 +72,7 @@ fn createLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.buil
     lib.io.mod.addImport("embed", lib.embed.mod);
     lib.mime.mod.addImport("embed", lib.embed.mod);
     lib.sync.mod.addImport("context", lib.context.mod);
+    lib.sync.mod.addImport("embed", lib.embed.mod);
     lib.net.mod.addImport("sync", lib.sync.mod);
     lib.net.mod.addImport("context", lib.context.mod);
     lib.net.mod.addImport("io", lib.io.mod);

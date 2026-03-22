@@ -16,8 +16,10 @@ pub const Io = @import("embed/Io.zig");
 pub const log = @import("embed/log.zig");
 pub const mem = @import("embed/mem.zig");
 pub const posix = @import("embed/posix.zig");
+pub const Random = @import("embed/Random.zig");
 pub const thread = @import("embed/Thread.zig");
 pub const time = @import("embed/time.zig");
+pub const math = @import("embed/math.zig");
 
 const net = @import("embed/net.zig");
 const meta = @import("embed/meta.zig");
@@ -43,14 +45,15 @@ pub fn Make(comptime Impl: type) type {
         pub const Io = root.Io;
         pub const debug = root.debug;
         pub const atomic = root.atomic;
-        pub const testing = root.testing;
+        pub const testing = root.testing.make(Impl.testing);
+        pub const Random = root.Random;
         pub const net = struct {
             pub const Ip4Address = root.net.Ip4Address(Self.posix);
             pub const Ip6Address = root.net.Ip6Address(Self.posix);
             pub const Address = root.net.Address(Self.posix);
         };
         pub const crypto = root.crypto.make(Impl.crypto);
-
+        pub const math = root.math;
         // Platform-independent data structures (from std)
         pub const array_list = collections.array_list;
         pub fn ArrayList(comptime T: type) type {
