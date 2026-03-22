@@ -72,11 +72,17 @@ lib/net/
   url.zig              Zero-alloc URL parser (RFC 3986)
   Resolver.zig         Pure-Zig DNS resolver (RFC 1035, per-server racer)
   tls/
-    stream.zig         TLS stream (Conn -> Conn)
-    client.zig         TLS client state machine
-    handshake.zig      TLS 1.2/1.3 handshake
+    Conn.zig           TLS client Conn wrapper
+    ServerConn.zig     TLS server Conn wrapper
+    Dialer.zig         TLS dial helper
+    Listener.zig       TLS listener wrapper
+    client_handshake.zig TLS client handshake state machine
+    server_handshake.zig TLS server handshake state machine
     record.zig         TLS record layer
-    ...
+    common.zig         TLS protocol constants and wire structs
+    alert.zig          TLS alert encoding/decoding
+    extensions.zig     TLS extension parsing/building
+    kdf.zig            TLS 1.2/1.3 key schedule helpers
   http/
     client.zig         HTTP client
     transport.zig      RoundTripper contract + default Transport
@@ -121,18 +127,20 @@ mirroring Go's `net` package.
 
 Type-erased bidirectional byte stream (Go's `net.Conn`). VTable-based,
 same pattern as `std.mem.Allocator`. Any concrete type with
-read/write/close can be wrapped into a Conn.
+read/write/close/deinit plus timeout setters can be wrapped into a Conn.
 
 ```zig
 pub const VTable = struct {
     read:  *const fn (*anyopaque, []u8) ReadError!usize,
     write: *const fn (*anyopaque, []const u8) WriteError!usize,
     close: *const fn (*anyopaque) void,
-    deinit: ?*const fn (*anyopaque) void = null,
+    deinit: *const fn (*anyopaque) void,
+    setReadTimeout: *const fn (*anyopaque, ms: ?u32) void,
+    setWriteTimeout: *const fn (*anyopaque, ms: ?u32) void,
 };
 ```
 
-Concrete implementations: **TcpConn** (TCP socket fd), **UdpConn** (connected UDP), **tls.Stream** (future).
+Concrete implementations: **TcpConn** (TCP socket fd), **UdpConn** (connected UDP), **tls.Conn** (TLS client), **tls.ServerConn** (TLS server).
 
 ### Listener
 
@@ -142,6 +150,7 @@ Type-erased stream listener (Go's `net.Listener`). Returns Conn on accept.
 pub const VTable = struct {
     accept: *const fn (*anyopaque) AcceptError!Conn,
     close:  *const fn (*anyopaque) void,
+    deinit: *const fn (*anyopaque) void,
 };
 ```
 
@@ -202,8 +211,6 @@ pub fn UdpConn(comptime lib: type) type {
     const Allocator = lib.mem.Allocator;
 
     return struct {
-        pub const Inner = Impl;
-
         /// Connected UDP -> Conn (read/write after connect).
         pub fn init(allocator: Allocator, fd: posix.socket_t) Allocator.Error!Conn { ... }
 
@@ -224,7 +231,7 @@ defer conn.deinit();
 
 // Listen for TCP connections:
 var ln = try net.listen(allocator, .{ .address = Addr.initIp4(.{0,0,0,0}, 8080) });
-defer ln.close();
+defer ln.deinit();
 ```
 
 ### ListenPacket
@@ -414,18 +421,34 @@ defer r2.deinit();
 
 ## net/tls
 
-TLS 1.2/1.3 client (Go's `crypto/tls`). Wraps any Conn into an
-encrypted Conn — the output type also satisfies the Conn contract,
-so protocol layers compose transparently.
+TLS 1.2/1.3 client/server building blocks and concrete wrappers in the
+style of Go's `crypto/tls`. The client and server wrappers both return a
+type-erased `net.Conn`, and the concrete TLS state can be recovered with
+`conn.as(net.tls.Conn)` or `conn.as(net.tls.ServerConn)`.
+
+Supported subset today:
+
+- TLS 1.3 client/server with `X25519` key exchange and the cipher suites `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, and `TLS_CHACHA20_POLY1305_SHA256`
+- Deterministic TLS 1.3 suite selection via `Config.tls13_cipher_suites` and `ServerConfig.tls13_cipher_suites`
+- Orderly shutdown with `close_notify`
+- Existing TLS 1.2 interoperability path for the currently implemented ECDHE + AES-GCM flow
+
+Core correctness is validated by local deterministic tests. Public-network
+smoke coverage lives in `lib/net/test_runner/tls.zig` as a separate optional
+runner so `zig test` does not depend on the public internet.
 
 ```zig
-var tcp = try net.dial(allocator, .tcp, ip);
-var tls = try net.tls.Stream.init(&tcp, allocator, "example.com", .{});
-try tls.handshake();
-defer tls.close();
+var tls_conn = try net.tls.dial(allocator, .tcp, ip, .{
+    .server_name = "example.com",
+    .tls13_cipher_suites = &.{ net.tls.CipherSuite.TLS_AES_256_GCM_SHA384 },
+});
+defer tls_conn.deinit();
 
-// tls satisfies Conn — pass to http, ws, etc.
-_ = try tls.write("GET / HTTP/1.0\r\n\r\n");
+const typed = try tls_conn.as(net.tls.Conn);
+try typed.handshake();
+
+// tls_conn still satisfies net.Conn
+_ = try tls_conn.write("GET / HTTP/1.0\r\n\r\n");
 ```
 
 ## net/http
@@ -490,9 +513,12 @@ while (try ws.recv()) |msg| {
 ```zig
 const embed = @import("embed").Make(platform);
 const net = @import("net").Make(embed);
+const Addr = embed.net.Address;
 
-var ln = try net.listen(.{ .port = 9000 });
-defer ln.close();
+var ln = try net.listen(embed.testing.allocator, .{
+    .address = Addr.initIp4(.{ 0, 0, 0, 0 }, 9000),
+});
+defer ln.deinit();
 
 while (true) {
     var conn = try ln.accept();

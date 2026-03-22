@@ -32,23 +32,19 @@ pub fn Dialer(comptime lib: type) type {
 
         pub fn dial(self: Self, network: Network, addr: Addr) !Conn {
             return switch (network) {
-                .tcp => self.dialTcp(addr),
-                .udp => self.dialUdp(addr),
+                .tcp => blk: {
+                    const fd = try posix.socket(addr.any.family, posix.SOCK.STREAM, 0);
+                    errdefer posix.close(fd);
+                    try posix.connect(fd, @ptrCast(&addr.any), addr.getOsSockLen());
+                    break :blk TC.init(self.allocator, fd);
+                },
+                .udp => blk: {
+                    const fd = try posix.socket(addr.any.family, posix.SOCK.DGRAM, 0);
+                    errdefer posix.close(fd);
+                    try posix.connect(fd, @ptrCast(&addr.any), addr.getOsSockLen());
+                    break :blk UC.init(self.allocator, fd);
+                },
             };
-        }
-
-        pub fn dialTcp(self: Self, addr: Addr) !Conn {
-            const fd = try posix.socket(addr.any.family, posix.SOCK.STREAM, 0);
-            errdefer posix.close(fd);
-            try posix.connect(fd, @ptrCast(&addr.any), addr.getOsSockLen());
-            return TC.init(self.allocator, fd);
-        }
-
-        pub fn dialUdp(self: Self, addr: Addr) !Conn {
-            const fd = try posix.socket(addr.any.family, posix.SOCK.DGRAM, 0);
-            errdefer posix.close(fd);
-            try posix.connect(fd, @ptrCast(&addr.any), addr.getOsSockLen());
-            return UC.init(self.allocator, fd);
         }
     };
 }
@@ -60,9 +56,11 @@ test "std_compat" {
     const D = Dialer(s);
 
     var ln = try TL.init(s.testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
-    defer ln.close();
+    defer ln.deinit();
 
-    const bound_port = try ln.port();
+    const typed = try ln.as(TL);
+
+    const bound_port = try typed.port();
 
     var d = D.init(s.testing.allocator, .{});
     var cc = try d.dial(.tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, bound_port));

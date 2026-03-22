@@ -1,12 +1,13 @@
 //! Listener — type-erased stream listener (like Go's net.Listener).
 //!
 //! VTable-based runtime dispatch. Any concrete listener type with
-//! accept/close/addr methods can be wrapped into a Listener.
+//! accept/close/deinit methods can be wrapped into a Listener.
 //!
 //! Usage:
-//!   var tcp_ln = try TcpListener.init(lib, .{ .port = 8080 });
-//!   var ln = tcp_ln.listener();   // type-erase into Listener
-//!   defer ln.close();
+//!   var ln = try TcpListener.init(allocator, .{ .port = 8080 });
+//!   defer ln.deinit();
+//!
+//!   const tcp_ln = try ln.as(TcpListener(lib));
 //!   while (true) {
 //!       var conn = try ln.accept();
 //!       // handle conn...
@@ -18,10 +19,12 @@ const Listener = @This();
 
 ptr: *anyopaque,
 vtable: *const VTable,
+type_id: *const anyopaque,
 
 pub const VTable = struct {
     accept: *const fn (ptr: *anyopaque) AcceptError!Conn,
     close: *const fn (ptr: *anyopaque) void,
+    deinit: *const fn (ptr: *anyopaque) void,
 };
 
 pub const AcceptError = error{
@@ -40,11 +43,33 @@ pub fn close(self: Listener) void {
     self.vtable.close(self.ptr);
 }
 
+pub fn deinit(self: Listener) void {
+    self.close();
+    self.vtable.deinit(self.ptr);
+}
+
+fn TypeIdHolder(comptime T: type) type {
+    return struct {
+        comptime _phantom: type = T,
+        var id: u8 = 0;
+    };
+}
+
+fn typeId(comptime T: type) *const anyopaque {
+    return @ptrCast(&TypeIdHolder(T).id);
+}
+
+pub fn as(self: Listener, comptime T: type) error{TypeMismatch}!*T {
+    if (self.type_id == typeId(T)) return @ptrCast(@alignCast(self.ptr));
+    return error.TypeMismatch;
+}
+
 /// Wrap a pointer to any concrete listener type into a Listener.
 ///
 /// The concrete type must provide:
 ///   fn accept(*Self) AcceptError!Conn
 ///   fn close(*Self) void
+///   fn deinit(*Self) void
 pub fn init(pointer: anytype) Listener {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);
@@ -62,15 +87,21 @@ pub fn init(pointer: anytype) Listener {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             self.close();
         }
+        fn deinitFn(ptr: *anyopaque) void {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            self.deinit();
+        }
 
         const vtable = VTable{
             .accept = acceptFn,
             .close = closeFn,
+            .deinit = deinitFn,
         };
     };
 
     return .{
         .ptr = pointer,
         .vtable = &gen.vtable,
+        .type_id = typeId(Impl),
     };
 }

@@ -21,5 +21,6 @@ test "fake_platform" {
     try sync_test_runner.channel.run(embed, impl.Channel, std.testing.allocator);
     try sync_test_runner.racer.run(embed);
     try net_test_runner.resolver_fake.run(embed);
+    try net_test_runner.tls.run(embed);
     try net_test_runner.resolver_ali_dns.run(embed);
 }

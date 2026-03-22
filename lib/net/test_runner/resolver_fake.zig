@@ -21,6 +21,11 @@ pub fn run(comptime lib: type) !void {
     const log = lib.log.scoped(.resolver_fake);
 
     const Runner = struct {
+        fn listenerPort(ln: net_mod.Listener, comptime NetNs: type) !u16 {
+            const typed = try ln.as(NetNs.TcpListener);
+            return typed.port();
+        }
+
         fn optionsDefaults() !void {
             var r = try R.init(testing.allocator, .{});
             defer r.deinit();
@@ -168,9 +173,10 @@ pub fn run(comptime lib: type) !void {
             var listener = try Net.listen(testing.allocator, .{
                 .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
             });
-            defer listener.close();
+            defer listener.deinit();
 
-            const port = try listener.port();
+            const listener_impl = try listener.as(Net.TcpListener);
+            const port = try listenerPort(listener, Net);
             var server_thread = try lib.Thread.spawn(.{}, struct {
                 fn run(ln: *Net.TcpListener) void {
                     var conn = ln.accept() catch return;
@@ -183,7 +189,7 @@ pub fn run(comptime lib: type) !void {
                     const resp_len = buildEmptySuccessResponse(R, req, &resp_buf) catch return;
                     writeTcpDnsMessage(conn, resp_buf[0..resp_len]) catch return;
                 }
-            }.run, .{&listener});
+            }.run, .{listener_impl});
             defer server_thread.join();
 
             var resolver = try R.init(testing.allocator, .{
@@ -377,9 +383,10 @@ pub fn run(comptime lib: type) !void {
             var listener = try Net.listen(testing.allocator, .{
                 .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
             });
-            defer listener.close();
+            defer listener.deinit();
 
-            const port = try listener.port();
+            const listener_impl = try listener.as(Net.TcpListener);
+            const port = try listenerPort(listener, Net);
             var server_thread = try lib.Thread.spawn(.{}, struct {
                 fn run(ln: *Net.TcpListener, ip4: [4]u8, ip6: [16]u8) void {
                     var conn = ln.accept() catch return;
@@ -407,7 +414,7 @@ pub fn run(comptime lib: type) !void {
                     writeTcpDnsMessage(conn, resp2_buf[0..resp2_len]) catch return;
                     writeTcpDnsMessage(conn, resp1_buf[0..resp1_len]) catch return;
                 }
-            }.run, .{ &listener, [4]u8{ 31, 32, 33, 34 }, ipv6 });
+            }.run, .{ listener_impl, [4]u8{ 31, 32, 33, 34 }, ipv6 });
             defer server_thread.join();
 
             var resolver = try R.init(testing.allocator, .{
@@ -445,7 +452,7 @@ pub fn run(comptime lib: type) !void {
             const BoolAtomic = lib.atomic.Value(bool);
 
             const SlowServer = struct {
-                listener: Net.TcpListener,
+                listener: net_mod.Listener,
                 accepted: BoolAtomic = BoolAtomic.init(false),
                 release: BoolAtomic = BoolAtomic.init(false),
             };
@@ -455,9 +462,9 @@ pub fn run(comptime lib: type) !void {
                     .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
                 }),
             };
-            defer slow_server.listener.close();
+            defer slow_server.listener.deinit();
 
-            const slow_port = try slow_server.listener.port();
+            const slow_port = try listenerPort(slow_server.listener, Net);
             var slow_thread = try lib.Thread.spawn(.{}, struct {
                 fn run(server: *SlowServer) void {
                     var conn = server.listener.accept() catch return;
@@ -637,7 +644,7 @@ pub fn run(comptime lib: type) !void {
             const BoolAtomic = lib.atomic.Value(bool);
 
             const SlowServer = struct {
-                listener: Net.TcpListener,
+                listener: net_mod.Listener,
                 accepted: BoolAtomic = BoolAtomic.init(false),
                 release: BoolAtomic = BoolAtomic.init(false),
             };
@@ -653,9 +660,9 @@ pub fn run(comptime lib: type) !void {
                     .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
                 }),
             };
-            defer slow_server.listener.close();
+            defer slow_server.listener.deinit();
 
-            const slow_port = try slow_server.listener.port();
+            const slow_port = try listenerPort(slow_server.listener, Net);
             var slow_thread = try lib.Thread.spawn(.{}, struct {
                 fn run(server: *SlowServer) void {
                     var conn = server.listener.accept() catch return;

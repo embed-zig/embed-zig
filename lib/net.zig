@@ -15,6 +15,7 @@
 //!
 //!   // Listen on IPv4:
 //!   var ln = try net.listen(allocator, .{ .address = Addr.initIp4(.{0,0,0,0}, 8080) });
+//!   defer ln.deinit();
 //!
 //!   // Listen on IPv6:
 //!   var ln6 = try net.listen(allocator, .{ .address = Addr.initIp6(.{0}**16, 8080, 0, 0) });
@@ -23,6 +24,7 @@ pub const Conn = @import("net/Conn.zig");
 pub const Listener = @import("net/Listener.zig");
 pub const PacketConn = @import("net/PacketConn.zig");
 pub const url = @import("net/url.zig");
+pub const tls = @import("net/tls.zig");
 
 const tcp_conn = @import("net/TcpConn.zig");
 const tcp_listener = @import("net/TcpListener.zig");
@@ -42,6 +44,7 @@ pub fn Make(comptime lib: type) type {
         pub const TcpListener = TL;
         pub const UdpConn = UC;
         pub const Resolver = resolver_mod.Resolver(lib);
+        pub const tls = @import("net/tls.zig").Make(lib);
         pub const ListenOptions = TL.Options;
 
         pub const ListenPacketOptions = struct {
@@ -57,7 +60,7 @@ pub fn Make(comptime lib: type) type {
             return d.dial(network, addr);
         }
 
-        pub fn listen(allocator: Allocator, opts: ListenOptions) !TL {
+        pub fn listen(allocator: Allocator, opts: ListenOptions) !Listener {
             return TL.init(allocator, opts);
         }
 
@@ -80,6 +83,7 @@ pub fn Make(comptime lib: type) type {
 pub const test_runner = struct {
     pub const tcp = @import("net/test_runner/tcp.zig");
     pub const udp = @import("net/test_runner/udp.zig");
+    pub const tls = @import("net/test_runner/tls.zig");
     pub const resolver_fake = @import("net/test_runner/resolver_fake.zig");
     pub const resolver_ali_dns = @import("net/test_runner/resolver_ali_dns.zig");
 };
@@ -88,6 +92,10 @@ test {
     _ = @import("net/Conn.zig");
     _ = @import("net/Listener.zig");
     _ = @import("net/PacketConn.zig");
+    _ = @import("net/tls.zig");
+    _ = @import("net/tls/common.zig");
+    _ = @import("net/tls/alert.zig");
+    _ = @import("net/tls/extensions.zig");
     _ = @import("net/TcpConn.zig");
     _ = @import("net/TcpListener.zig");
     _ = @import("net/Dialer.zig");
@@ -96,6 +104,7 @@ test {
     _ = @import("net/url.zig");
     _ = @import("net/test_runner/tcp.zig");
     _ = @import("net/test_runner/udp.zig");
+    _ = @import("net/test_runner/tls.zig");
     _ = @import("net/test_runner/resolver_fake.zig");
     _ = @import("net/test_runner/resolver_ali_dns.zig");
 }

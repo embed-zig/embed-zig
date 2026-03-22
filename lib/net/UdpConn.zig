@@ -18,7 +18,7 @@ pub fn UdpConn(comptime lib: type) type {
     const posix = lib.posix;
     const Allocator = lib.mem.Allocator;
 
-    const Impl = struct {
+    return struct {
         fd: posix.socket_t,
         allocator: Allocator,
         closed: bool = false,
@@ -43,26 +43,6 @@ pub fn UdpConn(comptime lib: type) type {
                 error.BrokenPipe => error.BrokenPipe,
                 else => error.Unexpected,
             };
-        }
-
-        // UDP preserves packet boundaries, so this intentionally performs a
-        // single recv instead of looping like the default Conn.readAll.
-        // A shorter packet is reported as ShortRead.
-        // TODO: Detecting oversized datagrams portably would require extra
-        // buffering/platform-specific APIs, so truncation is not distinguished
-        // here in order to keep readAll allocation-free and preserve the empty
-        // buffer no-op behavior of Conn.readAll.
-        pub fn readAll(self: *Self, buf: []u8) Conn.ReadError!void {
-            if (buf.len == 0) return;
-            const n = try self.read(buf);
-            if (n != buf.len) return error.ShortRead;
-        }
-
-        // UDP writeAll intentionally maps to a single send call. Looping here
-        // would emit multiple datagrams, which is not the desired UDP behavior.
-        pub fn writeAll(self: *Self, buf: []const u8) Conn.WriteError!void {
-            const n = try self.write(buf);
-            if (n != buf.len) return error.Unexpected;
         }
 
         pub fn readFrom(self: *Self, buf: []u8) PacketConn.ReadFromError!PacketConn.ReadFromResult {
@@ -126,17 +106,21 @@ pub fn UdpConn(comptime lib: type) type {
         }
 
         pub fn boundPort(self: *const Self) !u16 {
-            var bound: posix.sockaddr.in = undefined;
-            var bound_len: posix.socklen_t = @sizeOf(posix.sockaddr.in);
+            var bound: posix.sockaddr.storage = undefined;
+            var bound_len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
             try posix.getsockname(self.fd, @ptrCast(&bound), &bound_len);
-            return lib.mem.bigToNative(u16, bound.port);
+            const family = @as(*const posix.sockaddr, @ptrCast(&bound)).family;
+            if (family != posix.AF.INET) return error.AddressFamilyMismatch;
+            return lib.mem.bigToNative(u16, @as(*const posix.sockaddr.in, @ptrCast(@alignCast(&bound))).port);
         }
 
         pub fn boundPort6(self: *const Self) !u16 {
-            var bound: posix.sockaddr.in6 = undefined;
-            var bound_len: posix.socklen_t = @sizeOf(posix.sockaddr.in6);
+            var bound: posix.sockaddr.storage = undefined;
+            var bound_len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
             try posix.getsockname(self.fd, @ptrCast(&bound), &bound_len);
-            return lib.mem.bigToNative(u16, bound.port);
+            const family = @as(*const posix.sockaddr, @ptrCast(&bound)).family;
+            if (family != posix.AF.INET6) return error.AddressFamilyMismatch;
+            return lib.mem.bigToNative(u16, @as(*const posix.sockaddr.in6, @ptrCast(@alignCast(&bound))).port);
         }
 
         fn setSocketTimeout(fd: posix.socket_t, optname: u32, ms: ?u32) void {
@@ -147,23 +131,19 @@ pub fn UdpConn(comptime lib: type) type {
             const bytes: [@sizeOf(posix.timeval)]u8 = @bitCast(tv);
             posix.setsockopt(fd, posix.SOL.SOCKET, optname, &bytes) catch {};
         }
-    };
-
-    return struct {
-        pub const Inner = Impl;
 
         /// Connected UDP → Conn (read/write after connect).
         pub fn init(allocator: Allocator, fd: posix.socket_t) Allocator.Error!Conn {
-            const impl = try allocator.create(Impl);
-            impl.* = .{ .fd = fd, .allocator = allocator };
-            return Conn.init(impl);
+            const self = try allocator.create(Self);
+            self.* = .{ .fd = fd, .allocator = allocator };
+            return Conn.init(self);
         }
 
         /// Unconnected UDP → PacketConn (readFrom/writeTo).
         pub fn initPacket(allocator: Allocator, fd: posix.socket_t) Allocator.Error!PacketConn {
-            const impl = try allocator.create(Impl);
-            impl.* = .{ .fd = fd, .allocator = allocator };
-            return PacketConn.init(impl);
+            const self = try allocator.create(Self);
+            self.* = .{ .fd = fd, .allocator = allocator };
+            return PacketConn.init(self);
         }
     };
 }

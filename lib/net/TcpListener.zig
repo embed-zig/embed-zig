@@ -1,7 +1,7 @@
 //! TcpListener — binds and listens on a TCP port (like Go's net.TCPListener).
 //!
-//! Internal type used by net.listen. Users interact with the
-//! type-erased Listener interface.
+//! `init()` returns a type-erased `Listener`, and callers can recover the
+//! concrete implementation via `ln.as(TcpListener(lib))`.
 
 const Conn = @import("Conn.zig");
 const Listener = @import("Listener.zig");
@@ -26,7 +26,7 @@ pub fn TcpListener(comptime lib: type) type {
             reuse_addr: bool = true,
         };
 
-        pub fn init(allocator: Allocator, opts: Options) !Self {
+        pub fn init(allocator: Allocator, opts: Options) !Listener {
             const fd = try posix.socket(opts.address.any.family, posix.SOCK.STREAM, 0);
             errdefer posix.close(fd);
 
@@ -38,7 +38,10 @@ pub fn TcpListener(comptime lib: type) type {
             try posix.bind(fd, @ptrCast(&opts.address.any), opts.address.getOsSockLen());
             try posix.listen(fd, opts.backlog);
 
-            return .{ .fd = fd, .allocator = allocator };
+            const self = try allocator.create(Self);
+            errdefer allocator.destroy(self);
+            self.* = .{ .fd = fd, .allocator = allocator };
+            return Listener.init(self);
         }
 
         pub fn accept(self: *Self) Listener.AcceptError!Conn {
@@ -64,6 +67,11 @@ pub fn TcpListener(comptime lib: type) type {
             }
         }
 
+        pub fn deinit(self: *Self) void {
+            self.close();
+            self.allocator.destroy(self);
+        }
+
         pub fn port(self: *Self) !u16 {
             var bound: posix.sockaddr.storage = undefined;
             var bound_len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
@@ -76,9 +84,6 @@ pub fn TcpListener(comptime lib: type) type {
             };
         }
 
-        pub fn listener(self: *Self) Listener {
-            return Listener.init(self);
-        }
     };
 }
 
@@ -88,9 +93,11 @@ test "std_compat ipv4" {
     const TL = TcpListener(s);
 
     var ln = try TL.init(s.testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
-    defer ln.close();
+    defer ln.deinit();
 
-    const bound_port = try ln.port();
+    const typed = try ln.as(TL);
+
+    const bound_port = try typed.port();
 
     const cli_fd = try s.posix.socket(s.posix.AF.INET, s.posix.SOCK.STREAM, 0);
     const dest = s.net.Ip4Address.init(.{ 127, 0, 0, 1 }, bound_port);
@@ -122,9 +129,11 @@ test "std_compat ipv6" {
     const loopback_v6 = comptime Addr.parseIp6("::1", 0) catch unreachable;
 
     var ln = try TL.init(s.testing.allocator, .{ .address = loopback_v6 });
-    defer ln.close();
+    defer ln.deinit();
 
-    const bound_port = try ln.port();
+    const typed = try ln.as(TL);
+
+    const bound_port = try typed.port();
 
     var dest = loopback_v6;
     dest.setPort(bound_port);
