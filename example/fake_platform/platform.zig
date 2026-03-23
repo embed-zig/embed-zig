@@ -11,17 +11,25 @@ const impl = struct {
     pub const crypto = @import("src/crypto.zig");
 };
 
-pub const embed = @import("embed").Make(impl);
+const embed = @import("embed").Make(impl);
+const net = @import("net").Make(impl);
+const sync = struct {
+    pub const ChannelFactory = @import("sync").ChannelFactory(impl.Channel);
+};
 
-const test_runner = @import("embed").test_runner;
-const sync_test_runner = @import("sync").test_runner;
-const net_test_runner = @import("net").test_runner;
+const test_runner = struct {
+    pub const embed = @import("embed").test_runner;
+    pub const sync = @import("sync").test_runner;
+    pub const net = @import("net").test_runner;
+};
 
 test "fake_platform" {
-    try test_runner.std_compat.run(embed);
-    try sync_test_runner.channel.run(embed, impl.Channel, std.testing.allocator);
-    try sync_test_runner.racer.run(embed);
-    try net_test_runner.resolver_fake.run(embed);
-    try net_test_runner.tls.run(embed);
-    try net_test_runner.resolver_ali_dns.run(embed);
+    try test_runner.embed.std_compat.run(embed);
+    try test_runner.sync.channel.run(embed, sync.ChannelFactory);
+    try test_runner.sync.racer.run(embed);
+    try test_runner.net.tcp.run(embed);
+    try test_runner.net.udp.run(embed);
+    try test_runner.net.tls.run(embed);
+    try test_runner.net.resolver_fake.run(embed);
+    try test_runner.net.resolver_ali_dns.run(embed);
 }

@@ -1,5 +1,7 @@
 const std = @import("std");
 
+pub const errors = std.crypto.errors;
+
 pub const Sha256 = std.crypto.hash.sha2.Sha256;
 pub const Sha384 = std.crypto.hash.sha2.Sha384;
 pub const Sha512 = std.crypto.hash.sha2.Sha512;
