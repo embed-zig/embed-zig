@@ -45,6 +45,34 @@ const root = @This();
 
 pub fn make(comptime Impl: type) type {
     comptime {
+        if (!@hasField(Impl.sockaddr, "family"))
+            @compileError("Impl.sockaddr must expose a std-compatible family field");
+        if (!@hasDecl(Impl.sockaddr, "storage"))
+            @compileError("Impl.sockaddr must expose a std-compatible storage type");
+        if (!@hasDecl(Impl.sockaddr, "in"))
+            @compileError("Impl.sockaddr must expose a std-compatible IPv4 address type");
+        if (!@hasDecl(Impl.sockaddr, "in6"))
+            @compileError("Impl.sockaddr must expose a std-compatible IPv6 address type");
+
+        _ = @as(type, Impl.sockaddr.storage);
+        _ = @as(type, Impl.sockaddr.in);
+        _ = @as(type, Impl.sockaddr.in6);
+
+        if (!@hasField(Impl.sockaddr.storage, "family"))
+            @compileError("Impl.sockaddr.storage must expose a std-compatible family field");
+
+        if (!@hasField(Impl.sockaddr.in, "family") or
+            !@hasField(Impl.sockaddr.in, "port") or
+            !@hasField(Impl.sockaddr.in, "addr"))
+            @compileError("Impl.sockaddr.in must expose std-compatible family, port, and addr fields");
+
+        if (!@hasField(Impl.sockaddr.in6, "family") or
+            !@hasField(Impl.sockaddr.in6, "port") or
+            !@hasField(Impl.sockaddr.in6, "flowinfo") or
+            !@hasField(Impl.sockaddr.in6, "addr") or
+            !@hasField(Impl.sockaddr.in6, "scope_id"))
+            @compileError("Impl.sockaddr.in6 must expose std-compatible family, port, flowinfo, addr, and scope_id fields");
+
         _ = @as(*const fn (u32, u32, u32) SocketError!Impl.socket_t, &Impl.socket);
         _ = @as(*const fn (Impl.socket_t, *const Impl.sockaddr, Impl.socklen_t) BindError!void, &Impl.bind);
         _ = @as(*const fn (Impl.socket_t, u31) ListenError!void, &Impl.listen);

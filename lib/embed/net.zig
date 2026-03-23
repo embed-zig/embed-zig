@@ -247,8 +247,9 @@ fn hexDigit(c: u8) ?u16 {
 }
 
 test "parse" {
-    const posix = std.posix;
-    const expect = std.testing.expectEqual;
+    const test_std = @import("std");
+    const posix = test_std.posix;
+    const expect = test_std.testing.expectEqual;
     const V4 = Ip4Address(posix);
     const V6 = Ip6Address(posix);
     const Addr = Address(posix);
