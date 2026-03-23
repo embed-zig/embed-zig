@@ -18,6 +18,7 @@ networking primitives.
   - [ListenPacket](#listenpacket)
 - [net/url](#neturl)
 - [net/Resolver (DNS)](#netresolver-dns)
+- [net/ntp](#netntp)
 - [net/tls](#nettls)
 - [net/http](#nethttp)
 - [net/ws](#netws)
@@ -71,6 +72,7 @@ lib/net/
   Dialer.zig           Configurable network dialer (Go's net.Dialer)
   url.zig              Zero-alloc URL parser (RFC 3986)
   Resolver.zig         Pure-Zig DNS resolver (RFC 1035, per-server racer)
+  ntp.zig              UDP NTP client and wire helpers
   tls/
     Conn.zig           TLS client Conn wrapper
     ServerConn.zig     TLS server Conn wrapper
@@ -420,6 +422,33 @@ defer r2.deinit();
 ```
 
 ## net/tls
+
+## net/ntp
+
+Small UDP-based NTP client plus RFC 5905 wire helpers.
+
+Highlights:
+
+- Pure timestamp conversion and packet encode/decode helpers at module root
+- `Client(lib)` with single-server query and multi-server race support
+- Per-server race workers built on `sync.Racer`
+- Public-network Aliyun test coverage in `lib/net/test_runner/ntp.zig`
+
+```zig
+const embed = @import("embed").Make(platform);
+const net = @import("net").Make(embed);
+
+var client = try net.ntp.Client.init(embed.testing.allocator, .{
+    .servers = &.{net.ntp.Servers.aliyun},
+    .timeout_ms = 5000,
+});
+defer client.deinit();
+
+const resp = try client.query(embed.time.milliTimestamp());
+const current_time_ms = try client.getTime(embed.time.milliTimestamp());
+_ = resp;
+_ = current_time_ms;
+```
 
 TLS 1.2/1.3 client/server building blocks and concrete wrappers in the
 style of Go's `crypto/tls`. The client and server wrappers both return a
