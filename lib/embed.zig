@@ -17,7 +17,7 @@ pub const log = @import("embed/log.zig");
 pub const mem = @import("embed/mem.zig");
 pub const posix = @import("embed/posix.zig");
 pub const Random = @import("embed/Random.zig");
-pub const thread = @import("embed/Thread.zig");
+pub const Thread = @import("embed/Thread.zig");
 pub const time = @import("embed/time.zig");
 pub const math = @import("embed/math.zig");
 pub const debug = @import("embed/debug.zig");
@@ -33,7 +33,7 @@ pub const test_runner = struct {
 pub fn Make(comptime Impl: type) type {
     return struct {
         const Self = @This();
-        pub const Thread = thread.make(Impl.Thread);
+        pub const Thread = root.Thread.make(Impl.Thread);
         pub const log = root.log.make(Impl.log);
         pub const posix = root.posix.make(Impl.posix);
         pub const time = root.time.make(Impl.time);
@@ -111,6 +111,7 @@ pub fn Make(comptime Impl: type) type {
 }
 
 test {
+    _ = @import("embed/std_compat.zig");
     _ = @import("embed/test_runner/std.zig");
     _ = @import("embed/net.zig");
 }

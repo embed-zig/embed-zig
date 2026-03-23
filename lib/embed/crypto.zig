@@ -20,7 +20,7 @@
 //! Block:    Aes128, Aes256, core.aes.has_hardware_support
 //! Cert:     Certificate (including `Certificate.rsa`)
 
-const std = @import("std");
+const std = @import("std_re_export.zig");
 
 const root = @This();
 

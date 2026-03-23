@@ -2,7 +2,8 @@
 //!
 //! Usage:
 //!   const sync = @import("sync");
-//!   const IntChan = sync.ChannelFactory(platform.Channel).Channel(u32);
+//!   const Channel = sync.Channel(platform.Channel);
+//!   const IntChan = Channel(u32);
 //!   var ch = try IntChan.make(allocator, 16);
 //!   defer ch.deinit();
 //!   try ch.send(42);
@@ -18,18 +19,18 @@ pub fn RecvResult(comptime T: type) type {
     return struct { value: T, ok: bool };
 }
 
-/// Construct a sealed Channel factory from a platform Impl.
+/// Construct a sealed Channel type factory from a platform Impl.
 ///
 /// Impl must be: fn(type) type
-/// The returned type for a given T must provide:
+/// The returned factory produces a type for a given T that must provide:
 ///   fn init(Allocator, usize) !Ch
 ///   fn deinit(*Ch) void
 ///   fn close(*Ch) void
 ///   fn send(*Ch, T) anyerror!SendResult()
 ///   fn recv(*Ch) anyerror!RecvResult(T)
-pub fn makeFactory(comptime impl: fn (type) type) type {
+pub fn make(comptime impl: fn (type) type) fn (type) type {
     return struct {
-        pub fn Channel(comptime T: type) type {
+        fn factory(comptime T: type) type {
             const Ch = impl(T);
 
             comptime {
@@ -66,5 +67,5 @@ pub fn makeFactory(comptime impl: fn (type) type) type {
                 }
             };
         }
-    };
+    }.factory;
 }

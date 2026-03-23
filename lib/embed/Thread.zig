@@ -8,7 +8,7 @@
 //!   embed.Thread.Condition   — condition variable
 //!   embed.Thread.RwLock      — reader-writer lock
 
-const std = @import("std");
+const std_compat = @import("std_compat.zig");
 const mutex_mod = @import("Thread/Mutex.zig");
 const condition_mod = @import("Thread/Condition.zig");
 const rwlock_mod = @import("Thread/RwLock.zig");
@@ -22,11 +22,11 @@ pub const SpawnConfig = struct {
     core_id: ?i32 = null,
 };
 
-pub const SpawnError = std.Thread.SpawnError;
-pub const YieldError = std.Thread.YieldError;
-pub const CpuCountError = std.Thread.CpuCountError;
-pub const SetNameError = std.Thread.SetNameError;
-pub const GetNameError = std.Thread.GetNameError;
+pub const SpawnError = std_compat.Thread.SpawnError;
+pub const YieldError = std_compat.Thread.YieldError;
+pub const CpuCountError = std_compat.Thread.CpuCountError;
+pub const SetNameError = std_compat.Thread.SetNameError;
+pub const GetNameError = std_compat.Thread.GetNameError;
 
 /// Construct a sealed Thread namespace from a platform Impl.
 ///

@@ -1,7 +1,7 @@
 //! Channel 行为一致性测试运行器
 //!
-//! 本文件接受一个已经构造好的 ChannelFactory（通过 comptime 参数传入），
-//! 内部直接经由 `.Channel(u32)` 实例化测试对象，
+//! 本文件接受一个已经构造好的 Channel 类型工厂（通过 comptime 参数传入），
+//! 内部直接经由 `(u32)` 实例化测试对象，
 //! 运行全部测试，验证其行为与 Go channel 语义一致。
 //!
 //! 注意：本 runner 只使用 channel contract 暴露的 API（init/deinit/send/recv/close），
@@ -12,7 +12,7 @@
 //! ```
 //! try @import("sync").test_runner.channel.run(
 //!     embed,
-//!     @import("sync").ChannelFactory(platform.Channel),
+//!     @import("sync").Channel(platform.Channel),
 //! );
 //! ```
 //!
@@ -137,13 +137,13 @@
 //!  45. 快速连续 close + recv 不 panic、不 hang
 //!  46. 快速连续 close + send 不 panic、不 hang
 
-pub fn run(comptime lib: type, comptime channel_factory: type) !void {
-    const Runner = TestRunner(lib, channel_factory);
+pub fn run(comptime lib: type, comptime Channel: fn (type) type) !void {
+    const Runner = TestRunner(lib, Channel);
     return Runner.exec(lib.testing.allocator);
 }
 
-fn TestRunner(comptime lib: type, comptime channel_factory: type) type {
-    const Ch = channel_factory.Channel(u32);
+fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
+    const Ch = Channel(u32);
     const Thread = lib.Thread;
     const Allocator = lib.mem.Allocator;
     const Atomic = lib.atomic.Value;

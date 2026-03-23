@@ -3,7 +3,7 @@
 //! These helpers are platform-independent string/number formatting and parsing
 //! utilities. They do not depend on OS services, sockets, files, or threads.
 
-const std = @import("std");
+const std = @import("std_re_export.zig");
 
 pub const allocPrint = std.fmt.allocPrint;
 pub const bufPrintZ = std.fmt.bufPrintZ;

@@ -1,6 +1,6 @@
 //! `std.Random`-compatible random interface with a curated algorithm surface.
 
-const std = @import("std");
+const std = @import("std_re_export.zig");
 const StdRandom = std.Random;
 
 const Random = @This();

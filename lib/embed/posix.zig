@@ -18,7 +18,7 @@
 //!   lseek_SET, lseek_CUR, lseek_CUR_get, lseek_END,
 //!   mkdir, unlink
 
-const std = @import("std");
+const std = @import("std_re_export.zig");
 
 pub const UnexpectedError = std.posix.UnexpectedError;
 pub const SocketError = std.posix.SocketError;

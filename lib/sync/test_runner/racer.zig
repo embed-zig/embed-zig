@@ -293,13 +293,14 @@ fn spawnAllocatorTests(comptime lib: type) !void {
     const tst = lib.testing;
     const CapturingThread = CapturingThreadType(lib);
     const PassthroughAllocator = PassthroughAllocatorType(lib);
-    const FakeLib = struct {
+    const CapturingThreadLib = struct {
         pub const mem = lib.mem;
         pub const atomic = lib.atomic;
         pub const testing = lib.testing;
+        pub const debug = lib.debug;
         pub const Thread = CapturingThread;
     };
-    const R = root.Racer(FakeLib, u32);
+    const R = root.Racer(CapturingThreadLib, u32);
 
     var racer = try R.init(tst.allocator);
     defer racer.deinit();

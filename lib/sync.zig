@@ -3,7 +3,8 @@
 //! Usage:
 //!   const sync = @import("sync");
 //!   const U32Racer = sync.Racer(lib, u32);
-//!   const IntChan = sync.ChannelFactory(platform.Channel).Channel(u32);
+//!   const Channel = sync.Channel(platform.Channel);
+//!   const IntChan = Channel(u32);
 //!
 //!   var racer = try U32Racer.init(allocator);
 //!   defer racer.deinit();
@@ -17,8 +18,8 @@
 pub const channel = @import("sync/Channel.zig");
 const racer_mod = @import("sync/Racer.zig");
 
-pub fn ChannelFactory(comptime impl: fn (type) type) type {
-    return channel.makeFactory(impl);
+pub fn Channel(comptime impl: fn (type) type) fn (type) type {
+    return channel.make(impl);
 }
 
 pub fn Racer(comptime lib: type, comptime T: type) type {

@@ -1,4 +1,3 @@
-const std = @import("std");
 const context_mod = @import("context");
 
 pub fn Racer(comptime lib: type, comptime T: type) type {
@@ -165,9 +164,9 @@ pub fn Racer(comptime lib: type, comptime T: type) type {
                     if (ctx.deadline()) |deadline_ms| {
                         const remaining_ms = deadline_ms - lib.time.milliTimestamp();
                         if (remaining_ms <= 0) break :blk 0;
-                        break :blk @as(u64, @intCast(@min(remaining_ms, poll_ms))) * std.time.ns_per_ms;
+                        break :blk @as(u64, @intCast(@min(remaining_ms, poll_ms))) * lib.time.ns_per_ms;
                     }
-                    break :blk @as(u64, @intCast(poll_ms)) * std.time.ns_per_ms;
+                    break :blk @as(u64, @intCast(poll_ms)) * lib.time.ns_per_ms;
                 };
 
                 if (wait_ns == 0) {
@@ -204,7 +203,7 @@ pub fn Racer(comptime lib: type, comptime T: type) type {
             shared.mutex.lock();
             defer shared.mutex.unlock();
 
-            std.debug.assert(shared.running > 0);
+            lib.debug.assert(shared.running > 0);
             shared.running -= 1;
             if (shared.running == 0) shared.cond.broadcast();
         }

@@ -1,6 +1,6 @@
 //! ASCII utilities — re-exports from std.ascii.
 
-const std = @import("std");
+const std = @import("std_re_export.zig");
 
 pub const whitespace = std.ascii.whitespace;
 pub const isWhitespace = std.ascii.isWhitespace;

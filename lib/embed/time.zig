@@ -4,7 +4,8 @@
 //!   fn milliTimestamp() i64
 //!   fn nanoTimestamp() i128
 
-const std = @import("std");
+const std = @import("std_re_export.zig");
+const std_compat = @import("std_compat.zig");
 
 pub fn make(comptime Impl: type) type {
     comptime {
@@ -29,7 +30,7 @@ pub fn make(comptime Impl: type) type {
             started: i128,
             previous: i128,
 
-            pub const Error = std.time.Timer.Error;
+            pub const Error = std_compat.time.Timer.Error;
 
             pub fn start() Error!Timer {
                 const now = Impl.nanoTimestamp();

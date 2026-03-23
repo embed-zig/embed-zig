@@ -3,7 +3,7 @@
 //! Every symbol here mirrors its std counterpart exactly so that
 //! `embed.ArrayList(u8)` behaves identically to `std.ArrayList(u8)`.
 
-const std = @import("std");
+const std = @import("std_re_export.zig");
 
 // ── Array lists ──────────────────────────────────────────────────────
 

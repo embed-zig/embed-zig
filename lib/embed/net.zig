@@ -1,7 +1,8 @@
 //! Network utilities — address types matching std.net shape.
 
+const std = @import("std_re_export.zig");
 const mem = @import("mem.zig");
-const math = @import("std").math;
+const math = std.math;
 
 pub const IPv4ParseError = error{ InvalidCharacter, InvalidEnd, Overflow, Incomplete, NonCanonical };
 pub const IPv6ParseError = error{ InvalidCharacter, InvalidEnd, Overflow, Incomplete, InvalidIpv4Mapping };
@@ -246,7 +247,6 @@ fn hexDigit(c: u8) ?u16 {
 }
 
 test "parse" {
-    const std = @import("std");
     const posix = std.posix;
     const expect = std.testing.expectEqual;
     const V4 = Ip4Address(posix);

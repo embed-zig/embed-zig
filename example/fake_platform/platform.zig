@@ -14,7 +14,7 @@ const impl = struct {
 const embed = @import("embed").Make(impl);
 const net = @import("net").Make(impl);
 const sync = struct {
-    pub const ChannelFactory = @import("sync").ChannelFactory(impl.Channel);
+    pub const Channel = @import("sync").Channel(impl.Channel);
 };
 
 const test_runner = struct {
@@ -25,7 +25,7 @@ const test_runner = struct {
 
 test "fake_platform" {
     try test_runner.embed.std_compat.run(embed);
-    try test_runner.sync.channel.run(embed, sync.ChannelFactory);
+    try test_runner.sync.channel.run(embed, sync.Channel);
     try test_runner.sync.racer.run(embed);
     try test_runner.net.tcp.run(embed);
     try test_runner.net.udp.run(embed);
