@@ -18,12 +18,6 @@ const summary_label = "summary";
 const padding_spaces =
     "                                                                ";
 
-const TestHooks = struct {
-    fail_pending_run_alloc: bool = false,
-};
-
-threadlocal var test_hooks: ?*TestHooks = null;
-
 ptr: *anyopaque,
 vtable: *const VTable,
 allocator: embed_mod.mem.Allocator,
@@ -43,16 +37,6 @@ pub const VTable = struct {
     runFn: *const fn (*Self, []const u8, TestRunner) void,
     waitFn: *const fn (*Self) bool,
 };
-
-fn takePendingRunAllocFailure() bool {
-    if (test_hooks) |hooks| {
-        if (hooks.fail_pending_run_alloc) {
-            hooks.fail_pending_run_alloc = false;
-            return true;
-        }
-    }
-    return false;
-}
 
 const InitOptions = struct {
     ptr: *anyopaque,
@@ -638,10 +622,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
                 return;
             };
 
-            const pending = blk: {
-                if (takePendingRunAllocFailure()) break :blk null;
-                break :blk self_state.allocator.create(PendingRun) catch null;
-            } orelse {
+            const pending = self_state.allocator.create(PendingRun) catch null orelse {
                 var child_copy = child;
                 runner.deinit(self_state.allocator);
                 destroyNeverStarted(&child_copy);
@@ -2482,6 +2463,50 @@ test "testing/unit_tests/subtest_start_failure_cleanup" {
     const std = @import("std");
     const embed = @import("embed");
 
+    const FailNthAllocator = struct {
+        backing: embed.mem.Allocator,
+        alloc_index: usize = 0,
+        fail_at_alloc_index: ?usize = null,
+
+        fn allocator(self: *@This()) embed.mem.Allocator {
+            return .{
+                .ptr = self,
+                .vtable = &vtable,
+            };
+        }
+
+        fn alloc(ptr: *anyopaque, len: usize, alignment: embed.mem.Alignment, ret_addr: usize) ?[*]u8 {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            defer self.alloc_index += 1;
+            if (self.fail_at_alloc_index) |fail_at| {
+                if (self.alloc_index == fail_at) return null;
+            }
+            return self.backing.rawAlloc(len, alignment, ret_addr);
+        }
+
+        fn resize(ptr: *anyopaque, memory: []u8, alignment: embed.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            return self.backing.rawResize(memory, alignment, new_len, ret_addr);
+        }
+
+        fn remap(ptr: *anyopaque, memory: []u8, alignment: embed.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            return self.backing.rawRemap(memory, alignment, new_len, ret_addr);
+        }
+
+        fn free(ptr: *anyopaque, memory: []u8, alignment: embed.mem.Alignment, ret_addr: usize) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.backing.rawFree(memory, alignment, ret_addr);
+        }
+
+        const vtable: embed.mem.Allocator.VTable = .{
+            .alloc = alloc,
+            .resize = resize,
+            .remap = remap,
+            .free = free,
+        };
+    };
+
     const Support = struct {
         var entries: std.ArrayListUnmanaged([]u8) = .{};
         var mutex: std.Thread.Mutex = .{};
@@ -2678,27 +2703,39 @@ test "testing/unit_tests/subtest_start_failure_cleanup" {
     Support.reset();
     defer Support.reset();
 
-    TestLib.testing.allocator = std.testing.allocator;
-
     {
-        var hooks = TestHooks{
-            .fail_pending_run_alloc = true,
-        };
-        test_hooks = &hooks;
-        defer test_hooks = null;
+        var found_pending_alloc_failure = false;
 
-        var root = new(TestLib, .test_run);
-        root.run("child", Helper.makeTrackedRunner());
-        try std.testing.expect(!root.wait());
-        root.deinit();
+        for (0..32) |fail_offset| {
+            Support.reset();
+
+            var allocator_state = FailNthAllocator{
+                .backing = std.testing.allocator,
+            };
+            TestLib.testing.allocator = allocator_state.allocator();
+
+            var root = new(TestLib, .test_run);
+            allocator_state.fail_at_alloc_index = allocator_state.alloc_index + fail_offset;
+
+            root.run("child", Helper.makeTrackedRunner());
+            const ok = root.wait();
+            root.deinit();
+
+            if (try Helper.normalizedLogContains("subtest state alloc failed")) {
+                try std.testing.expect(!ok);
+                try std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
+                try std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
+                found_pending_alloc_failure = true;
+                break;
+            }
+        }
+
+        try std.testing.expect(found_pending_alloc_failure);
     }
-
-    try std.testing.expect(try Helper.normalizedLogContains("subtest state alloc failed"));
-    try std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
-    try std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
 
     Support.reset();
     Support.fail_spawn = true;
+    TestLib.testing.allocator = std.testing.allocator;
 
     {
         var root = new(TestLib, .test_run);
