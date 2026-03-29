@@ -64,3 +64,6 @@ That split keeps the project honest about two things at once:
   `std.Thread.spawn(...)`
 - `SpawnConfig.name`, `SpawnConfig.priority`, and `SpawnConfig.core_id` are
   currently host hints only; `embed_std` does not apply them at spawn time
+- `Thread.Condition.timedWait(...)` normalizes any underlying host wait failure
+  to `error.Timeout`, because the `embed` contract only exposes that narrower
+  error surface today

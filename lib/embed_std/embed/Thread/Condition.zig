@@ -12,6 +12,8 @@ pub fn wait(self: *Self, mutex: *Mutex) void {
 }
 
 pub fn timedWait(self: *Self, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
+    // The embed contract only exposes `error.Timeout`, so any host wait failure
+    // is normalized to that narrower surface here.
     self.inner.timedWait(&mutex.inner, timeout_ns) catch return error.Timeout;
 }
 

@@ -26,6 +26,8 @@ The root package exports:
   this package only with trusted font files.
 - `stb.Font.glyphIndex(codepoint)` returns `0` when the font does not provide a
   glyph for that codepoint.
+- `stb.BitmapBox.width()` and `height()` are signed deltas. Check that they are
+  positive before casting them to `usize` for bitmap sizing.
 - `stb.Font.renderCodepointBitmap(...)` validates the caller-provided bitmap
   layout and returns an error when the buffer is too small, the stride is
   invalid, or a dimension cannot be represented by `stb_truetype`. Zero-sized

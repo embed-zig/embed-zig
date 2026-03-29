@@ -19,7 +19,7 @@
 //! `make(...)` 路径会透传调用方提供的 allocator；直接 `run(...)` 时才回落到
 //! `lib.testing.allocator`。
 //!
-//! 以下是完整的测试要点清单：
+//! 以下是当前 runner 覆盖的测试要点清单：
 //!
 //!
 //! ═══════════════════════════════════════════════════════════
@@ -89,9 +89,9 @@
 //!  四、close 的 Go 语义
 //! ═══════════════════════════════════════════════════════════
 //!
-//! Go 语义：close 后 send 是 panic，double close 也是 panic。
-//! 本 contract 中 send after close 返回 ok=false，
-//! 测试验证 ok=false 语义。
+//! Go 语义里 close 后 send 是 panic，double close 也是 panic。
+//! 本 contract 只约束 send after close 返回 ok=false，因此这里锁定的是
+//! send/recv after close 的可观测语义；double close 不属于当前 runner 的断言范围。
 //!
 //!  21. close 一个未关闭 channel 成功，channel 进入 closed 状态
 //!  22. close 后 send 返回 ok=false，不能静默成功
@@ -132,9 +132,12 @@
 //!  七、资源安全
 //! ═══════════════════════════════════════════════════════════
 //!
-//!  42. 正常 send/recv/deinit 路径无内存泄漏
-//!  43. 带未消费缓冲数据直接 deinit 无内存泄漏
-//!  44. close 后 deinit 无资源泄漏
+//!  说明：这些 case 主要覆盖常见 close/deinit 生命周期不会 panic 或 hang，
+//!  并在默认测试分配器下不留下明显 allocator 泄漏；它们不是独立的 leak detector。
+//!
+//!  42. 正常 send/recv/deinit 路径可正常收尾
+//!  43. 带未消费缓冲数据直接 deinit 可正常收尾
+//!  44. close 后 deinit 可正常收尾
 //!  45. 快速连续 close + recv 不 panic、不 hang
 //!  46. 快速连续 close + send 不 panic、不 hang
 

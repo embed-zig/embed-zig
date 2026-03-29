@@ -46,12 +46,64 @@ pub fn run(comptime lib: type) !void {
 
 fn runImpl(comptime lib: type, allocator: lib.mem.Allocator) !void {
     try spawnAllocatorTests(lib, allocator);
+    try zeroTaskTests(lib, allocator);
     try firstWinnerTests(lib, allocator);
     try raceContextTests(lib, allocator);
     try cancelTests(lib, allocator);
     try doneAndWaitTests(lib, allocator);
     try exhaustedTests(lib, allocator);
     try initOomTests(lib);
+}
+
+fn zeroTaskTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
+    const testing = lib.testing;
+    const Context = context_mod.make(lib);
+    const R = root.Racer(lib, u32);
+
+    {
+        var racer = try R.init(allocator);
+        defer racer.deinit();
+
+        switch (racer.race()) {
+            .winner => return error.UnexpectedWinner,
+            .exhausted => {},
+        }
+
+        try testing.expect(!racer.done());
+        try testing.expectEqual(@as(?u32, null), racer.value());
+
+        racer.wait();
+        racer.wait();
+    }
+
+    {
+        var context = try Context.init(allocator);
+        defer context.deinit();
+
+        var racer = try R.init(allocator);
+        defer racer.deinit();
+
+        switch (try racer.raceContext(context.background())) {
+            .winner => return error.UnexpectedWinner,
+            .exhausted => {},
+        }
+
+        racer.cancel();
+        try testing.expect(racer.done());
+
+        switch (racer.race()) {
+            .winner => return error.UnexpectedWinner,
+            .exhausted => {},
+        }
+
+        switch (try racer.raceContext(context.background())) {
+            .winner => return error.UnexpectedWinner,
+            .exhausted => {},
+        }
+
+        try testing.expectEqual(@as(?u32, null), racer.value());
+        racer.wait();
+    }
 }
 
 fn firstWinnerTests(comptime lib: type, allocator: lib.mem.Allocator) !void {

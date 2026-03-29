@@ -138,10 +138,17 @@ pub fn timeout(self: *Self, ns: i64) void {
     self.vtable.timeoutFn(self, ns);
 }
 
+/// Starts a child run on this handle.
+///
+/// Callers must not start additional children after `wait()` has been called on
+/// the same `T`.
 pub fn run(self: *Self, child_name: []const u8, task: TestRunner) void {
     self.vtable.runFn(self, child_name, task);
 }
 
+/// Waits for all previously started child runs to finish.
+///
+/// This is idempotent and must be called before `deinit()`.
 pub fn wait(self: *Self) bool {
     return self.vtable.waitFn(self);
 }

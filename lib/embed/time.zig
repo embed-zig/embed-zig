@@ -120,6 +120,9 @@ pub fn make(comptime Impl: type) type {
             started: i128,
             previous: i128,
 
+            /// Kept as a std-shaped error union even though the current
+            /// `embed.time` contract only requires timestamp functions and
+            /// therefore has no active runtime start-failure path today.
             pub const Error = std_compat.Timer.Error;
 
             pub fn start() Error!Timer {
@@ -130,7 +133,7 @@ pub fn make(comptime Impl: type) type {
             /// Nanoseconds since start or last reset.
             pub fn read(self: *Timer) u64 {
                 const current = self.sample();
-                return elapsedToU64(current - self.started);
+                return elapsedSince(self.started, current);
             }
 
             /// Reset the start point to now.
@@ -142,7 +145,7 @@ pub fn make(comptime Impl: type) type {
             pub fn lap(self: *Timer) u64 {
                 const current = self.sample();
                 defer self.started = current;
-                return elapsedToU64(current - self.started);
+                return elapsedSince(self.started, current);
             }
 
             fn sample(self: *Timer) i128 {
@@ -151,6 +154,14 @@ pub fn make(comptime Impl: type) type {
                     self.previous = current;
                 }
                 return self.previous;
+            }
+
+            fn elapsedSince(started: i128, current: i128) u64 {
+                if (current <= started) return 0;
+
+                const delta_ns, const overflowed = @subWithOverflow(current, started);
+                if (overflowed != 0) return zig_std.math.maxInt(u64);
+                return elapsedToU64(delta_ns);
             }
 
             fn elapsedToU64(delta_ns: i128) u64 {
@@ -195,6 +206,31 @@ test "embed/unit_tests/time/Timer_saturates_elapsed_to_u64_max" {
     const Impl = struct {
         pub var index: usize = 0;
         pub const samples = [_]i128{ 0, max_u64_ns + 123 };
+
+        pub fn milliTimestamp() i64 {
+            return 0;
+        }
+
+        pub fn nanoTimestamp() i128 {
+            defer index += 1;
+            return samples[index];
+        }
+    };
+
+    const time = make(Impl);
+    Impl.index = 0;
+
+    var timer = try time.Timer.start();
+    try zig_std.testing.expectEqual(zig_std.math.maxInt(u64), timer.read());
+}
+
+test "embed/unit_tests/time/Timer_handles_i128_delta_overflow" {
+    const min_i128 = zig_std.math.minInt(i128);
+    const max_i128 = zig_std.math.maxInt(i128);
+
+    const Impl = struct {
+        pub var index: usize = 0;
+        pub const samples = [_]i128{ min_i128 + 1, max_i128 - 1 };
 
         pub fn milliTimestamp() i64 {
             return 0;

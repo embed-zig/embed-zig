@@ -221,3 +221,65 @@ pub fn Racer(comptime lib: type, comptime T: type) type {
         }
     };
 }
+
+test "sync/unit_tests/Racer/zero_task_paths" {
+    const std = @import("std");
+    const embed = @import("embed");
+
+    const TestLib = struct {
+        pub const mem = embed.mem;
+        pub const atomic = embed.atomic;
+        pub const debug = struct {
+            pub const assert = std.debug.assert;
+        };
+        pub const time = struct {
+            pub const ns_per_ms = std.time.ns_per_ms;
+
+            pub fn nanoTimestamp() i128 {
+                return std.time.nanoTimestamp();
+            }
+        };
+        pub const Thread = struct {
+            pub const Mutex = std.Thread.Mutex;
+            pub const Condition = std.Thread.Condition;
+            pub const SpawnConfig = struct {
+                allocator: ?embed.mem.Allocator = null,
+            };
+            pub const SpawnError = error{};
+
+            pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) SpawnError!@This() {
+                _ = config;
+                @call(.auto, f, args);
+                return .{};
+            }
+
+            pub fn detach(self: @This()) void {
+                _ = self;
+            }
+        };
+    };
+
+    const R = Racer(TestLib, u32);
+
+    var racer = try R.init(std.testing.allocator);
+    defer racer.deinit();
+
+    switch (racer.race()) {
+        .winner => return error.UnexpectedWinner,
+        .exhausted => {},
+    }
+
+    try std.testing.expect(!racer.done());
+    try std.testing.expectEqual(@as(?u32, null), racer.value());
+
+    racer.cancel();
+    try std.testing.expect(racer.done());
+
+    switch (racer.race()) {
+        .winner => return error.UnexpectedWinner,
+        .exhausted => {},
+    }
+
+    racer.wait();
+    racer.wait();
+}
