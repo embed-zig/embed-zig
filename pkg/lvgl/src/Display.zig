@@ -1,4 +1,3 @@
-const std = @import("std");
 const binding = @import("binding.zig");
 const Obj = @import("object/Obj.zig");
 
@@ -59,7 +58,7 @@ pub fn setOffset(self: *const Self, x: i32, y: i32) void {
 }
 
 pub fn setRotation(self: *const Self, new_rotation: Rotation) void {
-    binding.lv_display_set_rotation(self.handle, @enumFromInt(@intFromEnum(new_rotation)));
+    binding.lv_display_set_rotation(self.handle, @as(binding.DisplayRotation, @intCast(@intFromEnum(new_rotation))));
 }
 
 pub fn setDpi(self: *const Self, new_dpi: i32) void {
@@ -99,7 +98,7 @@ pub fn offsetY(self: *const Self) i32 {
 }
 
 pub fn rotation(self: *const Self) Rotation {
-    return @enumFromInt(@intFromEnum(binding.lv_display_get_rotation(self.handle)));
+    return @enumFromInt(binding.lv_display_get_rotation(self.handle));
 }
 
 pub fn dpi(self: *const Self) i32 {
@@ -107,7 +106,7 @@ pub fn dpi(self: *const Self) i32 {
 }
 
 test "lvgl/unit_tests/Display/raw_handle_roundtrip" {
-    const testing = std.testing;
+    const testing = @import("std").testing;
 
     const raw_handle: *binding.Display = @ptrFromInt(1);
     const display = Self.fromRaw(raw_handle);
@@ -115,4 +114,31 @@ test "lvgl/unit_tests/Display/raw_handle_roundtrip" {
     try testing.expectEqual(raw_handle, display.raw());
 
     _ = Self.activeScreen;
+}
+
+test "lvgl/unit_tests/Display/runtime_properties_roundtrip_through_wrapper" {
+    const testing = @import("std").testing;
+    const lvgl_testing = @import("testing.zig");
+
+    var fixture = try lvgl_testing.Fixture.init();
+    defer fixture.deinit();
+
+    var display = fixture.display;
+    display.setResolution(200, 100);
+    display.setPhysicalResolution(220, 140);
+    display.setOffset(7, 9);
+    const default_display = Self.getDefault() orelse return error.ExpectedDefaultDisplay;
+    try testing.expectEqual(display.raw(), default_display.raw());
+    try testing.expectEqual(@as(i32, 200), display.width());
+    try testing.expectEqual(@as(i32, 100), display.height());
+    try testing.expectEqual(@as(i32, 220), display.physicalWidth());
+    try testing.expectEqual(@as(i32, 140), display.physicalHeight());
+    try testing.expectEqual(@as(i32, 7), display.offsetX());
+    try testing.expectEqual(@as(i32, 9), display.offsetY());
+
+    display.setRotation(.deg180);
+    display.setDpi(123);
+    try testing.expectEqual(Rotation.deg180, display.rotation());
+    try testing.expectEqual(@as(i32, 123), display.dpi());
+    try testing.expectEqual(display.activeScreen().raw(), fixture.screen().raw());
 }

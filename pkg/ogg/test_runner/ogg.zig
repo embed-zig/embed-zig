@@ -51,10 +51,10 @@ fn runImpl(comptime lib: type) !void {
     var sync = ogg.Sync.init();
     defer sync.deinit();
 
-    var writer = ogg.Stream.init(0x1234);
+    var writer = try ogg.Stream.init(0x1234);
     defer writer.deinit();
 
-    var reader = ogg.Stream.init(0x1234);
+    var reader = try ogg.Stream.init(0x1234);
     defer reader.deinit();
 
     var encoded = try lib.ArrayList(u8).initCapacity(testing.allocator, 0);
@@ -91,7 +91,7 @@ fn runImpl(comptime lib: type) !void {
     var cursor: usize = 0;
     while (cursor < encoded.items.len) {
         const chunk_len = @min(encoded.items.len - cursor, 17 + (cursor % 23));
-        const buf = sync.buffer(chunk_len) orelse return error.ExpectedSyncBuffer;
+        const buf = try sync.buffer(chunk_len);
         @memcpy(buf, encoded.items[cursor .. cursor + chunk_len]);
         try sync.wrote(chunk_len);
         cursor += chunk_len;

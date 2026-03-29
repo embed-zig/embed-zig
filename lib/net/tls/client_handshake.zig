@@ -111,7 +111,7 @@ pub fn make(comptime lib: type) type {
         pub const InitOptions = struct {
             hostname: []const u8,
             allocator: Allocator,
-            verification: VerificationMode = .hostname_only,
+            verification: VerificationMode,
             min_version: common.ProtocolVersion = .tls_1_2,
             max_version: common.ProtocolVersion = .tls_1_3,
             tls12_cipher_suites: []const common.CipherSuite = &common.DEFAULT_TLS12_CIPHER_SUITES,
@@ -392,6 +392,7 @@ pub fn make(comptime lib: type) type {
 
                         pos += total_len;
                     }
+                    if (pos != data.len) return error.InvalidHandshake;
                 }
 
                 fn processServerHello(self: *Self, data: []const u8) HandshakeError!void {
@@ -1320,6 +1321,7 @@ test "net/unit_tests/tls/client_handshake/honors_tls13_only_version_range" {
     var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
         .hostname = "example.com",
         .allocator = std.testing.allocator,
+        .verification = .hostname_only,
         .min_version = .tls_1_3,
         .max_version = .tls_1_3,
     });
@@ -1375,6 +1377,7 @@ test "net/unit_tests/tls/client_handshake/honors_tls12_only_version_range" {
     var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
         .hostname = "example.com",
         .allocator = std.testing.allocator,
+        .verification = .hostname_only,
         .min_version = .tls_1_2,
         .max_version = .tls_1_2,
     });
@@ -1429,6 +1432,7 @@ test "net/unit_tests/tls/client_handshake/honors_configured_tls12_cipher_suites"
     var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
         .hostname = "example.com",
         .allocator = std.testing.allocator,
+        .verification = .hostname_only,
         .min_version = .tls_1_2,
         .max_version = .tls_1_2,
         .tls12_cipher_suites = &.{.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256},
@@ -1688,6 +1692,48 @@ test "net/unit_tests/tls/client_handshake/tls12_finished_flow_matches_std_tls_he
     @memcpy(server_finished_msg[4..], &hs.tls12_expected_server_verify_data);
     try hs.processServerFinished(server_finished_msg[4..], &server_finished_msg);
     try std.testing.expectEqual(client.HandshakeState.connected, hs.state);
+}
+
+test "net/unit_tests/tls/client_handshake/rejects_trailing_bytes_after_complete_handshake_message" {
+    const std = @import("std");
+    const client = make(std);
+    const tls_common = @import("common.zig").make(std);
+
+    const MockConn = struct {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
+            return error.EndOfStream;
+        }
+
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
+            return buf.len;
+        }
+
+        pub fn close(_: *@This()) void {}
+        pub fn deinit(_: *@This()) void {}
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    var conn = MockConn{};
+    var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
+        .hostname = "example.com",
+        .allocator = std.testing.allocator,
+        .verification = .no_verification,
+        .min_version = .tls_1_2,
+        .max_version = .tls_1_2,
+    });
+    hs.version = .tls_1_2;
+    hs.state = .wait_server_hello_done;
+
+    var msg: [5]u8 = undefined;
+    const header: tls_common.HandshakeHeader = .{
+        .msg_type = .server_hello_done,
+        .length = 0,
+    };
+    try header.serialize(msg[0..tls_common.HandshakeHeader.SIZE]);
+    msg[tls_common.HandshakeHeader.SIZE] = 0xAA;
+
+    try std.testing.expectError(error.InvalidHandshake, hs.processHandshake(&msg));
 }
 
 test "net/unit_tests/tls/client_handshake/client_hello_matches_std_tls_overlapping_wire_fields" {

@@ -48,3 +48,19 @@ That split keeps the project honest about two things at once:
 
 - `embed` remains aligned with `std` where it intentionally mirrors `std`
 - `embed_std` stays a faithful adapter layer instead of growing its own behavior
+
+## Thread notes
+
+`embed_std.embed.Thread` maps onto the host `std.Thread` surface as closely as the
+`embed` contract allows.
+
+- `Thread.setName(...)` and `Thread.getName(...)` operate on the current thread
+  and use the same host facilities that `std.Thread` uses where supported
+- on targets where `std.Thread` has no naming support, those calls return
+  `error.Unsupported`
+- `embed` caps thread-name buffers at 128 bytes, so `embed_std` also exposes at
+  most 128 bytes even on hosts where raw `std.Thread` allows longer names
+- `SpawnConfig.stack_size` and `SpawnConfig.allocator` are forwarded to
+  `std.Thread.spawn(...)`
+- `SpawnConfig.name`, `SpawnConfig.priority`, and `SpawnConfig.core_id` are
+  currently host hints only; `embed_std` does not apply them at spawn time

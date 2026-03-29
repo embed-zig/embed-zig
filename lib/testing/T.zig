@@ -18,6 +18,12 @@ const summary_label = "summary";
 const padding_spaces =
     "                                                                ";
 
+const TestHooks = struct {
+    fail_pending_run_alloc: bool = false,
+};
+
+threadlocal var test_hooks: ?*TestHooks = null;
+
 ptr: *anyopaque,
 vtable: *const VTable,
 allocator: embed_mod.mem.Allocator,
@@ -37,6 +43,16 @@ pub const VTable = struct {
     runFn: *const fn (*Self, []const u8, TestRunner) void,
     waitFn: *const fn (*Self) bool,
 };
+
+fn takePendingRunAllocFailure() bool {
+    if (test_hooks) |hooks| {
+        if (hooks.fail_pending_run_alloc) {
+            hooks.fail_pending_run_alloc = false;
+            return true;
+        }
+    }
+    return false;
+}
 
 const InitOptions = struct {
     ptr: *anyopaque,
@@ -194,9 +210,6 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
         base_ctx: Context,
         timeout_ctx: ?Context = null,
         pending_runs: lib.ArrayList(*PendingRun) = .empty,
-        child_peak_live_bytes_sum: usize = 0,
-        has_child_runs: bool = false,
-        run_peak_live_bytes: usize = 0,
         started_ns: u64 = 0,
         body_finished_ns: u64 = 0,
         failure_ns: u64 = 0,
@@ -266,9 +279,6 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
                 .timeout_ctx = null,
                 .state_mutex = .{},
                 .pending_runs = .empty,
-                .child_peak_live_bytes_sum = 0,
-                .has_child_runs = false,
-                .run_peak_live_bytes = 0,
                 .started_ns = 0,
                 .body_finished_ns = 0,
                 .failure_ns = 0,
@@ -323,9 +333,6 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
                 .timeout_ctx = null,
                 .state_mutex = .{},
                 .pending_runs = .empty,
-                .child_peak_live_bytes_sum = 0,
-                .has_child_runs = false,
-                .run_peak_live_bytes = 0,
                 .started_ns = 0,
                 .body_finished_ns = 0,
                 .failure_ns = 0,
@@ -347,14 +354,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
             return @ptrCast(@alignCast(ptr));
         }
 
-        fn deinitFn(self: *Self) void {
-            const state = fromPtr(self.ptr);
-            if (!state.is_wait_done) {
-                @panic("testing.T.deinit requires explicit wait");
-            }
-            if (state.pending_runs.items.len != 0) {
-                @panic("testing.T.deinit with pending subtests");
-            }
+        fn destroyState(state: *ImplSelf) void {
             const testing_allocator = state.testing_allocator;
             const testing_allocator_owner = if (state.parent) |parent|
                 parent.testing_allocator.allocator()
@@ -371,10 +371,48 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
             testing_allocator_owner.destroy(testing_allocator);
         }
 
+        fn destroyNeverStarted(self: *Self) void {
+            const state = fromPtr(self.ptr);
+            if (state.pending_runs.items.len != 0) {
+                @panic("testing.T.destroyNeverStarted with pending subtests");
+            }
+            if (state.is_wait_done) {
+                @panic("testing.T.destroyNeverStarted after wait");
+            }
+            destroyState(state);
+            self.* = undefined;
+        }
+
+        fn deinitFn(self: *Self) void {
+            const state = fromPtr(self.ptr);
+            if (!state.is_wait_done) {
+                @panic("testing.T.deinit requires explicit wait");
+            }
+            if (state.pending_runs.items.len != 0) {
+                @panic("testing.T.deinit with pending subtests");
+            }
+            destroyState(state);
+        }
+
         fn failed(self: *ImplSelf) bool {
             self.state_mutex.lock();
             defer self.state_mutex.unlock();
             return self.is_failed;
+        }
+
+        fn recordFailure(self: *ImplSelf, failure_ns: u64) void {
+            self.state_mutex.lock();
+            defer self.state_mutex.unlock();
+            self.is_failed = true;
+            if (self.failure_ns == 0) self.failure_ns = failure_ns;
+        }
+
+        fn recordFatal(self: *ImplSelf, failure_ns: u64) void {
+            self.state_mutex.lock();
+            defer self.state_mutex.unlock();
+            self.is_failed = true;
+            self.is_fatal = true;
+            if (self.failure_ns == 0) self.failure_ns = failure_ns;
         }
 
         fn fatal(self: *ImplSelf) bool {
@@ -405,11 +443,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
 
         fn logFatalFn(self: *Self, message: []const u8) void {
             const state = fromPtr(self.ptr);
-            state.state_mutex.lock();
-            state.is_failed = true;
-            state.is_fatal = true;
-            if (state.failure_ns == 0) state.failure_ns = currentTimestampNs();
-            state.state_mutex.unlock();
+            state.recordFatal(currentTimestampNs());
             const label = state.name_buf;
             if (message.len != 0) {
                 if (label.len == 0) {
@@ -456,10 +490,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
 
         fn logErrorFn(ptr: *anyopaque, message: []const u8) void {
             const self = fromPtr(ptr);
-            self.state_mutex.lock();
-            self.is_failed = true;
-            if (message.len != 0 and self.failure_ns == 0) self.failure_ns = currentTimestampNs();
-            self.state_mutex.unlock();
+            self.recordFailure(currentTimestampNs());
             const label = self.name_buf;
             if (message.len != 0) {
                 if (label.len == 0) {
@@ -505,13 +536,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
         }
 
         fn reportedPeakLiveBytes(self: *ImplSelf) usize {
-            if (self.parent == null) {
-                return self.testing_allocator.peakLiveBytes();
-            }
-            if (self.has_child_runs) {
-                return self.child_peak_live_bytes_sum;
-            }
-            return self.run_peak_live_bytes;
+            return self.testing_allocator.peakLiveBytes();
         }
 
         fn logFinished(self: *ImplSelf, success: bool, total_ms: u64, delta_ms: u64) void {
@@ -577,17 +602,18 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
 
         fn waitPending(parent: *Self, pending: *PendingRun) bool {
             const child_state = fromPtr(pending.child.ptr);
+            const parent_state = fromPtr(parent.ptr);
             const run_allocator = pending.testing_allocator.allocator();
             pending.worker.join();
-            child_state.run_peak_live_bytes = pending.testing_allocator.peakLiveBytes();
-            const child_peak_live_bytes = child_state.reportedPeakLiveBytes();
             pending.runner.deinit(run_allocator);
-            if (child_state.failed()) parent.logError("");
+            if (child_state.failed()) {
+                parent_state.recordFailure(if (child_state.failure_ns != 0)
+                    child_state.failure_ns
+                else
+                    currentTimestampNs());
+            }
             const ok = pending.ok and !child_state.failed();
             pending.child.deinit();
-            const parent_state = fromPtr(parent.ptr);
-            parent_state.child_peak_live_bytes_sum += child_peak_live_bytes;
-            parent_state.has_child_runs = true;
             parent_state.allocator.destroy(pending);
             return ok;
         }
@@ -605,9 +631,13 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
                 return;
             };
 
-            const pending = self_state.allocator.create(PendingRun) catch {
+            const pending = blk: {
+                if (takePendingRunAllocFailure()) break :blk null;
+                break :blk self_state.allocator.create(PendingRun) catch null;
+            } orelse {
                 var child_copy = child;
-                child_copy.deinit();
+                runner.deinit(self_state.allocator);
+                destroyNeverStarted(&child_copy);
                 self.logFatal("subtest state alloc failed");
                 return;
             };
@@ -647,7 +677,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
                     structuredLabelPadding(child_label),
                 });
                 pending.runner.deinit(pending.testing_allocator.allocator());
-                pending.child.deinit();
+                destroyNeverStarted(&pending.child);
                 self_state.allocator.destroy(pending);
                 self.logFatal("subtest spawn failed");
                 return;
@@ -1195,7 +1225,7 @@ test "testing/unit_tests/context_cancel_logs" {
             \\!!! /slow slow timeout
             \\<<< /fast done at 0.6s, 600ms, <mem>
             \\!!! /slow failed at 0.4s, 300ms, <mem>
-            \\!!! summary failed at 0.6s, 600ms, <mem>
+            \\!!! summary failed at 0.4s, 400ms, <mem>
         ;
         const expected_log_b =
             \\>>> /fast start at 0.0s
@@ -1236,8 +1266,8 @@ test "testing/unit_tests/context_cancel_logs" {
             \\!!! /suite/slow slow timeout
             \\<<< /suite/fast done at 0.3s, 170ms, <mem>
             \\!!! /suite/slow failed at 0.3s, 60ms, <mem>
-            \\!!! /suite failed at 0.3s, 280ms, <mem>
-            \\!!! summary failed at 0.3s, 380ms, <mem>
+            \\!!! /suite failed at 0.1s, 70ms, <mem>
+            \\!!! summary failed at 0.1s, 170ms, <mem>
         ;
 
         try Helper.expectLog(expected_log);
@@ -1829,8 +1859,8 @@ test "testing/unit_tests/timeout" {
             \\<<< /suite/fast done at 0.0s, 10ms, <mem>
             \\!!! /suite/slow parallel timeout
             \\!!! /suite/slow failed at 0.1s, 70ms, <mem>
-            \\!!! /suite failed at 0.1s, 160ms, <mem>
-            \\!!! summary failed at 0.1s, 160ms, <mem>
+            \\!!! /suite failed at 0.0s, 80ms, <mem>
+            \\!!! summary failed at 0.0s, 80ms, <mem>
         ;
 
         try Helper.expectLog(expected_log);
@@ -1853,8 +1883,8 @@ test "testing/unit_tests/timeout" {
             \\!!! /scoped/timed_branch failed at 0.0s, 50ms, <mem>
             \\>>> /scoped/plain_branch start at 0.0s
             \\<<< /scoped/plain_branch done at 0.0s, 10ms, <mem>
-            \\!!! /scoped failed at 0.0s, 60ms, <mem>
-            \\!!! summary failed at 0.0s, 60ms, <mem>
+            \\!!! /scoped failed at 0.0s, 50ms, <mem>
+            \\!!! summary failed at 0.0s, 50ms, <mem>
         ;
 
         try Helper.expectLog(expected_log);
@@ -2191,4 +2221,486 @@ test "testing/unit_tests/memory_limit" {
 
         try Helper.expectLog(expected_log);
     }
+}
+
+test "testing/unit_tests/peak_memory_uses_tree_peak" {
+    const std = @import("std");
+    const embed = @import("embed");
+
+    const Support = struct {
+        var entries: std.ArrayListUnmanaged([]u8) = .{};
+        var mutex: std.Thread.Mutex = .{};
+
+        fn reset() void {
+            mutex.lock();
+            defer mutex.unlock();
+            for (entries.items) |entry| {
+                std.testing.allocator.free(entry);
+            }
+            entries.deinit(std.testing.allocator);
+            entries = .{};
+        }
+
+        fn append(comptime format: []const u8, args: anytype) void {
+            const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
+            mutex.lock();
+            defer mutex.unlock();
+            entries.append(std.testing.allocator, message) catch @panic("OOM");
+        }
+
+        fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
+            mutex.lock();
+            defer mutex.unlock();
+
+            var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
+            errdefer bytes.deinit(allocator);
+
+            for (entries.items, 0..) |entry, idx| {
+                try bytes.appendSlice(allocator, entry);
+                if (idx + 1 != entries.items.len) {
+                    try bytes.append(allocator, '\n');
+                }
+            }
+            return bytes.toOwnedSlice(allocator);
+        }
+    };
+
+    const CapturingLog = struct {
+        pub fn scoped(comptime scope: @Type(.enum_literal)) type {
+            _ = scope;
+            return struct {
+                pub fn info(comptime format: []const u8, args: anytype) void {
+                    Support.append(format, args);
+                }
+
+                pub fn err(comptime format: []const u8, args: anytype) void {
+                    Support.append(format, args);
+                }
+            };
+        }
+    };
+
+    const TestThread = struct {
+        pub const SpawnConfig = std.Thread.SpawnConfig;
+        pub const Mutex = std.Thread.Mutex;
+        pub const RwLock = std.Thread.RwLock;
+        const ThreadSelf = @This();
+
+        pub const Condition = struct {
+            inner: std.Thread.Condition = .{},
+
+            pub fn wait(self: *Condition, mutex: *Mutex) void {
+                self.inner.wait(mutex);
+            }
+
+            pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
+                self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
+            }
+
+            pub fn signal(self: *Condition) void {
+                self.inner.signal();
+            }
+
+            pub fn broadcast(self: *Condition) void {
+                self.inner.broadcast();
+            }
+        };
+
+        pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
+            _ = config;
+            @call(.auto, f, args);
+            return .{};
+        }
+
+        pub fn join(self: ThreadSelf) void {
+            _ = self;
+        }
+
+        pub fn detach(self: ThreadSelf) void {
+            _ = self;
+        }
+
+        pub fn sleep(ns: u64) void {
+            _ = ns;
+        }
+    };
+
+    const TestLib = struct {
+        pub const mem = embed.mem;
+        pub const fmt = embed.fmt;
+        pub const Thread = TestThread;
+        pub const log = CapturingLog;
+
+        pub fn ArrayList(comptime Elem: type) type {
+            return std.ArrayList(Elem);
+        }
+
+        pub const testing = struct {
+            pub const allocator = std.testing.allocator;
+        };
+
+        pub const time = struct {
+            pub const ns_per_ms = std.time.ns_per_ms;
+
+            pub fn nanoTimestamp() i128 {
+                return 0;
+            }
+
+            pub fn milliTimestamp() i64 {
+                return 0;
+            }
+        };
+    };
+
+    const TaskRunner = struct {
+        fn make(comptime run_fn: anytype) TestRunner {
+            const Runner = struct {
+                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                    _ = self;
+                    _ = allocator;
+                }
+
+                pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                    _ = self;
+                    return run_fn(t, allocator);
+                }
+
+                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                    _ = allocator;
+                    std.testing.allocator.destroy(self);
+                }
+            };
+
+            const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
+            runner.* = .{};
+            return TestRunner.make(Runner).new(runner);
+        }
+    };
+
+    const LeafTask = struct {
+        fn run(t: *Self, allocator: embed.mem.Allocator) bool {
+            _ = t;
+            const bytes = allocator.alloc(u8, 384) catch return false;
+            defer allocator.free(bytes);
+            return true;
+        }
+    };
+
+    const SuiteTask = struct {
+        fn run(t: *Self, allocator: embed.mem.Allocator) bool {
+            _ = allocator;
+            t.run("child_a", TaskRunner.make(LeafTask.run));
+            t.run("child_b", TaskRunner.make(LeafTask.run));
+            return t.wait();
+        }
+    };
+
+    const Helper = struct {
+        fn plainLog() ![]u8 {
+            const actual_log = try Support.joinedLog(std.testing.allocator);
+            defer std.testing.allocator.free(actual_log);
+
+            var plain = std.ArrayList(u8).empty;
+            errdefer plain.deinit(std.testing.allocator);
+
+            var i: usize = 0;
+            while (i < actual_log.len) {
+                if (actual_log[i] == 0x1b and i + 1 < actual_log.len and actual_log[i + 1] == '[') {
+                    i += 2;
+                    while (i < actual_log.len and actual_log[i] != 'm') : (i += 1) {}
+                    if (i < actual_log.len) i += 1;
+                    continue;
+                }
+                try plain.append(std.testing.allocator, actual_log[i]);
+                i += 1;
+            }
+            return plain.toOwnedSlice(std.testing.allocator);
+        }
+
+        fn parseMemoryUsage(text: []const u8) !usize {
+            const space_idx = std.mem.lastIndexOfScalar(u8, text, ' ') orelse return error.BadMemoryText;
+            const number_text = text[0..space_idx];
+            const unit_text = text[space_idx + 1 ..];
+            const scale: usize = if (std.mem.eql(u8, unit_text, "B"))
+                1
+            else if (std.mem.eql(u8, unit_text, "KiB"))
+                1024
+            else if (std.mem.eql(u8, unit_text, "MiB"))
+                1024 * 1024
+            else
+                return error.BadMemoryUnit;
+
+            if (scale == 1) return std.fmt.parseInt(usize, number_text, 10);
+
+            const dot_idx = std.mem.indexOfScalar(u8, number_text, '.') orelse return error.BadMemoryNumber;
+            const whole = try std.fmt.parseInt(usize, number_text[0..dot_idx], 10);
+            const frac_text = number_text[dot_idx + 1 ..];
+            const frac = try std.fmt.parseInt(usize, frac_text, 10);
+            return whole * scale + (frac * scale) / 1000;
+        }
+
+        fn peakForLabel(log: []const u8, label: []const u8) !usize {
+            var lines = std.mem.splitScalar(u8, log, '\n');
+            while (lines.next()) |line| {
+                if (!std.mem.startsWith(u8, line, "<<< ")) continue;
+                const rest = line[4..];
+                if (!std.mem.startsWith(u8, rest, label)) continue;
+                if (std.mem.indexOf(u8, rest[label.len..], "done at ") == null) continue;
+                const mem_idx = std.mem.lastIndexOf(u8, line, ", ") orelse return error.BadPeakLine;
+                return parseMemoryUsage(line[mem_idx + 2 ..]);
+            }
+            return error.MissingPeakLine;
+        }
+    };
+
+    Support.reset();
+    defer Support.reset();
+
+    var root = new(TestLib, .test_run);
+    root.run("suite", TaskRunner.make(SuiteTask.run));
+    try std.testing.expect(root.wait());
+    root.deinit();
+
+    const log = try Helper.plainLog();
+    defer std.testing.allocator.free(log);
+
+    const suite_peak = try Helper.peakForLabel(log, "/suite");
+    const child_a_peak = try Helper.peakForLabel(log, "/suite/child_a");
+    const child_b_peak = try Helper.peakForLabel(log, "/suite/child_b");
+
+    try std.testing.expect(suite_peak + 64 < child_a_peak + child_b_peak);
+}
+
+test "testing/unit_tests/subtest_start_failure_cleanup" {
+    const std = @import("std");
+    const embed = @import("embed");
+
+    const Support = struct {
+        var entries: std.ArrayListUnmanaged([]u8) = .{};
+        var mutex: std.Thread.Mutex = .{};
+        var now_ns = std.atomic.Value(u64).init(0);
+        var fail_spawn = false;
+        var runner_run_hits: usize = 0;
+        var runner_deinit_hits: usize = 0;
+
+        fn reset() void {
+            mutex.lock();
+            defer mutex.unlock();
+            for (entries.items) |entry| {
+                std.testing.allocator.free(entry);
+            }
+            entries.deinit(std.testing.allocator);
+            entries = .{};
+            now_ns.store(0, .release);
+            fail_spawn = false;
+            runner_run_hits = 0;
+            runner_deinit_hits = 0;
+        }
+
+        fn append(comptime format: []const u8, args: anytype) void {
+            const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
+            mutex.lock();
+            defer mutex.unlock();
+            entries.append(std.testing.allocator, message) catch @panic("OOM");
+        }
+
+        fn timestampNs() u64 {
+            return now_ns.load(.acquire);
+        }
+
+        fn advance(ns: u64) void {
+            _ = now_ns.fetchAdd(ns, .acq_rel);
+        }
+
+        fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
+            mutex.lock();
+            defer mutex.unlock();
+
+            var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
+            errdefer bytes.deinit(allocator);
+
+            for (entries.items, 0..) |entry, idx| {
+                try bytes.appendSlice(allocator, entry);
+                if (idx + 1 != entries.items.len) {
+                    try bytes.append(allocator, '\n');
+                }
+            }
+            return bytes.toOwnedSlice(allocator);
+        }
+    };
+
+    const CapturingLog = struct {
+        pub fn scoped(comptime scope: @Type(.enum_literal)) type {
+            _ = scope;
+            return struct {
+                pub fn info(comptime format: []const u8, args: anytype) void {
+                    Support.append(format, args);
+                }
+
+                pub fn err(comptime format: []const u8, args: anytype) void {
+                    Support.append(format, args);
+                }
+            };
+        }
+    };
+
+    const TestThread = struct {
+        pub const SpawnConfig = std.Thread.SpawnConfig;
+        pub const Mutex = std.Thread.Mutex;
+        pub const RwLock = std.Thread.RwLock;
+        const ThreadSelf = @This();
+
+        pub const Condition = struct {
+            inner: std.Thread.Condition = .{},
+
+            pub fn wait(self: *Condition, mutex: *Mutex) void {
+                self.inner.wait(mutex);
+            }
+
+            pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
+                self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
+            }
+
+            pub fn signal(self: *Condition) void {
+                self.inner.signal();
+            }
+
+            pub fn broadcast(self: *Condition) void {
+                self.inner.broadcast();
+            }
+        };
+
+        pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) error{ThreadQuotaExceeded}!ThreadSelf {
+            _ = config;
+            if (Support.fail_spawn) return error.ThreadQuotaExceeded;
+            @call(.auto, f, args);
+            return .{};
+        }
+
+        pub fn join(self: ThreadSelf) void {
+            _ = self;
+        }
+
+        pub fn detach(self: ThreadSelf) void {
+            _ = self;
+        }
+
+        pub fn sleep(ns: u64) void {
+            Support.advance(ns);
+        }
+    };
+
+    const TestLib = struct {
+        pub const mem = embed.mem;
+        pub const fmt = embed.fmt;
+        pub const Thread = TestThread;
+        pub const log = CapturingLog;
+
+        pub fn ArrayList(comptime Elem: type) type {
+            return std.ArrayList(Elem);
+        }
+
+        pub const testing = struct {
+            pub var allocator: embed.mem.Allocator = undefined;
+        };
+
+        pub const time = struct {
+            pub const ns_per_ms = std.time.ns_per_ms;
+
+            pub fn nanoTimestamp() i128 {
+                return Support.timestampNs();
+            }
+
+            pub fn milliTimestamp() i64 {
+                return @intCast(@divFloor(Support.timestampNs(), std.time.ns_per_ms));
+            }
+        };
+    };
+
+    const Helper = struct {
+        fn makeTrackedRunner() TestRunner {
+            const Runner = struct {
+                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                    _ = self;
+                    _ = allocator;
+                }
+
+                pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                    _ = self;
+                    _ = t;
+                    _ = allocator;
+                    Support.runner_run_hits += 1;
+                    return true;
+                }
+
+                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                    _ = allocator;
+                    Support.runner_deinit_hits += 1;
+                    std.testing.allocator.destroy(self);
+                }
+            };
+
+            const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
+            runner.* = .{};
+            return TestRunner.make(Runner).new(runner);
+        }
+
+        fn normalizedLogContains(needle: []const u8) !bool {
+            const actual_log = try Support.joinedLog(std.testing.allocator);
+            defer std.testing.allocator.free(actual_log);
+
+            var plain = std.ArrayList(u8).empty;
+            defer plain.deinit(std.testing.allocator);
+
+            var i: usize = 0;
+            while (i < actual_log.len) {
+                if (actual_log[i] == 0x1b and i + 1 < actual_log.len and actual_log[i + 1] == '[') {
+                    i += 2;
+                    while (i < actual_log.len and actual_log[i] != 'm') : (i += 1) {}
+                    if (i < actual_log.len) i += 1;
+                    continue;
+                }
+                try plain.append(std.testing.allocator, actual_log[i]);
+                i += 1;
+            }
+
+            return std.mem.indexOf(u8, plain.items, needle) != null;
+        }
+    };
+
+    Support.reset();
+    defer Support.reset();
+
+    TestLib.testing.allocator = std.testing.allocator;
+
+    {
+        var hooks = TestHooks{
+            .fail_pending_run_alloc = true,
+        };
+        test_hooks = &hooks;
+        defer test_hooks = null;
+
+        var root = new(TestLib, .test_run);
+        root.run("child", Helper.makeTrackedRunner());
+        try std.testing.expect(!root.wait());
+        root.deinit();
+    }
+
+    try std.testing.expect(try Helper.normalizedLogContains("subtest state alloc failed"));
+    try std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
+    try std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
+
+    Support.reset();
+    Support.fail_spawn = true;
+
+    {
+        var root = new(TestLib, .test_run);
+        root.run("child", Helper.makeTrackedRunner());
+        try std.testing.expect(!root.wait());
+        root.deinit();
+    }
+
+    try std.testing.expect(try Helper.normalizedLogContains("subtest spawn failed"));
+    try std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
+    try std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
 }

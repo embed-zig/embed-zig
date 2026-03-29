@@ -3,6 +3,11 @@
 //! Impl must provide:
 //!   fn milliTimestamp() i64
 //!   fn nanoTimestamp() i128
+//!
+//! `nanoTimestamp()` is the monotonic nanosecond source for `Timer` and for
+//! timeout/deadline calculations built on top of `embed.time`.
+
+const zig_std = @import("std");
 
 const re_export = struct {
     const std = @import("std");
@@ -107,8 +112,10 @@ pub fn make(comptime Impl: type) type {
             return Impl.nanoTimestamp();
         }
 
-        /// Monotonic timer driven by nanoTimestamp. Returns elapsed
-        /// nanoseconds. Clamps to the last seen value on backward jumps.
+        /// Timer driven by the monotonic `nanoTimestamp()` backend. Returns
+        /// elapsed nanoseconds. Clamps to the last seen value on backward
+        /// jumps so consumers never observe negative elapsed time if a backend
+        /// violates that contract.
         pub const Timer = struct {
             started: i128,
             previous: i128,
@@ -123,7 +130,7 @@ pub fn make(comptime Impl: type) type {
             /// Nanoseconds since start or last reset.
             pub fn read(self: *Timer) u64 {
                 const current = self.sample();
-                return @intCast(current - self.started);
+                return elapsedToU64(current - self.started);
             }
 
             /// Reset the start point to now.
@@ -135,7 +142,7 @@ pub fn make(comptime Impl: type) type {
             pub fn lap(self: *Timer) u64 {
                 const current = self.sample();
                 defer self.started = current;
-                return @intCast(current - self.started);
+                return elapsedToU64(current - self.started);
             }
 
             fn sample(self: *Timer) i128 {
@@ -145,6 +152,63 @@ pub fn make(comptime Impl: type) type {
                 }
                 return self.previous;
             }
+
+            fn elapsedToU64(delta_ns: i128) u64 {
+                if (delta_ns <= 0) return 0;
+
+                const max_u64_ns: i128 = @intCast(zig_std.math.maxInt(u64));
+                if (delta_ns >= max_u64_ns) return zig_std.math.maxInt(u64);
+
+                return @intCast(delta_ns);
+            }
         };
     };
+}
+
+test "embed/unit_tests/time/Timer_clamps_backward_jumps" {
+    const Impl = struct {
+        pub var index: usize = 0;
+        pub const samples = [_]i128{ 100, 110, 105, 120, 115 };
+
+        pub fn milliTimestamp() i64 {
+            return 0;
+        }
+
+        pub fn nanoTimestamp() i128 {
+            defer index += 1;
+            return samples[index];
+        }
+    };
+
+    const time = make(Impl);
+    Impl.index = 0;
+
+    var timer = try time.Timer.start();
+    try zig_std.testing.expectEqual(@as(u64, 10), timer.read());
+    try zig_std.testing.expectEqual(@as(u64, 10), timer.read());
+    try zig_std.testing.expectEqual(@as(u64, 20), timer.lap());
+    try zig_std.testing.expectEqual(@as(u64, 0), timer.read());
+}
+
+test "embed/unit_tests/time/Timer_saturates_elapsed_to_u64_max" {
+    const max_u64_ns: i128 = @intCast(zig_std.math.maxInt(u64));
+    const Impl = struct {
+        pub var index: usize = 0;
+        pub const samples = [_]i128{ 0, max_u64_ns + 123 };
+
+        pub fn milliTimestamp() i64 {
+            return 0;
+        }
+
+        pub fn nanoTimestamp() i128 {
+            defer index += 1;
+            return samples[index];
+        }
+    };
+
+    const time = make(Impl);
+    Impl.index = 0;
+
+    var timer = try time.Timer.start();
+    try zig_std.testing.expectEqual(zig_std.math.maxInt(u64), timer.read());
 }

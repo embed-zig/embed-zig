@@ -207,7 +207,7 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             try testing.expectError(error.NameNotFound, resolver.lookupHost("nxdomain.test", &addrs));
         }
 
-        fn lookupHostReturnsNameNotFoundAfterEmptyUdpSuccessResponses() !void {
+        fn lookupHostReturnsNoDataAfterEmptyUdpSuccessResponses() !void {
             var pc = try Net.listenPacket(.{
                 .allocator = testing.allocator,
                 .address = addr4(0),
@@ -237,10 +237,10 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             defer resolver.deinit();
 
             var addrs: [4]Addr = undefined;
-            try testing.expectError(error.NameNotFound, resolver.lookupHost("empty-udp.test", &addrs));
+            try testing.expectError(error.NoData, resolver.lookupHost("empty-udp.test", &addrs));
         }
 
-        fn lookupHostReturnsNameNotFoundAfterEmptyTcpSuccessResponses() !void {
+        fn lookupHostReturnsNoDataAfterEmptyTcpSuccessResponses() !void {
             var listener = try Net.listen(testing.allocator, .{
                 .address = addr4(0),
             });
@@ -272,7 +272,7 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             defer resolver.deinit();
 
             var addrs: [4]Addr = undefined;
-            try testing.expectError(error.NameNotFound, resolver.lookupHost("empty-tcp.test", &addrs));
+            try testing.expectError(error.NoData, resolver.lookupHost("empty-tcp.test", &addrs));
         }
 
         fn lookupHostResolvesViaTlsServer() !void {
@@ -404,6 +404,65 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             try testing.expectEqual(@as(usize, 1), count);
             const ip = addrs[0].as4().?;
             try testing.expectEqual([4]u8{ 61, 62, 63, 64 }, ip);
+        }
+
+        fn lookupHostRejectsDohResponseWithMismatchedId() !void {
+            var listener = try Net.tls.listen(testing.allocator, .{
+                .address = addr4(0),
+            }, .{
+                .certificates = &.{.{
+                    .chain = &.{fixtures.self_signed_cert_der[0..]},
+                    .private_key = .{ .ecdsa_p256_sha256 = fixtures.self_signed_key_scalar },
+                }},
+                .min_version = .tls_1_3,
+                .max_version = .tls_1_3,
+            });
+            defer listener.deinit();
+
+            const port = try tlsListenerPort(listener, Net);
+            const listener_impl = try listener.as(Net.tls.Listener);
+            var server_thread = try lib.Thread.spawn(test_spawn_config, struct {
+                fn run(ln: *Net.tls.Listener, ip: [4]u8) void {
+                    var conn = ln.accept() catch return;
+                    defer conn.deinit();
+
+                    const tls_conn = conn.as(Net.tls.ServerConn) catch return;
+                    tls_conn.handshake() catch return;
+
+                    var head_buf: [2048]u8 = undefined;
+                    var body_buf: [512]u8 = undefined;
+                    const req = readHttpRequest(conn, &head_buf, &body_buf) catch return;
+                    if (!std.mem.eql(u8, req.method, "POST")) return;
+                    if (!std.mem.eql(u8, req.path, "/dns-query")) return;
+
+                    const req_id = readU16(req.body[0..2]);
+                    var dns_buf: [512]u8 = undefined;
+                    const dns_len = buildAResponseWithId(R, req.body, req_id +% 1, ip, &dns_buf) catch return;
+                    writeHttpDnsResponse(conn, 200, dns_buf[0..dns_len]) catch return;
+                }
+            }.run, .{ listener_impl, [4]u8{ 71, 72, 73, 74 } });
+            defer server_thread.join();
+
+            var resolver = try initResolver(.{
+                .servers = &.{.{
+                    .addr = addr4(port),
+                    .protocol = .doh,
+                    .tls_config = .{
+                        .server_name = "example.com",
+                        .verification = .self_signed,
+                        .min_version = .tls_1_3,
+                        .max_version = .tls_1_3,
+                    },
+                    .doh_path = "/dns-query",
+                }},
+                .mode = .ipv4_only,
+                .timeout_ms = 200,
+                .attempts = 1,
+            });
+            defer resolver.deinit();
+
+            var addrs: [4]Addr = undefined;
+            try testing.expectError(error.Timeout, resolver.lookupHost("doh-mismatched-id.test", &addrs));
         }
 
         fn lookupHostRejectsDohServerWithoutConfig() !void {
@@ -945,11 +1004,12 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
     try Runner.serverProtocolConfig();
     try Runner.lookupHostIgnoresEarlyNXDOMAINWhenLaterServerSucceeds();
     try Runner.lookupHostReturnsNameNotFoundAfterAllServersReportNXDOMAIN();
-    try Runner.lookupHostReturnsNameNotFoundAfterEmptyUdpSuccessResponses();
-    try Runner.lookupHostReturnsNameNotFoundAfterEmptyTcpSuccessResponses();
+    try Runner.lookupHostReturnsNoDataAfterEmptyUdpSuccessResponses();
+    try Runner.lookupHostReturnsNoDataAfterEmptyTcpSuccessResponses();
     try Runner.lookupHostResolvesViaTlsServer();
     try Runner.lookupHostRejectsTlsServerWithoutConfig();
     try Runner.lookupHostResolvesViaDohServer();
+    try Runner.lookupHostRejectsDohResponseWithMismatchedId();
     try Runner.lookupHostRejectsDohServerWithoutConfig();
     try Runner.lookupHostReturnsPartialUdpDualStackResult();
     try Runner.lookupHostReturnsPartialUdpDualStackResultAfterServfail();
@@ -964,7 +1024,11 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
 }
 
 fn buildAResponse(comptime R: type, req: []const u8, ip: [4]u8, out: *[512]u8) !usize {
-    var pos = try beginResponse(req, 0x8180, 1, out);
+    return buildAResponseWithId(R, req, readU16(req[0..2]), ip, out);
+}
+
+fn buildAResponseWithId(comptime R: type, req: []const u8, response_id: u16, ip: [4]u8, out: *[512]u8) !usize {
+    var pos = try beginResponseWithId(req, response_id, 0x8180, 1, out);
     if (pos + 16 > out.len) return error.InvalidResponse;
 
     out[pos] = 0xC0;
@@ -1006,10 +1070,14 @@ fn buildErrorResponse(comptime R: type, req: []const u8, rcode: u4, out: *[512]u
 }
 
 fn beginResponse(req: []const u8, flags: u16, ancount: u16, out: *[512]u8) !usize {
+    return beginResponseWithId(req, readU16(req[0..2]), flags, ancount, out);
+}
+
+fn beginResponseWithId(req: []const u8, response_id: u16, flags: u16, ancount: u16, out: *[512]u8) !usize {
     if (req.len < 12) return error.InvalidResponse;
 
     var pos: usize = 0;
-    writeU16(out, &pos, readU16(req[0..2]));
+    writeU16(out, &pos, response_id);
     writeU16(out, &pos, flags);
     writeU16(out, &pos, 1);
     writeU16(out, &pos, ancount);

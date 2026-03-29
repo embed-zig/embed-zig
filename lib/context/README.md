@@ -83,13 +83,17 @@ All of these return `Context` handles directly.
 `Context` exposes the common interface used by callers:
 
 - `err()` returns `?anyerror`
-- `deadline()` returns `?i64`
-- `wait(timeout_ms)` blocks until cancel/deadline or timeout
+- `deadline()` returns `?i128`
+- `wait(timeout_ns)` blocks until cancel/deadline or timeout
 - `cancel()` marks the node canceled with `error.Canceled`
 - `cancelWithCause(err)` marks the node canceled with a custom cause
 - `deinit()` detaches the node from the tree and frees its implementation
 - `value(T, key)` performs typed lookup through the parent chain
 - `as(T)` downcasts to a concrete implementation when tests/internal code need it
+
+Recursive cancellation walks take shared locks as they descend, so the injected
+`lib.Thread.RwLock` must allow nested shared-reader acquisition on the same
+thread.
 
 ## Node types
 

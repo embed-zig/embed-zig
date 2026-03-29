@@ -11,11 +11,25 @@ const stb = @import("stb_truetype");
 const font = try stb.Font.init(bytes);
 ```
 
+`stb.Font` borrows `bytes`; the caller must keep the font data alive and
+unchanged for as long as the `Font` is used.
+
 The root package exports:
 
 - `stb.Font`
 - `stb.FontInfo`
 - metrics/value types such as `VMetrics`, `HMetrics`, and `BitmapBox`
+
+## Notes
+
+- `stb_truetype` does not provide security guarantees for malicious font data; use
+  this package only with trusted font files.
+- `stb.Font.glyphIndex(codepoint)` returns `0` when the font does not provide a
+  glyph for that codepoint.
+- `stb.Font.renderCodepointBitmap(...)` validates the caller-provided bitmap
+  layout and returns an error when the buffer is too small, the stride is
+  invalid, or a dimension cannot be represented by `stb_truetype`. Zero-sized
+  renders are treated as a no-op.
 
 ## Package layout
 

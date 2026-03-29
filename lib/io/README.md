@@ -15,6 +15,9 @@ const io = @import("io");
 
 const BufferedReader = io.BufferedReader;
 const PrefixReader = io.PrefixReader;
+const readFull = io.readFull;
+const readAll = io.readAll;
+const writeAll = io.writeAll;
 ```
 
 Today `lib/io` exports:

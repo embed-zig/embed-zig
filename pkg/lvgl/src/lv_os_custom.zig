@@ -104,6 +104,10 @@ pub fn make(comptime lib: type, comptime allocator: lib.mem.Allocator) type {
             return c.LV_RESULT_INVALID;
         }
 
+        fn unsupportedFromIsr() c.lv_result_t {
+            return invalid();
+        }
+
         fn requireMutex(handle: ?*c.lv_mutex_t) ?*c.lv_mutex_t {
             return handle;
         }
@@ -183,7 +187,8 @@ pub fn make(comptime lib: type, comptime allocator: lib.mem.Allocator) type {
         }
 
         pub export fn lv_mutex_lock_isr(handle: ?*c.lv_mutex_t) c.lv_result_t {
-            return lv_mutex_lock(handle);
+            _ = handle;
+            return unsupportedFromIsr();
         }
 
         pub export fn lv_mutex_unlock(handle: ?*c.lv_mutex_t) c.lv_result_t {
@@ -225,7 +230,8 @@ pub fn make(comptime lib: type, comptime allocator: lib.mem.Allocator) type {
         }
 
         pub export fn lv_thread_sync_signal_isr(handle: ?*c.lv_thread_sync_t) c.lv_result_t {
-            return lv_thread_sync_signal(handle);
+            _ = handle;
+            return unsupportedFromIsr();
         }
 
         pub export fn lv_thread_sync_delete(handle: ?*c.lv_thread_sync_t) c.lv_result_t {

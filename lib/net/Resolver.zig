@@ -170,6 +170,7 @@ pub fn Resolver(comptime lib: type) type {
 
         pub const LookupError = error{
             NameNotFound,
+            NoData,
             Refused,
             Timeout,
             InvalidResponse,
@@ -231,6 +232,7 @@ pub fn Resolver(comptime lib: type) type {
             query_count: usize,
             failure_mutex: Thread.Mutex = .{},
             saw_name_not_found: bool = false,
+            saw_no_data: bool = false,
             saw_refused: bool = false,
 
             fn queryPkts(self: *const LookupJob) []const QueryPkt {
@@ -250,6 +252,7 @@ pub fn Resolver(comptime lib: type) type {
 
                 switch (err) {
                     error.NameNotFound => self.saw_name_not_found = true,
+                    error.NoData => self.saw_no_data = true,
                     error.Refused => self.saw_refused = true,
                     else => {},
                 }
@@ -260,6 +263,7 @@ pub fn Resolver(comptime lib: type) type {
                 defer self.failure_mutex.unlock();
 
                 if (self.saw_name_not_found) return error.NameNotFound;
+                if (self.saw_no_data) return error.NoData;
                 if (self.saw_refused) return error.Refused;
                 return error.Timeout;
             }
@@ -576,7 +580,7 @@ pub fn Resolver(comptime lib: type) type {
                 return result;
             }
             if (replied_count >= job.queryPkts().len) {
-                return WorkerResult{ .has_result = true, .err = error.NameNotFound };
+                return WorkerResult{ .has_result = true, .err = error.NoData };
             }
             return null;
         }
@@ -665,6 +669,7 @@ pub fn Resolver(comptime lib: type) type {
                     &recv_buf,
                 ) orelse return null;
                 if (recv_n < 12) return null;
+                if (readU16(recv_buf[0..2]) != qpkt.id) return null;
 
                 const rcode: u4 = @truncate(recv_buf[3]);
                 if (rcode == RCODE_NXDOMAIN) {
@@ -693,7 +698,7 @@ pub fn Resolver(comptime lib: type) type {
                 return result;
             }
             if (replied_count >= job.queryPkts().len and handled_count >= job.queryPkts().len) {
-                return WorkerResult{ .has_result = true, .err = error.NameNotFound };
+                return WorkerResult{ .has_result = true, .err = error.NoData };
             }
             return null;
         }
@@ -885,7 +890,7 @@ pub fn Resolver(comptime lib: type) type {
                 return result;
             }
             if (replied_count >= job.queryPkts().len) {
-                return WorkerResult{ .has_result = true, .err = error.NameNotFound };
+                return WorkerResult{ .has_result = true, .err = error.NoData };
             }
             return null;
         }

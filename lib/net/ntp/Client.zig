@@ -138,6 +138,8 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
 
         pub fn queryServerContext(self: *Self, ctx: context_mod.Context, server: Server, origin_time_ms: i64) anyerror!ntp.Response {
             try ensureContextActive(ctx);
+            try self.beginRace();
+            defer self.finishRace();
             return self.queryWithContext(ctx, server, normalizedOriginTimeMs(origin_time_ms));
         }
 

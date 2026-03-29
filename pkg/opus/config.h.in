@@ -21,13 +21,13 @@
 #undef USE_ALLOCA
 #undef NONTHREADSAFE_PSEUDOSTACK
 
-/* Math capability probes used by float_cast.h. */
+/* Math capability probes used by float_cast.h. Define only when available. */
 #undef HAVE_LRINT
 #undef HAVE_LRINTF
 
 /*
- * Default to disabling the float API.
- * To enable the float API in a copied header, leave this macro undefined.
+ * Optional: define this to disable the float API in a copied header.
+ * embed-zig leaves this undefined by default so the Zig float wrappers remain usable.
  */
 #undef DISABLE_FLOAT_API
 

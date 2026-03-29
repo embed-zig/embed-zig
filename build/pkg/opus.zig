@@ -156,9 +156,9 @@ const ConfigHeaderValues = struct {
     VAR_ARRAYS: u8 = 1,
     USE_ALLOCA: ?u8 = null,
     NONTHREADSAFE_PSEUDOSTACK: ?u8 = null,
-    HAVE_LRINT: u8 = 1,
-    HAVE_LRINTF: u8 = 1,
-    DISABLE_FLOAT_API: u8 = 1,
+    HAVE_LRINT: ?u8 = null,
+    HAVE_LRINTF: ?u8 = null,
+    DISABLE_FLOAT_API: ?u8 = null,
     CUSTOM_MODES: ?u8 = null,
     ENABLE_HARDENING: ?u8 = null,
 };

@@ -40,6 +40,8 @@ pub fn cancelChildren(ctx: Context) void {
     cancelChildrenWithCause(ctx, Context.Canceled);
 }
 
+// Recursive cancellation walks can stack shared-lock acquisitions on the same
+// root lock, so the injected RwLock must tolerate nested shared readers.
 pub fn cancelChildrenWithCause(ctx: Context, cause: anyerror) void {
     lockShared(ctx);
     defer unlockShared(ctx);

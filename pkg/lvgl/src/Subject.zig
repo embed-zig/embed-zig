@@ -1,4 +1,3 @@
-const std = @import("std");
 const binding = @import("binding.zig");
 
 const Self = @This();
@@ -28,6 +27,7 @@ pub fn initPointer(value: ?*anyopaque) InitError!Self {
     return .{ .handle = handle };
 }
 
+/// `buffer` and `prev_buffer` are stored by reference and must outlive the subject.
 pub fn initString(buffer: [:0]u8, prev_buffer: ?[:0]u8, initial_value: [:0]const u8) InitError!Self {
     const handle = binding.embed_lv_subject_create() orelse return error.OutOfMemory;
     const prev_ptr = if (prev_buffer) |buf| buf.ptr else null;
@@ -85,7 +85,7 @@ pub fn previousString(self: *Self) ?[*:0]const u8 {
 }
 
 test "lvgl/unit_tests/Subject/integer_subject_tracks_current_and_previous_values" {
-    const testing = std.testing;
+    const testing = @import("std").testing;
 
     var subject = try Self.initInt(12);
     defer subject.deinit();
@@ -99,7 +99,7 @@ test "lvgl/unit_tests/Subject/integer_subject_tracks_current_and_previous_values
 }
 
 test "lvgl/unit_tests/Subject/pointer_subject_tracks_previous_pointer_value" {
-    const testing = std.testing;
+    const testing = @import("std").testing;
 
     var first: u8 = 1;
     var second: u8 = 2;
@@ -116,6 +116,7 @@ test "lvgl/unit_tests/Subject/pointer_subject_tracks_previous_pointer_value" {
 }
 
 test "lvgl/unit_tests/Subject/string_subject_copies_into_owned_buffers" {
+    const std = @import("std");
     const testing = std.testing;
 
     var current_buffer = [_:0]u8{0} ** 16;
@@ -127,4 +128,20 @@ test "lvgl/unit_tests/Subject/string_subject_copies_into_owned_buffers" {
 
     try testing.expectEqualStrings("bye", std.mem.span(subject.getString()));
     try testing.expectEqualStrings("hi", std.mem.span(subject.previousString().?));
+}
+
+test "lvgl/unit_tests/Subject/string_subject_uses_caller_provided_storage" {
+    const testing = @import("std").testing;
+
+    var current_buffer = [_:0]u8{0} ** 16;
+    var previous_buffer = [_:0]u8{0} ** 16;
+    const current = current_buffer[0.. :0];
+    const previous = previous_buffer[0.. :0];
+    var subject = try Self.initString(current, previous, "hi");
+    defer subject.deinit();
+
+    subject.copyString("bye");
+
+    try testing.expectEqual(@intFromPtr(current.ptr), @intFromPtr(subject.getString()));
+    try testing.expectEqual(@intFromPtr(previous.ptr), @intFromPtr(subject.previousString().?));
 }

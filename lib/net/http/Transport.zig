@@ -35,6 +35,7 @@ pub fn Transport(comptime lib: type) type {
     const default_max_header_bytes = 32 * 1024;
     const unlimited_body_bytes = std.math.maxInt(usize);
     const default_body_io_buf_len = 1024;
+    const max_informational_responses = 8;
     return struct {
         allocator: Allocator,
         options: Options,
@@ -95,6 +96,7 @@ pub fn Transport(comptime lib: type) type {
             stream: Stream,
             ctx: ?Context,
             mode: BodyMode = .none,
+            max_trailer_bytes: usize = default_max_header_bytes,
             max_body_bytes: usize,
             bytes_read: usize = 0,
             closed: bool = false,
@@ -194,6 +196,8 @@ pub fn Transport(comptime lib: type) type {
                 while (true) {
                     const line = self.stream.readLine(&line_buf) catch |err| return self.mapReadError(err);
                     if (line.len == 0) return;
+                    if (line.len + 2 > self.max_trailer_bytes) return error.InvalidResponse;
+                    self.max_trailer_bytes -= line.len + 2;
                 }
             }
 
@@ -278,6 +282,7 @@ pub fn Transport(comptime lib: type) type {
             fn mapReadError(self: *BodyState, err: anyerror) anyerror {
                 return switch (err) {
                     error.EndOfStream => error.InvalidResponse,
+                    error.BufferTooSmall => error.InvalidResponse,
                     error.TimedOut => self.contextTimeoutError(),
                     error.ConnectionReset => error.ConnectionReset,
                     error.ConnectionRefused => error.ConnectionRefused,
@@ -949,6 +954,7 @@ pub fn Transport(comptime lib: type) type {
             var conn_reader = lease.conn orelse unreachable;
             var buffered = try BufferedConnReader.initAlloc(&conn_reader, allocator, self.options.max_header_bytes);
             defer buffered.deinit();
+            var informational_responses: usize = 0;
 
             while (true) {
                 const head_storage = self.readResponseHead(&buffered, allocator) catch |err| return switch (err) {
@@ -976,7 +982,11 @@ pub fn Transport(comptime lib: type) type {
                 if (parsed.status_code == 100) {
                     if (request_body_state.*) |writer| writer.allowBodySend();
                 }
-                if (isInformationalResponse(parsed.status_code)) continue;
+                if (isInformationalResponse(parsed.status_code)) {
+                    informational_responses += 1;
+                    if (informational_responses > max_informational_responses) return error.InvalidResponse;
+                    continue;
+                }
 
                 var skipped_waiting_request_body = false;
                 if (request_body_state.*) |writer| {
@@ -1007,6 +1017,7 @@ pub fn Transport(comptime lib: type) type {
                     .allocator = allocator,
                     .stream = Stream.init(conn_reader, &.{}),
                     .ctx = req.context(),
+                    .max_trailer_bytes = self.options.max_header_bytes,
                     .max_body_bytes = self.options.max_body_bytes,
                     .transport = self,
                     .pool_key = lease.pool_key,
@@ -1116,6 +1127,7 @@ pub fn Transport(comptime lib: type) type {
                 .headers = state.headers,
             };
 
+            var saw_transfer_encoding = false;
             var line_start: usize = 0;
             var header_index: usize = 0;
             while (line_start < header_block.len) {
@@ -1130,9 +1142,18 @@ pub fn Transport(comptime lib: type) type {
                 header_index += 1;
 
                 if (std.ascii.eqlIgnoreCase(name, Header.content_length)) {
-                    parsed.content_length = std.fmt.parseInt(usize, value, 10) catch return error.InvalidResponse;
+                    const content_length = std.fmt.parseInt(usize, value, 10) catch return error.InvalidResponse;
+                    if (parsed.chunked) return error.InvalidResponse;
+                    if (parsed.content_length) |existing| {
+                        if (existing != content_length) return error.InvalidResponse;
+                    } else {
+                        parsed.content_length = content_length;
+                    }
                 } else if (std.ascii.eqlIgnoreCase(name, Header.transfer_encoding)) {
-                    if (containsToken(value, "chunked")) parsed.chunked = true;
+                    if (saw_transfer_encoding or parsed.content_length != null) return error.InvalidResponse;
+                    if (!isSupportedChunkedTransferEncoding(value)) return error.InvalidResponse;
+                    parsed.chunked = true;
+                    saw_transfer_encoding = true;
                 } else if (std.ascii.eqlIgnoreCase(name, Header.connection)) {
                     if (containsToken(value, "close")) parsed.close = true;
                     if (containsToken(value, "keep-alive")) parsed.keep_alive = true;
@@ -1376,6 +1397,22 @@ fn containsToken(value: []const u8, token: []const u8) bool {
         start = comma + 1;
     }
     return false;
+}
+
+fn isSupportedChunkedTransferEncoding(value: []const u8) bool {
+    var start: usize = 0;
+    var saw_chunked = false;
+    while (start <= value.len) {
+        const comma = std.mem.indexOfScalarPos(u8, value, start, ',') orelse value.len;
+        const part = std.mem.trim(u8, value[start..comma], " ");
+        if (part.len == 0) return false;
+        if (!std.ascii.eqlIgnoreCase(part, "chunked")) return false;
+        if (saw_chunked) return false;
+        saw_chunked = true;
+        if (comma == value.len) break;
+        start = comma + 1;
+    }
+    return saw_chunked;
 }
 
 fn validateHeaderList(headers: []const Header, is_trailer: bool) anyerror!void {
@@ -1703,6 +1740,65 @@ test "net/unit_tests/http/Transport/readResponse_skips_informational_responses" 
     var buf: [2]u8 = undefined;
     try testing.expectEqual(@as(usize, 2), try body.read(&buf));
     try testing.expectEqualStrings("ok", &buf);
+}
+
+test "net/unit_tests/http/Transport/readResponse_rejects_too_many_informational_responses" {
+    const testing = std.testing;
+    const HttpTransport = Transport(std);
+    const too_many_informational_responses = 9;
+
+    const MockConn = struct {
+        response: []const u8,
+        offset: usize = 0,
+        closed: bool = false,
+        deinited: bool = false,
+
+        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+            const remaining = self.response[self.offset..];
+            if (remaining.len == 0) return 0;
+            const n = @min(buf.len, remaining.len);
+            @memcpy(buf[0..n], remaining[0..n]);
+            self.offset += n;
+            return n;
+        }
+
+        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+            return buf.len;
+        }
+
+        pub fn close(self: *@This()) void {
+            self.closed = true;
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.deinited = true;
+        }
+
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    var transport = try HttpTransport.init(testing.allocator, .{});
+    defer transport.deinit();
+
+    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
+    defer req.deinit();
+
+    var response = std.ArrayList(u8){};
+    defer response.deinit(testing.allocator);
+    for (0..too_many_informational_responses) |_| {
+        try response.appendSlice(testing.allocator, "HTTP/1.1 103 Early Hints\r\n\r\n");
+    }
+    try response.appendSlice(
+        testing.allocator,
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+    );
+
+    var mock_conn = MockConn{ .response = response.items };
+    var conn: ?Conn = Conn.init(&mock_conn);
+
+    try testing.expectError(error.InvalidResponse, transport.readResponse(&conn, &req));
+    if (conn) |owned_conn| owned_conn.deinit();
 }
 
 test "net/unit_tests/http/Transport/readResponse_propagates_request_body_write_error_at_response_EOF" {
@@ -2121,4 +2217,198 @@ test "net/unit_tests/http/Transport/RequestBodyState_sends_body_after_expect_con
 
     try testing.expect(writer.finish() == null);
     try testing.expectEqualStrings("later", mock_conn.writes.items);
+}
+
+test "net/unit_tests/http/Transport/readResponse_rejects_conflicting_content_length" {
+    const testing = std.testing;
+    const HttpTransport = Transport(std);
+
+    const MockConn = struct {
+        response: []const u8,
+        offset: usize = 0,
+
+        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+            const remaining = self.response[self.offset..];
+            if (remaining.len == 0) return 0;
+            const n = @min(buf.len, remaining.len);
+            @memcpy(buf[0..n], remaining[0..n]);
+            self.offset += n;
+            return n;
+        }
+
+        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+            return buf.len;
+        }
+
+        pub fn close(_: *@This()) void {}
+        pub fn deinit(_: *@This()) void {}
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    var transport = try HttpTransport.init(testing.allocator, .{});
+    defer transport.deinit();
+
+    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
+    var mock_conn = MockConn{
+        .response = "HTTP/1.1 200 OK\r\n" ++
+            "Content-Length: 1\r\n" ++
+            "Content-Length: 2\r\n" ++
+            "Connection: close\r\n\r\nx",
+    };
+    var conn: ?Conn = Conn.init(&mock_conn);
+
+    try testing.expectError(error.InvalidResponse, transport.readResponse(&conn, &req));
+    if (conn) |owned_conn| owned_conn.deinit();
+}
+
+test "net/unit_tests/http/Transport/readResponse_rejects_content_length_with_transfer_encoding" {
+    const testing = std.testing;
+    const HttpTransport = Transport(std);
+
+    const MockConn = struct {
+        response: []const u8,
+        offset: usize = 0,
+
+        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+            const remaining = self.response[self.offset..];
+            if (remaining.len == 0) return 0;
+            const n = @min(buf.len, remaining.len);
+            @memcpy(buf[0..n], remaining[0..n]);
+            self.offset += n;
+            return n;
+        }
+
+        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+            return buf.len;
+        }
+
+        pub fn close(_: *@This()) void {}
+        pub fn deinit(_: *@This()) void {}
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    var transport = try HttpTransport.init(testing.allocator, .{});
+    defer transport.deinit();
+
+    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
+    var mock_conn = MockConn{
+        .response = "HTTP/1.1 200 OK\r\n" ++
+            "Content-Length: 1\r\n" ++
+            "Transfer-Encoding: chunked\r\n" ++
+            "Connection: close\r\n\r\n" ++
+            "1\r\na\r\n0\r\n\r\n",
+    };
+    var conn: ?Conn = Conn.init(&mock_conn);
+
+    try testing.expectError(error.InvalidResponse, transport.readResponse(&conn, &req));
+    if (conn) |owned_conn| owned_conn.deinit();
+}
+
+test "net/unit_tests/http/Transport/chunked_body_rejects_oversized_trailers" {
+    const testing = std.testing;
+    const HttpTransport = Transport(std);
+
+    const MockConn = struct {
+        response: []const u8,
+        offset: usize = 0,
+
+        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+            const remaining = self.response[self.offset..];
+            if (remaining.len == 0) return 0;
+            const n = @min(buf.len, remaining.len);
+            @memcpy(buf[0..n], remaining[0..n]);
+            self.offset += n;
+            return n;
+        }
+
+        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+            return buf.len;
+        }
+
+        pub fn close(_: *@This()) void {}
+        pub fn deinit(_: *@This()) void {}
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    var transport = try HttpTransport.init(testing.allocator, .{ .max_header_bytes = 80 });
+    defer transport.deinit();
+
+    const trailer_fill = [_]u8{'a'} ** 96;
+    const response = try std.fmt.allocPrint(
+        testing.allocator,
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\na\r\nX-Long: {s}\r\n\r\n",
+        .{&trailer_fill},
+    );
+    defer testing.allocator.free(response);
+
+    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
+    var mock_conn = MockConn{ .response = response };
+    var conn: ?Conn = Conn.init(&mock_conn);
+
+    var resp = try transport.readResponse(&conn, &req);
+    defer resp.deinit();
+
+    const body = resp.body() orelse return error.TestUnexpectedResult;
+    var first: [1]u8 = undefined;
+    try testing.expectEqual(@as(usize, 1), try body.read(&first));
+    try testing.expectEqualStrings("a", &first);
+
+    var eof_buf: [1]u8 = undefined;
+    try testing.expectError(error.InvalidResponse, body.read(&eof_buf));
+}
+
+test "net/unit_tests/http/Transport/chunked_body_accepts_trailers_that_exactly_match_budget" {
+    const testing = std.testing;
+    const HttpTransport = Transport(std);
+
+    const MockConn = struct {
+        response: []const u8,
+        offset: usize = 0,
+
+        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+            const remaining = self.response[self.offset..];
+            if (remaining.len == 0) return 0;
+            const n = @min(buf.len, remaining.len);
+            @memcpy(buf[0..n], remaining[0..n]);
+            self.offset += n;
+            return n;
+        }
+
+        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+            return buf.len;
+        }
+
+        pub fn close(_: *@This()) void {}
+        pub fn deinit(_: *@This()) void {}
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    var transport = try HttpTransport.init(testing.allocator, .{ .max_header_bytes = 80 });
+    defer transport.deinit();
+
+    const trailer_fill = [_]u8{'b'} ** 70;
+    const response = try std.fmt.allocPrint(
+        testing.allocator,
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\na\r\n0\r\nX-Test: {s}\r\n\r\n",
+        .{&trailer_fill},
+    );
+    defer testing.allocator.free(response);
+
+    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
+    var mock_conn = MockConn{ .response = response };
+    var conn: ?Conn = Conn.init(&mock_conn);
+
+    var resp = try transport.readResponse(&conn, &req);
+    defer resp.deinit();
+
+    const body = resp.body() orelse return error.TestUnexpectedResult;
+    var buf: [1]u8 = undefined;
+    try testing.expectEqual(@as(usize, 1), try body.read(&buf));
+    try testing.expectEqualStrings("a", &buf);
+
+    try testing.expectEqual(@as(usize, 0), try body.read(&buf));
 }

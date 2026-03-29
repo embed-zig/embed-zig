@@ -3,6 +3,15 @@
 //! Usage:
 //!   const ogg = @import("ogg");
 //!   var sync = ogg.Sync.init();
+//!   var stream = try ogg.Stream.init(1234);
+//!   defer stream.deinit();
+//!   defer sync.deinit();
+//!   const buf = try sync.buffer(4);
+//!   buf[0] = 0;
+//!   try sync.wrote(1);
+//!
+//! `Sync` and `Stream` wrap mutable `libogg` state. Use one instance per
+//! thread, or guard shared instances with external synchronization.
 
 const binding_mod = @import("ogg/src/binding.zig");
 const types = @import("ogg/src/types.zig");

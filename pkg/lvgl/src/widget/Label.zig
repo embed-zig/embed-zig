@@ -1,4 +1,3 @@
-const std = @import("std");
 const binding = @import("../binding.zig");
 const Obj = @import("../object/Obj.zig");
 
@@ -38,6 +37,7 @@ pub fn setText(self: *const Self, new_text: [:0]const u8) void {
     binding.lv_label_set_text(self.handle, new_text.ptr);
 }
 
+/// `new_text` is stored by reference; keep it valid until the label text is replaced or the label is deleted.
 pub fn setTextStatic(self: *const Self, new_text: [:0]const u8) void {
     binding.lv_label_set_text_static(self.handle, new_text.ptr);
 }
@@ -55,6 +55,7 @@ pub fn longMode(self: *const Self) LongMode {
 }
 
 test "lvgl/unit_tests/widget/Label/composes_object_layer_and_stores_text" {
+    const std = @import("std");
     const testing = std.testing;
     const lvgl_testing = @import("../testing.zig");
 
@@ -73,7 +74,7 @@ test "lvgl/unit_tests/widget/Label/composes_object_layer_and_stores_text" {
 }
 
 test "lvgl/unit_tests/widget/Label/long_mode_roundtrips_through_wrapper" {
-    const testing = std.testing;
+    const testing = @import("std").testing;
     const lvgl_testing = @import("../testing.zig");
 
     var fixture = try lvgl_testing.Fixture.init();
@@ -90,6 +91,7 @@ test "lvgl/unit_tests/widget/Label/long_mode_roundtrips_through_wrapper" {
 }
 
 test "lvgl/unit_tests/widget/Label/static_text_still_participates_in_object_api" {
+    const std = @import("std");
     const testing = std.testing;
     const lvgl_testing = @import("../testing.zig");
 
@@ -109,4 +111,23 @@ test "lvgl/unit_tests/widget/Label/static_text_still_participates_in_object_api"
     try testing.expectEqualStrings("fixed", std.mem.span(label.text()));
     try testing.expectEqual(@as(i32, 14), obj.x());
     try testing.expectEqual(@as(i32, 9), obj.y());
+}
+
+test "lvgl/unit_tests/widget/Label/static_text_uses_borrowed_storage" {
+    const testing = @import("std").testing;
+    const lvgl_testing = @import("../testing.zig");
+
+    var fixture = try lvgl_testing.Fixture.init();
+    defer fixture.deinit();
+
+    var screen = fixture.screen();
+    var label = Self.create(&screen) orelse return error.OutOfMemory;
+    var obj = label.asObj();
+    defer obj.delete();
+
+    var borrowed = [_:0]u8{ 'v', 'g', 'a', 0 };
+    const borrowed_text = borrowed[0.. :0];
+    label.setTextStatic(borrowed_text);
+
+    try testing.expectEqual(@intFromPtr(borrowed_text.ptr), @intFromPtr(label.text()));
 }

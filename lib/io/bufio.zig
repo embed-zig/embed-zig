@@ -28,7 +28,9 @@ pub fn BufferedReader(comptime Reader: type) type {
             };
         }
 
+        /// `buf` must be non-empty.
         pub fn init(rd: *Reader, buf: []u8) Self {
+            std.debug.assert(buf.len > 0);
             return .{
                 .rd = rd,
                 .interface = initInterface(buf),
@@ -48,6 +50,8 @@ pub fn BufferedReader(comptime Reader: type) type {
             return &self.interface;
         }
 
+        /// Returns the underlying non-EOF read error after the `Io.Reader`
+        /// surface reports `error.ReadFailed`.
         pub fn err(self: *const Self) ?anyerror {
             return self.read_err;
         }
@@ -64,28 +68,66 @@ pub fn BufferedReader(comptime Reader: type) type {
             return 0;
         }
 
-        fn stream(r: *Io.Reader, _: *Io.Writer, _: Io.Limit) Io.Reader.StreamError!usize {
-            try fill(r);
-            return 0;
+        fn stream(r: *Io.Reader, w: *Io.Writer, limit: Io.Limit) Io.Reader.StreamError!usize {
+            const self: *Self = @alignCast(@fieldParentPtr("interface", r));
+
+            if (!limit.nonzero()) return 0;
+
+            var scratch: [256]u8 = undefined;
+            const dest = limit.slice(&scratch);
+            const n = readInto(self, dest) catch |read_err| switch (read_err) {
+                error.EndOfStream => return error.EndOfStream,
+                else => return error.ReadFailed,
+            };
+            if (n == 0) return error.EndOfStream;
+            try w.writeAll(dest[0..n]);
+            return n;
         }
 
         fn fill(r: *Io.Reader) Io.Reader.Error!void {
             const self: *Self = @alignCast(@fieldParentPtr("interface", r));
 
-            if (r.buffer.len == r.end) {
-                try r.rebase(r.buffer.len);
+            try ensureTailCapacity(self, r);
+
+            const dest = r.buffer[r.end..];
+            std.debug.assert(dest.len > 0);
+
+            const n = readInto(self, dest) catch |read_err| switch (read_err) {
+                error.EndOfStream => return error.EndOfStream,
+                else => return error.ReadFailed,
+            };
+            if (n == 0) return error.EndOfStream;
+            r.end += n;
+        }
+
+        fn ensureTailCapacity(self: *Self, r: *Io.Reader) Io.Reader.Error!void {
+            if (r.end < r.buffer.len) return;
+
+            if (r.seek == 0) {
+                self.read_err = error.BufferTooSmall;
+                return error.ReadFailed;
             }
 
-            const n = readSome(self.rd, r.buffer[r.end..]) catch |read_err| switch (read_err) {
-                error.EndOfStream => return error.EndOfStream,
+            try r.rebase(r.end - r.seek + 1);
+            if (r.end == r.buffer.len) {
+                self.read_err = error.BufferTooSmall;
+                return error.ReadFailed;
+            }
+        }
+
+        fn readInto(self: *Self, dest: []u8) anyerror!usize {
+            const n = readSome(self.rd, dest) catch |read_err| switch (read_err) {
+                error.EndOfStream => {
+                    self.read_err = null;
+                    return error.EndOfStream;
+                },
                 else => {
                     self.read_err = read_err;
-                    return error.ReadFailed;
+                    return read_err;
                 },
             };
             self.read_err = null;
-            if (n == 0) return error.EndOfStream;
-            r.end += n;
+            return n;
         }
 
         fn readSome(reader: *Reader, buf: []u8) anyerror!usize {
@@ -128,4 +170,82 @@ test "io/unit_tests/bufio/BufferedReader_init_supports_text_protocol_style_reads
 
     const line2 = try reader.takeDelimiterInclusive('\n');
     try std.testing.expectEqualStrings("PONG b\r\n", line2);
+}
+
+test "io/unit_tests/bufio/BufferedReader_small_buffer_supports_rebase_across_lines" {
+    var src = Io.Reader.fixed("ab\r\ncd\r\n");
+    var backing: [6]u8 = undefined;
+    var br = BufferedReader(@TypeOf(src)).init(&src, &backing);
+    const reader = br.ioReader();
+
+    const line1 = try reader.takeDelimiterInclusive('\n');
+    try std.testing.expectEqualStrings("ab\r\n", line1);
+
+    const line2 = try reader.takeDelimiterInclusive('\n');
+    try std.testing.expectEqualStrings("cd\r\n", line2);
+}
+
+test "io/unit_tests/bufio/BufferedReader_reports_StreamTooLong_for_overlong_line" {
+    var src = Io.Reader.fixed("abcdX\n");
+    var backing: [4]u8 = undefined;
+    var br = BufferedReader(@TypeOf(src)).init(&src, &backing);
+
+    try std.testing.expectError(error.StreamTooLong, br.ioReader().takeDelimiterInclusive('\n'));
+}
+
+test "io/unit_tests/bufio/BufferedReader_initAlloc_zero_bufsize_still_reads" {
+    var src = Io.Reader.fixed("ok");
+    var br = try BufferedReader(@TypeOf(src)).initAlloc(&src, std.testing.allocator, 0);
+    defer br.deinit();
+
+    try std.testing.expect(br.ioReader().buffer.len >= 1);
+    try std.testing.expectEqualStrings("o", try br.ioReader().take(1));
+}
+
+test "io/unit_tests/bufio/BufferedReader_err_preserves_and_clears_underlying_failure" {
+    const Reader = struct {
+        payload: []const u8 = "ok",
+        offset: usize = 0,
+        fail_once: bool = true,
+
+        fn read(self: *@This(), buf: []u8) anyerror!usize {
+            if (self.fail_once) {
+                self.fail_once = false;
+                return error.ConnectionReset;
+            }
+
+            const remaining = self.payload[self.offset..];
+            const n = @min(buf.len, remaining.len);
+            @memcpy(buf[0..n], remaining[0..n]);
+            self.offset += n;
+            return n;
+        }
+    };
+
+    var src = Reader{};
+    var backing: [4]u8 = undefined;
+    var br = BufferedReader(Reader).init(&src, &backing);
+    const reader = br.ioReader();
+
+    try std.testing.expectError(error.ReadFailed, reader.peek(1));
+    try std.testing.expect(br.err() != null);
+    try std.testing.expect(br.err().? == error.ConnectionReset);
+
+    try std.testing.expectEqualStrings("o", try reader.take(1));
+    try std.testing.expect(br.err() == null);
+}
+
+test "io/unit_tests/bufio/BufferedReader_reports_BufferTooSmall_via_err_when_window_cannot_grow" {
+    var src = Io.Reader.fixed("ab");
+    var backing: [1]u8 = undefined;
+    var br = BufferedReader(@TypeOf(src)).init(&src, &backing);
+    const reader = br.ioReader();
+
+    try std.testing.expectEqualStrings("a", try reader.peek(1));
+
+    var empty: [0]u8 = .{};
+    var bufs = [_][]u8{&empty};
+    try std.testing.expectError(error.ReadFailed, @TypeOf(br).readVec(reader, &bufs));
+    try std.testing.expect(br.err() != null);
+    try std.testing.expect(br.err().? == error.BufferTooSmall);
 }

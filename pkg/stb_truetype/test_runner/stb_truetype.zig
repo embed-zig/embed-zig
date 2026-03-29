@@ -4,6 +4,7 @@ const FontMod = @import("../src/Font.zig");
 const types_mod = @import("../src/types.zig");
 const font_bytes = @embedFile("font.ttf");
 const embedded_codepoint: u21 = 0x4E2D;
+const missing_codepoint: u21 = 0x10FFFF;
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
@@ -53,7 +54,10 @@ fn runImpl(comptime lib: type) !void {
     try testing.expectError(stb.Font.InitError.InvalidFont, stb.Font.initOffset(ascii_noise[0..], ascii_noise.len));
 
     const embedded_font = try stb.Font.init(font_bytes[0..]);
+    const embedded_font_offset = try stb.Font.initOffset(font_bytes[0..], 0);
     try testing.expect(embedded_font.glyphIndex(embedded_codepoint) > 0);
+    try testing.expectEqual(embedded_font.glyphIndex(embedded_codepoint), embedded_font_offset.glyphIndex(embedded_codepoint));
+    try testing.expectEqual(@as(i32, 0), embedded_font.glyphIndex(missing_codepoint));
 
     const scale = embedded_font.scaleForPixelHeight(24.0);
     try testing.expect(scale > 0);
@@ -65,25 +69,48 @@ fn runImpl(comptime lib: type) !void {
 
     const glyph_metrics = embedded_font.hMetrics(embedded_codepoint);
     try testing.expect(glyph_metrics.advance_width > 0);
+    try testing.expectEqual(@as(i32, 0), embedded_font.kernAdvance(missing_codepoint, embedded_codepoint));
 
     const glyph_box = embedded_font.bitmapBox(embedded_codepoint, scale, scale);
     try testing.expect(glyph_box.width() > 0);
     try testing.expect(glyph_box.height() > 0);
 
-    const bitmap_len: usize = @intCast(glyph_box.width() * glyph_box.height());
+    const width: usize = @intCast(glyph_box.width());
+    const height: usize = @intCast(glyph_box.height());
+    const bitmap_len, const bitmap_len_overflow = @mulWithOverflow(width, height);
+    try testing.expect(bitmap_len_overflow == 0);
     const bitmap = try testing.allocator.alloc(u8, bitmap_len);
     defer testing.allocator.free(bitmap);
     @memset(bitmap, 0);
-    embedded_font.renderCodepointBitmap(
+    try embedded_font.renderCodepointBitmap(
         bitmap,
-        @intCast(glyph_box.width()),
-        @intCast(glyph_box.height()),
-        @intCast(glyph_box.width()),
+        width,
+        height,
+        width,
         scale,
         scale,
         embedded_codepoint,
     );
     try testing.expect(hasNonZeroByte(bitmap));
+
+    const padded_stride = width + 2;
+    const padded_rows_len, const padded_rows_overflow = @mulWithOverflow(padded_stride, height - 1);
+    try testing.expect(padded_rows_overflow == 0);
+    const padded_bitmap_len, const padded_bitmap_len_overflow = @addWithOverflow(padded_rows_len, width);
+    try testing.expect(padded_bitmap_len_overflow == 0);
+    const padded_bitmap = try testing.allocator.alloc(u8, padded_bitmap_len);
+    defer testing.allocator.free(padded_bitmap);
+    @memset(padded_bitmap, 0);
+    try embedded_font.renderCodepointBitmap(
+        padded_bitmap,
+        width,
+        height,
+        padded_stride,
+        scale,
+        scale,
+        embedded_codepoint,
+    );
+    try testing.expect(hasNonZeroByte(padded_bitmap));
 
     const box = stb.BitmapBox{
         .x0 = -3,

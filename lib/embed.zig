@@ -44,7 +44,7 @@ pub fn make(comptime Impl: type) type {
         pub const Io = root.Io;
         pub const debug = root.debug;
         pub const atomic = root.atomic;
-        pub const testing = root.testing.make(Impl.testing, Self);
+        pub const testing = root.testing.make(Impl.testing);
         pub const Random = root.Random;
         pub const crypto = root.crypto.make(Impl.crypto);
         pub const math = root.math;
@@ -109,5 +109,4 @@ test "embed/unit_tests" {
     _ = @import("embed/Thread.zig");
     _ = @import("embed/time.zig");
     _ = @import("embed/testing.zig");
-    _ = @import("embed/testing/Allocator.zig");
 }

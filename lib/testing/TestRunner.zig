@@ -59,7 +59,10 @@ pub fn make(comptime TestRunner: type) type {
 
                 fn run(runner: *Self, t: *T, allocator: embed.mem.Allocator) bool {
                     const typed_ctx: *TestRunner = @ptrCast(@alignCast(runner.ctx));
-                    TestRunner.init(typed_ctx, allocator) catch return false;
+                    TestRunner.init(typed_ctx, allocator) catch |err| {
+                        t.logErrorf("runner init failed: {}", .{err});
+                        return false;
+                    };
                     return TestRunner.run(typed_ctx, t, allocator);
                 }
 
@@ -211,4 +214,129 @@ test "testing/unit_tests/TestRunner/new_deinit_without_run_is_ok" {
 
     runner.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
+}
+
+test "testing/unit_tests/TestRunner/init_failure_marks_test_failed" {
+    const std = @import("std");
+
+    const Support = struct {
+        var entries: std.ArrayListUnmanaged([]u8) = .{};
+        var mutex: std.Thread.Mutex = .{};
+
+        fn reset() void {
+            mutex.lock();
+            defer mutex.unlock();
+            for (entries.items) |entry| {
+                std.testing.allocator.free(entry);
+            }
+            entries.deinit(std.testing.allocator);
+            entries = .{};
+        }
+
+        fn append(comptime format: []const u8, args: anytype) void {
+            const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
+            mutex.lock();
+            defer mutex.unlock();
+            entries.append(std.testing.allocator, message) catch @panic("OOM");
+        }
+
+        fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
+            mutex.lock();
+            defer mutex.unlock();
+
+            var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
+            errdefer bytes.deinit(allocator);
+
+            for (entries.items, 0..) |entry, idx| {
+                try bytes.appendSlice(allocator, entry);
+                if (idx + 1 != entries.items.len) {
+                    try bytes.append(allocator, '\n');
+                }
+            }
+            return bytes.toOwnedSlice(allocator);
+        }
+    };
+
+    const CapturingLog = struct {
+        pub fn scoped(comptime scope: @Type(.enum_literal)) type {
+            _ = scope;
+            return struct {
+                pub fn info(comptime format: []const u8, args: anytype) void {
+                    Support.append(format, args);
+                }
+
+                pub fn err(comptime format: []const u8, args: anytype) void {
+                    Support.append(format, args);
+                }
+            };
+        }
+    };
+
+    const TestLib = struct {
+        pub const mem = embed.mem;
+        pub const fmt = embed.fmt;
+        pub const Thread = std.Thread;
+        pub const log = CapturingLog;
+        pub fn ArrayList(comptime Elem: type) type {
+            return std.ArrayList(Elem);
+        }
+        pub const testing = struct {
+            pub const allocator = std.testing.allocator;
+        };
+        pub const time = struct {
+            pub const ns_per_ms = std.time.ns_per_ms;
+
+            pub fn nanoTimestamp() i128 {
+                return std.time.nanoTimestamp();
+            }
+
+            pub fn milliTimestamp() i64 {
+                return std.time.milliTimestamp();
+            }
+        };
+    };
+
+    const OwnedArgs = struct {
+        run_hits: usize = 0,
+        deinit_hits: usize = 0,
+
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+            return error.InitFailed;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            self.deinit_hits += 1;
+        }
+
+        pub fn run(self: *@This(), test_handle: *T, allocator: embed.mem.Allocator) bool {
+            _ = test_handle;
+            _ = allocator;
+            self.run_hits += 1;
+            return true;
+        }
+    };
+
+    Support.reset();
+    defer Support.reset();
+
+    var t = T.new(TestLib, .test_run);
+    defer t.deinit();
+
+    var ctx = OwnedArgs{};
+    const RunnerType = Self.make(OwnedArgs);
+    var runner = RunnerType.new(&ctx);
+
+    try std.testing.expect(!runner.run(&t, std.testing.allocator));
+    try std.testing.expectEqual(@as(usize, 0), ctx.run_hits);
+    try std.testing.expect(!t.wait());
+
+    runner.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
+
+    const log = try Support.joinedLog(std.testing.allocator);
+    defer std.testing.allocator.free(log);
+    try std.testing.expect(std.mem.indexOf(u8, log, "runner init failed: error.InitFailed") != null);
 }

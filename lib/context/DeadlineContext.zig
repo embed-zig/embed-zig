@@ -19,6 +19,7 @@ pub fn DeadlineContext(comptime lib: type) type {
         deadline_ns: i128,
         timer_mu: Mutex = .{},
         timer_cond: Condition = .{},
+        timer_generation: usize = 0,
         timer_canceled: bool = false,
         timer_thread: ?lib.Thread = null,
         timer_started: bool = false,
@@ -35,17 +36,20 @@ pub fn DeadlineContext(comptime lib: type) type {
                     .parent = parent,
                 },
                 .tree_rw = internal.treeLock(parent, RwLock),
-                .cause = parent.err(),
                 .deadline_ns = deadline_ns,
             };
 
-            if (self.cause == null) {
-                if (self.effectiveDeadline() <= lib.time.nanoTimestamp()) {
-                    self.cause = Context.DeadlineExceeded;
-                } else {
-                    internal.attachChild(parent, ctx);
-                    self.ensureTimer();
-                }
+            internal.attachChild(parent, ctx);
+
+            if (parent.err()) |cause| {
+                self.markCanceled(cause);
+                return ctx;
+            }
+
+            if (self.effectiveDeadline() <= lib.time.nanoTimestamp()) {
+                self.markCanceled(Context.DeadlineExceeded);
+            } else {
+                self.ensureTimer();
             }
 
             return ctx;
@@ -75,25 +79,45 @@ pub fn DeadlineContext(comptime lib: type) type {
         }
 
         fn timerFn(self: *Self) void {
-            self.timer_mu.lock();
-            while (!self.timer_canceled) {
+            while (true) {
+                self.timer_mu.lock();
+                const generation = self.timer_generation;
+                const timer_canceled = self.timer_canceled;
+                self.timer_mu.unlock();
+                if (timer_canceled) return;
+
                 const remaining_ns = self.effectiveDeadline() - lib.time.nanoTimestamp();
-                if (remaining_ns <= 0) break;
+
+                self.timer_mu.lock();
+                if (self.timer_canceled) {
+                    self.timer_mu.unlock();
+                    return;
+                }
+                if (self.timer_generation != generation) {
+                    self.timer_mu.unlock();
+                    continue;
+                }
+                if (remaining_ns <= 0) {
+                    self.timer_mu.unlock();
+                    break;
+                }
 
                 const wait_ns: u64 = @intCast(@min(remaining_ns, @as(i128, @intCast((@as(u128, 1) << 64) - 1))));
                 self.timer_cond.timedWait(&self.timer_mu, wait_ns) catch {};
+                const timer_stopped = self.timer_canceled;
+                self.timer_mu.unlock();
+                if (timer_stopped) return;
             }
-            const timer_canceled = self.timer_canceled;
-            const deadline_reached = !timer_canceled and lib.time.nanoTimestamp() >= self.effectiveDeadline();
-            self.timer_mu.unlock();
-
-            if (!deadline_reached) return;
 
             self.mu.lock();
             const should_cancel = self.cause == null;
             self.mu.unlock();
 
-            if (should_cancel) self.markCanceled(Context.DeadlineExceeded);
+            if (should_cancel) {
+                self.tree_rw.lockShared();
+                defer self.tree_rw.unlockShared();
+                self.markCanceled(Context.DeadlineExceeded);
+            }
         }
 
         fn stopTimer(self: *Self) void {
@@ -169,18 +193,24 @@ pub fn DeadlineContext(comptime lib: type) type {
 
         fn cancelImpl(ptr: *anyopaque) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
+            self.tree_rw.lockShared();
+            defer self.tree_rw.unlockShared();
             self.stopTimer();
             self.markCanceled(Context.Canceled);
         }
 
         fn cancelWithCauseImpl(ptr: *anyopaque, cause: anyerror) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
+            self.tree_rw.lockShared();
+            defer self.tree_rw.unlockShared();
             self.stopTimer();
             self.markCanceled(cause);
         }
 
         fn propagateCancelWithCauseImpl(ptr: *anyopaque, cause: anyerror) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
+            self.tree_rw.lockShared();
+            defer self.tree_rw.unlockShared();
             self.stopTimer();
             self.markCanceled(cause);
         }
@@ -205,6 +235,9 @@ pub fn DeadlineContext(comptime lib: type) type {
         fn reparentFn(ptr: *anyopaque, parent: ?Context) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree.parent = parent;
+            self.timer_mu.lock();
+            self.timer_generation +%= 1;
+            self.timer_mu.unlock();
             self.timer_cond.signal();
         }
 

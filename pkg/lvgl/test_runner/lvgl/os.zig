@@ -43,6 +43,7 @@ pub fn make(comptime lib: type) testing.TestRunner {
                     try test_lib.expectEqual(binding.LV_RESULT_OK, binding.lv_mutex_lock(&mutex));
                     try test_lib.expectEqual(binding.LV_RESULT_OK, binding.lv_mutex_unlock(&mutex));
                     try test_lib.expectEqual(binding.LV_RESULT_OK, binding.lv_mutex_unlock(&mutex));
+                    try test_lib.expectEqual(binding.LV_RESULT_INVALID, binding.lv_mutex_lock_isr(&mutex));
                 }
 
                 fn customThreadAndSyncLifecycle() !void {
@@ -74,6 +75,7 @@ pub fn make(comptime lib: type) testing.TestRunner {
                     try test_lib.expectEqual(binding.LV_RESULT_OK, binding.lv_thread_sync_wait(&sync));
                     try test_lib.expect(did_run.load(.acquire));
                     try test_lib.expectEqual(binding.LV_RESULT_OK, binding.lv_thread_delete(&thread));
+                    try test_lib.expectEqual(binding.LV_RESULT_INVALID, binding.lv_thread_sync_signal_isr(&sync));
                 }
             };
 

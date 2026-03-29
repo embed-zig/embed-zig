@@ -286,6 +286,32 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             }
         }
 
+        fn waitForTrue(flag: *Atomic(bool), timeout_ms: u64) !void {
+            var elapsed_ms: u64 = 0;
+            while (elapsed_ms < timeout_ms) : (elapsed_ms += 1) {
+                if (flag.load(.acquire)) return;
+                Thread.sleep(time.ns_per_ms);
+            }
+            return error.TimeoutWaitingForFlag;
+        }
+
+        fn waitForCount(flag: *Atomic(u32), expected: u32, timeout_ms: u64) !void {
+            var elapsed_ms: u64 = 0;
+            while (elapsed_ms < timeout_ms) : (elapsed_ms += 1) {
+                if (flag.load(.acquire) >= expected) return;
+                Thread.sleep(time.ns_per_ms);
+            }
+            return error.TimeoutWaitingForCount;
+        }
+
+        fn expectStaysFalse(flag: *Atomic(bool), duration_ms: u64) !void {
+            var elapsed_ms: u64 = 0;
+            while (elapsed_ms < duration_ms) : (elapsed_ms += 1) {
+                if (flag.load(.acquire)) return error.FlagSetUnexpectedly;
+                Thread.sleep(time.ns_per_ms);
+            }
+        }
+
         // ═══════════════════════════════════════════════════════════
         //  一、初始化与基本属性 (#1-#4)
         // ═══════════════════════════════════════════════════════════
@@ -448,9 +474,8 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &finished });
 
-            Thread.sleep(80 * 1_000_000);
-            try testing.expect(entered.load(.acquire));
-            try testing.expect(!finished.load(.acquire));
+            try waitForTrue(&entered, 200);
+            try expectStaysFalse(&finished, 50);
 
             _ = try ch.recv();
             t.join();
@@ -465,15 +490,17 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             _ = try ch.send(1);
             _ = try ch.send(2);
 
+            var entered = Atomic(bool).init(false);
             var send_ok = Atomic(bool).init(false);
             const t = try Thread.spawn(.{}, struct {
-                fn run(c: *Ch, flag: *Atomic(bool)) void {
+                fn run(c: *Ch, ent: *Atomic(bool), flag: *Atomic(bool)) void {
+                    ent.store(true, .release);
                     const s = c.send(3) catch return;
                     flag.store(s.ok, .release);
                 }
-            }.run, .{ &ch, &send_ok });
+            }.run, .{ &ch, &entered, &send_ok });
 
-            Thread.sleep(30 * 1_000_000);
+            try waitForTrue(&entered, 200);
 
             const r = try ch.recv();
             try testing.expect(r.ok);
@@ -505,9 +532,8 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &finished });
 
-            Thread.sleep(80 * 1_000_000);
-            try testing.expect(entered.load(.acquire));
-            try testing.expect(!finished.load(.acquire));
+            try waitForTrue(&entered, 200);
+            try expectStaysFalse(&finished, 50);
 
             _ = try ch.send(42);
             t.join();
@@ -518,19 +544,21 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             var ch = try Ch.make(allocator, 4);
             defer ch.deinit();
 
+            var entered = Atomic(bool).init(false);
             var recv_ok = Atomic(bool).init(false);
             var recv_val = Atomic(Event).init(0);
             const t = try Thread.spawn(.{}, struct {
-                fn run(c: *Ch, ok_flag: *Atomic(bool), val_flag: *Atomic(Event)) void {
+                fn run(c: *Ch, ent: *Atomic(bool), ok_flag: *Atomic(bool), val_flag: *Atomic(Event)) void {
+                    ent.store(true, .release);
                     const r = c.recv() catch return;
                     if (r.ok) {
                         val_flag.store(r.value, .release);
                         ok_flag.store(true, .release);
                     }
                 }
-            }.run, .{ &ch, &recv_ok, &recv_val });
+            }.run, .{ &ch, &entered, &recv_ok, &recv_val });
 
-            Thread.sleep(30 * 1_000_000);
+            try waitForTrue(&entered, 200);
             _ = try ch.send(0xBEEF);
             t.join();
 
@@ -708,19 +736,21 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             var ch = try Ch.make(allocator, 4);
             defer ch.deinit();
 
+            var entered = Atomic(bool).init(false);
             var recv_ok = Atomic(bool).init(false);
             var recv_val = Atomic(Event).init(0);
             const t = try Thread.spawn(.{}, struct {
-                fn run(c: *Ch, ok_flag: *Atomic(bool), val_flag: *Atomic(Event)) void {
+                fn run(c: *Ch, ent: *Atomic(bool), ok_flag: *Atomic(bool), val_flag: *Atomic(Event)) void {
+                    ent.store(true, .release);
                     const r = c.recv() catch return;
                     if (r.ok) {
                         val_flag.store(r.value, .release);
                         ok_flag.store(true, .release);
                     }
                 }
-            }.run, .{ &ch, &recv_ok, &recv_val });
+            }.run, .{ &ch, &entered, &recv_ok, &recv_val });
 
-            Thread.sleep(50 * 1_000_000);
+            try waitForTrue(&entered, 200);
             _ = try ch.send(0xCAFE);
             t.join();
 
@@ -735,15 +765,17 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             _ = try ch.send(1);
             _ = try ch.send(2);
 
+            var entered = Atomic(bool).init(false);
             var send_ok = Atomic(bool).init(false);
             const t = try Thread.spawn(.{}, struct {
-                fn run(c: *Ch, flag: *Atomic(bool)) void {
+                fn run(c: *Ch, ent: *Atomic(bool), flag: *Atomic(bool)) void {
+                    ent.store(true, .release);
                     const s = c.send(3) catch return;
                     flag.store(s.ok, .release);
                 }
-            }.run, .{ &ch, &send_ok });
+            }.run, .{ &ch, &entered, &send_ok });
 
-            Thread.sleep(50 * 1_000_000);
+            try waitForTrue(&entered, 200);
             _ = try ch.recv();
             t.join();
 
@@ -754,18 +786,20 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             var ch = try Ch.make(allocator, 4);
             defer ch.deinit();
 
+            var entered = Atomic(bool).init(false);
             var recv_ok = Atomic(bool).init(true);
             const t = try Thread.spawn(.{}, struct {
-                fn run(c: *Ch, flag: *Atomic(bool)) void {
+                fn run(c: *Ch, ent: *Atomic(bool), flag: *Atomic(bool)) void {
+                    ent.store(true, .release);
                     const r = c.recv() catch {
                         flag.store(false, .release);
                         return;
                     };
                     flag.store(r.ok, .release);
                 }
-            }.run, .{ &ch, &recv_ok });
+            }.run, .{ &ch, &entered, &recv_ok });
 
-            Thread.sleep(50 * 1_000_000);
+            try waitForTrue(&entered, 200);
             ch.close();
             t.join();
 
@@ -779,18 +813,20 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             _ = try ch.send(1);
             _ = try ch.send(2);
 
+            var entered = Atomic(bool).init(false);
             var send_ok = Atomic(bool).init(true);
             const t = try Thread.spawn(.{}, struct {
-                fn run(c: *Ch, flag: *Atomic(bool)) void {
+                fn run(c: *Ch, ent: *Atomic(bool), flag: *Atomic(bool)) void {
+                    ent.store(true, .release);
                     const s = c.send(99) catch {
                         flag.store(false, .release);
                         return;
                     };
                     flag.store(s.ok, .release);
                 }
-            }.run, .{ &ch, &send_ok });
+            }.run, .{ &ch, &entered, &send_ok });
 
-            Thread.sleep(50 * 1_000_000);
+            try waitForTrue(&entered, 200);
             ch.close();
             t.join();
 
@@ -802,12 +838,14 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             defer ch.deinit();
 
             const N = 4;
+            var started = Atomic(u32).init(0);
             var done_count = Atomic(u32).init(0);
             var threads: [N]Thread = undefined;
 
             for (0..N) |i| {
                 threads[i] = try Thread.spawn(.{}, struct {
-                    fn run(c: *Ch, cnt: *Atomic(u32)) void {
+                    fn run(c: *Ch, started_count: *Atomic(u32), cnt: *Atomic(u32)) void {
+                        _ = started_count.fetchAdd(1, .acq_rel);
                         const r = c.recv() catch {
                             _ = cnt.fetchAdd(1, .acq_rel);
                             return;
@@ -816,10 +854,10 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
                             _ = cnt.fetchAdd(1, .acq_rel);
                         }
                     }
-                }.run, .{ &ch, &done_count });
+                }.run, .{ &ch, &started, &done_count });
             }
 
-            Thread.sleep(80 * 1_000_000);
+            try waitForCount(&started, @as(u32, N), 200);
             ch.close();
 
             for (0..N) |i| {
@@ -837,12 +875,14 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             _ = try ch.send(2);
 
             const N = 4;
+            var started = Atomic(u32).init(0);
             var done_count = Atomic(u32).init(0);
             var threads: [N]Thread = undefined;
 
             for (0..N) |i| {
                 threads[i] = try Thread.spawn(.{}, struct {
-                    fn run(c: *Ch, cnt: *Atomic(u32)) void {
+                    fn run(c: *Ch, started_count: *Atomic(u32), cnt: *Atomic(u32)) void {
+                        _ = started_count.fetchAdd(1, .acq_rel);
                         const s = c.send(99) catch {
                             _ = cnt.fetchAdd(1, .acq_rel);
                             return;
@@ -851,10 +891,10 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
                             _ = cnt.fetchAdd(1, .acq_rel);
                         }
                     }
-                }.run, .{ &ch, &done_count });
+                }.run, .{ &ch, &started, &done_count });
             }
 
-            Thread.sleep(80 * 1_000_000);
+            try waitForCount(&started, @as(u32, N), 200);
             ch.close();
 
             for (0..N) |i| {
@@ -964,28 +1004,60 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
 
             const CONSUMERS = 4;
             const TOTAL = 1000;
+            const Observed = struct {
+                mutex: Thread.Mutex = .{},
+                count: u32 = 0,
+                duplicate: bool = false,
+                out_of_range: bool = false,
+                seen: [TOTAL]bool = [_]bool{false} ** TOTAL,
 
+                fn record(self: *@This(), value: Event) void {
+                    self.mutex.lock();
+                    defer self.mutex.unlock();
+
+                    const idx: usize = @intCast(value);
+                    if (idx >= TOTAL) {
+                        self.out_of_range = true;
+                        return;
+                    }
+                    if (self.seen[idx]) {
+                        self.duplicate = true;
+                        return;
+                    }
+                    self.seen[idx] = true;
+                    self.count += 1;
+                }
+            };
+
+            var sender_failed = Atomic(bool).init(false);
             const sender = try Thread.spawn(.{}, struct {
-                fn run(c: *Ch) void {
+                fn run(c: *Ch, failed: *Atomic(bool)) void {
                     for (0..TOTAL) |i| {
-                        _ = c.send(@intCast(i)) catch return;
+                        const s = c.send(@intCast(i)) catch {
+                            failed.store(true, .release);
+                            return;
+                        };
+                        if (!s.ok) {
+                            failed.store(true, .release);
+                            return;
+                        }
                     }
                     c.close();
                 }
-            }.run, .{&ch});
+            }.run, .{ &ch, &sender_failed });
 
-            var global_count = Atomic(u32).init(0);
+            var observed = Observed{};
             var consumers: [CONSUMERS]Thread = undefined;
             for (0..CONSUMERS) |c| {
                 consumers[c] = try Thread.spawn(.{}, struct {
-                    fn run(channel: *Ch, cnt: *Atomic(u32)) void {
+                    fn run(channel: *Ch, obs: *Observed) void {
                         while (true) {
                             const r = channel.recv() catch return;
                             if (!r.ok) break;
-                            _ = cnt.fetchAdd(1, .acq_rel);
+                            obs.record(r.value);
                         }
                     }
-                }.run, .{ &ch, &global_count });
+                }.run, .{ &ch, &observed });
             }
 
             sender.join();
@@ -993,7 +1065,13 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
                 consumers[c].join();
             }
 
-            try testing.expectEqual(@as(u32, TOTAL), global_count.load(.acquire));
+            try testing.expect(!sender_failed.load(.acquire));
+            try testing.expect(!observed.out_of_range);
+            try testing.expect(!observed.duplicate);
+            try testing.expectEqual(@as(u32, TOTAL), observed.count);
+            for (observed.seen) |seen| {
+                try testing.expect(seen);
+            }
         }
 
         fn testMpmcIntegrity(allocator: Allocator) !void {
@@ -1004,40 +1082,67 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             const CONSUMERS = 4;
             const PER_PRODUCER = 500;
             const TOTAL = PRODUCERS * PER_PRODUCER;
+            const Observed = struct {
+                mutex: Thread.Mutex = .{},
+                count: u32 = 0,
+                duplicate: bool = false,
+                out_of_range: bool = false,
+                seen: [TOTAL]bool = [_]bool{false} ** TOTAL,
+
+                fn record(self: *@This(), value: Event) void {
+                    self.mutex.lock();
+                    defer self.mutex.unlock();
+
+                    const idx: usize = @intCast(value);
+                    if (idx >= TOTAL) {
+                        self.out_of_range = true;
+                        return;
+                    }
+                    if (self.seen[idx]) {
+                        self.duplicate = true;
+                        return;
+                    }
+                    self.seen[idx] = true;
+                    self.count += 1;
+                }
+            };
+
+            var producer_failed = Atomic(bool).init(false);
+            var observed = Observed{};
+
+            var cons_threads: [CONSUMERS]Thread = undefined;
+            for (0..CONSUMERS) |c| {
+                cons_threads[c] = try Thread.spawn(.{}, struct {
+                    fn run(channel: *Ch, obs: *Observed) void {
+                        while (true) {
+                            const r = channel.recv() catch return;
+                            if (!r.ok) return;
+                            obs.record(r.value);
+                        }
+                    }
+                }.run, .{ &ch, &observed });
+            }
 
             var prod_threads: [PRODUCERS]Thread = undefined;
             for (0..PRODUCERS) |p| {
                 prod_threads[p] = try Thread.spawn(.{}, struct {
-                    fn run(c: *Ch, base: u32) void {
+                    fn run(c: *Ch, base: u32, failed: *Atomic(bool)) void {
                         for (0..PER_PRODUCER) |i| {
-                            _ = c.send(@intCast(base + @as(u32, @intCast(i)))) catch return;
+                            const s = c.send(@intCast(base + @as(u32, @intCast(i)))) catch {
+                                failed.store(true, .release);
+                                return;
+                            };
+                            if (!s.ok) {
+                                failed.store(true, .release);
+                                return;
+                            }
                         }
                     }
-                }.run, .{ &ch, @as(u32, @intCast(p * PER_PRODUCER)) });
-            }
-
-            var global_count = Atomic(u32).init(0);
-            var cons_threads: [CONSUMERS]Thread = undefined;
-            for (0..CONSUMERS) |c| {
-                cons_threads[c] = try Thread.spawn(.{}, struct {
-                    fn run(channel: *Ch, cnt: *Atomic(u32)) void {
-                        while (cnt.load(.acquire) < TOTAL) {
-                            const r = channel.recv() catch return;
-                            if (!r.ok) return;
-                            _ = cnt.fetchAdd(1, .acq_rel);
-                        }
-                    }
-                }.run, .{ &ch, &global_count });
+                }.run, .{ &ch, @as(u32, @intCast(p * PER_PRODUCER)), &producer_failed });
             }
 
             for (0..PRODUCERS) |p| {
                 prod_threads[p].join();
-            }
-
-            var wait_ms: u32 = 0;
-            while (global_count.load(.acquire) < TOTAL and wait_ms < 5000) {
-                Thread.sleep(1 * 1_000_000);
-                wait_ms += 1;
             }
 
             ch.close();
@@ -1046,7 +1151,13 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
                 cons_threads[c].join();
             }
 
-            try testing.expectEqual(@as(u32, TOTAL), global_count.load(.acquire));
+            try testing.expect(!producer_failed.load(.acquire));
+            try testing.expect(!observed.out_of_range);
+            try testing.expect(!observed.duplicate);
+            try testing.expectEqual(@as(u32, TOTAL), observed.count);
+            for (observed.seen) |seen| {
+                try testing.expect(seen);
+            }
         }
 
         fn testConcurrentCloseRecv(allocator: Allocator) !void {
@@ -1057,23 +1168,25 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             _ = try ch.send(20);
             _ = try ch.send(30);
 
+            var started = Atomic(u32).init(0);
             var recv_count = Atomic(u32).init(0);
             const N = 4;
             var threads: [N]Thread = undefined;
 
             for (0..N) |i| {
                 threads[i] = try Thread.spawn(.{}, struct {
-                    fn run(c: *Ch, cnt: *Atomic(u32)) void {
+                    fn run(c: *Ch, started_count: *Atomic(u32), cnt: *Atomic(u32)) void {
+                        _ = started_count.fetchAdd(1, .acq_rel);
                         while (true) {
                             const r = c.recv() catch return;
                             if (!r.ok) return;
                             _ = cnt.fetchAdd(1, .acq_rel);
                         }
                     }
-                }.run, .{ &ch, &recv_count });
+                }.run, .{ &ch, &started, &recv_count });
             }
 
-            Thread.sleep(30 * 1_000_000);
+            try waitForCount(&started, @as(u32, N), 200);
             ch.close();
 
             for (0..N) |i| {
@@ -1084,31 +1197,39 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
         }
 
         fn testConcurrentCloseSend(allocator: Allocator) !void {
-            var ch = try Ch.make(allocator, 4);
+            const cap = 4;
+            const N = 8;
+            var ch = try Ch.make(allocator, cap);
             defer ch.deinit();
 
+            var started = Atomic(u32).init(0);
+            var send_success: [N]Atomic(bool) = undefined;
+            for (&send_success) |*flag| {
+                flag.* = Atomic(bool).init(false);
+            }
             var send_ok_count = Atomic(u32).init(0);
             var send_fail_count = Atomic(u32).init(0);
-            const N = 8;
             var threads: [N]Thread = undefined;
 
             for (0..N) |i| {
                 threads[i] = try Thread.spawn(.{}, struct {
-                    fn run(c: *Ch, ok_cnt: *Atomic(u32), fail_cnt: *Atomic(u32)) void {
-                        const s = c.send(42) catch {
+                    fn run(c: *Ch, started_count: *Atomic(u32), value: Event, success_flag: *Atomic(bool), ok_cnt: *Atomic(u32), fail_cnt: *Atomic(u32)) void {
+                        _ = started_count.fetchAdd(1, .acq_rel);
+                        const s = c.send(value) catch {
                             _ = fail_cnt.fetchAdd(1, .acq_rel);
                             return;
                         };
                         if (s.ok) {
+                            success_flag.store(true, .release);
                             _ = ok_cnt.fetchAdd(1, .acq_rel);
                         } else {
                             _ = fail_cnt.fetchAdd(1, .acq_rel);
                         }
                     }
-                }.run, .{ &ch, &send_ok_count, &send_fail_count });
+                }.run, .{ &ch, &started, @as(Event, @intCast(i)), &send_success[i], &send_ok_count, &send_fail_count });
             }
 
-            Thread.sleep(30 * 1_000_000);
+            try waitForCount(&started, @as(u32, N), 200);
             ch.close();
 
             for (0..N) |i| {
@@ -1118,6 +1239,27 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             const ok = send_ok_count.load(.acquire);
             const fail = send_fail_count.load(.acquire);
             try testing.expectEqual(@as(u32, N), ok + fail);
+
+            try testing.expect(ok <= @as(u32, cap));
+
+            var drained_seen = [_]bool{false} ** N;
+            var drained_count: u32 = 0;
+            while (true) {
+                const r = try ch.recv();
+                if (!r.ok) break;
+
+                const idx: usize = @intCast(r.value);
+                if (idx >= N) return error.ValueOutOfRange;
+                try testing.expect(!drained_seen[idx]);
+                drained_seen[idx] = true;
+                try testing.expect(send_success[idx].load(.acquire));
+                drained_count += 1;
+            }
+
+            try testing.expectEqual(ok, drained_count);
+            for (0..N) |i| {
+                try testing.expectEqual(send_success[i].load(.acquire), drained_seen[i]);
+            }
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -1185,13 +1327,15 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
                 _ = try ch.send(@intCast(i));
             }
 
+            var started = Atomic(u32).init(0);
             var ok_count = Atomic(u32).init(0);
             var fail_count = Atomic(u32).init(0);
             var threads: [RECEIVERS]Thread = undefined;
 
             for (0..RECEIVERS) |i| {
                 threads[i] = try Thread.spawn(.{}, struct {
-                    fn run(c: *Ch, ok_cnt: *Atomic(u32), fail_cnt: *Atomic(u32)) void {
+                    fn run(c: *Ch, started_count: *Atomic(u32), ok_cnt: *Atomic(u32), fail_cnt: *Atomic(u32)) void {
+                        _ = started_count.fetchAdd(1, .acq_rel);
                         const r = c.recv() catch {
                             _ = fail_cnt.fetchAdd(1, .acq_rel);
                             return;
@@ -1202,10 +1346,10 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
                             _ = fail_cnt.fetchAdd(1, .acq_rel);
                         }
                     }
-                }.run, .{ &ch, &ok_count, &fail_count });
+                }.run, .{ &ch, &started, &ok_count, &fail_count });
             }
 
-            Thread.sleep(50 * 1_000_000);
+            try waitForCount(&started, @as(u32, RECEIVERS), 200);
             ch.close();
 
             for (0..RECEIVERS) |i| {
@@ -1231,19 +1375,21 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             var ch = try Ch.make(allocator, 0);
             defer ch.deinit();
 
+            var entered = Atomic(bool).init(false);
             var recv_val = Atomic(Event).init(0);
             var recv_ok = Atomic(bool).init(false);
             const t = try Thread.spawn(.{}, struct {
-                fn run(c: *Ch, val: *Atomic(Event), ok: *Atomic(bool)) void {
+                fn run(c: *Ch, ent: *Atomic(bool), val: *Atomic(Event), ok: *Atomic(bool)) void {
+                    ent.store(true, .release);
                     const r = c.recv() catch return;
                     if (r.ok) {
                         val.store(r.value, .release);
                         ok.store(true, .release);
                     }
                 }
-            }.run, .{ &ch, &recv_val, &recv_ok });
+            }.run, .{ &ch, &entered, &recv_val, &recv_ok });
 
-            Thread.sleep(30 * 1_000_000);
+            try waitForTrue(&entered, 200);
             const s = try ch.send(0xDEAD);
             try testing.expect(s.ok);
             t.join();
@@ -1266,9 +1412,8 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &finished });
 
-            Thread.sleep(80 * 1_000_000);
-            try testing.expect(entered.load(.acquire));
-            try testing.expect(!finished.load(.acquire));
+            try waitForTrue(&entered, 200);
+            try expectStaysFalse(&finished, 50);
 
             _ = try ch.recv();
             t.join();
@@ -1289,9 +1434,8 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &finished });
 
-            Thread.sleep(80 * 1_000_000);
-            try testing.expect(entered.load(.acquire));
-            try testing.expect(!finished.load(.acquire));
+            try waitForTrue(&entered, 200);
+            try expectStaysFalse(&finished, 50);
 
             _ = try ch.send(42);
             t.join();
@@ -1324,18 +1468,20 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             var ch = try Ch.make(allocator, 0);
             defer ch.deinit();
 
+            var entered = Atomic(bool).init(false);
             var recv_ok = Atomic(bool).init(true);
             const t = try Thread.spawn(.{}, struct {
-                fn run(c: *Ch, flag: *Atomic(bool)) void {
+                fn run(c: *Ch, ent: *Atomic(bool), flag: *Atomic(bool)) void {
+                    ent.store(true, .release);
                     const r = c.recv() catch {
                         flag.store(false, .release);
                         return;
                     };
                     flag.store(r.ok, .release);
                 }
-            }.run, .{ &ch, &recv_ok });
+            }.run, .{ &ch, &entered, &recv_ok });
 
-            Thread.sleep(50 * 1_000_000);
+            try waitForTrue(&entered, 200);
             ch.close();
             t.join();
 
@@ -1346,18 +1492,20 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             var ch = try Ch.make(allocator, 0);
             defer ch.deinit();
 
+            var entered = Atomic(bool).init(false);
             var send_ok = Atomic(bool).init(true);
             const t = try Thread.spawn(.{}, struct {
-                fn run(c: *Ch, flag: *Atomic(bool)) void {
+                fn run(c: *Ch, ent: *Atomic(bool), flag: *Atomic(bool)) void {
+                    ent.store(true, .release);
                     const s = c.send(99) catch {
                         flag.store(false, .release);
                         return;
                     };
                     flag.store(s.ok, .release);
                 }
-            }.run, .{ &ch, &send_ok });
+            }.run, .{ &ch, &entered, &send_ok });
 
-            Thread.sleep(50 * 1_000_000);
+            try waitForTrue(&entered, 200);
             ch.close();
             t.join();
 

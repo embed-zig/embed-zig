@@ -223,6 +223,119 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             try waitForTrue(&wait_done, 300);
         }
 
+        fn singleServerWaitBlocksUntilQueryCompletes() !void {
+            const BoolAtomic = lib.atomic.Value(bool);
+
+            var pc = try Net.listenPacket(.{
+                .allocator = testing.allocator,
+                .address = addr4(0),
+            });
+            defer pc.deinit();
+
+            const impl = try pc.as(Net.UdpConn);
+            const port = try impl.boundPort();
+            var request_seen = BoolAtomic.init(false);
+            var server_thread = try Thread.spawn(.{}, struct {
+                fn run(server_pc: net_mod.PacketConn, seen: *BoolAtomic) void {
+                    var req_buf: [128]u8 = undefined;
+                    _ = server_pc.readFrom(&req_buf) catch return;
+                    seen.store(true, .release);
+                }
+            }.run, .{ pc, &request_seen });
+            defer server_thread.join();
+
+            var client = try Ntp.Client.init(testing.allocator, .{
+                .servers = &.{Ntp.Server.init(addr4(port))},
+                .timeout_ms = 200,
+            });
+            defer client.deinit();
+
+            var query_done = BoolAtomic.init(false);
+            var query_thread = try Thread.spawn(.{}, struct {
+                fn run(c: *Ntp.Client, done: *BoolAtomic) void {
+                    _ = c.query(lib.time.milliTimestamp()) catch {};
+                    done.store(true, .release);
+                }
+            }.run, .{ &client, &query_done });
+            defer query_thread.join();
+
+            try waitForTrue(&request_seen, 100);
+
+            var wait_done = BoolAtomic.init(false);
+            var wait_thread = try Thread.spawn(.{}, struct {
+                fn run(c: *Ntp.Client, done: *BoolAtomic) void {
+                    c.wait();
+                    done.store(true, .release);
+                }
+            }.run, .{ &client, &wait_done });
+            defer wait_thread.join();
+
+            Thread.sleep(20 * lib.time.ns_per_ms);
+            try testing.expect(!wait_done.load(.acquire));
+
+            try waitForTrue(&query_done, 1000);
+            try waitForTrue(&wait_done, 1000);
+        }
+
+        fn queryReturnsClosedAfterDeinitStarts() !void {
+            const BoolAtomic = lib.atomic.Value(bool);
+
+            var pc = try Net.listenPacket(.{
+                .allocator = testing.allocator,
+                .address = addr4(0),
+            });
+            defer pc.deinit();
+
+            const impl = try pc.as(Net.UdpConn);
+            const port = try impl.boundPort();
+            var request_seen = BoolAtomic.init(false);
+            var server_thread = try Thread.spawn(.{}, struct {
+                fn run(server_pc: net_mod.PacketConn, seen: *BoolAtomic) void {
+                    var req_buf: [128]u8 = undefined;
+                    _ = server_pc.readFrom(&req_buf) catch return;
+                    seen.store(true, .release);
+                }
+            }.run, .{ pc, &request_seen });
+            defer server_thread.join();
+
+            var client = try Ntp.Client.init(testing.allocator, .{
+                .servers = &.{Ntp.Server.init(addr4(port))},
+                .timeout_ms = 200,
+            });
+            var client_owned = true;
+            errdefer if (client_owned) client.deinit();
+
+            var first_query_done = BoolAtomic.init(false);
+            var first_query_thread = try Thread.spawn(.{}, struct {
+                fn run(c: *Ntp.Client, done: *BoolAtomic) void {
+                    _ = c.query(lib.time.milliTimestamp()) catch {};
+                    done.store(true, .release);
+                }
+            }.run, .{ &client, &first_query_done });
+            errdefer first_query_thread.join();
+
+            try waitForTrue(&request_seen, 100);
+
+            var deinit_done = BoolAtomic.init(false);
+            var deinit_thread = try Thread.spawn(.{}, struct {
+                fn run(c: *Ntp.Client, done: *BoolAtomic) void {
+                    c.deinit();
+                    done.store(true, .release);
+                }
+            }.run, .{ &client, &deinit_done });
+            client_owned = false;
+            errdefer deinit_thread.join();
+
+            try waitUntilDeiniting(lib, &client, 1000);
+            try testing.expectError(error.Closed, client.query(lib.time.milliTimestamp()));
+            try testing.expect(!deinit_done.load(.acquire));
+
+            try waitForTrue(&first_query_done, 1000);
+            try waitForTrue(&deinit_done, 1000);
+            first_query_thread.join();
+            deinit_thread.join();
+        }
+
         fn concurrentAliyunQueries() !void {
             const Shared = struct {
                 mutex: Thread.Mutex = .{},
@@ -264,5 +377,19 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
     try Runner.queryContextCanceledBeforeStart();
     try Runner.queryRaceContextCanceledBeforeStart();
     try Runner.queryRaceContextCancelStopsWorkersPromptly();
+    try Runner.singleServerWaitBlocksUntilQueryCompletes();
+    try Runner.queryReturnsClosedAfterDeinitStarts();
     try Runner.concurrentAliyunQueries();
+}
+
+fn waitUntilDeiniting(comptime l: type, client: anytype, timeout_ms: u32) !void {
+    var waited_ms: u32 = 0;
+    while (waited_ms < timeout_ms) : (waited_ms += 1) {
+        client.mutex.lock();
+        const deiniting = client.deiniting;
+        client.mutex.unlock();
+        if (deiniting) return;
+        l.Thread.sleep(l.time.ns_per_ms);
+    }
+    return error.Timeout;
 }

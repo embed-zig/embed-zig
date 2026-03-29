@@ -1,15 +1,14 @@
-#include <stdlib.h>
 #include "lvgl.h"
 
 lv_anim_t * embed_lv_anim_create(void) {
-    lv_anim_t * anim = (lv_anim_t *)malloc(sizeof(lv_anim_t));
+    lv_anim_t * anim = (lv_anim_t *)lv_malloc(sizeof(lv_anim_t));
     if(anim == NULL) return NULL;
     lv_anim_init(anim);
     return anim;
 }
 
 void embed_lv_anim_destroy(lv_anim_t * anim) {
-    free(anim);
+    lv_free(anim);
 }
 
 int32_t embed_lv_anim_get_start_value(const lv_anim_t * anim) {
@@ -49,9 +48,9 @@ uint8_t embed_lv_anim_get_early_apply(const lv_anim_t * anim) {
 }
 
 lv_subject_t * embed_lv_subject_create(void) {
-    return (lv_subject_t *)malloc(sizeof(lv_subject_t));
+    return (lv_subject_t *)lv_malloc(sizeof(lv_subject_t));
 }
 
 void embed_lv_subject_destroy(lv_subject_t * subject) {
-    free(subject);
+    lv_free(subject);
 }

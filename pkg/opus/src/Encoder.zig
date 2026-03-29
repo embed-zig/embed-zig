@@ -16,6 +16,7 @@ pub const Signal = types.Signal;
 pub const Bandwidth = types.Bandwidth;
 
 pub fn getSize(channels: u8) usize {
+    if (channels != 1 and channels != 2) return 0;
     return @intCast(binding.opus_encoder_get_size(@intCast(channels)));
 }
 
@@ -25,6 +26,8 @@ pub fn init(
     channels: u8,
     application: Application,
 ) (Error || embed.mem.Allocator.Error)!Self {
+    try validateChannels(channels);
+    try validateSampleRate(sample_rate);
     const size = getSize(channels);
     const mem = try allocator.alignedAlloc(u8, .@"16", size);
     errdefer allocator.free(mem);
@@ -55,6 +58,8 @@ pub fn frameSizeForMs(self: *const Self, ms: u32) u32 {
 }
 
 pub fn encode(self: *Self, pcm: []const i16, frame_size: u32, out: []u8) Error![]const u8 {
+    try self.validatePcmLen(pcm.len, frame_size);
+    try validateOutLen(out.len);
     const n = try opus_error.checkedPositive(binding.opus_encode(
         self.handle,
         pcm.ptr,
@@ -66,6 +71,8 @@ pub fn encode(self: *Self, pcm: []const i16, frame_size: u32, out: []u8) Error![
 }
 
 pub fn encodeFloat(self: *Self, pcm: []const f32, frame_size: u32, out: []u8) Error![]const u8 {
+    try self.validatePcmLen(pcm.len, frame_size);
+    try validateOutLen(out.len);
     const n = try opus_error.checkedPositive(binding.opus_encode_float(
         self.handle,
         pcm.ptr,
@@ -91,6 +98,7 @@ pub fn getBitrate(self: *Self) Error!u32 {
 }
 
 pub fn setComplexity(self: *Self, complexity: u4) Error!void {
+    if (complexity > 10) return Error.BadArg;
     try opus_error.checkError(binding.opus_encoder_ctl(self.handle, binding.OPUS_SET_COMPLEXITY_REQUEST, @as(c_int, complexity)));
 }
 
@@ -114,6 +122,30 @@ pub fn resetState(self: *Self) Error!void {
     try opus_error.checkError(binding.opus_encoder_ctl(self.handle, binding.OPUS_RESET_STATE));
 }
 
+fn validateChannels(channels: u8) Error!void {
+    if (channels != 1 and channels != 2) return Error.BadArg;
+}
+
+fn validateOutLen(out_len: usize) Error!void {
+    if (out_len == 0) return Error.BufferTooSmall;
+}
+
+fn validateSampleRate(sample_rate: u32) Error!void {
+    switch (sample_rate) {
+        8_000, 12_000, 16_000, 24_000, 48_000 => {},
+        else => return Error.BadArg,
+    }
+}
+
+fn validatePcmLen(self: *const Self, sample_count: usize, frame_size: u32) Error!void {
+    if (frame_size == 0) return Error.BadArg;
+    const channels: usize = self.channels;
+    const max_usize = ~@as(usize, 0);
+    const frame_samples: usize = @intCast(frame_size);
+    if (frame_samples > max_usize / channels) return Error.BadArg;
+    if (sample_count < frame_samples * channels) return Error.BadArg;
+}
+
 test "opus/unit_tests/Encoder/init_and_controls" {
     const std = @import("std");
     const testing = std.testing;
@@ -135,4 +167,37 @@ test "opus/unit_tests/Encoder/init_and_controls" {
     try encoder.setVbr(false);
     try encoder.setDtx(false);
     try encoder.resetState();
+}
+
+test "opus/unit_tests/Encoder/rejects_invalid_channels_and_short_pcm" {
+    const std = @import("std");
+    const testing = std.testing;
+
+    try testing.expectEqual(@as(usize, 0), getSize(3));
+    try testing.expectError(Error.BadArg, Self.init(testing.allocator, 48_000, 3, .audio));
+
+    var encoder = try Self.init(testing.allocator, 48_000, 2, .audio);
+    defer encoder.deinit(testing.allocator);
+
+    const frame_size = encoder.frameSizeForMs(20);
+    const too_short = [_]i16{0} ** 1919;
+    var valid_pcm: [1920]i16 = undefined;
+    for (&valid_pcm, 0..) |*sample, i| {
+        const lane: i32 = if (i % 2 == 0) -1 else 1;
+        sample.* = @intCast((@as(i32, @intCast(i % 113)) + 17) * 97 * lane);
+    }
+    var out: [1500]u8 = undefined;
+    const empty_out = [_]u8{};
+
+    try testing.expectError(Error.BadArg, encoder.encode(too_short[0..], frame_size, out[0..]));
+    try testing.expectError(Error.BadArg, encoder.encode(too_short[0..0], 0, out[0..]));
+    try testing.expectError(Error.BufferTooSmall, encoder.encode(valid_pcm[0..], frame_size, empty_out[0..]));
+    try testing.expectError(Error.BadArg, encoder.setComplexity(11));
+}
+
+test "opus/unit_tests/Encoder/rejects_invalid_sample_rate" {
+    const std = @import("std");
+    const testing = std.testing;
+
+    try testing.expectError(Error.BadArg, Self.init(testing.allocator, 44_100, 1, .audio));
 }

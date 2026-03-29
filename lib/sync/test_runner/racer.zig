@@ -48,6 +48,7 @@ fn runImpl(comptime lib: type, allocator: lib.mem.Allocator) !void {
     try spawnAllocatorTests(lib, allocator);
     try firstWinnerTests(lib, allocator);
     try raceContextTests(lib, allocator);
+    try cancelTests(lib, allocator);
     try doneAndWaitTests(lib, allocator);
     try exhaustedTests(lib, allocator);
     try initOomTests(lib);
@@ -56,23 +57,38 @@ fn runImpl(comptime lib: type, allocator: lib.mem.Allocator) !void {
 fn firstWinnerTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     const testing = lib.testing;
     const R = root.Racer(lib, u32);
+    const BoolAtomic = lib.atomic.Value(bool);
+    const U32Atomic = lib.atomic.Value(u32);
 
     var racer = try R.init(allocator);
     defer racer.deinit();
 
+    var started = U32Atomic.init(0);
+    var release = BoolAtomic.init(false);
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.State, l: type, delay_ms: u64, value: u32) void {
+        fn run(ctx: R.State, l: type, started_count: *U32Atomic, gate: *BoolAtomic, delay_ms: u64, value: u32) void {
+            _ = started_count.fetchAdd(1, .acq_rel);
+            while (!gate.load(.acquire)) {
+                l.Thread.sleep(l.time.ns_per_ms);
+            }
             l.Thread.sleep(delay_ms * l.time.ns_per_ms);
             _ = ctx.success(value);
         }
-    }.run, .{ lib, 20, 2 });
+    }.run, .{ lib, &started, &release, 20, 2 });
 
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.State, l: type, delay_ms: u64, value: u32) void {
+        fn run(ctx: R.State, l: type, started_count: *U32Atomic, gate: *BoolAtomic, delay_ms: u64, value: u32) void {
+            _ = started_count.fetchAdd(1, .acq_rel);
+            while (!gate.load(.acquire)) {
+                l.Thread.sleep(l.time.ns_per_ms);
+            }
             l.Thread.sleep(delay_ms * l.time.ns_per_ms);
             _ = ctx.success(value);
         }
-    }.run, .{ lib, 5, 1 });
+    }.run, .{ lib, &started, &release, 5, 1 });
+
+    try waitForCount(lib, &started, 2, 200);
+    release.store(true, .release);
 
     switch (racer.race()) {
         .winner => |value| try testing.expectEqual(@as(u32, 1), value),
@@ -148,9 +164,7 @@ fn raceContextTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
         var timeout_ctx = try context.withTimeout(context.background(), 200 * lib.time.ns_per_ms);
         defer timeout_ctx.deinit();
 
-        if (timeout_ctx.deadline() == null) {
-            log.err("raceContext: timeout winner missing deadline", .{});
-        }
+        if (timeout_ctx.deadline() == null) return error.ExpectedDeadline;
 
         if (racer.raceContext(timeout_ctx)) |result| {
             switch (result) {
@@ -207,9 +221,7 @@ fn raceContextTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
         var timeout_ctx = try context.withTimeout(context.background(), 5 * lib.time.ns_per_ms);
         defer timeout_ctx.deinit();
 
-        if (timeout_ctx.deadline() == null) {
-            log.err("raceContext: short timeout missing deadline", .{});
-        }
+        if (timeout_ctx.deadline() == null) return error.ExpectedDeadline;
 
         if (racer.raceContext(timeout_ctx)) |result| {
             switch (result) {
@@ -276,6 +288,132 @@ fn exhaustedTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
 
     racer.wait();
     racer.wait();
+}
+
+fn cancelTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
+    const testing = lib.testing;
+    const Context = context_mod.make(lib);
+    const R = root.Racer(lib, u32);
+    const BoolAtomic = lib.atomic.Value(bool);
+
+    const Flags = struct {
+        saw_done: BoolAtomic = BoolAtomic.init(false),
+        success_rejected: BoolAtomic = BoolAtomic.init(false),
+        finished: BoolAtomic = BoolAtomic.init(false),
+    };
+
+    {
+        var racer = try R.init(allocator);
+        defer racer.deinit();
+
+        var flags = Flags{};
+        try racer.spawn(.{}, struct {
+            fn run(ctx: R.State, l: type, f: *Flags) void {
+                while (!ctx.done()) {
+                    l.Thread.sleep(l.time.ns_per_ms);
+                }
+
+                f.saw_done.store(true, .release);
+                f.success_rejected.store(!ctx.success(99), .release);
+                f.finished.store(true, .release);
+            }
+        }.run, .{ lib, &flags });
+
+        var cancel_thread = try lib.Thread.spawn(.{}, struct {
+            fn run(r: *R, l: type) void {
+                l.Thread.sleep(5 * l.time.ns_per_ms);
+                r.cancel();
+            }
+        }.run, .{ &racer, lib });
+        defer cancel_thread.join();
+
+        switch (racer.race()) {
+            .winner => return error.UnexpectedWinner,
+            .exhausted => {},
+        }
+
+        try testing.expect(racer.done());
+        try testing.expectEqual(@as(?u32, null), racer.value());
+        try waitForTrue(lib, &flags.saw_done, 200);
+        try testing.expect(flags.success_rejected.load(.acquire));
+        try testing.expect(flags.finished.load(.acquire));
+
+        racer.wait();
+        racer.wait();
+    }
+
+    {
+        var context = try Context.init(allocator);
+        defer context.deinit();
+
+        var racer = try R.init(allocator);
+        defer racer.deinit();
+
+        var flags = Flags{};
+        try racer.spawn(.{}, struct {
+            fn run(ctx: R.State, l: type, f: *Flags) void {
+                while (!ctx.done()) {
+                    l.Thread.sleep(l.time.ns_per_ms);
+                }
+
+                f.saw_done.store(true, .release);
+                f.success_rejected.store(!ctx.success(123), .release);
+                f.finished.store(true, .release);
+            }
+        }.run, .{ lib, &flags });
+
+        var cancel_thread = try lib.Thread.spawn(.{}, struct {
+            fn run(r: *R, l: type) void {
+                l.Thread.sleep(5 * l.time.ns_per_ms);
+                r.cancel();
+            }
+        }.run, .{ &racer, lib });
+        defer cancel_thread.join();
+
+        switch (try racer.raceContext(context.background())) {
+            .winner => return error.UnexpectedWinner,
+            .exhausted => {},
+        }
+
+        try testing.expect(racer.done());
+        try testing.expectEqual(@as(?u32, null), racer.value());
+        try waitForTrue(lib, &flags.saw_done, 200);
+        try testing.expect(flags.success_rejected.load(.acquire));
+        try testing.expect(flags.finished.load(.acquire));
+
+        racer.wait();
+        racer.wait();
+    }
+
+    {
+        var racer = try R.init(allocator);
+        defer racer.deinit();
+
+        var finished = BoolAtomic.init(false);
+        try racer.spawn(.{}, struct {
+            fn run(ctx: R.State, l: type, fin: *BoolAtomic) void {
+                while (!ctx.done()) {
+                    l.Thread.sleep(l.time.ns_per_ms);
+                }
+                l.Thread.sleep(5 * l.time.ns_per_ms);
+                fin.store(true, .release);
+            }
+        }.run, .{ lib, &finished });
+
+        var cancel_thread = try lib.Thread.spawn(.{}, struct {
+            fn run(r: *R, l: type) void {
+                l.Thread.sleep(5 * l.time.ns_per_ms);
+                r.cancel();
+            }
+        }.run, .{ &racer, lib });
+
+        racer.wait();
+        cancel_thread.join();
+
+        try testing.expect(racer.done());
+        try testing.expect(finished.load(.acquire));
+        try testing.expectEqual(@as(?u32, null), racer.value());
+    }
 }
 
 fn doneAndWaitTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
@@ -395,6 +533,15 @@ fn waitForTrue(comptime lib: type, flag: *lib.atomic.Value(bool), timeout_ms: u6
         lib.Thread.sleep(lib.time.ns_per_ms);
     }
     return error.TimeoutWaitingForFlag;
+}
+
+fn waitForCount(comptime lib: type, count: *lib.atomic.Value(u32), expected: u32, timeout_ms: u64) !void {
+    var elapsed_ms: u64 = 0;
+    while (elapsed_ms < timeout_ms) : (elapsed_ms += 1) {
+        if (count.load(.acquire) >= expected) return;
+        lib.Thread.sleep(lib.time.ns_per_ms);
+    }
+    return error.TimeoutWaitingForCount;
 }
 
 fn allocatorAlignment(comptime lib: type) type {

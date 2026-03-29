@@ -31,10 +31,12 @@ pub fn CancelContext(comptime lib: type) type {
                     .parent = parent,
                 },
                 .tree_rw = internal.treeLock(parent, RwLock),
-                .cause = parent.err(),
             };
-            if (self.cause == null) {
-                internal.attachChild(parent, ctx);
+
+            internal.attachChild(parent, ctx);
+
+            if (parent.err()) |cause| {
+                self.markCanceled(cause);
             }
             return ctx;
         }
@@ -107,16 +109,22 @@ pub fn CancelContext(comptime lib: type) type {
 
         fn cancelImpl(ptr: *anyopaque) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
+            self.tree_rw.lockShared();
+            defer self.tree_rw.unlockShared();
             self.markCanceled(Context.Canceled);
         }
 
         fn cancelWithCauseImpl(ptr: *anyopaque, cause: anyerror) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
+            self.tree_rw.lockShared();
+            defer self.tree_rw.unlockShared();
             self.markCanceled(cause);
         }
 
         fn propagateCancelWithCauseImpl(ptr: *anyopaque, cause: anyerror) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
+            self.tree_rw.lockShared();
+            defer self.tree_rw.unlockShared();
             self.markCanceled(cause);
         }
 
