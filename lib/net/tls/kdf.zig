@@ -1,5 +1,5 @@
-pub fn Make(comptime lib: type) type {
-    const common = @import("common.zig").Make(lib);
+pub fn make(comptime lib: type) type {
+    const common = @import("common.zig").make(lib);
     const crypto = lib.crypto;
     const debug = lib.debug;
     const mem = lib.mem;
@@ -367,18 +367,18 @@ pub fn Make(comptime lib: type) type {
     };
 }
 
-test "Kdf hkdfExpandLabel sha256 basic" {
+test "net/unit_tests/tls/kdf/Kdf_hkdfExpandLabel_sha256_basic" {
     const std = @import("std");
-    const K = Make(std);
+    const K = make(std);
 
     const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x01} ** K.HkdfSha256.prk_length;
     const result = K.hkdfExpandLabelSha256(secret, "key", "", 16);
     try std.testing.expectEqual(@as(usize, 16), result.len);
 }
 
-test "Kdf hkdfExpandLabel is deterministic" {
+test "net/unit_tests/tls/kdf/Kdf_hkdfExpandLabel_is_deterministic" {
     const std = @import("std");
-    const K = Make(std);
+    const K = make(std);
 
     const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x05} ** K.HkdfSha256.prk_length;
     const r1 = K.hkdfExpandLabelSha256(secret, "key", "", 16);
@@ -386,9 +386,9 @@ test "Kdf hkdfExpandLabel is deterministic" {
     try std.testing.expectEqualSlices(u8, &r1, &r2);
 }
 
-test "Kdf deriveSecret changes with label" {
+test "net/unit_tests/tls/kdf/Kdf_deriveSecret_changes_with_label" {
     const std = @import("std");
-    const K = Make(std);
+    const K = make(std);
 
     const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x11} ** K.HkdfSha256.prk_length;
     const transcript: [K.Sha256.digest_length]u8 = [_]u8{0x22} ** K.Sha256.digest_length;
@@ -398,9 +398,9 @@ test "Kdf deriveSecret changes with label" {
     try std.testing.expect(!std.mem.eql(u8, &c_hs, &s_hs));
 }
 
-test "Kdf finishedVerifyData is deterministic" {
+test "net/unit_tests/tls/kdf/Kdf_finishedVerifyData_is_deterministic" {
     const std = @import("std");
-    const K = Make(std);
+    const K = make(std);
 
     const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x33} ** K.HkdfSha256.prk_length;
     const transcript: [K.Sha256.digest_length]u8 = [_]u8{0x44} ** K.Sha256.digest_length;
@@ -410,9 +410,9 @@ test "Kdf finishedVerifyData is deterministic" {
     try std.testing.expectEqualSlices(u8, &v1, &v2);
 }
 
-test "Kdf tls12Prf produces non-zero output" {
+test "net/unit_tests/tls/kdf/Kdf_tls12Prf_produces_non_zero_output" {
     const std = @import("std");
-    const K = Make(std);
+    const K = make(std);
 
     var out: [48]u8 = undefined;
     K.tls12PrfSha256(&out, "pre-master-secret", "master secret", "seed");
@@ -420,9 +420,9 @@ test "Kdf tls12Prf produces non-zero output" {
     try std.testing.expect(!std.mem.allEqual(u8, &out, 0));
 }
 
-test "Kdf transcript hash peek does not consume state" {
+test "net/unit_tests/tls/kdf/Kdf_transcript_hash_peek_does_not_consume_state" {
     const std = @import("std");
-    const K = Make(std);
+    const K = make(std);
 
     var tx = K.TranscriptHash(K.Sha256).init();
     tx.update("hel");
@@ -437,9 +437,9 @@ test "Kdf transcript hash peek does not consume state" {
     try std.testing.expectEqualSlices(u8, &expected, &finaled);
 }
 
-test "Kdf sha384 finished verify data matches std tls helpers" {
+test "net/unit_tests/tls/kdf/Kdf_sha384_finished_verify_data_matches_std_tls_helpers" {
     const std = @import("std");
-    const K = Make(std);
+    const K = make(std);
     const HmacSha384 = std.crypto.auth.hmac.sha2.HmacSha384;
     const HkdfSha384 = std.crypto.kdf.hkdf.Hkdf(HmacSha384);
 

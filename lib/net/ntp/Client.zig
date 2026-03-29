@@ -2,11 +2,15 @@ const std = @import("std");
 const context_mod = @import("context");
 const sync = @import("sync");
 const net_mod = @import("../../net.zig");
+const fd_mod = @import("../fd.zig");
+const sockaddr_mod = @import("../fd/SockAddr.zig");
 
 pub fn Client(comptime lib: type, comptime ntp: type) type {
-    const Net = net_mod.Make(lib);
-    const Addr = lib.net.Address;
+    const Net = net_mod.make(lib);
+    const Addr = net_mod.netip.AddrPort;
+    const IpAddr = net_mod.netip.Addr;
     const Allocator = lib.mem.Allocator;
+    const SockAddr = sockaddr_mod.SockAddr(lib);
     const Thread = lib.Thread;
     const PacketConn = net_mod.PacketConn;
     const WorkerRacer = sync.Racer(lib, ntp.Response);
@@ -29,7 +33,7 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
             }
 
             pub fn initIp(comptime ip: []const u8) Server {
-                return .{ .addr = comptime Addr.parseIp(ip, ntp.NTP_PORT) catch unreachable };
+                return .{ .addr = Addr.init(comptime IpAddr.parse(ip) catch unreachable, ntp.NTP_PORT) };
             }
         };
 
@@ -40,7 +44,7 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
         };
 
         pub const Options = struct {
-            servers: []const Server = &.{Servers.aliyun, Servers.cloudflare, Servers.google},
+            servers: []const Server = &.{ Servers.aliyun, Servers.cloudflare, Servers.google },
             timeout_ms: u32 = 5000,
             spawn_config: Thread.SpawnConfig = .{},
         };
@@ -113,7 +117,7 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
         }
 
         pub fn query(self: *Self, origin_time_ms: i64) anyerror!ntp.Response {
-            const Context = context_mod.Make(lib);
+            const Context = context_mod.make(lib);
             var context_api = try Context.init(self.allocator);
             defer context_api.deinit();
             return self.queryContext(context_api.background(), origin_time_ms);
@@ -126,7 +130,7 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
         }
 
         pub fn queryServer(self: *Self, server: Server, origin_time_ms: i64) anyerror!ntp.Response {
-            const Context = context_mod.Make(lib);
+            const Context = context_mod.make(lib);
             var context_api = try Context.init(self.allocator);
             defer context_api.deinit();
             return self.queryServerContext(context_api.background(), server, origin_time_ms);
@@ -148,7 +152,7 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
         }
 
         pub fn queryRace(self: *Self, origin_time_ms: i64) anyerror!ntp.Response {
-            const Context = context_mod.Make(lib);
+            const Context = context_mod.make(lib);
             var context_api = try Context.init(self.allocator);
             defer context_api.deinit();
             return self.queryRaceContext(context_api.background(), origin_time_ms);
@@ -192,6 +196,7 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
             if (spawned == 0) return spawn_err orelse error.NoServerConfigured;
 
             const race_result = job.racer.raceContext(ctx) catch |err| {
+                job.racer.cancel();
                 if (self.beginCleanup(job)) {
                     owns_job = false;
                 } else {
@@ -243,7 +248,8 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
 
             const write_timeout_ms = initialWriteTimeoutMs(ctx, self.options.timeout_ms);
             pc.setWriteTimeout(write_timeout_ms);
-            const sent = pc.writeTo(request[0..], @ptrCast(&server.addr.any), server.addr.getOsSockLen()) catch return error.SendFailed;
+            const encoded = SockAddr.encode(server.addr) catch return error.SendFailed;
+            const sent = pc.writeTo(request[0..], @ptrCast(&encoded.storage), encoded.len) catch return error.SendFailed;
             if (sent != request.len) return error.SendFailed;
 
             const started_ms = lib.time.milliTimestamp();
@@ -257,8 +263,8 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
                 const result = pc.readFrom(&recv_buf) catch |err| switch (err) {
                     error.TimedOut => {
                         if (ctx.err()) |cause| return cause;
-                        if (ctx.deadline()) |deadline_ms| {
-                            if (deadline_ms <= lib.time.milliTimestamp()) return error.DeadlineExceeded;
+                        if (ctx.deadline()) |deadline_ns| {
+                            if (deadline_ns <= lib.time.nanoTimestamp()) return error.DeadlineExceeded;
                         }
                         if (queryTimedOut(started_ms, self.options.timeout_ms)) return error.Timeout;
                         continue;
@@ -286,7 +292,8 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
             const expected_origin = ntp.unixMsToNtp(origin_time_ms);
 
             pc.setWriteTimeout(if (self.options.timeout_ms == 0) 1 else self.options.timeout_ms);
-            const sent = pc.writeTo(request[0..], @ptrCast(&server.addr.any), server.addr.getOsSockLen()) catch return error.SendFailed;
+            const encoded = SockAddr.encode(server.addr) catch return error.SendFailed;
+            const sent = pc.writeTo(request[0..], @ptrCast(&encoded.storage), encoded.len) catch return error.SendFailed;
             if (sent != request.len) return error.SendFailed;
 
             const started_ms = lib.time.milliTimestamp();
@@ -323,29 +330,22 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
         }
 
         fn anyAddressFor(addr: Addr) Addr {
-            return switch (addr.any.family) {
-                lib.posix.AF.INET => Addr.initIp4(.{ 0, 0, 0, 0 }, 0),
-                lib.posix.AF.INET6 => Addr.initIp6(.{0} ** 16, 0, 0, 0),
-                else => unreachable,
-            };
+            if (addr.addr().is4()) return Addr.from4(.{ 0, 0, 0, 0 }, 0);
+            if (addr.addr().is6()) return Addr.init(IpAddr.from16(.{0} ** 16), 0);
+            unreachable;
         }
 
         fn addrMatches(result: PacketConn.ReadFromResult, expected: Addr) bool {
-            const expected_len = expected.getOsSockLen();
+            const encoded = SockAddr.encode(expected) catch return false;
+            const expected_len = encoded.len;
             if (result.addr_len != expected_len) return false;
-
-            const expected_bytes: []const u8 = switch (expected.any.family) {
-                lib.posix.AF.INET => std.mem.asBytes(&expected.in.sa)[0..expected_len],
-                lib.posix.AF.INET6 => std.mem.asBytes(&expected.in6.sa)[0..expected_len],
-                else => return false,
-            };
-            return std.mem.eql(u8, result.addr[0..expected_len], expected_bytes);
+            return std.mem.eql(u8, result.addr[0..expected_len], std.mem.asBytes(&encoded.storage)[0..expected_len]);
         }
 
         fn initialWriteTimeoutMs(ctx: context_mod.Context, timeout_ms: u32) ?u32 {
             if (timeout_ms == 0) return 1;
-            if (ctx.deadline()) |deadline_ms| {
-                const remaining = deadline_ms - lib.time.milliTimestamp();
+            if (ctx.deadline()) |deadline_ns| {
+                const remaining = @divFloor(deadline_ns - lib.time.nanoTimestamp(), lib.time.ns_per_ms);
                 if (remaining <= 0) return 1;
                 return @intCast(@max(@as(i64, 1), @min(@as(i64, timeout_ms), remaining)));
             }
@@ -359,8 +359,8 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
             if (remaining_query <= 0) return null;
 
             var remaining_ms = remaining_query;
-            if (ctx.deadline()) |deadline_ms| {
-                const remaining_ctx = deadline_ms - now_ms;
+            if (ctx.deadline()) |deadline_ns| {
+                const remaining_ctx: i64 = @intCast(@divFloor(deadline_ns - lib.time.nanoTimestamp(), lib.time.ns_per_ms));
                 if (remaining_ctx <= 0) return null;
                 remaining_ms = @min(remaining_ms, remaining_ctx);
             }
@@ -383,16 +383,16 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
 
         fn timeoutForContext(ctx: context_mod.Context) anyerror {
             if (ctx.err()) |err| return err;
-            if (ctx.deadline()) |deadline_ms| {
-                if (deadline_ms <= lib.time.milliTimestamp()) return error.DeadlineExceeded;
+            if (ctx.deadline()) |deadline_ns| {
+                if (deadline_ns <= lib.time.nanoTimestamp()) return error.DeadlineExceeded;
             }
             return error.Timeout;
         }
 
         fn ensureContextActive(ctx: context_mod.Context) anyerror!void {
             if (ctx.err()) |err| return err;
-            if (ctx.deadline()) |deadline_ms| {
-                if (deadline_ms <= lib.time.milliTimestamp()) return error.DeadlineExceeded;
+            if (ctx.deadline()) |deadline_ns| {
+                if (deadline_ns <= lib.time.nanoTimestamp()) return error.DeadlineExceeded;
             }
         }
 

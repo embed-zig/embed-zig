@@ -1,5 +1,5 @@
-pub fn Make(comptime lib: type) type {
-    const common = @import("common.zig").Make(lib);
+pub fn make(comptime lib: type) type {
+    const common = @import("common.zig").make(lib);
 
     return struct {
         pub const AlertError = error{
@@ -122,10 +122,10 @@ pub fn Make(comptime lib: type) type {
     };
 }
 
-test "alert parse and serialize roundtrip" {
+test "net/unit_tests/tls/alert/parse_and_serialize_roundtrip" {
     const std = @import("std");
-    const common = @import("common.zig").Make(std);
-    const alert = Make(std);
+    const common = @import("common.zig").make(std);
+    const alert = make(std);
 
     const expected = common.Alert{
         .level = .fatal,
@@ -140,23 +140,23 @@ test "alert parse and serialize roundtrip" {
     try std.testing.expectEqual(expected.description, parsed.description);
 }
 
-test "alert maps common protocol alerts" {
+test "net/unit_tests/tls/alert/maps_common_protocol_alerts" {
     const std = @import("std");
-    const common = @import("common.zig").Make(std);
-    const alert = Make(std);
+    const common = @import("common.zig").make(std);
+    const alert = make(std);
 
     try std.testing.expectEqual(error.NoApplicationProtocol, alert.alertToError(.no_application_protocol));
     try std.testing.expectEqual(common.AlertDescription.handshake_failure, alert.errorToAlert(error.HandshakeFailure));
 }
 
-test "parseAlert rejects short payloads" {
+test "net/unit_tests/tls/alert/parseAlert_rejects_short_payloads" {
     const std = @import("std");
-    const alert = Make(std);
+    const alert = make(std);
     try std.testing.expectError(error.DecodeError, alert.parseAlert(&.{0x02}));
 }
 
-test "parseAlert rejects invalid alert level" {
+test "net/unit_tests/tls/alert/parseAlert_rejects_invalid_alert_level" {
     const std = @import("std");
-    const alert = Make(std);
+    const alert = make(std);
     try std.testing.expectError(error.DecodeError, alert.parseAlert(&.{ 0x03, 0x0a }));
 }

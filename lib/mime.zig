@@ -14,6 +14,6 @@ pub fn format(media_type: MediaType, writer: anytype) !void {
     return media_type.format(writer);
 }
 
-test {
+test "mime/unit_tests" {
     _ = @import("mime/MediaType.zig");
 }

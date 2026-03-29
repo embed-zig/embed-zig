@@ -161,7 +161,7 @@ pub fn stopScanning(self: *CBCentral) void {
 
 // ---- connect ----
 
-pub fn connect(self: *CBCentral, addr: Central.BdAddr, _: Central.AddrType, _: Central.ConnParams) Central.ConnectError!void {
+pub fn connect(self: *CBCentral, addr: Central.BdAddr, _: Central.AddrType, _: Central.ConnParams) Central.ConnectError!Central.ConnectionInfo {
     if (!self.started) self.start() catch return error.Unexpected;
 
     self.mutex.lock();
@@ -189,8 +189,23 @@ pub fn connect(self: *CBCentral, addr: Central.BdAddr, _: Central.AddrType, _: C
         .unexpected => error.Unexpected,
         else => error.Rejected,
     };
-
     self.state = .connected;
+
+    self.mutex.lock();
+    defer self.mutex.unlock();
+    for (self.peripherals.items) |slot| {
+        if (slot.peripheral != null and std.mem.eql(u8, &slot.addr, &addr)) {
+            return .{
+                .conn_handle = slot.handle,
+                .peer_addr = slot.addr,
+                .peer_addr_type = .public,
+                .interval = 0,
+                .latency = 0,
+                .timeout = 0,
+            };
+        }
+    }
+    return error.Unexpected;
 }
 
 pub fn disconnect(self: *CBCentral, conn_handle: u16) void {

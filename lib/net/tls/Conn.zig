@@ -1,11 +1,11 @@
 const NetConn = @import("../Conn.zig");
 
 pub fn Conn(comptime lib: type) type {
-    const common = @import("common.zig").Make(lib);
-    const alert = @import("alert.zig").Make(lib);
-    const kdf = @import("kdf.zig").Make(lib);
-    const record = @import("record.zig").Make(lib);
-    const client_handshake = @import("client_handshake.zig").Make(lib);
+    const common = @import("common.zig").make(lib);
+    const alert = @import("alert.zig").make(lib);
+    const kdf = @import("kdf.zig").make(lib);
+    const record = @import("record.zig").make(lib);
+    const client_handshake = @import("client_handshake.zig").make(lib);
     const Allocator = lib.mem.Allocator;
     const Mutex = lib.Thread.Mutex;
     const BundleRescanReturn = @typeInfo(@TypeOf(lib.crypto.Certificate.Bundle.rescan)).@"fn".return_type.?;
@@ -19,13 +19,14 @@ pub fn Conn(comptime lib: type) type {
             min_version: common.ProtocolVersion = .tls_1_2,
             max_version: common.ProtocolVersion = .tls_1_3,
             verification: ?client_handshake.VerificationMode = null,
+            tls12_cipher_suites: []const common.CipherSuite = &common.DEFAULT_TLS12_CIPHER_SUITES,
             tls13_cipher_suites: []const common.CipherSuite = &common.DEFAULT_TLS13_CIPHER_SUITES,
         };
 
         pub const HandshakeError = client_handshake.HandshakeError;
         pub const VerificationMode = client_handshake.VerificationMode;
         pub const InitError = Allocator.Error || HandshakeError || BundleRescanError || error{InvalidConfig};
-        
+
         allocator: Allocator,
         inner: NetConn,
         handshake_state: client_handshake.ClientHandshake(NetConn),
@@ -40,6 +41,7 @@ pub fn Conn(comptime lib: type) type {
         pending_end: usize = 0,
         read_record_buf: [common.MAX_CIPHERTEXT_LEN_TLS12]u8 = undefined,
         write_record_buf: [common.MAX_CIPHERTEXT_LEN_TLS12]u8 = undefined,
+        write_plaintext_buf: [common.MAX_PLAINTEXT_LEN + 1]u8 = undefined,
         plaintext_buf: [common.MAX_PLAINTEXT_LEN + 1]u8 = undefined,
         handshake_buf: [common.MAX_HANDSHAKE_LEN]u8 = undefined,
 
@@ -97,8 +99,9 @@ pub fn Conn(comptime lib: type) type {
             }
 
             while (true) {
-                const res = self.handshake_state.records.readRecord(&self.read_record_buf, &self.plaintext_buf) catch {
-                    return error.Unexpected;
+                const res = self.handshake_state.records.readRecord(&self.read_record_buf, &self.plaintext_buf) catch |err| switch (err) {
+                    error.TimedOut => return error.TimedOut,
+                    else => return error.Unexpected,
                 };
                 switch (res.content_type) {
                     .application_data => {
@@ -146,8 +149,14 @@ pub fn Conn(comptime lib: type) type {
             defer self.write_mu.unlock();
 
             const chunk_len = @min(buf.len, common.MAX_PLAINTEXT_LEN);
-            _ = self.handshake_state.records.writeRecord(.application_data, buf[0..chunk_len], &self.write_record_buf) catch {
-                return error.Unexpected;
+            _ = self.handshake_state.records.writeRecord(
+                .application_data,
+                buf[0..chunk_len],
+                &self.write_record_buf,
+                &self.write_plaintext_buf,
+            ) catch |err| switch (err) {
+                error.TimedOut => return error.TimedOut,
+                else => return error.Unexpected,
             };
             return chunk_len;
         }
@@ -246,7 +255,11 @@ pub fn Conn(comptime lib: type) type {
                 .handshake,
                 self.handshake_buf[0..total_len],
                 &self.write_record_buf,
-            ) catch return error.Unexpected;
+                &self.write_plaintext_buf,
+            ) catch |err| switch (err) {
+                error.TimedOut => return error.TimedOut,
+                else => return error.Unexpected,
+            };
 
             self.handshake_state.client_application_traffic_secret = try nextTrafficSecret(
                 self,
@@ -334,13 +347,13 @@ pub fn Conn(comptime lib: type) type {
         fn sendCloseNotify(self: *Self) void {
             self.write_mu.lock();
             defer self.write_mu.unlock();
-            self.handshake_state.records.sendAlert(.warning, .close_notify, &self.write_record_buf) catch {};
+            self.handshake_state.records.sendAlert(.warning, .close_notify, &self.write_record_buf, &self.write_plaintext_buf) catch {};
         }
 
         fn sendFatalAlert(self: *Self, description: common.AlertDescription) void {
             self.write_mu.lock();
             defer self.write_mu.unlock();
-            self.handshake_state.records.sendAlert(.fatal, description, &self.write_record_buf) catch {};
+            self.handshake_state.records.sendAlert(.fatal, description, &self.write_record_buf, &self.write_plaintext_buf) catch {};
         }
 
         fn handshakeErrorToAlert(err: HandshakeError) common.AlertDescription {
@@ -376,6 +389,7 @@ pub fn Conn(comptime lib: type) type {
                 .verification = verification,
                 .min_version = config.min_version,
                 .max_version = config.max_version,
+                .tls12_cipher_suites = config.tls12_cipher_suites,
                 .tls13_cipher_suites = config.tls13_cipher_suites,
             });
             return NetConn.init(self);
@@ -384,6 +398,8 @@ pub fn Conn(comptime lib: type) type {
         fn validateConfig(config: Config) InitError!void {
             if (config.server_name.len == 0) return error.InvalidConfig;
             if (@intFromEnum(config.min_version) > @intFromEnum(config.max_version)) return error.InvalidConfig;
+            if (!common.validateTls12CipherSuites(config.tls12_cipher_suites)) return error.InvalidConfig;
+            if (!common.validateTls13CipherSuites(config.tls13_cipher_suites)) return error.InvalidConfig;
         }
 
         fn resolveVerificationMode(self: *Self, config: Config) InitError!client_handshake.VerificationMode {
@@ -398,14 +414,14 @@ pub fn Conn(comptime lib: type) type {
     };
 }
 
-test "tls client conn type-erases and writes application data" {
+test "net/unit_tests/tls/Conn/client_conn_type_erases_and_writes_application_data" {
     const std = @import("std");
     const ConnType = Conn(std);
-    const C = @import("common.zig").Make(std);
-    const E = @import("extensions.zig").Make(std);
-    const K = @import("kdf.zig").Make(std);
-    const R = @import("record.zig").Make(std);
-    const CH = @import("client_handshake.zig").Make(std);
+    const C = @import("common.zig").make(std);
+    const E = @import("extensions.zig").make(std);
+    const K = @import("kdf.zig").make(std);
+    const R = @import("record.zig").make(std);
+    const CH = @import("client_handshake.zig").make(std);
     const fixtures = @import("test_fixtures.zig");
     const Ecdsa = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 
@@ -516,7 +532,8 @@ test "tls client conn type-erases and writes application data" {
             try server_hello_header.serialize(server_hello[0..C.HandshakeHeader.SIZE]);
 
             var record_buf: [C.MAX_CIPHERTEXT_LEN_TLS12]u8 = undefined;
-            _ = try plain_records.writeRecord(.handshake, server_hello[0..pos], &record_buf);
+            var write_plaintext_buf: [C.MAX_PLAINTEXT_LEN + 1]u8 = undefined;
+            _ = try plain_records.writeRecord(.handshake, server_hello[0..pos], &record_buf, &write_plaintext_buf);
             try hs.processHandshake(server_hello[0..pos]);
 
             var encrypted_records = R.RecordLayer(*SinkConn).init(&sink);
@@ -531,7 +548,7 @@ test "tls client conn type-erases and writes application data" {
                 0x00,
                 0x00,
             };
-            _ = try encrypted_records.writeRecord(.handshake, &encrypted_extensions, &record_buf);
+            _ = try encrypted_records.writeRecord(.handshake, &encrypted_extensions, &record_buf, &write_plaintext_buf);
             try hs.processHandshake(&encrypted_extensions);
 
             var certificate_msg: [4 + 1 + 3 + 3 + fixtures.self_signed_cert_der.len + 2]u8 = undefined;
@@ -551,7 +568,7 @@ test "tls client conn type-erases and writes application data" {
                 .length = @intCast(cert_pos - 4),
             };
             try certificate_header.serialize(certificate_msg[0..4]);
-            _ = try encrypted_records.writeRecord(.handshake, certificate_msg[0..cert_pos], &record_buf);
+            _ = try encrypted_records.writeRecord(.handshake, certificate_msg[0..cert_pos], &record_buf, &write_plaintext_buf);
             try hs.processHandshake(certificate_msg[0..cert_pos]);
 
             const context_string = "TLS 1.3, server CertificateVerify";
@@ -581,7 +598,7 @@ test "tls client conn type-erases and writes application data" {
                 .length = @intCast(cv_pos - 4),
             };
             try cert_verify_header.serialize(cert_verify_msg[0..4]);
-            _ = try encrypted_records.writeRecord(.handshake, cert_verify_msg[0..cv_pos], &record_buf);
+            _ = try encrypted_records.writeRecord(.handshake, cert_verify_msg[0..cv_pos], &record_buf, &write_plaintext_buf);
             try hs.processHandshake(cert_verify_msg[0..cv_pos]);
 
             const finished_key = std.crypto.tls.hkdfExpandLabel(
@@ -605,7 +622,7 @@ test "tls client conn type-erases and writes application data" {
             };
             try server_finished_header.serialize(server_finished[0..4]);
             @memcpy(server_finished[4..], &expected_server_verify_data);
-            _ = try encrypted_records.writeRecord(.handshake, &server_finished, &record_buf);
+            _ = try encrypted_records.writeRecord(.handshake, &server_finished, &record_buf, &write_plaintext_buf);
         }
     };
 
@@ -629,7 +646,7 @@ test "tls client conn type-erases and writes application data" {
     try std.testing.expect(raw.write_len > 0);
 }
 
-test "tls config accepts tls12-only client range" {
+test "net/unit_tests/tls/Conn/config_accepts_tls12_only_client_range" {
     const std = @import("std");
     const ConnType = Conn(std);
 

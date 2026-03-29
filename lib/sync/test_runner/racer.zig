@@ -10,27 +10,54 @@
 
 const root = @import("../../sync.zig");
 const context_mod = @import("context");
+const embed = @import("embed");
+const testing_api = @import("testing");
 
-pub fn run(comptime lib: type) !void {
-    const log = lib.log.scoped(.racer);
+pub fn make(comptime lib: type) testing_api.TestRunner {
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    log.info("=== racer test_runner start ===", .{});
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            runImpl(lib, allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    try spawnAllocatorTests(lib);
-    try firstWinnerTests(lib);
-    try raceContextTests(lib);
-    try doneAndWaitTests(lib);
-    try exhaustedTests(lib);
-    try initOomTests(lib);
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
+        }
+    };
 
-    log.info("=== racer test_runner done ===", .{});
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{};
+    return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-fn firstWinnerTests(comptime lib: type) !void {
+pub fn run(comptime lib: type) !void {
+    try runImpl(lib, lib.testing.allocator);
+}
+
+fn runImpl(comptime lib: type, allocator: lib.mem.Allocator) !void {
+    try spawnAllocatorTests(lib, allocator);
+    try firstWinnerTests(lib, allocator);
+    try raceContextTests(lib, allocator);
+    try doneAndWaitTests(lib, allocator);
+    try exhaustedTests(lib, allocator);
+    try initOomTests(lib);
+}
+
+fn firstWinnerTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     const testing = lib.testing;
     const R = root.Racer(lib, u32);
 
-    var racer = try R.init(testing.allocator);
+    var racer = try R.init(allocator);
     defer racer.deinit();
 
     try racer.spawn(.{}, struct {
@@ -64,15 +91,16 @@ fn firstWinnerTests(comptime lib: type) !void {
     racer.wait();
 }
 
-fn raceContextTests(comptime lib: type) !void {
+fn raceContextTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     const testing = lib.testing;
-    const Context = context_mod.Make(lib);
-    var context = try Context.init(testing.allocator);
+    const Context = context_mod.make(lib);
+    var context = try Context.init(allocator);
     defer context.deinit();
     const R = root.Racer(lib, u32);
+    const log = lib.log.scoped(.racer);
 
     {
-        var racer = try R.init(testing.allocator);
+        var racer = try R.init(allocator);
         defer racer.deinit();
 
         try racer.spawn(.{}, struct {
@@ -89,7 +117,7 @@ fn raceContextTests(comptime lib: type) !void {
     }
 
     {
-        var racer = try R.init(testing.allocator);
+        var racer = try R.init(allocator);
         defer racer.deinit();
 
         try racer.spawn(.{}, struct {
@@ -107,7 +135,7 @@ fn raceContextTests(comptime lib: type) !void {
     }
 
     {
-        var racer = try R.init(testing.allocator);
+        var racer = try R.init(allocator);
         defer racer.deinit();
 
         try racer.spawn(.{}, struct {
@@ -117,17 +145,26 @@ fn raceContextTests(comptime lib: type) !void {
             }
         }.run, .{lib});
 
-        var timeout_ctx = try context.withTimeout(context.background(), 200);
+        var timeout_ctx = try context.withTimeout(context.background(), 200 * lib.time.ns_per_ms);
         defer timeout_ctx.deinit();
 
-        switch (try racer.raceContext(timeout_ctx)) {
-            .winner => |value| try testing.expectEqual(@as(u32, 11), value),
-            .exhausted => return error.ExpectedWinner,
+        if (timeout_ctx.deadline() == null) {
+            log.err("raceContext: timeout winner missing deadline", .{});
+        }
+
+        if (racer.raceContext(timeout_ctx)) |result| {
+            switch (result) {
+                .winner => |value| try testing.expectEqual(@as(u32, 11), value),
+                .exhausted => return error.ExpectedWinner,
+            }
+        } else |err| {
+            log.err("raceContext: timeout winner actual error={}", .{err});
+            return err;
         }
     }
 
     {
-        var racer = try R.init(testing.allocator);
+        var racer = try R.init(allocator);
         defer racer.deinit();
 
         try racer.spawn(.{}, struct {
@@ -157,7 +194,7 @@ fn raceContextTests(comptime lib: type) !void {
     }
 
     {
-        var racer = try R.init(testing.allocator);
+        var racer = try R.init(allocator);
         defer racer.deinit();
 
         try racer.spawn(.{}, struct {
@@ -167,14 +204,26 @@ fn raceContextTests(comptime lib: type) !void {
             }
         }.run, .{lib});
 
-        var timeout_ctx = try context.withTimeout(context.background(), 5);
+        var timeout_ctx = try context.withTimeout(context.background(), 5 * lib.time.ns_per_ms);
         defer timeout_ctx.deinit();
 
-        try testing.expectError(error.DeadlineExceeded, racer.raceContext(timeout_ctx));
+        if (timeout_ctx.deadline() == null) {
+            log.err("raceContext: short timeout missing deadline", .{});
+        }
+
+        if (racer.raceContext(timeout_ctx)) |result| {
+            switch (result) {
+                .winner => |value| log.err("raceContext: short timeout returned winner={}", .{value}),
+                .exhausted => log.err("raceContext: short timeout returned exhausted", .{}),
+            }
+            return error.TestExpectedError;
+        } else |err| {
+            if (err != error.DeadlineExceeded) return error.TestUnexpectedError;
+        }
     }
 
     {
-        var racer = try R.init(testing.allocator);
+        var racer = try R.init(allocator);
         defer racer.deinit();
 
         try racer.spawn(.{}, struct {
@@ -199,11 +248,11 @@ fn raceContextTests(comptime lib: type) !void {
     }
 }
 
-fn exhaustedTests(comptime lib: type) !void {
+fn exhaustedTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     const testing = lib.testing;
     const R = root.Racer(lib, u32);
 
-    var racer = try R.init(testing.allocator);
+    var racer = try R.init(allocator);
     defer racer.deinit();
 
     try racer.spawn(.{}, struct {
@@ -229,7 +278,7 @@ fn exhaustedTests(comptime lib: type) !void {
     racer.wait();
 }
 
-fn doneAndWaitTests(comptime lib: type) !void {
+fn doneAndWaitTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     const testing = lib.testing;
     const R = root.Racer(lib, u32);
     const BoolAtomic = lib.atomic.Value(bool);
@@ -241,7 +290,7 @@ fn doneAndWaitTests(comptime lib: type) !void {
         winner_rejected: BoolAtomic = BoolAtomic.init(false),
     };
 
-    var racer = try R.init(testing.allocator);
+    var racer = try R.init(allocator);
     defer racer.deinit();
 
     var flags = Flags{};
@@ -289,7 +338,7 @@ fn doneAndWaitTests(comptime lib: type) !void {
     try testing.expect(flags.finished.load(.acquire));
 }
 
-fn spawnAllocatorTests(comptime lib: type) !void {
+fn spawnAllocatorTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     const tst = lib.testing;
     const CapturingThread = CapturingThreadType(lib);
     const PassthroughAllocator = PassthroughAllocatorType(lib);
@@ -302,7 +351,7 @@ fn spawnAllocatorTests(comptime lib: type) !void {
     };
     const R = root.Racer(CapturingThreadLib, u32);
 
-    var racer = try R.init(tst.allocator);
+    var racer = try R.init(allocator);
     defer racer.deinit();
 
     CapturingThread.last_allocator = null;
@@ -313,9 +362,9 @@ fn spawnAllocatorTests(comptime lib: type) !void {
     }.run, .{});
 
     const seen_default = CapturingThread.last_allocator orelse return error.ExpectedDefaultAllocator;
-    try tst.expect(lib.meta.eql(seen_default, tst.allocator));
+    try tst.expect(lib.meta.eql(seen_default, allocator));
 
-    var explicit_allocator_state = PassthroughAllocator.init(tst.allocator);
+    var explicit_allocator_state = PassthroughAllocator.init(allocator);
     const explicit_allocator = explicit_allocator_state.allocator();
 
     CapturingThread.last_allocator = null;
@@ -463,9 +512,4 @@ fn CapturingThreadType(comptime lib: type) type {
             _ = self;
         }
     };
-}
-
-test "std_compat" {
-    const std = @import("std");
-    try run(std);
 }

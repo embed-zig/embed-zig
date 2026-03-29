@@ -11,7 +11,7 @@ the actual low-level implementation come from an injected platform backend.
 The intended usage model is:
 
 ```zig
-const embed = @import("embed").Make(platform_impl);
+const embed = @import("embed").make(platform_impl);
 ```
 
 Code written against `embed` should, as much as possible, also work against

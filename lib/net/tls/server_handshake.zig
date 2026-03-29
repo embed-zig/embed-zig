@@ -1,7 +1,7 @@
-pub fn Make(comptime lib: type) type {
-    const common = @import("common.zig").Make(lib);
-    const kdf = @import("kdf.zig").Make(lib);
-    const record = @import("record.zig").Make(lib);
+pub fn make(comptime lib: type) type {
+    const common = @import("common.zig").make(lib);
+    const kdf = @import("kdf.zig").make(lib);
+    const record = @import("record.zig").make(lib);
     const crypto = lib.crypto;
     const mem = lib.mem;
 
@@ -199,14 +199,14 @@ pub fn Make(comptime lib: type) type {
                     self.records.setVersion(.tls_1_2);
 
                     const server_hello_len = try self.encodeServerHello(handshake_buf);
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..server_hello_len], record_buf) catch {
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..server_hello_len], record_buf, handshake_buf) catch {
                         return error.RecordIoFailed;
                     };
                     self.transcript_hash.update(handshake_buf[0..server_hello_len]);
 
                     if (self.version == .tls_1_3) {
                         const ccs = [_]u8{@intFromEnum(common.ChangeCipherSpecType.change_cipher_spec)};
-                        _ = self.records.writeRecord(.change_cipher_spec, &ccs, record_buf) catch {
+                        _ = self.records.writeRecord(.change_cipher_spec, &ccs, record_buf, handshake_buf) catch {
                             return error.RecordIoFailed;
                         };
 
@@ -228,7 +228,7 @@ pub fn Make(comptime lib: type) type {
                                 .finished => try self.encodeFinished(handshake_buf),
                                 else => unreachable,
                             };
-                            _ = self.records.writeRecord(.handshake, handshake_buf[0..len], record_buf) catch {
+                            _ = self.records.writeRecord(.handshake, handshake_buf[0..len], record_buf, handshake_buf) catch {
                                 return error.RecordIoFailed;
                             };
                             self.transcript_hash.update(handshake_buf[0..len]);
@@ -242,19 +242,19 @@ pub fn Make(comptime lib: type) type {
                     }
 
                     const certificate_len = try self.encodeCertificate(handshake_buf);
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..certificate_len], record_buf) catch {
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..certificate_len], record_buf, handshake_buf) catch {
                         return error.RecordIoFailed;
                     };
                     self.transcript_hash.update(handshake_buf[0..certificate_len]);
 
                     const server_key_exchange_len = try self.encodeServerKeyExchange(handshake_buf);
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..server_key_exchange_len], record_buf) catch {
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..server_key_exchange_len], record_buf, handshake_buf) catch {
                         return error.RecordIoFailed;
                     };
                     self.transcript_hash.update(handshake_buf[0..server_key_exchange_len]);
 
                     const server_hello_done_len = try self.encodeServerHelloDone(handshake_buf);
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..server_hello_done_len], record_buf) catch {
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..server_hello_done_len], record_buf, handshake_buf) catch {
                         return error.RecordIoFailed;
                     };
                     self.transcript_hash.update(handshake_buf[0..server_hello_done_len]);
@@ -418,7 +418,7 @@ pub fn Make(comptime lib: type) type {
                     pos += 1;
 
                     if (self.version == .tls_1_3) {
-                        var ext_builder = @import("extensions.zig").Make(lib).ExtensionBuilder.init(out[pos + 2 ..]);
+                        var ext_builder = @import("extensions.zig").make(lib).ExtensionBuilder.init(out[pos + 2 ..]);
                         ext_builder.addSelectedVersion(.tls_1_3) catch return error.BufferTooSmall;
                         ext_builder.addKeyShareServer(.{
                             .group = .x25519,
@@ -511,7 +511,7 @@ pub fn Make(comptime lib: type) type {
                     signed_pos += self.client_random.len;
                     @memcpy(signed_message[signed_pos..][0..self.server_random.len], &self.server_random);
                     signed_pos += self.server_random.len;
-                    @memcpy(signed_message[signed_pos..][0..params_end - common.HandshakeHeader.SIZE], out[common.HandshakeHeader.SIZE..params_end]);
+                    @memcpy(signed_message[signed_pos..][0 .. params_end - common.HandshakeHeader.SIZE], out[common.HandshakeHeader.SIZE..params_end]);
                     signed_pos += params_end - common.HandshakeHeader.SIZE;
 
                     var signature_buf: [128]u8 = undefined;
@@ -930,7 +930,7 @@ pub fn Make(comptime lib: type) type {
                     if (self.version != .tls_1_2) return error.UnexpectedMessage;
 
                     const ccs = [_]u8{@intFromEnum(common.ChangeCipherSpecType.change_cipher_spec)};
-                    _ = self.records.writeRecord(.change_cipher_spec, &ccs, record_buf) catch {
+                    _ = self.records.writeRecord(.change_cipher_spec, &ccs, record_buf, handshake_buf) catch {
                         return error.RecordIoFailed;
                     };
 
@@ -947,7 +947,7 @@ pub fn Make(comptime lib: type) type {
                     try header.serialize(handshake_buf[0..common.HandshakeHeader.SIZE]);
                     @memcpy(handshake_buf[common.HandshakeHeader.SIZE..][0..verify_data.len], &verify_data);
 
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..total_len], record_buf) catch {
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..total_len], record_buf, handshake_buf) catch {
                         return error.RecordIoFailed;
                     };
                     self.transcript_hash.update(handshake_buf[0..total_len]);
@@ -1021,19 +1021,19 @@ pub fn Make(comptime lib: type) type {
     };
 }
 
-test "server handshake selects configured tls13 cipher suite preference" {
+test "net/unit_tests/tls/server_handshake/selects_configured_tls13_cipher_suite_preference" {
     const std = @import("std");
-    const client = @import("client_handshake.zig").Make(std);
+    const client = @import("client_handshake.zig").make(std);
     const fixtures = @import("test_fixtures.zig");
-    const tls_server = Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const tls_server = make(std);
+    const tls_common = @import("common.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -1071,19 +1071,19 @@ test "server handshake selects configured tls13 cipher suite preference" {
     try std.testing.expectEqual(tls_server.HandshakeState.send_server_flight, sh.state);
 }
 
-test "server handshake rejects duplicate client hello extensions" {
+test "net/unit_tests/tls/server_handshake/rejects_duplicate_client_hello_extensions" {
     const std = @import("std");
-    const client = @import("client_handshake.zig").Make(std);
+    const client = @import("client_handshake.zig").make(std);
     const fixtures = @import("test_fixtures.zig");
-    const tls_server = Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const tls_server = make(std);
+    const tls_common = @import("common.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -1164,19 +1164,19 @@ test "server handshake rejects duplicate client hello extensions" {
     try std.testing.expectError(error.InvalidHandshake, sh.processHandshake(bad_hello));
 }
 
-test "server handshake rejects tls13 client hello without key share" {
+test "net/unit_tests/tls/server_handshake/rejects_tls13_client_hello_without_key_share" {
     const std = @import("std");
-    const client = @import("client_handshake.zig").Make(std);
+    const client = @import("client_handshake.zig").make(std);
     const fixtures = @import("test_fixtures.zig");
-    const tls_server = Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const tls_server = make(std);
+    const tls_common = @import("common.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -1258,19 +1258,19 @@ test "server handshake rejects tls13 client hello without key share" {
     try std.testing.expectError(error.MissingExtension, sh.processHandshake(bad_hello));
 }
 
-test "server handshake marks tls12 downgrade sentinel when server supports tls13" {
+test "net/unit_tests/tls/server_handshake/marks_tls12_downgrade_sentinel_when_server_supports_tls13" {
     const std = @import("std");
-    const client = @import("client_handshake.zig").Make(std);
+    const client = @import("client_handshake.zig").make(std);
     const fixtures = @import("test_fixtures.zig");
-    const tls_server = Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const tls_server = make(std);
+    const tls_common = @import("common.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 

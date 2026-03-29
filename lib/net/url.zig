@@ -178,7 +178,7 @@ fn eql(a: []const u8, b: []const u8) bool {
     return true;
 }
 
-test "parse full" {
+test "net/unit_tests/url/parse_full" {
     const std = @import("std");
     const expectStr = std.testing.expectEqualStrings;
 
@@ -194,7 +194,7 @@ test "parse full" {
     try std.testing.expectEqual(@as(u16, 8080), u.portAsNumber().?);
 }
 
-test "parse minimal" {
+test "net/unit_tests/url/parse_minimal" {
     const std = @import("std");
     const expectStr = std.testing.expectEqualStrings;
 
@@ -208,7 +208,7 @@ test "parse minimal" {
     try std.testing.expectEqual(@as(?u16, null), u.portAsNumber());
 }
 
-test "parse ipv6" {
+test "net/unit_tests/url/parse_ipv6" {
     const std = @import("std");
     const expectStr = std.testing.expectEqualStrings;
 
@@ -219,7 +219,7 @@ test "parse ipv6" {
     try expectStr("/path", u.path);
 }
 
-test "parse no port" {
+test "net/unit_tests/url/parse_no_port" {
     const std = @import("std");
     const expectStr = std.testing.expectEqualStrings;
 
@@ -230,7 +230,7 @@ test "parse no port" {
     try expectStr("/path", u.path);
 }
 
-test "parse query only" {
+test "net/unit_tests/url/parse_query_only" {
     const std = @import("std");
     const expectStr = std.testing.expectEqualStrings;
 
@@ -241,7 +241,7 @@ test "parse query only" {
     try expectStr("", u.fragment);
 }
 
-test "parse fragment only" {
+test "net/unit_tests/url/parse_fragment_only" {
     const std = @import("std");
     const expectStr = std.testing.expectEqualStrings;
 
@@ -252,7 +252,7 @@ test "parse fragment only" {
     try expectStr("frag", u.fragment);
 }
 
-test "parse userinfo no password" {
+test "net/unit_tests/url/parse_userinfo_no_password" {
     const std = @import("std");
     const expectStr = std.testing.expectEqualStrings;
 
@@ -262,7 +262,7 @@ test "parse userinfo no password" {
     try expectStr("example.com", u.host);
 }
 
-test "parse empty path with query" {
+test "net/unit_tests/url/parse_empty_path_with_query" {
     const std = @import("std");
     const expectStr = std.testing.expectEqualStrings;
 
@@ -272,7 +272,7 @@ test "parse empty path with query" {
     try expectStr("key=val", u.raw_query);
 }
 
-test "parse comptime" {
+test "net/unit_tests/url/parse_comptime" {
     const std = @import("std");
     const expectStr = std.testing.expectEqualStrings;
 
@@ -289,7 +289,7 @@ test "parse comptime" {
     }
 }
 
-test "parse errors" {
+test "net/unit_tests/url/parse_errors" {
     const std = @import("std");
 
     try std.testing.expectError(error.EmptyInput, parse(""));
@@ -297,7 +297,7 @@ test "parse errors" {
     try std.testing.expectError(error.MissingScheme, parse("/path/only"));
 }
 
-test "portAsNumber overflow" {
+test "net/unit_tests/url/portAsNumber_overflow" {
     const std = @import("std");
 
     const overflow = try parse("http://example.com:99999");

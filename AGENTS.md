@@ -1,122 +1,53 @@
 # embed-zig
 
-Cross-platform runtime library for Zig. Platform implementations inject
-concrete types via `embed.Make(platform)`, producing a namespace that code
-can program against without depending on `std` directly.
+## Core Rules
 
-## Table of Contents
+- `embed` directly exports a curated subset of `std` types and helpers that are intended to remain cross-platform.
+- If code needs a more complete `std`-shaped environment, build it at comptime with `embed.make(...)` and use the resulting namespace.
+- The long-term goal of `embed` is to be a drop-in replacement for the `std` package.
+- Outside `lib/embed` and `lib/embed_std`, non-test library code should not import `std` directly. Runtime, concurrency, networking, time, allocator, and similar capabilities should come from the injected `lib` / `embed` namespace.
+- Direct `std` imports are allowed in `test` blocks. Integration tests and compatibility tests should use `std`, and `embed_std` remains the std-backed adapter layer.
+- `make` is a function. New type / namespace construction entry points should use lowercase `make`.
 
-- [Relationship with std](#relationship-with-std)
-- [Project structure](#project-structure)
-- [Contracts and comptime verification](#contracts-and-comptime-verification)
-- [Error sets and type re-exports](#error-sets-and-type-re-exports)
-- [Testing](#testing)
-- [CI](#ci)
-- [example/fake\_platform](#examplefake_platform)
-- [Adding a new platform](#adding-a-new-platform)
+## Testing Rules
 
-## Relationship with std
+- Put `test_runner` under `<module>/test_runner/` or `<package>/test_runner/`.
+- By default, `test_runner` should be portable: prefer forms such as `run(comptime lib: type, ...)` that can run against different injected `embed` implementations on different platforms.
+- If a runner is explicitly host-only / std-only, say so in the name and only call it from `compat_tests` or from clearly host-only test entry points.
+- Test names must preserve these tokens because the build system filters by them: `unit_tests`, `integration_tests`, `compat_tests`.
 
-embed is a **strict superset** of a subset of std:
+### Unit Tests
 
-1. **Matching names must match behavior.** If embed exposes a symbol that
-   also exists in std (e.g. `Thread`, `Thread.Mutex`, `log`, `posix`,
-   `atomic.Value`, `mem.Allocator`), its API surface and semantics must be
-   identical to std. Code written against embed must compile and behave
-   correctly when `std` is substituted in.
+- `unit test` should live next to the implementation file, directly inside that file, and should not require network access or external dependencies.
+- Root-file `test "<name>/unit_tests"` imports nearby unit tests.
 
-2. **embed may extend std.** embed can provide types that have no std
-   equivalent. `Channel` is the primary example today -- a typed,
-   bounded, multi-producer/multi-consumer channel with Go-style close
-   semantics. These extensions live alongside the std-compatible surface
-   and do not conflict with it.
+### Integration Tests
 
-In short: `std` code is valid embed code, but not vice versa (because of
-extensions like Channel).
+- `integration test` should live under the shared `integration/` tree rather than being scattered under each module or package, should use `std`, should call one or more cases from `test_runner`, should be exposed through `test {}` or `test "..." {}` blocks, and is the right place for tests that use network access, depend on external systems, or take longer to run.
+- Root-file `test "<name>/integration_tests"` imports integration tests from the shared `integration/` tree.
 
-## Project structure
+### Compat Tests
 
-```
-lib/embed.zig              Root module; Make(Impl) entry point
-lib/embed/                 Contracts (Thread, Channel, log, posix, ...)
-lib/embed/test_runner/     Built-in test runners (see Testing below)
-example/fake_platform/     Reference platform implementation
-build.zig / build.zig.zon  Package definition
-.github/workflows/ci.yml   CI workflow
-```
+- `compat test` is compatibility coverage, should live in the `embed_std` module, and should usually avoid network access and long-running scenarios.
+- Compatibility coverage has two parts: tests against `embed_std`, and tests against `std`.
+- `embed_std` hosts `test "<name>/compat_tests/embed"` and `test "<name>/compat_tests/std"` compatibility coverage.
 
-## Contracts and comptime verification
+## Read Before Editing
 
-Each contract (`Thread.zig`, `posix.zig`, `log.zig`, etc.) uses a
-`make(comptime Impl: type) type` pattern. Inside `make`, a `comptime {}`
-block verifies the Impl's function signatures via `@as` casts:
+- Read [`lib/embed/README.md`](lib/embed/README.md) before editing runtime contracts, `embed.make(...)`, or std-alignment rules.
+- Read [`lib/context/README.md`](lib/context/README.md) before editing context trees, cancellation / timeout semantics, or context tests.
+- Read [`lib/sync/README.md`](lib/sync/README.md) before editing `Channel`, `Racer`, concurrency semantics, or sync tests.
+- Read [`lib/io/README.md`](lib/io/README.md) before adding or reshaping generic IO helpers, or deciding whether an interface belongs in `io`.
+- Read [`lib/net/README.md`](lib/net/README.md) before editing the networking root module, resolver, TLS, HTTP, NTP, fd, stack, or related test runners.
+- Read [`lib/mime/README.md`](lib/mime/README.md) before editing MIME parsing / formatting or HTTP-related content-type handling.
+- Read [`lib/bt/README.md`](lib/bt/README.md) before editing the Bluetooth host stack, client/server, mocker, xfer, or bt tests.
+- Read [`lib/embed_std/README.md`](lib/embed_std/README.md) before editing the std-backed compatibility layer.
+- Read [`lib/zux/README.md`](lib/zux/README.md) before editing the `zux` module.
 
-```zig
-comptime {
-    _ = @as(*const fn () YieldError!void, &Impl.yield);
-    _ = @as(*const fn ([]const u8) SetNameError!void, &Impl.setName);
-    // ...
-}
-```
+## Package Docs
 
-If an Impl is missing a function or has a wrong signature, the build fails
-immediately with a clear error. Constants like `Impl.max_name_len` are
-also range-checked at comptime (must be 1..128 for Thread).
-
-## Error sets and type re-exports
-
-Where embed's error sets are identical to std's, the contract re-exports
-them directly (e.g. `pub const SocketError = std.posix.SocketError;`).
-This avoids duplication drift. Types that embed extends or customizes
-(e.g. `SpawnConfig` with `priority`/`core_id` fields, or
-`max_name_len` which is platform-dependent) remain hand-defined.
-
-## Testing
-
-Two built-in test runners live in `lib/embed/test_runner/`:
-
-- **std_compat** (`std.zig`) -- Exercises Thread, Mutex, Condition, RwLock,
-  log, posix (TCP/UDP/file/seek), net, time, atomic, and mem. Accepts any
-  type with the same shape as std. The `test "compact_test"` block at the
-  bottom passes `std` itself, proving embed is a proper subset.
-
-- **channel** (`channel.zig`) -- 57 tests covering buffered/unbuffered
-  channels: init, FIFO ordering, ring wrap, close semantics, blocking/wakeup,
-  SPSC/MPSC/SPMC/MPMC concurrency, and resource safety.
-
-Run tests via any example platform:
-
-```
-cd example/fake_platform && zig build test
-```
-
-## CI
-
-GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push
-and pull request:
-
-- **build** job: `zig build` at the repo root (ubuntu + macos).
-- **test** job: `zig build test` for each example in the `example/` matrix
-  (ubuntu + macos x each example). To add a new example, append its
-  directory name to the `example:` list in the matrix.
-
-## example/fake_platform
-
-A reference platform implementation that wires every embed contract to its
-std equivalent. It serves two purposes:
-
-1. **Example for implementors.** Shows exactly which types and functions a
-   platform must provide (`Thread`, `Channel`, `log`, `posix`, `time`).
-
-2. **Integration test harness.** `platform.zig` contains a `test` block
-   that runs both `std_compat` and `channel` test runners against the
-   fake platform, verifying the full embed surface end-to-end.
-
-## Adding a new platform
-
-1. Create `example/<name>/` with `build.zig`, `build.zig.zon`, and
-   `platform.zig`.
-2. Implement each contract (`Thread`, `Channel`, `log`, `posix`, `time`).
-   Use `fake_platform/src/` as a reference.
-3. Add a `test` block in `platform.zig` that calls the test runners.
-4. Add `<name>` to the `example:` matrix in `.github/workflows/ci.yml`.
+- Read [`pkg/core_bluetooth/README.md`](pkg/core_bluetooth/README.md) before editing the Apple BLE backend / CoreBluetooth package.
+- Read [`pkg/lvgl/README.md`](pkg/lvgl/README.md) before editing LVGL bindings, OSAL wiring, display tests, or screenshot-comparison logic.
+- Read [`pkg/ogg/README.md`](pkg/ogg/README.md) before editing Ogg bindings or package tests.
+- Read [`pkg/opus/README.md`](pkg/opus/README.md) before editing Opus bindings or package tests.
+- Read [`pkg/stb_truetype/README.md`](pkg/stb_truetype/README.md) before editing stb_truetype bindings, font tests, or package wiring.

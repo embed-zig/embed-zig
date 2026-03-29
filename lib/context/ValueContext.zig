@@ -51,7 +51,7 @@ pub fn ValueContext(comptime lib: type, comptime T: type) type {
             return parent.err();
         }
 
-        fn deadlineImpl(ptr: *anyopaque) ?i64 {
+        fn deadlineImpl(ptr: *anyopaque) ?i128 {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
@@ -70,18 +70,19 @@ pub fn ValueContext(comptime lib: type, comptime T: type) type {
             return parent.vtable.valueFn(parent.ptr, key);
         }
 
-        fn waitImpl(ptr: *anyopaque, timeout_ms: ?u32) ?anyerror {
+        fn waitImpl(ptr: *anyopaque, timeout_ns: ?i64) ?anyerror {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            const deadline_ms: ?i64 = if (timeout_ms) |ms| lib.time.milliTimestamp() + @as(i64, ms) else null;
+            const deadline_ns: ?i128 = if (timeout_ns) |ns| lib.time.nanoTimestamp() + @as(i128, ns) else null;
 
             while (true) {
-                const slice_ms: u32 = blk: {
-                    if (deadline_ms) |deadline| {
-                        const remaining_ms = deadline - lib.time.milliTimestamp();
-                        if (remaining_ms <= 0) return null;
-                        break :blk @intCast(@min(remaining_ms, 10));
+                const slice_ns: i64 = blk: {
+                    const quantum_ns = 10 * lib.time.ns_per_ms;
+                    if (deadline_ns) |deadline| {
+                        const remaining_ns = deadline - lib.time.nanoTimestamp();
+                        if (remaining_ns <= 0) return null;
+                        break :blk @intCast(@min(remaining_ns, quantum_ns));
                     }
-                    break :blk 10;
+                    break :blk quantum_ns;
                 };
 
                 self.tree_rw.lockShared();
@@ -89,7 +90,7 @@ pub fn ValueContext(comptime lib: type, comptime T: type) type {
                     self.tree_rw.unlockShared();
                     return null;
                 };
-                const cause = parent.wait(slice_ms);
+                const cause = parent.wait(slice_ns);
                 self.tree_rw.unlockShared();
                 if (cause) |err| return err;
             }

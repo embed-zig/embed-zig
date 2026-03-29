@@ -1,15 +1,9 @@
-//! Central — type-erased BLE Central interface (like net.Conn for byte streams).
+//! Central — type-erased low-level BLE Central interface.
 //!
-//! VTable-based runtime dispatch. Any concrete Central implementation
-//! (HCI host stack, CoreBluetooth, Android BLE) can be wrapped into a Central.
-//!
-//! Application code programs against this interface and is portable
-//! across all backends.
-//!
-//! Usage:
-//!   var central = try cb.Central(.{}).init(allocator);
-//!   try central.start();
-//!   try central.startScanning(.{ .active = true });
+//! This is the backend-facing VTable surface. It exposes scanning,
+//! connection management, GATT discovery, and raw attribute operations.
+//! Higher-level concepts like Conn/Char/Subscription are built on top
+//! in `central/Host.zig`.
 
 const Central = @This();
 
@@ -133,13 +127,15 @@ pub const VTable = struct {
     stop: *const fn (ptr: *anyopaque) void,
     startScanning: *const fn (ptr: *anyopaque, config: ScanConfig) ScanError!void,
     stopScanning: *const fn (ptr: *anyopaque) void,
-    connect: *const fn (ptr: *anyopaque, addr: BdAddr, addr_type: AddrType, params: ConnParams) ConnectError!void,
+    connect: *const fn (ptr: *anyopaque, addr: BdAddr, addr_type: AddrType, params: ConnParams) ConnectError!ConnectionInfo,
     disconnect: *const fn (ptr: *anyopaque, conn_handle: u16) void,
     discoverServices: *const fn (ptr: *anyopaque, conn_handle: u16, out: []DiscoveredService) GattError!usize,
-    discoverChars: *const fn (ptr: *anyopaque, conn_handle: u16, start_handle: u16, end: u16, out: []DiscoveredChar) GattError!usize,
+    discoverChars: *const fn (ptr: *anyopaque, conn_handle: u16, start_handle: u16, end_handle: u16, out: []DiscoveredChar) GattError!usize,
     gattRead: *const fn (ptr: *anyopaque, conn_handle: u16, attr_handle: u16, out: []u8) GattError!usize,
     gattWrite: *const fn (ptr: *anyopaque, conn_handle: u16, attr_handle: u16, data: []const u8) GattError!void,
+    gattWriteNoResp: *const fn (ptr: *anyopaque, conn_handle: u16, attr_handle: u16, data: []const u8) GattError!void,
     subscribe: *const fn (ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void,
+    subscribeIndications: *const fn (ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void,
     unsubscribe: *const fn (ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void,
     getState: *const fn (ptr: *anyopaque) State,
     addEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void,
@@ -173,7 +169,7 @@ pub fn stopScanning(self: Central) void {
 
 // -- connect --
 
-pub fn connect(self: Central, addr: BdAddr, addr_type: AddrType, params: ConnParams) ConnectError!void {
+pub fn connect(self: Central, addr: BdAddr, addr_type: AddrType, params: ConnParams) ConnectError!ConnectionInfo {
     return self.vtable.connect(self.ptr, addr, addr_type, params);
 }
 
@@ -181,7 +177,7 @@ pub fn disconnect(self: Central, conn_handle: u16) void {
     self.vtable.disconnect(self.ptr, conn_handle);
 }
 
-// -- discovery --
+// -- GATT --
 
 pub fn discoverServices(self: Central, conn_handle: u16, out: []DiscoveredService) GattError!usize {
     return self.vtable.discoverServices(self.ptr, conn_handle, out);
@@ -191,8 +187,6 @@ pub fn discoverChars(self: Central, conn_handle: u16, start_handle: u16, end_han
     return self.vtable.discoverChars(self.ptr, conn_handle, start_handle, end_handle, out);
 }
 
-// -- GATT client --
-
 pub fn gattRead(self: Central, conn_handle: u16, attr_handle: u16, out: []u8) GattError!usize {
     return self.vtable.gattRead(self.ptr, conn_handle, attr_handle, out);
 }
@@ -201,12 +195,41 @@ pub fn gattWrite(self: Central, conn_handle: u16, attr_handle: u16, data: []cons
     return self.vtable.gattWrite(self.ptr, conn_handle, attr_handle, data);
 }
 
+pub fn gattWriteNoResp(self: Central, conn_handle: u16, attr_handle: u16, data: []const u8) GattError!void {
+    return self.vtable.gattWriteNoResp(self.ptr, conn_handle, attr_handle, data);
+}
+
 pub fn subscribe(self: Central, conn_handle: u16, cccd_handle: u16) GattError!void {
     return self.vtable.subscribe(self.ptr, conn_handle, cccd_handle);
 }
 
+pub fn subscribeIndications(self: Central, conn_handle: u16, cccd_handle: u16) GattError!void {
+    return self.vtable.subscribeIndications(self.ptr, conn_handle, cccd_handle);
+}
+
 pub fn unsubscribe(self: Central, conn_handle: u16, cccd_handle: u16) GattError!void {
     return self.vtable.unsubscribe(self.ptr, conn_handle, cccd_handle);
+}
+
+pub fn resolveChar(self: Central, conn_handle: u16, svc_uuid: u16, char_uuid: u16) GattError!DiscoveredChar {
+    var services: [16]DiscoveredService = undefined;
+    const svc_count = try self.discoverServices(conn_handle, &services);
+
+    var service: ?DiscoveredService = null;
+    for (services[0..svc_count]) |svc| {
+        if (svc.uuid == svc_uuid) {
+            service = svc;
+            break;
+        }
+    }
+    const found_service = service orelse return error.AttError;
+
+    var chars: [16]DiscoveredChar = undefined;
+    const char_count = try self.discoverChars(conn_handle, found_service.start_handle, found_service.end_handle, &chars);
+    for (chars[0..char_count]) |ch| {
+        if (ch.uuid == char_uuid) return ch;
+    }
+    return error.AttError;
 }
 
 // -- state & info --
@@ -251,7 +274,7 @@ pub fn wrap(pointer: anytype) Central {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             self.stopScanning();
         }
-        fn connectFn(ptr: *anyopaque, addr: BdAddr, addr_type: AddrType, params: ConnParams) ConnectError!void {
+        fn connectFn(ptr: *anyopaque, addr: BdAddr, addr_type: AddrType, params: ConnParams) ConnectError!ConnectionInfo {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             return self.connect(addr, addr_type, params);
         }
@@ -275,8 +298,22 @@ pub fn wrap(pointer: anytype) Central {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             return self.gattWrite(conn_handle, attr_handle, data);
         }
+        fn gattWriteNoRespFn(ptr: *anyopaque, conn_handle: u16, attr_handle: u16, data: []const u8) GattError!void {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            if (@hasDecl(Impl, "gattWriteNoResp")) {
+                return self.gattWriteNoResp(conn_handle, attr_handle, data);
+            }
+            return self.gattWrite(conn_handle, attr_handle, data);
+        }
         fn subscribeFn(ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
+            return self.subscribe(conn_handle, cccd_handle);
+        }
+        fn subscribeIndicationsFn(ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            if (@hasDecl(Impl, "subscribeIndications")) {
+                return self.subscribeIndications(conn_handle, cccd_handle);
+            }
             return self.subscribe(conn_handle, cccd_handle);
         }
         fn unsubscribeFn(ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void {
@@ -311,7 +348,9 @@ pub fn wrap(pointer: anytype) Central {
             .discoverChars = discoverCharsFn,
             .gattRead = gattReadFn,
             .gattWrite = gattWriteFn,
+            .gattWriteNoResp = gattWriteNoRespFn,
             .subscribe = subscribeFn,
+            .subscribeIndications = subscribeIndicationsFn,
             .unsubscribe = unsubscribeFn,
             .getState = getStateFn,
             .addEventHook = addEventHookFn,

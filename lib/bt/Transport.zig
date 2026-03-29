@@ -1,7 +1,7 @@
 //! Transport — type-erased HCI transport (like net.Conn for byte streams).
 //!
 //! VTable-based runtime dispatch. Any concrete transport with
-//! send/recv/reset methods can be wrapped into a Transport.
+//! read/write/reset methods can be wrapped into a Transport.
 //!
 //! Only used by the built-in HCI host stack. OS-level backends
 //! (CoreBluetooth, Android BLE) do not need a Transport.
@@ -9,7 +9,8 @@
 //! Usage:
 //!   var h4 = H4Uart.init(&uart);
 //!   var transport = Transport.init(&h4);
-//!   var hci = Hci.init(transport, allocator);
+//!   const HciType = Hci(embed);
+//!   var hci = HciType.init(transport, .{});
 
 const Transport = @This();
 
@@ -17,44 +18,47 @@ ptr: *anyopaque,
 vtable: *const VTable,
 
 pub const VTable = struct {
-    send: *const fn (ptr: *anyopaque, buf: []const u8) SendError!void,
-    recv: *const fn (ptr: *anyopaque, buf: []u8) RecvError!usize,
+    write: *const fn (ptr: *anyopaque, buf: []const u8) WriteError!usize,
+    read: *const fn (ptr: *anyopaque, buf: []u8) ReadError!usize,
     reset: *const fn (ptr: *anyopaque) void,
     deinit: *const fn (ptr: *anyopaque) void,
-    setRecvTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
-    setSendTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
+    setReadDeadline: *const fn (ptr: *anyopaque, deadline_ns: ?i64) void,
+    setWriteDeadline: *const fn (ptr: *anyopaque, deadline_ns: ?i64) void,
 };
 
-pub const SendError = error{
+pub const WriteError = error{
     Timeout,
     HwError,
     Unexpected,
 };
 
-pub const RecvError = error{
+pub const ReadError = error{
     Timeout,
     HwError,
     Unexpected,
 };
 
-pub fn send(self: Transport, buf: []const u8) SendError!void {
-    return self.vtable.send(self.ptr, buf);
+pub const SendError = WriteError;
+pub const RecvError = ReadError;
+
+pub fn write(self: Transport, buf: []const u8) WriteError!usize {
+    return self.vtable.write(self.ptr, buf);
 }
 
-pub fn recv(self: Transport, buf: []u8) RecvError!usize {
-    return self.vtable.recv(self.ptr, buf);
+pub fn read(self: Transport, buf: []u8) ReadError!usize {
+    return self.vtable.read(self.ptr, buf);
 }
 
 pub fn reset(self: Transport) void {
     self.vtable.reset(self.ptr);
 }
 
-pub fn setRecvTimeout(self: Transport, ms: ?u32) void {
-    self.vtable.setRecvTimeout(self.ptr, ms);
+pub fn setReadDeadline(self: Transport, deadline_ns: ?i64) void {
+    self.vtable.setReadDeadline(self.ptr, deadline_ns);
 }
 
-pub fn setSendTimeout(self: Transport, ms: ?u32) void {
-    self.vtable.setSendTimeout(self.ptr, ms);
+pub fn setWriteDeadline(self: Transport, deadline_ns: ?i64) void {
+    self.vtable.setWriteDeadline(self.ptr, deadline_ns);
 }
 
 pub fn deinit(self: Transport) void {
@@ -70,13 +74,13 @@ pub fn init(pointer: anytype) Transport {
     const Impl = info.pointer.child;
 
     const gen = struct {
-        fn sendFn(ptr: *anyopaque, buf: []const u8) SendError!void {
+        fn writeFn(ptr: *anyopaque, buf: []const u8) WriteError!usize {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            return self.send(buf);
+            return self.write(buf);
         }
-        fn recvFn(ptr: *anyopaque, buf: []u8) RecvError!usize {
+        fn readFn(ptr: *anyopaque, buf: []u8) ReadError!usize {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            return self.recv(buf);
+            return self.read(buf);
         }
         fn resetFn(ptr: *anyopaque) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
@@ -86,22 +90,22 @@ pub fn init(pointer: anytype) Transport {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             self.deinit();
         }
-        fn setRecvTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+        fn setReadDeadlineFn(ptr: *anyopaque, deadline_ns: ?i64) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            self.setRecvTimeout(ms);
+            self.setReadDeadline(deadline_ns);
         }
-        fn setSendTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+        fn setWriteDeadlineFn(ptr: *anyopaque, deadline_ns: ?i64) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            self.setSendTimeout(ms);
+            self.setWriteDeadline(deadline_ns);
         }
 
         const vtable = VTable{
-            .send = sendFn,
-            .recv = recvFn,
+            .write = writeFn,
+            .read = readFn,
             .reset = resetFn,
             .deinit = deinitFn,
-            .setRecvTimeout = setRecvTimeoutFn,
-            .setSendTimeout = setSendTimeoutFn,
+            .setReadDeadline = setReadDeadlineFn,
+            .setWriteDeadline = setWriteDeadlineFn,
         };
     };
 

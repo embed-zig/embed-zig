@@ -1,9 +1,11 @@
 const NetConn = @import("../Conn.zig");
+const Context = @import("context").Context;
 const net_dialer_mod = @import("../Dialer.zig");
+const netip = @import("../netip.zig");
 const conn_impl = @import("Conn.zig");
 
 pub fn Dialer(comptime lib: type) type {
-    const Addr = lib.net.Address;
+    const AddrPort = netip.AddrPort;
     const NetDialer = net_dialer_mod.Dialer(lib);
     const TC = conn_impl.Conn(lib);
 
@@ -22,10 +24,21 @@ pub fn Dialer(comptime lib: type) type {
             };
         }
 
-        pub fn dial(self: Self, network: Network, addr: Addr) !NetConn {
+        pub fn dial(self: Self, network: Network, addr: AddrPort) !NetConn {
             return switch (network) {
                 .tcp => blk: {
                     var conn = try self.net_dialer.dial(.tcp, addr);
+                    errdefer conn.deinit();
+                    break :blk TC.init(self.net_dialer.allocator, conn, self.config);
+                },
+                .udp => error.UnsupportedNetwork,
+            };
+        }
+
+        pub fn dialContext(self: Self, ctx: Context, network: Network, addr: AddrPort) !NetConn {
+            return switch (network) {
+                .tcp => blk: {
+                    var conn = try self.net_dialer.dialContext(ctx, .tcp, addr);
                     errdefer conn.deinit();
                     break :blk TC.init(self.net_dialer.allocator, conn, self.config);
                 },

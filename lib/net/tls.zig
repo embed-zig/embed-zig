@@ -14,23 +14,26 @@ const conn_impl = @import("tls/Conn.zig");
 const server_conn_impl = @import("tls/ServerConn.zig");
 const listener_impl = @import("tls/Listener.zig");
 const dialer_impl = @import("tls/Dialer.zig");
+const netip = @import("netip.zig");
 const NetConn = @import("Conn.zig");
 const NetListener = @import("Listener.zig");
 const tcp_listener = @import("TcpListener.zig");
+const Context = @import("context").Context;
 
-pub fn Make(comptime lib: type) type {
-    const C = common.Make(lib);
-    const A = alert.Make(lib);
-    const E = extensions.Make(lib);
-    const K = kdf.Make(lib);
-    const R = record.Make(lib);
-    const CH = client_handshake.Make(lib);
-    const SH = server_handshake.Make(lib);
+pub fn make(comptime lib: type) type {
+    const C = common.make(lib);
+    const A = alert.make(lib);
+    const E = extensions.make(lib);
+    const K = kdf.make(lib);
+    const R = record.make(lib);
+    const CH = client_handshake.make(lib);
+    const SH = server_handshake.make(lib);
     const TC = conn_impl.Conn(lib);
     const SC = server_conn_impl.ServerConn(lib);
     const TL = listener_impl.Listener(lib);
-    const TD = dialer_impl.Dialer(lib);
+    const TlsDialer = dialer_impl.Dialer(lib);
     const NTL = tcp_listener.TcpListener(lib);
+    const NetDialer = @import("Dialer.zig").Dialer(lib);
 
     return struct {
         pub const ProtocolVersion = C.ProtocolVersion;
@@ -39,7 +42,10 @@ pub fn Make(comptime lib: type) type {
         pub const CipherSuite = C.CipherSuite;
         pub const Tls13Hash = C.Tls13Hash;
         pub const Tls13CipherProfile = C.Tls13CipherProfile;
+        pub const DEFAULT_TLS12_CIPHER_SUITES = C.DEFAULT_TLS12_CIPHER_SUITES;
         pub const DEFAULT_TLS13_CIPHER_SUITES = C.DEFAULT_TLS13_CIPHER_SUITES;
+        pub const isSupportedTls12CipherSuite = C.isSupportedTls12CipherSuite;
+        pub const validateTls12CipherSuites = C.validateTls12CipherSuites;
         pub const validateTls13CipherSuites = C.validateTls13CipherSuites;
         pub const NamedGroup = C.NamedGroup;
         pub const SignatureScheme = C.SignatureScheme;
@@ -123,8 +129,8 @@ pub fn Make(comptime lib: type) type {
         pub const Conn = TC;
         pub const ServerConn = SC;
         pub const Listener = TL;
-        pub const Dialer = TD;
-        pub const Network = TD.Network;
+        pub const Dialer = TlsDialer;
+        pub const Network = TlsDialer.Network;
         pub const ListenOptions = NTL.Options;
 
         pub fn client(allocator: lib.mem.Allocator, inner: NetConn, config: Config) TC.InitError!NetConn {
@@ -138,12 +144,24 @@ pub fn Make(comptime lib: type) type {
         pub fn dial(
             allocator: lib.mem.Allocator,
             network: Network,
-            addr: lib.net.Address,
+            addr: netip.AddrPort,
             config: Config,
         ) !NetConn {
-            const net_dialer = @import("Dialer.zig").Dialer(lib).init(allocator, .{});
-            const d = TD.init(net_dialer, config);
+            const net_dialer = NetDialer.init(allocator, .{});
+            const d = TlsDialer.init(net_dialer, config);
             return d.dial(network, addr);
+        }
+
+        pub fn dialContext(
+            ctx: Context,
+            allocator: lib.mem.Allocator,
+            network: Network,
+            addr: netip.AddrPort,
+            config: Config,
+        ) !NetConn {
+            const net_dialer = NetDialer.init(allocator, .{});
+            const d = TlsDialer.init(net_dialer, config);
+            return d.dialContext(ctx, network, addr);
         }
 
         pub fn newListener(allocator: lib.mem.Allocator, inner: NetListener, config: ServerConfig) !NetListener {
@@ -153,22 +171,10 @@ pub fn Make(comptime lib: type) type {
         pub fn listen(allocator: lib.mem.Allocator, opts: ListenOptions, config: ServerConfig) !NetListener {
             var inner = try NTL.init(allocator, opts);
             errdefer inner.deinit();
-            return TL.init(allocator, inner, config);
+            var ln = try TL.init(allocator, inner, config);
+            errdefer ln.deinit();
+            try ln.listen();
+            return ln;
         }
     };
 }
-
-test {
-    _ = @import("tls/common.zig");
-    _ = @import("tls/alert.zig");
-    _ = @import("tls/extensions.zig");
-    _ = @import("tls/kdf.zig");
-    _ = @import("tls/record.zig");
-    _ = @import("tls/client_handshake.zig");
-    _ = @import("tls/server_handshake.zig");
-    _ = @import("tls/Conn.zig");
-    _ = @import("tls/ServerConn.zig");
-    _ = @import("tls/Listener.zig");
-    _ = @import("tls/Dialer.zig");
-}
-

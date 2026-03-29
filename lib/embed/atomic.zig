@@ -1,5 +1,9 @@
 //! Atomic utilities — re-exports from std.atomic.
 
-const std = @import("std_re_export.zig");
+const re_export = struct {
+    const std = @import("std");
 
-pub const Value = std.atomic.Value;
+    pub const Value = std.atomic.Value;
+};
+
+pub const Value = re_export.Value;

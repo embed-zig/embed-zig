@@ -4,22 +4,29 @@
 //! freed on deinit().
 
 const Conn = @import("Conn.zig");
+const fd_mod = @import("fd.zig");
 
 pub fn TcpConn(comptime lib: type) type {
     const posix = lib.posix;
     const Allocator = lib.mem.Allocator;
+    const Stream = fd_mod.Stream(lib);
 
     return struct {
         fd: posix.socket_t,
+        stream: Stream,
         allocator: Allocator,
         closed: bool = false,
+        read_timeout_ms: ?u32 = null,
+        write_timeout_ms: ?u32 = null,
 
         const Self = @This();
 
         pub fn read(self: *Self, buf: []u8) Conn.ReadError!usize {
             if (self.closed) return error.EndOfStream;
-            return posix.recv(self.fd, buf, 0) catch |err| return switch (err) {
-                error.WouldBlock => error.TimedOut,
+            self.applyReadTimeout();
+            return self.stream.read(buf) catch |err| return switch (err) {
+                error.Closed => error.EndOfStream,
+                error.TimedOut => error.TimedOut,
                 error.ConnectionResetByPeer => error.ConnectionReset,
                 error.ConnectionRefused => error.ConnectionRefused,
                 else => error.Unexpected,
@@ -28,8 +35,10 @@ pub fn TcpConn(comptime lib: type) type {
 
         pub fn write(self: *Self, buf: []const u8) Conn.WriteError!usize {
             if (self.closed) return error.BrokenPipe;
-            return posix.send(self.fd, buf, 0) catch |err| return switch (err) {
-                error.WouldBlock => error.TimedOut,
+            self.applyWriteTimeout();
+            return self.stream.write(buf) catch |err| return switch (err) {
+                error.Closed => error.BrokenPipe,
+                error.TimedOut => error.TimedOut,
                 error.ConnectionResetByPeer => error.ConnectionReset,
                 error.BrokenPipe => error.BrokenPipe,
                 else => error.Unexpected,
@@ -38,8 +47,8 @@ pub fn TcpConn(comptime lib: type) type {
 
         pub fn close(self: *Self) void {
             if (!self.closed) {
-                posix.shutdown(self.fd, .both) catch {};
-                posix.close(self.fd);
+                self.stream.shutdown(.both) catch {};
+                self.stream.close();
                 self.closed = true;
             }
         }
@@ -51,26 +60,39 @@ pub fn TcpConn(comptime lib: type) type {
         }
 
         pub fn setReadTimeout(self: *Self, ms: ?u32) void {
-            setSocketTimeout(self.fd, posix.SO.RCVTIMEO, ms);
+            self.read_timeout_ms = ms;
         }
 
         pub fn setWriteTimeout(self: *Self, ms: ?u32) void {
-            setSocketTimeout(self.fd, posix.SO.SNDTIMEO, ms);
+            self.write_timeout_ms = ms;
         }
 
-        fn setSocketTimeout(fd: posix.socket_t, optname: u32, ms: ?u32) void {
-            const tv: posix.timeval = if (ms) |t| .{
-                .sec = @intCast(t / 1000),
-                .usec = @intCast((t % 1000) * 1000),
-            } else .{ .sec = 0, .usec = 0 };
-            const bytes: [@sizeOf(posix.timeval)]u8 = @bitCast(tv);
-            posix.setsockopt(fd, posix.SOL.SOCKET, optname, &bytes) catch {};
+        fn applyReadTimeout(self: *Self) void {
+            self.stream.setReadDeadline(timeoutToDeadline(self.read_timeout_ms));
         }
 
-        pub fn init(allocator: Allocator, fd: posix.socket_t) Allocator.Error!Conn {
+        fn applyWriteTimeout(self: *Self) void {
+            self.stream.setWriteDeadline(timeoutToDeadline(self.write_timeout_ms));
+        }
+
+        fn timeoutToDeadline(ms: ?u32) ?i64 {
+            const timeout_ms = ms orelse return null;
+            return lib.time.milliTimestamp() + timeout_ms;
+        }
+
+        pub fn initFromStream(allocator: Allocator, stream: Stream) Allocator.Error!Conn {
             const self = try allocator.create(Self);
-            self.* = .{ .fd = fd, .allocator = allocator };
+            self.* = .{
+                .fd = stream.fd,
+                .stream = stream,
+                .allocator = allocator,
+            };
             return Conn.init(self);
+        }
+
+        pub fn init(allocator: Allocator, fd: posix.socket_t) !Conn {
+            const stream = try Stream.adopt(fd);
+            return initFromStream(allocator, stream);
         }
     };
 }

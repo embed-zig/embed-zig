@@ -15,15 +15,22 @@
 //!   7. Detached cleanup waits for lagging workers and frees lookup state
 //!   8. deinit() waits for all outstanding lookups to finish cleanup
 
+const std = @import("std");
+const Conn = @import("Conn.zig");
 const dialer = @import("Dialer.zig");
+const http_mod = @import("http.zig");
+const netip = @import("netip.zig");
+const tls_mod = @import("tls.zig");
 const context_mod = @import("context");
-const io = @import("io");
 const sync = @import("sync");
 
 pub fn Resolver(comptime lib: type) type {
     const posix = lib.posix;
-    const Addr = lib.net.Address;
+    const Addr = netip.Addr;
+    const AddrPort = netip.AddrPort;
     const Dialer = dialer.Dialer(lib);
+    const Http = http_mod.make(lib);
+    const Tls = tls_mod.make(lib);
     const mem = lib.mem;
     const Allocator = mem.Allocator;
     const Thread = lib.Thread;
@@ -44,9 +51,13 @@ pub fn Resolver(comptime lib: type) type {
             doh = 3,
         };
 
+        pub const TlsConfig = Tls.Config;
+
         pub const Server = struct {
-            addr: Addr,
+            addr: AddrPort,
             protocol: Protocol = .udp,
+            tls_config: ?TlsConfig = null,
+            doh_path: []const u8 = "",
 
             pub fn init(comptime ip: []const u8, comptime protocol: Protocol) Server {
                 const port: u16 = comptime switch (protocol) {
@@ -54,7 +65,42 @@ pub fn Resolver(comptime lib: type) type {
                     .tls => 853,
                     .doh => 443,
                 };
-                return .{ .addr = comptime Addr.parseIp(ip, port) catch unreachable, .protocol = protocol };
+                return .{
+                    .addr = AddrPort.init(comptime Addr.parse(ip) catch unreachable, port),
+                    .protocol = protocol,
+                    .tls_config = comptime switch (protocol) {
+                        .tls, .doh => if (tlsServerNameForIp(ip)) |server_name|
+                            TlsConfig{ .server_name = server_name }
+                        else
+                            null,
+                        else => null,
+                    },
+                    .doh_path = comptime switch (protocol) {
+                        .doh => "/dns-query",
+                        else => "",
+                    },
+                };
+            }
+
+            pub fn initTls(comptime ip: []const u8, comptime server_name: []const u8) Server {
+                return .{
+                    .addr = AddrPort.init(comptime Addr.parse(ip) catch unreachable, 853),
+                    .protocol = .tls,
+                    .tls_config = .{ .server_name = server_name },
+                };
+            }
+
+            pub fn initDoh(comptime ip: []const u8, comptime server_name: []const u8) Server {
+                return initDohPath(ip, server_name, "/dns-query");
+            }
+
+            pub fn initDohPath(comptime ip: []const u8, comptime server_name: []const u8, comptime path: []const u8) Server {
+                return .{
+                    .addr = AddrPort.init(comptime Addr.parse(ip) catch unreachable, 443),
+                    .protocol = .doh,
+                    .tls_config = .{ .server_name = server_name },
+                    .doh_path = path,
+                };
             }
         };
 
@@ -64,24 +110,44 @@ pub fn Resolver(comptime lib: type) type {
                 pub const v4_2 = "223.6.6.6";
                 pub const v6_1 = "2400:3200::1";
                 pub const v6_2 = "2400:3200:baba::1";
+                pub const server_name = "dns.alidns.com";
             };
             pub const google = struct {
                 pub const v4_1 = "8.8.8.8";
                 pub const v4_2 = "8.8.4.4";
                 pub const v6_1 = "2001:4860:4860::8888";
                 pub const v6_2 = "2001:4860:4860::8844";
+                pub const server_name = "dns.google";
             };
             pub const cloudflare = struct {
                 pub const v4_1 = "1.1.1.1";
                 pub const v4_2 = "1.0.0.1";
                 pub const v6_1 = "2606:4700:4700::1111";
                 pub const v6_2 = "2606:4700:4700::1001";
+                pub const server_name = "cloudflare-dns.com";
             };
             pub const quad9 = struct {
                 pub const v4_1 = "9.9.9.9";
                 pub const v4_2 = "149.112.112.112";
+                pub const server_name = "dns.quad9.net";
             };
         };
+
+        fn tlsServerNameForIp(comptime ip: []const u8) ?[]const u8 {
+            if (mem.eql(u8, ip, dns.ali.v4_1) or mem.eql(u8, ip, dns.ali.v4_2) or mem.eql(u8, ip, dns.ali.v6_1) or mem.eql(u8, ip, dns.ali.v6_2)) {
+                return dns.ali.server_name;
+            }
+            if (mem.eql(u8, ip, dns.google.v4_1) or mem.eql(u8, ip, dns.google.v4_2) or mem.eql(u8, ip, dns.google.v6_1) or mem.eql(u8, ip, dns.google.v6_2)) {
+                return dns.google.server_name;
+            }
+            if (mem.eql(u8, ip, dns.cloudflare.v4_1) or mem.eql(u8, ip, dns.cloudflare.v4_2) or mem.eql(u8, ip, dns.cloudflare.v6_1) or mem.eql(u8, ip, dns.cloudflare.v6_2)) {
+                return dns.cloudflare.server_name;
+            }
+            if (mem.eql(u8, ip, dns.quad9.v4_1) or mem.eql(u8, ip, dns.quad9.v4_2)) {
+                return dns.quad9.server_name;
+            }
+            return null;
+        }
 
         pub const Options = struct {
             servers: []const Server = &.{
@@ -107,6 +173,7 @@ pub fn Resolver(comptime lib: type) type {
             Refused,
             Timeout,
             InvalidResponse,
+            InvalidTlsConfig,
             NoServerConfigured,
             Closed,
             OutOfMemory,
@@ -155,6 +222,7 @@ pub fn Resolver(comptime lib: type) type {
         };
 
         const WorkerRacer = sync.Racer(lib, WorkerResult);
+        const worker_io_quantum_ms: i64 = 50;
 
         const LookupJob = struct {
             resolver: *Self,
@@ -204,10 +272,116 @@ pub fn Resolver(comptime lib: type) type {
             id: u16,
         };
 
+        const WorkerAttemptContext = struct {
+            allocator: Allocator,
+            state: WorkerRacer.State,
+            deadline_ns: i128,
+            tree: context_mod.Context.TreeLink = .{},
+            tree_rw: Thread.RwLock = .{},
+
+            fn init(allocator: Allocator, state: WorkerRacer.State, timeout_ms: u32) @This() {
+                return .{
+                    .allocator = allocator,
+                    .state = state,
+                    .deadline_ns = lib.time.nanoTimestamp() + @as(i128, timeout_ms) * lib.time.ns_per_ms,
+                };
+            }
+
+            fn context(self: *@This()) context_mod.Context {
+                const ctx = context_mod.Context.init(self, &vtable, self.allocator);
+                self.tree.ctx = ctx;
+                return ctx;
+            }
+
+            fn err(self: *@This()) ?anyerror {
+                if (self.state.done()) return error.Canceled;
+                if (lib.time.nanoTimestamp() >= self.deadline_ns) return error.DeadlineExceeded;
+                return null;
+            }
+
+            fn errFn(ptr: *anyopaque) ?anyerror {
+                const self: *@This() = @ptrCast(@alignCast(ptr));
+                return self.err();
+            }
+
+            fn deadlineFn(ptr: *anyopaque) ?i128 {
+                const self: *@This() = @ptrCast(@alignCast(ptr));
+                return self.deadline_ns;
+            }
+
+            fn valueFn(_: *anyopaque, _: *const anyopaque) ?*const anyopaque {
+                return null;
+            }
+
+            fn waitFn(ptr: *anyopaque, timeout_ns: ?i64) ?anyerror {
+                const self: *@This() = @ptrCast(@alignCast(ptr));
+                if (self.err()) |cause| return cause;
+                if (timeout_ns) |ns| {
+                    if (ns > 0) lib.Thread.sleep(@intCast(ns));
+                }
+                return self.err();
+            }
+
+            fn cancelFn(_: *anyopaque) void {}
+            fn cancelWithCauseFn(_: *anyopaque, _: anyerror) void {}
+            fn propagateCancelWithCauseFn(_: *anyopaque, _: anyerror) void {}
+            fn deinitFn(_: *anyopaque) void {}
+
+            fn treeFn(ptr: *anyopaque) *context_mod.Context.TreeLink {
+                const self: *@This() = @ptrCast(@alignCast(ptr));
+                return &self.tree;
+            }
+
+            fn treeLockFn(ptr: *anyopaque) *anyopaque {
+                const self: *@This() = @ptrCast(@alignCast(ptr));
+                return &self.tree_rw;
+            }
+
+            fn reparentFn(_: *anyopaque, _: ?context_mod.Context) void {}
+
+            fn lockSharedFn(ptr: *anyopaque) void {
+                const self: *@This() = @ptrCast(@alignCast(ptr));
+                self.tree_rw.lockShared();
+            }
+
+            fn unlockSharedFn(ptr: *anyopaque) void {
+                const self: *@This() = @ptrCast(@alignCast(ptr));
+                self.tree_rw.unlockShared();
+            }
+
+            fn lockFn(ptr: *anyopaque) void {
+                const self: *@This() = @ptrCast(@alignCast(ptr));
+                self.tree_rw.lock();
+            }
+
+            fn unlockFn(ptr: *anyopaque) void {
+                const self: *@This() = @ptrCast(@alignCast(ptr));
+                self.tree_rw.unlock();
+            }
+
+            const vtable: context_mod.Context.VTable = .{
+                .errFn = errFn,
+                .deadlineFn = deadlineFn,
+                .valueFn = valueFn,
+                .waitFn = waitFn,
+                .cancelFn = cancelFn,
+                .cancelWithCauseFn = cancelWithCauseFn,
+                .propagateCancelWithCauseFn = propagateCancelWithCauseFn,
+                .deinitFn = deinitFn,
+                .treeFn = treeFn,
+                .treeLockFn = treeLockFn,
+                .reparentFn = reparentFn,
+                .lockSharedFn = lockSharedFn,
+                .unlockSharedFn = unlockSharedFn,
+                .lockFn = lockFn,
+                .unlockFn = unlockFn,
+            };
+        };
+
         /// Public resolver calls return `anyerror` so they can transparently
         /// propagate arbitrary causes injected via `context.cancelWithCause(...)`.
         pub fn lookupHost(self: *Self, name: []const u8, buf: []Addr) anyerror!usize {
-            const Context = context_mod.Make(lib);
+            const Context = context_mod.make(lib);
             var context_api = try Context.init(self.allocator);
             defer context_api.deinit();
             return self.lookupHostContext(context_api.background(), name, buf);
@@ -219,6 +393,7 @@ pub fn Resolver(comptime lib: type) type {
             errdefer if (needs_finish_lookup) self.finishLookup();
 
             if (self.options.servers.len == 0) return error.NoServerConfigured;
+            for (self.options.servers) |server| try validateServer(server);
 
             const num_queries: usize = switch (self.options.mode) {
                 .ipv4_only, .ipv6_only => 1,
@@ -275,6 +450,7 @@ pub fn Resolver(comptime lib: type) type {
             if (spawned == 0) return spawn_err orelse error.NoServerConfigured;
 
             const race_result = job.racer.raceContext(ctx) catch |err| {
+                job.racer.cancel();
                 if (self.beginCleanup(job)) {
                     owns_job = false;
                 } else {
@@ -306,7 +482,8 @@ pub fn Resolver(comptime lib: type) type {
             const result: ?WorkerResult = switch (server.protocol) {
                 .udp => udpResolve(ctx, server, job),
                 .tcp => tcpResolve(ctx, server, job),
-                else => null,
+                .tls => tlsResolve(ctx, server, job),
+                .doh => dohResolve(ctx, server, job),
             };
 
             if (result) |r| {
@@ -418,20 +595,244 @@ pub fn Resolver(comptime lib: type) type {
 
         fn tcpAttempt(ctx: WorkerRacer.State, server: Server, job: *LookupJob, timeout_ms: u32) ?WorkerResult {
             const d = Dialer.init(job.resolver.allocator, .{});
-            var c = d.dial(.tcp, server.addr) catch return null;
+            var attempt_ctx_impl = WorkerAttemptContext.init(job.resolver.allocator, ctx, timeout_ms);
+            var c = d.dialContext(attempt_ctx_impl.context(), .tcp, server.addr) catch return null;
+            defer c.deinit();
+
+            return streamAttempt(ctx, c, job, timeout_ms);
+        }
+
+        fn tlsResolve(ctx: WorkerRacer.State, server: Server, job: *LookupJob) ?WorkerResult {
+            const attempts = @max(job.resolver.options.attempts, 1);
+            const per_attempt_ms = job.resolver.options.timeout_ms / attempts;
+
+            var attempt: u32 = 0;
+            while (attempt < attempts) : (attempt += 1) {
+                if (ctx.done()) return null;
+                if (tlsAttempt(ctx, server, job, per_attempt_ms)) |r| return r;
+            }
+            return null;
+        }
+
+        fn tlsAttempt(ctx: WorkerRacer.State, server: Server, job: *LookupJob, timeout_ms: u32) ?WorkerResult {
+            const tls_config = server.tls_config orelse return null;
+            const net_dialer = Dialer.init(job.resolver.allocator, .{});
+            const tls_dialer = Tls.Dialer.init(net_dialer, tls_config);
+            var attempt_ctx_impl = WorkerAttemptContext.init(job.resolver.allocator, ctx, timeout_ms);
+            var c = tls_dialer.dialContext(attempt_ctx_impl.context(), .tcp, server.addr) catch return null;
             defer c.deinit();
 
             c.setReadTimeout(timeout_ms);
             c.setWriteTimeout(timeout_ms);
 
-            for (job.queryPkts()) |qpkt| {
+            const tls_conn = c.as(Tls.Conn) catch return null;
+            if (ctx.done()) return null;
+            tls_conn.handshake() catch return null;
+
+            return streamAttempt(ctx, c, job, timeout_ms);
+        }
+
+        fn dohResolve(ctx: WorkerRacer.State, server: Server, job: *LookupJob) ?WorkerResult {
+            const attempts = @max(job.resolver.options.attempts, 1);
+            const per_attempt_ms = job.resolver.options.timeout_ms / attempts;
+
+            var attempt: u32 = 0;
+            while (attempt < attempts) : (attempt += 1) {
+                if (ctx.done()) return null;
+                if (dohAttempt(ctx, server, job, per_attempt_ms)) |r| return r;
+            }
+            return null;
+        }
+
+        fn dohAttempt(ctx: WorkerRacer.State, server: Server, job: *LookupJob, timeout_ms: u32) ?WorkerResult {
+            var result = WorkerResult{};
+            var replied = [2]bool{ false, false };
+            var replied_count: usize = 0;
+            var handled = [2]bool{ false, false };
+            var handled_count: usize = 0;
+
+            for (job.queryPkts(), 0..) |qpkt, idx| {
                 if (ctx.done()) return null;
 
+                var recv_buf: [2048]u8 = undefined;
+                const recv_n = dohExchange(
+                    ctx,
+                    server,
+                    qpkt,
+                    job.resolver.allocator,
+                    job.resolver.options.spawn_config,
+                    timeout_ms,
+                    &recv_buf,
+                ) orelse return null;
+                if (recv_n < 12) return null;
+
+                const rcode: u4 = @truncate(recv_buf[3]);
+                if (rcode == RCODE_NXDOMAIN) {
+                    return WorkerResult{ .has_result = true, .err = error.NameNotFound };
+                }
+                if (rcode == RCODE_REFUSED) {
+                    return WorkerResult{ .has_result = true, .err = error.Refused };
+                }
+                if (rcode == RCODE_SERVFAIL) {
+                    handled[idx] = true;
+                    handled_count += 1;
+                    continue;
+                }
+                if (rcode != RCODE_NOERROR) return null;
+
+                const n = parseResponse(recv_buf[0..recv_n], qpkt.qtype, result.addrs[result.count..]) catch return null;
+                replied[idx] = true;
+                replied_count += 1;
+                handled[idx] = true;
+                handled_count += 1;
+                if (n > 0) result.count += n;
+            }
+
+            if (result.count > 0) {
+                result.has_result = true;
+                return result;
+            }
+            if (replied_count >= job.queryPkts().len and handled_count >= job.queryPkts().len) {
+                return WorkerResult{ .has_result = true, .err = error.NameNotFound };
+            }
+            return null;
+        }
+
+        fn dohExchange(
+            ctx: WorkerRacer.State,
+            server: Server,
+            qpkt: QueryPkt,
+            allocator: Allocator,
+            spawn_config: Thread.SpawnConfig,
+            timeout_ms: u32,
+            out: []u8,
+        ) ?usize {
+            const tls_config = server.tls_config orelse return null;
+            var attempt_ctx_impl = WorkerAttemptContext.init(allocator, ctx, timeout_ms);
+            var transport = Http.Transport.init(allocator, .{
+                .resolver = .{ .servers = &.{} },
+                .spawn_config = spawn_config,
+                .tls_client_config = tls_config,
+                .disable_keep_alives = true,
+                .max_idle_conns = 0,
+                .tls_handshake_timeout_ms = timeout_ms,
+                .response_header_timeout_ms = timeout_ms,
+            }) catch return null;
+            defer transport.deinit();
+
+            var url_buf: [256]u8 = undefined;
+            const raw_url = formatDohUrl(server, &url_buf) catch return null;
+            var req = Http.Request.init(allocator, "POST", raw_url) catch return null;
+            defer req.deinit();
+            req = req.withContext(attempt_ctx_impl.context());
+            req.host = tls_config.server_name;
+            req.close = true;
+            req.addHeader(Http.Header.accept, "application/dns-message") catch return null;
+            req.addHeader(Http.Header.content_type, "application/dns-message") catch return null;
+
+            var body = SliceReadCloser{ .payload = qpkt.buf[0..qpkt.len] };
+            req = req.withBody(Http.ReadCloser.init(&body));
+            req.content_length = @intCast(qpkt.len);
+
+            var resp = transport.roundTrip(&req) catch return null;
+            defer resp.deinit();
+            if (!resp.ok()) return null;
+            if (!responseHasDnsMessageContentType(resp)) return null;
+
+            var response_body = resp.body() orelse return null;
+            return readResponseBody(&response_body, out) orelse return null;
+        }
+
+        const SliceReadCloser = struct {
+            payload: []const u8,
+            offset: usize = 0,
+
+            pub fn read(self: *@This(), buf: []u8) anyerror!usize {
+                const remaining = self.payload[self.offset..];
+                const n = @min(buf.len, remaining.len);
+                @memcpy(buf[0..n], remaining[0..n]);
+                self.offset += n;
+                return n;
+            }
+
+            pub fn close(_: *@This()) void {}
+        };
+
+        fn formatDohUrl(server: Server, buf: []u8) ![]u8 {
+            var host_buf: [96]u8 = undefined;
+            const host = try formatDohHost(server.addr, &host_buf);
+            const port = server.addr.port();
+            if (port == 443) {
+                return std.fmt.bufPrint(buf, "https://{s}{s}", .{ host, server.doh_path });
+            }
+            return std.fmt.bufPrint(buf, "https://{s}:{d}{s}", .{ host, port, server.doh_path });
+        }
+
+        fn formatDohHost(addr_port: AddrPort, buf: []u8) ![]u8 {
+            const addr = addr_port.addr();
+            if (addr.is4()) {
+                const bytes = addr.as4().?;
+                return std.fmt.bufPrint(buf, "{d}.{d}.{d}.{d}", .{
+                    bytes[0], bytes[1], bytes[2], bytes[3],
+                });
+            }
+            if (addr.is6()) return formatIpv6Host(addr.as16().?, 0, buf);
+            return error.InvalidResponse;
+        }
+
+        fn formatIpv6Host(bytes: [16]u8, _: u32, buf: []u8) ![]u8 {
+            const groups = [8]u16{
+                (@as(u16, bytes[0]) << 8) | bytes[1],
+                (@as(u16, bytes[2]) << 8) | bytes[3],
+                (@as(u16, bytes[4]) << 8) | bytes[5],
+                (@as(u16, bytes[6]) << 8) | bytes[7],
+                (@as(u16, bytes[8]) << 8) | bytes[9],
+                (@as(u16, bytes[10]) << 8) | bytes[11],
+                (@as(u16, bytes[12]) << 8) | bytes[13],
+                (@as(u16, bytes[14]) << 8) | bytes[15],
+            };
+
+            return std.fmt.bufPrint(
+                buf,
+                "[{x}:{x}:{x}:{x}:{x}:{x}:{x}:{x}]",
+                .{
+                    groups[0], groups[1], groups[2], groups[3],
+                    groups[4], groups[5], groups[6], groups[7],
+                },
+            );
+        }
+
+        fn responseHasDnsMessageContentType(resp: Http.Response) bool {
+            for (resp.header) |hdr| {
+                if (hdr.is(Http.Header.content_type)) {
+                    const semi = std.mem.indexOfScalar(u8, hdr.value, ';') orelse hdr.value.len;
+                    const media_type = std.mem.trim(u8, hdr.value[0..semi], " \t");
+                    return std.ascii.eqlIgnoreCase(media_type, "application/dns-message");
+                }
+            }
+            return false;
+        }
+
+        fn readResponseBody(body: *Http.ReadCloser, out: []u8) ?usize {
+            var total: usize = 0;
+            while (true) {
+                if (total >= out.len) return null;
+                const n = body.read(out[total..]) catch return null;
+                if (n == 0) return total;
+                total += n;
+            }
+        }
+
+        fn streamAttempt(ctx: WorkerRacer.State, c: Conn, job: *LookupJob, timeout_ms: u32) ?WorkerResult {
+            var conn = c;
+            const started_ms = lib.time.milliTimestamp();
+
+            for (job.queryPkts()) |qpkt| {
                 var tcp_buf: [514]u8 = undefined;
                 tcp_buf[0] = @truncate(qpkt.len >> 8);
                 tcp_buf[1] = @truncate(qpkt.len);
                 @memcpy(tcp_buf[2..][0..qpkt.len], qpkt.buf[0..qpkt.len]);
-                io.writeAll(@TypeOf(c), &c, tcp_buf[0 .. 2 + qpkt.len]) catch return null;
+                tryWriteAll(ctx, &conn, tcp_buf[0 .. 2 + qpkt.len], started_ms, timeout_ms) orelse return null;
             }
 
             var result = WorkerResult{};
@@ -441,16 +842,14 @@ pub fn Resolver(comptime lib: type) type {
             var handled_count: usize = 0;
 
             while (handled_count < job.queryPkts().len) {
-                if (ctx.done()) return null;
-
                 var len_buf: [2]u8 = undefined;
-                io.readFull(@TypeOf(c), &c, &len_buf) catch return null;
+                tryReadFull(ctx, &conn, &len_buf, started_ms, timeout_ms) orelse return null;
 
                 const msg_len = readU16(&len_buf);
                 if (msg_len < 12 or msg_len > 512) return null;
 
                 var recv_buf: [512]u8 = undefined;
-                io.readFull(@TypeOf(c), &c, recv_buf[0..msg_len]) catch return null;
+                tryReadFull(ctx, &conn, recv_buf[0..msg_len], started_ms, timeout_ms) orelse return null;
 
                 const resp_id = readU16(recv_buf[0..2]);
                 const idx = job.queryIndexById(resp_id) orelse continue;
@@ -489,6 +888,58 @@ pub fn Resolver(comptime lib: type) type {
                 return WorkerResult{ .has_result = true, .err = error.NameNotFound };
             }
             return null;
+        }
+
+        fn tryWriteAll(ctx: WorkerRacer.State, conn: *Conn, buf: []const u8, started_ms: i64, timeout_ms: u32) ?void {
+            var offset: usize = 0;
+            while (offset < buf.len) {
+                if (ctx.done()) return null;
+                const io_timeout_ms = nextStreamTimeoutWorker(ctx, started_ms, timeout_ms) orelse return null;
+                conn.setWriteTimeout(io_timeout_ms);
+                const n = conn.write(buf[offset..]) catch |err| switch (err) {
+                    error.TimedOut => continue,
+                    else => return null,
+                };
+                if (n == 0) return null;
+                offset += n;
+            }
+        }
+
+        fn tryReadFull(ctx: WorkerRacer.State, conn: *Conn, buf: []u8, started_ms: i64, timeout_ms: u32) ?void {
+            var offset: usize = 0;
+            while (offset < buf.len) {
+                if (ctx.done()) return null;
+                const io_timeout_ms = nextStreamTimeoutWorker(ctx, started_ms, timeout_ms) orelse return null;
+                conn.setReadTimeout(io_timeout_ms);
+                const n = conn.read(buf[offset..]) catch |err| switch (err) {
+                    error.TimedOut => continue,
+                    else => return null,
+                };
+                if (n == 0) return null;
+                offset += n;
+            }
+        }
+
+        fn nextStreamTimeoutWorker(ctx: WorkerRacer.State, started_ms: i64, timeout_ms: u32) ?u32 {
+            if (ctx.done()) return null;
+            const now_ms = lib.time.milliTimestamp();
+            const elapsed_ms = now_ms - started_ms;
+            const remaining_query = @as(i64, timeout_ms) - elapsed_ms;
+            if (remaining_query <= 0) return null;
+            return @intCast(@max(@as(i64, 1), @min(remaining_query, worker_io_quantum_ms)));
+        }
+
+        fn validateServer(server: Server) LookupError!void {
+            switch (server.protocol) {
+                .tls, .doh => {
+                    const tls_config = server.tls_config orelse return error.InvalidTlsConfig;
+                    if (tls_config.server_name.len == 0) return error.InvalidTlsConfig;
+                    if (server.protocol == .doh and (server.doh_path.len == 0 or server.doh_path[0] != '/')) {
+                        return error.InvalidTlsConfig;
+                    }
+                },
+                else => {},
+            }
         }
 
         fn beginLookup(self: *Self) error{Closed}!void {
@@ -604,14 +1055,14 @@ pub fn Resolver(comptime lib: type) type {
                         pos += rdlength;
                         continue;
                     }
-                    out[count] = Addr.initIp4(pkt[pos..][0..4].*, 0);
+                    out[count] = Addr.from4(pkt[pos..][0..4].*);
                     count += 1;
                 } else if (rtype == qtype and rtype == QTYPE_AAAA and rdlength == 16) {
                     if (count >= out.len) {
                         pos += rdlength;
                         continue;
                     }
-                    out[count] = Addr.initIp6(pkt[pos..][0..16].*, 0, 0, 0);
+                    out[count] = Addr.from16(pkt[pos..][0..16].*);
                     count += 1;
                 }
 
@@ -649,9 +1100,4 @@ pub fn Resolver(comptime lib: type) type {
             return readU16(&buf);
         }
     };
-}
-
-test {
-    _ = @import("test_runner/resolver_fake.zig");
-    _ = @import("test_runner/resolver_ali_dns.zig");
 }

@@ -1,7 +1,11 @@
 //! `std.Random`-compatible random interface with a curated algorithm surface.
 
-const std = @import("std_re_export.zig");
-const StdRandom = std.Random;
+const re_export = struct {
+    const std = @import("std");
+
+    pub const Random = std.Random;
+};
+const StdRandom = re_export.Random;
 
 const Random = @This();
 
@@ -102,4 +106,3 @@ fn toStd(r: Random) StdRandom {
         .fillFn = r.fillFn,
     };
 }
-

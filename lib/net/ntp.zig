@@ -55,9 +55,3 @@ pub fn make(comptime lib: type) type {
         }
     };
 }
-
-test {
-    _ = @import("ntp/Client.zig");
-    _ = @import("ntp/types.zig");
-    _ = @import("ntp/wire.zig");
-}

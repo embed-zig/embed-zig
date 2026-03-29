@@ -1,5 +1,5 @@
-pub fn Make(comptime lib: type) type {
-    const common = @import("common.zig").Make(lib);
+pub fn make(comptime lib: type) type {
+    const common = @import("common.zig").make(lib);
     const Allocator = lib.mem.Allocator;
     const ArrayList = lib.ArrayList;
     const mem = lib.mem;
@@ -308,10 +308,10 @@ pub fn Make(comptime lib: type) type {
     };
 }
 
-test "ExtensionBuilder server name roundtrip" {
+test "net/unit_tests/tls/extensions/ExtensionBuilder_server_name_roundtrip" {
     const std = @import("std");
-    const common = @import("common.zig").Make(std);
-    const extensions = Make(std);
+    const common = @import("common.zig").make(std);
+    const extensions = make(std);
 
     var buf: [256]u8 = undefined;
     var builder = extensions.ExtensionBuilder.init(&buf);
@@ -327,10 +327,10 @@ test "ExtensionBuilder server name roundtrip" {
     _ = common;
 }
 
-test "ExtensionBuilder supported versions encodes client list" {
+test "net/unit_tests/tls/extensions/ExtensionBuilder_supported_versions_encodes_client_list" {
     const std = @import("std");
-    const common = @import("common.zig").Make(std);
-    const extensions = Make(std);
+    const common = @import("common.zig").make(std);
+    const extensions = make(std);
 
     var buf: [256]u8 = undefined;
     var builder = extensions.ExtensionBuilder.init(&buf);
@@ -342,9 +342,9 @@ test "ExtensionBuilder supported versions encodes client list" {
     try std.testing.expectEqual(@as(u8, 4), data[4]);
 }
 
-test "ExtensionBuilder selected version roundtrip" {
+test "net/unit_tests/tls/extensions/ExtensionBuilder_selected_version_roundtrip" {
     const std = @import("std");
-    const extensions = Make(std);
+    const extensions = make(std);
 
     var buf: [16]u8 = undefined;
     var builder = extensions.ExtensionBuilder.init(&buf);
@@ -354,12 +354,12 @@ test "ExtensionBuilder selected version roundtrip" {
     defer std.testing.allocator.free(exts);
 
     const ext = extensions.findExtension(exts, .supported_versions) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqual(@import("common.zig").Make(std).ProtocolVersion.tls_1_3, try extensions.parseSupportedVersion(ext.data));
+    try std.testing.expectEqual(@import("common.zig").make(std).ProtocolVersion.tls_1_3, try extensions.parseSupportedVersion(ext.data));
 }
 
-test "ExtensionBuilder key share server roundtrip" {
+test "net/unit_tests/tls/extensions/ExtensionBuilder_key_share_server_roundtrip" {
     const std = @import("std");
-    const extensions = Make(std);
+    const extensions = make(std);
 
     var buf: [64]u8 = undefined;
     var builder = extensions.ExtensionBuilder.init(&buf);
@@ -374,46 +374,46 @@ test "ExtensionBuilder key share server roundtrip" {
 
     const ext = extensions.findExtension(exts, .key_share) orelse return error.TestUnexpectedResult;
     const entry = try extensions.parseKeyShareServer(ext.data);
-    try std.testing.expectEqual(@import("common.zig").Make(std).NamedGroup.x25519, entry.group);
+    try std.testing.expectEqual(@import("common.zig").make(std).NamedGroup.x25519, entry.group);
     try std.testing.expectEqualSlices(u8, &key, entry.key_exchange);
 }
 
-test "ExtensionBuilder detects small buffers" {
+test "net/unit_tests/tls/extensions/ExtensionBuilder_detects_small_buffers" {
     const std = @import("std");
-    const extensions = Make(std);
+    const extensions = make(std);
 
     var buf: [4]u8 = undefined;
     var builder = extensions.ExtensionBuilder.init(&buf);
     try std.testing.expectError(error.BufferTooSmall, builder.addServerName("example.com"));
 }
 
-test "parseExtensions rejects truncated payloads" {
+test "net/unit_tests/tls/extensions/parseExtensions_rejects_truncated_payloads" {
     const std = @import("std");
-    const extensions = Make(std);
+    const extensions = make(std);
     try std.testing.expectError(error.InvalidExtension, extensions.parseExtensions(&.{ 0x00, 0x00, 0x00 }, std.testing.allocator));
 }
 
-test "parseSupportedVersion rejects short payloads" {
+test "net/unit_tests/tls/extensions/parseSupportedVersion_rejects_short_payloads" {
     const std = @import("std");
-    const extensions = Make(std);
+    const extensions = make(std);
     try std.testing.expectError(error.InvalidExtension, extensions.parseSupportedVersion(&.{0x03}));
 }
 
-test "parseSupportedVersion rejects trailing bytes" {
+test "net/unit_tests/tls/extensions/parseSupportedVersion_rejects_trailing_bytes" {
     const std = @import("std");
-    const extensions = Make(std);
+    const extensions = make(std);
     try std.testing.expectError(error.InvalidExtension, extensions.parseSupportedVersion(&.{ 0x03, 0x04, 0x00 }));
 }
 
-test "parseKeyShareServer rejects short payloads" {
+test "net/unit_tests/tls/extensions/parseKeyShareServer_rejects_short_payloads" {
     const std = @import("std");
-    const extensions = Make(std);
+    const extensions = make(std);
     try std.testing.expectError(error.InvalidExtension, extensions.parseKeyShareServer(&.{ 0x00, 0x1d, 0x00 }));
 }
 
-test "parseKeyShareServer rejects trailing bytes" {
+test "net/unit_tests/tls/extensions/parseKeyShareServer_rejects_trailing_bytes" {
     const std = @import("std");
-    const extensions = Make(std);
+    const extensions = make(std);
     try std.testing.expectError(
         error.InvalidExtension,
         extensions.parseKeyShareServer(&.{ 0x00, 0x1d, 0x00, 0x02, 0xaa, 0xbb, 0xcc }),

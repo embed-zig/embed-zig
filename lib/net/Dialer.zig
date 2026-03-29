@@ -4,17 +4,24 @@
 //!   var d = Dialer(lib).init(allocator, .{});
 //!   var conn = try d.dial(.tcp, addr);
 //!   var conn = try d.dial(.udp, addr);
+//!   var conn = try d.dialContext(ctx, .tcp, addr);
 
+const Context = @import("context").Context;
 const Conn = @import("Conn.zig");
+const netip = @import("netip.zig");
 const tcp_conn = @import("TcpConn.zig");
 const udp_conn = @import("UdpConn.zig");
+const fd_mod = @import("fd.zig");
+const sockaddr_mod = @import("fd/SockAddr.zig");
 
 pub fn Dialer(comptime lib: type) type {
-    const posix = lib.posix;
-    const Addr = lib.net.Address;
+    const Addr = @import("netip/AddrPort.zig");
     const Allocator = lib.mem.Allocator;
+    const SockAddr = sockaddr_mod.SockAddr(lib);
     const TC = tcp_conn.TcpConn(lib);
     const UC = udp_conn.UdpConn(lib);
+    const Stream = fd_mod.Stream(lib);
+    const Packet = fd_mod.Packet(lib);
 
     return struct {
         allocator: Allocator,
@@ -33,46 +40,45 @@ pub fn Dialer(comptime lib: type) type {
         pub fn dial(self: Self, network: Network, addr: Addr) !Conn {
             return switch (network) {
                 .tcp => blk: {
-                    const fd = try posix.socket(addr.any.family, posix.SOCK.STREAM, 0);
-                    errdefer posix.close(fd);
-                    try posix.connect(fd, @ptrCast(&addr.any), addr.getOsSockLen());
-                    break :blk TC.init(self.allocator, fd);
+                    var stream = try Stream.initSocket(try SockAddr.family(addr.addr()));
+                    errdefer stream.deinit();
+                    try stream.connect(addr);
+                    break :blk try TC.initFromStream(self.allocator, stream);
                 },
                 .udp => blk: {
-                    const fd = try posix.socket(addr.any.family, posix.SOCK.DGRAM, 0);
-                    errdefer posix.close(fd);
-                    try posix.connect(fd, @ptrCast(&addr.any), addr.getOsSockLen());
-                    break :blk UC.init(self.allocator, fd);
+                    var packet = try Packet.initSocket(try SockAddr.family(addr.addr()));
+                    errdefer packet.deinit();
+                    try packet.connect(addr);
+                    break :blk try UC.initFromPacket(self.allocator, packet);
                 },
             };
         }
+
+        pub fn dialContext(self: Self, ctx: Context, network: Network, addr: Addr) !Conn {
+            try ensureContextActive(ctx);
+            return switch (network) {
+                .tcp => blk: {
+                    var stream = try Stream.initSocket(try SockAddr.family(addr.addr()));
+                    errdefer stream.deinit();
+                    try stream.connectContext(ctx, addr);
+                    try ensureContextActive(ctx);
+                    break :blk try TC.initFromStream(self.allocator, stream);
+                },
+                .udp => blk: {
+                    var packet = try Packet.initSocket(try SockAddr.family(addr.addr()));
+                    errdefer packet.deinit();
+                    try packet.connect(addr);
+                    try ensureContextActive(ctx);
+                    break :blk try UC.initFromPacket(self.allocator, packet);
+                },
+            };
+        }
+
+        fn ensureContextActive(ctx: Context) anyerror!void {
+            if (ctx.err()) |err| return err;
+            if (ctx.deadline()) |deadline_ns| {
+                if (deadline_ns <= lib.time.nanoTimestamp()) return error.DeadlineExceeded;
+            }
+        }
     };
-}
-
-test "std_compat" {
-    const s = @import("std");
-    const Addr = s.net.Address;
-    const TL = @import("TcpListener.zig").TcpListener(s);
-    const D = Dialer(s);
-
-    var ln = try TL.init(s.testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
-    defer ln.deinit();
-
-    const typed = try ln.as(TL);
-
-    const bound_port = try typed.port();
-
-    var d = D.init(s.testing.allocator, .{});
-    var cc = try d.dial(.tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, bound_port));
-    defer cc.deinit();
-
-    var ac = try ln.accept();
-    defer ac.deinit();
-
-    const msg = "hello Dialer";
-    _ = try cc.write(msg);
-
-    var buf: [64]u8 = undefined;
-    const n = try ac.read(buf[0..]);
-    try s.testing.expectEqualStrings(msg, buf[0..n]);
 }

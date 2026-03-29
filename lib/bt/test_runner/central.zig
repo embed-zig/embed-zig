@@ -4,16 +4,57 @@
 //! error conditions. Does NOT require a paired Peripheral — all tests
 //! exercise the local Central state machine only.
 //!
-//! `runWithPeer` is provided separately for integration tests that
-//! have a real Peripheral available.
+//! Paired Central/Peripheral integration scenarios live in
+//! `bt/test_runner/pair.zig`.
 //!
 //! Usage:
 //!   const runner = @import("bt/test_runner/central.zig");
-//!   test { try runner.run(std, my_central); }
+//!   t.run("central", runner.make(std, &host));
 
+const embed = @import("embed");
 const Central = @import("../Central.zig");
+const testing_api = @import("testing");
 
-pub fn run(comptime lib: type, c: Central) !void {
+pub fn make(comptime lib: type, host: anytype) testing_api.TestRunner {
+    const HostPtr = @TypeOf(host);
+    comptime requireHostPointer(HostPtr);
+
+    const Runner = struct {
+        host: HostPtr,
+
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = allocator;
+            const c = self.host.central();
+            c.start() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            defer c.stop();
+
+            runCentral(lib, c) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
+        }
+    };
+
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{ .host = host };
+    return testing_api.TestRunner.make(Runner).new(runner);
+}
+
+fn runCentral(comptime lib: type, c: Central) !void {
     const testing = lib.testing;
 
     // ---- initial state ----
@@ -106,32 +147,8 @@ pub fn run(comptime lib: type, c: Central) !void {
     try testing.expectEqual(Central.State.idle, c.getState());
 }
 
-pub fn runWithPeer(comptime lib: type, c: Central, peer_addr: Central.BdAddr) !void {
-    const testing = lib.testing;
-    try testing.expectEqual(Central.State.idle, c.getState());
-
-    try c.connect(peer_addr, .public, .{});
-    try testing.expectEqual(Central.State.connected, c.getState());
-
-    var svcs: [8]Central.DiscoveredService = undefined;
-    const svc_count = try c.discoverServices(0x0040, &svcs);
-    try testing.expect(svc_count > 0);
-
-    var chars: [8]Central.DiscoveredChar = undefined;
-    const char_count = try c.discoverChars(0x0040, svcs[0].start_handle, svcs[0].end_handle, &chars);
-    try testing.expect(char_count > 0);
-
-    var buf: [64]u8 = undefined;
-    const read_len = try c.gattRead(0x0040, chars[0].value_handle, &buf);
-    try testing.expect(read_len > 0);
-
-    try c.gattWrite(0x0040, chars[0].value_handle, "test");
-
-    if (chars[0].cccd_handle != 0) {
-        try c.subscribe(0x0040, chars[0].cccd_handle);
-        try c.unsubscribe(0x0040, chars[0].cccd_handle);
+fn requireHostPointer(comptime T: type) void {
+    if (@typeInfo(T) != .pointer) {
+        @compileError("central runner expects *Host instance");
     }
-
-    c.disconnect(0x0040);
-    try testing.expectEqual(Central.State.idle, c.getState());
 }

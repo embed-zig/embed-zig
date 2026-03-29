@@ -5,7 +5,7 @@
 //! error.DeadlineExceeded.
 //!
 //! Usage:
-//!   const Context = @import("context").Make(lib);
+//!   const Context = @import("context").make(lib);
 //!   var context = try Context.init(allocator);
 //!   defer context.deinit();
 //!
@@ -24,21 +24,21 @@
 //!   // Or cancel with a specific cause:
 //!   cancel_ctx.cancelWithCause(error.BrokenPipe);
 //!
-//!   // Deadline (absolute milliTimestamp):
-//!   var dc = try context.withDeadline(bg, lib.time.milliTimestamp() + 5000);
+//!   // Deadline (absolute nanoTimestamp):
+//!   var dc = try context.withDeadline(bg, lib.time.nanoTimestamp() + 5 * lib.time.ns_per_ms);
 //!   defer dc.deinit();
 //!
-//!   // Timeout (relative milliseconds):
-//!   var tc = try context.withTimeout(bg, 5000);
+//!   // Timeout (relative nanoseconds):
+//!   var tc = try context.withTimeout(bg, 5 * lib.time.ns_per_ms);
 //!   defer tc.deinit();
 
-const std = @import("std");
+const embed = @import("embed");
 pub const Context = @import("context/Context.zig");
 const cancel_context = @import("context/CancelContext.zig");
 const deadline_context = @import("context/DeadlineContext.zig");
 const value_context = @import("context/ValueContext.zig");
 
-pub fn Make(comptime lib: type) type {
+pub fn make(comptime lib: type) type {
     const Background = struct {
         tree: Context.TreeLink = .{},
         tree_rw: lib.Thread.RwLock = .{},
@@ -49,7 +49,7 @@ pub fn Make(comptime lib: type) type {
             return null;
         }
 
-        fn deadlineFn(_: *anyopaque) ?i64 {
+        fn deadlineFn(_: *anyopaque) ?i128 {
             return null;
         }
 
@@ -57,12 +57,13 @@ pub fn Make(comptime lib: type) type {
             return null;
         }
 
-        fn waitFn(_: *anyopaque, timeout_ms: ?u32) ?anyerror {
-            if (timeout_ms) |ms| {
-                lib.Thread.sleep(@as(u64, ms) * lib.time.ns_per_ms);
+        fn waitFn(_: *anyopaque, timeout_ns: ?i64) ?anyerror {
+            if (timeout_ns) |ns| {
+                if (ns <= 0) return null;
+                lib.Thread.sleep(@intCast(ns));
                 return null;
             }
-            while (true) lib.Thread.sleep(std.math.maxInt(u64));
+            while (true) lib.Thread.sleep(embed.math.maxInt(u64));
         }
 
         fn cancelFn(_: *anyopaque) void {}
@@ -153,8 +154,9 @@ pub fn Make(comptime lib: type) type {
         pub fn deinit(self: *Self) void {
             const allocator = self.shared.allocator;
             self.shared.background_impl.tree_rw.lock();
-            std.debug.assert(self.shared.background_impl.tree.children.first == null);
+            const has_children = self.shared.background_impl.tree.children.first != null;
             self.shared.background_impl.tree_rw.unlock();
+            if (has_children) @panic("context root deinit with active child");
             allocator.destroy(self.shared);
             self.* = undefined;
         }
@@ -166,18 +168,18 @@ pub fn Make(comptime lib: type) type {
         }
 
         /// Create a context that auto-cancels at the given absolute deadline
-        /// (milliTimestamp). If the parent has an earlier deadline, that one
+        /// (nanoTimestamp). If the parent has an earlier deadline, that one
         /// takes effect instead.
-        pub fn withDeadline(self: *const Self, parent: Context, deadline_ms: i64) lib.mem.Allocator.Error!Context {
+        pub fn withDeadline(self: *const Self, parent: Context, deadline_ns: i128) lib.mem.Allocator.Error!Context {
             _ = self;
-            return DeadlineContext.init(parent.allocator, parent, deadline_ms);
+            return DeadlineContext.init(parent.allocator, parent, deadline_ns);
         }
 
-        /// Create a context that auto-cancels after timeout_ms milliseconds.
+        /// Create a context that auto-cancels after timeout_ns nanoseconds.
         /// Convenience wrapper over withDeadline.
-        pub fn withTimeout(self: *const Self, parent: Context, timeout_ms: i64) lib.mem.Allocator.Error!Context {
+        pub fn withTimeout(self: *const Self, parent: Context, timeout_ns: i64) lib.mem.Allocator.Error!Context {
             _ = self;
-            return DeadlineContext.init(parent.allocator, parent, lib.time.milliTimestamp() + timeout_ms);
+            return DeadlineContext.init(parent.allocator, parent, lib.time.nanoTimestamp() + timeout_ns);
         }
 
         /// Attach a typed key-value pair to the context chain.
@@ -193,14 +195,4 @@ pub fn Make(comptime lib: type) type {
     };
 }
 
-pub const test_runner = struct {
-    pub const context = @import("context/test_runner/context.zig");
-};
-
-test {
-    _ = @import("context/Context.zig");
-    _ = @import("context/CancelContext.zig");
-    _ = @import("context/DeadlineContext.zig");
-    _ = @import("context/ValueContext.zig");
-    _ = @import("context/test_runner/context.zig");
-}
+test "context/unit_tests" {}

@@ -4,6 +4,8 @@ const Context = @import("Context.zig");
 const internal = @import("internal.zig");
 const Allocator = @import("embed").mem.Allocator;
 
+const max_wait_ns_i128 = @as(i128, @intCast((@as(u128, 1) << 64) - 1));
+
 pub fn CancelContext(comptime lib: type) type {
     const Mutex = lib.Thread.Mutex;
     const Condition = lib.Thread.Condition;
@@ -54,18 +56,17 @@ pub fn CancelContext(comptime lib: type) type {
             internal.cancelChildrenWithCause(self.tree.ctx, cause);
         }
 
-        pub fn wait(self: *Self, timeout_ms: ?u32) ?anyerror {
+        pub fn wait(self: *Self, timeout_ns: ?i64) ?anyerror {
             self.mu.lock();
             defer self.mu.unlock();
 
-            if (timeout_ms) |ms| {
-                const deadline_ms = lib.time.milliTimestamp() + @as(i64, ms);
+            if (timeout_ns) |ns| {
+                const deadline_ns = lib.time.nanoTimestamp() + @as(i128, ns);
                 while (self.cause == null) {
-                    const remaining_ms = deadline_ms - lib.time.milliTimestamp();
-                    if (remaining_ms <= 0) return null;
+                    const remaining_ns = deadline_ns - lib.time.nanoTimestamp();
+                    if (remaining_ns <= 0) return null;
 
-                    const remaining_ns = @as(u64, @intCast(remaining_ms)) * lib.time.ns_per_ms;
-                    self.cond.timedWait(&self.mu, remaining_ns) catch {};
+                    self.cond.timedWait(&self.mu, @intCast(@min(remaining_ns, max_wait_ns_i128))) catch {};
                 }
                 return self.cause;
             }
@@ -83,7 +84,7 @@ pub fn CancelContext(comptime lib: type) type {
             return self.cause;
         }
 
-        fn deadlineImpl(ptr: *anyopaque) ?i64 {
+        fn deadlineImpl(ptr: *anyopaque) ?i128 {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
@@ -99,9 +100,9 @@ pub fn CancelContext(comptime lib: type) type {
             return parent.vtable.valueFn(parent.ptr, key);
         }
 
-        fn waitImpl(ptr: *anyopaque, timeout_ms: ?u32) ?anyerror {
+        fn waitImpl(ptr: *anyopaque, timeout_ns: ?i64) ?anyerror {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            return self.wait(timeout_ms);
+            return self.wait(timeout_ns);
         }
 
         fn cancelImpl(ptr: *anyopaque) void {

@@ -1,8 +1,8 @@
-pub fn Make(comptime lib: type) type {
-    const common = @import("common.zig").Make(lib);
-    const extensions = @import("extensions.zig").Make(lib);
-    const kdf = @import("kdf.zig").Make(lib);
-    const record = @import("record.zig").Make(lib);
+pub fn make(comptime lib: type) type {
+    const common = @import("common.zig").make(lib);
+    const extensions = @import("extensions.zig").make(lib);
+    const kdf = @import("kdf.zig").make(lib);
+    const record = @import("record.zig").make(lib);
     const crypto = lib.crypto;
     const mem = lib.mem;
     const time = lib.time;
@@ -114,6 +114,7 @@ pub fn Make(comptime lib: type) type {
             verification: VerificationMode = .hostname_only,
             min_version: common.ProtocolVersion = .tls_1_2,
             max_version: common.ProtocolVersion = .tls_1_3,
+            tls12_cipher_suites: []const common.CipherSuite = &common.DEFAULT_TLS12_CIPHER_SUITES,
             tls13_cipher_suites: []const common.CipherSuite = &common.DEFAULT_TLS13_CIPHER_SUITES,
         };
 
@@ -127,6 +128,7 @@ pub fn Make(comptime lib: type) type {
                 verification: VerificationMode,
                 min_version: common.ProtocolVersion,
                 max_version: common.ProtocolVersion,
+                tls12_cipher_suites: []const common.CipherSuite,
                 tls13_cipher_suites: []const common.CipherSuite,
                 client_random: [32]u8,
                 legacy_session_id: [32]u8,
@@ -175,17 +177,22 @@ pub fn Make(comptime lib: type) type {
                     options: InitOptions,
                 ) HandshakeError!Self {
                     try validateVersionRange(options.min_version, options.max_version);
+                    if (!common.validateTls12CipherSuites(options.tls12_cipher_suites)) return error.UnsupportedCipherSuite;
                     if (!common.validateTls13CipherSuites(options.tls13_cipher_suites)) return error.UnsupportedCipherSuite;
 
                     var self: Self = .{
                         .state = .initial,
                         .version = .tls_1_3,
-                        .cipher_suite = options.tls13_cipher_suites[0],
+                        .cipher_suite = if (options.max_version == .tls_1_2)
+                            options.tls12_cipher_suites[0]
+                        else
+                            options.tls13_cipher_suites[0],
                         .hostname = options.hostname,
                         .allocator = options.allocator,
                         .verification = options.verification,
                         .min_version = options.min_version,
                         .max_version = options.max_version,
+                        .tls12_cipher_suites = options.tls12_cipher_suites,
                         .tls13_cipher_suites = options.tls13_cipher_suites,
                         .client_random = undefined,
                         .legacy_session_id = undefined,
@@ -234,7 +241,7 @@ pub fn Make(comptime lib: type) type {
 
                 pub fn sendClientHello(self: *Self, handshake_buf: []u8, record_buf: []u8) HandshakeError!usize {
                     const len = try self.encodeClientHello(handshake_buf);
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..len], record_buf) catch {
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..len], record_buf, handshake_buf) catch {
                         return error.RecordIoFailed;
                     };
                     self.state = .wait_server_hello;
@@ -256,22 +263,24 @@ pub fn Make(comptime lib: type) type {
                     @memcpy(out[body_pos..][0..self.legacy_session_id.len], &self.legacy_session_id);
                     body_pos += self.legacy_session_id.len;
 
-                    const tls12_cipher_suites = [_]common.CipherSuite{
-                        .TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-                        .TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-                        .TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
-                        .TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-                    };
-                    const cipher_suite_count = self.tls13_cipher_suites.len + tls12_cipher_suites.len;
+                    const offer_tls13 = self.offeredTls13();
+                    const offer_tls12 = self.versionAllowed(.tls_1_2);
+                    const tls13_cipher_suite_count: usize = if (offer_tls13) self.tls13_cipher_suites.len else 0;
+                    const tls12_cipher_suite_count: usize = if (offer_tls12) self.tls12_cipher_suites.len else 0;
+                    const cipher_suite_count = tls13_cipher_suite_count + tls12_cipher_suite_count;
                     mem.writeInt(u16, out[body_pos..][0..2], @intCast(cipher_suite_count * 2), .big);
                     body_pos += 2;
-                    for (self.tls13_cipher_suites) |suite| {
-                        mem.writeInt(u16, out[body_pos..][0..2], @intFromEnum(suite), .big);
-                        body_pos += 2;
+                    if (offer_tls13) {
+                        for (self.tls13_cipher_suites) |suite| {
+                            mem.writeInt(u16, out[body_pos..][0..2], @intFromEnum(suite), .big);
+                            body_pos += 2;
+                        }
                     }
-                    for (tls12_cipher_suites) |suite| {
-                        mem.writeInt(u16, out[body_pos..][0..2], @intFromEnum(suite), .big);
-                        body_pos += 2;
+                    if (offer_tls12) {
+                        for (self.tls12_cipher_suites) |suite| {
+                            mem.writeInt(u16, out[body_pos..][0..2], @intFromEnum(suite), .big);
+                            body_pos += 2;
+                        }
                     }
 
                     out[body_pos] = 1;
@@ -458,7 +467,7 @@ pub fn Make(comptime lib: type) type {
                         return;
                     }
 
-                    if (!isSupportedTls12CipherSuite(self.cipher_suite)) return error.UnsupportedCipherSuite;
+                    if (!self.clientSupportsTls12CipherSuite(self.cipher_suite)) return error.UnsupportedCipherSuite;
                     if (!saw_supported_versions) {
                         if (!self.versionAllowed(.tls_1_2)) return error.UnsupportedVersion;
                         self.version = .tls_1_2;
@@ -479,6 +488,13 @@ pub fn Make(comptime lib: type) type {
 
                 fn clientSupportsTls13CipherSuite(self: *const Self, suite: common.CipherSuite) bool {
                     for (self.tls13_cipher_suites) |allowed| {
+                        if (allowed == suite) return true;
+                    }
+                    return false;
+                }
+
+                fn clientSupportsTls12CipherSuite(self: *const Self, suite: common.CipherSuite) bool {
+                    for (self.tls12_cipher_suites) |allowed| {
                         if (allowed == suite) return true;
                     }
                     return false;
@@ -733,7 +749,7 @@ pub fn Make(comptime lib: type) type {
                     try header.serialize(handshake_buf[0..common.HandshakeHeader.SIZE]);
                     @memcpy(handshake_buf[common.HandshakeHeader.SIZE..][0..verify_data.len], verify_data);
 
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..total_len], record_buf) catch {
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..total_len], record_buf, handshake_buf) catch {
                         return error.RecordIoFailed;
                     };
 
@@ -783,7 +799,7 @@ pub fn Make(comptime lib: type) type {
                     handshake_buf[common.HandshakeHeader.SIZE] = @intCast(public_key.len);
                     @memcpy(handshake_buf[common.HandshakeHeader.SIZE + 1 ..][0..public_key.len], public_key);
                     self.records.setVersion(.tls_1_2);
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..total_len], record_buf) catch {
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..total_len], record_buf, handshake_buf) catch {
                         return error.RecordIoFailed;
                     };
                     self.transcript_hash.update(handshake_buf[0..total_len]);
@@ -791,7 +807,7 @@ pub fn Make(comptime lib: type) type {
                     try self.deriveTls12Secrets();
 
                     const ccs = [_]u8{@intFromEnum(common.ChangeCipherSpecType.change_cipher_spec)};
-                    _ = self.records.writeRecord(.change_cipher_spec, &ccs, record_buf) catch {
+                    _ = self.records.writeRecord(.change_cipher_spec, &ccs, record_buf, handshake_buf) catch {
                         return error.RecordIoFailed;
                     };
 
@@ -807,7 +823,7 @@ pub fn Make(comptime lib: type) type {
                     try finished_header.serialize(handshake_buf[0..common.HandshakeHeader.SIZE]);
                     @memcpy(handshake_buf[common.HandshakeHeader.SIZE..][0..verify_data.len], &verify_data);
 
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..finished_len], record_buf) catch {
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..finished_len], record_buf, handshake_buf) catch {
                         return error.RecordIoFailed;
                     };
                     self.transcript_hash.update(handshake_buf[0..finished_len]);
@@ -817,7 +833,7 @@ pub fn Make(comptime lib: type) type {
 
                 fn deriveTls12Secrets(self: *Self) HandshakeError!void {
                     const shared_secret = self.tls12SharedSecret() orelse return error.KeyExchangeFailed;
-                    if (!isSupportedTls12CipherSuite(self.cipher_suite)) return error.UnsupportedCipherSuite;
+                    if (!self.clientSupportsTls12CipherSuite(self.cipher_suite)) return error.UnsupportedCipherSuite;
 
                     var master_seed: [64]u8 = undefined;
                     @memcpy(master_seed[0..32], &self.client_random);
@@ -1205,17 +1221,6 @@ pub fn Make(comptime lib: type) type {
                     }
                 }
 
-                fn isSupportedTls12CipherSuite(suite: common.CipherSuite) bool {
-                    return switch (suite) {
-                        .TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-                        .TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-                        .TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-                        .TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
-                        => true,
-                        else => false,
-                    };
-                }
-
                 fn generateP256KeyPair() HandshakeError!crypto.sign.ecdsa.EcdsaP256Sha256.KeyPair {
                     while (true) {
                         var seed: [crypto.sign.ecdsa.EcdsaP256Sha256.SecretKey.encoded_length]u8 = undefined;
@@ -1245,9 +1250,9 @@ pub fn Make(comptime lib: type) type {
     };
 }
 
-test "client handshake x25519 shared secret roundtrip" {
+test "net/unit_tests/tls/client_handshake/x25519_shared_secret_roundtrip" {
     const std = @import("std");
-    const client = Make(std);
+    const client = make(std);
 
     var a = try client.KeyExchange.generate(.x25519);
     var b = try client.KeyExchange.generate(.x25519);
@@ -1257,17 +1262,17 @@ test "client handshake x25519 shared secret roundtrip" {
     try std.testing.expectEqualSlices(u8, secret_a, secret_b);
 }
 
-test "client handshake encodes client hello" {
+test "net/unit_tests/tls/client_handshake/encodes_client_hello" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const client = make(std);
+    const tls_common = @import("common.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -1290,18 +1295,18 @@ test "client handshake encodes client hello" {
     try std.testing.expectEqual(@as(u8, 32), buf[tls_common.HandshakeHeader.SIZE + 34]);
 }
 
-test "client handshake honors tls13-only version range" {
+test "net/unit_tests/tls/client_handshake/honors_tls13_only_version_range" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_common = @import("common.zig").Make(std);
-    const tls_ext = @import("extensions.zig").Make(std);
+    const client = make(std);
+    const tls_common = @import("common.zig").make(std);
+    const tls_ext = @import("extensions.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -1345,18 +1350,18 @@ test "client handshake honors tls13-only version range" {
     try std.testing.expectEqualSlices(u8, &.{ 0x02, 0x03, 0x04 }, supported_versions.data);
 }
 
-test "client handshake honors tls12-only version range" {
+test "net/unit_tests/tls/client_handshake/honors_tls12_only_version_range" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_common = @import("common.zig").Make(std);
-    const tls_ext = @import("extensions.zig").Make(std);
+    const client = make(std);
+    const tls_common = @import("common.zig").make(std);
+    const tls_ext = @import("extensions.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -1400,11 +1405,57 @@ test "client handshake honors tls12-only version range" {
     try std.testing.expectEqualSlices(u8, &.{ 0x02, 0x03, 0x03 }, supported_versions.data);
 }
 
-test "client handshake tls12 finished flow matches std tls helpers" {
+test "net/unit_tests/tls/client_handshake/honors_configured_tls12_cipher_suites" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_common = @import("common.zig").Make(std);
-    const tls_record = @import("record.zig").Make(std);
+    const client = make(std);
+    const tls_common = @import("common.zig").make(std);
+
+    const MockConn = struct {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
+            return error.EndOfStream;
+        }
+
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
+            return buf.len;
+        }
+
+        pub fn close(_: *@This()) void {}
+        pub fn deinit(_: *@This()) void {}
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    var conn = MockConn{};
+    var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
+        .hostname = "example.com",
+        .allocator = std.testing.allocator,
+        .min_version = .tls_1_2,
+        .max_version = .tls_1_2,
+        .tls12_cipher_suites = &.{.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256},
+    });
+
+    var buf: [1024]u8 = undefined;
+    const len = try hs.encodeClientHello(&buf);
+    const header = try tls_common.HandshakeHeader.parse(buf[0..tls_common.HandshakeHeader.SIZE]);
+    const body = buf[tls_common.HandshakeHeader.SIZE..len][0..header.length];
+
+    var pos: usize = 0;
+    pos += 2;
+    pos += 32;
+    pos += 1 + body[pos];
+
+    const cipher_suites_len = std.mem.readInt(u16, body[pos..][0..2], .big);
+    pos += 2;
+    try std.testing.expectEqual(@as(u16, 2), cipher_suites_len);
+    const cipher_suite: tls_common.CipherSuite = @enumFromInt(std.mem.readInt(u16, body[pos..][0..2], .big));
+    try std.testing.expectEqual(tls_common.CipherSuite.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, cipher_suite);
+}
+
+test "net/unit_tests/tls/client_handshake/tls12_finished_flow_matches_std_tls_helpers" {
+    const std = @import("std");
+    const client = make(std);
+    const tls_common = @import("common.zig").make(std);
+    const tls_record = @import("record.zig").make(std);
     const fixtures = @import("test_fixtures.zig");
     const Ecdsa = std.crypto.sign.ecdsa.EcdsaP256Sha256;
     const HmacSha256 = std.crypto.auth.hmac.sha2.HmacSha256;
@@ -1413,11 +1464,11 @@ test "client handshake tls12 finished flow matches std tls helpers" {
         write_buf: [4096]u8 = undefined,
         write_len: usize = 0,
 
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(self: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             @memcpy(self.write_buf[self.write_len..][0..buf.len], buf);
             self.write_len += buf.len;
             return buf.len;
@@ -1433,7 +1484,7 @@ test "client handshake tls12 finished flow matches std tls helpers" {
         data: []const u8,
         pos: usize = 0,
 
-        pub fn read(self: *@This(), buf: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             if (self.pos >= self.data.len) return error.EndOfStream;
             const n = @min(buf.len, self.data.len - self.pos);
             @memcpy(buf[0..n], self.data[self.pos..][0..n]);
@@ -1441,7 +1492,7 @@ test "client handshake tls12 finished flow matches std tls helpers" {
             return n;
         }
 
-        pub fn write(_: *@This(), _: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), _: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.Unexpected;
         }
 
@@ -1639,21 +1690,21 @@ test "client handshake tls12 finished flow matches std tls helpers" {
     try std.testing.expectEqual(client.HandshakeState.connected, hs.state);
 }
 
-test "client handshake client hello matches std tls overlapping wire fields" {
+test "net/unit_tests/tls/client_handshake/client_hello_matches_std_tls_overlapping_wire_fields" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_common = @import("common.zig").Make(std);
-    const tls_ext = @import("extensions.zig").Make(std);
+    const client = make(std);
+    const tls_common = @import("common.zig").make(std);
+    const tls_ext = @import("extensions.zig").make(std);
 
     const MockConn = struct {
         write_buf: [4096]u8 = undefined,
         write_len: usize = 0,
 
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(self: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             @memcpy(self.write_buf[self.write_len..][0..buf.len], buf);
             self.write_len += buf.len;
             return buf.len;
@@ -1807,18 +1858,18 @@ test "client handshake client hello matches std tls overlapping wire fields" {
     try Helpers.expectContainsCipherSuite(ours.cipher_suites, .TLS_AES_256_GCM_SHA384);
 }
 
-test "client handshake processes tls13 server hello" {
+test "net/unit_tests/tls/client_handshake/processes_tls13_server_hello" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_ext = @import("extensions.zig").Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const client = make(std);
+    const tls_ext = @import("extensions.zig").make(std);
+    const tls_common = @import("common.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -1878,18 +1929,18 @@ test "client handshake processes tls13 server hello" {
     try std.testing.expect(!std.mem.allEqual(u8, &hs.server_handshake_traffic_secret, 0));
 }
 
-test "client handshake rejects tls13 server hello without key share" {
+test "net/unit_tests/tls/client_handshake/rejects_tls13_server_hello_without_key_share" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_ext = @import("extensions.zig").Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const client = make(std);
+    const tls_ext = @import("extensions.zig").make(std);
+    const tls_common = @import("common.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -1934,18 +1985,18 @@ test "client handshake rejects tls13 server hello without key share" {
     try std.testing.expectError(error.MissingExtension, hs.processHandshake(server_hello[0..pos]));
 }
 
-test "client handshake rejects tls13 suite with tls12 selected version" {
+test "net/unit_tests/tls/client_handshake/rejects_tls13_suite_with_tls12_selected_version" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_ext = @import("extensions.zig").Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const client = make(std);
+    const tls_ext = @import("extensions.zig").make(std);
+    const tls_common = @import("common.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -1997,17 +2048,17 @@ test "client handshake rejects tls13 suite with tls12 selected version" {
     try std.testing.expectError(error.UnsupportedVersion, hs.processHandshake(server_hello[0..pos]));
 }
 
-test "client handshake accepts tls12 fallback from server without downgrade sentinel" {
+test "net/unit_tests/tls/client_handshake/accepts_tls12_fallback_from_server_without_downgrade_sentinel" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const client = make(std);
+    const tls_common = @import("common.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -2048,17 +2099,17 @@ test "client handshake accepts tls12 fallback from server without downgrade sent
     try std.testing.expectEqual(tls_common.CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, hs.cipher_suite);
 }
 
-test "client handshake accepts tls12 chacha server hello" {
+test "net/unit_tests/tls/client_handshake/accepts_tls12_chacha_server_hello" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const client = make(std);
+    const tls_common = @import("common.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -2099,17 +2150,17 @@ test "client handshake accepts tls12 chacha server hello" {
     try std.testing.expectEqual(tls_common.CipherSuite.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, hs.cipher_suite);
 }
 
-test "client handshake rejects tls12 downgrade sentinel when tls13 was offered" {
+test "net/unit_tests/tls/client_handshake/rejects_tls12_downgrade_sentinel_when_tls13_was_offered" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const client = make(std);
+    const tls_common = @import("common.zig").make(std);
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -2149,22 +2200,22 @@ test "client handshake rejects tls12 downgrade sentinel when tls13 was offered" 
     try std.testing.expectError(error.InvalidHandshake, hs.processHandshake(server_hello[0..pos]));
 }
 
-test "client handshake finished flow matches std tls helpers" {
+test "net/unit_tests/tls/client_handshake/finished_flow_matches_std_tls_helpers" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_ext = @import("extensions.zig").Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const client = make(std);
+    const tls_ext = @import("extensions.zig").make(std);
+    const tls_common = @import("common.zig").make(std);
     const Ecdsa = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 
     const MockConn = struct {
         write_buf: [4096]u8 = undefined,
         write_len: usize = 0,
 
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(self: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             @memcpy(self.write_buf[self.write_len..][0..buf.len], buf);
             self.write_len += buf.len;
             return buf.len;
@@ -2370,18 +2421,18 @@ test "client handshake finished flow matches std tls helpers" {
     try std.testing.expectEqual(client.HandshakeState.connected, hs.state);
 }
 
-test "client handshake verifies certificate chain with bundle" {
+test "net/unit_tests/tls/client_handshake/verifies_certificate_chain_with_bundle" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const client = make(std);
+    const tls_common = @import("common.zig").make(std);
     const fixtures = @import("test_fixtures.zig");
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 
@@ -2436,18 +2487,18 @@ test "client handshake verifies certificate chain with bundle" {
     try std.testing.expectEqual(@as(usize, fixtures.chain_leaf_der.len), hs.server_cert_der_len);
 }
 
-test "client handshake rejects unknown certificate authority" {
+test "net/unit_tests/tls/client_handshake/rejects_unknown_certificate_authority" {
     const std = @import("std");
-    const client = Make(std);
-    const tls_common = @import("common.zig").Make(std);
+    const client = make(std);
+    const tls_common = @import("common.zig").make(std);
     const fixtures = @import("test_fixtures.zig");
 
     const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             return error.EndOfStream;
         }
 
-        pub fn write(_: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             return buf.len;
         }
 

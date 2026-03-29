@@ -1,35 +1,63 @@
-//! HTTP transport test runner — local and public-network integration tests.
+//! Shared HTTP transport runner implementation.
 //!
-//! Covers:
-//! - local HTTP/1.1 round trips for 200 and 404 responses
-//! - context timeout propagation as `context.err()`
-//! - public AliDNS DoH endpoint reachability over plain HTTP
-//!
-//! Usage:
-//!   try @import("net/test_runner/http_transport.zig").run(lib);
-
+const embed = @import("embed");
 const io = @import("io");
 const net_mod = @import("../../net.zig");
 const context_mod = @import("context");
+const testing_api = @import("testing");
 
-pub fn run(comptime lib: type) !void {
-    try runImpl(lib, .full);
+pub fn make(
+    comptime lib: type,
+    comptime name: []const u8,
+    comptime run_cases: *const fn (type, type) anyerror!void,
+) testing_api.TestRunner {
+    const Runner = struct {
+        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
+
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            runImpl(lib, t, allocator, run_cases) catch |err| {
+                t.logErrorf("{s} runner failed: {}", .{ name, err });
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
+        }
+    };
+
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{};
+    return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-pub fn runLocal(comptime lib: type) !void {
-    try runImpl(lib, .local);
-}
-
-pub fn runLayer01Local(comptime lib: type) !void {
-    try runImpl(lib, .layer01);
-}
-
-fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !void {
-    const Net = net_mod.Make(lib);
+fn runImpl(
+    comptime lib: type,
+    t: *testing_api.T,
+    alloc: lib.mem.Allocator,
+    comptime run_cases: *const fn (type, type) anyerror!void,
+) !void {
+    _ = t;
+    const Net = net_mod.make(lib);
     const Http = Net.http;
-    const Addr = lib.net.Address;
-    const testing = lib.testing;
-    const log = lib.log.scoped(.http_transport);
+    const AddrPort = net_mod.netip.AddrPort;
+    const testing = struct {
+        pub var allocator: lib.mem.Allocator = undefined;
+        pub const expect = lib.testing.expect;
+        pub const expectEqual = lib.testing.expectEqual;
+        pub const expectEqualStrings = lib.testing.expectEqualStrings;
+        pub const expectError = lib.testing.expectError;
+    };
+    testing.allocator = alloc;
+    const test_spawn_config: lib.Thread.SpawnConfig = .{};
 
     const ServerSpec = struct {
         expected_request_line: []const u8,
@@ -69,6 +97,10 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
     };
 
     const Runner = struct {
+        fn addr4(port: u16) AddrPort {
+            return AddrPort.from4(.{ 127, 0, 0, 1 }, port);
+        }
+
         const Mutex = lib.Thread.Mutex;
         const Condition = lib.Thread.Condition;
         const EmptyState = struct {};
@@ -241,7 +273,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             return typed.port();
         }
 
-        fn localReturns200() !void {
+        pub fn localReturns200() !void {
             try withOneShotServer(.{
                 .expected_request_line = "GET /ok HTTP/1.1",
                 .status_code = Http.status.ok,
@@ -269,7 +301,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             }.run);
         }
 
-        fn localReturns404() !void {
+        pub fn localReturns404() !void {
             try withOneShotServer(.{
                 .expected_request_line = "GET /missing HTTP/1.1",
                 .status_code = Http.status.not_found,
@@ -297,7 +329,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             }.run);
         }
 
-        fn defaultUserAgentMatchesGo() !void {
+        pub fn defaultUserAgentMatches() !void {
             try withServerState(
                 EmptyState{},
                 struct {
@@ -306,7 +338,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
                         var req_buf: [4096]u8 = undefined;
                         const req_head = try readRequestHead(conn, &req_buf);
                         try testing.expect(hasRequestLine(req_head, "GET /user-agent-default HTTP/1.1"));
-                        try testing.expectEqualStrings("Go-http-client/1.1", headerValue(req_head, Http.Header.user_agent) orelse "");
+                        try testing.expectEqualStrings("embed-zig-http-client/1.0", headerValue(req_head, Http.Header.user_agent) orelse "");
                         io.writeAll(@TypeOf(c), &c, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok") catch {};
                     }
                 }.run,
@@ -330,7 +362,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn emptyUserAgentSuppressesDefault() !void {
+        pub fn emptyUserAgentSuppressesDefault() !void {
             try withServerState(
                 EmptyState{},
                 struct {
@@ -368,7 +400,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn contextDeadlineExceeded() !void {
+        pub fn contextDeadlineExceeded() !void {
             try withOneShotServer(.{
                 .expected_request_line = "GET /slow HTTP/1.1",
                 .status_code = Http.status.ok,
@@ -379,10 +411,10 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
                     var transport = try Http.Transport.init(testing.allocator, .{});
                     defer transport.deinit();
 
-                    const Context = context_mod.Make(lib);
+                    const Context = context_mod.make(lib);
                     var ctx_api = try Context.init(testing.allocator);
                     defer ctx_api.deinit();
-                    var timeout_ctx = try ctx_api.withTimeout(ctx_api.background(), 30);
+                    var timeout_ctx = try ctx_api.withTimeout(ctx_api.background(), 30 * lib.time.ns_per_ms);
                     defer timeout_ctx.deinit();
 
                     const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/slow", .{port});
@@ -396,7 +428,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             }.run);
         }
 
-        fn responseHeaderTimeoutExceeded() !void {
+        pub fn responseHeaderTimeoutExceeded() !void {
             try withOneShotServer(.{
                 .expected_request_line = "GET /header-timeout HTTP/1.1",
                 .status_code = Http.status.ok,
@@ -418,7 +450,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             }.run);
         }
 
-        fn responseHeaderTimeoutDoesNotLimitBodyRead() !void {
+        pub fn responseHeaderTimeoutDoesNotLimitBodyRead() !void {
             try withServerState(
                 EmptyState{},
                 struct {
@@ -459,37 +491,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn publicAliDnsDoh() !void {
-            var transport = try Http.Transport.init(testing.allocator, .{});
-            defer transport.deinit();
-
-            var req = try Http.Request.init(
-                testing.allocator,
-                "GET",
-                "http://public.alidns.com/resolve?name=public.alidns.com&type=A",
-            );
-            const headers = [_]Http.Header{
-                Http.Header.init(Http.Header.accept, "application/dns-json"),
-            };
-            req.header = &headers;
-
-            var resp = try transport.roundTrip(&req);
-            defer resp.deinit();
-
-            try testing.expect(resp.status_code == Http.status.ok or resp.status_code == Http.status.unauthorized);
-
-            const body = try readBody(resp);
-            defer testing.allocator.free(body);
-
-            if (resp.status_code == Http.status.ok) {
-                try testing.expect(body.len != 0);
-            } else {
-                try testing.expectEqual(Http.status.unauthorized, resp.status_code);
-                try testing.expect(lib.mem.indexOf(u8, body, "NoPermission") != null);
-            }
-        }
-
-        fn responseBodyLargerThanMaxBodyBytesFails() !void {
+        pub fn responseBodyLargerThanMaxBodyBytesFails() !void {
             const payload = [_]u8{'r'} ** 8192;
 
             try withOneShotServer(.{
@@ -510,7 +512,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             }.run);
         }
 
-        fn defaultMaxHeaderBytesAllowsLargeResponseHeaders() !void {
+        pub fn configuredMaxHeaderBytesAllowsLargeResponseHeaders() !void {
             const State = struct {
                 fill: []u8,
             };
@@ -538,7 +540,9 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
                 }.run,
                 struct {
                     fn run(port: u16, _: *State) !void {
-                        var transport = try Http.Transport.init(testing.allocator, .{});
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .max_header_bytes = 64 * 1024,
+                        });
                         defer transport.deinit();
 
                         const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/large-header-default", .{port});
@@ -556,7 +560,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn largeResponseStreamsWithoutBufferingWholeBody() !void {
+        pub fn largeResponseStreamsWithoutBufferingWholeBody() !void {
             const payload = [_]u8{'r'} ** 8192;
 
             try withOneShotServer(.{
@@ -583,7 +587,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             }.run);
         }
 
-        fn defaultMaxBodyBytesAllowsLargeResponse() !void {
+        pub fn defaultMaxBodyBytesAllowsLargeResponse() !void {
             const payload_len = 5 * 1024 * 1024;
             const payload = try testing.allocator.alloc(u8, payload_len);
             defer testing.allocator.free(payload);
@@ -615,7 +619,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             }.run);
         }
 
-        fn largeRequestStreamsWithoutBufferingWholeBody() !void {
+        pub fn largeRequestStreamsWithoutBufferingWholeBody() !void {
             const payload = [_]u8{'q'} ** 8192;
 
             const BodySource = struct {
@@ -661,7 +665,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             }.run);
         }
 
-        fn defaultMaxBodyBytesAllowsLargeRequest() !void {
+        pub fn defaultMaxBodyBytesAllowsLargeRequest() !void {
             const payload_len = 5 * 1024 * 1024;
             const payload = try testing.allocator.alloc(u8, payload_len);
             defer testing.allocator.free(payload);
@@ -711,7 +715,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             }.run);
         }
 
-        fn connectMethodIsRejected() !void {
+        pub fn connectMethodIsRejected() !void {
             var transport = try Http.Transport.init(testing.allocator, .{});
             defer transport.deinit();
 
@@ -719,7 +723,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             try testing.expectError(error.UnsupportedMethod, transport.roundTrip(&req));
         }
 
-        fn idleConnectionIsReused() !void {
+        pub fn idleConnectionIsReused() !void {
             const accept_count = try withTwoRequestKeepAliveServer(.{
                 .first_request_line = "GET /reuse-1 HTTP/1.1",
                 .second_request_line = "GET /reuse-2 HTTP/1.1",
@@ -754,7 +758,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             try testing.expectEqual(@as(usize, 1), accept_count);
         }
 
-        fn closeIdleConnectionsForcesNewConn() !void {
+        pub fn closeIdleConnectionsForcesNewConn() !void {
             const accept_count = try withTwoRequestKeepAliveServer(.{
                 .first_request_line = "GET /close-idle-1 HTTP/1.1",
                 .second_request_line = "GET /close-idle-2 HTTP/1.1",
@@ -791,7 +795,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             try testing.expectEqual(@as(usize, 2), accept_count);
         }
 
-        fn earlyResponseBodyCloseDoesNotReuseConn() !void {
+        pub fn earlyResponseBodyCloseDoesNotReuseConn() !void {
             const accept_count = try withTwoRequestKeepAliveServer(.{
                 .first_request_line = "GET /partial-close-1 HTTP/1.1",
                 .second_request_line = "GET /partial-close-2 HTTP/1.1",
@@ -827,7 +831,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             try testing.expectEqual(@as(usize, 2), accept_count);
         }
 
-        fn idleConnectionTimeoutForcesNewConn() !void {
+        pub fn idleConnectionTimeoutForcesNewConn() !void {
             const accept_count = try withTwoRequestKeepAliveServer(.{
                 .first_request_line = "GET /idle-timeout-1 HTTP/1.1",
                 .second_request_line = "GET /idle-timeout-2 HTTP/1.1",
@@ -867,7 +871,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             try testing.expectEqual(@as(usize, 2), accept_count);
         }
 
-        fn sameHostRequestWhileBodyOpenUsesSecondConn() !void {
+        pub fn sameHostRequestWhileBodyOpenUsesSecondConn() !void {
             const accept_count = try withTwoRequestKeepAliveServer(.{
                 .first_request_line = "GET /body-open-1 HTTP/1.1",
                 .second_request_line = "GET /body-open-2 HTTP/1.1",
@@ -894,7 +898,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
                         .transport = &transport,
                         .req = &req2,
                     };
-                    var thread = try lib.Thread.spawn(.{}, RoundTripTask.run, .{&task});
+                    var thread = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
                     thread.join();
 
                     if (task.err) |err| return err;
@@ -910,7 +914,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             try testing.expectEqual(@as(usize, 2), accept_count);
         }
 
-        fn staleIdleConnectionRetriesReplayableGet() !void {
+        pub fn staleIdleConnectionRetriesReplayableGet() !void {
             const accept_count = try withStaleIdleRetryServer(.{
                 .warmup_request_line = "GET /warm HTTP/1.1",
                 .warmup_body = "warm",
@@ -946,7 +950,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             try testing.expectEqual(@as(usize, 2), accept_count);
         }
 
-        fn staleIdleConnectionRetriesIdempotentReplayablePost() !void {
+        pub fn staleIdleConnectionRetriesIdempotentReplayablePost() !void {
             const payload = "retry payload";
             const accept_count = try withStaleIdleRetryServer(.{
                 .warmup_request_line = "GET /warm-post HTTP/1.1",
@@ -995,7 +999,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             try testing.expectEqual(@as(usize, 2), accept_count);
         }
 
-        fn chunkedRequestUsesTransferEncoding() !void {
+        pub fn chunkedRequestUsesTransferEncoding() !void {
             try withServerState(
                 EmptyState{},
                 struct {
@@ -1040,7 +1044,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn chunkedResponseStreams() !void {
+        pub fn chunkedResponseStreams() !void {
             try withServerState(
                 EmptyState{},
                 struct {
@@ -1081,7 +1085,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn eofDelimitedResponseStreams() !void {
+        pub fn eofDelimitedResponseStreams() !void {
             try withServerState(
                 EmptyState{},
                 struct {
@@ -1118,7 +1122,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn headResponseIsBodyless() !void {
+        pub fn headResponseIsBodyless() !void {
             try withOneShotServer(.{
                 .expected_request_line = "HEAD /head HTTP/1.1",
                 .status_code = Http.status.ok,
@@ -1141,7 +1145,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             }.run);
         }
 
-        fn status204ResponseIsBodyless() !void {
+        pub fn status204ResponseIsBodyless() !void {
             try withOneShotServer(.{
                 .expected_request_line = "GET /no-content HTTP/1.1",
                 .status_code = Http.status.no_content,
@@ -1164,7 +1168,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             }.run);
         }
 
-        fn status304ResponseIsBodyless() !void {
+        pub fn status304ResponseIsBodyless() !void {
             try withOneShotServer(.{
                 .expected_request_line = "GET /not-modified HTTP/1.1",
                 .status_code = Http.status.not_modified,
@@ -1187,7 +1191,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             }.run);
         }
 
-        fn informationalContinueThenFinalResponse() !void {
+        pub fn informationalContinueThenFinalResponse() !void {
             const payload = "hello";
 
             try withServerState(
@@ -1233,7 +1237,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn expectContinueTimeoutSendsBodyWithoutInformational() !void {
+        pub fn expectContinueTimeoutSendsBodyWithoutInformational() !void {
             const payload = "hello after timeout";
 
             try withServerState(
@@ -1280,7 +1284,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn finalResponseWithoutContinueSkipsRequestBody() !void {
+        pub fn finalResponseWithoutContinueSkipsRequestBody() !void {
             const State = struct {
                 body: BlockingBodySource = .{},
             };
@@ -1327,7 +1331,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn requestBodyStreamsBeforeRoundTripCompletes() !void {
+        pub fn requestBodyStreamsBeforeRoundTripCompletes() !void {
             const State = struct {
                 body: PhasedBodySource = .{
                     .first = "ping",
@@ -1374,7 +1378,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
                             .transport = &transport,
                             .req = &req,
                         };
-                        var thread = try lib.Thread.spawn(.{}, RoundTripTask.run, .{&task});
+                        var thread = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
 
                         state.server_saw_first.wait();
                         state.body.releaseSecond();
@@ -1392,7 +1396,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn responseBodyStreamsProgressively() !void {
+        pub fn responseBodyStreamsProgressively() !void {
             const State = struct {
                 client_read_first: Gate = .{},
             };
@@ -1443,7 +1447,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn fullDuplexRequestAndResponse() !void {
+        pub fn fullDuplexRequestAndResponse() !void {
             const State = struct {
                 body: PhasedBodySource = .{
                     .first = "hello",
@@ -1513,7 +1517,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             );
         }
 
-        fn bodylessEarlyResponseDoesNotWaitForBlockedRequestBody() !void {
+        pub fn bodylessEarlyResponseDoesNotWaitForBlockedRequestBody() !void {
             const State = struct {
                 body: PhasedBodySource = .{
                     .first = "hello",
@@ -1562,7 +1566,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
 
         fn withTwoRequestKeepAliveServer(spec: TwoRequestSpec, comptime ClientFn: anytype) !usize {
             var ln = try Net.listen(testing.allocator, .{
-                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+                .address = addr4(0),
             });
             defer ln.deinit();
 
@@ -1588,7 +1592,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
 
         fn withStaleIdleRetryServer(spec: StaleIdleRetrySpec, comptime ClientFn: anytype) !usize {
             var ln = try Net.listen(testing.allocator, .{
-                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+                .address = addr4(0),
             });
             defer ln.deinit();
 
@@ -1694,7 +1698,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
 
         fn withOneShotServer(spec: ServerSpec, comptime ClientFn: anytype) !void {
             var ln = try Net.listen(testing.allocator, .{
-                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+                .address = addr4(0),
             });
             defer ln.deinit();
 
@@ -1759,7 +1763,7 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
             const State = @TypeOf(state_init);
             var state = state_init;
             var ln = try Net.listen(testing.allocator, .{
-                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+                .address = addr4(0),
             });
             defer ln.deinit();
 
@@ -1893,63 +1897,5 @@ fn runImpl(comptime lib: type, comptime suite: enum { full, local, layer01 }) !v
         }
     };
 
-    log.info("=== http transport test_runner start ===", .{});
-    if (suite == .layer01) {
-        try Runner.idleConnectionIsReused();
-        try Runner.closeIdleConnectionsForcesNewConn();
-        try Runner.earlyResponseBodyCloseDoesNotReuseConn();
-        try Runner.idleConnectionTimeoutForcesNewConn();
-        try Runner.sameHostRequestWhileBodyOpenUsesSecondConn();
-        try Runner.defaultUserAgentMatchesGo();
-        try Runner.emptyUserAgentSuppressesDefault();
-        try Runner.responseHeaderTimeoutExceeded();
-        try Runner.responseHeaderTimeoutDoesNotLimitBodyRead();
-        try Runner.defaultMaxHeaderBytesAllowsLargeResponseHeaders();
-        try Runner.defaultMaxBodyBytesAllowsLargeResponse();
-        try Runner.defaultMaxBodyBytesAllowsLargeRequest();
-        try Runner.informationalContinueThenFinalResponse();
-        try Runner.expectContinueTimeoutSendsBodyWithoutInformational();
-        try Runner.finalResponseWithoutContinueSkipsRequestBody();
-        try Runner.staleIdleConnectionRetriesReplayableGet();
-        try Runner.staleIdleConnectionRetriesIdempotentReplayablePost();
-        log.info("=== http transport test_runner done ===", .{});
-        return;
-    }
-
-    try Runner.localReturns200();
-    try Runner.localReturns404();
-    try Runner.defaultUserAgentMatchesGo();
-    try Runner.emptyUserAgentSuppressesDefault();
-    try Runner.contextDeadlineExceeded();
-    try Runner.responseHeaderTimeoutExceeded();
-    try Runner.responseHeaderTimeoutDoesNotLimitBodyRead();
-    try Runner.defaultMaxHeaderBytesAllowsLargeResponseHeaders();
-    try Runner.responseBodyLargerThanMaxBodyBytesFails();
-    try Runner.defaultMaxBodyBytesAllowsLargeResponse();
-    try Runner.largeResponseStreamsWithoutBufferingWholeBody();
-    try Runner.defaultMaxBodyBytesAllowsLargeRequest();
-    try Runner.largeRequestStreamsWithoutBufferingWholeBody();
-    try Runner.connectMethodIsRejected();
-    try Runner.idleConnectionIsReused();
-    try Runner.closeIdleConnectionsForcesNewConn();
-    try Runner.earlyResponseBodyCloseDoesNotReuseConn();
-    try Runner.idleConnectionTimeoutForcesNewConn();
-    try Runner.sameHostRequestWhileBodyOpenUsesSecondConn();
-    try Runner.chunkedRequestUsesTransferEncoding();
-    try Runner.chunkedResponseStreams();
-    try Runner.eofDelimitedResponseStreams();
-    try Runner.headResponseIsBodyless();
-    try Runner.status204ResponseIsBodyless();
-    try Runner.status304ResponseIsBodyless();
-    try Runner.informationalContinueThenFinalResponse();
-    try Runner.expectContinueTimeoutSendsBodyWithoutInformational();
-    try Runner.finalResponseWithoutContinueSkipsRequestBody();
-    try Runner.requestBodyStreamsBeforeRoundTripCompletes();
-    try Runner.responseBodyStreamsProgressively();
-    try Runner.fullDuplexRequestAndResponse();
-    try Runner.bodylessEarlyResponseDoesNotWaitForBlockedRequestBody();
-    try Runner.staleIdleConnectionRetriesReplayableGet();
-    try Runner.staleIdleConnectionRetriesIdempotentReplayablePost();
-    if (suite == .full) try Runner.publicAliDnsDoh();
-    log.info("=== http transport test_runner done ===", .{});
+    try run_cases(lib, Runner);
 }

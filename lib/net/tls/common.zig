@@ -1,4 +1,4 @@
-pub fn Make(comptime lib: type) type {
+pub fn make(comptime lib: type) type {
     const crypto = lib.crypto;
     const mem = lib.mem;
 
@@ -174,6 +174,35 @@ pub fn Make(comptime lib: type) type {
                 };
             }
         };
+
+        pub const DEFAULT_TLS12_CIPHER_SUITES = [_]CipherSuite{
+            .TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+            .TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            .TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+            .TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+        };
+
+        pub fn isSupportedTls12CipherSuite(suite: CipherSuite) bool {
+            return switch (suite) {
+                .TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+                .TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                .TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+                .TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+                => true,
+                else => false,
+            };
+        }
+
+        pub fn validateTls12CipherSuites(suites: []const CipherSuite) bool {
+            if (suites.len == 0) return false;
+            for (suites, 0..) |suite, i| {
+                if (!isSupportedTls12CipherSuite(suite)) return false;
+                for (suites[0..i]) |prev| {
+                    if (prev == suite) return false;
+                }
+            }
+            return true;
+        }
 
         pub const DEFAULT_TLS13_CIPHER_SUITES = if (crypto.core.aes.has_hardware_support)
             [_]CipherSuite{
@@ -381,9 +410,9 @@ pub fn Make(comptime lib: type) type {
     };
 }
 
-test "RecordHeader parse and serialize roundtrip" {
+test "net/unit_tests/tls/common/RecordHeader_parse_and_serialize_roundtrip" {
     const std = @import("std");
-    const common = Make(std);
+    const common = make(std);
 
     const header = common.RecordHeader{
         .content_type = .handshake,
@@ -400,9 +429,9 @@ test "RecordHeader parse and serialize roundtrip" {
     try std.testing.expectEqual(header.length, decoded.length);
 }
 
-test "HandshakeHeader parse and serialize roundtrip" {
+test "net/unit_tests/tls/common/HandshakeHeader_parse_and_serialize_roundtrip" {
     const std = @import("std");
-    const common = Make(std);
+    const common = make(std);
 
     const header = common.HandshakeHeader{
         .msg_type = .certificate,
@@ -417,9 +446,9 @@ test "HandshakeHeader parse and serialize roundtrip" {
     try std.testing.expectEqual(header.length, decoded.length);
 }
 
-test "CipherSuite helpers expose expected metadata" {
+test "net/unit_tests/tls/common/CipherSuite_helpers_expose_expected_metadata" {
     const std = @import("std");
-    const common = Make(std);
+    const common = make(std);
 
     try std.testing.expect(common.CipherSuite.TLS_AES_128_GCM_SHA256.isTls13());
     try std.testing.expectEqual(@as(u8, 16), common.CipherSuite.TLS_AES_128_GCM_SHA256.keyLength());
@@ -429,8 +458,8 @@ test "CipherSuite helpers expose expected metadata" {
     try std.testing.expect(!common.CipherSuite.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256.isTls13());
 }
 
-test "ProtocolVersion name is stable" {
+test "net/unit_tests/tls/common/ProtocolVersion_name_is_stable" {
     const std = @import("std");
-    const common = Make(std);
+    const common = make(std);
     try std.testing.expectEqualStrings("TLS 1.3", common.ProtocolVersion.tls_1_3.name());
 }

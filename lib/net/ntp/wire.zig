@@ -75,14 +75,14 @@ pub fn unixMsToNtp(unix_ms: i64) types.NtpTimestamp {
     };
 }
 
-test "timestamp conversion round trip" {
+test "net/unit_tests/ntp/wire/timestamp_conversion_round_trip" {
     const test_ms: i64 = 1_706_000_000_000;
     const ntp = unixMsToNtp(test_ms);
     const back = ntpToUnixMs(ntp);
     try std.testing.expect(@abs(back - test_ms) <= 1);
 }
 
-test "request packet format" {
+test "net/unit_tests/ntp/wire/request_packet_format" {
     var buf: [48]u8 = undefined;
     buildRequest(&buf, 0);
 
@@ -91,7 +91,7 @@ test "request packet format" {
     for (buf[40..48]) |b| try std.testing.expectEqual(@as(u8, 0), b);
 }
 
-test "request packet writes transmit timestamp" {
+test "net/unit_tests/ntp/wire/request_packet_writes_transmit_timestamp" {
     var buf: [48]u8 = undefined;
     buildRequest(&buf, 1_706_012_096_000);
 
@@ -102,7 +102,7 @@ test "request packet writes transmit timestamp" {
     try std.testing.expect(saw_nonzero);
 }
 
-test "parse response validates origin before stratum" {
+test "net/unit_tests/ntp/wire/parse_response_validates_origin_before_stratum" {
     const origin_ms: i64 = 1_706_012_096_000;
     const origin = unixMsToNtp(origin_ms);
     const recv = unixMsToNtp(origin_ms + 12);
@@ -124,7 +124,7 @@ test "parse response validates origin before stratum" {
     try std.testing.expectError(error.OriginMismatch, parseResponse(&buf, origin));
 }
 
-test "parse response returns timestamps" {
+test "net/unit_tests/ntp/wire/parse_response_returns_timestamps" {
     const origin_ms: i64 = 1_706_012_096_000;
     const origin = unixMsToNtp(origin_ms);
     const recv = unixMsToNtp(origin_ms + 15);

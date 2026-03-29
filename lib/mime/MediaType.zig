@@ -169,7 +169,7 @@ fn validateQuotedPayload(value: []const u8) ParseError!void {
     }
 }
 
-test "MediaType.init stores value and params" {
+test "mime/unit_tests/MediaType/init_stores_value_and_params" {
     const std = @import("std");
     const params = [_]Parameter{
         .{ .name = "charset", .value = "utf-8" },
@@ -182,7 +182,7 @@ test "MediaType.init stores value and params" {
     try std.testing.expectEqualStrings("utf-8", mt.params[0].value);
 }
 
-test "MediaType.parse parses value and params without allocation" {
+test "mime/unit_tests/MediaType/parse_parses_value_and_params_without_allocation" {
     const std = @import("std");
     var params_buf: [2]Parameter = undefined;
     const mt = try MediaType.parse("text/html; charset=utf-8; boundary=abc123", &params_buf);
@@ -195,7 +195,7 @@ test "MediaType.parse parses value and params without allocation" {
     try std.testing.expectEqualStrings("abc123", mt.params[1].value);
 }
 
-test "MediaType.parse accepts quoted parameter values" {
+test "mime/unit_tests/MediaType/parse_accepts_quoted_parameter_values" {
     const std = @import("std");
     var params_buf: [1]Parameter = undefined;
     const mt = try MediaType.parse("text/plain; charset=\"utf-8\"", &params_buf);
@@ -206,7 +206,7 @@ test "MediaType.parse accepts quoted parameter values" {
     try std.testing.expectEqualStrings("utf-8", mt.params[0].value);
 }
 
-test "MediaType.parse accepts semicolons inside quoted parameter values" {
+test "mime/unit_tests/MediaType/parse_accepts_semicolons_inside_quoted_parameter_values" {
     const std = @import("std");
     var params_buf: [1]Parameter = undefined;
     const mt = try MediaType.parse("text/plain; title=\"hello;world\"", &params_buf);
@@ -217,7 +217,7 @@ test "MediaType.parse accepts semicolons inside quoted parameter values" {
     try std.testing.expectEqualStrings("hello;world", mt.params[0].value);
 }
 
-test "MediaType.parse accepts quoted-pair escapes" {
+test "mime/unit_tests/MediaType/parse_accepts_quoted_pair_escapes" {
     const std = @import("std");
     var params_buf: [1]Parameter = undefined;
     const mt = try MediaType.parse("text/plain; title=\"hello\\\"world\\\\path\"", &params_buf);
@@ -228,7 +228,7 @@ test "MediaType.parse accepts quoted-pair escapes" {
     try std.testing.expectEqualStrings("hello\\\"world\\\\path", mt.params[0].value);
 }
 
-test "MediaType.format writes media type text" {
+test "mime/unit_tests/MediaType/format_writes_media_type_text" {
     const std = @import("std");
     const params = [_]Parameter{
         .{ .name = "charset", .value = "utf-8" },
@@ -246,7 +246,7 @@ test "MediaType.format writes media type text" {
     );
 }
 
-test "MediaType.format rejects values requiring escape sequences" {
+test "mime/unit_tests/MediaType/format_rejects_values_requiring_escape_sequences" {
     const std = @import("std");
     const params = [_]Parameter{
         .{ .name = "title", .value = "hello\"world" },
@@ -258,7 +258,7 @@ test "MediaType.format rejects values requiring escape sequences" {
     try std.testing.expectError(error.InvalidQuotedPair, mt.format(stream.writer()));
 }
 
-test "MediaType.format preserves quoted-pair escapes" {
+test "mime/unit_tests/MediaType/format_preserves_quoted_pair_escapes" {
     const std = @import("std");
     const params = [_]Parameter{
         .{ .name = "title", .value = "hello\\\"world\\\\path" },

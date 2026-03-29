@@ -103,7 +103,7 @@ pub fn BufferedReader(comptime Reader: type) type {
     };
 }
 
-test "BufferedReader.initAlloc supports peek and take" {
+test "io/unit_tests/bufio/BufferedReader_initAlloc_supports_peek_and_take" {
     var src = Io.Reader.fixed("hello\r\nworld");
     var br = try BufferedReader(@TypeOf(src)).initAlloc(&src, std.testing.allocator, 16);
     defer br.deinit();
@@ -117,7 +117,7 @@ test "BufferedReader.initAlloc supports peek and take" {
     try std.testing.expectEqualStrings("ello\r\n", rest);
 }
 
-test "BufferedReader.init supports text protocol style reads" {
+test "io/unit_tests/bufio/BufferedReader_init_supports_text_protocol_style_reads" {
     var src = Io.Reader.fixed("PING a\r\nPONG b\r\n");
     var backing: [32]u8 = undefined;
     var br = BufferedReader(@TypeOf(src)).init(&src, &backing);

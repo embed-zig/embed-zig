@@ -1,5 +1,5 @@
-pub fn Make(comptime lib: type) type {
-    const common = @import("common.zig").Make(lib);
+pub fn make(comptime lib: type) type {
+    const common = @import("common.zig").make(lib);
     const crypto = lib.crypto;
     const mem = lib.mem;
 
@@ -13,6 +13,7 @@ pub fn Make(comptime lib: type) type {
             DecryptionFailed,
             BadRecordMac,
             UnexpectedRecord,
+            TimedOut,
         };
 
         pub const ReadRecordResult = struct {
@@ -248,281 +249,305 @@ pub fn Make(comptime lib: type) type {
                     };
                 }
 
-            pub fn setVersion(self: *Self, version: common.ProtocolVersion) void {
-                self.version = version;
-            }
-
-            pub fn setReadCipher(self: *Self, cipher: CipherState()) void {
-                self.read_cipher = cipher;
-                self.read_seq = 0;
-            }
-
-            pub fn setWriteCipher(self: *Self, cipher: CipherState()) void {
-                self.write_cipher = cipher;
-                self.write_seq = 0;
-            }
-
-            pub fn writeRecord(
-                self: *Self,
-                content_type: common.ContentType,
-                plaintext: []const u8,
-                buffer: []u8,
-            ) RecordError!usize {
-                if (plaintext.len > common.MAX_PLAINTEXT_LEN) return error.RecordTooLarge;
-
-                return switch (self.write_cipher) {
-                    .none => try self.writePlainRecord(content_type, plaintext, buffer),
-                    inline .aes_128_gcm, .aes_256_gcm, .chacha20_poly1305 => |cipher| blk: {
-                        if (self.version == .tls_1_3) {
-                            break :blk try self.writeEncryptedTls13(content_type, plaintext, cipher, buffer);
-                        } else {
-                            break :blk try self.writeEncryptedTls12(content_type, plaintext, cipher, buffer);
-                        }
-                    },
-                };
-            }
-
-            pub fn readRecord(self: *Self, buffer: []u8, plaintext_out: []u8) RecordError!ReadRecordResult {
-                var header_buf: [common.RecordHeader.SIZE]u8 = undefined;
-                self.connReadAll(&header_buf) catch return error.UnexpectedRecord;
-
-                const header = common.RecordHeader.parse(&header_buf) catch return error.UnexpectedRecord;
-                const max_record_len: usize = if (self.version == .tls_1_2)
-                    common.MAX_CIPHERTEXT_LEN_TLS12
-                else
-                    common.MAX_CIPHERTEXT_LEN;
-
-                if (header.length > max_record_len) return error.RecordTooLarge;
-                if (buffer.len < header.length) return error.BufferTooSmall;
-
-                const record_body = buffer[0..header.length];
-                self.connReadAll(record_body) catch return error.UnexpectedRecord;
-
-                if (header.content_type == .change_cipher_spec) {
-                    if (plaintext_out.len < header.length) return error.BufferTooSmall;
-                    @memcpy(plaintext_out[0..header.length], record_body);
-                    return .{ .content_type = header.content_type, .length = header.length };
+                pub fn setVersion(self: *Self, version: common.ProtocolVersion) void {
+                    self.version = version;
                 }
 
-                return switch (self.read_cipher) {
-                    .none => blk: {
+                pub fn setReadCipher(self: *Self, cipher: CipherState()) void {
+                    self.read_cipher = cipher;
+                    self.read_seq = 0;
+                }
+
+                pub fn setWriteCipher(self: *Self, cipher: CipherState()) void {
+                    self.write_cipher = cipher;
+                    self.write_seq = 0;
+                }
+
+                pub fn writeRecord(
+                    self: *Self,
+                    content_type: common.ContentType,
+                    plaintext: []const u8,
+                    buffer: []u8,
+                    plaintext_scratch: []u8,
+                ) RecordError!usize {
+                    if (plaintext.len > common.MAX_PLAINTEXT_LEN) return error.RecordTooLarge;
+
+                    return switch (self.write_cipher) {
+                        .none => try self.writePlainRecord(content_type, plaintext, buffer),
+                        inline .aes_128_gcm, .aes_256_gcm, .chacha20_poly1305 => |cipher| blk: {
+                            if (self.version == .tls_1_3) {
+                                break :blk try self.writeEncryptedTls13(content_type, plaintext, cipher, buffer, plaintext_scratch);
+                            } else {
+                                break :blk try self.writeEncryptedTls12(content_type, plaintext, cipher, buffer);
+                            }
+                        },
+                    };
+                }
+
+                pub fn readRecord(self: *Self, buffer: []u8, plaintext_out: []u8) RecordError!ReadRecordResult {
+                    var header_buf: [common.RecordHeader.SIZE]u8 = undefined;
+                    self.connReadAll(&header_buf) catch |err| switch (err) {
+                        error.TimedOut => return error.TimedOut,
+                        else => return error.UnexpectedRecord,
+                    };
+
+                    const header = common.RecordHeader.parse(&header_buf) catch return error.UnexpectedRecord;
+                    const max_record_len: usize = if (self.version == .tls_1_2)
+                        common.MAX_CIPHERTEXT_LEN_TLS12
+                    else
+                        common.MAX_CIPHERTEXT_LEN;
+
+                    if (header.length > max_record_len) return error.RecordTooLarge;
+                    if (buffer.len < header.length) return error.BufferTooSmall;
+
+                    const record_body = buffer[0..header.length];
+                    self.connReadAll(record_body) catch |err| switch (err) {
+                        error.TimedOut => return error.TimedOut,
+                        else => return error.UnexpectedRecord,
+                    };
+
+                    if (header.content_type == .change_cipher_spec) {
                         if (plaintext_out.len < header.length) return error.BufferTooSmall;
                         @memcpy(plaintext_out[0..header.length], record_body);
-                        break :blk .{ .content_type = header.content_type, .length = header.length };
-                    },
-                    inline .aes_128_gcm, .aes_256_gcm, .chacha20_poly1305 => |cipher| blk: {
-                        if (self.version == .tls_1_3) {
-                            break :blk try self.readEncryptedTls13(header_buf, header, record_body, plaintext_out, cipher);
-                        } else {
-                            break :blk try self.readEncryptedTls12(header, record_body, plaintext_out, cipher);
-                        }
-                    },
-                };
-            }
+                        return .{ .content_type = header.content_type, .length = header.length };
+                    }
 
-            pub fn sendAlert(
-                self: *Self,
-                level: common.AlertLevel,
-                description: common.AlertDescription,
-                buffer: []u8,
-            ) RecordError!void {
-                const payload = [_]u8{ @intFromEnum(level), @intFromEnum(description) };
-                _ = try self.writeRecord(.alert, &payload, buffer);
-            }
-
-            fn writePlainRecord(
-                self: *Self,
-                content_type: common.ContentType,
-                plaintext: []const u8,
-                buffer: []u8,
-            ) RecordError!usize {
-                const total_len = common.RecordHeader.SIZE + plaintext.len;
-                if (buffer.len < total_len) return error.BufferTooSmall;
-
-                const header: common.RecordHeader = .{
-                    .content_type = content_type,
-                    .legacy_version = self.version,
-                    .length = @intCast(plaintext.len),
-                };
-                try header.serialize(buffer[0..common.RecordHeader.SIZE]);
-                @memcpy(buffer[common.RecordHeader.SIZE..][0..plaintext.len], plaintext);
-
-                self.connWriteAll(buffer[0..total_len]) catch return error.UnexpectedRecord;
-                return total_len;
-            }
-
-            fn writeEncryptedTls13(
-                self: *Self,
-                content_type: common.ContentType,
-                plaintext: []const u8,
-                cipher: anytype,
-                buffer: []u8,
-            ) RecordError!usize {
-                const inner_len = plaintext.len + 1;
-                const ciphertext_len = inner_len + 16;
-                const total_len = common.RecordHeader.SIZE + ciphertext_len;
-                if (buffer.len < total_len) return error.BufferTooSmall;
-
-                const header: common.RecordHeader = .{
-                    .content_type = .application_data,
-                    .legacy_version = .tls_1_2,
-                    .length = @intCast(ciphertext_len),
-                };
-                try header.serialize(buffer[0..common.RecordHeader.SIZE]);
-
-                var inner_plaintext: [common.MAX_PLAINTEXT_LEN + 1]u8 = undefined;
-                @memcpy(inner_plaintext[0..plaintext.len], plaintext);
-                inner_plaintext[plaintext.len] = @intFromEnum(content_type);
-
-                var tag: [16]u8 = undefined;
-                cipher.encrypt(
-                    buffer[common.RecordHeader.SIZE..][0..inner_len],
-                    &tag,
-                    inner_plaintext[0..inner_len],
-                    buffer[0..common.RecordHeader.SIZE],
-                    self.write_seq,
-                );
-                @memcpy(buffer[common.RecordHeader.SIZE + inner_len ..][0..16], &tag);
-
-                self.write_seq += 1;
-                self.connWriteAll(buffer[0..total_len]) catch return error.UnexpectedRecord;
-                return total_len;
-            }
-
-            fn writeEncryptedTls12(
-                self: *Self,
-                content_type: common.ContentType,
-                plaintext: []const u8,
-                cipher: anytype,
-                buffer: []u8,
-            ) RecordError!usize {
-                const explicit_nonce_len = cipher.tls12ExplicitNonceLength();
-                const record_len = explicit_nonce_len + plaintext.len + 16;
-                const total_len = common.RecordHeader.SIZE + record_len;
-                if (buffer.len < total_len) return error.BufferTooSmall;
-
-                const header: common.RecordHeader = .{
-                    .content_type = content_type,
-                    .legacy_version = self.version,
-                    .length = @intCast(record_len),
-                };
-                try header.serialize(buffer[0..common.RecordHeader.SIZE]);
-
-                var explicit_nonce: [8]u8 = undefined;
-                mem.writeInt(u64, &explicit_nonce, self.write_seq, .big);
-                if (explicit_nonce_len != 0) {
-                    @memcpy(buffer[common.RecordHeader.SIZE..][0..explicit_nonce_len], explicit_nonce[0..explicit_nonce_len]);
+                    return switch (self.read_cipher) {
+                        .none => blk: {
+                            if (plaintext_out.len < header.length) return error.BufferTooSmall;
+                            @memcpy(plaintext_out[0..header.length], record_body);
+                            break :blk .{ .content_type = header.content_type, .length = header.length };
+                        },
+                        inline .aes_128_gcm, .aes_256_gcm, .chacha20_poly1305 => |cipher| blk: {
+                            if (self.version == .tls_1_3) {
+                                break :blk try self.readEncryptedTls13(header_buf, header, record_body, plaintext_out, cipher);
+                            } else {
+                                break :blk try self.readEncryptedTls12(header, record_body, plaintext_out, cipher);
+                            }
+                        },
+                    };
                 }
 
-                var ad = self.additionalData(self.write_seq, content_type, self.version, plaintext.len);
+                pub fn sendAlert(
+                    self: *Self,
+                    level: common.AlertLevel,
+                    description: common.AlertDescription,
+                    buffer: []u8,
+                    plaintext_scratch: []u8,
+                ) RecordError!void {
+                    const payload = [_]u8{ @intFromEnum(level), @intFromEnum(description) };
+                    _ = try self.writeRecord(.alert, &payload, buffer, plaintext_scratch);
+                }
 
-                var tag: [16]u8 = undefined;
-                cipher.encryptTls12(
-                    buffer[common.RecordHeader.SIZE + explicit_nonce_len ..][0..plaintext.len],
-                    &tag,
-                    plaintext,
-                    &ad,
-                    explicit_nonce,
-                );
-                @memcpy(buffer[common.RecordHeader.SIZE + explicit_nonce_len + plaintext.len ..][0..16], &tag);
+                fn writePlainRecord(
+                    self: *Self,
+                    content_type: common.ContentType,
+                    plaintext: []const u8,
+                    buffer: []u8,
+                ) RecordError!usize {
+                    const total_len = common.RecordHeader.SIZE + plaintext.len;
+                    if (buffer.len < total_len) return error.BufferTooSmall;
 
-                self.write_seq += 1;
-                self.connWriteAll(buffer[0..total_len]) catch return error.UnexpectedRecord;
-                return total_len;
-            }
+                    const header: common.RecordHeader = .{
+                        .content_type = content_type,
+                        .legacy_version = self.version,
+                        .length = @intCast(plaintext.len),
+                    };
+                    try header.serialize(buffer[0..common.RecordHeader.SIZE]);
+                    @memcpy(buffer[common.RecordHeader.SIZE..][0..plaintext.len], plaintext);
 
-            fn readEncryptedTls13(
-                self: *Self,
-                header_buf: [common.RecordHeader.SIZE]u8,
-                header: common.RecordHeader,
-                record_body: []const u8,
-                plaintext_out: []u8,
-                cipher: anytype,
-            ) RecordError!ReadRecordResult {
-                if (header.length < 17) return error.BadRecordMac;
+                    self.connWriteAll(buffer[0..total_len]) catch |err| switch (err) {
+                        error.TimedOut => return error.TimedOut,
+                        else => return error.UnexpectedRecord,
+                    };
+                    return total_len;
+                }
 
-                const ciphertext_len = header.length - 16;
-                const ciphertext = record_body[0..ciphertext_len];
-                const tag = record_body[ciphertext_len..][0..16].*;
-                if (plaintext_out.len < ciphertext_len) return error.BufferTooSmall;
+                fn writeEncryptedTls13(
+                    self: *Self,
+                    content_type: common.ContentType,
+                    plaintext: []const u8,
+                    cipher: anytype,
+                    buffer: []u8,
+                    plaintext_scratch: []u8,
+                ) RecordError!usize {
+                    const inner_len = plaintext.len + 1;
+                    const ciphertext_len = inner_len + 16;
+                    const total_len = common.RecordHeader.SIZE + ciphertext_len;
+                    if (buffer.len < total_len) return error.BufferTooSmall;
+                    if (plaintext_scratch.len < inner_len) return error.BufferTooSmall;
 
-                cipher.decrypt(
-                    plaintext_out[0..ciphertext_len],
-                    ciphertext,
-                    tag,
-                    &header_buf,
-                    self.read_seq,
-                ) catch return error.BadRecordMac;
+                    const header: common.RecordHeader = .{
+                        .content_type = .application_data,
+                        .legacy_version = .tls_1_2,
+                        .length = @intCast(ciphertext_len),
+                    };
+                    try header.serialize(buffer[0..common.RecordHeader.SIZE]);
 
-                self.read_seq += 1;
+                    const inner_plaintext = plaintext_scratch[0..inner_len];
+                    if (@intFromPtr(inner_plaintext.ptr) != @intFromPtr(plaintext.ptr)) {
+                        @memcpy(inner_plaintext[0..plaintext.len], plaintext);
+                    }
+                    inner_plaintext[plaintext.len] = @intFromEnum(content_type);
 
-                var inner_len = ciphertext_len;
-                while (inner_len > 0 and plaintext_out[inner_len - 1] == 0) {
+                    var tag: [16]u8 = undefined;
+                    cipher.encrypt(
+                        buffer[common.RecordHeader.SIZE..][0..inner_len],
+                        &tag,
+                        inner_plaintext,
+                        buffer[0..common.RecordHeader.SIZE],
+                        self.write_seq,
+                    );
+                    @memcpy(buffer[common.RecordHeader.SIZE + inner_len ..][0..16], &tag);
+
+                    self.write_seq += 1;
+                    self.connWriteAll(buffer[0..total_len]) catch |err| switch (err) {
+                        error.TimedOut => return error.TimedOut,
+                        else => return error.UnexpectedRecord,
+                    };
+                    return total_len;
+                }
+
+                fn writeEncryptedTls12(
+                    self: *Self,
+                    content_type: common.ContentType,
+                    plaintext: []const u8,
+                    cipher: anytype,
+                    buffer: []u8,
+                ) RecordError!usize {
+                    const explicit_nonce_len = cipher.tls12ExplicitNonceLength();
+                    const record_len = explicit_nonce_len + plaintext.len + 16;
+                    const total_len = common.RecordHeader.SIZE + record_len;
+                    if (buffer.len < total_len) return error.BufferTooSmall;
+
+                    const header: common.RecordHeader = .{
+                        .content_type = content_type,
+                        .legacy_version = self.version,
+                        .length = @intCast(record_len),
+                    };
+                    try header.serialize(buffer[0..common.RecordHeader.SIZE]);
+
+                    var explicit_nonce: [8]u8 = undefined;
+                    mem.writeInt(u64, &explicit_nonce, self.write_seq, .big);
+                    if (explicit_nonce_len != 0) {
+                        @memcpy(buffer[common.RecordHeader.SIZE..][0..explicit_nonce_len], explicit_nonce[0..explicit_nonce_len]);
+                    }
+
+                    var ad = self.additionalData(self.write_seq, content_type, self.version, plaintext.len);
+
+                    var tag: [16]u8 = undefined;
+                    cipher.encryptTls12(
+                        buffer[common.RecordHeader.SIZE + explicit_nonce_len ..][0..plaintext.len],
+                        &tag,
+                        plaintext,
+                        &ad,
+                        explicit_nonce,
+                    );
+                    @memcpy(buffer[common.RecordHeader.SIZE + explicit_nonce_len + plaintext.len ..][0..16], &tag);
+
+                    self.write_seq += 1;
+                    self.connWriteAll(buffer[0..total_len]) catch |err| switch (err) {
+                        error.TimedOut => return error.TimedOut,
+                        else => return error.UnexpectedRecord,
+                    };
+                    return total_len;
+                }
+
+                fn readEncryptedTls13(
+                    self: *Self,
+                    header_buf: [common.RecordHeader.SIZE]u8,
+                    header: common.RecordHeader,
+                    record_body: []const u8,
+                    plaintext_out: []u8,
+                    cipher: anytype,
+                ) RecordError!ReadRecordResult {
+                    if (header.length < 17) return error.BadRecordMac;
+
+                    const ciphertext_len = header.length - 16;
+                    const ciphertext = record_body[0..ciphertext_len];
+                    const tag = record_body[ciphertext_len..][0..16].*;
+                    if (plaintext_out.len < ciphertext_len) return error.BufferTooSmall;
+
+                    cipher.decrypt(
+                        plaintext_out[0..ciphertext_len],
+                        ciphertext,
+                        tag,
+                        &header_buf,
+                        self.read_seq,
+                    ) catch return error.BadRecordMac;
+
+                    self.read_seq += 1;
+
+                    var inner_len = ciphertext_len;
+                    while (inner_len > 0 and plaintext_out[inner_len - 1] == 0) {
+                        inner_len -= 1;
+                    }
+                    if (inner_len == 0) return error.DecryptionFailed;
+
                     inner_len -= 1;
+                    const inner_content_type: common.ContentType = @enumFromInt(plaintext_out[inner_len]);
+                    return .{ .content_type = inner_content_type, .length = inner_len };
                 }
-                if (inner_len == 0) return error.DecryptionFailed;
 
-                inner_len -= 1;
-                const inner_content_type: common.ContentType = @enumFromInt(plaintext_out[inner_len]);
-                return .{ .content_type = inner_content_type, .length = inner_len };
-            }
+                fn readEncryptedTls12(
+                    self: *Self,
+                    header: common.RecordHeader,
+                    record_body: []const u8,
+                    plaintext_out: []u8,
+                    cipher: anytype,
+                ) RecordError!ReadRecordResult {
+                    const explicit_nonce_len = cipher.tls12ExplicitNonceLength();
+                    if (header.length < explicit_nonce_len + 16 + 1) return error.BadRecordMac;
 
-            fn readEncryptedTls12(
-                self: *Self,
-                header: common.RecordHeader,
-                record_body: []const u8,
-                plaintext_out: []u8,
-                cipher: anytype,
-            ) RecordError!ReadRecordResult {
-                const explicit_nonce_len = cipher.tls12ExplicitNonceLength();
-                if (header.length < explicit_nonce_len + 16 + 1) return error.BadRecordMac;
+                    var explicit_nonce: [8]u8 = undefined;
+                    if (explicit_nonce_len == 0) {
+                        mem.writeInt(u64, &explicit_nonce, self.read_seq, .big);
+                    } else {
+                        explicit_nonce = record_body[0..8].*;
+                    }
+                    const ciphertext_len = header.length - explicit_nonce_len - 16;
+                    const ciphertext = record_body[explicit_nonce_len..][0..ciphertext_len];
+                    const tag = record_body[explicit_nonce_len + ciphertext_len ..][0..16].*;
+                    if (plaintext_out.len < ciphertext_len) return error.BufferTooSmall;
 
-                var explicit_nonce: [8]u8 = undefined;
-                if (explicit_nonce_len == 0) {
-                    mem.writeInt(u64, &explicit_nonce, self.read_seq, .big);
-                } else {
-                    explicit_nonce = record_body[0..8].*;
+                    var ad = self.additionalData(self.read_seq, header.content_type, header.legacy_version, ciphertext_len);
+
+                    cipher.decryptTls12(
+                        plaintext_out[0..ciphertext_len],
+                        ciphertext,
+                        tag,
+                        &ad,
+                        explicit_nonce,
+                    ) catch return error.BadRecordMac;
+
+                    self.read_seq += 1;
+                    return .{ .content_type = header.content_type, .length = ciphertext_len };
                 }
-                const ciphertext_len = header.length - explicit_nonce_len - 16;
-                const ciphertext = record_body[explicit_nonce_len..][0..ciphertext_len];
-                const tag = record_body[explicit_nonce_len + ciphertext_len ..][0..16].*;
-                if (plaintext_out.len < ciphertext_len) return error.BufferTooSmall;
 
-                var ad = self.additionalData(self.read_seq, header.content_type, header.legacy_version, ciphertext_len);
+                fn additionalData(
+                    self: *const Self,
+                    seq_num: u64,
+                    content_type: common.ContentType,
+                    version: common.ProtocolVersion,
+                    plaintext_len: usize,
+                ) [13]u8 {
+                    _ = self;
 
-                cipher.decryptTls12(
-                    plaintext_out[0..ciphertext_len],
-                    ciphertext,
-                    tag,
-                    &ad,
-                    explicit_nonce,
-                ) catch return error.BadRecordMac;
-
-                self.read_seq += 1;
-                return .{ .content_type = header.content_type, .length = ciphertext_len };
-            }
-
-            fn additionalData(
-                self: *const Self,
-                seq_num: u64,
-                content_type: common.ContentType,
-                version: common.ProtocolVersion,
-                plaintext_len: usize,
-            ) [13]u8 {
-                _ = self;
-
-                var out: [13]u8 = undefined;
-                mem.writeInt(u64, out[0..8], seq_num, .big);
-                out[8] = @intFromEnum(content_type);
-                mem.writeInt(u16, out[9..11], @intFromEnum(version), .big);
-                mem.writeInt(u16, out[11..13], @intCast(plaintext_len), .big);
-                return out;
-            }
+                    var out: [13]u8 = undefined;
+                    mem.writeInt(u64, out[0..8], seq_num, .big);
+                    out[8] = @intFromEnum(content_type);
+                    mem.writeInt(u16, out[9..11], @intFromEnum(version), .big);
+                    mem.writeInt(u16, out[11..13], @intCast(plaintext_len), .big);
+                    return out;
+                }
 
                 fn connReadAll(self: *Self, buf: []u8) RecordError!void {
                     var filled: usize = 0;
                     while (filled < buf.len) {
-                        const n = self.conn.read(buf[filled..]) catch return error.UnexpectedRecord;
+                        const n = self.conn.read(buf[filled..]) catch |err| switch (err) {
+                            error.TimedOut => return error.TimedOut,
+                            else => return error.UnexpectedRecord,
+                        };
                         if (n == 0) return error.UnexpectedRecord;
                         filled += n;
                     }
@@ -531,7 +556,10 @@ pub fn Make(comptime lib: type) type {
                 fn connWriteAll(self: *Self, buf: []const u8) RecordError!void {
                     var written: usize = 0;
                     while (written < buf.len) {
-                        const n = self.conn.write(buf[written..]) catch return error.UnexpectedRecord;
+                        const n = self.conn.write(buf[written..]) catch |err| switch (err) {
+                            error.TimedOut => return error.TimedOut,
+                            else => return error.UnexpectedRecord,
+                        };
                         if (n == 0) return error.UnexpectedRecord;
                         written += n;
                     }
@@ -541,9 +569,9 @@ pub fn Make(comptime lib: type) type {
     };
 }
 
-test "record cipher states initialize and roundtrip" {
+test "net/unit_tests/tls/record/cipher_states_initialize_and_roundtrip" {
     const std = @import("std");
-    const record = Make(std);
+    const record = make(std);
 
     const key16 = [_]u8{0x01} ** 16;
     const key32 = [_]u8{0x02} ** 32;
@@ -568,9 +596,9 @@ test "record cipher states initialize and roundtrip" {
     try std.testing.expectEqualSlices(u8, plaintext, &chacha_pt);
 }
 
-test "record layer plain write and read" {
+test "net/unit_tests/tls/record/layer_plain_write_and_read" {
     const std = @import("std");
-    const record = Make(std);
+    const record = make(std);
 
     const MockConn = struct {
         read_buf: [512]u8 = undefined,
@@ -579,7 +607,7 @@ test "record layer plain write and read" {
         write_buf: [512]u8 = undefined,
         write_len: usize = 0,
 
-        pub fn read(self: *@This(), buf: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             if (self.read_pos >= self.read_len) return error.EndOfStream;
             const n = @min(buf.len, self.read_len - self.read_pos);
             @memcpy(buf[0..n], self.read_buf[self.read_pos..][0..n]);
@@ -587,7 +615,7 @@ test "record layer plain write and read" {
             return n;
         }
 
-        pub fn write(self: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             const n = @min(buf.len, self.write_buf.len - self.write_len);
             if (n == 0) return error.Unexpected;
             @memcpy(self.write_buf[self.write_len..][0..n], buf[0..n]);
@@ -605,7 +633,8 @@ test "record layer plain write and read" {
     var layer = record.RecordLayer(*MockConn).init(&mock);
 
     var write_buf: [128]u8 = undefined;
-    _ = try layer.writeRecord(.handshake, "abc", &write_buf);
+    var plaintext_buf: [128]u8 = undefined;
+    _ = try layer.writeRecord(.handshake, "abc", &write_buf, &plaintext_buf);
 
     @memcpy(mock.read_buf[0..mock.write_len], mock.write_buf[0..mock.write_len]);
     mock.read_len = mock.write_len;
@@ -613,17 +642,17 @@ test "record layer plain write and read" {
 
     var cipher_buf: [128]u8 = undefined;
     var plaintext_out: [128]u8 = undefined;
-    const common = @import("common.zig").Make(std);
+    const common = @import("common.zig").make(std);
     const result = try layer.readRecord(&cipher_buf, &plaintext_out);
     try std.testing.expectEqual(common.ContentType.handshake, result.content_type);
     try std.testing.expectEqual(@as(usize, 3), result.length);
     try std.testing.expectEqualSlices(u8, "abc", plaintext_out[0..result.length]);
 }
 
-test "record layer tls13 encrypted roundtrip" {
+test "net/unit_tests/tls/record/layer_tls13_encrypted_roundtrip" {
     const std = @import("std");
-    const common = @import("common.zig").Make(std);
-    const record = Make(std);
+    const common = @import("common.zig").make(std);
+    const record = make(std);
 
     const MockConn = struct {
         read_buf: [1024]u8 = undefined,
@@ -632,7 +661,7 @@ test "record layer tls13 encrypted roundtrip" {
         write_buf: [1024]u8 = undefined,
         write_len: usize = 0,
 
-        pub fn read(self: *@This(), buf: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             if (self.read_pos >= self.read_len) return error.EndOfStream;
             const n = @min(buf.len, self.read_len - self.read_pos);
             @memcpy(buf[0..n], self.read_buf[self.read_pos..][0..n]);
@@ -640,7 +669,7 @@ test "record layer tls13 encrypted roundtrip" {
             return n;
         }
 
-        pub fn write(self: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             const n = @min(buf.len, self.write_buf.len - self.write_len);
             if (n == 0) return error.Unexpected;
             @memcpy(self.write_buf[self.write_len..][0..n], buf[0..n]);
@@ -663,7 +692,8 @@ test "record layer tls13 encrypted roundtrip" {
     writer.setWriteCipher(try record.CipherState().init(.TLS_AES_128_GCM_SHA256, &key, &iv));
 
     var wire_buf: [512]u8 = undefined;
-    _ = try writer.writeRecord(.handshake, "hello", &wire_buf);
+    var plaintext_buf: [common.MAX_PLAINTEXT_LEN + 1]u8 = undefined;
+    _ = try writer.writeRecord(.handshake, "hello", &wire_buf, &plaintext_buf);
 
     var reader_conn = MockConn{};
     @memcpy(reader_conn.read_buf[0..writer_conn.write_len], writer_conn.write_buf[0..writer_conn.write_len]);
@@ -681,10 +711,10 @@ test "record layer tls13 encrypted roundtrip" {
     try std.testing.expectEqualSlices(u8, "hello", plaintext_out[0..result.length]);
 }
 
-test "record layer tls12 chacha encrypted roundtrip omits explicit nonce" {
+test "net/unit_tests/tls/record/layer_tls12_chacha_encrypted_roundtrip_omits_explicit_nonce" {
     const std = @import("std");
-    const common = @import("common.zig").Make(std);
-    const record = Make(std);
+    const common = @import("common.zig").make(std);
+    const record = make(std);
 
     const MockConn = struct {
         read_buf: [1024]u8 = undefined,
@@ -693,7 +723,7 @@ test "record layer tls12 chacha encrypted roundtrip omits explicit nonce" {
         write_buf: [1024]u8 = undefined,
         write_len: usize = 0,
 
-        pub fn read(self: *@This(), buf: []u8) error{EndOfStream,ShortRead,ConnectionReset,ConnectionRefused,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
             if (self.read_pos >= self.read_len) return error.EndOfStream;
             const n = @min(buf.len, self.read_len - self.read_pos);
             @memcpy(buf[0..n], self.read_buf[self.read_pos..][0..n]);
@@ -701,7 +731,7 @@ test "record layer tls12 chacha encrypted roundtrip omits explicit nonce" {
             return n;
         }
 
-        pub fn write(self: *@This(), buf: []const u8) error{ConnectionReset,BrokenPipe,TimedOut,Unexpected}!usize {
+        pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
             const n = @min(buf.len, self.write_buf.len - self.write_len);
             if (n == 0) return error.Unexpected;
             @memcpy(self.write_buf[self.write_len..][0..n], buf[0..n]);
@@ -724,7 +754,8 @@ test "record layer tls12 chacha encrypted roundtrip omits explicit nonce" {
     writer.setWriteCipher(try record.CipherState().init(.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, &key, &iv));
 
     var wire_buf: [512]u8 = undefined;
-    _ = try writer.writeRecord(.application_data, "hello", &wire_buf);
+    var plaintext_buf: [common.MAX_PLAINTEXT_LEN + 1]u8 = undefined;
+    _ = try writer.writeRecord(.application_data, "hello", &wire_buf, &plaintext_buf);
 
     const header = try common.RecordHeader.parse(writer_conn.write_buf[0..common.RecordHeader.SIZE]);
     try std.testing.expectEqual(@as(u16, "hello".len + 16), header.length);
@@ -743,4 +774,42 @@ test "record layer tls12 chacha encrypted roundtrip omits explicit nonce" {
     try std.testing.expectEqual(common.ContentType.application_data, result.content_type);
     try std.testing.expectEqual(@as(usize, 5), result.length);
     try std.testing.expectEqualSlices(u8, "hello", plaintext_out[0..result.length]);
+}
+
+test "net/unit_tests/tls/record/layer_preserves_timeout_while_reading" {
+    const std = @import("std");
+    const record = make(std);
+
+    const MockConn = struct {
+        step: u8 = 0,
+
+        pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
+            switch (self.step) {
+                0 => {
+                    self.step = 1;
+                    buf[0] = 0x16;
+                    buf[1] = 0x03;
+                    return 2;
+                },
+                1 => return error.TimedOut,
+                else => return error.EndOfStream,
+            }
+        }
+
+        pub fn write(_: *@This(), _: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
+            return error.Unexpected;
+        }
+
+        pub fn close(_: *@This()) void {}
+        pub fn deinit(_: *@This()) void {}
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    var mock = MockConn{};
+    var layer = record.RecordLayer(*MockConn).init(&mock);
+    var cipher_buf: [128]u8 = undefined;
+    var plaintext_out: [128]u8 = undefined;
+
+    try std.testing.expectError(error.TimedOut, layer.readRecord(&cipher_buf, &plaintext_out));
 }

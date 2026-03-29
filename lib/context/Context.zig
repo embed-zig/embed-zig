@@ -8,12 +8,12 @@ const embed = @import("embed");
 
 const Context = @This();
 
+pub const DoublyLinkedList = embed.collections.DoublyLinkedList;
+
 ptr: *anyopaque,
 vtable: *const VTable,
 type_id: *const anyopaque = typeId(UnknownContext),
 allocator: embed.mem.Allocator,
-
-pub const DoublyLinkedList = embed.collections.DoublyLinkedList;
 
 pub const TreeLink = struct {
     ctx: Context = undefined,
@@ -28,9 +28,9 @@ pub const TreeLink = struct {
 
 pub const VTable = struct {
     errFn: *const fn (ptr: *anyopaque) ?anyerror,
-    deadlineFn: *const fn (ptr: *anyopaque) ?i64,
+    deadlineFn: *const fn (ptr: *anyopaque) ?i128,
     valueFn: *const fn (ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque,
-    waitFn: *const fn (ptr: *anyopaque, timeout_ms: ?u32) ?anyerror,
+    waitFn: *const fn (ptr: *anyopaque, timeout_ns: ?i64) ?anyerror,
     cancelFn: *const fn (ptr: *anyopaque) void,
     cancelWithCauseFn: *const fn (ptr: *anyopaque, cause: anyerror) void,
     propagateCancelWithCauseFn: *const fn (ptr: *anyopaque, cause: anyerror) void,
@@ -65,15 +65,15 @@ pub fn err(self: Context) ?anyerror {
     return self.vtable.errFn(self.ptr);
 }
 
-/// Returns the deadline (milliTimestamp) if one is set, or null.
-pub fn deadline(self: Context) ?i64 {
+/// Returns the deadline (nanoTimestamp) if one is set, or null.
+pub fn deadline(self: Context) ?i128 {
     return self.vtable.deadlineFn(self.ptr);
 }
 
 /// Block until canceled or timeout. Returns the cause error, or null if the
 /// timeout expired before cancellation.
-pub fn wait(self: Context, timeout_ms: ?u32) ?anyerror {
-    return self.vtable.waitFn(self.ptr, timeout_ms);
+pub fn wait(self: Context, timeout_ns: ?i64) ?anyerror {
+    return self.vtable.waitFn(self.ptr, timeout_ns);
 }
 
 pub fn cancel(self: Context) void {

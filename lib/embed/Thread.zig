@@ -8,25 +8,64 @@
 //!   embed.Thread.Condition   — condition variable
 //!   embed.Thread.RwLock      — reader-writer lock
 
-const std_compat = @import("std_compat.zig");
+const debug = @import("debug.zig");
+const fmt = @import("fmt.zig");
 const mutex_mod = @import("Thread/Mutex.zig");
 const condition_mod = @import("Thread/Condition.zig");
 const rwlock_mod = @import("Thread/RwLock.zig");
+const mem = @import("mem.zig");
+const posix = @import("posix.zig");
+
+const std_compat = struct {
+    pub const SpawnConfig = struct {
+        /// Size in bytes of the Thread's stack. If 0, the default stack size will be used.
+        stack_size: usize = 0,
+
+        /// The allocator to be used to allocate memory for the to-be-spawned thread
+        allocator: ?mem.Allocator = null,
+
+        priority: u8 = 5,
+
+        name: [*:0]const u8 = "task",
+
+        core_id: ?i32 = null,
+    };
+
+    pub const SpawnError = error{
+        ThreadQuotaExceeded,
+        SystemResources,
+        OutOfMemory,
+        LockedMemoryLimitExceeded,
+        Unexpected,
+    };
+    pub const YieldError = error{
+        SystemCannotYield,
+    };
+    pub const CpuCountError = error{
+        PermissionDenied,
+        SystemResources,
+        Unsupported,
+        Unexpected,
+    };
+    pub const SetNameError = error{
+        NameTooLong,
+        Unsupported,
+        Unexpected,
+    } || posix.PrctlError || posix.WriteError || posix.FileOpenError || fmt.BufPrintError;
+    pub const GetNameError = error{
+        Unsupported,
+        Unexpected,
+    } || posix.PrctlError || posix.ReadError || posix.FileOpenError || fmt.BufPrintError;
+};
 
 const root = @This();
 
-pub const SpawnConfig = struct {
-    stack_size: usize = 16384,
-    priority: u8 = 5,
-    name: [*:0]const u8 = "task",
-    core_id: ?i32 = null,
-};
-
-pub const SpawnError = std_compat.Thread.SpawnError;
-pub const YieldError = std_compat.Thread.YieldError;
-pub const CpuCountError = std_compat.Thread.CpuCountError;
-pub const SetNameError = std_compat.Thread.SetNameError;
-pub const GetNameError = std_compat.Thread.GetNameError;
+pub const SpawnConfig = std_compat.SpawnConfig;
+pub const SpawnError = std_compat.SpawnError;
+pub const YieldError = std_compat.YieldError;
+pub const CpuCountError = std_compat.CpuCountError;
+pub const SetNameError = std_compat.SetNameError;
+pub const GetNameError = std_compat.GetNameError;
 
 /// Construct a sealed Thread namespace from a platform Impl.
 ///
@@ -40,26 +79,31 @@ pub const GetNameError = std_compat.Thread.GetNameError;
 ///   fn getCurrentId() Id
 ///   fn setName(name: []const u8) SetNameError!void
 ///   fn getName(buf: *[max_name_len:0]u8) GetNameError!?[]const u8
+///   const default_stack_size: usize
 ///   const Id: type
 ///   const max_name_len: usize
 ///
 /// Impl must also provide sub-types:
 ///   Mutex, Condition, RwLock
-pub fn make(comptime Impl: type) type {
+pub fn make(comptime Impl: type, comptime Heap: type) type {
     comptime {
         if (Impl.max_name_len == 0 or Impl.max_name_len > 128)
             @compileError("Impl.max_name_len must be between 1 and 128");
 
+        _ = @as(*const fn (Impl) void, &Impl.join);
+        _ = @as(*const fn (Impl) void, &Impl.detach);
         _ = @as(*const fn () YieldError!void, &Impl.yield);
         _ = @as(*const fn (u64) void, &Impl.sleep);
         _ = @as(*const fn () CpuCountError!usize, &Impl.getCpuCount);
         _ = @as(*const fn () Impl.Id, &Impl.getCurrentId);
         _ = @as(*const fn ([]const u8) SetNameError!void, &Impl.setName);
         _ = @as(*const fn (*[Impl.max_name_len:0]u8) GetNameError!?[]const u8, &Impl.getName);
+        _ = @as(usize, Impl.default_stack_size);
     }
 
     return struct {
         pub const SpawnConfig = root.SpawnConfig;
+        pub const default_stack_size = Impl.default_stack_size;
         pub const SpawnError = root.SpawnError;
         pub const YieldError = root.YieldError;
         pub const CpuCountError = root.CpuCountError;
@@ -78,7 +122,13 @@ pub fn make(comptime Impl: type) type {
         const Self = @This();
 
         pub fn spawn(config: root.SpawnConfig, comptime f: anytype, args: anytype) root.SpawnError!Self {
-            const inner = try Impl.spawn(config, f, args);
+            var spawn_config = config;
+            if (spawn_config.stack_size == 0) {
+                spawn_config.stack_size = default_stack_size;
+            }
+            debug.assert(spawn_config.stack_size >= Heap.pageSize());
+
+            const inner = try Impl.spawn(spawn_config, f, args);
             return .{ .impl = inner };
         }
 

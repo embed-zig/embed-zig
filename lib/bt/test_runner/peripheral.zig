@@ -4,51 +4,94 @@
 //! event hooks, and error conditions. Does NOT require a paired Central —
 //! all tests exercise the local Peripheral state machine only.
 //!
+//! Paired Central/Peripheral integration scenarios live in
+//! `bt/test_runner/pair.zig`.
+//!
 //! Usage:
 //!   const runner = @import("bt/test_runner/peripheral.zig");
-//!   test { try runner.run(std, my_peripheral); }
+//!   t.run("peripheral", runner.make(std, &host));
 
+const root = @This();
+const embed = @import("embed");
 const Peripheral = @import("../Peripheral.zig");
+const testing_api = @import("testing");
 
-pub fn run(comptime lib: type, p: Peripheral) !void {
+pub fn make(comptime lib: type, host: anytype) testing_api.TestRunner {
+    const HostPtr = @TypeOf(host);
+    comptime requireHostPointer(HostPtr);
+
+    const Runner = struct {
+        host: HostPtr,
+
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = allocator;
+            const p = self.host.peripheral();
+            p.start() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            defer p.stop();
+
+            runPeripheral(lib, p) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
+        }
+    };
+
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{ .host = host };
+    return testing_api.TestRunner.make(Runner).new(runner);
+}
+
+fn runPeripheral(comptime lib: type, p: Peripheral) !void {
     const testing = lib.testing;
 
     // ---- initial state ----
     try testing.expectEqual(Peripheral.State.idle, p.getState());
     _ = p.getAddr();
 
-    // ---- handler: standard 16-bit SIG UUID (Heart Rate) ----
-    p.handle(0x180D, 0x2A37, struct {
-        fn handler(_: *Peripheral.Request, rw: *Peripheral.ResponseWriter) void {
-            rw.ok();
-        }
-    }.handler, null);
+    p.setConfig(.{
+        .services = &.{
+            Peripheral.Service(0x180D, &.{
+                Peripheral.Char(0x2A37, Peripheral.CharConfig.default()),
+                Peripheral.Char(0x2A38, Peripheral.CharConfig.default()),
+            }),
+            Peripheral.Service(0xFFE0, &.{
+                Peripheral.Char(0xFFE1, Peripheral.CharConfig.default()),
+            }),
+            Peripheral.Service(0x180F, &.{
+                Peripheral.Char(0x2A19, Peripheral.CharConfig.default()),
+            }),
+            Peripheral.Service(0xFFF0, &.{
+                Peripheral.Char(0xFFF1, Peripheral.CharConfig.default()),
+            }),
+        },
+    });
 
-    // ---- handler: custom 16-bit UUID ----
-    p.handle(0xFFE0, 0xFFE1, struct {
-        fn handler(_: *Peripheral.Request, rw: *Peripheral.ResponseWriter) void {
-            rw.ok();
-        }
-    }.handler, null);
-
-    // ---- handler: another SIG service (Battery) ----
-    p.handle(0x180F, 0x2A19, struct {
-        fn handler(_: *Peripheral.Request, rw: *Peripheral.ResponseWriter) void {
-            rw.ok();
-        }
-    }.handler, null);
-
-    // ---- handler: with user context ----
+    // ---- raw request handler registration ----
     var ctx_val: u32 = 42;
-    p.handle(0xFFF0, 0xFFF1, struct {
-        fn handler(req: *Peripheral.Request, rw: *Peripheral.ResponseWriter) void {
-            if (req.user_ctx) |ctx| {
-                const v: *u32 = @ptrCast(@alignCast(ctx));
+    p.setRequestHandler(&ctx_val, struct {
+        fn handler(ctx: ?*anyopaque, req: *const Peripheral.Request, rw: *Peripheral.ResponseWriter) void {
+            if (req.service_uuid == 0xFFF0 and req.char_uuid == 0xFFF1) {
+                const raw = ctx orelse unreachable;
+                const v: *u32 = @ptrCast(@alignCast(raw));
                 _ = v;
             }
             rw.ok();
         }
-    }.handler, &ctx_val);
+    }.handler);
 
     // ---- advertise: name + single service UUID ----
     try p.startAdvertising(.{
@@ -151,4 +194,10 @@ pub fn run(comptime lib: type, p: Peripheral) !void {
 
     // ---- final state: idle ----
     try testing.expectEqual(Peripheral.State.idle, p.getState());
+}
+
+fn requireHostPointer(comptime T: type) void {
+    if (@typeInfo(T) != .pointer) {
+        @compileError("peripheral runner expects *Host instance");
+    }
 }

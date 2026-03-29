@@ -1,11 +1,11 @@
 const NetConn = @import("../Conn.zig");
 
 pub fn ServerConn(comptime lib: type) type {
-    const common = @import("common.zig").Make(lib);
-    const alert = @import("alert.zig").Make(lib);
-    const kdf = @import("kdf.zig").Make(lib);
-    const record = @import("record.zig").Make(lib);
-    const server_handshake = @import("server_handshake.zig").Make(lib);
+    const common = @import("common.zig").make(lib);
+    const alert = @import("alert.zig").make(lib);
+    const kdf = @import("kdf.zig").make(lib);
+    const record = @import("record.zig").make(lib);
+    const server_handshake = @import("server_handshake.zig").make(lib);
     const Allocator = lib.mem.Allocator;
     const Mutex = lib.Thread.Mutex;
 
@@ -30,6 +30,7 @@ pub fn ServerConn(comptime lib: type) type {
         pending_end: usize = 0,
         read_record_buf: [common.MAX_CIPHERTEXT_LEN_TLS12]u8 = undefined,
         write_record_buf: [common.MAX_CIPHERTEXT_LEN_TLS12]u8 = undefined,
+        write_plaintext_buf: [common.MAX_PLAINTEXT_LEN + 1]u8 = undefined,
         plaintext_buf: [common.MAX_PLAINTEXT_LEN + 1]u8 = undefined,
         handshake_buf: [common.MAX_HANDSHAKE_LEN]u8 = undefined,
 
@@ -81,8 +82,9 @@ pub fn ServerConn(comptime lib: type) type {
             if (self.pending_start < self.pending_end) return self.readPending(buf);
 
             while (true) {
-                const res = self.handshake_state.records.readRecord(&self.read_record_buf, &self.plaintext_buf) catch {
-                    return error.Unexpected;
+                const res = self.handshake_state.records.readRecord(&self.read_record_buf, &self.plaintext_buf) catch |err| switch (err) {
+                    error.TimedOut => return error.TimedOut,
+                    else => return error.Unexpected,
                 };
                 switch (res.content_type) {
                     .application_data => {
@@ -121,8 +123,14 @@ pub fn ServerConn(comptime lib: type) type {
             defer self.write_mu.unlock();
 
             const chunk_len = @min(buf.len, common.MAX_PLAINTEXT_LEN);
-            _ = self.handshake_state.records.writeRecord(.application_data, buf[0..chunk_len], &self.write_record_buf) catch {
-                return error.Unexpected;
+            _ = self.handshake_state.records.writeRecord(
+                .application_data,
+                buf[0..chunk_len],
+                &self.write_record_buf,
+                &self.write_plaintext_buf,
+            ) catch |err| switch (err) {
+                error.TimedOut => return error.TimedOut,
+                else => return error.Unexpected,
             };
             return chunk_len;
         }
@@ -218,7 +226,11 @@ pub fn ServerConn(comptime lib: type) type {
                 .handshake,
                 self.handshake_buf[0..total_len],
                 &self.write_record_buf,
-            ) catch return error.Unexpected;
+                &self.write_plaintext_buf,
+            ) catch |err| switch (err) {
+                error.TimedOut => return error.TimedOut,
+                else => return error.Unexpected,
+            };
 
             self.handshake_state.server_application_traffic_secret = try nextTrafficSecret(
                 self,
@@ -306,13 +318,13 @@ pub fn ServerConn(comptime lib: type) type {
         fn sendCloseNotify(self: *Self) void {
             self.write_mu.lock();
             defer self.write_mu.unlock();
-            self.handshake_state.records.sendAlert(.warning, .close_notify, &self.write_record_buf) catch {};
+            self.handshake_state.records.sendAlert(.warning, .close_notify, &self.write_record_buf, &self.write_plaintext_buf) catch {};
         }
 
         fn sendFatalAlert(self: *Self, description: common.AlertDescription) void {
             self.write_mu.lock();
             defer self.write_mu.unlock();
-            self.handshake_state.records.sendAlert(.fatal, description, &self.write_record_buf) catch {};
+            self.handshake_state.records.sendAlert(.fatal, description, &self.write_record_buf, &self.write_plaintext_buf) catch {};
         }
 
         fn handshakeErrorToAlert(err: HandshakeError) common.AlertDescription {

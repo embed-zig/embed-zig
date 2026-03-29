@@ -1,18 +1,61 @@
-//! TCP test runner — integration tests for net.Make(lib) TCP path.
+//! TCP test runner — integration tests for net.make(lib) TCP path.
 //!
 //! Tests dial, listen, accept, read/write over loopback for both IPv4 and IPv6.
 //!
 //! Usage:
-//!   try @import("net/test_runner/tcp.zig").run(lib);
+//!   const runner = @import("net/test_runner/tcp.zig").make(lib);
+//!   t.run("net/tcp", runner);
 
+const context_mod = @import("context");
+const embed = @import("embed");
 const io = @import("io");
+const testing_api = @import("testing");
 const net = @import("../../net.zig");
 
-pub fn run(comptime lib: type) !void {
-    const Net = net.Make(lib);
-    const Addr = lib.net.Address;
+pub fn make(comptime lib: type) testing_api.TestRunner {
+    const Runner = struct {
+        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
+
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            runImpl(lib, t, allocator) catch |err| {
+                t.logErrorf("tcp runner failed: {}", .{err});
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
+        }
+    };
+
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{};
+    return testing_api.TestRunner.make(Runner).new(runner);
+}
+
+fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !void {
+    _ = t;
+    const Net = net.make(lib);
+    const Addr = net.netip.AddrPort;
+    const IpAddr = net.netip.Addr;
     const Thread = lib.Thread;
-    const testing = lib.testing;
+    const testing = struct {
+        pub var allocator: lib.mem.Allocator = undefined;
+        pub const expect = lib.testing.expect;
+        pub const expectEqual = lib.testing.expectEqual;
+        pub const expectEqualSlices = lib.testing.expectEqualSlices;
+        pub const expectEqualStrings = lib.testing.expectEqualStrings;
+        pub const expectError = lib.testing.expectError;
+    };
+    testing.allocator = alloc;
 
     const Runner = struct {
         const Mutex = Thread.Mutex;
@@ -71,18 +114,44 @@ pub fn run(comptime lib: type) !void {
             }
         }
 
+        fn skipIfConnectDidNotPend(err: anyerror) anyerror!void {
+            switch (err) {
+                error.AccessDenied,
+                error.PermissionDenied,
+                error.AddressInUse,
+                error.AddressNotAvailable,
+                error.AddressFamilyNotSupported,
+                error.ConnectionRefused,
+                error.NetworkUnreachable,
+                error.ConnectionTimedOut,
+                error.ConnectionResetByPeer,
+                error.FileNotFound,
+                error.SystemResources,
+                => return error.SkipZigTest,
+                else => return err,
+            }
+        }
+
         fn listenerPort(ln: net.Listener, comptime NetNs: type) !u16 {
             const typed = try ln.as(NetNs.TcpListener);
             return typed.port();
         }
 
+        fn addr4(addr: [4]u8, port: u16) Addr {
+            return Addr.from4(addr, port);
+        }
+
+        fn addr6(text: []const u8, port: u16) !Addr {
+            return Addr.init(try IpAddr.parse(text), port);
+        }
+
         fn tcpIpv4DialAndListen() !void {
-            var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
+            var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
             defer ln.deinit();
 
             const bound_port = try listenerPort(ln, Net);
 
-            var cc = try Net.dial(testing.allocator, .tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, bound_port));
+            var cc = try Net.dial(testing.allocator, .tcp, addr4(.{ 127, 0, 0, 1 }, bound_port));
             defer cc.deinit();
 
             var ac = try ln.accept();
@@ -101,15 +170,14 @@ pub fn run(comptime lib: type) !void {
         }
 
         fn tcpIpv6DialAndListen() !void {
-            const loopback_v6 = comptime Addr.parseIp6("::1", 0) catch unreachable;
+            const loopback_v6 = try addr6("::1", 0);
 
             var ln = try Net.listen(testing.allocator, .{ .address = loopback_v6 });
             defer ln.deinit();
 
             const bound_port = try listenerPort(ln, Net);
 
-            var dial_addr = loopback_v6;
-            dial_addr.setPort(bound_port);
+            const dial_addr = loopback_v6.withPort(bound_port);
 
             var cc = try Net.dial(testing.allocator, .tcp, dial_addr);
             defer cc.deinit();
@@ -129,13 +197,129 @@ pub fn run(comptime lib: type) !void {
             try testing.expectEqualStrings("v6ok", buf[0..4]);
         }
 
+        fn tcpDialerDialAndDialContext() !void {
+            const Context = context_mod.make(lib);
+
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+
+            var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
+            defer ln.deinit();
+
+            const bound_port = try listenerPort(ln, Net);
+            const d = Net.Dialer.init(testing.allocator, .{});
+
+            var cc = try d.dial(.tcp, addr4(.{ 127, 0, 0, 1 }, bound_port));
+            defer cc.deinit();
+
+            var ac = try ln.accept();
+            defer ac.deinit();
+
+            const msg = "hello Dialer.dial tcp";
+            try io.writeAll(@TypeOf(cc), &cc, msg);
+
+            var buf: [64]u8 = undefined;
+            try io.readFull(@TypeOf(ac), &ac, buf[0..msg.len]);
+            try testing.expectEqualStrings(msg, buf[0..msg.len]);
+
+            var ctx_conn = try d.dialContext(ctx_api.background(), .tcp, addr4(.{ 127, 0, 0, 1 }, bound_port));
+            defer ctx_conn.deinit();
+
+            var ctx_ac = try ln.accept();
+            defer ctx_ac.deinit();
+
+            const ctx_msg = "hello dialContext tcp";
+            try io.writeAll(@TypeOf(ctx_conn), &ctx_conn, ctx_msg);
+            try io.readFull(@TypeOf(ctx_ac), &ctx_ac, buf[0..ctx_msg.len]);
+            try testing.expectEqualStrings(ctx_msg, buf[0..ctx_msg.len]);
+        }
+
+        fn tcpDialContextCanceledBeforeStart() !void {
+            const Context = context_mod.make(lib);
+
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+
+            var cancel_ctx = try ctx_api.withCancel(ctx_api.background());
+            defer cancel_ctx.deinit();
+            cancel_ctx.cancel();
+
+            var d = Net.Dialer.init(testing.allocator, .{});
+            try testing.expectError(
+                error.Canceled,
+                d.dialContext(cancel_ctx, .tcp, addr4(.{ 127, 0, 0, 1 }, 1)),
+            );
+        }
+
+        fn tcpDialContextDeadlineExceededBeforeStart() !void {
+            const Context = context_mod.make(lib);
+
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+
+            var deadline_ctx = try ctx_api.withDeadline(ctx_api.background(), lib.time.nanoTimestamp() - 1 * lib.time.ns_per_ms);
+            defer deadline_ctx.deinit();
+
+            var d = Net.Dialer.init(testing.allocator, .{});
+            try testing.expectError(
+                error.DeadlineExceeded,
+                d.dialContext(deadline_ctx, .tcp, addr4(.{ 127, 0, 0, 1 }, 1)),
+            );
+        }
+
+        fn tcpDialContextCanceledDuringConnect() !void {
+            const Context = context_mod.make(lib);
+
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+
+            var cancel_ctx = try ctx_api.withCancel(ctx_api.background());
+            defer cancel_ctx.deinit();
+
+            const d = Net.Dialer.init(testing.allocator, .{});
+            const cancel_thread = try Thread.spawn(.{}, struct {
+                fn run(ctx: context_mod.Context, comptime thread_lib: type) void {
+                    thread_lib.Thread.sleep(40 * thread_lib.time.ns_per_ms);
+                    ctx.cancel();
+                }
+            }.run, .{ cancel_ctx, lib });
+            defer cancel_thread.join();
+
+            var conn = d.dialContext(cancel_ctx, .tcp, addr4(.{ 203, 0, 113, 1 }, 9)) catch |err| switch (err) {
+                error.Canceled => return,
+                else => return skipIfConnectDidNotPend(err),
+            };
+            defer conn.deinit();
+
+            return error.ExpectedCanceledConnect;
+        }
+
+        fn tcpDialContextDeadlineExceededDuringConnect() !void {
+            const Context = context_mod.make(lib);
+
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+
+            var deadline_ctx = try ctx_api.withDeadline(ctx_api.background(), lib.time.nanoTimestamp() + 40 * lib.time.ns_per_ms);
+            defer deadline_ctx.deinit();
+
+            const d = Net.Dialer.init(testing.allocator, .{});
+            var conn = d.dialContext(deadline_ctx, .tcp, addr4(.{ 203, 0, 113, 1 }, 9)) catch |err| switch (err) {
+                error.DeadlineExceeded => return,
+                else => return skipIfConnectDidNotPend(err),
+            };
+            defer conn.deinit();
+
+            return error.ExpectedDeadlineExceeded;
+        }
+
         fn tcpReadTimeout() !void {
-            var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
+            var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
             defer ln.deinit();
 
             const port = try listenerPort(ln, Net);
 
-            var cc = try Net.dial(testing.allocator, .tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+            var cc = try Net.dial(testing.allocator, .tcp, addr4(.{ 127, 0, 0, 1 }, port));
             defer cc.deinit();
 
             var ac = try ln.accept();
@@ -154,12 +338,12 @@ pub fn run(comptime lib: type) !void {
         }
 
         fn tcpReadFull() !void {
-            var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
+            var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
             defer ln.deinit();
 
             const port = try listenerPort(ln, Net);
 
-            var cc = try Net.dial(testing.allocator, .tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+            var cc = try Net.dial(testing.allocator, .tcp, addr4(.{ 127, 0, 0, 1 }, port));
             defer cc.deinit();
 
             var ac = try ln.accept();
@@ -174,12 +358,12 @@ pub fn run(comptime lib: type) !void {
         }
 
         fn tcpWriteTimeout() !void {
-            var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
+            var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
             defer ln.deinit();
 
             const port = try listenerPort(ln, Net);
 
-            var cc = try Net.dial(testing.allocator, .tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+            var cc = try Net.dial(testing.allocator, .tcp, addr4(.{ 127, 0, 0, 1 }, port));
             defer cc.deinit();
 
             var ac = try ln.accept();
@@ -204,12 +388,12 @@ pub fn run(comptime lib: type) !void {
             const TcpConnType = @import("../TcpConn.zig").TcpConn(lib);
             const UdpConnType = @import("../UdpConn.zig").UdpConn(lib);
 
-            var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
+            var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
             defer ln.deinit();
 
             const port = try listenerPort(ln, Net);
 
-            var cc = try Net.dial(testing.allocator, .tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+            var cc = try Net.dial(testing.allocator, .tcp, addr4(.{ 127, 0, 0, 1 }, port));
             defer cc.deinit();
 
             var ac = try ln.accept();
@@ -223,11 +407,11 @@ pub fn run(comptime lib: type) !void {
         }
 
         fn tcpMultipleAccept() !void {
-            var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
+            var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
             defer ln.deinit();
 
             const port = try listenerPort(ln, Net);
-            const dest = Addr.initIp4(.{ 127, 0, 0, 1 }, port);
+            const dest = addr4(.{ 127, 0, 0, 1 }, port);
 
             var c1 = try Net.dial(testing.allocator, .tcp, dest);
             defer c1.deinit();
@@ -281,11 +465,11 @@ pub fn run(comptime lib: type) !void {
                 }
             };
 
-            var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
+            var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
             defer ln.deinit();
 
             const port = try listenerPort(ln, Net);
-            const dest = Addr.initIp4(.{ 127, 0, 0, 1 }, port);
+            const dest = addr4(.{ 127, 0, 0, 1 }, port);
 
             var cc = try Net.dial(testing.allocator, .tcp, dest);
             defer cc.deinit();
@@ -373,11 +557,11 @@ pub fn run(comptime lib: type) !void {
                 }
             };
 
-            var ln = try Net.listen(testing.allocator, .{ .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0) });
+            var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
             defer ln.deinit();
 
             const port = try listenerPort(ln, Net);
-            const dest = Addr.initIp4(.{ 127, 0, 0, 1 }, port);
+            const dest = addr4(.{ 127, 0, 0, 1 }, port);
 
             var ready = ReadyCounter.init(2);
             var accept1 = AcceptCtx{ .ready = &ready, .listener = ln };
@@ -424,6 +608,17 @@ pub fn run(comptime lib: type) !void {
 
     try Runner.tcpIpv4DialAndListen();
     try Runner.tcpIpv6DialAndListen();
+    try Runner.tcpDialerDialAndDialContext();
+    try Runner.tcpDialContextCanceledBeforeStart();
+    try Runner.tcpDialContextDeadlineExceededBeforeStart();
+    Runner.tcpDialContextCanceledDuringConnect() catch |err| switch (err) {
+        error.SkipZigTest => {},
+        else => return err,
+    };
+    Runner.tcpDialContextDeadlineExceededDuringConnect() catch |err| switch (err) {
+        error.SkipZigTest => {},
+        else => return err,
+    };
     try Runner.tcpReadTimeout();
     try Runner.tcpReadFull();
     try Runner.tcpWriteTimeout();

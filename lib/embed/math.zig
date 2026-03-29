@@ -1,4 +1,13 @@
-const std = @import("std_re_export.zig");
+//! Math utilities — re-exports from std.math.
 
-pub const Order = std.math.Order;
-pub const order = std.math.order;
+const re_export = struct {
+    const std = @import("std");
+
+    pub const Order = std.math.Order;
+    pub const maxInt = std.math.maxInt;
+    pub const order = std.math.order;
+};
+
+pub const Order = re_export.Order;
+pub const maxInt = re_export.maxInt;
+pub const order = re_export.order;

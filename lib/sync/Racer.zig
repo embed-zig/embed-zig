@@ -28,7 +28,7 @@ pub fn Racer(comptime lib: type, comptime T: type) type {
         pub const State = struct {
             shared: *SharedState,
 
-            /// True once a winning value has been published.
+            /// True once a terminal outcome has been published or cancellation requested.
             pub fn done(self: State) bool {
                 return self.shared.done.load(.acquire);
             }
@@ -47,7 +47,7 @@ pub fn Racer(comptime lib: type, comptime T: type) type {
                 self.shared.mutex.lock();
                 defer self.shared.mutex.unlock();
 
-                if (self.shared.has_value) return false;
+                if (self.shared.has_value or self.shared.done.load(.acquire)) return false;
 
                 self.shared.value = result;
                 self.shared.has_value = true;
@@ -73,9 +73,21 @@ pub fn Racer(comptime lib: type, comptime T: type) type {
             self.* = undefined;
         }
 
-        /// True once a winning value has been published.
+        /// True once a terminal outcome has been published or cancellation requested.
         pub fn done(self: *Self) bool {
             return self.shared.done.load(.acquire);
+        }
+
+        /// Signals spawned tasks to stop cooperatively. This does not force
+        /// `race()` to return early; callers should pair it with their own
+        /// cancellation path and then `wait()` / `deinit()` as needed.
+        pub fn cancel(self: *Self) void {
+            self.shared.mutex.lock();
+            defer self.shared.mutex.unlock();
+
+            if (self.shared.done.load(.acquire)) return;
+            self.shared.done.store(true, .release);
+            self.shared.cond.broadcast();
         }
 
         /// Returns the current winning value, if any.
@@ -160,13 +172,13 @@ pub fn Racer(comptime lib: type, comptime T: type) type {
                 if (ctx.err()) |err| return err;
 
                 const wait_ns: u64 = blk: {
-                    const poll_ms: i64 = 10;
-                    if (ctx.deadline()) |deadline_ms| {
-                        const remaining_ms = deadline_ms - lib.time.milliTimestamp();
-                        if (remaining_ms <= 0) break :blk 0;
-                        break :blk @as(u64, @intCast(@min(remaining_ms, poll_ms))) * lib.time.ns_per_ms;
+                    const poll_ns: i128 = 10 * lib.time.ns_per_ms;
+                    if (ctx.deadline()) |deadline_ns| {
+                        const remaining_ns = deadline_ns - lib.time.nanoTimestamp();
+                        if (remaining_ns <= 0) break :blk 0;
+                        break :blk @intCast(@min(remaining_ns, poll_ns));
                     }
-                    break :blk @as(u64, @intCast(poll_ms)) * lib.time.ns_per_ms;
+                    break :blk @intCast(poll_ns);
                 };
 
                 if (wait_ns == 0) {

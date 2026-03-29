@@ -4,8 +4,11 @@
 //! accept/close/deinit methods can be wrapped into a Listener.
 //!
 //! Usage:
-//!   var ln = try TcpListener.init(allocator, .{ .port = 8080 });
+//!   var ln = try TcpListener.init(allocator, .{
+//!       .address = Addr.from4(.{ 0, 0, 0, 0 }, 8080),
+//!   });
 //!   defer ln.deinit();
+//!   try ln.listen();
 //!
 //!   const tcp_ln = try ln.as(TcpListener(lib));
 //!   while (true) {
@@ -22,10 +25,13 @@ vtable: *const VTable,
 type_id: *const anyopaque,
 
 pub const VTable = struct {
+    listen: *const fn (ptr: *anyopaque) ListenError!void,
     accept: *const fn (ptr: *anyopaque) AcceptError!Conn,
     close: *const fn (ptr: *anyopaque) void,
     deinit: *const fn (ptr: *anyopaque) void,
 };
+
+pub const ListenError = anyerror;
 
 pub const AcceptError = error{
     ConnectionAborted,
@@ -37,6 +43,10 @@ pub const AcceptError = error{
 
 pub fn accept(self: Listener) AcceptError!Conn {
     return self.vtable.accept(self.ptr);
+}
+
+pub fn listen(self: Listener) ListenError!void {
+    return self.vtable.listen(self.ptr);
 }
 
 pub fn close(self: Listener) void {
@@ -67,6 +77,7 @@ pub fn as(self: Listener, comptime T: type) error{TypeMismatch}!*T {
 /// Wrap a pointer to any concrete listener type into a Listener.
 ///
 /// The concrete type must provide:
+///   fn listen(*Self) ListenError!void
 ///   fn accept(*Self) AcceptError!Conn
 ///   fn close(*Self) void
 ///   fn deinit(*Self) void
@@ -79,6 +90,10 @@ pub fn init(pointer: anytype) Listener {
     const Impl = info.pointer.child;
 
     const gen = struct {
+        fn listenFn(ptr: *anyopaque) ListenError!void {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            return self.listen();
+        }
         fn acceptFn(ptr: *anyopaque) AcceptError!Conn {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             return self.accept();
@@ -93,6 +108,7 @@ pub fn init(pointer: anytype) Listener {
         }
 
         const vtable = VTable{
+            .listen = listenFn,
             .accept = acceptFn,
             .close = closeFn,
             .deinit = deinitFn,

@@ -6,7 +6,7 @@
 - deadlines and timeouts
 - request-scoped values
 
-The public entrypoint is `Make(lib)`, where `lib` supplies the platform-facing
+The public entrypoint is `make(lib)`, where `lib` supplies the platform-facing
 pieces (`lib.Thread`, `lib.time`, `lib.mem`, and `lib.debug` when needed).
 
 ## Quick start
@@ -14,7 +14,7 @@ pieces (`lib.Thread`, `lib.time`, `lib.mem`, and `lib.debug` when needed).
 ```zig
 const context_mod = @import("context");
 
-const ContextApi = context_mod.Make(lib);
+const ContextApi = context_mod.make(lib);
 var context = try ContextApi.init(allocator);
 defer context.deinit();
 
@@ -56,7 +56,7 @@ children list. Deadline and value lookup walk upward through the parent chain.
 ## API shape
 
 ```zig
-const ContextApi = context_mod.Make(lib);
+const ContextApi = context_mod.make(lib);
 var context = try ContextApi.init(allocator);
 defer context.deinit();
 ```
@@ -175,7 +175,13 @@ type checks are needed beyond the requested `T`.
 The reusable test entrypoint is:
 
 ```zig
-try @import("context").test_runner.context.run(lib);
+const testing = @import("testing").make(lib);
+const context_runner = @import("integration/context.zig").make(lib);
+
+var t = testing.init();
+defer t.deinit();
+t.run("context", context_runner);
+if (!t.wait()) return error.TestFailed;
 ```
 
 The test runner covers:

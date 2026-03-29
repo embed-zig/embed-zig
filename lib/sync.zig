@@ -31,9 +31,7 @@ pub const test_runner = struct {
     pub const racer = @import("sync/test_runner/racer.zig");
 };
 
-test {
+test "sync/unit_tests" {
     _ = @import("sync/Channel.zig");
-    _ = @import("sync/test_runner/channel.zig");
     _ = @import("sync/Racer.zig");
-    _ = @import("sync/test_runner/racer.zig");
 }

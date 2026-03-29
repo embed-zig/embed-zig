@@ -1,7 +1,7 @@
 # lib/net — Go-style networking for embed-zig
 
 High-level networking package built on top of `embed`. Takes a comptime
-`lib` (the result of `embed.Make(platform)`) and provides Go-style
+`lib` (the result of `embed.make(platform)`) and provides Go-style
 networking primitives.
 
 ## Table of Contents
@@ -48,8 +48,8 @@ networking primitives.
 ## Dependency
 
 ```zig
-const embed = @import("embed").Make(platform);
-const net = @import("net").Make(embed);
+const embed = @import("embed").make(platform);
+const net = @import("net").make(embed);
 ```
 
 `lib/net` depends on the sealed `embed` namespace for:
@@ -62,7 +62,7 @@ const net = @import("net").Make(embed);
 
 ```
 lib/net/
-  net.zig              Root; Make(lib) entry point, Conn, Listener, PacketConn, Dial, Listen
+  net.zig              Root; make(lib) entry point, Conn, Listener, PacketConn, Dial, Listen
   Conn.zig             Type-erased byte stream interface (Go's net.Conn)
   Listener.zig         Type-erased stream listener interface (Go's net.Listener)
   PacketConn.zig       Type-erased datagram interface (Go's net.PacketConn)
@@ -86,15 +86,13 @@ lib/net/
     extensions.zig     TLS extension parsing/building
     kdf.zig            TLS 1.2/1.3 key schedule helpers
   http/
-    client.zig         HTTP client
-    transport.zig      RoundTripper contract + default Transport
-    request.zig        HTTP request builder/parser
-    response.zig       HTTP response parser
-    server.zig         HTTP/1.1 server
-    router.zig         Path-based request router
-  ws/
-    client.zig         WebSocket client (RFC 6455)
-    frame.zig          WebSocket frame codec
+    Header.zig         HTTP header entry
+    ReadCloser.zig     HTTP body read+close contract
+    RoundTripper.zig   RoundTripper contract
+    Request.zig        HTTP request builder/parser
+    Response.zig       HTTP response parser
+    Transport.zig      Default HTTP/1.1 client transport
+    status.zig         HTTP status codes and helpers
 ```
 
 ## Layer diagram
@@ -115,7 +113,7 @@ lib/net/
 ├──────────┴──────────┴───────────────────────────┤
 │              net/Resolver    net/url              │
 ├─────────────────────────────────────────────────┤
-│              lib (embed.Make)                    │
+│              lib (embed.make)                    │
 │   posix / Thread / time / net.Address           │
 └─────────────────────────────────────────────────┘
 ```
@@ -298,7 +296,7 @@ no CGO, fully portable across embed platforms.
 | Result storage          | Heap `ArrayList(LookupAddr)`          | Caller-provided `[]Address` buffer          |
 | Timeout / retry         | From resolv.conf (`timeout`, `attempts`) | Explicit in `Options`                    |
 | Platform                | Linux-specific, musl port             | Platform-agnostic via `lib.posix`           |
-| Protocol                | UDP only (no TCP fallback)            | Per-server `Protocol`: udp, tcp (tls, doh planned) |
+| Protocol                | UDP only (no TCP fallback)            | Per-server `Protocol`: udp, tcp, tls (`doh` planned) |
 
 ### Resolver struct
 
@@ -311,19 +309,21 @@ pub fn Resolver(comptime lib: type) type {
         pub const Protocol = enum(u3) {
             udp = 0,
             tcp = 1,
-            tls = 2,   // planned
+            tls = 2,
             doh = 3,   // planned
         };
 
         pub const Server = struct {
             addr: Addr,
             protocol: Protocol = .udp,
+            tls_config: ?TlsConfig = null,
 
             pub fn init(comptime ip: []const u8, protocol: Protocol) Server;
+            pub fn initTls(comptime ip: []const u8, comptime server_name: []const u8) Server;
         };
 
         pub const dns = struct {
-            pub const ali = struct { v4_1, v4_2, v6_1, v6_2: []const u8 };
+            pub const ali = struct { v4_1, v4_2, v6_1, v6_2, tls_name: []const u8 };
             pub const google = struct { ... };
             pub const cloudflare = struct { ... };
             pub const quad9 = struct { ... };
@@ -364,13 +364,14 @@ lookupHost("example.com")
   ├─ Build query packets (A and/or AAAA)
   │
   ├─ Spawn one Racer task per configured server
-  │     Server0/udp   Server1/tcp   Server2/udp   ...
+  │     Server0/udp   Server1/tcp   Server2/tls   ...
   │
   ├─ Each task:
   │     if done flag set → exit
   │     result = switch (server.protocol) {
   │         .udp → udpResolve(server)
   │         .tcp → tcpResolve(server)
+  │         .tls → tlsResolve(server)
   │     }
   │     if addresses found → publish through sync.Racer
   │     if NXDOMAIN / REFUSED → record as fallback error
@@ -382,7 +383,7 @@ lookupHost("example.com")
 ```
 
 Key properties:
-- **True parallelism**: UDP and TCP queries run on separate threads simultaneously
+- **True parallelism**: UDP, TCP, and TLS queries run on separate threads simultaneously
 - **First successful answer wins**: negative DNS replies do not short-circuit later successes
 - **Per-server sockets**: each task opens its own fd, no shared fd coordination
 - **Detached cleanup**: `lookupHost()` can return before lagging workers time out
@@ -393,12 +394,13 @@ Key properties:
 - `buildQuery(buf, name, qtype, id) !usize` — RFC 1035 §4.1 question section
 - `parseResponse(pkt, qtype, out) !usize` — parse answer section, extract A/AAAA records
 - TCP framing: 2-byte big-endian length prefix per RFC 1035 §4.2.2
+- DNS-over-TLS reuses the same TCP framing inside a `net.tls.Conn`
 
 ### Usage
 
 ```zig
-const embed = @import("embed").Make(platform);
-const net = @import("net").Make(embed);
+const embed = @import("embed").make(platform);
+const net = @import("net").make(embed);
 const Addr = embed.net.Address;
 
 const R = net.Resolver;
@@ -419,6 +421,29 @@ var r2 = try R.init(allocator, .{
     .mode = .ipv4_only,
 });
 defer r2.deinit();
+
+// DNS-over-TLS with built-in SNI defaults for well-known providers
+var r3 = try R.init(allocator, .{
+    .servers = &.{
+        R.Server.init(R.dns.ali.v4_1, .tls),
+        R.Server.init(R.dns.google.v4_1, .tls),
+    },
+    .timeout_ms = 5000,
+});
+defer r3.deinit();
+
+// Custom DNS-over-TLS server
+var r4 = try R.init(allocator, .{
+    .servers = &.{.{
+        .addr = Addr.initIp4(.{ 127, 0, 0, 1 }, 853),
+        .protocol = .tls,
+        .tls_config = .{
+            .server_name = "example.com",
+            .verification = .self_signed,
+        },
+    }},
+});
+defer r4.deinit();
 ```
 
 ## net/tls
@@ -435,8 +460,8 @@ Highlights:
 - Public-network Aliyun test coverage in `lib/net/test_runner/ntp.zig`
 
 ```zig
-const embed = @import("embed").Make(platform);
-const net = @import("net").Make(embed);
+const embed = @import("embed").make(platform);
+const net = @import("net").make(embed);
 
 var client = try net.ntp.Client.init(embed.testing.allocator, .{
     .servers = &.{net.ntp.Servers.aliyun},
@@ -482,66 +507,64 @@ _ = try tls_conn.write("GET / HTTP/1.0\r\n\r\n");
 
 ## net/http
 
-HTTP/1.1 client and server (Go's `net/http`).
+HTTP/1.1 client-side request/response model plus the default transport.
+Today the package exposes:
 
-**Client** — uses a RoundTripper abstraction (like Go's `http.Transport`):
+- `Header`, `ReadCloser`, `Request`, `Response`
+- `status` helpers
+- `RoundTripper` contract
+- `Transport` as the default HTTP/1.1 client transport
+
+Server/router layers are not landed yet.
+
+**Default transport**:
 
 ```zig
-var transport = net.http.Transport.init(allocator, .{});
-var client = net.http.Client.init(&transport);
+var transport = try net.http.Transport.init(allocator, .{});
+defer transport.deinit();
 
-var buf: [8192]u8 = undefined;
-const resp = try client.get("https://example.com/api", &buf);
+var req = try net.http.Request.init(allocator, "GET", "http://example.com/api");
+var resp = try transport.roundTrip(&req);
+defer resp.deinit();
+
+const body = resp.body() orelse return error.MissingBody;
+var buf: [1024]u8 = undefined;
+const n = try body.read(&buf);
+_ = n;
 ```
 
-**Server** — per-connection handler with path-based routing:
+**Custom transport** — implement `RoundTripper`:
 
 ```zig
-const routes = [_]net.http.Route{
-    net.http.router.get("/health", handleHealth),
-    net.http.router.post("/api/data", handleData),
+const MyTransport = struct {
+    fn roundTrip(self: *@This(), req: *const net.http.Request) !net.http.Response {
+        _ = self;
+        _ = req;
+        return error.Todo;
+    }
 };
-var server = net.http.Server.init(allocator, &routes);
 
-var ln = try net.listen(.{ .port = 8080 });
-while (true) {
-    var conn = try ln.accept();
-    _ = try lib.Thread.spawn(.{}, server.serveConn, .{conn});
-}
+var impl = MyTransport{};
+var round_tripper = net.http.RoundTripper.init(&impl);
 ```
 
 **RoundTripper** contract (for custom/mock transports):
 
 ```zig
-fn roundTrip(*Self, RoundTripRequest, []u8) !RoundTripResponse
+fn roundTrip(*Self, *const http.Request) !http.Response
 ```
 
 ## net/ws
 
-WebSocket client (Go's `golang.org/x/net/websocket` / `nhooyr.io/websocket`).
-Works over any Conn — plain TCP or TLS.
-
-```zig
-var ws = try net.ws.Client.init(allocator, &tls_conn, .{
-    .host = "echo.websocket.org",
-    .path = "/",
-});
-defer ws.deinit();
-
-try ws.sendText("hello");
-while (try ws.recv()) |msg| {
-    // msg.type (.text, .binary, .ping, .pong)
-    // msg.payload
-}
-```
+Planned, but not landed in the current tree yet.
 
 ## Usage examples
 
 ### TCP echo server
 
 ```zig
-const embed = @import("embed").Make(platform);
-const net = @import("net").Make(embed);
+const embed = @import("embed").make(platform);
+const net = @import("net").make(embed);
 const Addr = embed.net.Address;
 
 var ln = try net.listen(embed.testing.allocator, .{
@@ -565,16 +588,21 @@ while (true) {
 }
 ```
 
-### HTTPS GET
+### HTTP GET
 
 ```zig
-const embed = @import("embed").Make(platform);
-const net = @import("net").Make(embed);
+const embed = @import("embed").make(platform);
+const net = @import("net").make(embed);
 
-var transport = net.http.Transport.init(allocator, .{});
-var client = net.http.Client.init(&transport);
+var transport = try net.http.Transport.init(embed.testing.allocator, .{});
+defer transport.deinit();
 
-var buf: [16384]u8 = undefined;
-const resp = try client.get("https://httpbin.org/get", &buf);
-embed.log.info("status={} body={s}", .{ resp.status_code, resp.body() });
+var req = try net.http.Request.init(embed.testing.allocator, "GET", "http://example.com/");
+var body_buf: [1024]u8 = undefined;
+var resp = try transport.roundTrip(&req);
+defer resp.deinit();
+
+const body = resp.body() orelse return error.MissingBody;
+const n = try body.read(&body_buf);
+embed.log.info("status={} body={s}", .{ resp.status_code, body_buf[0..n] });
 ```

@@ -1,0 +1,21 @@
+#ifndef OGG_CONFIG_H
+#define OGG_CONFIG_H
+
+/*
+ * Curated Ogg configuration template for embed-zig.
+ *
+ * Copy this file to your app and adjust it as needed, then pass it via:
+ *   -Dogg=true -Dogg_config_header=path/to/config.h
+ *
+ * Note:
+ * - integer type selection is handled separately in `pkg/ogg/include/ogg/config_types.h`
+ * - this file is mostly for small behavior toggles
+ */
+
+/*
+ * Disable CRC verification in the demuxer.
+ * Leave undefined for the default upstream behavior.
+ */
+#undef DISABLE_CRC
+
+#endif /* OGG_CONFIG_H */

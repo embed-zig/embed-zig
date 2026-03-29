@@ -1,5 +1,9 @@
 //! Meta utilities — re-exports from std.meta.
 
-const std = @import("std_re_export.zig");
+const re_export = struct {
+    const std = @import("std");
 
-pub const eql = std.meta.eql;
+    pub const eql = std.meta.eql;
+};
+
+pub const eql = re_export.eql;

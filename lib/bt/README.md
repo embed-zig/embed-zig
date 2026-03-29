@@ -23,7 +23,11 @@ is planned as a future addition under the same package.
 - [bt/Peripheral](#btperipheral)
 - [bt/Transport](#bttransport)
 - [bt/host (HCI backend)](#bthost-hci-backend)
+  - [Design direction](#design-direction)
   - [Hci](#hci)
+  - [Host facade](#host-facade)
+  - [Client and Server](#client-and-server)
+  - [Transfer extensions](#transfer-extensions)
   - [hci (codec)](#hci-codec)
   - [l2cap](#l2cap)
   - [att](#att)
@@ -66,7 +70,7 @@ is planned as a future addition under the same package.
 ## Dependency
 
 ```zig
-const embed = @import("embed").Make(platform);
+const embed = @import("embed").make(platform);
 const bt = @import("bt");
 ```
 
@@ -88,17 +92,21 @@ dependency on HCI, L2CAP, ATT, or any protocol internals.
 **Backend layer** — concrete implementations of Central/Peripheral.
 Three categories:
 
-| Backend          | Central impl        | Peripheral impl        | Needs Transport? |
-|------------------|---------------------|------------------------|------------------|
-| HCI host stack   | `host.HciCentral`  | `host.HciPeripheral`   | Yes              |
+| Backend          | Central impl                  | Peripheral impl                   | Needs Transport? |
+|------------------|-------------------------------|-----------------------------------|------------------|
+| HCI host stack   | `host.Central` via `bt.Host`  | `host.Peripheral` via `bt.Host`   | Yes              |
 | CoreBluetooth    | platform provides   | platform provides      | No               |
 | Android BLE      | platform provides   | platform provides      | No               |
 
 The HCI host stack (`bt/host/`) is built into `lib/bt` and implements
 Central/Peripheral by driving the full protocol stack
 (HCI → L2CAP → ATT → GAP → GATT) over a `Transport` VTable.
-Everything under `bt/host/` is internal to this backend — application
-code never touches it.
+
+On top of the raw role adapters, the host backend is evolving an
+**extension layer** for higher-level data transfer and RPC-style APIs.
+This layer is intentionally host-specific: it builds on `bt.Host`,
+`host.Client`, and `host.Server`, not on the portable `bt.Central` /
+`bt.Peripheral` VTables.
 
 CoreBluetooth and Android backends are provided by the platform.
 They implement the Central/Peripheral VTable directly, bridging to
@@ -108,31 +116,42 @@ OS handles everything below GATT.
 ## Package structure
 
 ```
-lib/bt.zig                    Root; Make(lib) entry point
+lib/bt.zig                    Root; make(lib) entry point
 lib/bt/
   ── Application layer (backend-agnostic) ──
   Central.zig                 Type-erased Central interface (VTable)
   Peripheral.zig              Type-erased Peripheral interface (VTable)
   Transport.zig               Type-erased HCI transport (VTable)
+  Hci.zig                     Type-erased controller-facing HCI interface
+  Host.zig                    Host bundle exposing central/peripheral plus host-level views
+  Mocker.zig                  Multi-node Bluetooth test world
+  mocker/
+    Hci.zig                   Mock controller implementing bt.Hci
 
   ── HCI backend (only needed when driving raw HCI) ──
   host/
     Hci.zig                   HCI host: holds Transport, event loop
-    HciCentral.zig            Central impl backed by Hci
-    HciPeripheral.zig         Peripheral impl backed by Hci
+    Central.zig               Central role adapter backed by bt.Hci
+    Peripheral.zig            Peripheral role adapter backed by bt.Hci
+    Client.zig                Host-level client facade built on Central
+    Server.zig                Host-level server facade built on Peripheral
     hci/
       commands.zig            HCI command encoder (Vol 4 Part E)
       events.zig              HCI event decoder
       acl.zig                 ACL data packet codec (Vol 4 Part E 5.4.2)
       status.zig              HCI status/error codes (Vol 2 Part D)
-    l2cap/
-      l2cap.zig               LE L2CAP: header parse, reassembly, fragmentation
-    att/
-      att.zig                 ATT PDU codec, UUID, opcodes (Vol 3 Part F)
-    gap/
-      gap.zig                 LE GAP state machine: adv, scan, connect
-    smp/
-      smp.zig                 Security Manager Protocol (Vol 3 Part H)
+    l2cap.zig                 LE L2CAP: header parse, reassembly, fragmentation
+    att.zig                   ATT PDU codec, UUID, opcodes (Vol 3 Part F)
+    Gap.zig                   LE GAP state machine: adv, scan, connect
+    client/
+      // host.Client submodules
+      xfer.zig                  Client-side transfer helper entrypoint
+      xfer/
+        rpc.zig                 Planned RPC-style transfer protocol
+        read_x.zig              Transfer primitive
+        write_x.zig             Transfer primitive
+    server/
+      // host.Server submodules
     gatt/
       server.zig              GATT server: comptime service table, PDU dispatch
       client.zig              GATT client: discovery, read, write, subscribe
@@ -152,10 +171,16 @@ lib/bt/
 │  Backend implementations (one per platform)                  │
 ├──────┬───────────────┬───────────────────────────────────────┤
 │      │               │                                       │
-│  HciCentral     HciPeripheral    CoreBluetooth / Android /.. │
+│  host.Central   host.Peripheral  CoreBluetooth / Android /.. │
 │      │               │            (platform provides,        │
 │      └───────┬───────┘             no host/ needed)          │
 │              │                                               │
+│        host.Client    host.Server                            │
+│              │             │                                 │
+│              └───────┬─────┘                                 │
+│                      │                                       │
+│             host/client/xfer (read_x, write_x, ...)          │
+│                      │                                       │
 │          bt/host/Hci ─────────────────────────────┐          │
 │              │                                    │          │
 │    ┌─────────┴──────────┐                         │          │
@@ -174,7 +199,7 @@ lib/bt/
 │       Platform provides: H4, H5, USB, SDIO, ...  │          │
 │              │                                    │          │
 ├──────────────┴────────────────────────────────────┘──────────┤
-│                    lib (embed.Make)                           │
+│                    lib (embed.make)                           │
 │              Thread / time / mem / atomic                     │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -297,24 +322,109 @@ pub const RecvError = error{ Timeout, HwError, Unexpected };
 The built-in HCI host stack. Implements `Central` and `Peripheral`
 by driving the full BLE protocol stack over a `Transport`.
 
-**Everything under `host/` is internal to this backend.** Application
-code never imports or references anything from `host/`. If the platform
-uses CoreBluetooth or Android BLE, `host/` is not compiled at all.
+Most of `host/` is specific to the raw-HCI backend. If the platform uses
+CoreBluetooth or Android BLE, `host/` is not compiled at all.
+
+### Design direction
+
+The direction for the HCI backend is to expose two layers:
+
+1. A **portable role layer**: `bt.Central` and `bt.Peripheral`.
+2. A **host-only extension layer**: `bt.Host`, `host.Client`,
+   `host.Server`, and transfer-oriented helpers under `host/client/xfer/`.
+
+This keeps the public portable surface small while still allowing richer
+host-side protocols to be built once and reused across raw-HCI targets.
 
 ### Hci
 
-The coordinator. Holds a `Transport`, runs the event loop,
-and dispatches HCI events through the protocol layers:
+The built-in host stack is exposed as `bt.HciHost`. It owns the concrete
+HCI coordinator, runs the event loop, and binds one shared controller
+instance to both Central and Peripheral adapters:
 
 ```zig
-var hci = bt.host.Hci.init(transport, allocator);
+const Host = bt.HciHost(embed, platform.Channel);
+var host = try Host.init(allocator, transport, .{
+    .spawn_config = .{ .name = "bt-hci-rx" },
+});
+defer host.deinit();
 
-var hci_central = bt.host.HciCentral.init(&hci);
-var central = bt.Central.wrap(&hci_central);  // type-erase for app code
-
-var hci_peripheral = bt.host.HciPeripheral.init(&hci);
-var peripheral = bt.Peripheral.wrap(&hci_peripheral);  // type-erase
+var central = host.central();
+var peripheral = host.peripheral();
 ```
+
+### Host facade
+
+`bt.HciHost` is the join point for one shared controller-facing stack.
+Today it exposes the portable role views:
+
+```zig
+var central = host.central();
+var peripheral = host.peripheral();
+```
+
+`bt.Host` also exposes host-only facades:
+
+```zig
+var client = host.client();
+var server = host.server();
+```
+
+These are not portable cross-platform BLE interfaces. They are extensions
+for the built-in HCI host backend, layered above `host.Central` and
+`host.Peripheral`.
+
+### Client and Server
+
+`host.Client` is the higher-level wrapper around the Central role.
+It is the place for client-side convenience APIs that are more structured
+than raw GATT primitives.
+
+`host.Server` is the higher-level wrapper around the Peripheral role.
+It is the place for request routing, service registration, and server-side
+convenience behavior on top of the raw Peripheral contract.
+
+Current layout:
+
+```text
+host/Client.zig
+host/client/
+
+host/Server.zig
+host/server/
+```
+
+The layering is:
+
+```text
+bt.Host
+  -> host.Central -> host.Client
+  -> host.Peripheral -> host.Server
+```
+
+### Transfer extensions
+
+The existing transfer-oriented helpers such as `read_x` and `write_x`
+should live under the host client layer instead of as a top-level
+`bt/xfer` package.
+
+Reasoning:
+
+- They are not backend-agnostic transport primitives.
+- They build on central/client-side connection semantics and GATT conventions.
+- Future features such as RPC belong in the same client extension layer.
+
+The layout is:
+
+```text
+host/client/xfer/
+  rpc.zig
+  read_x.zig
+  write_x.zig
+```
+
+In other words, `xfer` becomes a **transfer extension layer for the host
+client backend**, not a separate top-level Bluetooth abstraction.
 
 Internally, `Hci` orchestrates:
 1. Send HCI commands via `Transport.send`
@@ -523,12 +633,18 @@ Each platform provides a concrete implementation of `Central` and/or
 **Bare-metal (HCI)** — use the built-in host stack:
 
 ```zig
+const Host = bt.HciHost(embed, platform.Channel);
+
 var h4 = platform.H4Uart.init(&uart);
 var transport = bt.Transport.init(&h4);
-var hci = bt.host.Hci.init(transport, allocator);
+var host = try Host.init(allocator, transport, .{});
 
-var hci_central = bt.host.HciCentral.init(&hci);
-var central = bt.Central.wrap(&hci_central);
+var central = host.central();
+var peripheral = host.peripheral();
+
+// Planned host-only extension views:
+// var client = host.client();
+// var server = host.server();
 ```
 
 **Apple (CoreBluetooth)** — platform bridges CBCentralManager:
@@ -557,7 +673,7 @@ try central.startScanning(.{ .active = true });
 ### Portable BLE scanner
 
 ```zig
-const embed = @import("embed").Make(platform);
+const embed = @import("embed").make(platform);
 const bt = @import("bt");
 
 fn runScanner(central: bt.Central) !void {
@@ -579,7 +695,7 @@ fn runScanner(central: bt.Central) !void {
 ### GATT peripheral (Heart Rate)
 
 ```zig
-const embed = @import("embed").Make(platform);
+const embed = @import("embed").make(platform);
 const bt = @import("bt");
 
 fn runHeartRate(peripheral: bt.Peripheral) !void {

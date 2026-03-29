@@ -25,20 +25,26 @@ mutex: std.Thread.Mutex = .{},
 cond: std.Thread.Condition = .{},
 operation_done: bool = false,
 op_error: ?OpError = null,
-
-handlers: std.ArrayListUnmanaged(HandlerEntry) = .{},
-cb_chars: std.ArrayListUnmanaged(?objc.Id) = .{},
+request_ctx: ?*anyopaque = null,
+request_handler: ?Peripheral.RequestHandlerFn = null,
+services: std.ArrayListUnmanaged(ServiceEntry) = .{},
+chars: std.ArrayListUnmanaged(CharEntry) = .{},
 
 hooks: std.ArrayListUnmanaged(EventHook) = .{},
 
 const OpError = enum { invalid_config, already_advertising, unexpected };
 
-const HandlerEntry = struct {
+const ServiceEntry = struct {
+    uuid: u16 = 0,
+    char_start: usize = 0,
+    char_count: usize = 0,
+};
+
+const CharEntry = struct {
     svc_uuid: u16 = 0,
     char_uuid: u16 = 0,
-    func: ?Peripheral.HandlerFn = null,
-    ctx: ?*anyopaque = null,
-    active: bool = false,
+    config: Peripheral.CharConfig = .{},
+    cb_char: ?objc.Id = null,
 };
 
 const EventHook = struct {
@@ -80,6 +86,7 @@ pub fn start(self: *CBPeripheral) StartError!void {
         self.cond.wait(&self.mutex);
     }
     if (!self.powered_on) return error.BluetoothUnavailable;
+    self.materializeServicesLocked();
 }
 
 pub fn stop(self: *CBPeripheral) void {
@@ -91,13 +98,8 @@ pub fn stop(self: *CBPeripheral) void {
     self.powered_on = false;
     self.state_known = false;
     self.state = .idle;
+    self.clearMaterializedServicesLocked();
     self.mutex.unlock();
-
-    objc.msgSend(void, self.manager.?, objc.sel("removeAllServices"), .{});
-    for (self.cb_chars.items) |c| {
-        if (c) |char_obj| objc.release(char_obj);
-    }
-    self.cb_chars.shrinkRetainingCapacity(0);
     objc.release(self.manager.?);
     objc.release(self.delegate.?);
     objc.releaseQueue(self.queue.?);
@@ -108,8 +110,8 @@ pub fn stop(self: *CBPeripheral) void {
 
 pub fn deinit(self: *CBPeripheral) void {
     self.stop();
-    self.cb_chars.deinit(self.allocator);
-    self.handlers.deinit(self.allocator);
+    self.services.deinit(self.allocator);
+    self.chars.deinit(self.allocator);
     self.hooks.deinit(self.allocator);
     const alloc = self.allocator;
     self.* = undefined;
@@ -118,47 +120,41 @@ pub fn deinit(self: *CBPeripheral) void {
 
 // ---- handler registration ----
 
-pub fn handle(self: *CBPeripheral, svc_uuid: u16, char_uuid: u16, func: Peripheral.HandlerFn, ctx: ?*anyopaque) void {
-    if (!self.started) self.start() catch return;
-
-    self.handlers.append(self.allocator, .{
-        .svc_uuid = svc_uuid,
-        .char_uuid = char_uuid,
-        .func = func,
-        .ctx = ctx,
-        .active = true,
-    }) catch return;
-
-    const char_props: objc.NSUInteger = 0x02 | 0x08 | 0x10; // read | write | notify
-    const char_perms: objc.NSUInteger = 0x01 | 0x02; // readable | writeable
-    const cb_char = objc.msgSend(objc.Id, objc.alloc(objc.getClass("CBMutableCharacteristic")), objc.sel("initWithType:properties:value:permissions:"), .{
-        objc.cbuuid(char_uuid),
-        char_props,
-        @as(?*anyopaque, null),
-        char_perms,
-    });
-    self.cb_chars.append(self.allocator, cb_char) catch return;
-
-    const cb_svc = objc.msgSend(objc.Id, objc.alloc(objc.getClass("CBMutableService")), objc.sel("initWithType:primary:"), .{
-        objc.cbuuid(svc_uuid),
-        @as(objc.BOOL, objc.YES),
-    });
-
-    const char_array = objc.nsArray(&[_]objc.Id{cb_char}, 1);
-    objc.msgSend(void, cb_svc, objc.sel("setCharacteristics:"), .{char_array});
-
+pub fn setConfig(self: *CBPeripheral, config: Peripheral.GattConfig) void {
     self.mutex.lock();
-    self.operation_done = false;
-    self.op_error = null;
+    defer self.mutex.unlock();
 
-    objc.msgSend(void, self.manager.?, objc.sel("addService:"), .{cb_svc});
+    self.clearMaterializedServicesLocked();
+    self.services.clearRetainingCapacity();
+    self.chars.clearRetainingCapacity();
 
-    while (!self.operation_done) {
-        self.cond.wait(&self.mutex);
+    for (config.services) |svc| {
+        const char_start = self.chars.items.len;
+        self.services.append(self.allocator, .{
+            .uuid = svc.uuid,
+            .char_start = char_start,
+            .char_count = svc.chars.len,
+        }) catch return;
+
+        for (svc.chars) |ch| {
+            self.chars.append(self.allocator, .{
+                .svc_uuid = svc.uuid,
+                .char_uuid = ch.uuid,
+                .config = ch.config,
+            }) catch return;
+        }
     }
-    self.mutex.unlock();
 
-    objc.release(cb_svc);
+    if (self.started and self.powered_on) {
+        self.materializeServicesLocked();
+    }
+}
+
+pub fn setRequestHandler(self: *CBPeripheral, ctx: ?*anyopaque, func: Peripheral.RequestHandlerFn) void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+    self.request_ctx = ctx;
+    self.request_handler = func;
 }
 
 // ---- advertising ----
@@ -260,17 +256,93 @@ pub fn addEventHook(self: *CBPeripheral, ctx: ?*anyopaque, cb: *const fn (?*anyo
 // ---- internal helpers ----
 
 fn findCBChar(self: *CBPeripheral, char_uuid: u16) ?objc.Id {
-    for (self.handlers.items, 0..) |h, i| {
-        if (h.char_uuid == char_uuid) return self.cb_chars.items[i];
+    for (self.chars.items) |entry| {
+        if (entry.char_uuid == char_uuid) return entry.cb_char;
     }
     return null;
 }
 
-fn findHandler(self: *CBPeripheral, char_uuid: u16) ?*HandlerEntry {
-    for (self.handlers.items) |*h| {
-        if (h.char_uuid == char_uuid and h.active) return h;
+fn findChar(self: *CBPeripheral, svc_uuid: u16, char_uuid: u16) ?*CharEntry {
+    for (self.chars.items) |*entry| {
+        if (entry.svc_uuid == svc_uuid and entry.char_uuid == char_uuid) return entry;
     }
     return null;
+}
+
+fn clearMaterializedServicesLocked(self: *CBPeripheral) void {
+    if (self.manager) |manager| {
+        objc.msgSend(void, manager, objc.sel("removeAllServices"), .{});
+    }
+    for (self.chars.items) |*entry| {
+        if (entry.cb_char) |cb_char| {
+            objc.release(cb_char);
+            entry.cb_char = null;
+        }
+    }
+}
+
+fn materializeServicesLocked(self: *CBPeripheral) void {
+    if (!self.started or !self.powered_on or self.manager == null) return;
+
+    for (self.services.items) |service| {
+        if (service.char_count == 0) continue;
+
+        const cb_chars = self.allocator.alloc(objc.Id, service.char_count) catch return;
+        defer self.allocator.free(cb_chars);
+
+        for (0..service.char_count) |i| {
+            const entry = &self.chars.items[service.char_start + i];
+            entry.cb_char = makeCharacteristic(entry.char_uuid, entry.config);
+            cb_chars[i] = entry.cb_char.?;
+        }
+
+        const cb_svc = objc.msgSend(objc.Id, objc.alloc(objc.getClass("CBMutableService")), objc.sel("initWithType:primary:"), .{
+            objc.cbuuid(service.uuid),
+            @as(objc.BOOL, objc.YES),
+        });
+        defer objc.release(cb_svc);
+
+        const char_array = objc.nsArray(cb_chars, cb_chars.len);
+        objc.msgSend(void, cb_svc, objc.sel("setCharacteristics:"), .{char_array});
+
+        self.operation_done = false;
+        self.op_error = null;
+        objc.msgSend(void, self.manager.?, objc.sel("addService:"), .{cb_svc});
+
+        while (!self.operation_done) {
+            self.cond.wait(&self.mutex);
+        }
+
+        if (self.op_error != null) {
+            return;
+        }
+    }
+}
+
+fn makeCharacteristic(uuid: u16, config: Peripheral.CharConfig) objc.Id {
+    return objc.msgSend(objc.Id, objc.alloc(objc.getClass("CBMutableCharacteristic")), objc.sel("initWithType:properties:value:permissions:"), .{
+        objc.cbuuid(uuid),
+        characteristicProperties(config),
+        @as(?*anyopaque, null),
+        characteristicPermissions(config),
+    });
+}
+
+fn characteristicProperties(config: Peripheral.CharConfig) objc.NSUInteger {
+    var props: objc.NSUInteger = 0;
+    if (config.read) props |= 0x02;
+    if (config.write_without_response) props |= 0x04;
+    if (config.write) props |= 0x08;
+    if (config.notify) props |= 0x10;
+    if (config.indicate) props |= 0x20;
+    return props;
+}
+
+fn characteristicPermissions(config: Peripheral.CharConfig) objc.NSUInteger {
+    var perms: objc.NSUInteger = 0;
+    if (config.read) perms |= 0x01;
+    if (config.write or config.write_without_response) perms |= 0x02;
+    return perms;
 }
 
 fn fireEvent(self: *CBPeripheral, event: Peripheral.PeripheralEvent) void {
@@ -353,13 +425,30 @@ fn pmDidReceiveRead(delegate: objc.Id, _: objc.SEL, manager: objc.Id, request: o
     const self = getSelf(delegate) orelse return;
 
     const characteristic: objc.Id = objc.msgSend(objc.Id, request, objc.sel("characteristic"), .{});
+    const service: objc.Id = objc.msgSend(objc.Id, characteristic, objc.sel("service"), .{});
+    const service_uuid_obj: objc.Id = objc.msgSend(objc.Id, service, objc.sel("UUID"), .{});
     const uuid_obj: objc.Id = objc.msgSend(objc.Id, characteristic, objc.sel("UUID"), .{});
+    const svc_uuid = objc.cbuuidToU16(service_uuid_obj);
     const char_uuid = objc.cbuuidToU16(uuid_obj);
 
-    const handler = self.findHandler(char_uuid) orelse {
+    const char_entry = self.findChar(svc_uuid, char_uuid) orelse {
         objc.msgSend(void, manager, objc.sel("respondToRequest:withResult:"), .{
             request,
             @as(objc.NSInteger, 10), // CBATTErrorAttributeNotFound
+        });
+        return;
+    };
+    if (!char_entry.config.read) {
+        objc.msgSend(void, manager, objc.sel("respondToRequest:withResult:"), .{
+            request,
+            @as(objc.NSInteger, 2), // CBATTErrorReadNotPermitted
+        });
+        return;
+    }
+    const handler = self.request_handler orelse {
+        objc.msgSend(void, manager, objc.sel("respondToRequest:withResult:"), .{
+            request,
+            @as(objc.NSInteger, 6), // CBATTErrorRequestNotSupported
         });
         return;
     };
@@ -375,13 +464,12 @@ fn pmDidReceiveRead(delegate: objc.Id, _: objc.SEL, manager: objc.Id, request: o
     var req = Peripheral.Request{
         .op = .read,
         .conn_handle = 0,
-        .service_uuid = handler.svc_uuid,
+        .service_uuid = svc_uuid,
         .char_uuid = char_uuid,
         .data = &.{},
-        .user_ctx = handler.ctx,
     };
 
-    handler.func.?(&req, &rw);
+    handler(self.request_ctx, &req, &rw);
 }
 
 fn pmDidReceiveWrite(delegate: objc.Id, _: objc.SEL, manager: objc.Id, requests: objc.Id) callconv(.c) void {
@@ -391,10 +479,33 @@ fn pmDidReceiveWrite(delegate: objc.Id, _: objc.SEL, manager: objc.Id, requests:
     for (0..count) |i| {
         const request: objc.Id = objc.msgSend(objc.Id, requests, objc.sel("objectAtIndex:"), .{@as(objc.NSUInteger, i)});
         const characteristic: objc.Id = objc.msgSend(objc.Id, request, objc.sel("characteristic"), .{});
+        const service: objc.Id = objc.msgSend(objc.Id, characteristic, objc.sel("service"), .{});
+        const service_uuid_obj: objc.Id = objc.msgSend(objc.Id, service, objc.sel("UUID"), .{});
         const uuid_obj: objc.Id = objc.msgSend(objc.Id, characteristic, objc.sel("UUID"), .{});
+        const svc_uuid = objc.cbuuidToU16(service_uuid_obj);
         const char_uuid = objc.cbuuidToU16(uuid_obj);
 
-        const handler = self.findHandler(char_uuid) orelse continue;
+        const char_entry = self.findChar(svc_uuid, char_uuid) orelse {
+            objc.msgSend(void, manager, objc.sel("respondToRequest:withResult:"), .{
+                request,
+                @as(objc.NSInteger, 10), // CBATTErrorAttributeNotFound
+            });
+            continue;
+        };
+        if (!(char_entry.config.write or char_entry.config.write_without_response)) {
+            objc.msgSend(void, manager, objc.sel("respondToRequest:withResult:"), .{
+                request,
+                @as(objc.NSInteger, 3), // CBATTErrorWriteNotPermitted
+            });
+            continue;
+        }
+        const handler = self.request_handler orelse {
+            objc.msgSend(void, manager, objc.sel("respondToRequest:withResult:"), .{
+                request,
+                @as(objc.NSInteger, 6), // CBATTErrorRequestNotSupported
+            });
+            continue;
+        };
 
         const value: objc.Id = objc.msgSend(objc.Id, request, objc.sel("value"), .{});
         var data_buf: [512]u8 = undefined;
@@ -411,13 +522,12 @@ fn pmDidReceiveWrite(delegate: objc.Id, _: objc.SEL, manager: objc.Id, requests:
         var req = Peripheral.Request{
             .op = .write,
             .conn_handle = 0,
-            .service_uuid = handler.svc_uuid,
+            .service_uuid = svc_uuid,
             .char_uuid = char_uuid,
             .data = data_slice,
-            .user_ctx = handler.ctx,
         };
 
-        handler.func.?(&req, &rw);
+        handler(self.request_ctx, &req, &rw);
     }
 }
 

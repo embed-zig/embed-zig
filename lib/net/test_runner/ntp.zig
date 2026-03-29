@@ -4,21 +4,71 @@
 //! environments with real network connectivity.
 //!
 //! Usage:
-//!   try @import("net/test_runner/ntp.zig").run(lib);
+//!   const runner = @import("net/test_runner/ntp.zig").make(lib);
+//!   t.run("net/ntp", runner);
 
 const context_mod = @import("context");
+const embed = @import("embed");
 const net_mod = @import("../../net.zig");
+const testing_api = @import("testing");
 
-pub fn run(comptime lib: type) !void {
-    const Net = net_mod.Make(lib);
+pub fn make(comptime lib: type) testing_api.TestRunner {
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            runImpl(lib, t, allocator) catch |err| {
+                t.logErrorf("ntp runner failed: {}", .{err});
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
+        }
+    };
+
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{};
+    return testing_api.TestRunner.make(Runner).new(runner);
+}
+
+fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !void {
+    _ = t;
+    const Net = net_mod.make(lib);
     const Ntp = Net.ntp;
-    const Addr = lib.net.Address;
+    const AddrPort = net_mod.netip.AddrPort;
     const Thread = lib.Thread;
-    const testing = lib.testing;
-    const log = lib.log.scoped(.ntp);
-    const Context = context_mod.Make(lib);
+    const Context = context_mod.make(lib);
+    const testing = struct {
+        pub var allocator: lib.mem.Allocator = undefined;
+        pub const expect = lib.testing.expect;
+        pub const expectEqual = lib.testing.expectEqual;
+        pub const expectEqualStrings = lib.testing.expectEqualStrings;
+        pub const expectError = lib.testing.expectError;
+    };
+    testing.allocator = alloc;
 
     const Runner = struct {
+        fn addr4(port: u16) AddrPort {
+            return AddrPort.from4(.{ 127, 0, 0, 1 }, port);
+        }
+
+        fn waitForTrue(flag: *lib.atomic.Value(bool), timeout_ms: u32) !void {
+            var waited_ms: u32 = 0;
+            while (waited_ms < timeout_ms) : (waited_ms += 1) {
+                if (flag.load(.acquire)) return;
+                Thread.sleep(lib.time.ns_per_ms);
+            }
+            return error.Timeout;
+        }
+
         fn expectReasonableResponse(resp: Ntp.Response) !void {
             try testing.expect(resp.stratum >= 1 and resp.stratum <= 15);
             try testing.expect(resp.receive_time_ms > 1_700_000_000_000);
@@ -60,7 +110,7 @@ pub fn run(comptime lib: type) !void {
         }
 
         fn queryRaceWithAliyunAndBadEndpoint() !void {
-            const bad = Ntp.Server.init(Addr.initIp4(.{ 127, 0, 0, 1 }, 1));
+            const bad = Ntp.Server.init(addr4(1));
             var client = try Ntp.Client.init(testing.allocator, .{
                 .servers = &.{ bad, Ntp.Servers.aliyun },
                 .timeout_ms = 3000,
@@ -82,7 +132,7 @@ pub fn run(comptime lib: type) !void {
         }
 
         fn queryUsesRaceAcrossConfiguredServers() !void {
-            const bad = Ntp.Server.init(Addr.initIp4(.{ 127, 0, 0, 1 }, 1));
+            const bad = Ntp.Server.init(addr4(1));
             var client = try Ntp.Client.init(testing.allocator, .{
                 .servers = &.{ bad, Ntp.Servers.aliyun, Ntp.Servers.cloudflare },
                 .timeout_ms = 5000,
@@ -118,7 +168,7 @@ pub fn run(comptime lib: type) !void {
             defer cancel_ctx.deinit();
             cancel_ctx.cancel();
 
-            const bad = Ntp.Server.init(Addr.initIp4(.{ 127, 0, 0, 1 }, 1));
+            const bad = Ntp.Server.init(addr4(1));
             var client = try Ntp.Client.init(testing.allocator, .{
                 .servers = &.{ bad, Ntp.Servers.aliyun, Ntp.Servers.cloudflare },
                 .timeout_ms = 5000,
@@ -126,6 +176,51 @@ pub fn run(comptime lib: type) !void {
             defer client.deinit();
 
             try testing.expectError(error.Canceled, client.queryContext(cancel_ctx, lib.time.milliTimestamp()));
+        }
+
+        fn queryRaceContextCancelStopsWorkersPromptly() !void {
+            const BoolAtomic = lib.atomic.Value(bool);
+
+            var pc1 = try Net.listenPacket(.{
+                .allocator = testing.allocator,
+                .address = addr4(0),
+            });
+            defer pc1.deinit();
+            var pc2 = try Net.listenPacket(.{
+                .allocator = testing.allocator,
+                .address = addr4(0),
+            });
+            defer pc2.deinit();
+
+            const impl1 = try pc1.as(Net.UdpConn);
+            const impl2 = try pc2.as(Net.UdpConn);
+
+            var context_api = try Context.init(testing.allocator);
+            defer context_api.deinit();
+            var timeout_ctx = try context_api.withTimeout(context_api.background(), 5 * lib.time.ns_per_ms);
+            defer timeout_ctx.deinit();
+
+            var client = try Ntp.Client.init(testing.allocator, .{
+                .servers = &.{
+                    Ntp.Server.init(addr4(try impl1.boundPort())),
+                    Ntp.Server.init(addr4(try impl2.boundPort())),
+                },
+                .timeout_ms = 1000,
+            });
+            defer client.deinit();
+
+            try testing.expectError(error.DeadlineExceeded, client.queryRaceContext(timeout_ctx, lib.time.milliTimestamp()));
+
+            var wait_done = BoolAtomic.init(false);
+            var wait_thread = try Thread.spawn(.{}, struct {
+                fn run(c: *Ntp.Client, done: *BoolAtomic) void {
+                    c.wait();
+                    done.store(true, .release);
+                }
+            }.run, .{ &client, &wait_done });
+            defer wait_thread.join();
+
+            try waitForTrue(&wait_done, 300);
         }
 
         fn concurrentAliyunQueries() !void {
@@ -161,7 +256,6 @@ pub fn run(comptime lib: type) !void {
         }
     };
 
-    log.info("=== ntp test_runner start ===", .{});
     try Runner.queryAliyun();
     try Runner.getTimeAliyun();
     try Runner.queryRaceWithAliyunAndBadEndpoint();
@@ -169,6 +263,6 @@ pub fn run(comptime lib: type) !void {
     try Runner.queryUsesRaceAcrossConfiguredServers();
     try Runner.queryContextCanceledBeforeStart();
     try Runner.queryRaceContextCanceledBeforeStart();
+    try Runner.queryRaceContextCancelStopsWorkersPromptly();
     try Runner.concurrentAliyunQueries();
-    log.info("=== ntp test_runner done ===", .{});
 }

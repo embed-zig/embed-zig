@@ -16,7 +16,8 @@
 //! );
 //! ```
 //!
-//! runner 内部使用 `lib.testing.allocator` 运行各项用例。
+//! `make(...)` 路径会透传调用方提供的 allocator；直接 `run(...)` 时才回落到
+//! `lib.testing.allocator`。
 //!
 //! 以下是完整的测试要点清单：
 //!
@@ -137,9 +138,43 @@
 //!  45. 快速连续 close + recv 不 panic、不 hang
 //!  46. 快速连续 close + send 不 panic、不 hang
 
+const embed = @import("embed");
+const testing_api = @import("testing");
+
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            runImpl(lib, Channel, allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
+        }
+    };
+
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{};
+    return testing_api.TestRunner.make(Runner).new(runner);
+}
+
 pub fn run(comptime lib: type, comptime Channel: fn (type) type) !void {
+    try runImpl(lib, Channel, lib.testing.allocator);
+}
+
+fn runImpl(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.mem.Allocator) !void {
     const Runner = TestRunner(lib, Channel);
-    return Runner.exec(lib.testing.allocator);
+    return Runner.exec(allocator);
 }
 
 fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
@@ -148,7 +183,7 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
     const Allocator = lib.mem.Allocator;
     const Atomic = lib.atomic.Value;
     const time = lib.time;
-    const log = lib.log.scoped(.channel_test);
+    const run_log = lib.log.scoped(.test_run);
     const testing = lib.testing;
     const Event = u32;
 
@@ -156,7 +191,6 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
         fn exec(allocator: Allocator) !void {
             var passed: u32 = 0;
             var failed: u32 = 0;
-            const run_start = time.milliTimestamp();
 
             runOne("unbufferedInit", allocator, &passed, &failed, testUnbufferedInit);
             runOne("unbufferedRendezvous", allocator, &passed, &failed, testUnbufferedRendezvous);
@@ -225,9 +259,6 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             runOne("rapidCloseSend", allocator, &passed, &failed, testRapidCloseSend);
             runOne("bufferedRecvEmptyAfterDrain", allocator, &passed, &failed, testBufferedRecvEmptyAfterDrain);
 
-            const total_ms = time.milliTimestamp() - run_start;
-            log.info("channel: {d} passed, {d} failed, total {d}ms", .{ passed, failed, total_ms });
-
             if (failed > 0) return error.TestsFailed;
         }
 
@@ -240,12 +271,17 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
         ) void {
             const start = time.milliTimestamp();
             if (func(allocator)) |_| {
-                const ms = time.milliTimestamp() - start;
-                log.info("PASS  {s} ({d}ms)", .{ name, ms });
                 passed.* += 1;
             } else |err| {
                 const ms = time.milliTimestamp() - start;
-                log.err("FAIL  {s} ({d}ms) — {s}", .{ name, ms, @errorName(err) });
+                const elapsed_ms: u64 = if (ms <= 0) 0 else @intCast(ms);
+                run_log.err("!!! [channel/{s}] {d}.{d:0>1}s, {d}ms: {s}", .{
+                    name,
+                    elapsed_ms / 1000,
+                    (elapsed_ms % 1000) / 100,
+                    elapsed_ms,
+                    @errorName(err),
+                });
                 failed.* += 1;
             }
         }

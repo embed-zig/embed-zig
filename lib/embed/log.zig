@@ -41,20 +41,20 @@ pub fn make(comptime Impl: type) type {
 
         pub fn scoped(comptime scope: @Type(.enum_literal)) type {
             return struct {
-                pub fn err(comptime format: []const u8, args: anytype) void {
+                pub inline fn err(comptime format: []const u8, args: anytype) void {
                     @branchHint(.cold);
                     Impl.write(.err, scope, format, args);
                 }
 
-                pub fn warn(comptime format: []const u8, args: anytype) void {
+                pub inline fn warn(comptime format: []const u8, args: anytype) void {
                     Impl.write(.warn, scope, format, args);
                 }
 
-                pub fn info(comptime format: []const u8, args: anytype) void {
+                pub inline fn info(comptime format: []const u8, args: anytype) void {
                     Impl.write(.info, scope, format, args);
                 }
 
-                pub fn debug(comptime format: []const u8, args: anytype) void {
+                pub inline fn debug(comptime format: []const u8, args: anytype) void {
                     Impl.write(.debug, scope, format, args);
                 }
             };

@@ -16,7 +16,7 @@ pub fn DeadlineContext(comptime lib: type) type {
         mu: Mutex = .{},
         cond: Condition = .{},
         cause: ?anyerror = null,
-        deadline_ms: i64,
+        deadline_ns: i128,
         timer_mu: Mutex = .{},
         timer_cond: Condition = .{},
         timer_canceled: bool = false,
@@ -25,7 +25,7 @@ pub fn DeadlineContext(comptime lib: type) type {
 
         const Self = @This();
 
-        pub fn init(allocator: Allocator, parent: Context, deadline_ms: i64) Allocator.Error!Context {
+        pub fn init(allocator: Allocator, parent: Context, deadline_ns: i128) Allocator.Error!Context {
             const self = try allocator.create(Self);
             const ctx = Context.init(self, &vtable, allocator);
             self.* = .{
@@ -36,11 +36,11 @@ pub fn DeadlineContext(comptime lib: type) type {
                 },
                 .tree_rw = internal.treeLock(parent, RwLock),
                 .cause = parent.err(),
-                .deadline_ms = deadline_ms,
+                .deadline_ns = deadline_ns,
             };
 
             if (self.cause == null) {
-                if (self.effectiveDeadline() <= lib.time.milliTimestamp()) {
+                if (self.effectiveDeadline() <= lib.time.nanoTimestamp()) {
                     self.cause = Context.DeadlineExceeded;
                 } else {
                     internal.attachChild(parent, ctx);
@@ -51,17 +51,17 @@ pub fn DeadlineContext(comptime lib: type) type {
             return ctx;
         }
 
-        fn effectiveDeadline(self: *const Self) i64 {
+        fn effectiveDeadline(self: *const Self) i128 {
             const self_mut: *Self = @constCast(self);
             self_mut.tree_rw.lockShared();
             defer self_mut.tree_rw.unlockShared();
             const parent = self_mut.tree.parent;
             if (parent) |p| {
                 if (p.deadline()) |parent_dl| {
-                    return @min(parent_dl, self.deadline_ms);
+                    return @min(parent_dl, self.deadline_ns);
                 }
             }
-            return self.deadline_ms;
+            return self.deadline_ns;
         }
 
         fn ensureTimer(self: *Self) void {
@@ -77,14 +77,14 @@ pub fn DeadlineContext(comptime lib: type) type {
         fn timerFn(self: *Self) void {
             self.timer_mu.lock();
             while (!self.timer_canceled) {
-                const remaining_ms = self.effectiveDeadline() - lib.time.milliTimestamp();
-                if (remaining_ms <= 0) break;
+                const remaining_ns = self.effectiveDeadline() - lib.time.nanoTimestamp();
+                if (remaining_ns <= 0) break;
 
-                const wait_ns = @as(u64, @intCast(remaining_ms)) * lib.time.ns_per_ms;
+                const wait_ns: u64 = @intCast(@min(remaining_ns, @as(i128, @intCast((@as(u128, 1) << 64) - 1))));
                 self.timer_cond.timedWait(&self.timer_mu, wait_ns) catch {};
             }
             const timer_canceled = self.timer_canceled;
-            const deadline_reached = !timer_canceled and lib.time.milliTimestamp() >= self.effectiveDeadline();
+            const deadline_reached = !timer_canceled and lib.time.nanoTimestamp() >= self.effectiveDeadline();
             self.timer_mu.unlock();
 
             if (!deadline_reached) return;
@@ -121,18 +121,17 @@ pub fn DeadlineContext(comptime lib: type) type {
             internal.cancelChildrenWithCause(self.tree.ctx, cause);
         }
 
-        pub fn wait(self: *Self, timeout_ms: ?u32) ?anyerror {
+        pub fn wait(self: *Self, timeout_ns: ?i64) ?anyerror {
             self.mu.lock();
             defer self.mu.unlock();
 
-            if (timeout_ms) |ms| {
-                const deadline_ms = lib.time.milliTimestamp() + @as(i64, ms);
+            if (timeout_ns) |ns| {
+                const deadline_ns = lib.time.nanoTimestamp() + @as(i128, ns);
                 while (self.cause == null) {
-                    const remaining_ms = deadline_ms - lib.time.milliTimestamp();
-                    if (remaining_ms <= 0) return null;
+                    const remaining_ns = deadline_ns - lib.time.nanoTimestamp();
+                    if (remaining_ns <= 0) return null;
 
-                    const remaining_ns = @as(u64, @intCast(remaining_ms)) * lib.time.ns_per_ms;
-                    self.cond.timedWait(&self.mu, remaining_ns) catch {};
+                    self.cond.timedWait(&self.mu, @intCast(@min(remaining_ns, @as(i128, @intCast((@as(u128, 1) << 64) - 1))))) catch {};
                 }
                 return self.cause;
             }
@@ -150,7 +149,7 @@ pub fn DeadlineContext(comptime lib: type) type {
             return self.cause;
         }
 
-        fn deadlineImpl(ptr: *anyopaque) ?i64 {
+        fn deadlineImpl(ptr: *anyopaque) ?i128 {
             const self: *Self = @ptrCast(@alignCast(ptr));
             return self.effectiveDeadline();
         }
@@ -163,9 +162,9 @@ pub fn DeadlineContext(comptime lib: type) type {
             return parent.vtable.valueFn(parent.ptr, key);
         }
 
-        fn waitImpl(ptr: *anyopaque, timeout_ms: ?u32) ?anyerror {
+        fn waitImpl(ptr: *anyopaque, timeout_ns: ?i64) ?anyerror {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            return self.wait(timeout_ms);
+            return self.wait(timeout_ns);
         }
 
         fn cancelImpl(ptr: *anyopaque) void {

@@ -31,6 +31,11 @@ pub fn Listener(comptime lib: type) type {
             return NetListener.init(self);
         }
 
+        pub fn listen(self: *Self) NetListener.ListenError!void {
+            if (self.closed) return error.SocketNotListening;
+            try self.inner.listen();
+        }
+
         pub fn accept(self: *Self) NetListener.AcceptError!NetConn {
             if (self.closed) return error.SocketNotListening;
 

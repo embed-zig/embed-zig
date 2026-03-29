@@ -1,6 +1,6 @@
 //! Crypto contract — platform-dependent cryptographic primitives.
 //!
-//! After `embed.Make(impl)`, `embed.crypto.hash.sha2.Sha256` has the
+//! After `embed.make(impl)`, `embed.crypto.hash.sha2.Sha256` has the
 //! same API as `std.crypto.hash.sha2.Sha256`.
 //!
 //! Impl provides **flat types** with std-compatible function signatures.
@@ -20,11 +20,19 @@
 //! Block:    Aes128, Aes256, core.aes.has_hardware_support
 //! Cert:     Certificate (including `Certificate.rsa`)
 
-const std = @import("std_re_export.zig");
+const re_export = struct {
+    const std = @import("std");
+
+    pub const errors = std.crypto.errors;
+    pub const AuthenticationError = std.crypto.errors.AuthenticationError;
+    pub const IdentityElementError = std.crypto.errors.IdentityElementError;
+    pub const Hkdf = std.crypto.kdf.hkdf.Hkdf;
+};
 
 const root = @This();
+const mem = @import("mem.zig");
 
-pub const errors = std.crypto.errors;
+pub const errors = re_export.errors;
 
 pub fn make(comptime Impl: type) type {
     return struct {
@@ -67,7 +75,7 @@ pub fn make(comptime Impl: type) type {
                 pub const HkdfSha384 = makeHkdf(Impl.HkdfSha384);
 
                 pub fn Hkdf(comptime Hmac: type) type {
-                    return makeHkdf(std.crypto.kdf.hkdf.Hkdf(unwrapInnerType(Hmac)));
+                    return makeHkdf(re_export.Hkdf(unwrapInnerType(Hmac)));
                 }
             };
         };
@@ -209,7 +217,7 @@ fn makeAead(comptime Impl: type) type {
             &Impl.encrypt,
         );
         _ = @as(
-            *const fn ([]u8, []const u8, [Impl.tag_length]u8, []const u8, [Impl.nonce_length]u8, [Impl.key_length]u8) std.crypto.errors.AuthenticationError!void,
+            *const fn ([]u8, []const u8, [Impl.tag_length]u8, []const u8, [Impl.nonce_length]u8, [Impl.key_length]u8) re_export.AuthenticationError!void,
             &Impl.decrypt,
         );
     }
@@ -223,7 +231,7 @@ fn makeAead(comptime Impl: type) type {
             Impl.encrypt(c, tag, m, ad, npub, key);
         }
 
-        pub fn decrypt(m: []u8, c: []const u8, tag: [tag_length]u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) std.crypto.errors.AuthenticationError!void {
+        pub fn decrypt(m: []u8, c: []const u8, tag: [tag_length]u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) re_export.AuthenticationError!void {
             return Impl.decrypt(m, c, tag, ad, npub, key);
         }
     };
@@ -328,11 +336,11 @@ fn makeX25519(comptime Impl: type) type {
         _ = @as(usize, Impl.seed_length);
 
         _ = @as(
-            *const fn ([Impl.secret_length]u8) std.crypto.errors.IdentityElementError![Impl.public_length]u8,
+            *const fn ([Impl.secret_length]u8) re_export.IdentityElementError![Impl.public_length]u8,
             &Impl.recoverPublicKey,
         );
         _ = @as(
-            *const fn ([Impl.secret_length]u8, [Impl.public_length]u8) std.crypto.errors.IdentityElementError![Impl.shared_length]u8,
+            *const fn ([Impl.secret_length]u8, [Impl.public_length]u8) re_export.IdentityElementError![Impl.shared_length]u8,
             &Impl.scalarmult,
         );
 
@@ -347,11 +355,11 @@ fn makeX25519(comptime Impl: type) type {
         pub const seed_length = Impl.seed_length;
         pub const KeyPair = Impl.KeyPair;
 
-        pub fn recoverPublicKey(secret_key: [secret_length]u8) std.crypto.errors.IdentityElementError![public_length]u8 {
+        pub fn recoverPublicKey(secret_key: [secret_length]u8) re_export.IdentityElementError![public_length]u8 {
             return Impl.recoverPublicKey(secret_key);
         }
 
-        pub fn scalarmult(secret_key: [secret_length]u8, public_key: [public_length]u8) std.crypto.errors.IdentityElementError![shared_length]u8 {
+        pub fn scalarmult(secret_key: [secret_length]u8, public_key: [public_length]u8) re_export.IdentityElementError![shared_length]u8 {
             return Impl.scalarmult(secret_key, public_key);
         }
     };
@@ -430,8 +438,8 @@ fn makeCertificate(comptime Impl: type, comptime HashSha2: type, comptime ImplHa
         _ = @as(*const fn (Parsed, []const u8) ParsedVerifyHostNameReturn, &Parsed.verifyHostName);
         _ = @as(*const fn (Parsed, Parsed, i64) ParsedVerifyReturn, &Parsed.verify);
         _ = @as(*const fn (Bundle, Parsed, i64) BundleVerifyReturn, &Bundle.verify);
-        _ = @as(*const fn (*Bundle, std.mem.Allocator) BundleRescanReturn, &Bundle.rescan);
-        _ = @as(*const fn (*Bundle, std.mem.Allocator) void, &Bundle.deinit);
+        _ = @as(*const fn (*Bundle, mem.Allocator) BundleRescanReturn, &Bundle.rescan);
+        _ = @as(*const fn (*Bundle, mem.Allocator) void, &Bundle.deinit);
         if (!@hasField(Impl, "buffer") or !@hasField(Impl, "index"))
             @compileError("Certificate must expose std-compatible buffer/index fields");
         _ = makeRsa(Impl.rsa, HashSha2, ImplHashSha2);

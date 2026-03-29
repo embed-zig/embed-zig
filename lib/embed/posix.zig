@@ -7,39 +7,70 @@
 //!
 //! Types:
 //!   fd_t, socket_t, sockaddr, socklen_t, pollfd, timeval, timespec,
-//!   AF, SOCK, IPPROTO, SOL, SO, POLL,
-//!   mode_t, O
+//!   AF, SOCK, IPPROTO, SOL, SO, POLL, E,
+//!   mode_t, O, F
 //!
 //! Functions: (signatures verified at comptime via @as)
 //!   socket, bind, listen, accept, connect,
 //!   send, recv, sendto, recvfrom,
-//!   setsockopt, shutdown, getsockname, poll, close,
+//!   setsockopt, shutdown, getsockname, poll, close, fcntl,
 //!   open, read, write,
 //!   lseek_SET, lseek_CUR, lseek_CUR_get, lseek_END,
 //!   mkdir, unlink
 
-const std = @import("std_re_export.zig");
+const re_export = struct {
+    const std = @import("std");
 
-pub const UnexpectedError = std.posix.UnexpectedError;
-pub const SocketError = std.posix.SocketError;
-pub const BindError = std.posix.BindError;
-pub const ListenError = std.posix.ListenError;
-pub const AcceptError = std.posix.AcceptError;
-pub const ConnectError = std.posix.ConnectError;
-pub const SendError = std.posix.SendError;
-pub const SendToError = std.posix.SendToError;
-pub const RecvFromError = std.posix.RecvFromError;
-pub const SetSockOptError = std.posix.SetSockOptError;
-pub const ShutdownError = std.posix.ShutdownError;
-pub const PollError = std.posix.PollError;
-pub const OpenError = std.posix.OpenError;
-pub const ReadError = std.posix.ReadError;
-pub const WriteError = std.posix.WriteError;
-pub const SeekError = std.posix.SeekError;
-pub const MakeDirError = std.posix.MakeDirError;
-pub const UnlinkError = std.posix.UnlinkError;
-pub const GetSockNameError = std.posix.GetSockNameError;
-pub const ShutdownHow = std.posix.ShutdownHow;
+    pub const PrctlError = std.posix.PrctlError;
+    pub const FileOpenError = std.fs.File.OpenError;
+    pub const UnexpectedError = std.posix.UnexpectedError;
+    pub const SocketError = std.posix.SocketError;
+    pub const BindError = std.posix.BindError;
+    pub const ListenError = std.posix.ListenError;
+    pub const AcceptError = std.posix.AcceptError;
+    pub const ConnectError = std.posix.ConnectError;
+    pub const SendError = std.posix.SendError;
+    pub const SendToError = std.posix.SendToError;
+    pub const RecvFromError = std.posix.RecvFromError;
+    pub const SetSockOptError = std.posix.SetSockOptError;
+    pub const GetSockOptError = std.posix.GetSockOptError;
+    pub const ShutdownError = std.posix.ShutdownError;
+    pub const PollError = std.posix.PollError;
+    pub const OpenError = std.posix.OpenError;
+    pub const ReadError = std.posix.ReadError;
+    pub const WriteError = std.posix.WriteError;
+    pub const SeekError = std.posix.SeekError;
+    pub const MakeDirError = std.posix.MakeDirError;
+    pub const UnlinkError = std.posix.UnlinkError;
+    pub const GetSockNameError = std.posix.GetSockNameError;
+    pub const FcntlError = std.posix.FcntlError;
+    pub const ShutdownHow = std.posix.ShutdownHow;
+};
+
+pub const PrctlError = re_export.PrctlError;
+pub const FileOpenError = re_export.FileOpenError;
+pub const UnexpectedError = re_export.UnexpectedError;
+pub const SocketError = re_export.SocketError;
+pub const BindError = re_export.BindError;
+pub const ListenError = re_export.ListenError;
+pub const AcceptError = re_export.AcceptError;
+pub const ConnectError = re_export.ConnectError;
+pub const SendError = re_export.SendError;
+pub const SendToError = re_export.SendToError;
+pub const RecvFromError = re_export.RecvFromError;
+pub const SetSockOptError = re_export.SetSockOptError;
+pub const GetSockOptError = re_export.GetSockOptError;
+pub const ShutdownError = re_export.ShutdownError;
+pub const PollError = re_export.PollError;
+pub const OpenError = re_export.OpenError;
+pub const ReadError = re_export.ReadError;
+pub const WriteError = re_export.WriteError;
+pub const SeekError = re_export.SeekError;
+pub const MakeDirError = re_export.MakeDirError;
+pub const UnlinkError = re_export.UnlinkError;
+pub const GetSockNameError = re_export.GetSockNameError;
+pub const FcntlError = re_export.FcntlError;
+pub const ShutdownHow = re_export.ShutdownHow;
 
 const root = @This();
 
@@ -57,6 +88,29 @@ pub fn make(comptime Impl: type) type {
         _ = @as(type, Impl.sockaddr.storage);
         _ = @as(type, Impl.sockaddr.in);
         _ = @as(type, Impl.sockaddr.in6);
+        _ = @as(type, Impl.E);
+        _ = @as(type, Impl.F);
+        _ = @as(type, Impl.O);
+        _ = @as(Impl.E, .ACCES);
+        _ = @as(Impl.E, .PERM);
+        _ = @as(Impl.E, .ADDRINUSE);
+        _ = @as(Impl.E, .ADDRNOTAVAIL);
+        _ = @as(Impl.E, .AFNOSUPPORT);
+        _ = @as(Impl.E, .CONNREFUSED);
+        _ = @as(Impl.E, .CONNRESET);
+        _ = @as(Impl.E, .HOSTUNREACH);
+        _ = @as(Impl.E, .NETUNREACH);
+        _ = @as(Impl.E, .TIMEDOUT);
+        _ = @as(Impl.E, .NOENT);
+        if (!@hasDecl(Impl.F, "GETFL"))
+            @compileError("Impl.F must expose a std-compatible GETFL constant");
+        if (!@hasDecl(Impl.F, "SETFL"))
+            @compileError("Impl.F must expose a std-compatible SETFL constant");
+        if (!@hasField(Impl.O, "NONBLOCK"))
+            @compileError("Impl.O must expose a std-compatible NONBLOCK flag");
+        _ = @as(i32, Impl.F.GETFL);
+        _ = @as(i32, Impl.F.SETFL);
+        _ = @as(comptime_int, @bitOffsetOf(Impl.O, "NONBLOCK"));
 
         if (!@hasField(Impl.sockaddr.storage, "family"))
             @compileError("Impl.sockaddr.storage must expose a std-compatible family field");
@@ -87,6 +141,7 @@ pub fn make(comptime Impl: type) type {
         _ = @as(*const fn (Impl.socket_t, *Impl.sockaddr, *Impl.socklen_t) GetSockNameError!void, &Impl.getsockname);
         _ = @as(*const fn ([]Impl.pollfd, i32) PollError!usize, &Impl.poll);
         _ = @as(*const fn (Impl.fd_t) void, &Impl.close);
+        _ = @as(*const fn (Impl.fd_t, i32, usize) FcntlError!usize, &Impl.fcntl);
 
         _ = @as(*const fn ([]const u8, Impl.O, Impl.mode_t) OpenError!Impl.fd_t, &Impl.open);
         _ = @as(*const fn (Impl.fd_t, []u8) ReadError!usize, &Impl.read);
@@ -111,12 +166,16 @@ pub fn make(comptime Impl: type) type {
         pub const SOL = Impl.SOL;
         pub const SO = Impl.SO;
         pub const POLL = Impl.POLL;
+        pub const E = Impl.E;
         pub const ShutdownHow = root.ShutdownHow;
         pub const timeval = Impl.timeval;
         pub const timespec = Impl.timespec;
         pub const mode_t = Impl.mode_t;
         pub const O = Impl.O;
+        pub const F = Impl.F;
 
+        pub const PrctlError = root.PrctlError;
+        pub const FileOpenError = root.FileOpenError;
         pub const UnexpectedError = root.UnexpectedError;
         pub const SocketError = root.SocketError;
         pub const BindError = root.BindError;
@@ -127,6 +186,7 @@ pub fn make(comptime Impl: type) type {
         pub const SendToError = root.SendToError;
         pub const RecvFromError = root.RecvFromError;
         pub const SetSockOptError = root.SetSockOptError;
+        pub const GetSockOptError = root.GetSockOptError;
         pub const ShutdownError = root.ShutdownError;
         pub const GetSockNameError = root.GetSockNameError;
         pub const PollError = root.PollError;
@@ -136,6 +196,7 @@ pub fn make(comptime Impl: type) type {
         pub const SeekError = root.SeekError;
         pub const MakeDirError = root.MakeDirError;
         pub const UnlinkError = root.UnlinkError;
+        pub const FcntlError = root.FcntlError;
 
         pub fn socket(domain: u32, socket_type: u32, protocol: u32) root.SocketError!socket_t {
             return Impl.socket(domain, socket_type, protocol);
@@ -177,6 +238,10 @@ pub fn make(comptime Impl: type) type {
             return Impl.setsockopt(sock, level, optname, opt);
         }
 
+        pub fn getsockopt(sock: socket_t, level: i32, optname: u32, opt: []u8) root.GetSockOptError!void {
+            return Impl.getsockopt(sock, level, optname, opt);
+        }
+
         pub fn shutdown(sock: socket_t, how: root.ShutdownHow) root.ShutdownError!void {
             return Impl.shutdown(sock, how);
         }
@@ -191,6 +256,10 @@ pub fn make(comptime Impl: type) type {
 
         pub fn close(fd: fd_t) void {
             Impl.close(fd);
+        }
+
+        pub fn fcntl(fd: fd_t, cmd: i32, arg: usize) root.FcntlError!usize {
+            return Impl.fcntl(fd, cmd, arg);
         }
 
         pub fn open(path: []const u8, flags: O, mode: mode_t) root.OpenError!fd_t {

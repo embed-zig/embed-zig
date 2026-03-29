@@ -5,42 +5,72 @@
 //! embedded-friendly TLS runner because they depend on Zig stdlib TLS and host
 //! networking APIs.
 //!
-//! The private `run()` helper is only driven by the local `test "tls std_compat"`
-//! block at the bottom of this file; it is not part of the public test-runner
-//! namespace.
+//! This runner is host-only and is intended to be invoked from `lib/net.zig`'s
+//! `net/compat_tests/std` block.
 
 const std = @import("std");
+const embed = @import("embed");
+const testing_api = @import("testing");
 const net_mod = @import("../../net.zig");
+const sockaddr_mod = @import("../fd/SockAddr.zig");
 const fixtures = @import("../tls/test_fixtures.zig");
+const AddrPort = net_mod.netip.AddrPort;
 
-fn run() !void {
-    const Net = net_mod.Make(std);
-    const log = std.log.scoped(.tls_std_compat);
+pub fn make() testing_api.TestRunner {
+    const Runner = struct {
+        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
-    log.info("=== tls std_compat start ===", .{});
-    try serverInteroperatesWithStdTlsClient(Net);
-    try serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(Net);
-    log.info("=== tls std_compat done ===", .{});
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            runImpl(std, t, allocator) catch |err| {
+                t.logErrorf("tls_std_compat runner failed: {}", .{err});
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            std.testing.allocator.destroy(self);
+        }
+    };
+
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{};
+    return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-fn serverInteroperatesWithStdTlsClient(comptime Net: type) !void {
-    var ln = try Net.TcpListener.init(std.testing.allocator, .{
-        .address = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 0),
+fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !void {
+    _ = t;
+    const Net = net_mod.make(lib);
+    try serverInteroperatesWithStdTlsClient(Net, alloc);
+    try serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(Net, alloc);
+}
+
+fn serverInteroperatesWithStdTlsClient(comptime Net: type, allocator: std.mem.Allocator) !void {
+    var ln = try Net.TcpListener.init(allocator, .{
+        .address = AddrPort.from4(.{ 127, 0, 0, 1 }, 0),
     });
     defer ln.deinit();
+    try ln.listen();
     const ln_impl = try ln.as(Net.TcpListener);
     const port = try ln_impl.port();
 
     var server_result: ?anyerror = null;
     var server_thread = try std.Thread.spawn(.{}, struct {
-        fn run(listener: *Net.TcpListener, result: *?anyerror) void {
+        fn run(listener: *Net.TcpListener, tls_allocator: std.mem.Allocator, result: *?anyerror) void {
             var conn = listener.accept() catch |err| {
                 result.* = err;
                 return;
             };
             errdefer conn.deinit();
 
-            var tls_conn = Net.tls.server(std.testing.allocator, conn, .{
+            var tls_conn = Net.tls.server(tls_allocator, conn, .{
                 .certificates = &.{.{
                     .chain = &.{fixtures.self_signed_cert_der[0..]},
                     .private_key = .{ .ecdsa_p256_sha256 = fixtures.self_signed_key_scalar },
@@ -62,11 +92,10 @@ fn serverInteroperatesWithStdTlsClient(comptime Net: type) !void {
             };
             if (!std.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
         }
-    }.run, .{ ln_impl, &server_result });
+    }.run, .{ ln_impl, allocator, &server_result });
     defer server_thread.join();
 
-    const addr = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, port);
-    const stream = try std.net.tcpConnectToAddress(addr);
+    const stream = try tcpConnectStream(AddrPort.from4(.{ 127, 0, 0, 1 }, port));
     defer stream.close();
 
     var input_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
@@ -96,29 +125,30 @@ fn serverInteroperatesWithStdTlsClient(comptime Net: type) !void {
     if (server_result) |err| return err;
 }
 
-fn serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(comptime Net: type) !void {
+fn serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(comptime Net: type, allocator: std.mem.Allocator) !void {
     for ([_]Net.tls.CipherSuite{
         .TLS_AES_128_GCM_SHA256,
         .TLS_AES_256_GCM_SHA384,
         .TLS_CHACHA20_POLY1305_SHA256,
     }) |suite| {
-        var ln = try Net.TcpListener.init(std.testing.allocator, .{
-            .address = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, 0),
+        var ln = try Net.TcpListener.init(allocator, .{
+            .address = AddrPort.from4(.{ 127, 0, 0, 1 }, 0),
         });
         defer ln.deinit();
+        try ln.listen();
         const ln_impl = try ln.as(Net.TcpListener);
         const port = try ln_impl.port();
 
         var server_result: ?anyerror = null;
         var server_thread = try std.Thread.spawn(.{}, struct {
-            fn run(listener: *Net.TcpListener, wanted_suite: Net.tls.CipherSuite, result: *?anyerror) void {
+            fn run(listener: *Net.TcpListener, tls_allocator: std.mem.Allocator, wanted_suite: Net.tls.CipherSuite, result: *?anyerror) void {
                 var conn = listener.accept() catch |err| {
                     result.* = err;
                     return;
                 };
                 errdefer conn.deinit();
 
-                var tls_conn = Net.tls.server(std.testing.allocator, conn, .{
+                var tls_conn = Net.tls.server(tls_allocator, conn, .{
                     .certificates = &.{.{
                         .chain = &.{fixtures.self_signed_cert_der[0..]},
                         .private_key = .{ .ecdsa_p256_sha256 = fixtures.self_signed_key_scalar },
@@ -153,11 +183,10 @@ fn serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(comptime Net: 
                 };
                 if (!std.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
             }
-        }.run, .{ ln_impl, suite, &server_result });
+        }.run, .{ ln_impl, allocator, suite, &server_result });
         defer server_thread.join();
 
-        const addr = std.net.Address.initIp4(.{ 127, 0, 0, 1 }, port);
-        const stream = try std.net.tcpConnectToAddress(addr);
+        const stream = try tcpConnectStream(AddrPort.from4(.{ 127, 0, 0, 1 }, port));
         defer stream.close();
 
         var input_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
@@ -206,6 +235,11 @@ fn writeAll(conn: net_mod.Conn, buf: []const u8) !void {
     }
 }
 
-test "tls std_compat" {
-    try run();
+fn tcpConnectStream(addr: AddrPort) !std.net.Stream {
+    const SockAddr = sockaddr_mod.SockAddr(std);
+    const encoded = try SockAddr.encode(addr);
+    const fd = try std.posix.socket(encoded.family, std.posix.SOCK.STREAM, 0);
+    errdefer std.posix.close(fd);
+    try std.posix.connect(fd, @ptrCast(&encoded.storage), encoded.len);
+    return .{ .handle = fd };
 }

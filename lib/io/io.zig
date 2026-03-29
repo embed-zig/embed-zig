@@ -96,7 +96,7 @@ pub fn PrefixReader(comptime Reader: type) type {
     };
 }
 
-test "readAll reads until eof" {
+test "io/unit_tests/io/readAll_reads_until_eof" {
     const Reader = struct {
         payload: []const u8 = "hello",
         offset: usize = 0,
@@ -117,7 +117,7 @@ test "readAll reads until eof" {
     try std.testing.expectEqualStrings("hello", bytes);
 }
 
-test "readFull fills destination buffer" {
+test "io/unit_tests/io/readFull_fills_destination_buffer" {
     const Reader = struct {
         payload: []const u8 = "hello",
         offset: usize = 0,
@@ -138,7 +138,7 @@ test "readFull fills destination buffer" {
     try std.testing.expectEqualStrings("hello", &buf);
 }
 
-test "writeAll writes full payload" {
+test "io/unit_tests/io/writeAll_writes_full_payload" {
     const Writer = struct {
         out: []u8,
         pos: usize = 0,
@@ -157,7 +157,7 @@ test "writeAll writes full payload" {
     try std.testing.expectEqualStrings("hello", &storage);
 }
 
-test "readFull returns EndOfStream on short read" {
+test "io/unit_tests/io/readFull_returns_EndOfStream_on_short_read" {
     const Reader = struct {
         payload: []const u8 = "hi",
         offset: usize = 0,
@@ -177,7 +177,7 @@ test "readFull returns EndOfStream on short read" {
     try std.testing.expectError(error.EndOfStream, readFull(Reader, &reader, &buf));
 }
 
-test "PrefixReader consumes prefix before reader" {
+test "io/unit_tests/io/PrefixReader_consumes_prefix_before_reader" {
     const Reader = struct {
         payload: []const u8 = "world",
         offset: usize = 0,
@@ -201,7 +201,7 @@ test "PrefixReader consumes prefix before reader" {
     try std.testing.expectEqualStrings("hello world", buf[0 .. n + m]);
 }
 
-test "PrefixReader readLine and expectCrlf" {
+test "io/unit_tests/io/PrefixReader_readLine_and_expectCrlf" {
     const Reader = struct {
         payload: []const u8 = "tail\r\n",
         offset: usize = 0,

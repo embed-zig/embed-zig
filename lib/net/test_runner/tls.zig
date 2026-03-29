@@ -3,24 +3,70 @@
 //! These tests exercise the generic `net.tls` client and server paths using
 //! local loopback listeners so the same behavior can be re-run on embedded
 //! targets. Public-network smoke coverage is available separately via
-//! `runPublicAliDnsSmoke`, which pins exact TLS versions against
-//! `public.alidns.com:853` in sequence.
+//! `tls_dial.make(...)`, which pins exact TLS versions against
+//! `dns.alidns.com:853` in sequence.
 //!
 //! Usage:
-//!   try @import("net/test_runner/tls.zig").run(lib);
-//!   try @import("net/test_runner/tls.zig").runPublicAliDnsSmoke(lib); // optional
+//!   const runner = @import("net/test_runner/tls.zig").make(lib);
+//!   t.run("net/tls", runner);
 
+const context_mod = @import("context");
+const embed = @import("embed");
 const net_mod = @import("../../net.zig");
 const fixtures = @import("../tls/test_fixtures.zig");
+const testing_api = @import("testing");
 
-pub fn run(comptime lib: type) !void {
-    const Net = net_mod.Make(lib);
-    const Addr = lib.net.Address;
+pub fn make(comptime lib: type) testing_api.TestRunner {
+    const Runner = struct {
+        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
+
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            runImpl(lib, t, allocator) catch |err| {
+                t.logErrorf("tls runner failed: {}", .{err});
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
+        }
+    };
+
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{};
+    return testing_api.TestRunner.make(Runner).new(runner);
+}
+
+fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !void {
+    _ = t;
+    const Net = net_mod.make(lib);
+    const Addr = net_mod.netip.AddrPort;
     const Thread = lib.Thread;
-    const testing = lib.testing;
-    const log = lib.log.scoped(.tls);
+    const testing = struct {
+        pub var allocator: lib.mem.Allocator = undefined;
+        pub const expect = lib.testing.expect;
+        pub const expectEqual = lib.testing.expectEqual;
+        pub const expectEqualStrings = lib.testing.expectEqualStrings;
+        pub const expectError = lib.testing.expectError;
+    };
+    testing.allocator = alloc;
+    const test_spawn_config: Thread.SpawnConfig = .{
+        .stack_size = 64 * 1024,
+    };
 
     const Runner = struct {
+        fn addr4(port: u16) Addr {
+            return Addr.from4(.{ 127, 0, 0, 1 }, port);
+        }
+
         const StartGate = struct {
             mutex: Thread.Mutex = .{},
             cond: Thread.Condition = .{},
@@ -98,14 +144,15 @@ pub fn run(comptime lib: type) !void {
                 .TLS_CHACHA20_POLY1305_SHA256,
             }) |suite| {
                 var ln = try Net.TcpListener.init(testing.allocator, .{
-                    .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+                    .address = addr4(0),
                 });
                 defer ln.deinit();
+                try ln.listen();
                 const ln_impl = try ln.as(Net.TcpListener);
                 const port = try ln_impl.port();
 
                 var server_result: ?anyerror = null;
-                var server_thread = try Thread.spawn(.{}, struct {
+                var server_thread = try Thread.spawn(test_spawn_config, struct {
                     fn run(listener: *Net.TcpListener, wanted_suite: Net.tls.CipherSuite, result: *?anyerror) void {
                         var conn = listener.accept() catch |err| {
                             result.* = err;
@@ -152,7 +199,7 @@ pub fn run(comptime lib: type) !void {
                 defer server_thread.join();
 
                 var d = Net.Dialer.init(testing.allocator, .{});
-                var client_conn = try d.dial(.tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+                var client_conn = try d.dial(.tcp, addr4(port));
                 var client_conn_owned = true;
                 errdefer if (client_conn_owned) client_conn.deinit();
 
@@ -189,14 +236,15 @@ pub fn run(comptime lib: type) !void {
                 .TLS_CHACHA20_POLY1305_SHA256,
             }) |suite| {
                 var ln = try Net.TcpListener.init(testing.allocator, .{
-                    .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+                    .address = addr4(0),
                 });
                 defer ln.deinit();
+                try ln.listen();
                 const ln_impl = try ln.as(Net.TcpListener);
                 const port = try ln_impl.port();
 
                 var server_result: ?anyerror = null;
-                var server_thread = try Thread.spawn(.{}, struct {
+                var server_thread = try Thread.spawn(test_spawn_config, struct {
                     fn run(listener: *Net.TcpListener, wanted_suite: Net.tls.CipherSuite, result: *?anyerror) void {
                         var conn = listener.accept() catch |err| {
                             result.* = err;
@@ -248,7 +296,7 @@ pub fn run(comptime lib: type) !void {
                 defer server_thread.join();
 
                 var d = Net.Dialer.init(testing.allocator, .{});
-                var client_conn = try d.dial(.tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+                var client_conn = try d.dial(.tcp, addr4(port));
                 var client_conn_owned = true;
                 errdefer if (client_conn_owned) client_conn.deinit();
 
@@ -279,14 +327,15 @@ pub fn run(comptime lib: type) !void {
 
         fn closeSendsCloseNotifyToPeer() !void {
             var ln = try Net.TcpListener.init(testing.allocator, .{
-                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+                .address = addr4(0),
             });
             defer ln.deinit();
+            try ln.listen();
             const ln_impl = try ln.as(Net.TcpListener);
             const port = try ln_impl.port();
 
             var server_result: ?anyerror = null;
-            var server_thread = try Thread.spawn(.{}, struct {
+            var server_thread = try Thread.spawn(test_spawn_config, struct {
                 fn run(listener: *Net.TcpListener, result: *?anyerror) void {
                     var conn = listener.accept() catch |err| {
                         result.* = err;
@@ -329,7 +378,7 @@ pub fn run(comptime lib: type) !void {
             defer server_thread.join();
 
             var d = Net.Dialer.init(testing.allocator, .{});
-            var client_conn = try d.dial(.tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+            var client_conn = try d.dial(.tcp, addr4(port));
             var client_conn_owned = true;
             errdefer if (client_conn_owned) client_conn.deinit();
 
@@ -350,7 +399,7 @@ pub fn run(comptime lib: type) !void {
 
         fn listenerAcceptsTlsClient() !void {
             var ln = try Net.tls.listen(testing.allocator, .{
-                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+                .address = addr4(0),
             }, .{
                 .certificates = &.{.{
                     .chain = &.{fixtures.self_signed_cert_der[0..]},
@@ -364,7 +413,7 @@ pub fn run(comptime lib: type) !void {
             const port = try tcp_impl.port();
 
             var server_result: ?anyerror = null;
-            var server_thread = try Thread.spawn(.{}, struct {
+            var server_thread = try Thread.spawn(test_spawn_config, struct {
                 fn run(listener: *Net.tls.Listener, result: *?anyerror) void {
                     var conn = listener.accept() catch |err| {
                         result.* = err;
@@ -396,7 +445,7 @@ pub fn run(comptime lib: type) !void {
             defer server_thread.join();
 
             var d = Net.Dialer.init(testing.allocator, .{});
-            var client_conn = try d.dial(.tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+            var client_conn = try d.dial(.tcp, addr4(port));
             var client_conn_owned = true;
             errdefer if (client_conn_owned) client_conn.deinit();
 
@@ -417,7 +466,7 @@ pub fn run(comptime lib: type) !void {
 
         fn dialerConnectsToTlsListener() !void {
             var ln = try Net.tls.listen(testing.allocator, .{
-                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+                .address = addr4(0),
             }, .{
                 .certificates = &.{.{
                     .chain = &.{fixtures.self_signed_cert_der[0..]},
@@ -431,7 +480,7 @@ pub fn run(comptime lib: type) !void {
             const port = try tcp_impl.port();
 
             var server_result: ?anyerror = null;
-            var server_thread = try Thread.spawn(.{}, struct {
+            var server_thread = try Thread.spawn(test_spawn_config, struct {
                 fn run(listener: *Net.tls.Listener, result: *?anyerror) void {
                     var conn = listener.accept() catch |err| {
                         result.* = err;
@@ -467,7 +516,7 @@ pub fn run(comptime lib: type) !void {
                 .server_name = "example.com",
                 .verification = .self_signed,
             });
-            var conn = try d.dial(.tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+            var conn = try d.dial(.tcp, addr4(port));
             defer conn.deinit();
 
             const typed = try conn.as(Net.tls.Conn);
@@ -481,16 +530,112 @@ pub fn run(comptime lib: type) !void {
             if (server_result) |err| return err;
         }
 
-        fn connSupportsConcurrentBidirectionalReadWrite() !void {
-            var ln = try Net.TcpListener.init(testing.allocator, .{
-                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+        fn dialContextConnectsToTlsListener() !void {
+            const Context = context_mod.make(lib);
+            var context_api = try Context.init(testing.allocator);
+            defer context_api.deinit();
+
+            var ln = try Net.tls.listen(testing.allocator, .{
+                .address = addr4(0),
+            }, .{
+                .certificates = &.{.{
+                    .chain = &.{fixtures.self_signed_cert_der[0..]},
+                    .private_key = .{ .ecdsa_p256_sha256 = fixtures.self_signed_key_scalar },
+                }},
             });
             defer ln.deinit();
+
+            const tls_listener = try ln.as(Net.tls.Listener);
+            const tcp_impl = try tls_listener.inner.as(Net.TcpListener);
+            const port = try tcp_impl.port();
+
+            var server_result: ?anyerror = null;
+            var server_thread = try Thread.spawn(test_spawn_config, struct {
+                fn run(listener: *Net.tls.Listener, result: *?anyerror) void {
+                    var conn = listener.accept() catch |err| {
+                        result.* = err;
+                        return;
+                    };
+                    defer conn.deinit();
+
+                    const typed = conn.as(Net.tls.ServerConn) catch {
+                        result.* = error.TestUnexpectedResult;
+                        return;
+                    };
+                    typed.handshake() catch |err| {
+                        result.* = err;
+                        return;
+                    };
+
+                    var buf: [4]u8 = undefined;
+                    readAll(conn, &buf) catch |err| {
+                        result.* = err;
+                        return;
+                    };
+                    writeAll(conn, "pong") catch |err| {
+                        result.* = err;
+                        return;
+                    };
+                    if (!lib.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
+                }
+            }.run, .{ tls_listener, &server_result });
+            defer server_thread.join();
+
+            var conn = try Net.tls.dialContext(
+                context_api.background(),
+                testing.allocator,
+                .tcp,
+                addr4(port),
+                .{
+                    .server_name = "example.com",
+                    .verification = .self_signed,
+                },
+            );
+            defer conn.deinit();
+
+            const typed = try conn.as(Net.tls.Conn);
+            try typed.handshake();
+
+            try writeAll(conn, "ping");
+            var resp: [4]u8 = undefined;
+            try readAll(conn, &resp);
+            try testing.expectEqualStrings("pong", &resp);
+
+            if (server_result) |err| return err;
+        }
+
+        fn dialContextCanceledBeforeStart() !void {
+            const Context = context_mod.make(lib);
+            var context_api = try Context.init(testing.allocator);
+            defer context_api.deinit();
+
+            var cancel_ctx = try context_api.withCancel(context_api.background());
+            defer cancel_ctx.deinit();
+            cancel_ctx.cancel();
+
+            try testing.expectError(error.Canceled, Net.tls.dialContext(
+                cancel_ctx,
+                testing.allocator,
+                .tcp,
+                addr4(1),
+                .{
+                    .server_name = "example.com",
+                    .verification = .self_signed,
+                },
+            ));
+        }
+
+        fn connSupportsConcurrentBidirectionalReadWrite() !void {
+            var ln = try Net.TcpListener.init(testing.allocator, .{
+                .address = addr4(0),
+            });
+            defer ln.deinit();
+            try ln.listen();
             const ln_impl = try ln.as(Net.TcpListener);
             const port = try ln_impl.port();
 
             var server_result: ?anyerror = null;
-            var server_thread = try Thread.spawn(.{}, struct {
+            var server_thread = try Thread.spawn(test_spawn_config, struct {
                 fn run(listener: *Net.TcpListener, result: *?anyerror) void {
                     var conn = listener.accept() catch |err| {
                         result.* = err;
@@ -545,7 +690,7 @@ pub fn run(comptime lib: type) !void {
                     var read_result: ?anyerror = null;
                     var write_result: ?anyerror = null;
 
-                    var reader_thread = Thread.spawn(.{}, reader, .{ReadTask{
+                    var reader_thread = Thread.spawn(test_spawn_config, reader, .{ReadTask{
                         .gate = &gate,
                         .conn = tls_conn,
                         .expected = expected_from_client,
@@ -556,7 +701,7 @@ pub fn run(comptime lib: type) !void {
                         return;
                     };
 
-                    var writer_thread = Thread.spawn(.{}, writer, .{WriteTask{
+                    var writer_thread = Thread.spawn(test_spawn_config, writer, .{WriteTask{
                         .gate = &gate,
                         .conn = tls_conn,
                         .payload = outbound,
@@ -580,7 +725,7 @@ pub fn run(comptime lib: type) !void {
             }.run, .{ ln_impl, &server_result });
 
             var d = Net.Dialer.init(testing.allocator, .{});
-            var client_conn = try d.dial(.tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port));
+            var client_conn = try d.dial(.tcp, addr4(port));
             var client_conn_owned = true;
             errdefer if (client_conn_owned) client_conn.deinit();
 
@@ -617,7 +762,7 @@ pub fn run(comptime lib: type) !void {
             var read_result: ?anyerror = null;
             var write_result: ?anyerror = null;
 
-            var reader_thread = try Thread.spawn(.{}, reader, .{ReadTask{
+            var reader_thread = try Thread.spawn(test_spawn_config, reader, .{ReadTask{
                 .gate = &gate,
                 .conn = tls_client,
                 .expected = expected_from_server,
@@ -625,7 +770,7 @@ pub fn run(comptime lib: type) !void {
                 .result = &read_result,
             }});
 
-            var writer_thread = try Thread.spawn(.{}, writer, .{WriteTask{
+            var writer_thread = try Thread.spawn(test_spawn_config, writer, .{WriteTask{
                 .gate = &gate,
                 .conn = tls_client,
                 .payload = outbound,
@@ -649,15 +794,13 @@ pub fn run(comptime lib: type) !void {
 
             try testing.expectError(
                 error.UnsupportedNetwork,
-                d.dial(.udp, Addr.initIp4(.{ 127, 0, 0, 1 }, 1)),
+                d.dial(.udp, addr4(1)),
             );
         }
 
         fn invalidListenerConfigRejected() !void {
-            log.info("tls listener invalid config rejected", .{});
-
             var inner = try Net.listen(testing.allocator, .{
-                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+                .address = addr4(0),
             });
             defer inner.deinit();
 
@@ -675,11 +818,6 @@ pub fn run(comptime lib: type) !void {
             client_tls13_cipher_suites: ?[]const NetType.tls.CipherSuite,
             server_tls13_cipher_suites: ?[]const NetType.tls.CipherSuite,
         ) !void {
-            log.info(
-                "loopback self-signed: min={s}, max={s}",
-                .{ min_version.name(), max_version.name() },
-            );
-
             var server_config: NetType.tls.ServerConfig = .{
                 .certificates = &.{.{
                     .chain = &.{fixtures.self_signed_cert_der[0..]},
@@ -693,7 +831,7 @@ pub fn run(comptime lib: type) !void {
             }
 
             var ln = try NetType.tls.listen(testing.allocator, .{
-                .address = Addr.initIp4(.{ 127, 0, 0, 1 }, 0),
+                .address = addr4(0),
             }, server_config);
             defer ln.deinit();
 
@@ -702,7 +840,7 @@ pub fn run(comptime lib: type) !void {
             const port = try tcp_listener.port();
 
             var server_result: ?anyerror = null;
-            var server_thread = try Thread.spawn(.{}, struct {
+            var server_thread = try Thread.spawn(test_spawn_config, struct {
                 fn run(
                     listener: *NetType.tls.Listener,
                     expected: NetType.tls.ProtocolVersion,
@@ -758,7 +896,7 @@ pub fn run(comptime lib: type) !void {
                 client_config.tls13_cipher_suites = suites;
             }
 
-            var conn = try NetType.tls.dial(testing.allocator, .tcp, Addr.initIp4(.{ 127, 0, 0, 1 }, port), client_config);
+            var conn = try NetType.tls.dial(testing.allocator, .tcp, addr4(port), client_config);
             defer conn.deinit();
 
             const typed = try conn.as(NetType.tls.Conn);
@@ -800,7 +938,6 @@ pub fn run(comptime lib: type) !void {
         }
     };
 
-    log.info("=== tls local test_runner start ===", .{});
     try Runner.localLoopbackVersions();
     try Runner.tls13ConfiguredSuites();
     try Runner.serverConnHandlesClientKeyUpdate();
@@ -808,60 +945,11 @@ pub fn run(comptime lib: type) !void {
     try Runner.closeSendsCloseNotifyToPeer();
     try Runner.listenerAcceptsTlsClient();
     try Runner.dialerConnectsToTlsListener();
+    try Runner.dialContextConnectsToTlsListener();
+    try Runner.dialContextCanceledBeforeStart();
     try Runner.connSupportsConcurrentBidirectionalReadWrite();
     try Runner.dialerRejectsUdp();
     try Runner.invalidListenerConfigRejected();
-    log.info("=== tls local test_runner done ===", .{});
-}
-
-pub fn runPublicAliDnsSmoke(comptime lib: type) !void {
-    const Net = net_mod.Make(lib);
-    const Resolver = Net.Resolver;
-    const Addr = lib.net.Address;
-    const testing = lib.testing;
-    const log = lib.log.scoped(.tls);
-
-    log.info("=== tls public smoke start ===", .{});
-    var bundle: lib.crypto.Certificate.Bundle = .{};
-    defer bundle.deinit(testing.allocator);
-    try bundle.rescan(testing.allocator);
-
-    const server_addr = comptime Addr.parseIp(Resolver.dns.ali.v4_1, 853) catch unreachable;
-    inline for ([_]Net.tls.ProtocolVersion{
-        .tls_1_2,
-        .tls_1_3,
-    }) |version| {
-        try runAliDnsPinnedVersionCase(lib, Net, server_addr, &bundle, version);
-    }
-    log.info("=== tls public smoke done ===", .{});
-}
-
-fn runAliDnsPinnedVersionCase(
-    comptime lib: type,
-    comptime NetType: type,
-    server_addr: anytype,
-    bundle: *const lib.crypto.Certificate.Bundle,
-    version: NetType.tls.ProtocolVersion,
-) !void {
-    const testing = lib.testing;
-    const log = lib.log.scoped(.tls);
-
-    log.info(
-        "public.alidns.com pinned version={s}",
-        .{version.name()},
-    );
-
-    var tls_conn = try NetType.tls.dial(testing.allocator, .tcp, server_addr, .{
-        .server_name = "public.alidns.com",
-        .root_cas = bundle,
-        .min_version = version,
-        .max_version = version,
-    });
-    defer tls_conn.deinit();
-
-    const tls_impl = try tls_conn.as(NetType.tls.Conn);
-    try tls_impl.handshake();
-    try testing.expectEqual(version, tls_impl.handshake_state.version);
 }
 
 fn nextTrafficSecret(
@@ -911,7 +999,7 @@ fn sendClientKeyUpdate(comptime NetType: type, client: *NetType.tls.Conn) !void 
     try header.serialize(msg[0..NetType.tls.HandshakeHeader.SIZE]);
     msg[NetType.tls.HandshakeHeader.SIZE] = 0;
 
-    _ = try client.handshake_state.records.writeRecord(.handshake, &msg, &client.write_record_buf);
+    _ = try client.handshake_state.records.writeRecord(.handshake, &msg, &client.write_record_buf, &client.write_plaintext_buf);
 
     client.handshake_state.client_application_traffic_secret = nextTrafficSecret(
         NetType,
@@ -934,7 +1022,7 @@ fn sendServerKeyUpdate(comptime NetType: type, server: *NetType.tls.ServerConn) 
     try header.serialize(msg[0..NetType.tls.HandshakeHeader.SIZE]);
     msg[NetType.tls.HandshakeHeader.SIZE] = 0;
 
-    _ = try server.handshake_state.records.writeRecord(.handshake, &msg, &server.write_record_buf);
+    _ = try server.handshake_state.records.writeRecord(.handshake, &msg, &server.write_record_buf, &server.write_plaintext_buf);
 
     server.handshake_state.server_application_traffic_secret = nextTrafficSecret(
         NetType,

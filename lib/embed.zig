@@ -1,7 +1,7 @@
 //! embed — cross-platform runtime library.
 //!
 //! Usage:
-//!   const embed = @import("embed").Make(platform);
+//!   const embed = @import("embed").make(platform);
 //!
 //!   var t = try embed.Thread.spawn(.{}, myFunc, .{ &state });
 //!   t.join();
@@ -12,6 +12,7 @@ pub const ascii = @import("embed/ascii.zig");
 pub const collections = @import("embed/collections.zig");
 pub const crypto = @import("embed/crypto.zig");
 pub const fmt = @import("embed/fmt.zig");
+pub const heap = @import("embed/heap.zig");
 pub const Io = @import("embed/Io.zig");
 pub const log = @import("embed/log.zig");
 pub const mem = @import("embed/mem.zig");
@@ -23,17 +24,16 @@ pub const math = @import("embed/math.zig");
 pub const debug = @import("embed/debug.zig");
 pub const meta = @import("embed/meta.zig");
 pub const atomic = @import("embed/atomic.zig");
-pub const net = @import("embed/net.zig");
 pub const testing = @import("embed/testing.zig");
-
 pub const test_runner = struct {
-    pub const std_compat = @import("embed/test_runner/std.zig");
+    pub const logging = @import("embed/test_runner/logging.zig");
 };
 
-pub fn Make(comptime Impl: type) type {
+pub fn make(comptime Impl: type) type {
     return struct {
         const Self = @This();
-        pub const Thread = root.Thread.make(Impl.Thread);
+        pub const heap = root.heap.make(Impl.heap);
+        pub const Thread = root.Thread.make(Impl.Thread, Self.heap);
         pub const log = root.log.make(Impl.log);
         pub const posix = root.posix.make(Impl.posix);
         pub const time = root.time.make(Impl.time);
@@ -44,13 +44,8 @@ pub fn Make(comptime Impl: type) type {
         pub const Io = root.Io;
         pub const debug = root.debug;
         pub const atomic = root.atomic;
-        pub const testing = root.testing.make(Impl.testing);
+        pub const testing = root.testing.make(Impl.testing, Self);
         pub const Random = root.Random;
-        pub const net = struct {
-            pub const Ip4Address = root.net.Ip4Address(Self.posix);
-            pub const Ip6Address = root.net.Ip6Address(Self.posix);
-            pub const Address = root.net.Address(Self.posix);
-        };
         pub const crypto = root.crypto.make(Impl.crypto);
         pub const math = root.math;
         // Platform-independent data structures (from std)
@@ -110,8 +105,9 @@ pub fn Make(comptime Impl: type) type {
     };
 }
 
-test {
-    _ = @import("embed/std_compat.zig");
-    _ = @import("embed/test_runner/std.zig");
-    _ = @import("embed/net.zig");
+test "embed/unit_tests" {
+    _ = @import("embed/Thread.zig");
+    _ = @import("embed/time.zig");
+    _ = @import("embed/testing.zig");
+    _ = @import("embed/testing/Allocator.zig");
 }

@@ -1,0 +1,214 @@
+//! testing.TestRunner — thin vtable wrapper around a typed runner object.
+//!
+//! `make(TestRunner).new(ctx)` borrows `ctx`, calls `ctx.init(allocator)` from
+//! `run()`, then forwards to `ctx.run(t, allocator)`.
+
+const embed = @import("embed");
+const Self = @This();
+const T = @import("T.zig");
+
+var default_ctx_byte: u8 = 0;
+
+ctx: *anyopaque,
+vtable: *const VTable,
+spawn_config: embed.Thread.SpawnConfig = .{},
+memory_limit: ?usize = null,
+
+pub const VTable = struct {
+    runFn: *const fn (*Self, *T, embed.mem.Allocator) bool,
+    deinitFn: *const fn (Self, embed.mem.Allocator) void = noopDeinit,
+};
+
+const Options = struct {
+    ctx: *anyopaque = defaultCtx(),
+    vtable: *const VTable,
+    spawn_config: embed.Thread.SpawnConfig = .{},
+    memory_limit: ?usize = null,
+};
+
+fn init(options: Options) Self {
+    return .{
+        .ctx = options.ctx,
+        .vtable = options.vtable,
+        .spawn_config = options.spawn_config,
+        .memory_limit = options.memory_limit,
+    };
+}
+
+pub fn run(self: *Self, t: *T, allocator: embed.mem.Allocator) bool {
+    return self.vtable.runFn(self, t, allocator);
+}
+
+pub fn deinit(self: Self, allocator: embed.mem.Allocator) void {
+    self.vtable.deinitFn(self, allocator);
+}
+
+pub fn make(comptime TestRunner: type) type {
+    comptime {
+        _ = @as(*const fn (*TestRunner, embed.mem.Allocator) anyerror!void, TestRunner.init);
+        _ = @as(*const fn (*TestRunner, *T, embed.mem.Allocator) bool, TestRunner.run);
+        _ = @as(*const fn (*TestRunner, embed.mem.Allocator) void, TestRunner.deinit);
+    }
+    return struct {
+        pub fn new(ctx: *TestRunner) Self {
+            const Impl = struct {
+                const vtable: VTable = .{
+                    .runFn = @This().run,
+                    .deinitFn = @This().deinit,
+                };
+
+                fn run(runner: *Self, t: *T, allocator: embed.mem.Allocator) bool {
+                    const typed_ctx: *TestRunner = @ptrCast(@alignCast(runner.ctx));
+                    TestRunner.init(typed_ctx, allocator) catch return false;
+                    return TestRunner.run(typed_ctx, t, allocator);
+                }
+
+                fn deinit(runner: Self, allocator: embed.mem.Allocator) void {
+                    const typed_ctx: *TestRunner = @ptrCast(@alignCast(runner.ctx));
+                    TestRunner.deinit(typed_ctx, allocator);
+                }
+            };
+
+            return init(.{
+                .ctx = @ptrCast(ctx),
+                .vtable = &Impl.vtable,
+                .spawn_config = if (@hasField(TestRunner, "spawn_config")) ctx.spawn_config else .{},
+                .memory_limit = if (@hasField(TestRunner, "memory_limit")) ctx.memory_limit else null,
+            });
+        }
+    };
+}
+
+fn defaultCtx() *anyopaque {
+    return @ptrCast(&default_ctx_byte);
+}
+
+fn noopDeinit(_: Self, _: embed.mem.Allocator) void {}
+
+test "testing/unit_tests/TestRunner/forwards_run_and_deinit" {
+    const std = @import("std");
+
+    const RunnerState = struct {
+        run_hits: usize = 0,
+        deinit_hits: usize = 0,
+        expected_allocator_ptr: usize = 0,
+    };
+
+    const Helper = struct {
+        fn run(runner: *Self, t: *T, allocator: embed.mem.Allocator) bool {
+            const state: *RunnerState = @ptrCast(@alignCast(runner.ctx));
+            _ = t;
+            state.run_hits += 1;
+            state.expected_allocator_ptr = @intFromPtr(allocator.ptr);
+            return true;
+        }
+
+        fn deinit(runner: Self, allocator: embed.mem.Allocator) void {
+            const state: *RunnerState = @ptrCast(@alignCast(runner.ctx));
+            _ = allocator;
+            state.deinit_hits += 1;
+        }
+    };
+
+    var state = RunnerState{};
+    var handle = T.new(std, .test_run);
+    defer {
+        std.testing.expect(handle.wait()) catch @panic("handle wait failed");
+        handle.deinit();
+    }
+    var runner = Self.init(.{
+        .ctx = @ptrCast(&state),
+        .vtable = &.{
+            .runFn = Helper.run,
+            .deinitFn = Helper.deinit,
+        },
+        .spawn_config = .{ .stack_size = 1234 },
+        .memory_limit = 99,
+    });
+
+    try std.testing.expectEqual(@as(usize, 1234), runner.spawn_config.stack_size);
+    try std.testing.expectEqual(@as(?usize, 99), runner.memory_limit);
+    try std.testing.expect(runner.run(&handle, std.testing.allocator));
+    try std.testing.expectEqual(@as(usize, 1), state.run_hits);
+    try std.testing.expectEqual(@intFromPtr(std.testing.allocator.ptr), state.expected_allocator_ptr);
+
+    runner.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), state.deinit_hits);
+}
+
+test "testing/unit_tests/TestRunner/new_owns_state" {
+    const std = @import("std");
+
+    const OwnedArgs = struct {
+        seed: usize,
+        init_allocator_ptr: usize,
+        deinit_hits: usize = 0,
+        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 4096 },
+        memory_limit: ?usize = 21,
+
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            self.init_allocator_ptr = @intFromPtr(allocator.ptr);
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            self.deinit_hits += 1;
+        }
+
+        pub fn run(self: *@This(), test_handle: *T, allocator: embed.mem.Allocator) bool {
+            _ = test_handle;
+            return self.seed == 5 and self.init_allocator_ptr == @intFromPtr(allocator.ptr);
+        }
+    };
+
+    var t = T.new(std, .test_run);
+    defer {
+        std.testing.expect(t.wait()) catch @panic("t wait failed");
+        t.deinit();
+    }
+    var ctx = OwnedArgs{
+        .seed = 5,
+        .init_allocator_ptr = 0,
+    };
+    const RunnerType = Self.make(OwnedArgs);
+    var runner = RunnerType.new(&ctx);
+
+    try std.testing.expectEqual(@as(usize, 4096), runner.spawn_config.stack_size);
+    try std.testing.expectEqual(@as(?usize, 21), runner.memory_limit);
+    try std.testing.expect(runner.run(&t, std.testing.allocator));
+    try std.testing.expectEqual(@as(usize, 0), ctx.deinit_hits);
+    runner.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
+}
+
+test "testing/unit_tests/TestRunner/new_deinit_without_run_is_ok" {
+    const std = @import("std");
+
+    const OwnedArgs = struct {
+        deinit_hits: usize = 0,
+
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            self.deinit_hits += 1;
+        }
+
+        pub fn run(self: *@This(), test_handle: *T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            _ = test_handle;
+            _ = allocator;
+            return true;
+        }
+    };
+
+    var ctx = OwnedArgs{};
+    const RunnerType = Self.make(OwnedArgs);
+    var runner = RunnerType.new(&ctx);
+
+    runner.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
+}
