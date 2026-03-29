@@ -448,6 +448,13 @@ observer/event/animation layers.
 
 LVGL is heavily configured at compile time.
 
+For this repo's custom OS backend, the Zig OSAL implementation is
+exported as a separate `lvgl_osal` module rather than hanging off the
+main `lvgl` module. This keeps the raw LVGL binding and the custom OSAL
+adapter independently importable, which avoids dependency cycles when a
+consumer needs to instantiate its own OSAL layer and then link that
+result back into LVGL.
+
 The main configuration entry point is `lv_conf.h`.
 
 The inclusion logic is controlled by `lv_conf_internal.h`, which:

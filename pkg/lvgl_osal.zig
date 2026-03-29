@@ -1,3 +1,9 @@
+//! lvgl_osal — LVGL custom OSAL adapter.
+//!
+//! Usage:
+//!   const lvgl_osal = @import("lvgl_osal");
+//!   _ = lvgl_osal.make;
+
 const c = @cImport({
     @cInclude("lv_os_custom.h");
     @cInclude("src/osal/lv_os.h");
@@ -277,4 +283,8 @@ pub fn make(comptime lib: type, comptime allocator: lib.mem.Allocator) type {
             return ok();
         }
     };
+}
+
+test "lvgl_osal/unit_tests" {
+    _ = make;
 }

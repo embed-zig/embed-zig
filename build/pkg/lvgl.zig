@@ -3,6 +3,7 @@ const GitRepo = @import("../GitRepo.zig");
 
 var library: ?*std.Build.Step.Compile = null;
 var osal_library: ?*std.Build.Step.Compile = null;
+var osal_module: ?*std.Build.Module = null;
 var resolved_target: ?std.Build.ResolvedTarget = null;
 var resolved_optimize: ?std.builtin.OptimizeMode = null;
 
@@ -96,8 +97,26 @@ pub fn create(
         });
     }
     b.modules.put("lvgl", mod) catch @panic("OOM");
+
+    const osal_mod = b.createModule(.{
+        .root_source_file = b.path("pkg/lvgl_osal.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    osal_mod.addConfigHeader(config_header);
+    osal_mod.addIncludePath(repo.includePath("."));
+    osal_mod.addIncludePath(b.path("pkg/lvgl/include"));
+    if (b.sysroot) |sysroot| {
+        osal_mod.addSystemIncludePath(.{
+            .cwd_relative = b.pathJoin(&.{ sysroot, "include" }),
+        });
+    }
+    b.modules.put("lvgl_osal", osal_mod) catch @panic("OOM");
+
     b.installArtifact(lib);
     library = lib;
+    osal_module = osal_mod;
 }
 
 pub fn link(b: *std.Build) void {
@@ -124,7 +143,6 @@ fn createOsalLibrary(b: *std.Build) *std.Build.Step.Compile {
         .git_repo = "https://github.com/lvgl/lvgl.git",
         .commit = "85aa60d18b3d5e5588d7b247abf90198f07c8a63",
     });
-    const config_header = createConfigHeader(b);
     const embed = b.modules.get("embed") orelse @panic("lvgl osal impl requires embed");
     const impl_mod = b.createModule(.{
         .root_source_file = b.path("lib/embed_std/embed.zig"),
@@ -132,29 +150,16 @@ fn createOsalLibrary(b: *std.Build) *std.Build.Step.Compile {
         .optimize = optimize,
     });
     impl_mod.addImport("embed", embed);
-    const osal_mod = b.createModule(.{
-        .root_source_file = b.path("pkg/lvgl/src/lv_os_custom.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    osal_mod.addConfigHeader(config_header);
-    osal_mod.addIncludePath(repo.includePath("."));
-    osal_mod.addIncludePath(b.path("pkg/lvgl/include"));
-    if (b.sysroot) |sysroot| {
-        osal_mod.addSystemIncludePath(.{
-            .cwd_relative = b.pathJoin(&.{ sysroot, "include" }),
-        });
-    }
+    const osal_mod = osal_module orelse @panic("lvgl_osal module missing");
     const write_files = b.addWriteFiles();
     const root_source = write_files.add("lvgl_osal_root.zig",
         \\const std = @import("std");
         \\const embed = @import("embed");
-        \\const osal = @import("lvgl_osal_runtime");
+        \\const lvgl_osal = @import("lvgl_osal");
         \\const runtime = embed.make(@import("lvgl_osal_impl"));
         \\
         \\comptime {
-        \\    _ = osal.make(runtime, std.heap.page_allocator);
+        \\    _ = lvgl_osal.make(runtime, std.heap.page_allocator);
         \\}
         \\
     );
@@ -170,18 +175,10 @@ fn createOsalLibrary(b: *std.Build) *std.Build.Step.Compile {
             .sanitize_c = .off,
         }),
     });
-    osal.root_module.addConfigHeader(config_header);
-    osal.root_module.addIncludePath(repo.includePath("."));
-    osal.root_module.addIncludePath(b.path("pkg/lvgl/include"));
     osal.root_module.addImport("embed", embed);
     osal.root_module.addImport("lvgl_osal_impl", impl_mod);
-    osal.root_module.addImport("lvgl_osal_runtime", osal_mod);
+    osal.root_module.addImport("lvgl_osal", osal_mod);
     repo.dependOn(&osal.step);
-    if (b.sysroot) |sysroot| {
-        osal.root_module.addSystemIncludePath(.{
-            .cwd_relative = b.pathJoin(&.{ sysroot, "include" }),
-        });
-    }
 
     osal_library = osal;
     return osal;

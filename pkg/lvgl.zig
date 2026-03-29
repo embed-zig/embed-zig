@@ -2,6 +2,7 @@
 //!
 //! Usage:
 //!   const lvgl = @import("lvgl");
+//!   const lvgl_osal = @import("lvgl_osal");
 //!   _ = lvgl.binding;
 
 pub const binding = @import("lvgl/src/binding.zig");
@@ -36,10 +37,6 @@ pub const test_runner = struct {
     pub const lvgl = @import("lvgl/test_runner/lvgl.zig");
     pub const bitmap = @import("lvgl/test_runner/bitmap.zig");
 };
-
-pub fn Osal(comptime runtime: type, comptime allocator: runtime.mem.Allocator) type {
-    return @import("lvgl/src/lv_os_custom.zig").make(runtime, allocator);
-}
 
 pub fn init() void {
     binding.lv_init();
