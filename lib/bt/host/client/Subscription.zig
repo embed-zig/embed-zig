@@ -9,7 +9,7 @@ pub fn Subscription(comptime lib: type, comptime ClientType: type) type {
 
         pub const State = struct {
             allocator: lib.mem.Allocator,
-            client: *ClientType,
+            client: ?*ClientType,
             conn_handle: u16,
             value_handle: u16,
             cccd_handle: u16,
@@ -17,6 +17,8 @@ pub fn Subscription(comptime lib: type, comptime ClientType: type) type {
             cond: lib.Thread.Condition = .{},
             queue: std.ArrayListUnmanaged(Message) = .{},
             closed: bool = false,
+            waiters: usize = 0,
+            refs: usize = 1,
         };
 
         state: *State,
@@ -42,8 +44,10 @@ pub fn Subscription(comptime lib: type, comptime ClientType: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            _ = self.state.client.unregisterSubscription(self.state, true);
-            destroyState(self.state);
+            if (self.state.client) |client| {
+                _ = client.unregisterSubscription(self.state, true);
+            }
+            releaseState(self.state);
         }
 
         pub fn next(self: *Self, timeout_ms: ?u32) error{TimedOut}!?Message {
@@ -73,14 +77,48 @@ pub fn Subscription(comptime lib: type, comptime ClientType: type) type {
             state.cond.broadcast();
         }
 
-        pub fn destroyState(state: *State) void {
+        pub fn retainState(state: *State) void {
+            state.mutex.lock();
+            defer state.mutex.unlock();
+            state.refs += 1;
+        }
+
+        pub fn detachClient(state: *State) void {
+            state.mutex.lock();
+            defer state.mutex.unlock();
+            state.client = null;
+            state.closed = true;
+            state.cond.broadcast();
+        }
+
+        pub fn releaseState(state: *State) void {
+            state.mutex.lock();
+            state.closed = true;
+            state.cond.broadcast();
+            std.debug.assert(state.refs != 0);
+            state.refs -= 1;
+            if (state.refs != 0) {
+                state.mutex.unlock();
+                return;
+            }
+            while (state.waiters != 0) {
+                state.cond.wait(&state.mutex);
+            }
+            state.mutex.unlock();
             state.queue.deinit(state.allocator);
             state.allocator.destroy(state);
         }
 
         fn nextState(state: *State, timeout_ms: ?u32) error{TimedOut}!?Message {
             state.mutex.lock();
-            defer state.mutex.unlock();
+            state.waiters += 1;
+            defer {
+                state.waiters -= 1;
+                if (state.waiters == 0) {
+                    state.cond.broadcast();
+                }
+                state.mutex.unlock();
+            }
 
             while (state.queue.items.len == 0 and !state.closed) {
                 if (timeout_ms) |ms| {

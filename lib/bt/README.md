@@ -426,6 +426,15 @@ host/client/xfer/
 In other words, `xfer` becomes a **transfer extension layer for the host
 client backend**, not a separate top-level Bluetooth abstraction.
 
+On the server side, `host.Server.handleX()` is the matching endpoint for
+client `readX` / `writeX` traffic. It uses xfer-specific logical
+read/write callbacks rather than the plain `bt.Peripheral.Request` /
+`ResponseWriter` contract, because the wire protocol is driven by control
+writes plus notify/indicate chunk delivery instead of raw ATT reads.
+`host.Server` keeps subscription and xfer runtime state per connection so
+disconnect handling can tear down one peer without scanning unrelated
+peers.
+
 Internally, `Hci` orchestrates:
 1. Send HCI commands via `Transport.send`
 2. Receive HCI events via `Transport.recv` (blocking, dedicated thread)

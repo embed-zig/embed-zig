@@ -12,7 +12,6 @@
 //! Higher-level concepts such as Conn / Char / Subscription / Handler
 //! should be built on top of `Central` / `Peripheral`, not directly on Hci.
 
-const std = @import("std");
 const Hci = @This();
 
 ptr: *anyopaque,
@@ -32,7 +31,9 @@ pub const Role = enum {
 
 pub const ScanConfig = struct {
     active: bool = true,
+    /// Raw controller scan interval units as expected by the concrete HCI backend.
     interval: u16 = 0x0010,
+    /// Raw controller scan window units as expected by the concrete HCI backend.
     window: u16 = 0x0010,
     filter_duplicates: bool = true,
 };
@@ -77,6 +78,8 @@ pub const AdvReportFn = *const fn (?*anyopaque, []const u8) void;
 pub const ConnectedFn = *const fn (?*anyopaque, Link) void;
 pub const DisconnectedFn = *const fn (?*anyopaque, u16, u8) void;
 pub const NotificationFn = *const fn (?*anyopaque, u16, u16, []const u8) void;
+/// Handle one inbound ATT request and return the number of response bytes written into `out`.
+/// The returned length must be less than or equal to `out.len`.
 pub const AttRequestFn = *const fn (?*anyopaque, u16, []const u8, []u8) usize;
 
 pub const CentralListener = struct {
@@ -341,6 +344,7 @@ pub fn wrap(pointer: anytype) Hci {
 }
 
 test "bt/unit_tests/Hci/wrap_delegates_to_concrete_implementation" {
+    const testing = @import("std").testing;
     const Impl = struct {
         retained: bool = false,
         scanning: bool = false,
@@ -445,26 +449,26 @@ test "bt/unit_tests/Hci/wrap_delegates_to_concrete_implementation" {
     const hci = wrap(&impl);
 
     try hci.retain();
-    try std.testing.expect(impl.retained);
+    try testing.expect(impl.retained);
 
     hci.setCentralListener(.{});
     hci.setPeripheralListener(.{});
 
     try hci.startScanning(.{});
-    try std.testing.expect(hci.isScanning());
+    try testing.expect(hci.isScanning());
     hci.stopScanning();
 
     try hci.startAdvertising(.{});
-    try std.testing.expect(hci.isAdvertising());
+    try testing.expect(hci.isAdvertising());
     hci.stopAdvertising();
 
     try hci.connect(.{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF }, .public, .{});
     const link = hci.getLink(.central) orelse return error.NoLink;
-    try std.testing.expectEqual(@as(u16, 0x0040), link.conn_handle);
-    try std.testing.expectEqual(@as(?BdAddr, .{ 1, 2, 3, 4, 5, 6 }), hci.getAddr());
+    try testing.expectEqual(@as(u16, 0x0040), link.conn_handle);
+    try testing.expectEqual(@as(?BdAddr, .{ 1, 2, 3, 4, 5, 6 }), hci.getAddr());
 
     var resp: [8]u8 = undefined;
     const n = try hci.sendAttRequest(0x0040, &.{0x01}, &resp);
-    try std.testing.expectEqual(@as(usize, 2), n);
-    try std.testing.expectEqual(@as(u8, 0xAA), resp[0]);
+    try testing.expectEqual(@as(usize, 2), n);
+    try testing.expectEqual(@as(u8, 0xAA), resp[0]);
 }

@@ -85,17 +85,17 @@ pub fn Peripheral(comptime lib: type) type {
 
         pub fn start(self: *Self) bt.StartError!void {
             if (self.started) return;
+            self.hci.retain() catch return error.Unexpected;
+            errdefer {
+                self.hci.release();
+            }
             self.hci.setPeripheralListener(.{
                 .ctx = self,
                 .on_connected = onConnected,
                 .on_disconnected = onDisconnected,
                 .on_att_request = onAttRequest,
             });
-            self.hci.retain() catch return error.Unexpected;
-            errdefer {
-                self.hci.setPeripheralListener(.{});
-                self.hci.release();
-            }
+            errdefer self.hci.setPeripheralListener(.{});
             self.started = true;
         }
 
@@ -131,7 +131,7 @@ pub fn Peripheral(comptime lib: type) type {
                         .svc_uuid = svc.uuid,
                         .char_uuid = ch.uuid,
                         .config = ch.config,
-                    }) catch return;
+                    }) catch std.debug.panic("OOM rebuilding peripheral GATT chars", .{});
                 }
             }
             self.rebuildAttributeLayoutLocked();
@@ -142,6 +142,13 @@ pub fn Peripheral(comptime lib: type) type {
             defer self.mutex.unlock();
             self.request_ctx = ctx;
             self.request_handler = func;
+        }
+
+        pub fn clearRequestHandler(self: *Self) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            self.request_ctx = null;
+            self.request_handler = null;
         }
 
         pub fn startAdvertising(self: *Self, config: bt.AdvConfig) bt.AdvError!void {
@@ -247,10 +254,38 @@ pub fn Peripheral(comptime lib: type) type {
             self.hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch return;
         }
 
+        pub fn removeEventHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, bt.PeripheralEvent) void) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            var i: usize = 0;
+            while (i < self.hooks.items.len) {
+                const hook = self.hooks.items[i];
+                if (hook.ctx == ctx and hook.cb == cb) {
+                    _ = self.hooks.orderedRemove(i);
+                    continue;
+                }
+                i += 1;
+            }
+        }
+
         pub fn addSubscriptionHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, SubscriptionInfo) void) void {
             self.mutex.lock();
             defer self.mutex.unlock();
             self.subscription_hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch return;
+        }
+
+        pub fn removeSubscriptionHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, SubscriptionInfo) void) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            var i: usize = 0;
+            while (i < self.subscription_hooks.items.len) {
+                const hook = self.subscription_hooks.items[i];
+                if (hook.ctx == ctx and hook.cb == cb) {
+                    _ = self.subscription_hooks.orderedRemove(i);
+                    continue;
+                }
+                i += 1;
+            }
         }
 
         fn findCharHandle(self: *Self, char_uuid: u16) ?u16 {
@@ -302,7 +337,7 @@ pub fn Peripheral(comptime lib: type) type {
                     .uuid = entry.svc_uuid,
                     .start_handle = start_handle,
                     .end_handle = next_handle - 1,
-                }) catch return;
+                }) catch std.debug.panic("OOM rebuilding peripheral GATT services", .{});
             }
         }
 
@@ -362,6 +397,10 @@ pub fn Peripheral(comptime lib: type) type {
         fn onDisconnected(ctx: ?*anyopaque, conn_handle: u16, _: u8) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
             self.mutex.lock();
+            if (conn_handle != self.conn_handle) {
+                self.mutex.unlock();
+                return;
+            }
             self.state = .idle;
             self.conn_handle = 0;
             self.mtu = att.DEFAULT_MTU;
@@ -579,6 +618,13 @@ pub fn Peripheral(comptime lib: type) type {
                 }
                 if (entry.cccd_handle == attr_handle) {
                     var subscription_info: ?SubscriptionInfo = null;
+                    if (value.len < 2) {
+                        self.mutex.unlock();
+                        if (needs_response) {
+                            return att.encodeErrorResponse(out, att.WRITE_REQUEST, attr_handle, .invalid_attribute_value_length).len;
+                        }
+                        return 0;
+                    }
                     if (value.len >= 2) {
                         const next_cccd_value = std.mem.readInt(u16, value[0..][0..2], .little);
                         if (entry.cccd_value != next_cccd_value) {
@@ -783,5 +829,39 @@ test "bt/unit_tests/host/Peripheral_setConfig_applies_per_characteristic_propert
     switch (att.decodePdu(out[0..write_denied_len]).?) {
         .error_response => |err| try std.testing.expectEqual(att.ErrorCode.write_not_permitted, err.error_code),
         else => return error.ExpectedWriteNotPermitted,
+    }
+}
+
+test "bt/unit_tests/host/Peripheral_short_cccd_write_returns_invalid_length" {
+    const Impl = Peripheral(std);
+
+    var peripheral = Impl{
+        .hci = undefined,
+        .allocator = std.testing.allocator,
+    };
+    defer peripheral.chars.deinit(std.testing.allocator);
+    defer peripheral.hooks.deinit(std.testing.allocator);
+    defer peripheral.services.deinit(std.testing.allocator);
+
+    peripheral.setConfig(.{
+        .services = &.{
+            bt.Service(0x180D, &.{
+                bt.Char(0x2A37, (bt.CharConfig{}).withNotify()),
+            }),
+        },
+    });
+
+    var out: [att.MAX_PDU_LEN]u8 = undefined;
+    const resp_len = peripheral.handleWrite(
+        1,
+        .write,
+        peripheral.chars.items[0].cccd_handle,
+        &.{0x01},
+        &out,
+        true,
+    );
+    switch (att.decodePdu(out[0..resp_len]).?) {
+        .error_response => |err| try std.testing.expectEqual(att.ErrorCode.invalid_attribute_value_length, err.error_code),
+        else => return error.ExpectedInvalidLength,
     }
 }

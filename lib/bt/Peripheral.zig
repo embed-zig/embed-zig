@@ -207,12 +207,15 @@ pub const VTable = struct {
     stopAdvertising: *const fn (ptr: *anyopaque) void,
     setConfig: *const fn (ptr: *anyopaque, config: GattConfig) void,
     setRequestHandler: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: RequestHandlerFn) void,
+    clearRequestHandler: *const fn (ptr: *anyopaque) void,
     notify: *const fn (ptr: *anyopaque, conn_handle: u16, char_uuid: u16, data: []const u8) GattError!void,
     indicate: *const fn (ptr: *anyopaque, conn_handle: u16, char_uuid: u16, data: []const u8) GattError!void,
     disconnect: *const fn (ptr: *anyopaque, conn_handle: u16) void,
     getState: *const fn (ptr: *anyopaque) State,
     addEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, PeripheralEvent) void) void,
+    removeEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, PeripheralEvent) void) void,
     addSubscriptionHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, SubscriptionInfo) void) void,
+    removeSubscriptionHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, SubscriptionInfo) void) void,
     getAddr: *const fn (ptr: *anyopaque) ?BdAddr,
     deinit: *const fn (ptr: *anyopaque) void,
 };
@@ -245,6 +248,10 @@ pub fn setRequestHandler(self: Peripheral, ctx: ?*anyopaque, cb: RequestHandlerF
     self.vtable.setRequestHandler(self.ptr, ctx, cb);
 }
 
+pub fn clearRequestHandler(self: Peripheral) void {
+    self.vtable.clearRequestHandler(self.ptr);
+}
+
 pub fn notify(self: Peripheral, conn_handle: u16, char_uuid: u16, data: []const u8) GattError!void {
     return self.vtable.notify(self.ptr, conn_handle, char_uuid, data);
 }
@@ -269,15 +276,25 @@ pub fn addEventHook(self: Peripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaq
     self.vtable.addEventHook(self.ptr, ctx, cb);
 }
 
+pub fn removeEventHook(self: Peripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, PeripheralEvent) void) void {
+    self.vtable.removeEventHook(self.ptr, ctx, cb);
+}
+
+/// Register a best-effort hook for subscription state changes.
+/// Backends that do not surface subscription transitions may ignore it.
 pub fn addSubscriptionHook(self: Peripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, SubscriptionInfo) void) void {
     self.vtable.addSubscriptionHook(self.ptr, ctx, cb);
+}
+
+pub fn removeSubscriptionHook(self: Peripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, SubscriptionInfo) void) void {
+    self.vtable.removeSubscriptionHook(self.ptr, ctx, cb);
 }
 
 pub fn wrap(pointer: anytype) Peripheral {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);
     if (info != .pointer or info.pointer.size != .one)
-        @compileError("Peripheral.init expects a single-item pointer");
+        @compileError("Peripheral.wrap expects a single-item pointer");
 
     const Impl = info.pointer.child;
 
@@ -312,6 +329,13 @@ pub fn wrap(pointer: anytype) Peripheral {
             self.setRequestHandler(ctx, cb);
         }
 
+        fn clearRequestHandlerFn(ptr: *anyopaque) void {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            if (@hasDecl(Impl, "clearRequestHandler")) {
+                self.clearRequestHandler();
+            }
+        }
+
         fn notifyFn(ptr: *anyopaque, conn_handle: u16, char_uuid: u16, data: []const u8) GattError!void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             return self.notify(conn_handle, char_uuid, data);
@@ -337,10 +361,24 @@ pub fn wrap(pointer: anytype) Peripheral {
             self.addEventHook(ctx, cb);
         }
 
+        fn removeEventHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, PeripheralEvent) void) void {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            if (@hasDecl(Impl, "removeEventHook")) {
+                self.removeEventHook(ctx, cb);
+            }
+        }
+
         fn addSubscriptionHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, SubscriptionInfo) void) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             if (@hasDecl(Impl, "addSubscriptionHook")) {
                 self.addSubscriptionHook(ctx, cb);
+            }
+        }
+
+        fn removeSubscriptionHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, SubscriptionInfo) void) void {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            if (@hasDecl(Impl, "removeSubscriptionHook")) {
+                self.removeSubscriptionHook(ctx, cb);
             }
         }
 
@@ -361,12 +399,15 @@ pub fn wrap(pointer: anytype) Peripheral {
             .stopAdvertising = stopAdvertisingFn,
             .setConfig = setConfigFn,
             .setRequestHandler = setRequestHandlerFn,
+            .clearRequestHandler = clearRequestHandlerFn,
             .notify = notifyFn,
             .indicate = indicateFn,
             .disconnect = disconnectFn,
             .getState = getStateFn,
             .addEventHook = addEventHookFn,
+            .removeEventHook = removeEventHookFn,
             .addSubscriptionHook = addSubscriptionHookFn,
+            .removeSubscriptionHook = removeSubscriptionHookFn,
             .getAddr = getAddrFn,
             .deinit = deinitFn,
         };
@@ -376,4 +417,32 @@ pub fn wrap(pointer: anytype) Peripheral {
         .ptr = pointer,
         .vtable = &gen.vtable,
     };
+}
+
+test "bt/unit_tests/Peripheral_wrap_allows_missing_subscription_hook" {
+    const Impl = struct {
+        pub fn start(_: *@This()) StartError!void {}
+        pub fn stop(_: *@This()) void {}
+        pub fn startAdvertising(_: *@This(), _: AdvConfig) AdvError!void {}
+        pub fn stopAdvertising(_: *@This()) void {}
+        pub fn setConfig(_: *@This(), _: GattConfig) void {}
+        pub fn setRequestHandler(_: *@This(), _: ?*anyopaque, _: RequestHandlerFn) void {}
+        pub fn notify(_: *@This(), _: u16, _: u16, _: []const u8) GattError!void {}
+        pub fn indicate(_: *@This(), _: u16, _: u16, _: []const u8) GattError!void {}
+        pub fn disconnect(_: *@This(), _: u16) void {}
+        pub fn getState(_: *@This()) State {
+            return .idle;
+        }
+        pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, PeripheralEvent) void) void {}
+        pub fn getAddr(_: *@This()) ?BdAddr {
+            return null;
+        }
+        pub fn deinit(_: *@This()) void {}
+    };
+
+    var impl = Impl{};
+    const peripheral = wrap(&impl);
+    peripheral.addSubscriptionHook(null, struct {
+        fn onHook(_: ?*anyopaque, _: SubscriptionInfo) void {}
+    }.onHook);
 }

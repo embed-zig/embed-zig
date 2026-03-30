@@ -9,7 +9,7 @@
 //! Usage:
 //!   var h4 = H4Uart.init(&uart);
 //!   var transport = Transport.init(&h4);
-//!   const HciType = Hci(embed);
+//!   const HciType = @import("bt/host/Hci.zig").Hci(embed);
 //!   var hci = HciType.init(transport, .{});
 
 const Transport = @This();

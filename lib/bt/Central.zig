@@ -3,7 +3,7 @@
 //! This is the backend-facing VTable surface. It exposes scanning,
 //! connection management, GATT discovery, and raw attribute operations.
 //! Higher-level concepts like Conn/Char/Subscription are built on top
-//! in `central/Host.zig`.
+//! in the host-side helpers under `lib/bt/host/`.
 
 const Central = @This();
 
@@ -26,7 +26,11 @@ pub const State = enum {
 
 pub const ScanConfig = struct {
     active: bool = true,
+    /// Scan interval in milliseconds. Backends that speak raw HCI must convert
+    /// this to controller-specific scan units.
     interval_ms: u16 = 10,
+    /// Scan window in milliseconds. Backends that speak raw HCI must convert
+    /// this to controller-specific scan units.
     window_ms: u16 = 10,
     filter_duplicates: bool = true,
     timeout_ms: u32 = 0,
@@ -139,6 +143,7 @@ pub const VTable = struct {
     unsubscribe: *const fn (ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void,
     getState: *const fn (ptr: *anyopaque) State,
     addEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void,
+    removeEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void,
     getAddr: *const fn (ptr: *anyopaque) ?BdAddr,
     deinit: *const fn (ptr: *anyopaque) void,
 };
@@ -222,6 +227,7 @@ pub fn resolveChar(self: Central, conn_handle: u16, svc_uuid: u16, char_uuid: u1
             break;
         }
     }
+    if (service == null and svc_count == services.len) return error.AttError;
     const found_service = service orelse return error.AttError;
 
     var chars: [16]DiscoveredChar = undefined;
@@ -229,6 +235,7 @@ pub fn resolveChar(self: Central, conn_handle: u16, svc_uuid: u16, char_uuid: u1
     for (chars[0..char_count]) |ch| {
         if (ch.uuid == char_uuid) return ch;
     }
+    if (char_count == chars.len) return error.AttError;
     return error.AttError;
 }
 
@@ -248,12 +255,16 @@ pub fn addEventHook(self: Central, ctx: ?*anyopaque, cb: *const fn (?*anyopaque,
     self.vtable.addEventHook(self.ptr, ctx, cb);
 }
 
+pub fn removeEventHook(self: Central, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void {
+    self.vtable.removeEventHook(self.ptr, ctx, cb);
+}
+
 /// Wrap a pointer to any concrete Central implementation into a Central.
 pub fn wrap(pointer: anytype) Central {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);
     if (info != .pointer or info.pointer.size != .one)
-        @compileError("Central.init expects a single-item pointer");
+        @compileError("Central.wrap expects a single-item pointer");
 
     const Impl = info.pointer.child;
 
@@ -303,7 +314,7 @@ pub fn wrap(pointer: anytype) Central {
             if (@hasDecl(Impl, "gattWriteNoResp")) {
                 return self.gattWriteNoResp(conn_handle, attr_handle, data);
             }
-            return self.gattWrite(conn_handle, attr_handle, data);
+            return error.Unexpected;
         }
         fn subscribeFn(ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
@@ -314,7 +325,7 @@ pub fn wrap(pointer: anytype) Central {
             if (@hasDecl(Impl, "subscribeIndications")) {
                 return self.subscribeIndications(conn_handle, cccd_handle);
             }
-            return self.subscribe(conn_handle, cccd_handle);
+            return error.Unexpected;
         }
         fn unsubscribeFn(ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
@@ -327,6 +338,12 @@ pub fn wrap(pointer: anytype) Central {
         fn addEventHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             self.addEventHook(ctx, cb);
+        }
+        fn removeEventHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            if (@hasDecl(Impl, "removeEventHook")) {
+                self.removeEventHook(ctx, cb);
+            }
         }
         fn getAddrFn(ptr: *anyopaque) ?BdAddr {
             const self: *Impl = @ptrCast(@alignCast(ptr));
@@ -354,6 +371,7 @@ pub fn wrap(pointer: anytype) Central {
             .unsubscribe = unsubscribeFn,
             .getState = getStateFn,
             .addEventHook = addEventHookFn,
+            .removeEventHook = removeEventHookFn,
             .getAddr = getAddrFn,
             .deinit = deinitFn,
         };
@@ -363,4 +381,43 @@ pub fn wrap(pointer: anytype) Central {
         .ptr = pointer,
         .vtable = &gen.vtable,
     };
+}
+
+test "bt/unit_tests/Central_wrap_does_not_silently_downgrade_optional_gatt_ops" {
+    const Impl = struct {
+        pub fn start(_: *@This()) StartError!void {}
+        pub fn stop(_: *@This()) void {}
+        pub fn startScanning(_: *@This(), _: ScanConfig) ScanError!void {}
+        pub fn stopScanning(_: *@This()) void {}
+        pub fn connect(_: *@This(), _: BdAddr, _: AddrType, _: ConnParams) ConnectError!ConnectionInfo {
+            return error.Rejected;
+        }
+        pub fn disconnect(_: *@This(), _: u16) void {}
+        pub fn discoverServices(_: *@This(), _: u16, _: []DiscoveredService) GattError!usize {
+            return 0;
+        }
+        pub fn discoverChars(_: *@This(), _: u16, _: u16, _: u16, _: []DiscoveredChar) GattError!usize {
+            return 0;
+        }
+        pub fn gattRead(_: *@This(), _: u16, _: u16, _: []u8) GattError!usize {
+            return 0;
+        }
+        pub fn gattWrite(_: *@This(), _: u16, _: u16, _: []const u8) GattError!void {}
+        pub fn subscribe(_: *@This(), _: u16, _: u16) GattError!void {}
+        pub fn unsubscribe(_: *@This(), _: u16, _: u16) GattError!void {}
+        pub fn getState(_: *@This()) State {
+            return .idle;
+        }
+        pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, CentralEvent) void) void {}
+        pub fn getAddr(_: *@This()) ?BdAddr {
+            return null;
+        }
+        pub fn deinit(_: *@This()) void {}
+    };
+
+    var impl = Impl{};
+    const central = wrap(&impl);
+
+    try @import("std").testing.expectError(error.Unexpected, central.gattWriteNoResp(1, 2, "x"));
+    try @import("std").testing.expectError(error.Unexpected, central.subscribeIndications(1, 2));
 }

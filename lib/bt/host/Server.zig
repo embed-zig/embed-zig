@@ -3,8 +3,6 @@
 const std = @import("std");
 const bt = @import("../../bt.zig");
 const att = @import("att.zig");
-const RequestMod = @import("server/Request.zig");
-const ResponseWriterMod = @import("server/ResponseWriter.zig");
 const SubscriptionMod = @import("server/Subscription.zig");
 const xfer_chunk = @import("client/xfer/chunk.zig");
 
@@ -12,9 +10,18 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
     return struct {
         const Self = @This();
 
-        pub const Request = RequestMod.Request;
-        pub const ResponseWriter = ResponseWriterMod.ResponseWriter;
+        pub const Request = bt.Peripheral.Request;
+        pub const ResponseWriter = bt.Peripheral.ResponseWriter;
+        pub const ReadXRequest = @import("server/xfer/ReadXRequest.zig");
+        pub const WriteXRequest = @import("server/xfer/WriteXRequest.zig");
+        pub const ReadXResponseWriter = @import("server/xfer/ReadXResponseWriter.zig");
         pub const HandlerFn = *const fn (?*anyopaque, *const Request, *ResponseWriter) void;
+        pub const ReadXHandlerFn = *const fn (?*anyopaque, *const ReadXRequest, *ReadXResponseWriter) void;
+        pub const WriteXHandlerFn = *const fn (?*anyopaque, *const WriteXRequest) void;
+        pub const XHandler = struct {
+            read: ?ReadXHandlerFn = null,
+            write: ?WriteXHandlerFn = null,
+        };
         pub const Subscription = SubscriptionMod.Subscription(lib, Self);
         pub const PushMode = enum {
             notify,
@@ -28,17 +35,24 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
 
         const SubscriptionState = Subscription.State;
         const AcceptCh = Channel(*SubscriptionState);
-        const RouteProtocol = enum {
-            plain,
-            xfer,
-        };
-
-        const Route = struct {
+        const CharKey = struct {
             service_uuid: u16,
             char_uuid: u16,
+        };
+        const PlainRoute = struct {
             handler: HandlerFn,
             ctx: ?*anyopaque,
-            protocol: RouteProtocol,
+        };
+        const XferRoute = struct {
+            callbacks: XHandler,
+            ctx: ?*anyopaque,
+        };
+        const RouteKind = union(enum) {
+            plain: PlainRoute,
+            xfer: XferRoute,
+        };
+        const Route = struct {
+            kind: RouteKind,
         };
 
         const BufferedResponseState = struct {
@@ -50,11 +64,10 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
                 self.buf.deinit(self.allocator);
             }
 
-            fn writer(self: *BufferedResponseState) ResponseWriter {
+            fn writer(self: *BufferedResponseState) ReadXResponseWriter {
                 return .{
                     ._impl = self,
                     ._write_fn = writeFn,
-                    ._ok_fn = okFn,
                     ._err_fn = errFn,
                 };
             }
@@ -75,8 +88,6 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
                     }
                 };
             }
-
-            fn okFn(_: *anyopaque) void {}
 
             fn errFn(ptr: *anyopaque, code: u8) void {
                 const self: *BufferedResponseState = @ptrCast(@alignCast(ptr));
@@ -111,6 +122,43 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
                 self.recv_buf = null;
             }
         };
+        const ConnState = struct {
+            subscriptions: lib.AutoHashMapUnmanaged(CharKey, *SubscriptionState) = .{},
+            read_x_states: lib.AutoHashMapUnmanaged(CharKey, ReadXState) = .{},
+            write_x_states: lib.AutoHashMapUnmanaged(CharKey, WriteXState) = .{},
+
+            fn isEmpty(self: *const ConnState) bool {
+                return self.subscriptions.count() == 0 and
+                    self.read_x_states.count() == 0 and
+                    self.write_x_states.count() == 0;
+            }
+
+            fn deinit(self: *ConnState, allocator: lib.mem.Allocator) void {
+                var subs = self.subscriptions.iterator();
+                while (subs.next()) |entry| {
+                    const state = entry.value_ptr.*;
+                    Subscription.close(state);
+                    if (state.internal) {
+                        Subscription.destroyState(state);
+                    }
+                }
+
+                var read_iter = self.read_x_states.iterator();
+                while (read_iter.next()) |entry| {
+                    allocator.free(entry.value_ptr.data);
+                }
+
+                var write_iter = self.write_x_states.iterator();
+                while (write_iter.next()) |entry| {
+                    entry.value_ptr.deinit(allocator);
+                }
+
+                self.subscriptions.deinit(allocator);
+                self.read_x_states.deinit(allocator);
+                self.write_x_states.deinit(allocator);
+                self.* = .{};
+            }
+        };
 
         const default_xfer_mtu: u16 = 247;
 
@@ -119,10 +167,8 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
         hook_installed: bool = false,
         mutex: lib.Thread.Mutex = .{},
         cond: lib.Thread.Condition = .{},
-        routes: std.ArrayListUnmanaged(Route) = .{},
-        subscriptions: std.ArrayListUnmanaged(*SubscriptionState) = .{},
-        read_x_states: std.ArrayListUnmanaged(ReadXState) = .{},
-        write_x_states: std.ArrayListUnmanaged(WriteXState) = .{},
+        routes: lib.AutoHashMapUnmanaged(CharKey, Route) = .{},
+        conns: lib.AutoHashMapUnmanaged(u16, ConnState) = .{},
         accept_ch: AcceptCh,
         queued_count: usize = 0,
         enqueue_inflight: usize = 0,
@@ -151,6 +197,15 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
         }
 
         pub fn deinit(self: *Self) void {
+            if (self.hook_installed) {
+                if (self.peripheral) |peripheral| {
+                    peripheral.removeEventHook(self, onPeripheralEvent);
+                    peripheral.removeSubscriptionHook(self, onSubscriptionChanged);
+                    peripheral.clearRequestHandler();
+                }
+                self.hook_installed = false;
+            }
+
             self.mutex.lock();
             self.closed = true;
             self.cond.broadcast();
@@ -162,21 +217,11 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             while (self.enqueue_inflight != 0) {
                 self.cond.wait(&self.mutex);
             }
-            for (self.subscriptions.items) |state| {
-                Subscription.close(state);
-                if (state.internal) {
-                    Subscription.destroyState(state);
-                }
+            var conn_iter = self.conns.iterator();
+            while (conn_iter.next()) |entry| {
+                entry.value_ptr.deinit(self.allocator);
             }
-            for (self.read_x_states.items) |state| {
-                self.allocator.free(state.data);
-            }
-            for (self.write_x_states.items) |*state| {
-                state.deinit(self.allocator);
-            }
-            self.subscriptions.deinit(self.allocator);
-            self.read_x_states.deinit(self.allocator);
-            self.write_x_states.deinit(self.allocator);
+            self.conns.deinit(self.allocator);
             self.routes.deinit(self.allocator);
             self.mutex.unlock();
             while (true) {
@@ -187,7 +232,6 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             self.accept_ch.deinit();
 
             self.peripheral = null;
-            self.hook_installed = false;
         }
 
         pub fn start(self: *Self) bt.Peripheral.StartError!void {
@@ -219,11 +263,12 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
         }
 
         pub fn handle(self: *Self, service_uuid: u16, char_uuid: u16, handler: HandlerFn, ctx: ?*anyopaque) HandleError!void {
-            return self.registerRoute(service_uuid, char_uuid, handler, ctx, .plain);
+            return self.registerPlainRoute(service_uuid, char_uuid, handler, ctx);
         }
 
-        pub fn handleX(self: *Self, service_uuid: u16, char_uuid: u16, handler: HandlerFn, ctx: ?*anyopaque) HandleError!void {
-            return self.registerRoute(service_uuid, char_uuid, handler, ctx, .xfer);
+        /// Registers logical xfer handlers for client `readX` / `writeX` traffic.
+        pub fn handleX(self: *Self, service_uuid: u16, char_uuid: u16, handler: XHandler, ctx: ?*anyopaque) HandleError!void {
+            return self.registerXferRoute(service_uuid, char_uuid, handler, ctx);
         }
 
         pub fn accept(self: *Self, timeout_ms: ?u32) AcceptError!?Subscription {
@@ -249,8 +294,18 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
                 self.queued_count -= 1;
                 self.mutex.unlock();
 
-                const recv_res = self.accept_ch.recv() catch return null;
-                if (!recv_res.ok) return null;
+                const recv_res = self.accept_ch.recv() catch {
+                    self.mutex.lock();
+                    self.queued_count += 1;
+                    self.mutex.unlock();
+                    return null;
+                };
+                if (!recv_res.ok) {
+                    self.mutex.lock();
+                    self.queued_count += 1;
+                    self.mutex.unlock();
+                    return null;
+                }
 
                 const state = recv_res.value;
                 state.mutex.lock();
@@ -281,6 +336,34 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             return self.peripheral orelse @panic("host.Server used before Host.server() binding");
         }
 
+        fn charKey(service_uuid: u16, char_uuid: u16) CharKey {
+            return .{
+                .service_uuid = service_uuid,
+                .char_uuid = char_uuid,
+            };
+        }
+
+        fn getOrPutConnLocked(self: *Self, conn_handle: u16) !*ConnState {
+            const gop = try self.conns.getOrPut(self.allocator, conn_handle);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .{};
+            }
+            return gop.value_ptr;
+        }
+
+        fn pruneConnIfEmptyLocked(self: *Self, conn_handle: u16) void {
+            const conn = self.conns.getPtr(conn_handle) orelse return;
+            if (conn.isEmpty()) {
+                _ = self.conns.remove(conn_handle);
+            }
+        }
+
+        fn takeConnLocked(self: *Self, conn_handle: u16) ?ConnState {
+            const conn = self.conns.get(conn_handle) orelse return null;
+            _ = self.conns.remove(conn_handle);
+            return conn;
+        }
+
         fn onRequest(ctx: ?*anyopaque, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
             self.dispatchRequest(req, rw);
@@ -292,9 +375,9 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             self.mutex.unlock();
 
             if (route) |matched| {
-                switch (matched.protocol) {
-                    .plain => matched.handler(matched.ctx, req, rw),
-                    .xfer => self.dispatchXferRequest(matched, req, rw),
+                switch (matched.kind) {
+                    .plain => |plain| plain.handler(plain.ctx, req, rw),
+                    .xfer => |xfer| self.dispatchXferRequest(xfer, req, rw),
                 }
                 return;
             }
@@ -324,7 +407,10 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             }
 
             const internal = if (self.findRouteLocked(info.service_uuid, info.char_uuid)) |route|
-                route.protocol == .xfer
+                switch (route.kind) {
+                    .plain => false,
+                    .xfer => true,
+                }
             else
                 false;
 
@@ -341,7 +427,12 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
                 return;
             };
 
-            self.subscriptions.append(self.allocator, sub.state) catch {
+            const conn = self.getOrPutConnLocked(info.conn_handle) catch {
+                self.mutex.unlock();
+                Subscription.destroyState(sub.state);
+                return;
+            };
+            conn.subscriptions.put(self.allocator, charKey(info.service_uuid, info.char_uuid), sub.state) catch {
                 self.mutex.unlock();
                 Subscription.destroyState(sub.state);
                 return;
@@ -380,94 +471,93 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
 
         fn handleDisconnect(self: *Self, conn_handle: u16) void {
             self.mutex.lock();
-            var i: usize = 0;
-            while (i < self.subscriptions.items.len) {
-                const state = self.subscriptions.items[i];
-                if (Subscription.matchesConn(state, conn_handle)) {
-                    _ = self.subscriptions.orderedRemove(i);
-                    Subscription.close(state);
-                    if (state.internal) {
-                        Subscription.destroyState(state);
-                    }
-                    continue;
-                }
-                i += 1;
+            if (self.takeConnLocked(conn_handle)) |conn_state| {
+                var conn = conn_state;
+                conn.deinit(self.allocator);
             }
-            self.clearXferForConnLocked(conn_handle);
             self.mutex.unlock();
         }
 
         fn closeMatchingLocked(self: *Self, conn_handle: u16, service_uuid: u16, char_uuid: u16) void {
-            var i: usize = 0;
-            while (i < self.subscriptions.items.len) {
-                const state = self.subscriptions.items[i];
-                if (Subscription.matches(state, conn_handle, service_uuid, char_uuid)) {
-                    _ = self.subscriptions.orderedRemove(i);
-                    Subscription.close(state);
-                    if (state.internal) {
-                        Subscription.destroyState(state);
-                    }
-                    continue;
+            const conn = self.conns.getPtr(conn_handle) orelse return;
+            const key = charKey(service_uuid, char_uuid);
+
+            if (conn.subscriptions.get(key)) |state| {
+                _ = conn.subscriptions.remove(key);
+                Subscription.close(state);
+                if (state.internal) {
+                    Subscription.destroyState(state);
                 }
-                i += 1;
             }
-            self.clearReadXStateLocked(conn_handle, service_uuid, char_uuid);
-            self.clearWriteXStateLocked(conn_handle, service_uuid, char_uuid);
+            self.clearReadXStateInConnLocked(conn, key);
+            self.clearWriteXStateInConnLocked(conn, key);
+            self.pruneConnIfEmptyLocked(conn_handle);
         }
 
         fn removeSubscriptionLocked(self: *Self, state: *SubscriptionState) bool {
-            for (self.subscriptions.items, 0..) |item, i| {
-                if (item == state) {
-                    _ = self.subscriptions.orderedRemove(i);
-                    return true;
-                }
+            const conn = self.conns.getPtr(state.conn_handle) orelse return false;
+            const key = charKey(state.service_uuid, state.char_uuid);
+            const existing = conn.subscriptions.get(key) orelse return false;
+            if (existing != state) {
+                return false;
             }
-            return false;
+            _ = conn.subscriptions.remove(key);
+            self.pruneConnIfEmptyLocked(state.conn_handle);
+            return true;
         }
 
-        fn registerRoute(
+        fn registerPlainRoute(
             self: *Self,
             service_uuid: u16,
             char_uuid: u16,
             handler: HandlerFn,
             ctx: ?*anyopaque,
-            protocol: RouteProtocol,
         ) HandleError!void {
             self.mutex.lock();
             defer self.mutex.unlock();
 
-            for (self.routes.items) |*route| {
-                if (route.service_uuid == service_uuid and route.char_uuid == char_uuid) {
-                    route.* = .{
-                        .service_uuid = service_uuid,
-                        .char_uuid = char_uuid,
-                        .handler = handler,
-                        .ctx = ctx,
-                        .protocol = protocol,
-                    };
-                    return;
-                }
-            }
+            return self.upsertRouteLocked(service_uuid, char_uuid, .{
+                .plain = .{
+                    .handler = handler,
+                    .ctx = ctx,
+                },
+            });
+        }
 
-            self.routes.append(self.allocator, .{
-                .service_uuid = service_uuid,
-                .char_uuid = char_uuid,
-                .handler = handler,
-                .ctx = ctx,
-                .protocol = protocol,
+        fn registerXferRoute(
+            self: *Self,
+            service_uuid: u16,
+            char_uuid: u16,
+            handler: XHandler,
+            ctx: ?*anyopaque,
+        ) HandleError!void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            return self.upsertRouteLocked(service_uuid, char_uuid, .{
+                .xfer = .{
+                    .callbacks = handler,
+                    .ctx = ctx,
+                },
+            });
+        }
+
+        fn upsertRouteLocked(
+            self: *Self,
+            service_uuid: u16,
+            char_uuid: u16,
+            kind: RouteKind,
+        ) HandleError!void {
+            self.routes.put(self.allocator, charKey(service_uuid, char_uuid), .{
+                .kind = kind,
             }) catch return error.Unexpected;
         }
 
         fn findRouteLocked(self: *Self, service_uuid: u16, char_uuid: u16) ?Route {
-            for (self.routes.items) |item| {
-                if (item.service_uuid == service_uuid and item.char_uuid == char_uuid) {
-                    return item;
-                }
-            }
-            return null;
+            return self.routes.get(charKey(service_uuid, char_uuid));
         }
 
-        fn dispatchXferRequest(self: *Self, route: Route, req: *const Request, rw: *ResponseWriter) void {
+        fn dispatchXferRequest(self: *Self, route: XferRoute, req: *const Request, rw: *ResponseWriter) void {
             switch (req.op) {
                 .write, .write_without_response => {},
                 .read => {
@@ -481,7 +571,7 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
                 return;
             }
             if (xfer_chunk.isWriteStartMagic(req.data)) {
-                self.handleXWriteStart(req, rw);
+                self.handleXWriteStart(route, req, rw);
                 return;
             }
             if (self.handleXWriteChunk(route, req, rw)) return;
@@ -494,7 +584,11 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
         }
 
-        fn handleXReadStart(self: *Self, route: Route, req: *const Request, rw: *ResponseWriter) void {
+        fn handleXReadStart(self: *Self, route: XferRoute, req: *const Request, rw: *ResponseWriter) void {
+            const read_handler = route.callbacks.read orelse {
+                rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                return;
+            };
             const mode = self.subscriptionMode(req.conn_handle, req.service_uuid, req.char_uuid) orelse {
                 rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                 return;
@@ -504,14 +598,12 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             defer buffered.deinit();
 
             var handler_rw = buffered.writer();
-            const handler_req: Request = .{
-                .op = .read,
+            const handler_req: ReadXRequest = .{
                 .conn_handle = req.conn_handle,
                 .service_uuid = req.service_uuid,
                 .char_uuid = req.char_uuid,
-                .data = &.{},
             };
-            route.handler(route.ctx, &handler_req, &handler_rw);
+            read_handler(route.ctx, &handler_req, &handler_rw);
 
             if (buffered.err_code) |code| {
                 rw.err(code);
@@ -534,7 +626,13 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             self.mutex.lock();
             self.clearReadXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
             self.clearWriteXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
-            self.read_x_states.append(self.allocator, .{
+            const conn = self.conns.getPtr(req.conn_handle) orelse {
+                self.mutex.unlock();
+                self.allocator.free(payload);
+                rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                return;
+            };
+            conn.read_x_states.put(self.allocator, charKey(req.service_uuid, req.char_uuid), .{
                 .conn_handle = req.conn_handle,
                 .service_uuid = req.service_uuid,
                 .char_uuid = req.char_uuid,
@@ -551,10 +649,18 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             self.mutex.unlock();
 
             rw.ok();
-            self.sendReadXChunks(req.conn_handle, req.service_uuid, req.char_uuid, null) catch {};
+            self.sendReadXChunks(req.conn_handle, req.service_uuid, req.char_uuid, null) catch {
+                self.mutex.lock();
+                self.clearReadXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
+                self.mutex.unlock();
+            };
         }
 
-        fn handleXWriteStart(self: *Self, req: *const Request, rw: *ResponseWriter) void {
+        fn handleXWriteStart(self: *Self, route: XferRoute, req: *const Request, rw: *ResponseWriter) void {
+            if (route.callbacks.write == null) {
+                rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                return;
+            }
             const mode = self.subscriptionMode(req.conn_handle, req.service_uuid, req.char_uuid) orelse {
                 rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                 return;
@@ -563,7 +669,12 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             self.mutex.lock();
             self.clearReadXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
             self.clearWriteXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
-            self.write_x_states.append(self.allocator, .{
+            const conn = self.conns.getPtr(req.conn_handle) orelse {
+                self.mutex.unlock();
+                rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                return;
+            };
+            conn.write_x_states.put(self.allocator, charKey(req.service_uuid, req.char_uuid), .{
                 .conn_handle = req.conn_handle,
                 .service_uuid = req.service_uuid,
                 .char_uuid = req.char_uuid,
@@ -577,14 +688,17 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             rw.ok();
         }
 
-        fn handleXWriteChunk(self: *Self, route: Route, req: *const Request, rw: *ResponseWriter) bool {
+        fn handleXWriteChunk(self: *Self, route: XferRoute, req: *const Request, rw: *ResponseWriter) bool {
             self.mutex.lock();
-            const idx = self.findWriteXStateIndexLocked(req.conn_handle, req.service_uuid, req.char_uuid) orelse {
+            const conn = self.conns.getPtr(req.conn_handle) orelse {
+                self.mutex.unlock();
+                return false;
+            };
+            const state = conn.write_x_states.getPtr(charKey(req.service_uuid, req.char_uuid)) orelse {
                 self.mutex.unlock();
                 return false;
             };
 
-            const state = &self.write_x_states.items[idx];
             if (req.data.len < xfer_chunk.header_size) {
                 self.mutex.unlock();
                 rw.err(@intFromEnum(att.ErrorCode.invalid_attribute_value_length));
@@ -649,7 +763,7 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             if (!should_reply) return true;
 
             if (complete) {
-                self.invokeXferWriteHandler(route, conn_handle, service_uuid, char_uuid, data);
+                invokeXferWriteHandler(route, conn_handle, service_uuid, char_uuid, data);
                 self.push(conn_handle, char_uuid, mode, &xfer_chunk.ack_signal) catch {};
                 self.mutex.lock();
                 self.clearWriteXStateLocked(conn_handle, service_uuid, char_uuid);
@@ -657,7 +771,11 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
                 return true;
             }
 
-            self.sendWriteXLossList(conn_handle, service_uuid, char_uuid, mode) catch {};
+            self.sendWriteXLossList(conn_handle, service_uuid, char_uuid, mode) catch {
+                self.mutex.lock();
+                self.clearWriteXStateLocked(conn_handle, service_uuid, char_uuid);
+                self.mutex.unlock();
+            };
             return true;
         }
 
@@ -672,35 +790,37 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             if ((req.data.len % 2) != 0 or req.data.len == 0) return false;
 
             self.mutex.lock();
-            const exists = self.findReadXStateIndexLocked(req.conn_handle, req.service_uuid, req.char_uuid) != null;
+            const exists = if (self.conns.getPtr(req.conn_handle)) |conn|
+                conn.read_x_states.get(charKey(req.service_uuid, req.char_uuid)) != null
+            else
+                false;
             self.mutex.unlock();
             if (!exists) return false;
 
             rw.ok();
-            self.sendReadXChunks(req.conn_handle, req.service_uuid, req.char_uuid, req.data) catch {};
+            self.sendReadXChunks(req.conn_handle, req.service_uuid, req.char_uuid, req.data) catch {
+                self.mutex.lock();
+                self.clearReadXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
+                self.mutex.unlock();
+            };
             return true;
         }
 
         fn invokeXferWriteHandler(
-            self: *Self,
-            route: Route,
+            route: XferRoute,
             conn_handle: u16,
             service_uuid: u16,
             char_uuid: u16,
             data: []const u8,
         ) void {
-            var buffered = BufferedResponseState{ .allocator = self.allocator };
-            defer buffered.deinit();
-
-            var handler_rw = buffered.writer();
-            const handler_req: Request = .{
-                .op = .write,
+            const write_handler = route.callbacks.write orelse return;
+            const handler_req: WriteXRequest = .{
                 .conn_handle = conn_handle,
                 .service_uuid = service_uuid,
                 .char_uuid = char_uuid,
                 .data = data,
             };
-            route.handler(route.ctx, &handler_req, &handler_rw);
+            write_handler(route.ctx, &handler_req);
         }
 
         fn sendReadXChunks(
@@ -711,11 +831,14 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             loss_list: ?[]const u8,
         ) PushError!void {
             self.mutex.lock();
-            const idx = self.findReadXStateIndexLocked(conn_handle, service_uuid, char_uuid) orelse {
+            const conn = self.conns.getPtr(conn_handle) orelse {
                 self.mutex.unlock();
                 return;
             };
-            const state = self.read_x_states.items[idx];
+            const state = conn.read_x_states.get(charKey(service_uuid, char_uuid)) orelse {
+                self.mutex.unlock();
+                return;
+            };
             self.mutex.unlock();
 
             var selected: [260]u16 = undefined;
@@ -772,11 +895,14 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             mode: PushMode,
         ) PushError!void {
             self.mutex.lock();
-            const idx = self.findWriteXStateIndexLocked(conn_handle, service_uuid, char_uuid) orelse {
+            const conn = self.conns.getPtr(conn_handle) orelse {
                 self.mutex.unlock();
                 return;
             };
-            const state = self.write_x_states.items[idx];
+            const state = conn.write_x_states.get(charKey(service_uuid, char_uuid)) orelse {
+                self.mutex.unlock();
+                return;
+            };
             self.mutex.unlock();
 
             var missing: [260]u16 = undefined;
@@ -796,66 +922,36 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             self.mutex.lock();
             defer self.mutex.unlock();
 
-            for (self.subscriptions.items) |state| {
-                if (Subscription.matches(state, conn_handle, service_uuid, char_uuid)) {
-                    if ((state.cccd_value & 0x0001) != 0) return .notify;
-                    if ((state.cccd_value & 0x0002) != 0) return .indicate;
-                    return null;
-                }
-            }
+            const conn = self.conns.getPtr(conn_handle) orelse return null;
+            const state = conn.subscriptions.get(charKey(service_uuid, char_uuid)) orelse return null;
+            if ((state.cccd_value & 0x0001) != 0) return .notify;
+            if ((state.cccd_value & 0x0002) != 0) return .indicate;
             return null;
         }
 
-        fn findReadXStateIndexLocked(self: *Self, conn_handle: u16, service_uuid: u16, char_uuid: u16) ?usize {
-            for (self.read_x_states.items, 0..) |state, i| {
-                if (state.conn_handle == conn_handle and state.service_uuid == service_uuid and state.char_uuid == char_uuid) {
-                    return i;
-                }
-            }
-            return null;
-        }
-
-        fn clearReadXStateLocked(self: *Self, conn_handle: u16, service_uuid: u16, char_uuid: u16) void {
-            const idx = self.findReadXStateIndexLocked(conn_handle, service_uuid, char_uuid) orelse return;
-            const state = self.read_x_states.orderedRemove(idx);
+        fn clearReadXStateInConnLocked(self: *Self, conn: *ConnState, key: CharKey) void {
+            const state = conn.read_x_states.get(key) orelse return;
+            _ = conn.read_x_states.remove(key);
             self.allocator.free(state.data);
         }
 
-        fn findWriteXStateIndexLocked(self: *Self, conn_handle: u16, service_uuid: u16, char_uuid: u16) ?usize {
-            for (self.write_x_states.items, 0..) |state, i| {
-                if (state.conn_handle == conn_handle and state.service_uuid == service_uuid and state.char_uuid == char_uuid) {
-                    return i;
-                }
-            }
-            return null;
+        fn clearReadXStateLocked(self: *Self, conn_handle: u16, service_uuid: u16, char_uuid: u16) void {
+            const conn = self.conns.getPtr(conn_handle) orelse return;
+            self.clearReadXStateInConnLocked(conn, charKey(service_uuid, char_uuid));
+            self.pruneConnIfEmptyLocked(conn_handle);
+        }
+
+        fn clearWriteXStateInConnLocked(self: *Self, conn: *ConnState, key: CharKey) void {
+            const state = conn.write_x_states.get(key) orelse return;
+            _ = conn.write_x_states.remove(key);
+            var owned = state;
+            owned.deinit(self.allocator);
         }
 
         fn clearWriteXStateLocked(self: *Self, conn_handle: u16, service_uuid: u16, char_uuid: u16) void {
-            const idx = self.findWriteXStateIndexLocked(conn_handle, service_uuid, char_uuid) orelse return;
-            var state = self.write_x_states.orderedRemove(idx);
-            state.deinit(self.allocator);
-        }
-
-        fn clearXferForConnLocked(self: *Self, conn_handle: u16) void {
-            var read_i: usize = 0;
-            while (read_i < self.read_x_states.items.len) {
-                if (self.read_x_states.items[read_i].conn_handle == conn_handle) {
-                    const state = self.read_x_states.orderedRemove(read_i);
-                    self.allocator.free(state.data);
-                    continue;
-                }
-                read_i += 1;
-            }
-
-            var write_i: usize = 0;
-            while (write_i < self.write_x_states.items.len) {
-                if (self.write_x_states.items[write_i].conn_handle == conn_handle) {
-                    var state = self.write_x_states.orderedRemove(write_i);
-                    state.deinit(self.allocator);
-                    continue;
-                }
-                write_i += 1;
-            }
+            const conn = self.conns.getPtr(conn_handle) orelse return;
+            self.clearWriteXStateInConnLocked(conn, charKey(service_uuid, char_uuid));
+            self.pruneConnIfEmptyLocked(conn_handle);
         }
     };
 }
@@ -967,6 +1063,10 @@ test "bt/integration_tests/host/Server_handleX_reads_and_writes_without_accept_q
     const Mocker = bt.Mocker(std);
     const TestChannel = @import("embed_std").sync.Channel;
     const Host = @import("../Host.zig").Host(std, TestChannel);
+    const ServerType = @FieldType(Host, "server_impl");
+    const ReadXRequest = ServerType.ReadXRequest;
+    const WriteXRequest = ServerType.WriteXRequest;
+    const ReadXResponseWriter = ServerType.ReadXResponseWriter;
 
     const chars = [_]bt.Peripheral.CharDef{
         bt.Peripheral.Char(0x2A57, .{
@@ -983,7 +1083,10 @@ test "bt/integration_tests/host/Server_handleX_reads_and_writes_without_accept_q
         read_value: [600]u8 = undefined,
         write_value: [600]u8 = undefined,
         write_len: usize = 0,
-        last_op: ?bt.Peripheral.Operation = null,
+        last_op: ?enum {
+            read_x,
+            write_x,
+        } = null,
 
         fn init() @This() {
             var self = @This(){};
@@ -993,20 +1096,18 @@ test "bt/integration_tests/host/Server_handleX_reads_and_writes_without_accept_q
             return self;
         }
 
-        fn handle(ctx: ?*anyopaque, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
+        fn handleRead(ctx: ?*anyopaque, req: *const ReadXRequest, rw: *ReadXResponseWriter) void {
             const self: *@This() = @ptrCast(@alignCast(ctx.?));
-            self.last_op = req.op;
-            switch (req.op) {
-                .read => {
-                    rw.write(&self.read_value);
-                    rw.ok();
-                },
-                .write, .write_without_response => {
-                    self.write_len = @min(self.write_value.len, req.data.len);
-                    @memcpy(self.write_value[0..self.write_len], req.data[0..self.write_len]);
-                    rw.ok();
-                },
-            }
+            _ = req;
+            self.last_op = .read_x;
+            rw.write(&self.read_value);
+        }
+
+        fn handleWrite(ctx: ?*anyopaque, req: *const WriteXRequest) void {
+            const self: *@This() = @ptrCast(@alignCast(ctx.?));
+            self.last_op = .write_x;
+            self.write_len = @min(self.write_value.len, req.data.len);
+            @memcpy(self.write_value[0..self.write_len], req.data[0..self.write_len]);
         }
     };
 
@@ -1029,7 +1130,10 @@ test "bt/integration_tests/host/Server_handleX_reads_and_writes_without_accept_q
     });
 
     var handler_state = HandlerState.init();
-    try server.handleX(0x180D, 0x2A57, HandlerState.handle, &handler_state);
+    try server.handleX(0x180D, 0x2A57, .{
+        .read = HandlerState.handleRead,
+        .write = HandlerState.handleWrite,
+    }, &handler_state);
     try server.start();
     defer server.stop();
     try server.startAdvertising(.{
@@ -1043,6 +1147,8 @@ test "bt/integration_tests/host/Server_handleX_reads_and_writes_without_accept_q
     var conn = try client.connect(addr, .public, .{});
     var characteristic = try conn.characteristic(0x180D, 0x2A57);
 
+    try std.testing.expectError(error.AttError, characteristic.write(&xfer_chunk.read_start_magic));
+
     var sub = try characteristic.subscribe();
     try std.testing.expectError(error.TimedOut, server.accept(100));
     sub.deinit();
@@ -1050,13 +1156,104 @@ test "bt/integration_tests/host/Server_handleX_reads_and_writes_without_accept_q
     const read_back = try characteristic.readX(std.testing.allocator);
     defer std.testing.allocator.free(read_back);
     try std.testing.expectEqualSlices(u8, &handler_state.read_value, read_back);
-    try std.testing.expectEqual(@as(?bt.Peripheral.Operation, .read), handler_state.last_op);
+    try std.testing.expectEqual(@as(@TypeOf(handler_state.last_op), .read_x), handler_state.last_op);
 
     var write_value: [600]u8 = undefined;
     for (&write_value, 0..) |*byte, i| {
         byte.* = @intCast((i * 7) % 251);
     }
     try characteristic.writeX(&write_value);
-    try std.testing.expectEqual(@as(?bt.Peripheral.Operation, .write), handler_state.last_op);
+    try std.testing.expectEqual(@as(@TypeOf(handler_state.last_op), .write_x), handler_state.last_op);
     try std.testing.expectEqualSlices(u8, &write_value, handler_state.write_value[0..handler_state.write_len]);
+}
+
+test "bt/integration_tests/host/Server_disconnect_cleans_only_that_connection_state" {
+    const Mocker = bt.Mocker(std);
+    const TestChannel = @import("embed_std").sync.Channel;
+    const Host = @import("../Host.zig").Host(std, TestChannel);
+    const ServerType = @FieldType(Host, "server_impl");
+
+    const chars = [_]bt.Peripheral.CharDef{
+        bt.Peripheral.Char(0x2A37, .{
+            .notify = true,
+        }),
+    };
+    const services = [_]bt.Peripheral.ServiceDef{
+        bt.Peripheral.Service(0x180D, &chars),
+    };
+
+    var mocker = Mocker.init(std.testing.allocator, .{});
+    defer mocker.deinit();
+
+    var central_a: Host = try mocker.createHost(.{});
+    defer central_a.deinit();
+    var central_b: Host = try mocker.createHost(.{});
+    defer central_b.deinit();
+    var peripheral_host: Host = try mocker.createHost(.{
+        .hci = .{
+            .controller_addr = .{ 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6 },
+            .peer_addr = .{ 0x31, 0x32, 0x33, 0x34, 0x35, 0x36 },
+        },
+    });
+    defer peripheral_host.deinit();
+
+    var server = peripheral_host.server();
+    server.setConfig(.{
+        .services = &services,
+    });
+    try server.start();
+    defer server.stop();
+    try server.startAdvertising(.{
+        .device_name = "mock-disconnect",
+        .service_uuids = &.{0x180D},
+    });
+    defer server.stopAdvertising();
+
+    const addr = server.getAddr() orelse return error.NoPeripheralAddr;
+
+    const client_a = central_a.client();
+    var conn_a = try client_a.connect(addr, .public, .{});
+    var char_a = try conn_a.characteristic(0x180D, 0x2A37);
+    var client_sub_a = try char_a.subscribe();
+    defer client_sub_a.deinit();
+
+    const client_b = central_b.client();
+    var conn_b = try client_b.connect(addr, .public, .{});
+    var char_b = try conn_b.characteristic(0x180D, 0x2A37);
+    var client_sub_b = try char_b.subscribe();
+    defer client_sub_b.deinit();
+
+    var server_sub_1 = (try server.accept(1000)) orelse return error.NoServerSubscription;
+    defer server_sub_1.deinit();
+    var server_sub_2 = (try server.accept(1000)) orelse return error.NoServerSubscription;
+    defer server_sub_2.deinit();
+
+    const closed_sub: *ServerType.Subscription = if (server_sub_1.connHandle() == conn_a.connHandle())
+        &server_sub_1
+    else
+        &server_sub_2;
+    const live_sub: *ServerType.Subscription = if (server_sub_1.connHandle() == conn_b.connHandle())
+        &server_sub_1
+    else
+        &server_sub_2;
+
+    conn_a.disconnect();
+
+    var closed = false;
+    for (0..20) |_| {
+        closed_sub.write("stale") catch |err| switch (err) {
+            error.Closed => {
+                closed = true;
+                break;
+            },
+            else => return err,
+        };
+        std.time.sleep(10 * std.time.ns_per_ms);
+    }
+    try std.testing.expect(closed);
+
+    try live_sub.write("ok");
+    const msg = (try client_sub_b.next(1000)) orelse return error.NoSubscriptionMessage;
+    try std.testing.expectEqual(conn_b.connHandle(), msg.conn_handle);
+    try std.testing.expectEqualSlices(u8, "ok", msg.payload());
 }

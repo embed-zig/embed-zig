@@ -1,13 +1,12 @@
 //! bt.Host — generic host bundle type constructor.
 
-const embed_std = @import("embed_std");
 const root = @import("../bt.zig");
 const Central = @import("host/Central.zig").Central;
 const Client = @import("host/Client.zig").Client;
 const Peripheral = @import("host/Peripheral.zig").Peripheral;
 const Server = @import("host/Server.zig").Server;
 
-pub fn make(comptime Impl: type, comptime Channel: fn (type) type) type {
+pub fn make(comptime lib: type, comptime Impl: type, comptime Channel: fn (type) type) type {
     comptime {
         if (!@hasDecl(Impl, "Config")) @compileError("Host impl must define Config");
         if (!@hasDecl(Impl, "init")) @compileError("Host impl must define init");
@@ -22,10 +21,8 @@ pub fn make(comptime Impl: type, comptime Channel: fn (type) type) type {
         _ = @as(*const fn (*Impl) root.Peripheral, &Impl.peripheral);
     }
 
-    const host_lib = embed_std.std;
-
-    const ClientImpl = Client(host_lib, root.Central);
-    const ServerImpl = Server(host_lib, Channel, root.Peripheral);
+    const ClientImpl = Client(lib, root.Central);
+    const ServerImpl = Server(lib, Channel, root.Peripheral);
 
     return struct {
         impl: Impl,
@@ -39,6 +36,7 @@ pub fn make(comptime Impl: type, comptime Channel: fn (type) type) type {
 
         pub fn init(hci: root.Hci, config: Config) !Self {
             var impl = try Impl.init(hci, config);
+            errdefer impl.deinit();
             return .{
                 .impl = impl,
                 .client_impl = ClientImpl.init(config.allocator),
@@ -78,9 +76,7 @@ pub fn make(comptime Impl: type, comptime Channel: fn (type) type) type {
 
 pub fn Host(comptime lib: type, comptime Channel: fn (type) type) type {
     const CentralImpl = Central(lib);
-    const ClientImpl = Client(lib, CentralImpl);
     const PeripheralImpl = Peripheral(lib);
-    const ServerImpl = Server(lib, Channel, PeripheralImpl);
     const Allocator = lib.mem.Allocator;
 
     const Impl = struct {
@@ -89,25 +85,19 @@ pub fn Host(comptime lib: type, comptime Channel: fn (type) type) type {
         };
 
         central_impl: CentralImpl,
-        client_impl: ClientImpl,
         peripheral_impl: PeripheralImpl,
-        server_impl: ServerImpl,
 
         const Self = @This();
 
         pub fn init(hci: root.Hci, config: Config) !Self {
             return .{
                 .central_impl = CentralImpl.init(hci, config.allocator),
-                .client_impl = ClientImpl.init(config.allocator),
                 .peripheral_impl = PeripheralImpl.init(hci, config.allocator),
-                .server_impl = try ServerImpl.init(config.allocator),
             };
         }
 
         pub fn deinit(self: *Self) void {
             self.central_impl.deinit();
-            self.client_impl.deinit();
-            self.server_impl.deinit();
             self.peripheral_impl.deinit();
         }
 
@@ -118,17 +108,7 @@ pub fn Host(comptime lib: type, comptime Channel: fn (type) type) type {
         pub fn peripheral(self: *Self) root.Peripheral {
             return root.Peripheral.wrap(&self.peripheral_impl);
         }
-
-        pub fn client(self: *Self) *ClientImpl {
-            self.client_impl.bind(&self.central_impl);
-            return &self.client_impl;
-        }
-
-        pub fn server(self: *Self) *ServerImpl {
-            self.server_impl.bind(&self.peripheral_impl);
-            return &self.server_impl;
-        }
     };
 
-    return make(Impl, Channel);
+    return make(lib, Impl, Channel);
 }

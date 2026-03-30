@@ -186,7 +186,8 @@ fn decodeLeMetaEvent(params: []const u8) Event {
     const sub_params = if (params.len > 1) params[1..] else &[_]u8{};
 
     return switch (sub) {
-        LE_CONNECTION_COMPLETE, LE_ENHANCED_CONNECTION_COMPLETE => decodeLeConnectionComplete(sub_params),
+        LE_CONNECTION_COMPLETE => decodeLeConnectionComplete(sub_params),
+        LE_ENHANCED_CONNECTION_COMPLETE => decodeLeEnhancedConnectionComplete(sub_params),
         LE_ADVERTISING_REPORT => .{ .le_advertising_report = .{
             .num_reports = if (sub_params.len > 0) sub_params[0] else 0,
             .data = sub_params,
@@ -207,6 +208,20 @@ fn decodeLeConnectionComplete(params: []const u8) Event {
         .conn_interval = std.mem.readInt(u16, params[11..13], .little),
         .conn_latency = std.mem.readInt(u16, params[13..15], .little),
         .supervision_timeout = std.mem.readInt(u16, params[15..17], .little),
+    } };
+}
+
+fn decodeLeEnhancedConnectionComplete(params: []const u8) Event {
+    if (params.len < 30) return .{ .unknown = .{ .event_code = LE_META, .data = params } };
+    return .{ .le_connection_complete = .{
+        .status = Status.fromByte(params[0]),
+        .conn_handle = std.mem.readInt(u16, params[1..3], .little) & 0x0FFF,
+        .role = params[3],
+        .peer_addr_type = params[4],
+        .peer_addr = params[5..11].*,
+        .conn_interval = std.mem.readInt(u16, params[23..25], .little),
+        .conn_latency = std.mem.readInt(u16, params[25..27], .little),
+        .supervision_timeout = std.mem.readInt(u16, params[27..29], .little),
     } };
 }
 
@@ -285,6 +300,39 @@ test "bt/unit_tests/host/hci/events/decode_le_connection_complete" {
             try std.testing.expectEqual(@as(u16, 0x0040), lc.conn_handle);
             try std.testing.expectEqual(@as(u8, 1), lc.role);
             try std.testing.expectEqual(@as(u8, 0xAA), lc.peer_addr[0]);
+        },
+        else => return error.WrongEvent,
+    }
+}
+
+test "bt/unit_tests/host/hci/events/decode_le_enhanced_connection_complete" {
+    var raw: [3 + 1 + 30]u8 = undefined;
+    raw[0] = 0x04;
+    raw[1] = 0x3E;
+    raw[2] = 31;
+    raw[3] = 0x0A;
+    raw[4] = 0x00;
+    raw[5] = 0x40;
+    raw[6] = 0x00;
+    raw[7] = 0x01;
+    raw[8] = 0x00;
+    @memcpy(raw[9..15], &[6]u8{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF });
+    @memcpy(raw[15..21], &[6]u8{ 1, 2, 3, 4, 5, 6 });
+    @memcpy(raw[21..27], &[6]u8{ 7, 8, 9, 10, 11, 12 });
+    std.mem.writeInt(u16, raw[27..29], 0x0018, .little);
+    std.mem.writeInt(u16, raw[29..31], 0x0001, .little);
+    std.mem.writeInt(u16, raw[31..33], 0x00C8, .little);
+    raw[33] = 0;
+
+    const evt = decode(&raw) orelse return error.DecodeFailed;
+    switch (evt) {
+        .le_connection_complete => |lc| {
+            try std.testing.expect(lc.status.isSuccess());
+            try std.testing.expectEqual(@as(u16, 0x0040), lc.conn_handle);
+            try std.testing.expectEqual(@as(u8, 0xAA), lc.peer_addr[0]);
+            try std.testing.expectEqual(@as(u16, 0x0018), lc.conn_interval);
+            try std.testing.expectEqual(@as(u16, 0x0001), lc.conn_latency);
+            try std.testing.expectEqual(@as(u16, 0x00C8), lc.supervision_timeout);
         },
         else => return error.WrongEvent,
     }

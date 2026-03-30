@@ -14,6 +14,7 @@ const BtHci = @import("../Hci.zig");
 const Central = @import("../Central.zig");
 const Transport = @import("../Transport.zig");
 const hci_commands = @import("../host/hci/commands.zig");
+const hci_events = @import("../host/hci/events.zig");
 const hci_acl = @import("../host/hci/acl.zig");
 const hci_status = @import("../host/hci/status.zig").Status;
 const l2cap = @import("../host/l2cap.zig");
@@ -559,10 +560,14 @@ pub fn Hci(comptime lib: type) type {
         }
 
         fn isScanningHci(self: *Self) bool {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             return self.scan_enabled;
         }
 
         fn isAdvertisingHci(self: *Self) bool {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             return self.adv_enabled;
         }
 
@@ -573,12 +578,11 @@ pub fn Hci(comptime lib: type) type {
 
         pub fn reset(self: *Self) void {
             self.mutex.lock();
+            defer self.mutex.unlock();
             self.queue.clearRetainingCapacity();
             self.host_server_pushes.clearRetainingCapacity();
             self.peer_att_response_len = 0;
             self.peer_att_response_ready = false;
-            self.mutex.unlock();
-
             self.scan_enabled = false;
             self.adv_enabled = false;
             self.central_link = .{};
@@ -809,10 +813,8 @@ pub fn Hci(comptime lib: type) type {
 
         fn effectiveReadDeadlineNs(self: *const Self) ?i64 {
             if (self.read_deadline_ns) |deadline| return deadline;
-            if (self.default_recv_timeout_ms) |timeout_ms| {
-                return nowNs(lib) + @as(i64, @intCast(timeout_ms)) * @as(i64, @intCast(NS_PER_MS));
-            }
-            return null;
+            const timeout_ms = self.default_recv_timeout_ms orelse DEFAULT_RECV_TIMEOUT_MS;
+            return nowNs(lib) + @as(i64, @intCast(timeout_ms)) * @as(i64, @intCast(NS_PER_MS));
         }
 
         fn nowNs(comptime l: type) i64 {
@@ -1277,13 +1279,42 @@ pub fn Hci(comptime lib: type) type {
                     const conn_handle = std.mem.readInt(u16, params[0..][0..2], .little) & 0x0FFF;
                     const reason: hci_status = @enumFromInt(params[2]);
 
-                    if (self.roleForHandle(conn_handle)) |_| {
-                        self.clearLink(.central);
-                        self.clearLink(.peripheral);
+                    self.mutex.lock();
+                    const role = self.roleForHandle(conn_handle);
+                    const peer = if (role) |resolved_role| self.peerForRole(resolved_role) else null;
+                    self.mutex.unlock();
+
+                    const resolved_role = role orelse {
+                        try self.enqueueCommandStatus(.no_connection, opcode);
+                        return;
+                    };
+
+                    if (peer) |p| {
+                        lockNodes(self, p);
+                        defer unlockNodes(self, p);
+
+                        const confirmed_role = self.roleForHandle(conn_handle) orelse {
+                            try self.enqueueCommandStatus(.no_connection, opcode);
+                            return;
+                        };
+                        const peer_role = oppositeRole(confirmed_role);
+                        const peer_should_disconnect = p.hasLink(peer_role) and p.peerForRole(peer_role) == self;
+                        const peer_handle = p.connHandleForRole(peer_role);
+
+                        self.clearLink(confirmed_role);
+                        if (peer_should_disconnect) p.clearLink(peer_role);
+
+                        unlockNodes(self, p);
                         try self.enqueueCommandStatus(.success, opcode);
                         try self.enqueueDisconnectionComplete(conn_handle, reason);
+                        if (peer_should_disconnect) try p.enqueueDisconnectionComplete(peer_handle, reason);
+                        lockNodes(self, p);
                     } else {
-                        try self.enqueueCommandStatus(.no_connection, opcode);
+                        self.mutex.lock();
+                        self.clearLink(resolved_role);
+                        self.mutex.unlock();
+                        try self.enqueueCommandStatus(.success, opcode);
+                        try self.enqueueDisconnectionComplete(conn_handle, reason);
                     }
                 },
                 else => {
@@ -1784,4 +1815,47 @@ test "bt/unit_tests/mocker/Hci_asHci_supports_central_and_peripheral_flows" {
     try mock.connectAsCentral();
     try std.testing.expect(peripheral_state.connected);
     try std.testing.expect(hci.getLink(.peripheral) != null);
+}
+
+test "bt/unit_tests/mocker/Hci_disconnect_command_clears_peer_link" {
+    const Mock = Hci(std);
+
+    var central = try Mock.init(std.testing.allocator, .{});
+    defer central.deinit();
+
+    var peripheral = try Mock.init(std.testing.allocator, .{
+        .controller_addr = .{ 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 },
+        .peer_addr = .{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
+    });
+    defer peripheral.deinit();
+
+    try peripheral.asHci().startAdvertising(.{ .connectable = true });
+    try central.establishPeerLink(&peripheral);
+
+    var params: [3]u8 = undefined;
+    std.mem.writeInt(u16, params[0..2], central.config.conn_handle, .little);
+    params[2] = @intFromEnum(hci_status.remote_user_terminated);
+
+    var cmd_buf: [hci_commands.MAX_CMD_LEN]u8 = undefined;
+    _ = try central.write(hci_commands.encode(&cmd_buf, hci_commands.DISCONNECT, &params));
+
+    try std.testing.expect(central.getLinkHci(.central) == null);
+    try std.testing.expect(peripheral.getLinkHci(.peripheral) == null);
+
+    var evt_buf: [80]u8 = undefined;
+    const evt_len = try peripheral.read(&evt_buf);
+    const event = hci_events.decode(evt_buf[0..evt_len]);
+    try std.testing.expect(event == .disconnection_complete);
+}
+
+test "bt/unit_tests/mocker/Hci_read_without_explicit_timeout_still_times_out" {
+    const Mock = Hci(std);
+
+    var mock = try Mock.init(std.testing.allocator, .{
+        .recv_timeout_ms = null,
+    });
+    defer mock.deinit();
+
+    var buf: [8]u8 = undefined;
+    try std.testing.expectError(error.Timeout, mock.read(&buf));
 }

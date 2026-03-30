@@ -172,12 +172,14 @@ pub const FragmentIterator = struct {
 
         const remaining = self.l2cap_data.len - self.offset;
         const chunk = @min(remaining, self.max_data_len);
-        return acl.encode(
+        const out = acl.encode(
             self.buf[Reassembler.MAX_SDU_LEN..],
             self.conn_handle,
             .continuing,
             self.l2cap_data[self.offset..][0..chunk],
         );
+        self.offset += chunk;
+        return out;
     }
 };
 
@@ -253,4 +255,21 @@ test "bt/unit_tests/host/l2cap/reassembler_two_fragments" {
 
 test "bt/unit_tests/host/l2cap/parseHeader_returns_null_for_short_input" {
     try std.testing.expectEqual(@as(?Header, null), parseHeader(&.{ 0x00, 0x00 }));
+}
+
+test "bt/unit_tests/host/l2cap/fragment_iterator_advances_offset_across_continuations" {
+    var buf: [Reassembler.MAX_SDU_LEN + acl.MAX_PACKET_LEN]u8 = undefined;
+    const att_payload = "abcdefghijklmnop";
+    var it = fragmentIterator(&buf, att_payload, 0x0040, 6);
+
+    const first = it.next() orelse return error.MissingFirstFragment;
+    try std.testing.expectEqual(acl.PbFlag.first_auto_flush, (acl.parsePacketHeader(first) orelse return error.BadHeader).pb_flag);
+
+    const second = it.next() orelse return error.MissingSecondFragment;
+    const second_payload = acl.getPayload(second) orelse return error.BadSecondPayload;
+    try std.testing.expectEqualSlices(u8, att_payload[2..8], second_payload);
+
+    const third = it.next() orelse return error.MissingThirdFragment;
+    const third_payload = acl.getPayload(third) orelse return error.BadThirdPayload;
+    try std.testing.expectEqualSlices(u8, att_payload[8..14], third_payload);
 }

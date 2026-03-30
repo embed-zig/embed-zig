@@ -44,14 +44,21 @@ pub fn Client(comptime lib: type, comptime CentralType: type) type {
         }
 
         pub fn deinit(self: *Self) void {
+            if (self.hook_installed) {
+                if (self.central) |central| {
+                    central.removeEventHook(self, onCentralEvent);
+                }
+                self.hook_installed = false;
+            }
+
             self.mutex.lock();
             defer self.mutex.unlock();
             for (self.subscriptions.items) |state| {
-                Subscription.close(state);
+                Subscription.detachClient(state);
+                Subscription.releaseState(state);
             }
             self.subscriptions.deinit(self.allocator);
             self.central = null;
-            self.hook_installed = false;
         }
 
         pub fn connect(
@@ -118,15 +125,18 @@ pub fn Client(comptime lib: type, comptime CentralType: type) type {
             const sub = Subscription.init(self.allocator, self, conn_handle, value_handle, cccd_handle) catch {
                 return error.Unexpected;
             };
-            errdefer Subscription.destroyState(sub.state);
+            errdefer Subscription.releaseState(sub.state);
 
             self.mutex.lock();
             self.subscriptions.append(self.allocator, sub.state) catch {
                 self.mutex.unlock();
                 return error.Unexpected;
             };
+            Subscription.retainState(sub.state);
             self.mutex.unlock();
-            errdefer _ = self.unregisterSubscription(sub.state, false);
+            errdefer {
+                _ = self.unregisterSubscription(sub.state, false);
+            }
 
             if (prefer_indications) {
                 try self.centralPtr().subscribeIndications(conn_handle, cccd_handle);
@@ -148,6 +158,9 @@ pub fn Client(comptime lib: type, comptime CentralType: type) type {
             }
 
             Subscription.close(state);
+            if (removed) {
+                Subscription.releaseState(state);
+            }
             return removed;
         }
 
@@ -194,6 +207,7 @@ pub fn Client(comptime lib: type, comptime CentralType: type) type {
                 if (state.conn_handle == conn_handle) {
                     _ = self.subscriptions.orderedRemove(i);
                     Subscription.close(state);
+                    Subscription.releaseState(state);
                     continue;
                 }
                 i += 1;

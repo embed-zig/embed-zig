@@ -1,10 +1,8 @@
-const root = @This();
-
 pub const Central = @import("bt/Central.zig");
+pub const Host = @import("bt/Host.zig");
 pub const Peripheral = @import("bt/Peripheral.zig");
 pub const GattConfig = Peripheral.GattConfig;
 pub const Transport = @import("bt/Transport.zig");
-pub const Host = @import("bt/Host.zig").make;
 pub const Hci = @import("bt/Hci.zig");
 pub const Mocker = @import("bt/Mocker.zig").Mocker;
 pub const test_runner = struct {
@@ -16,8 +14,8 @@ pub const test_runner = struct {
 /// Build the built-in HCI-backed host bundle bound to `lib`.
 ///
 /// Usage:
-///   const Host = bt.HciHost(embed, platform.Channel);
-///   var host = try Host.init(allocator, transport, .{});
+///   const HciHostType = bt.HciHost(embed, platform.Channel);
+///   var host = try HciHostType.init(allocator, transport, .{});
 ///   defer host.deinit();
 ///
 ///   var central = host.central();
@@ -36,8 +34,11 @@ pub fn HciHost(comptime lib: type, comptime Channel: fn (type) type) type {
 
         pub fn init(allocator: Allocator, transport: Transport, config: ConcreteHci.Config) !Self {
             const hci_ptr = try allocator.create(ConcreteHci);
-            errdefer allocator.destroy(hci_ptr);
             hci_ptr.* = ConcreteHci.init(transport, config);
+            errdefer {
+                hci_ptr.deinit();
+                allocator.destroy(hci_ptr);
+            }
 
             var host_impl = try HostType.init(Hci.wrap(hci_ptr), .{
                 .allocator = allocator,
@@ -63,6 +64,10 @@ pub fn HciHost(comptime lib: type, comptime Channel: fn (type) type) type {
 
         pub fn peripheral(self: *Self) Peripheral {
             return self.host.peripheral();
+        }
+
+        pub fn client(self: *Self) @TypeOf(self.host.client()) {
+            return self.host.client();
         }
 
         pub fn server(self: *Self) @TypeOf(self.host.server()) {

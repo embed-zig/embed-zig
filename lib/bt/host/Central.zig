@@ -12,6 +12,8 @@ pub fn Central(comptime lib: type) type {
     return struct {
         const Self = @This();
         const POLL_INTERVAL_NS: u64 = 1_000_000;
+        const MIN_WAIT_TIMEOUT_MS: u32 = 1000;
+        const CONNECT_TIMEOUT_MS: u32 = 5000;
 
         hci: bt.Hci,
         state: bt.Central.State = .idle,
@@ -57,7 +59,7 @@ pub fn Central(comptime lib: type) type {
                 self.offset += 1;
 
                 const addr_type = switch (self.raw[self.offset]) {
-                    0x00 => bt.Central.AddrType.public,
+                    0x00, 0x02 => bt.Central.AddrType.public,
                     else => bt.Central.AddrType.random,
                 };
                 self.offset += 1;
@@ -94,6 +96,10 @@ pub fn Central(comptime lib: type) type {
 
         pub fn start(self: *Self) bt.Central.StartError!void {
             if (self.started) return;
+            self.hci.retain() catch return error.Unexpected;
+            errdefer {
+                self.hci.release();
+            }
             self.hci.setCentralListener(.{
                 .ctx = self,
                 .on_adv_report = onAdvReport,
@@ -101,11 +107,7 @@ pub fn Central(comptime lib: type) type {
                 .on_disconnected = onDisconnected,
                 .on_notification = onNotification,
             });
-            self.hci.retain() catch return error.Unexpected;
-            errdefer {
-                self.hci.setCentralListener(.{});
-                self.hci.release();
-            }
+            errdefer self.hci.setCentralListener(.{});
             self.started = true;
         }
 
@@ -176,18 +178,35 @@ pub fn Central(comptime lib: type) type {
             };
             self.state = .connecting;
 
-            while (self.hci.isConnectingCentral()) {
+            var waited_ms: u32 = 0;
+            while (self.hci.isConnectingCentral()) : (waited_ms += 1) {
+                if (waited_ms >= CONNECT_TIMEOUT_MS) {
+                    self.hci.cancelConnect();
+                    self.state = .idle;
+                    return error.Timeout;
+                }
                 lib.Thread.sleep(POLL_INTERVAL_NS);
             }
-            const link = self.hci.getLink(.central) orelse return error.Rejected;
+            const link = self.hci.getLink(.central) orelse {
+                self.state = .idle;
+                return error.Rejected;
+            };
             self.state = .connected;
             return linkToConnectionInfo(link);
         }
 
         pub fn disconnect(self: *Self, conn_handle: u16) void {
+            const wait_timeout_ms = if (self.hci.getLinkByHandle(conn_handle)) |link|
+                @max(MIN_WAIT_TIMEOUT_MS, @as(u32, link.timeout) * 10)
+            else
+                MIN_WAIT_TIMEOUT_MS;
             self.hci.disconnect(conn_handle, 0x13);
-            while (self.hci.getLink(.central) != null) {
+            var waited_ms: u32 = 0;
+            while (self.hci.getLinkByHandle(conn_handle) != null and waited_ms < wait_timeout_ms) : (waited_ms += 1) {
                 lib.Thread.sleep(POLL_INTERVAL_NS);
+            }
+            if (self.hci.getLinkByHandle(conn_handle) == null) {
+                self.state = .idle;
             }
         }
 
@@ -318,6 +337,20 @@ pub fn Central(comptime lib: type) type {
             self.mutex.lock();
             defer self.mutex.unlock();
             self.hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch return;
+        }
+
+        pub fn removeEventHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, bt.Central.CentralEvent) void) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            var i: usize = 0;
+            while (i < self.hooks.items.len) {
+                const hook = self.hooks.items[i];
+                if (hook.ctx == ctx and hook.cb == cb) {
+                    _ = self.hooks.orderedRemove(i);
+                    continue;
+                }
+                i += 1;
+            }
         }
 
         pub fn resolveChar(self: *Self, conn_handle: u16, svc_uuid: u16, char_uuid: u16) bt.Central.GattError!bt.Central.DiscoveredChar {
@@ -545,4 +578,77 @@ test "bt/unit_tests/host/Central_advertising_filter_matches_uuid16_and_service_d
     };
     try std.testing.expect(Impl.matchesServiceFilter(&service_data, &.{0x180F}));
     try std.testing.expect(!Impl.matchesServiceFilter(&service_data, &.{0x180D}));
+}
+
+test "bt/unit_tests/host/Central_advertising_iterator_maps_public_identity_address_to_public" {
+    const Impl = Central(std);
+    const raw = [_]u8{
+        1,
+        0x00,
+        0x02,
+        0xA1,
+        0xA2,
+        0xA3,
+        0xA4,
+        0xA5,
+        0xA6,
+        0,
+        0xC5,
+    };
+
+    var iter = Impl.AdvIterator.init(&raw);
+    const report = iter.next() orelse return error.NoReport;
+    try std.testing.expectEqual(bt.Central.AddrType.public, report.addr_type);
+}
+
+test "bt/unit_tests/host/Central_connect_resets_state_after_rejected_link" {
+    const Impl = Central(std);
+
+    const FakeHci = struct {
+        connecting: bool = false,
+
+        pub fn retain(_: *@This()) bt.Hci.Error!void {}
+        pub fn release(_: *@This()) void {}
+        pub fn setCentralListener(_: *@This(), _: bt.Hci.CentralListener) void {}
+        pub fn setPeripheralListener(_: *@This(), _: bt.Hci.PeripheralListener) void {}
+        pub fn startScanning(_: *@This(), _: bt.Hci.ScanConfig) bt.Hci.Error!void {}
+        pub fn stopScanning(_: *@This()) void {}
+        pub fn startAdvertising(_: *@This(), _: bt.Hci.AdvConfig) bt.Hci.Error!void {}
+        pub fn stopAdvertising(_: *@This()) void {}
+        pub fn connect(self: *@This(), _: bt.Hci.BdAddr, _: bt.Hci.AddrType, _: bt.Hci.ConnConfig) bt.Hci.Error!void {
+            self.connecting = false;
+        }
+        pub fn cancelConnect(_: *@This()) void {}
+        pub fn disconnect(_: *@This(), _: u16, _: u8) void {}
+        pub fn sendAcl(_: *@This(), _: u16, _: []const u8) bt.Hci.Error!void {}
+        pub fn sendAttRequest(_: *@This(), _: u16, _: []const u8, _: []u8) bt.Hci.Error!usize {
+            return error.Unexpected;
+        }
+        pub fn getAddr(_: *@This()) ?bt.Hci.BdAddr {
+            return null;
+        }
+        pub fn getLink(_: *@This(), _: bt.Hci.Role) ?bt.Hci.Link {
+            return null;
+        }
+        pub fn getLinkByHandle(_: *@This(), _: u16) ?bt.Hci.Link {
+            return null;
+        }
+        pub fn isScanning(_: *@This()) bool {
+            return false;
+        }
+        pub fn isAdvertising(_: *@This()) bool {
+            return false;
+        }
+        pub fn isConnectingCentral(self: *@This()) bool {
+            return self.connecting;
+        }
+        pub fn deinit(_: *@This()) void {}
+    };
+
+    var fake_hci = FakeHci{};
+    var central = Impl.init(bt.Hci.wrap(&fake_hci), std.testing.allocator);
+    defer central.deinit();
+
+    try std.testing.expectError(error.Rejected, central.connect(.{ 1, 2, 3, 4, 5, 6 }, .public, .{}));
+    try std.testing.expectEqual(bt.Central.State.idle, central.getState());
 }

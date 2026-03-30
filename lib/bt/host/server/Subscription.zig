@@ -16,7 +16,9 @@ pub fn Subscription(comptime lib: type, comptime ServerType: type) type {
             cccd_value: u16,
             internal: bool,
             mutex: lib.Thread.Mutex = .{},
+            cond: lib.Thread.Condition = .{},
             closed: bool = false,
+            active_ops: usize = 0,
         };
 
         state: *State,
@@ -46,6 +48,7 @@ pub fn Subscription(comptime lib: type, comptime ServerType: type) type {
         }
 
         pub fn deinit(self: *Self) void {
+            close(self.state);
             _ = self.state.server.unregisterSubscription(self.state);
             destroyState(self.state);
         }
@@ -56,12 +59,14 @@ pub fn Subscription(comptime lib: type, comptime ServerType: type) type {
         }
 
         pub fn notify(self: *Self, data: []const u8) WriteError!void {
-            try ensureOpenAndMode(self.state, 0x0001);
+            try beginWrite(self.state, 0x0001);
+            defer endWrite(self.state);
             return self.state.server.push(self.state.conn_handle, self.state.char_uuid, .notify, data);
         }
 
         pub fn indicate(self: *Self, data: []const u8) WriteError!void {
-            try ensureOpenAndMode(self.state, 0x0002);
+            try beginWrite(self.state, 0x0002);
+            defer endWrite(self.state);
             return self.state.server.push(self.state.conn_handle, self.state.char_uuid, .indicate, data);
         }
 
@@ -101,17 +106,35 @@ pub fn Subscription(comptime lib: type, comptime ServerType: type) type {
             state.mutex.lock();
             defer state.mutex.unlock();
             state.closed = true;
+            state.cond.broadcast();
         }
 
         pub fn destroyState(state: *State) void {
+            state.mutex.lock();
+            state.closed = true;
+            while (state.active_ops != 0) {
+                state.cond.wait(&state.mutex);
+            }
+            state.mutex.unlock();
             state.allocator.destroy(state);
         }
 
-        fn ensureOpenAndMode(state: *State, required_bits: u16) WriteError!void {
+        fn beginWrite(state: *State, required_bits: u16) WriteError!void {
             state.mutex.lock();
-            defer state.mutex.unlock();
+            errdefer state.mutex.unlock();
             if (state.closed) return error.Closed;
             if ((state.cccd_value & required_bits) == 0) return error.UnsupportedMode;
+            state.active_ops += 1;
+            state.mutex.unlock();
+        }
+
+        fn endWrite(state: *State) void {
+            state.mutex.lock();
+            defer state.mutex.unlock();
+            state.active_ops -= 1;
+            if (state.active_ops == 0) {
+                state.cond.broadcast();
+            }
         }
     };
 }

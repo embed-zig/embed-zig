@@ -200,7 +200,11 @@ pub fn GattServer(comptime services: []const ServiceDef) type {
 
         fn handleReadByGroupType(self: *Self, req: att.ReadByGroupTypeRequest, out: []u8) usize {
             _ = self;
-            if (req.uuid.uuid16 != att.PRIMARY_SERVICE_UUID) {
+            const req_uuid16 = switch (req.uuid) {
+                .uuid16 => |uuid16| uuid16,
+                .uuid128 => return att.encodeErrorResponse(out, att.READ_BY_GROUP_TYPE_REQUEST, req.start_handle, .unsupported_group_type).len,
+            };
+            if (req_uuid16 != att.PRIMARY_SERVICE_UUID) {
                 return att.encodeErrorResponse(out, att.READ_BY_GROUP_TYPE_REQUEST, req.start_handle, .unsupported_group_type).len;
             }
 
@@ -236,13 +240,17 @@ pub fn GattServer(comptime services: []const ServiceDef) type {
         }
 
         fn handleReadByType(_: *Self, req: att.ReadByTypeRequest, out: []u8) usize {
+            const req_uuid16 = switch (req.uuid) {
+                .uuid16 => |uuid16| uuid16,
+                .uuid128 => return att.encodeErrorResponse(out, att.READ_BY_TYPE_REQUEST, req.start_handle, .attribute_not_found).len,
+            };
             var pos: usize = 2;
             var entry_len: u8 = 0;
             const max_pos = @min(out.len, att.MAX_PDU_LEN);
 
             for (table) |a| {
                 if (a.handle < req.start_handle or a.handle > req.end_handle) continue;
-                if (a.type_uuid != req.uuid.uuid16) continue;
+                if (a.type_uuid != req_uuid16) continue;
 
                 if (a.kind == .characteristic_decl) {
                     const this_len: u8 = 7; // handle(2) + props(1) + value_handle(2) + uuid(2)
@@ -418,4 +426,38 @@ test "bt/unit_tests/host/gatt/server/GattServer_read_by_group_type_discovers_ser
     const resp_len = server.handlePdu(req, &out);
     try std.testing.expect(resp_len > 2);
     try std.testing.expectEqual(att.READ_BY_GROUP_TYPE_RESPONSE, out[0]);
+}
+
+test "bt/unit_tests/host/gatt/server/GattServer_read_by_group_type_rejects_uuid128_request" {
+    const Server = GattServer(&[_]ServiceDef{
+        Service(0x180D, &[_]CharDef{Char(0x2A37, .{ .read = true })}),
+    });
+    var server = Server.init();
+    var out: [att.MAX_PDU_LEN]u8 = undefined;
+
+    var req_buf: [21]u8 = undefined;
+    const req = att.encodeReadByGroupTypeRequest(&req_buf, 0x0001, 0xFFFF, att.UUID.from128([_]u8{0} ** 16));
+    const resp_len = server.handlePdu(req, &out);
+    const pdu = att.decodePdu(out[0..resp_len]) orelse return error.DecodeFailed;
+    switch (pdu) {
+        .error_response => |err_resp| try std.testing.expectEqual(att.ErrorCode.unsupported_group_type, err_resp.error_code),
+        else => return error.WrongVariant,
+    }
+}
+
+test "bt/unit_tests/host/gatt/server/GattServer_read_by_type_rejects_uuid128_request" {
+    const Server = GattServer(&[_]ServiceDef{
+        Service(0x180D, &[_]CharDef{Char(0x2A37, .{ .read = true })}),
+    });
+    var server = Server.init();
+    var out: [att.MAX_PDU_LEN]u8 = undefined;
+
+    var req_buf: [21]u8 = undefined;
+    const req = att.encodeReadByTypeRequest(&req_buf, 0x0001, 0xFFFF, att.UUID.from128([_]u8{0} ** 16));
+    const resp_len = server.handlePdu(req, &out);
+    const pdu = att.decodePdu(out[0..resp_len]) orelse return error.DecodeFailed;
+    switch (pdu) {
+        .error_response => |err_resp| try std.testing.expectEqual(att.ErrorCode.attribute_not_found, err_resp.error_code),
+        else => return error.WrongVariant,
+    }
 }

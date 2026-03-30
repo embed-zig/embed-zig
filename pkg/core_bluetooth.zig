@@ -14,7 +14,7 @@ const embed_std = @import("embed_std");
 const CBCentral = @import("core_bluetooth/src/CBCentral.zig");
 const CBPeripheral = @import("core_bluetooth/src/CBPeripheral.zig");
 
-pub const Host = bt.Host(struct {
+pub const Host = bt.Host.make(embed_std.std, struct {
     pub const CentralConfig = CBCentral.Config;
     pub const PeripheralConfig = CBPeripheral.Config;
     pub const Config = struct {

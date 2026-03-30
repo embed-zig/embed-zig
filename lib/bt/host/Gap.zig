@@ -58,7 +58,8 @@ const CmdQueue = struct {
     count: usize = 0,
 
     fn push(self: *CmdQueue, data: []const u8) void {
-        if (self.count >= MAX_PENDING_CMDS) return;
+        std.debug.assert(self.count < MAX_PENDING_CMDS);
+        std.debug.assert(data.len <= self.items[self.tail].buf.len);
         @memcpy(self.items[self.tail].buf[0..data.len], data);
         self.items[self.tail].len = data.len;
         self.tail = (self.tail + 1) % MAX_PENDING_CMDS;
@@ -71,6 +72,12 @@ const CmdQueue = struct {
         self.head = (self.head + 1) % MAX_PENDING_CMDS;
         self.count -= 1;
         return slot.buf[0..slot.len];
+    }
+
+    fn clear(self: *CmdQueue) void {
+        self.head = 0;
+        self.tail = 0;
+        self.count = 0;
     }
 };
 
@@ -189,6 +196,7 @@ pub fn readBdAddr(self: *Gap) void {
 pub fn resetController(self: *Gap) void {
     var buf: [commands.MAX_CMD_LEN]u8 = undefined;
     const cmd = commands.reset(&buf);
+    self.cmd_queue.clear();
     self.cmd_queue.push(cmd);
     self.scanning = false;
     self.advertising = false;
@@ -464,4 +472,14 @@ test "bt/unit_tests/host/gap/handleEvent_command_complete_READ_BD_ADDR_stores_ad
     try std.testing.expect(gap.addr_known);
     try std.testing.expectEqual(@as(u8, 0x11), gap.bd_addr[0]);
     try std.testing.expectEqual(@as(u8, 0x66), gap.bd_addr[5]);
+}
+
+test "bt/unit_tests/host/gap/resetController_discards_stale_queued_commands" {
+    var gap = Gap.init();
+    gap.startScanning(.{});
+    gap.resetController();
+
+    const cmd = gap.nextCommand() orelse return error.NoCommand;
+    try std.testing.expectEqual(commands.RESET, std.mem.readInt(u16, cmd[1..3], .little));
+    try std.testing.expectEqual(@as(?[]const u8, null), gap.nextCommand());
 }

@@ -42,6 +42,7 @@ pub fn Mocker(comptime lib: type) type {
 
         allocator: lib.mem.Allocator,
         config: Config,
+        mutex: lib.Thread.Mutex = .{},
         nodes: std.ArrayListUnmanaged(Node) = .{},
 
         pub fn init(allocator: lib.mem.Allocator, config: Config) Self {
@@ -52,6 +53,8 @@ pub fn Mocker(comptime lib: type) type {
         }
 
         pub fn deinit(self: *Self) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             for (self.nodes.items) |node| {
                 node.impl.deinit();
                 self.allocator.destroy(node.impl);
@@ -89,6 +92,8 @@ pub fn Mocker(comptime lib: type) type {
                 .on_connect_requested = onConnectRequested,
             });
 
+            self.mutex.lock();
+            defer self.mutex.unlock();
             try self.nodes.append(self.allocator, .{
                 .impl = ptr,
                 .position = config.position,
@@ -98,6 +103,8 @@ pub fn Mocker(comptime lib: type) type {
         }
 
         fn destroyHciNode(self: *Self, ptr: *HciImpl) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
             const index = self.indexOf(ptr) orelse return;
             const node = self.nodes.orderedRemove(index);
             node.impl.deinit();
@@ -113,6 +120,8 @@ pub fn Mocker(comptime lib: type) type {
 
         fn onScanStarted(ctx: ?*anyopaque, scanner: *HciImpl, _: root.Hci.ScanConfig) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
+            self.mutex.lock();
+            defer self.mutex.unlock();
             for (self.nodes.items) |node| {
                 if (node.impl == scanner) continue;
                 if (!node.impl.isAdvertisingNode()) continue;
@@ -124,6 +133,8 @@ pub fn Mocker(comptime lib: type) type {
         fn onAdvStateChanged(ctx: ?*anyopaque, advertiser: *HciImpl, enabled: bool) void {
             if (!enabled) return;
             const self: *Self = @ptrCast(@alignCast(ctx.?));
+            self.mutex.lock();
+            defer self.mutex.unlock();
             for (self.nodes.items) |node| {
                 if (node.impl == advertiser) continue;
                 if (!node.impl.isScanningNode()) continue;
@@ -140,6 +151,8 @@ pub fn Mocker(comptime lib: type) type {
             _: root.Hci.ConnConfig,
         ) root.Hci.Error!void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
+            self.mutex.lock();
+            defer self.mutex.unlock();
             const peer = self.findNodeByAddr(addr, addr_type) orelse return error.Rejected;
             if (peer == requester) return error.Rejected;
             if (!peer.isAdvertisingNode()) return error.Rejected;
