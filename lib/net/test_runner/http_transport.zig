@@ -84,6 +84,15 @@ fn runImpl(
         retry_response_body: []const u8,
     };
 
+    const RedirectSpec = struct {
+        first_request_line: []const u8,
+        second_request_line: []const u8,
+        location: []const u8,
+        final_body: []const u8,
+        final_status_code: u16 = 200,
+        reuse_wait_timeout_ms: u32 = 100,
+    };
+
     const RequestBodyMatch = enum {
         ok,
         missing_header_terminator,
@@ -357,6 +366,175 @@ fn runImpl(
                     const body = try readBody(resp);
                     defer testing.allocator.free(body);
                     try testing.expectEqualStrings("missing", body);
+                }
+            }.run);
+        }
+
+        pub fn clientLocalReturns200() !void {
+            try withOneShotServer(.{
+                .expected_request_line = "GET /client-ok HTTP/1.1",
+                .status_code = Http.status.ok,
+                .body = "ok",
+            }, struct {
+                fn run(port: u16) !void {
+                    var client = try Http.Client.init(testing.allocator, .{});
+                    defer client.deinit();
+
+                    const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-ok", .{port});
+                    defer testing.allocator.free(url);
+
+                    var resp = try client.get(url);
+                    defer resp.deinit();
+
+                    const body = try readBody(resp);
+                    defer testing.allocator.free(body);
+
+                    try testing.expectEqual(Http.status.ok, resp.status_code);
+                    try testing.expectEqualStrings("ok", body);
+                }
+            }.run);
+        }
+
+        pub fn clientHeadResponseIsBodyless() !void {
+            try withOneShotServer(.{
+                .expected_request_line = "HEAD /client-head HTTP/1.1",
+                .status_code = Http.status.ok,
+                .body = "",
+            }, struct {
+                fn run(port: u16) !void {
+                    var client = try Http.Client.init(testing.allocator, .{});
+                    defer client.deinit();
+
+                    const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-head", .{port});
+                    defer testing.allocator.free(url);
+
+                    var resp = try client.head(url);
+                    defer resp.deinit();
+
+                    try testing.expectEqual(Http.status.ok, resp.status_code);
+                    try testing.expect(resp.body() == null);
+                }
+            }.run);
+        }
+
+        pub fn clientFollowsRedirect() !void {
+            _ = try withRedirectServer(.{
+                .first_request_line = "GET /client-start HTTP/1.1",
+                .second_request_line = "GET /client-target HTTP/1.1",
+                .location = "/client-target",
+                .final_body = "redirected",
+            }, struct {
+                fn run(port: u16) !void {
+                    var client = try Http.Client.init(testing.allocator, .{});
+                    defer client.deinit();
+
+                    const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-start", .{port});
+                    defer testing.allocator.free(url);
+
+                    var resp = try client.get(url);
+                    defer resp.deinit();
+
+                    const body = try readBody(resp);
+                    defer testing.allocator.free(body);
+
+                    try testing.expectEqual(Http.status.ok, resp.status_code);
+                    try testing.expectEqualStrings("redirected", body);
+                    try testing.expect(resp.request != null);
+                    try testing.expectEqualStrings("/client-target", resp.request.?.url.path);
+                }
+            }.run);
+        }
+
+        pub fn clientCloseIdleConnectionsForcesNewConn() !void {
+            const accept_count = try withTwoRequestKeepAliveServer(.{
+                .first_request_line = "GET /client-idle HTTP/1.1",
+                .second_request_line = "GET /client-idle HTTP/1.1",
+                .first_body = "one",
+                .second_body = "two",
+            }, struct {
+                fn run(port: u16) !void {
+                    var client = try Http.Client.init(testing.allocator, .{});
+                    defer client.deinit();
+
+                    const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-idle", .{port});
+                    defer testing.allocator.free(url);
+
+                    var resp1 = try client.get(url);
+                    const body1 = try readBody(resp1);
+                    defer testing.allocator.free(body1);
+                    try testing.expectEqualStrings("one", body1);
+                    resp1.deinit();
+
+                    client.closeIdleConnections();
+
+                    var resp2 = try client.get(url);
+                    defer resp2.deinit();
+
+                    const body2 = try readBody(resp2);
+                    defer testing.allocator.free(body2);
+                    try testing.expectEqualStrings("two", body2);
+                }
+            }.run);
+
+            try testing.expectEqual(@as(usize, 2), accept_count);
+        }
+
+        pub fn clientDeinitWaitsForResponseDeinit() !void {
+            try withOneShotServer(.{
+                .expected_request_line = "GET /client-deinit HTTP/1.1",
+                .status_code = Http.status.ok,
+                .body = "wait",
+            }, struct {
+                fn run(port: u16) !void {
+                    const State = struct {
+                        mutex: Mutex = .{},
+                        cond: Condition = .{},
+                        started: bool = false,
+                        finished: bool = false,
+                    };
+
+                    const DeinitTask = struct {
+                        fn run(client: *Http.Client, state: *State) void {
+                            state.mutex.lock();
+                            state.started = true;
+                            state.cond.broadcast();
+                            state.mutex.unlock();
+
+                            client.deinit();
+
+                            state.mutex.lock();
+                            state.finished = true;
+                            state.cond.broadcast();
+                            state.mutex.unlock();
+                        }
+                    };
+
+                    var client = try Http.Client.init(testing.allocator, .{});
+                    const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-deinit", .{port});
+                    defer testing.allocator.free(url);
+
+                    var resp = try client.get(url);
+
+                    var state = State{};
+                    const thread = try lib.Thread.spawn(test_spawn_config, DeinitTask.run, .{ &client, &state });
+
+                    state.mutex.lock();
+                    while (!state.started) state.cond.wait(&state.mutex);
+                    state.mutex.unlock();
+
+                    lib.Thread.sleep(20 * lib.time.ns_per_ms);
+
+                    state.mutex.lock();
+                    const finished_early = state.finished;
+                    state.mutex.unlock();
+                    try testing.expect(!finished_early);
+
+                    resp.deinit();
+                    thread.join();
+
+                    state.mutex.lock();
+                    defer state.mutex.unlock();
+                    try testing.expect(state.finished);
                 }
             }.run);
         }
@@ -2943,6 +3121,34 @@ fn runImpl(
             return accept_count;
         }
 
+        fn withRedirectServer(spec: RedirectSpec, comptime ClientFn: anytype) !usize {
+            var ln = try Net.listen(testing.allocator, .{
+                .address = addr4(0),
+            });
+            defer ln.deinit();
+
+            const listener_impl = try ln.as(Net.TcpListener);
+            const port = try listenerPort(ln, Net);
+            var accept_count: usize = 0;
+            var server_result: ?anyerror = null;
+
+            var server_thread = try lib.Thread.spawn(.{}, struct {
+                fn run(tcp_listener: *Net.TcpListener, server_spec: RedirectSpec, accepts: *usize, result: *?anyerror) void {
+                    serveRedirectRequests(tcp_listener, server_spec, accepts) catch |err| {
+                        result.* = err;
+                    };
+                }
+            }.run, .{ listener_impl, spec, &accept_count, &server_result });
+            var server_joined = false;
+            errdefer if (!server_joined) server_thread.join();
+
+            try ClientFn(port);
+            server_thread.join();
+            server_joined = true;
+            if (server_result) |err| return err;
+            return accept_count;
+        }
+
         fn serveTwoKeepAliveRequests(tcp_listener: *Net.TcpListener, spec: TwoRequestSpec, accept_count: *usize) !void {
             var conn = try tcp_listener.accept();
             accept_count.* += 1;
@@ -3003,6 +3209,65 @@ fn runImpl(
             );
             try io.writeAll(@TypeOf(c), &c, head);
             try io.writeAll(@TypeOf(c), &c, spec.retry_response_body);
+        }
+
+        fn serveRedirectRequests(tcp_listener: *Net.TcpListener, spec: RedirectSpec, accept_count: *usize) !void {
+            var conn = try tcp_listener.accept();
+            accept_count.* += 1;
+            defer conn.deinit();
+
+            {
+                var c = conn;
+                var req_buf: [4096]u8 = undefined;
+                const req_head = try readRequestHead(conn, &req_buf);
+                try testing.expect(hasRequestLine(req_head, spec.first_request_line));
+
+                var first_head_buf: [256]u8 = undefined;
+                const first_head = try lib.fmt.bufPrint(
+                    &first_head_buf,
+                    "HTTP/1.1 302 Found\r\nLocation: {s}\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n",
+                    .{spec.location},
+                );
+                try io.writeAll(@TypeOf(c), &c, first_head);
+            }
+
+            conn.setReadTimeout(spec.reuse_wait_timeout_ms);
+            var req_buf: [4096]u8 = undefined;
+            const second_req_head = readRequestHead(conn, &req_buf) catch |err| switch (err) {
+                error.TimedOut, error.EndOfStream => &.{},
+                else => return err,
+            };
+            conn.setReadTimeout(null);
+
+            if (second_req_head.len != 0) {
+                var c = conn;
+                try testing.expect(hasRequestLine(second_req_head, spec.second_request_line));
+                var second_head_buf: [256]u8 = undefined;
+                const second_head = try lib.fmt.bufPrint(
+                    &second_head_buf,
+                    "HTTP/1.1 {d} OK\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n",
+                    .{ spec.final_status_code, spec.final_body.len },
+                );
+                try io.writeAll(@TypeOf(c), &c, second_head);
+                try io.writeAll(@TypeOf(c), &c, spec.final_body);
+                return;
+            }
+
+            var second_conn = try tcp_listener.accept();
+            accept_count.* += 1;
+            defer second_conn.deinit();
+            var c = second_conn;
+            const second_head = try readRequestHead(second_conn, &req_buf);
+            try testing.expect(hasRequestLine(second_head, spec.second_request_line));
+
+            var second_head_buf: [256]u8 = undefined;
+            const final_head = try lib.fmt.bufPrint(
+                &second_head_buf,
+                "HTTP/1.1 {d} OK\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n",
+                .{ spec.final_status_code, spec.final_body.len },
+            );
+            try io.writeAll(@TypeOf(c), &c, final_head);
+            try io.writeAll(@TypeOf(c), &c, spec.final_body);
         }
 
         fn serveKeepAliveRequest(conn: net_mod.Conn, expected_request_line: []const u8, body: []const u8, close_conn: bool) !bool {

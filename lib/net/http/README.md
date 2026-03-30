@@ -1,10 +1,9 @@
 # lib/net/http
 
-Low-level Go-style HTTP building blocks for `lib/net`.
+Go-style HTTP building blocks plus an early high-level `Client` for `lib/net`.
 
 Today this package is centered on the client-side request/response model and
-the default transport. It does not ship a full high-level `Client` or `Server`
-yet.
+the default transport. A first `Client` layer is landed; `Server` is not.
 
 ## Public Surface
 
@@ -15,6 +14,7 @@ yet.
 - `Request`
 - `Response`
 - `status`
+- `Client`
 - `RoundTripper`
 - `Transport`
 
@@ -23,6 +23,54 @@ Import via the `net` package:
 ```zig
 const embed = @import("embed").make(platform);
 const net = @import("net").make(embed);
+```
+
+## Client
+
+`Client` is the first high-level facade above `RoundTripper` / `Transport`.
+
+Current behavior:
+
+- owned default `Transport` or borrowed custom `RoundTripper`
+- `do(req: *Request) !Response`
+- `get(url)` and `head(url)` convenience helpers
+- bounded redirect following with a default limit of `10`
+- 301/302/303 rewrite-to-GET behavior
+- 307/308 preserve-method behavior only when the body is replayable
+- response-scoped request cleanup for helper-built and redirect-hop requests
+- in-flight request tracking so `deinit()` waits for returned responses to be
+  released via `Response.deinit()`
+- new work started after `deinit()` begins fails with `error.Closed`
+
+Current scope boundary:
+
+- `Client` is intentionally still early.
+- Cookie jars, auth-policy helpers, total client timeout, `post`, and extra
+  client-level retries remain deferred follow-up layers.
+- There is intentionally no package-global `DefaultTransport` or
+  `DefaultClient`; callers should explicitly own and share the instance they
+  want to reuse.
+- `Client.deinit()` blocks until every live `Response` from that client has been
+  released with `Response.deinit()`.
+- Treat `deinit()` as exclusive teardown: once shutdown begins, do not race more
+  `Client` method calls against it from other threads.
+
+### Example
+
+```zig
+const embed = @import("embed").make(platform);
+const net = @import("net").make(embed);
+
+var client = try net.http.Client.init(embed.testing.allocator, .{});
+defer client.deinit();
+
+var resp = try client.get("https://example.com/");
+defer resp.deinit();
+
+const body = resp.body() orelse return error.MissingBody;
+var buf: [1024]u8 = undefined;
+const n = try body.read(&buf);
+embed.log.info("status={} body={s}", .{ resp.status_code, buf[0..n] });
 ```
 
 ## Transport
@@ -50,8 +98,11 @@ Important scope boundary:
 
 - `Transport` is intentionally low-level.
 - Redirects, cookies, auth policy, retries, and other high-level client policy
-  should live in a future `Client`, not in `Transport`, unless Go's
+  should live in `Client`, not in `Transport`, unless Go's
   `http.Transport` already owns that behavior.
+- One intentional internal `Transport` caller remains `net.Resolver`'s DoH path:
+  it uses a short-lived transport directly for a resolver-internal one-shot DNS
+  exchange, without `Client` redirect/policy layering.
 
 ### Example
 
@@ -111,7 +162,7 @@ Notes:
 
 ## Not Supported Yet
 
-These are the main HTTP transport gaps today.
+These are the main remaining HTTP gaps today.
 
 ### Request / Response Semantics
 
@@ -139,6 +190,11 @@ These are the main HTTP transport gaps today.
 
 ### Go-Surface / API Gaps
 
+- `Client.post(...)`
+- client-managed cookie jar integration
+- client-managed auth policy helpers
+- client-managed total timeout policy
+- client-managed retries beyond the current transport replay
 - `Clone()`
 - `CancelRequest()`
 - exact Go-style `RegisterProtocol()` / `TLSNextProto` public surface
@@ -153,24 +209,9 @@ These are the main HTTP transport gaps today.
 - a built-in HTTP/2 transport behind the current
   `force_attempt_http2` / `alternate_protocols` handoff model
 
-## Next Planned Types
+## Next Planned Type
 
-The next major package-level structures should be `Client` and `Server`.
-
-### Planned `Client`
-
-`Client` should sit above `RoundTripper` / `Transport` and own high-level
-request policy.
-
-Likely responsibilities:
-
-- hold a default `RoundTripper` or `Transport`
-- provide convenience entry points such as `get`, `post`, or a higher-level
-  `do`
-- manage redirect policy
-- own cookie and auth policy surfaces that should not live in `Transport`
-- centralize replay / retry policy that is higher-level than transport safety
-- present a stable caller-facing surface while `Transport` stays low-level
+The next major package-level structure should be `Server`.
 
 ### Planned `Server`
 
@@ -192,6 +233,7 @@ Likely responsibilities:
 
 If you want the package's current stable story:
 
-- use `Transport` for low-level client-side round trips today
+- use `Client` for the current high-level client path
+- use `Transport` for low-level client-side round trips
 - use this README for package-level scope and open gaps
 - use `review/lib_net.md` for the compressed review/worklog summary

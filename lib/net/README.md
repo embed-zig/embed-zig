@@ -101,6 +101,7 @@ lib/
       RoundTripper.zig RoundTripper contract
       Request.zig      HTTP request builder/parser
       Response.zig     HTTP response parser
+      Client.zig       High-level client facade above RoundTripper/Transport
       Transport.zig    Default HTTP/1.1 client transport
       status.zig       HTTP status codes and helpers
 ```
@@ -325,6 +326,13 @@ no CGO, fully portable across embed platforms.
 | Platform                | Linux-specific, musl port             | Platform-agnostic via `lib.posix`           |
 | Protocol                | UDP only (no TCP fallback)            | Per-server `Protocol`: udp, tcp, tls, doh |
 
+Resolver-specific note:
+
+- The internal DoH path intentionally uses a short-lived `http.Transport`
+  directly, not `http.Client`. It is treated as a resolver-internal DNS wire
+  exchange, with explicit timeout / no-keepalive / no-recursive-resolver
+  behavior, rather than as a general high-level HTTP client call.
+
 ### Resolver struct
 
 ```zig
@@ -353,7 +361,7 @@ pub fn Resolver(comptime lib: type) type {
         };
 
         pub const dns = struct {
-            pub const ali = struct { v4_1, v4_2, v6_1, v6_2, tls_name: []const u8 };
+            pub const ali = struct { v4_1, v4_2, v6_1, v6_2, server_name: []const u8 };
             pub const google = struct { ... };
             pub const cloudflare = struct { ... };
             pub const quad9 = struct { ... };
@@ -381,7 +389,7 @@ pub fn Resolver(comptime lib: type) type {
         pub fn init(allocator: Allocator, options: Options) Allocator.Error!Self;
         pub fn deinit(self: *Self) void;
         pub fn wait(self: *Self) void;
-        pub fn lookupHost(self: *Self, name: []const u8, buf: []Addr) LookupError!usize;
+        pub fn lookupHost(self: *Self, name: []const u8, buf: []Addr) anyerror!usize;
     };
 }
 ```
@@ -394,7 +402,7 @@ lookupHost("example.com")
   ├─ Build query packets (A and/or AAAA)
   │
   ├─ Spawn one Racer task per configured server
-  │     Server0/udp   Server1/tcp   Server2/tls   ...
+  │     Server0/udp   Server1/tcp   Server2/tls   Server3/doh ...
   │
   ├─ Each task:
   │     if done flag set → exit
@@ -402,6 +410,7 @@ lookupHost("example.com")
   │         .udp → udpResolve(server)
   │         .tcp → tcpResolve(server)
   │         .tls → tlsResolve(server)
+  │         .doh → dohResolve(server)
   │     }
   │     if addresses found → publish through sync.Racer
   │     if NXDOMAIN / REFUSED → record as fallback error
@@ -413,7 +422,7 @@ lookupHost("example.com")
 ```
 
 Key properties:
-- **True parallelism**: UDP, TCP, and TLS queries run on separate threads simultaneously
+- **True parallelism**: UDP, TCP, TLS, and DoH queries run on separate threads simultaneously
 - **First successful answer wins**: negative DNS replies do not short-circuit later successes
 - **Per-server sockets**: each task opens its own fd, no shared fd coordination
 - **Detached cleanup**: `lookupHost()` can return before lagging workers time out
@@ -546,10 +555,17 @@ Today the package exposes:
 
 - `Header`, `ReadCloser`, `Request`, `Response`
 - `status` helpers
+- `Client` as the current high-level client facade
 - `RoundTripper` contract
 - `Transport` as the default HTTP/1.1 client transport
 
-Server/router layers are not landed yet.
+The current `Client` layer supports `do`, `get`, `head`, owned-default vs
+borrowed-transport setup, and bounded redirects. Server/router layers are not
+landed yet.
+
+There is intentionally no package-global `DefaultTransport` or `DefaultClient`.
+Callers that want app-wide reuse should hold and share an explicit `Client` or
+`Transport` instance at the application boundary.
 
 For package-local transport behavior, unsupported items, and the planned
 `Client` / `Server` structures, see `lib/net/http/README.md`.
@@ -562,6 +578,21 @@ defer transport.deinit();
 
 var req = try net.http.Request.init(allocator, "GET", "http://example.com/api");
 var resp = try transport.roundTrip(&req);
+defer resp.deinit();
+
+const body = resp.body() orelse return error.MissingBody;
+var buf: [1024]u8 = undefined;
+const n = try body.read(&buf);
+_ = n;
+```
+
+**Client**:
+
+```zig
+var client = try net.http.Client.init(allocator, .{});
+defer client.deinit();
+
+var resp = try client.get("http://example.com/api");
 defer resp.deinit();
 
 const body = resp.body() orelse return error.MissingBody;

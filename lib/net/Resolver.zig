@@ -714,6 +714,9 @@ pub fn Resolver(comptime lib: type) type {
         ) ?usize {
             const tls_config = server.tls_config orelse return null;
             var attempt_ctx_impl = WorkerAttemptContext.init(allocator, ctx, timeout_ms);
+            // DoH here is an internal one-shot DNS wire exchange, so keep it on a
+            // short-lived Transport rather than layering in Client redirect/policy
+            // behavior or extra shared client state.
             var transport = Http.Transport.init(allocator, .{
                 .resolver = .{ .servers = &.{} },
                 .spawn_config = spawn_config,
