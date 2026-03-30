@@ -85,11 +85,16 @@ pub const DiscoveredChar = struct {
     uuid: u16,
 };
 
+pub const DEFAULT_ATT_MTU: u16 = 23;
+pub const MAX_ATT_MTU: u16 = 517;
+pub const ATT_VALUE_OVERHEAD: u16 = 3;
+pub const MAX_NOTIFICATION_VALUE_LEN: usize = MAX_ATT_MTU - ATT_VALUE_OVERHEAD;
+
 pub const NotificationData = struct {
     conn_handle: u16,
     attr_handle: u16,
-    data: [247]u8 = undefined,
-    len: u8 = 0,
+    data: [MAX_NOTIFICATION_VALUE_LEN]u8 = undefined,
+    len: u16 = 0,
 
     pub fn payload(self: *const NotificationData) []const u8 {
         return self.data[0..self.len];
@@ -138,9 +143,11 @@ pub const VTable = struct {
     gattRead: *const fn (ptr: *anyopaque, conn_handle: u16, attr_handle: u16, out: []u8) GattError!usize,
     gattWrite: *const fn (ptr: *anyopaque, conn_handle: u16, attr_handle: u16, data: []const u8) GattError!void,
     gattWriteNoResp: *const fn (ptr: *anyopaque, conn_handle: u16, attr_handle: u16, data: []const u8) GattError!void,
+    exchangeMtu: *const fn (ptr: *anyopaque, conn_handle: u16, mtu: u16) GattError!u16,
     subscribe: *const fn (ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void,
     subscribeIndications: *const fn (ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void,
     unsubscribe: *const fn (ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void,
+    getAttMtu: *const fn (ptr: *anyopaque, conn_handle: u16) u16,
     getState: *const fn (ptr: *anyopaque) State,
     addEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void,
     removeEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void,
@@ -204,6 +211,10 @@ pub fn gattWriteNoResp(self: Central, conn_handle: u16, attr_handle: u16, data: 
     return self.vtable.gattWriteNoResp(self.ptr, conn_handle, attr_handle, data);
 }
 
+pub fn exchangeMtu(self: Central, conn_handle: u16, mtu: u16) GattError!u16 {
+    return self.vtable.exchangeMtu(self.ptr, conn_handle, mtu);
+}
+
 pub fn subscribe(self: Central, conn_handle: u16, cccd_handle: u16) GattError!void {
     return self.vtable.subscribe(self.ptr, conn_handle, cccd_handle);
 }
@@ -214,6 +225,10 @@ pub fn subscribeIndications(self: Central, conn_handle: u16, cccd_handle: u16) G
 
 pub fn unsubscribe(self: Central, conn_handle: u16, cccd_handle: u16) GattError!void {
     return self.vtable.unsubscribe(self.ptr, conn_handle, cccd_handle);
+}
+
+pub fn getAttMtu(self: Central, conn_handle: u16) u16 {
+    return self.vtable.getAttMtu(self.ptr, conn_handle);
 }
 
 pub fn resolveChar(self: Central, conn_handle: u16, svc_uuid: u16, char_uuid: u16) GattError!DiscoveredChar {
@@ -316,6 +331,13 @@ pub fn wrap(pointer: anytype) Central {
             }
             return error.Unexpected;
         }
+        fn exchangeMtuFn(ptr: *anyopaque, conn_handle: u16, mtu: u16) GattError!u16 {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            if (@hasDecl(Impl, "exchangeMtu")) {
+                return self.exchangeMtu(conn_handle, mtu);
+            }
+            return error.Unexpected;
+        }
         fn subscribeFn(ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             return self.subscribe(conn_handle, cccd_handle);
@@ -330,6 +352,13 @@ pub fn wrap(pointer: anytype) Central {
         fn unsubscribeFn(ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             return self.unsubscribe(conn_handle, cccd_handle);
+        }
+        fn getAttMtuFn(ptr: *anyopaque, conn_handle: u16) u16 {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            if (@hasDecl(Impl, "getAttMtu")) {
+                return self.getAttMtu(conn_handle);
+            }
+            return DEFAULT_ATT_MTU;
         }
         fn getStateFn(ptr: *anyopaque) State {
             const self: *Impl = @ptrCast(@alignCast(ptr));
@@ -366,9 +395,11 @@ pub fn wrap(pointer: anytype) Central {
             .gattRead = gattReadFn,
             .gattWrite = gattWriteFn,
             .gattWriteNoResp = gattWriteNoRespFn,
+            .exchangeMtu = exchangeMtuFn,
             .subscribe = subscribeFn,
             .subscribeIndications = subscribeIndicationsFn,
             .unsubscribe = unsubscribeFn,
+            .getAttMtu = getAttMtuFn,
             .getState = getStateFn,
             .addEventHook = addEventHookFn,
             .removeEventHook = removeEventHookFn,
@@ -419,5 +450,7 @@ test "bt/unit_tests/Central_wrap_does_not_silently_downgrade_optional_gatt_ops" 
     const central = wrap(&impl);
 
     try @import("std").testing.expectError(error.Unexpected, central.gattWriteNoResp(1, 2, "x"));
+    try @import("std").testing.expectError(error.Unexpected, central.exchangeMtu(1, MAX_ATT_MTU));
     try @import("std").testing.expectError(error.Unexpected, central.subscribeIndications(1, 2));
+    try @import("std").testing.expectEqual(DEFAULT_ATT_MTU, central.getAttMtu(1));
 }

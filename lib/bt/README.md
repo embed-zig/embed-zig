@@ -145,13 +145,14 @@ lib/bt/
     Gap.zig                   LE GAP state machine: adv, scan, connect
     client/
       // host.Client submodules
-      xfer.zig                  Client-side transfer helper entrypoint
-      xfer/
-        rpc.zig                 Planned RPC-style transfer protocol
-        read_x.zig              Transfer primitive
-        write_x.zig             Transfer primitive
+      xfer.zig                Compatibility entrypoint to host/xfer/client.zig
     server/
       // host.Server submodules
+    xfer/
+      Chunk.zig               Shared xfer wire helpers
+      client.zig              Client-side xfer helpers: readX, writeX, get
+      Server.zig              Server-side xfer engine
+      ServerMux.zig           Topic router over one xfer characteristic
     gatt/
       server.zig              GATT server: comptime service table, PDU dispatch
       client.zig              GATT client: discovery, read, write, subscribe
@@ -179,7 +180,7 @@ lib/bt/
 │              │             │                                 │
 │              └───────┬─────┘                                 │
 │                      │                                       │
-│             host/client/xfer (read_x, write_x, ...)          │
+│                     host/xfer                                │
 │                      │                                       │
 │          bt/host/Hci ─────────────────────────────┐          │
 │              │                                    │          │
@@ -331,7 +332,7 @@ The direction for the HCI backend is to expose two layers:
 
 1. A **portable role layer**: `bt.Central` and `bt.Peripheral`.
 2. A **host-only extension layer**: `bt.Host`, `host.Client`,
-   `host.Server`, and transfer-oriented helpers under `host/client/xfer/`.
+   `host.Server`, and transfer-oriented helpers under `host/xfer/`.
 
 This keeps the public portable surface small while still allowing richer
 host-side protocols to be built once and reused across raw-HCI targets.
@@ -404,36 +405,35 @@ bt.Host
 
 ### Transfer extensions
 
-The existing transfer-oriented helpers such as `read_x` and `write_x`
-should live under the host client layer instead of as a top-level
-`bt/xfer` package.
+The existing transfer-oriented helpers such as `readX`, `writeX`, and
+`get()` live under the host-only `host/xfer/` package instead of as a
+top-level `bt/xfer` package.
 
 Reasoning:
 
 - They are not backend-agnostic transport primitives.
-- They build on central/client-side connection semantics and GATT conventions.
-- Future features such as RPC belong in the same client extension layer.
+- They build on host client/server connection semantics and GATT conventions.
+- Future features such as RPC-style topic routing belong next to the existing
+  xfer engine and mux rather than inside generic client or server wrappers.
 
 The layout is:
 
 ```text
-host/client/xfer/
-  rpc.zig
-  read_x.zig
-  write_x.zig
+host/xfer/
+  Chunk.zig
+  client.zig
+  Server.zig
+  ServerMux.zig
 ```
 
-In other words, `xfer` becomes a **transfer extension layer for the host
-client backend**, not a separate top-level Bluetooth abstraction.
+In other words, `xfer` becomes a **host-only transfer extension layer**,
+not a separate top-level Bluetooth abstraction.
 
-On the server side, `host.Server.handleX()` is the matching endpoint for
-client `readX` / `writeX` traffic. It uses xfer-specific logical
-read/write callbacks rather than the plain `bt.Peripheral.Request` /
-`ResponseWriter` contract, because the wire protocol is driven by control
-writes plus notify/indicate chunk delivery instead of raw ATT reads.
-`host.Server` keeps subscription and xfer runtime state per connection so
-disconnect handling can tear down one peer without scanning unrelated
-peers.
+`host/client/Characteristic.zig` exposes the client convenience methods
+such as `readX`, `writeX`, and `get()`, while `host.Server.handleX()` is
+the matching endpoint for routed xfer traffic. `host/xfer/Server.zig`
+keeps xfer-specific runtime state per connection so disconnect handling can
+tear down one peer without scanning unrelated peers.
 
 Internally, `Hci` orchestrates:
 1. Send HCI commands via `Transport.send`

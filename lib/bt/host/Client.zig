@@ -111,6 +111,10 @@ pub fn Client(comptime lib: type, comptime CentralType: type) type {
             return self.centralPtr().gattWriteNoResp(conn_handle, attr_handle, data);
         }
 
+        pub fn attMtu(self: *Self, conn_handle: u16) u16 {
+            return self.centralPtr().getAttMtu(conn_handle);
+        }
+
         pub fn disconnectConn(self: *Self, conn_handle: u16) void {
             self.centralPtr().disconnect(conn_handle);
         }

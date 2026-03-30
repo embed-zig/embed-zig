@@ -276,3 +276,38 @@ test "integration_tests/bt/pair" {
 
     if (!t.wait()) return error.TestFailed;
 }
+
+test "integration_tests/bt/xfer" {
+    const std = @import("std");
+    std.testing.log_level = .info;
+
+    const bt_mod = @import("bt");
+    const Mocker = bt_mod.Mocker(std);
+
+    var mocker = Mocker.init(std.testing.allocator, .{});
+    defer mocker.deinit();
+
+    var client_host = try mocker.createHost(.{
+        .position = .{ .x = -1, .y = 0, .z = 0 },
+    });
+    defer client_host.deinit();
+
+    var server_host = try mocker.createHost(.{
+        .position = .{ .x = 1, .y = 0, .z = 0 },
+        .hci = .{
+            .controller_addr = .{ 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6 },
+            .peer_addr = .{ 0x51, 0x52, 0x53, 0x54, 0x55, 0x56 },
+            .mtu = 64,
+        },
+    });
+    defer server_host.deinit();
+
+    var t = testing_mod.T.new(std, .bt_xfer);
+    defer t.deinit();
+    t.timeout(5 * std.time.ns_per_s);
+
+    t.parallel();
+    t.run("xfer/peripheral", bt_mod.test_runner.pair_xfer.makePeripheral(std, &server_host));
+    t.run("xfer/central", bt_mod.test_runner.pair_xfer.makeCentral(std, &client_host));
+    if (!t.wait()) return error.TestFailed;
+}
