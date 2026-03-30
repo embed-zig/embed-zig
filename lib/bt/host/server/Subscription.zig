@@ -14,11 +14,11 @@ pub fn Subscription(comptime lib: type, comptime ServerType: type) type {
             service_uuid: u16,
             char_uuid: u16,
             cccd_value: u16,
-            internal: bool,
             mutex: lib.Thread.Mutex = .{},
             cond: lib.Thread.Condition = .{},
             closed: bool = false,
             active_ops: usize = 0,
+            ref_count: usize = 1,
         };
 
         state: *State,
@@ -32,7 +32,6 @@ pub fn Subscription(comptime lib: type, comptime ServerType: type) type {
             service_uuid: u16,
             char_uuid: u16,
             cccd_value: u16,
-            internal: bool,
         ) !Self {
             const state = try allocator.create(State);
             state.* = .{
@@ -42,15 +41,16 @@ pub fn Subscription(comptime lib: type, comptime ServerType: type) type {
                 .service_uuid = service_uuid,
                 .char_uuid = char_uuid,
                 .cccd_value = cccd_value,
-                .internal = internal,
             };
             return .{ .state = state };
         }
 
         pub fn deinit(self: *Self) void {
             close(self.state);
-            _ = self.state.server.unregisterSubscription(self.state);
-            destroyState(self.state);
+            if (self.state.server.unregisterSubscription(self.state)) {
+                release(self.state);
+            }
+            release(self.state);
         }
 
         pub fn write(self: *Self, data: []const u8) WriteError!void {
@@ -109,8 +109,20 @@ pub fn Subscription(comptime lib: type, comptime ServerType: type) type {
             state.cond.broadcast();
         }
 
-        pub fn destroyState(state: *State) void {
+        pub fn retain(state: *State) void {
             state.mutex.lock();
+            state.ref_count += 1;
+            state.mutex.unlock();
+        }
+
+        pub fn release(state: *State) void {
+            state.mutex.lock();
+            if (state.ref_count == 0) unreachable;
+            state.ref_count -= 1;
+            if (state.ref_count != 0) {
+                state.mutex.unlock();
+                return;
+            }
             state.closed = true;
             while (state.active_ops != 0) {
                 state.cond.wait(&state.mutex);

@@ -1,6 +1,6 @@
-//! chunk — BLE xfer chunk encoding and bitmask utilities.
+//! Chunk — BLE xfer chunk encoding and bitmask utilities.
 
-const std = @import("std");
+const embed = @import("embed");
 
 /// Maximum number of chunks supported by the 12-bit header fields.
 pub const max_chunks: u16 = 4095;
@@ -30,6 +30,16 @@ pub const start_magic = read_start_magic;
 
 /// ACK marker sent by the receiver once all chunks arrive.
 pub const ack_signal = [2]u8{ 0xFF, 0xFF };
+
+pub const Topic = u64;
+pub const RequestId = u32;
+pub const topic_size: usize = @sizeOf(Topic);
+pub const request_id_size: usize = @sizeOf(RequestId);
+
+pub const ReadStartMetadata = struct {
+    topic: Topic,
+    request_id: ?RequestId = null,
+};
 
 pub const Header = struct {
     total: u16,
@@ -61,15 +71,37 @@ pub fn isStartMagic(data: []const u8) bool {
 }
 
 pub fn isReadStartMagic(data: []const u8) bool {
-    return data.len >= read_start_magic.len and std.mem.eql(u8, data[0..read_start_magic.len], &read_start_magic);
+    return data.len >= read_start_magic.len and embed.mem.eql(u8, data[0..read_start_magic.len], &read_start_magic);
 }
 
 pub fn isWriteStartMagic(data: []const u8) bool {
-    return data.len >= write_start_magic.len and std.mem.eql(u8, data[0..write_start_magic.len], &write_start_magic);
+    return data.len >= write_start_magic.len and embed.mem.eql(u8, data[0..write_start_magic.len], &write_start_magic);
 }
 
 pub fn isAck(data: []const u8) bool {
     return data.len >= ack_signal.len and data[0] == 0xFF and data[1] == 0xFF;
+}
+
+pub fn encodeReadStartMetadata(buf: []u8, topic: Topic, request_id: ?RequestId) []u8 {
+    if (buf.len < topic_size) unreachable;
+    writeInt(Topic, buf[0..topic_size], topic);
+    if (request_id) |rid| {
+        if (buf.len < topic_size + request_id_size) unreachable;
+        writeInt(RequestId, buf[topic_size .. topic_size + request_id_size], rid);
+        return buf[0 .. topic_size + request_id_size];
+    }
+    return buf[0..topic_size];
+}
+
+pub fn decodeReadStartMetadata(data: []const u8) error{InvalidReadStartMetadata}!ReadStartMetadata {
+    if (data.len < topic_size) return error.InvalidReadStartMetadata;
+    return .{
+        .topic = readInt(Topic, data[0..topic_size]),
+        .request_id = if (data.len >= topic_size + request_id_size)
+            readInt(RequestId, data[topic_size .. topic_size + request_id_size])
+        else
+            null,
+    };
 }
 
 pub fn encodeLossList(seqs: []const u16, buf: []u8) []u8 {
@@ -164,7 +196,27 @@ pub fn chunksNeeded(data_len: usize, mtu: u16) usize {
     return (data_len + dcs - 1) / dcs;
 }
 
-test "bt/unit_tests/host/client/xfer/chunk/Header_encode_decode_roundtrip" {
+fn writeInt(comptime T: type, buf: []u8, value: T) void {
+    var shift: usize = (buf.len - 1) * 8;
+    var i: usize = 0;
+    while (i < buf.len) : (i += 1) {
+        buf[i] = @intCast((value >> @intCast(shift)) & 0xFF);
+        if (shift == 0) break;
+        shift -= 8;
+    }
+}
+
+fn readInt(comptime T: type, buf: []const u8) T {
+    var value: T = 0;
+    for (buf) |byte| {
+        value = (value << 8) | @as(T, byte);
+    }
+    return value;
+}
+
+test "bt/unit_tests/host/xfer/Chunk/Header_encode_decode_roundtrip" {
+    const std = @import("std");
+
     const cases = [_]Header{
         .{ .total = 1, .seq = 1 },
         .{ .total = 100, .seq = 50 },
@@ -182,7 +234,9 @@ test "bt/unit_tests/host/client/xfer/chunk/Header_encode_decode_roundtrip" {
     }
 }
 
-test "bt/unit_tests/host/client/xfer/chunk/Header_validate_rejects_out_of_range_values" {
+test "bt/unit_tests/host/xfer/Chunk/Header_validate_rejects_out_of_range_values" {
+    const std = @import("std");
+
     try (Header{ .total = 1, .seq = 1 }).validate();
     try (Header{ .total = 4095, .seq = 4095 }).validate();
 
@@ -192,7 +246,9 @@ test "bt/unit_tests/host/client/xfer/chunk/Header_validate_rejects_out_of_range_
     try std.testing.expectError(error.InvalidHeader, (Header{ .total = 4096, .seq = 1 }).validate());
 }
 
-test "bt/unit_tests/host/client/xfer/chunk/control_message_detection" {
+test "bt/unit_tests/host/xfer/Chunk/control_message_detection" {
+    const std = @import("std");
+
     try std.testing.expect(isStartMagic(&read_start_magic));
     try std.testing.expect(isReadStartMagic(&read_start_magic));
     try std.testing.expect(isWriteStartMagic(&write_start_magic));
@@ -205,7 +261,9 @@ test "bt/unit_tests/host/client/xfer/chunk/control_message_detection" {
     try std.testing.expect(!isAck(&[_]u8{0xFF}));
 }
 
-test "bt/unit_tests/host/client/xfer/chunk/loss_list_roundtrip_and_truncation" {
+test "bt/unit_tests/host/xfer/Chunk/loss_list_roundtrip_and_truncation" {
+    const std = @import("std");
+
     const seqs = [_]u16{ 1, 42, 4095 };
     var buf: [6]u8 = undefined;
     const encoded = encodeLossList(&seqs, &buf);
@@ -227,7 +285,9 @@ test "bt/unit_tests/host/client/xfer/chunk/loss_list_roundtrip_and_truncation" {
     try std.testing.expectEqual(@as(u16, 42), truncated_out[1]);
 }
 
-test "bt/unit_tests/host/client/xfer/chunk/bitmask_set_clear_complete_and_collect_missing" {
+test "bt/unit_tests/host/xfer/Chunk/bitmask_set_clear_complete_and_collect_missing" {
+    const std = @import("std");
+
     var buf: [2]u8 = undefined;
     Bitmask.initClear(&buf, 10);
     try std.testing.expectEqual(@as(usize, 2), Bitmask.requiredBytes(10));
@@ -262,7 +322,9 @@ test "bt/unit_tests/host/client/xfer/chunk/bitmask_set_clear_complete_and_collec
     try std.testing.expect(!Bitmask.isSet(&buf, 5));
 }
 
-test "bt/unit_tests/host/client/xfer/chunk/bitmask_initAllSet_masks_partial_last_byte" {
+test "bt/unit_tests/host/xfer/Chunk/bitmask_initAllSet_masks_partial_last_byte" {
+    const std = @import("std");
+
     var buf: [2]u8 = undefined;
     Bitmask.initAllSet(&buf, 10);
     try std.testing.expectEqual(@as(u8, 0xFF), buf[0]);
@@ -274,7 +336,9 @@ test "bt/unit_tests/host/client/xfer/chunk/bitmask_initAllSet_masks_partial_last
     try std.testing.expectEqual(@as(u8, 0x07), one_byte[0]);
 }
 
-test "bt/unit_tests/host/client/xfer/chunk/size_helpers" {
+test "bt/unit_tests/host/xfer/Chunk/size_helpers" {
+    const std = @import("std");
+
     try std.testing.expectEqual(@as(usize, 241), dataChunkSize(247));
     try std.testing.expectEqual(@as(usize, 24), dataChunkSize(30));
     try std.testing.expectEqual(@as(usize, 1), dataChunkSize(7));
@@ -286,4 +350,23 @@ test "bt/unit_tests/host/client/xfer/chunk/size_helpers" {
     try std.testing.expectEqual(@as(usize, 4), chunksNeeded(964, 247));
     try std.testing.expectEqual(@as(usize, 5), chunksNeeded(1000, 247));
     try std.testing.expectEqual(@as(usize, 3), chunksNeeded(56, 30));
+}
+
+test "bt/unit_tests/host/xfer/Chunk/read_start_metadata_roundtrip" {
+    const std = @import("std");
+
+    var buf: [topic_size + request_id_size]u8 = undefined;
+    const without_request_id = encodeReadStartMetadata(buf[0..], 0x0102030405060708, null);
+    try std.testing.expectEqual(@as(usize, topic_size), without_request_id.len);
+
+    const decoded_without = try decodeReadStartMetadata(without_request_id);
+    try std.testing.expectEqual(@as(Topic, 0x0102030405060708), decoded_without.topic);
+    try std.testing.expectEqual(@as(?RequestId, null), decoded_without.request_id);
+
+    const with_request_id = encodeReadStartMetadata(buf[0..], 0x0102030405060708, 0x0A0B0C0D);
+    try std.testing.expectEqual(@as(usize, topic_size + request_id_size), with_request_id.len);
+
+    const decoded_with = try decodeReadStartMetadata(with_request_id);
+    try std.testing.expectEqual(@as(Topic, 0x0102030405060708), decoded_with.topic);
+    try std.testing.expectEqual(@as(?RequestId, 0x0A0B0C0D), decoded_with.request_id);
 }

@@ -1,5 +1,6 @@
-const read_x = @import("xfer/read_x.zig");
-const write_x = @import("xfer/write_x.zig");
+const client = @import("../xfer/client.zig");
 
-pub const read = read_x.read;
-pub const write = write_x.write;
+pub const Topic = client.Topic;
+pub const get = client.get;
+pub const read = client.read;
+pub const write = client.write;

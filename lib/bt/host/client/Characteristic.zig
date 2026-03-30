@@ -1,7 +1,7 @@
 //! host.client.Characteristic — resolved characteristic bound to one connection.
 
 const bt = @import("../../../bt.zig");
-const xfer = @import("xfer.zig");
+const xfer = @import("../xfer/client.zig");
 
 pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime SubscriptionType: type) type {
     return struct {
@@ -49,12 +49,20 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
             return self.client.writeAttrNoResp(self.conn_handle, self.value_handle, data);
         }
 
+        pub fn attMtu(self: *Self) u16 {
+            return self.client.attMtu(self.conn_handle);
+        }
+
         pub fn writeX(self: *Self, data: []const u8) !void {
             return xfer.write(self, data);
         }
 
         pub fn readX(self: *Self, allocator: lib.mem.Allocator) ![]u8 {
             return xfer.read(self, allocator);
+        }
+
+        pub fn get(self: *Self, topic: xfer.Topic, allocator: lib.mem.Allocator) ![]u8 {
+            return xfer.get(self, topic, allocator);
         }
 
         pub fn subscribe(self: *Self) ClientType.GattError!SubscriptionType {

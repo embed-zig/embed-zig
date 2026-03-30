@@ -9,6 +9,7 @@ pub const test_runner = struct {
     pub const central = @import("bt/test_runner/central.zig");
     pub const peripheral = @import("bt/test_runner/peripheral.zig");
     pub const pair = @import("bt/test_runner/pair.zig");
+    pub const pair_xfer = @import("bt/test_runner/pair_xfer.zig");
 };
 
 /// Build the built-in HCI-backed host bundle bound to `lib`.
@@ -89,5 +90,6 @@ test "bt/unit_tests" {
     _ = @import("bt/host/Central.zig");
     _ = @import("bt/host/Peripheral.zig");
     _ = @import("bt/host/client/xfer.zig");
+    _ = @import("bt/host/Server.zig");
     _ = @import("bt/Host.zig");
 }

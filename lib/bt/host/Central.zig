@@ -18,6 +18,7 @@ pub fn Central(comptime lib: type) type {
         hci: bt.Hci,
         state: bt.Central.State = .idle,
         started: bool = false,
+        att_mtu: u16 = bt.Central.DEFAULT_ATT_MTU,
         mutex: lib.Thread.Mutex = .{},
         hooks: std.ArrayListUnmanaged(EventHook) = .{},
         scan_service_uuids: std.ArrayListUnmanaged(u16) = .{},
@@ -118,6 +119,7 @@ pub fn Central(comptime lib: type) type {
             self.hci.release();
             self.started = false;
             self.state = .idle;
+            self.att_mtu = bt.Central.DEFAULT_ATT_MTU;
         }
 
         pub fn deinit(self: *Self) void {
@@ -192,6 +194,13 @@ pub fn Central(comptime lib: type) type {
                 return error.Rejected;
             };
             self.state = .connected;
+            _ = self.exchangeMtu(link.conn_handle, bt.Central.MAX_ATT_MTU) catch |err| switch (err) {
+                error.Disconnected => {
+                    self.state = .idle;
+                    return error.Rejected;
+                },
+                else => {},
+            };
             return linkToConnectionInfo(link);
         }
 
@@ -298,6 +307,28 @@ pub fn Central(comptime lib: type) type {
             };
         }
 
+        pub fn exchangeMtu(self: *Self, conn_handle: u16, mtu: u16) bt.Central.GattError!u16 {
+            var req_buf: [att.MAX_PDU_LEN]u8 = undefined;
+            var resp_buf: [att.MAX_PDU_LEN]u8 = undefined;
+            const requested_mtu = @max(bt.Central.DEFAULT_ATT_MTU, @min(mtu, bt.Central.MAX_ATT_MTU));
+            const req = att.encodeMtuRequest(&req_buf, requested_mtu);
+            const resp = try self.sendAttRequest(conn_handle, req, &resp_buf);
+            const pdu = att.decodePdu(resp) orelse return error.Unexpected;
+
+            return switch (pdu) {
+                .exchange_mtu_response => |mtu_resp| blk: {
+                    const effective_mtu = @max(
+                        bt.Central.DEFAULT_ATT_MTU,
+                        @min(requested_mtu, mtu_resp.server_mtu),
+                    );
+                    self.att_mtu = effective_mtu;
+                    break :blk effective_mtu;
+                },
+                .error_response => error.AttError,
+                else => error.Unexpected,
+            };
+        }
+
         pub fn subscribe(self: *Self, conn_handle: u16, cccd_handle: u16) bt.Central.GattError!void {
             var req_buf: [att.MAX_PDU_LEN]u8 = undefined;
             var resp_buf: [att.MAX_PDU_LEN]u8 = undefined;
@@ -323,6 +354,12 @@ pub fn Central(comptime lib: type) type {
             const resp = try self.sendAttRequest(conn_handle, req, &resp_buf);
 
             if (gatt_client.isErrorFor(resp, att.WRITE_REQUEST)) |_| return error.AttError;
+        }
+
+        pub fn getAttMtu(self: *Self, conn_handle: u16) u16 {
+            const link = self.hci.getLink(.central) orelse return bt.Central.DEFAULT_ATT_MTU;
+            if (link.conn_handle != conn_handle) return bt.Central.DEFAULT_ATT_MTU;
+            return self.att_mtu;
         }
 
         pub fn getState(self: *Self) bt.Central.State {
@@ -494,6 +531,7 @@ pub fn Central(comptime lib: type) type {
 
         fn onConnected(ctx: ?*anyopaque, link: bt.Hci.Link) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
+            self.att_mtu = bt.Central.DEFAULT_ATT_MTU;
             self.state = .connected;
             self.fireEvent(.{ .connected = linkToConnectionInfo(link) });
         }
@@ -501,6 +539,7 @@ pub fn Central(comptime lib: type) type {
         fn onDisconnected(ctx: ?*anyopaque, conn_handle: u16, _: u8) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
             self.state = .idle;
+            self.att_mtu = bt.Central.DEFAULT_ATT_MTU;
             self.fireEvent(.{ .disconnected = conn_handle });
         }
 
@@ -512,7 +551,7 @@ pub fn Central(comptime lib: type) type {
             };
             const n = @min(data.len, notif.data.len);
             @memcpy(notif.data[0..n], data[0..n]);
-            notif.len = @truncate(n);
+            notif.len = @intCast(n);
             self.fireEvent(.{ .notification = notif });
         }
     };
@@ -651,4 +690,66 @@ test "bt/unit_tests/host/Central_connect_resets_state_after_rejected_link" {
 
     try std.testing.expectError(error.Rejected, central.connect(.{ 1, 2, 3, 4, 5, 6 }, .public, .{}));
     try std.testing.expectEqual(bt.Central.State.idle, central.getState());
+}
+
+test "bt/unit_tests/host/Central_connect_falls_back_to_default_mtu_when_exchange_fails" {
+    const Impl = Central(std);
+
+    const FakeHci = struct {
+        link: bt.Hci.Link = .{
+            .role = .central,
+            .conn_handle = 7,
+            .peer_addr = .{ 1, 2, 3, 4, 5, 6 },
+            .peer_addr_type = .public,
+            .interval = 24,
+            .latency = 0,
+            .timeout = 200,
+        },
+
+        pub fn retain(_: *@This()) bt.Hci.Error!void {}
+        pub fn release(_: *@This()) void {}
+        pub fn setCentralListener(_: *@This(), _: bt.Hci.CentralListener) void {}
+        pub fn setPeripheralListener(_: *@This(), _: bt.Hci.PeripheralListener) void {}
+        pub fn startScanning(_: *@This(), _: bt.Hci.ScanConfig) bt.Hci.Error!void {}
+        pub fn stopScanning(_: *@This()) void {}
+        pub fn startAdvertising(_: *@This(), _: bt.Hci.AdvConfig) bt.Hci.Error!void {}
+        pub fn stopAdvertising(_: *@This()) void {}
+        pub fn connect(_: *@This(), _: bt.Hci.BdAddr, _: bt.Hci.AddrType, _: bt.Hci.ConnConfig) bt.Hci.Error!void {}
+        pub fn cancelConnect(_: *@This()) void {}
+        pub fn disconnect(_: *@This(), _: u16, _: u8) void {}
+        pub fn sendAcl(_: *@This(), _: u16, _: []const u8) bt.Hci.Error!void {}
+        pub fn sendAttRequest(_: *@This(), _: u16, _: []const u8, _: []u8) bt.Hci.Error!usize {
+            return error.Unexpected;
+        }
+        pub fn getAddr(_: *@This()) ?bt.Hci.BdAddr {
+            return null;
+        }
+        pub fn getLink(self: *@This(), role: bt.Hci.Role) ?bt.Hci.Link {
+            if (role != .central) return null;
+            return self.link;
+        }
+        pub fn getLinkByHandle(self: *@This(), conn_handle: u16) ?bt.Hci.Link {
+            if (conn_handle != self.link.conn_handle) return null;
+            return self.link;
+        }
+        pub fn isScanning(_: *@This()) bool {
+            return false;
+        }
+        pub fn isAdvertising(_: *@This()) bool {
+            return false;
+        }
+        pub fn isConnectingCentral(_: *@This()) bool {
+            return false;
+        }
+        pub fn deinit(_: *@This()) void {}
+    };
+
+    var fake_hci = FakeHci{};
+    var central = Impl.init(bt.Hci.wrap(&fake_hci), std.testing.allocator);
+    defer central.deinit();
+
+    const info = try central.connect(fake_hci.link.peer_addr, .public, .{});
+    try std.testing.expectEqual(fake_hci.link.conn_handle, info.conn_handle);
+    try std.testing.expectEqual(bt.Central.State.connected, central.getState());
+    try std.testing.expectEqual(bt.Central.DEFAULT_ATT_MTU, central.getAttMtu(fake_hci.link.conn_handle));
 }

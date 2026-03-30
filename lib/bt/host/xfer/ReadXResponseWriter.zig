@@ -1,4 +1,4 @@
-//! host.server.xfer.ReadXResponseWriter — logical read_x response writer.
+//! xfer.ReadXResponseWriter — logical read_x response writer.
 
 _impl: *anyopaque,
 _write_fn: *const fn (*anyopaque, []const u8) void,
