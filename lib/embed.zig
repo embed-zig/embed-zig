@@ -24,6 +24,7 @@ pub const math = @import("embed/math.zig");
 pub const debug = @import("embed/debug.zig");
 pub const meta = @import("embed/meta.zig");
 pub const atomic = @import("embed/atomic.zig");
+pub const builtin = @import("embed/builtin.zig");
 pub const testing = @import("embed/testing.zig");
 pub const test_runner = struct {
     pub const logging = @import("embed/test_runner/logging.zig");
@@ -44,6 +45,7 @@ pub fn make(comptime Impl: type) type {
         pub const Io = root.Io;
         pub const debug = root.debug;
         pub const atomic = root.atomic;
+        pub const builtin = root.builtin;
         pub const testing = root.testing.make(Impl.testing);
         pub const Random = root.Random;
         pub const crypto = root.crypto.make(Impl.crypto);

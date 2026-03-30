@@ -216,6 +216,7 @@ lib/zux/
   DirtySet.zig
   Subscription.zig
   Runtime.zig
+  StoreObject.zig
   input/
     Callback.zig
     State.zig
