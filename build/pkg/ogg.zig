@@ -3,6 +3,11 @@ const GitRepo = @import("../GitRepo.zig");
 
 var library: ?*std.Build.Step.Compile = null;
 
+const c_sources: []const []const u8 = &.{
+    "src/bitwise.c",
+    "src/framing.c",
+};
+
 pub fn create(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
@@ -21,7 +26,6 @@ pub fn create(
             "Optional path to a complete Ogg config header; otherwise embed-zig includes pkg/ogg/config.default.h",
         ) orelse b.path("pkg/ogg/config.default.h"),
     );
-    const c_wrappers = createWrappedCSources(b, repo);
 
     const lib = b.addLibrary(.{
         .linkage = .static,
@@ -33,6 +37,7 @@ pub fn create(
         }),
     });
     lib.root_module.addConfigHeader(config_header);
+    lib.root_module.addCMacro("HAVE_CONFIG_H", "1");
     lib.root_module.addIncludePath(local_include);
     lib.root_module.addIncludePath(repo.includePath("include"));
     if (b.sysroot) |sysroot| {
@@ -41,8 +46,8 @@ pub fn create(
         });
     }
     lib.root_module.addCSourceFile(.{ .file = b.path("pkg/ogg/src/binding.c") });
-    for (c_wrappers) |src| {
-        lib.root_module.addCSourceFile(.{ .file = src });
+    for (c_sources) |src| {
+        lib.root_module.addCSourceFile(.{ .file = repo.sourcePath(src) });
     }
     repo.dependOn(&lib.step);
 
@@ -52,6 +57,7 @@ pub fn create(
         .optimize = optimize,
     });
     mod.addConfigHeader(config_header);
+    mod.addCMacro("HAVE_CONFIG_H", "1");
     mod.addIncludePath(local_include);
     mod.addIncludePath(repo.includePath("include"));
     if (b.sysroot) |sysroot| {
@@ -99,26 +105,6 @@ fn createConfigHeader(
     });
 }
 
-fn createWrappedCSources(
-    b: *std.Build,
-    repo: GitRepo.GitRepo,
-) []const std.Build.LazyPath {
-    const write_files = b.addWriteFiles();
-    const wrapper_sources = [_][]const u8{
-        "src/bitwise.c",
-        "src/framing.c",
-    };
-    const c_wrappers = b.allocator.alloc(std.Build.LazyPath, wrapper_sources.len) catch @panic("OOM");
-    for (c_wrappers, wrapper_sources) |*wrapper, src| {
-        wrapper.* = write_files.add(wrapperName(b, src), b.fmt(
-            \\#include "config.h"
-            \\#include "{s}"
-            \\
-        , .{normalizeIncludePath(b, repo.sourcePath(src))}));
-    }
-    return c_wrappers;
-}
-
 fn normalizeIncludePath(b: *std.Build, header: std.Build.LazyPath) []const u8 {
     const raw = header.getPath(b);
     const resolved = if (std.fs.path.isAbsolute(raw))
@@ -126,9 +112,4 @@ fn normalizeIncludePath(b: *std.Build, header: std.Build.LazyPath) []const u8 {
     else
         b.pathFromRoot(raw);
     return std.mem.replaceOwned(u8, b.allocator, resolved, "\\", "/") catch @panic("OOM");
-}
-
-fn wrapperName(b: *std.Build, src: []const u8) []const u8 {
-    const flattened = std.mem.replaceOwned(u8, b.allocator, src, "/", "__") catch @panic("OOM");
-    return b.fmt("{s}.wrap.c", .{flattened});
 }

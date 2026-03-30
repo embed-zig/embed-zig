@@ -163,7 +163,6 @@ pub fn create(
             "Optional path to a complete Opus config header; otherwise embed-zig includes pkg/opus/config.default.h",
         ) orelse b.path("pkg/opus/config.default.h"),
     );
-    const c_wrappers = createWrappedCSources(b, repo);
 
     const lib = b.addLibrary(.{
         .linkage = .static,
@@ -176,6 +175,7 @@ pub fn create(
         }),
     });
     lib.root_module.addConfigHeader(config_header);
+    lib.root_module.addCMacro("HAVE_CONFIG_H", "1");
     for (include_dirs) |dir| {
         lib.root_module.addIncludePath(repo.includePath(dir));
     }
@@ -184,8 +184,8 @@ pub fn create(
             .cwd_relative = b.pathJoin(&.{ sysroot, "include" }),
         });
     }
-    for (c_wrappers) |src| {
-        lib.root_module.addCSourceFile(.{ .file = src });
+    for (c_sources) |src| {
+        lib.root_module.addCSourceFile(.{ .file = repo.sourcePath(src) });
     }
     lib.root_module.addCSourceFile(.{ .file = b.path("pkg/opus/src/binding.c") });
     repo.dependOn(&lib.step);
@@ -197,6 +197,7 @@ pub fn create(
         .link_libc = true,
     });
     mod.addConfigHeader(config_header);
+    mod.addCMacro("HAVE_CONFIG_H", "1");
     for (include_dirs) |dir| {
         mod.addIncludePath(repo.includePath(dir));
     }
@@ -245,22 +246,6 @@ fn createConfigHeader(
     });
 }
 
-fn createWrappedCSources(
-    b: *std.Build,
-    repo: GitRepo.GitRepo,
-) []const std.Build.LazyPath {
-    const write_files = b.addWriteFiles();
-    const c_wrappers = b.allocator.alloc(std.Build.LazyPath, c_sources.len) catch @panic("OOM");
-    for (c_wrappers, c_sources) |*wrapper, src| {
-        wrapper.* = write_files.add(wrapperName(b, src), b.fmt(
-            \\#include "config.h"
-            \\#include "{s}"
-            \\
-        , .{normalizeIncludePath(b, repo.sourcePath(src))}));
-    }
-    return c_wrappers;
-}
-
 fn normalizeIncludePath(b: *std.Build, header: std.Build.LazyPath) []const u8 {
     const raw = header.getPath(b);
     const resolved = if (std.fs.path.isAbsolute(raw))
@@ -268,9 +253,4 @@ fn normalizeIncludePath(b: *std.Build, header: std.Build.LazyPath) []const u8 {
     else
         b.pathFromRoot(raw);
     return std.mem.replaceOwned(u8, b.allocator, resolved, "\\", "/") catch @panic("OOM");
-}
-
-fn wrapperName(b: *std.Build, src: []const u8) []const u8 {
-    const flattened = std.mem.replaceOwned(u8, b.allocator, src, "/", "__") catch @panic("OOM");
-    return b.fmt("{s}.wrap.c", .{flattened});
 }
