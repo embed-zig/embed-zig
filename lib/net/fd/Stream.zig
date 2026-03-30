@@ -36,10 +36,12 @@ pub fn Stream(comptime lib: type) type {
             Closed,
             TimedOut,
         } || posix.RecvFromError || posix.PollError;
+        pub const ReadContextError = ReadError || ContextStateError;
         pub const WriteError = error{
             Closed,
             TimedOut,
         } || posix.SendError || posix.PollError;
+        pub const WriteContextError = WriteError || ContextStateError;
 
         const ContextStateError = error{
             Canceled,
@@ -76,12 +78,14 @@ pub fn Stream(comptime lib: type) type {
         pub fn connect(self: *Self, addr: AddrPort) ConnectError!void {
             if (self.closed) return error.Closed;
             const encoded = try SockAddr.encode(addr);
+            var pending = false;
 
             posix.connect(self.fd, @ptrCast(&encoded.storage), encoded.len) catch |err| switch (err) {
-                error.WouldBlock, error.ConnectionPending => {},
+                error.WouldBlock, error.ConnectionPending => pending = true,
                 else => return err,
             };
 
+            if (!pending) return;
             return self.waitForConnect(null);
         }
 
@@ -89,12 +93,14 @@ pub fn Stream(comptime lib: type) type {
             if (self.closed) return error.Closed;
             try checkContext(ctx);
             const encoded = try SockAddr.encode(addr);
+            var pending = false;
 
             posix.connect(self.fd, @ptrCast(&encoded.storage), encoded.len) catch |err| switch (err) {
-                error.WouldBlock, error.ConnectionPending => {},
+                error.WouldBlock, error.ConnectionPending => pending = true,
                 else => return err,
             };
 
+            if (!pending) return;
             return self.waitForConnect(ctx);
         }
 
@@ -113,6 +119,22 @@ pub fn Stream(comptime lib: type) type {
             }
         }
 
+        pub fn readContext(self: *Self, ctx: context_mod.Context, buf: []u8) ReadContextError!usize {
+            if (self.closed) return error.Closed;
+            try checkContext(ctx);
+
+            while (true) {
+                const n = posix.recv(self.fd, buf, 0) catch |err| switch (err) {
+                    error.WouldBlock => {
+                        try self.waitForReadContext(ctx);
+                        continue;
+                    },
+                    else => return err,
+                };
+                return n;
+            }
+        }
+
         pub fn write(self: *Self, buf: []const u8) WriteError!usize {
             if (self.closed) return error.Closed;
 
@@ -120,6 +142,22 @@ pub fn Stream(comptime lib: type) type {
                 const n = posix.send(self.fd, buf, 0) catch |err| switch (err) {
                     error.WouldBlock => {
                         try self.waitForWrite();
+                        continue;
+                    },
+                    else => return err,
+                };
+                return n;
+            }
+        }
+
+        pub fn writeContext(self: *Self, ctx: context_mod.Context, buf: []const u8) WriteContextError!usize {
+            if (self.closed) return error.Closed;
+            try checkContext(ctx);
+
+            while (true) {
+                const n = posix.send(self.fd, buf, 0) catch |err| switch (err) {
+                    error.WouldBlock => {
+                        try self.waitForWriteContext(ctx);
                         continue;
                     },
                     else => return err,
@@ -151,7 +189,11 @@ pub fn Stream(comptime lib: type) type {
             while (true) {
                 poll_fds[0].revents = 0;
                 const timeout_ms = if (ctx) |c| try contextPollTimeout(c) else -1;
-                const ready = try posix.poll(poll_fds[0..], timeout_ms);
+                const ready = posix.poll(poll_fds[0..], timeout_ms) catch |err| {
+                    // Some backends surface EINTR as "Interrupted"; others don't include it.
+                    if (errorNameEquals(err, "Interrupted")) continue;
+                    return err;
+                };
                 if (ready == 0) {
                     if (ctx) |c| {
                         try checkContext(c);
@@ -171,8 +213,16 @@ pub fn Stream(comptime lib: type) type {
             try waitForIo(self.fd, posix.POLL.IN | posix.POLL.HUP | posix.POLL.ERR, self.read_deadline_ms);
         }
 
+        fn waitForReadContext(self: *Self, ctx: context_mod.Context) ReadContextError!void {
+            try waitForIoContext(self.fd, posix.POLL.IN | posix.POLL.HUP | posix.POLL.ERR, self.read_deadline_ms, ctx);
+        }
+
         fn waitForWrite(self: *Self) WriteError!void {
             try waitForIo(self.fd, posix.POLL.OUT | posix.POLL.HUP | posix.POLL.ERR, self.write_deadline_ms);
+        }
+
+        fn waitForWriteContext(self: *Self, ctx: context_mod.Context) WriteContextError!void {
+            try waitForIoContext(self.fd, posix.POLL.OUT | posix.POLL.HUP | posix.POLL.ERR, self.write_deadline_ms, ctx);
         }
 
         fn waitForIo(fd: posix.socket_t, events: anytype, deadline_ms: ?i64) (error{TimedOut} || posix.PollError)!void {
@@ -185,8 +235,41 @@ pub fn Stream(comptime lib: type) type {
             while (true) {
                 poll_fds[0].revents = 0;
                 const timeout_ms = timeoutFromDeadline(deadline_ms);
-                const ready = try posix.poll(poll_fds[0..], timeout_ms);
+                const ready = posix.poll(poll_fds[0..], timeout_ms) catch |err| {
+                    if (errorNameEquals(err, "Interrupted")) continue;
+                    return err;
+                };
                 if (ready == 0) return error.TimedOut;
+                return;
+            }
+        }
+
+        fn waitForIoContext(
+            fd: posix.socket_t,
+            events: anytype,
+            deadline_ms: ?i64,
+            ctx: context_mod.Context,
+        ) (error{TimedOut} || ContextStateError || posix.PollError)!void {
+            var poll_fds = [_]posix.pollfd{.{
+                .fd = fd,
+                .events = events,
+                .revents = 0,
+            }};
+
+            while (true) {
+                poll_fds[0].revents = 0;
+                const timeout_ms = try contextIoPollTimeout(ctx, deadline_ms);
+                const ready = posix.poll(poll_fds[0..], timeout_ms) catch |err| {
+                    if (errorNameEquals(err, "Interrupted")) continue;
+                    return err;
+                };
+                if (ready == 0) {
+                    checkContext(ctx) catch |err| return err;
+                    if (deadline_ms) |deadline| {
+                        if (lib.time.milliTimestamp() >= deadline) return error.TimedOut;
+                    }
+                    continue;
+                }
                 return;
             }
         }
@@ -209,6 +292,18 @@ pub fn Stream(comptime lib: type) type {
             }
 
             return @intCast(context_poll_quantum_ms);
+        }
+
+        fn contextIoPollTimeout(ctx: context_mod.Context, deadline_ms: ?i64) (error{TimedOut} || ContextStateError)!i32 {
+            var timeout_ms = try contextPollTimeout(ctx);
+
+            if (deadline_ms) |deadline| {
+                const remaining = deadline - lib.time.milliTimestamp();
+                if (remaining <= 0) return error.TimedOut;
+                timeout_ms = @intCast(@min(@as(i64, timeout_ms), remaining));
+            }
+
+            return timeout_ms;
         }
 
         fn checkContext(ctx: context_mod.Context) ContextStateError!void {
@@ -250,6 +345,15 @@ pub fn Stream(comptime lib: type) type {
             const T = info.pointer.child;
             const raw: [*]u8 = @ptrCast(ptr);
             return raw[0..@sizeOf(T)];
+        }
+
+        fn errorNameEquals(err: anyerror, comptime expected: []const u8) bool {
+            const name = @errorName(err);
+            if (name.len != expected.len) return false;
+            inline for (expected, 0..) |byte, i| {
+                if (name[i] != byte) return false;
+            }
+            return true;
         }
     };
 }

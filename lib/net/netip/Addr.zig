@@ -43,6 +43,7 @@ pub fn parse(s: []const u8) ParseError!Addr {
         if (percent == 0 or percent + 1 >= s.len) return error.InvalidCharacter;
         const zone = s[percent + 1 ..];
         if (zone.len > max_zone_len) return error.ZoneTooLong;
+        if (parseIpv4(s[0..percent])) |_| return error.ZoneOnIPv4 else |_| {}
 
         var addr = try parseIpv6(s[0..percent]);
         @memcpy(addr.zone[0..zone.len], zone);
@@ -619,6 +620,11 @@ test "net/unit_tests/netip/addr/parse_scoped_ipv6" {
     var buf: [80]u8 = undefined;
     const n = try addr.formatBuf(&buf);
     try testing.expectEqualStrings("fe80::1%eth0", buf[0..n]);
+}
+
+test "net/unit_tests/netip/addr/reject_zone_on_ipv4" {
+    const testing = @import("std").testing;
+    try testing.expectError(error.ZoneOnIPv4, Addr.parse("192.0.2.1%eth0"));
 }
 
 test "net/unit_tests/netip/addr/from16_keeps_ipv4_mapped_ipv6_until_unmap" {

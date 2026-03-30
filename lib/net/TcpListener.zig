@@ -43,23 +43,36 @@ pub fn TcpListener(comptime lib: type) type {
         }
 
         pub fn listen(self: *Self) Listener.ListenError!void {
-            self.listener.listen(self.backlog) catch |err| return switch (err) {
-                error.Closed => error.SocketNotListening,
-                else => err,
-            };
+            try self.listener.listen(self.backlog);
         }
 
         pub fn accept(self: *Self) Listener.AcceptError!Conn {
             var stream = self.listener.accept() catch |err| return switch (err) {
-                error.Closed, error.SocketNotListening => error.SocketNotListening,
+                error.BlockedByFirewall => error.BlockedByFirewall,
+                error.Closed => error.Closed,
+                error.SocketNotListening => error.SocketNotListening,
                 error.ConnectionAborted => error.ConnectionAborted,
+                error.ConnectionResetByPeer => error.ConnectionResetByPeer,
+                error.DeadLock => error.DeadLock,
+                error.FileDescriptorNotASocket => error.FileDescriptorNotASocket,
+                error.FileBusy => error.FileBusy,
+                error.Locked => error.Locked,
+                error.LockedRegionLimitExceeded => error.LockedRegionLimitExceeded,
+                error.NetworkSubsystemFailed => error.NetworkSubsystemFailed,
+                error.OperationNotSupported => error.OperationNotSupported,
+                error.PermissionDenied => error.PermissionDenied,
                 error.ProcessFdQuotaExceeded => error.ProcessFdQuotaExceeded,
+                error.ProtocolFailure => error.ProtocolFailure,
                 error.SystemFdQuotaExceeded => error.SystemFdQuotaExceeded,
+                error.SystemResources => error.SystemResources,
+                error.WouldBlock => error.WouldBlock,
                 else => error.Unexpected,
             };
             errdefer stream.deinit();
 
-            return SC.initFromStream(self.allocator, stream) catch return error.Unexpected;
+            return SC.initFromStream(self.allocator, stream) catch |err| switch (err) {
+                error.OutOfMemory => error.OutOfMemory,
+            };
         }
 
         pub fn close(self: *Self) void {
@@ -71,8 +84,10 @@ pub fn TcpListener(comptime lib: type) type {
             self.allocator.destroy(self);
         }
 
-        pub fn port(self: *Self) !u16 {
-            return self.listener.port() catch return error.Unexpected;
+        pub const PortError = FdListener.PortError;
+
+        pub fn port(self: *Self) PortError!u16 {
+            return self.listener.port();
         }
     };
 }
@@ -147,4 +162,94 @@ test "net/unit_tests/TcpListener/std_compat_ipv6" {
     var buf: [64]u8 = undefined;
     const n = try ac.read(buf[0..]);
     try s.testing.expectEqualStrings(msg, buf[0..n]);
+}
+
+test "net/unit_tests/TcpListener/accept_after_close_returns_closed" {
+    const s = @import("std");
+    const Addr = @import("netip/AddrPort.zig");
+    const TL = TcpListener(s);
+
+    var ln = try TL.init(s.testing.allocator, .{ .address = Addr.from4(.{ 127, 0, 0, 1 }, 0) });
+    defer ln.deinit();
+    try ln.listen();
+    ln.close();
+
+    try s.testing.expectError(error.Closed, ln.accept());
+}
+
+test "net/unit_tests/TcpListener/accept_before_listen_returns_socket_not_listening" {
+    const s = @import("std");
+    const Addr = @import("netip/AddrPort.zig");
+    const TL = TcpListener(s);
+
+    var ln = try TL.init(s.testing.allocator, .{ .address = Addr.from4(.{ 127, 0, 0, 1 }, 0) });
+    defer ln.deinit();
+
+    try s.testing.expectError(error.SocketNotListening, ln.accept());
+}
+
+test "net/unit_tests/TcpListener/accept_reports_out_of_memory" {
+    const s = @import("std");
+    const Addr = @import("netip/AddrPort.zig");
+    const SockAddr = sockaddr_mod.SockAddr(s);
+    const TL = TcpListener(s);
+
+    const OneShotAllocator = struct {
+        backing: s.mem.Allocator,
+        allocations_left: usize = 1,
+
+        const Self = @This();
+        const Alignment = s.mem.Alignment;
+
+        fn allocator(self: *Self) s.mem.Allocator {
+            return .{
+                .ptr = self,
+                .vtable = &vtable,
+            };
+        }
+
+        fn alloc(ptr: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            if (self.allocations_left == 0) return null;
+            self.allocations_left -= 1;
+            return self.backing.rawAlloc(len, alignment, ret_addr);
+        }
+
+        fn resize(ptr: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            return self.backing.rawResize(memory, alignment, new_len, ret_addr);
+        }
+
+        fn remap(ptr: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            return self.backing.rawRemap(memory, alignment, new_len, ret_addr);
+        }
+
+        fn free(ptr: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            self.backing.rawFree(memory, alignment, ret_addr);
+        }
+
+        const vtable: s.mem.Allocator.VTable = .{
+            .alloc = alloc,
+            .resize = resize,
+            .remap = remap,
+            .free = free,
+        };
+    };
+
+    var allocator = OneShotAllocator{ .backing = s.heap.page_allocator };
+    var ln = try TL.init(allocator.allocator(), .{ .address = Addr.from4(.{ 127, 0, 0, 1 }, 0) });
+    defer ln.deinit();
+    try ln.listen();
+
+    const typed = try ln.as(TL);
+    const bound_port = try typed.port();
+    const dest = try SockAddr.encode(Addr.from4(.{ 127, 0, 0, 1 }, bound_port));
+
+    const cli_fd = try s.posix.socket(s.posix.AF.INET, s.posix.SOCK.STREAM, 0);
+    defer s.posix.close(cli_fd);
+    try s.posix.connect(cli_fd, @ptrCast(&dest.storage), dest.len);
+
+    try s.testing.expectError(error.OutOfMemory, ln.accept());
 }

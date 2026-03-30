@@ -1,5 +1,6 @@
 //! fd packet test runner — validates the internal non-blocking packet layer.
 
+const context_mod = @import("context");
 const embed = @import("embed");
 const testing_api = @import("testing");
 const fd_mod = @import("../fd.zig");
@@ -35,6 +36,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
 
 fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !void {
     _ = t;
+    const Context = context_mod.make(lib);
     const Packet = fd_mod.Packet(lib);
     const AddrPort = netip.AddrPort;
     const Addr = netip.Addr;
@@ -91,6 +93,32 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             try testing.expectEqual(expected_port, lib.mem.bigToNative(u16, in.port));
         }
 
+        fn expectFromAddrPort6(result: Packet.ReadFromResult, expected_port: u16) !void {
+            const sa: *const posix.sockaddr = @ptrCast(&result.addr);
+            try testing.expectEqual(posix.AF.INET6, sa.family);
+            const in6: *const posix.sockaddr.in6 = @ptrCast(@alignCast(&result.addr));
+            try testing.expectEqual(expected_port, lib.mem.bigToNative(u16, in6.port));
+        }
+
+        fn skipIfConnectDidNotPend(err: anyerror) anyerror!void {
+            switch (err) {
+                error.AccessDenied,
+                error.PermissionDenied,
+                error.AddressInUse,
+                error.AddressNotAvailable,
+                error.AddressFamilyNotSupported,
+                error.ConnectionRefused,
+                error.NetworkUnreachable,
+                error.ConnectionTimedOut,
+                error.ConnectionResetByPeer,
+                error.FileNotFound,
+                error.SystemResources,
+                error.ConnectFailed,
+                => return error.SkipZigTest,
+                else => return err,
+            }
+        }
+
         fn packetIpv4Loopback() !void {
             var receiver = try bindLoopback(AddrPort.from4(.{ 127, 0, 0, 1 }, 0));
             defer receiver.deinit();
@@ -117,14 +145,14 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             defer sender.deinit();
 
             const dest = try localAddr(&receiver);
+            const src = try localAddr(&sender);
             const sent = try sender.writeTo("udp6", dest);
             try testing.expectEqual(@as(usize, 4), sent);
 
             var buf: [16]u8 = undefined;
             const recv = try receiver.readFrom(&buf);
             try testing.expectEqualStrings("udp6", buf[0..recv.bytes_read]);
-            const sa: *const posix.sockaddr = @ptrCast(&recv.addr);
-            try testing.expectEqual(posix.AF.INET6, sa.family);
+            try expectFromAddrPort6(recv, src.port());
         }
 
         fn packetConnectedReadWrite() !void {
@@ -148,6 +176,112 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             try testing.expectEqualStrings("pong", buf[0..n2]);
         }
 
+        fn packetConnectContextLoopback() !void {
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+
+            var server = try bindLoopback(AddrPort.from4(.{ 127, 0, 0, 1 }, 0));
+            defer server.deinit();
+            var client = try bindLoopback(AddrPort.from4(.{ 127, 0, 0, 1 }, 0));
+            defer client.deinit();
+
+            const server_addr = try localAddr(&server);
+            try client.connectContext(ctx_api.background(), server_addr);
+
+            _ = try client.write("ctx");
+
+            var buf: [16]u8 = undefined;
+            const recv = try server.readFrom(&buf);
+            try testing.expectEqualStrings("ctx", buf[0..recv.bytes_read]);
+
+            const n = try server.writeTo("ok", try localAddr(&client));
+            try testing.expectEqual(@as(usize, 2), n);
+
+            const ack_len = try client.read(&buf);
+            try testing.expectEqualStrings("ok", buf[0..ack_len]);
+        }
+
+        fn packetConnectContextCanceledBeforeStart() !void {
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+
+            var ctx = try ctx_api.withCancel(ctx_api.background());
+            defer ctx.deinit();
+            ctx.cancel();
+
+            var packet = try Packet.initSocket(posix.AF.INET);
+            defer packet.deinit();
+
+            try testing.expectError(
+                error.Canceled,
+                packet.connectContext(ctx, AddrPort.from4(.{ 127, 0, 0, 1 }, 1)),
+            );
+        }
+
+        fn packetConnectContextDeadlineExceededBeforeStart() !void {
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+
+            var ctx = try ctx_api.withDeadline(ctx_api.background(), lib.time.nanoTimestamp() - 1 * lib.time.ns_per_ms);
+            defer ctx.deinit();
+
+            var packet = try Packet.initSocket(posix.AF.INET);
+            defer packet.deinit();
+
+            try testing.expectError(
+                error.DeadlineExceeded,
+                packet.connectContext(ctx, AddrPort.from4(.{ 127, 0, 0, 1 }, 1)),
+            );
+        }
+
+        fn packetConnectContextCanceledDuringConnect() !void {
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+
+            var ctx = try ctx_api.withCancel(ctx_api.background());
+            defer ctx.deinit();
+
+            var packet = try Packet.initSocket(posix.AF.INET);
+            defer packet.deinit();
+
+            const cancel_thread = try Thread.spawn(.{}, struct {
+                fn run(cancel_ctx: context_mod.Context, comptime thread_lib: type) void {
+                    thread_lib.Thread.sleep(40 * thread_lib.time.ns_per_ms);
+                    cancel_ctx.cancel();
+                }
+            }.run, .{ ctx, lib });
+            defer cancel_thread.join();
+
+            packet.connectContext(ctx, AddrPort.from4(.{ 203, 0, 113, 1 }, 9)) catch |err| switch (err) {
+                error.Canceled => return,
+                else => return skipIfConnectDidNotPend(err),
+            };
+
+            // UDP connect may complete synchronously on some hosts because there
+            // is no handshake to force an in-progress state.
+            return error.SkipZigTest;
+        }
+
+        fn packetConnectContextDeadlineExceededDuringConnect() !void {
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+
+            var ctx = try ctx_api.withDeadline(ctx_api.background(), lib.time.nanoTimestamp() + 40 * lib.time.ns_per_ms);
+            defer ctx.deinit();
+
+            var packet = try Packet.initSocket(posix.AF.INET);
+            defer packet.deinit();
+
+            packet.connectContext(ctx, AddrPort.from4(.{ 203, 0, 113, 1 }, 9)) catch |err| switch (err) {
+                error.DeadlineExceeded => return,
+                else => return skipIfConnectDidNotPend(err),
+            };
+
+            // UDP connect may complete synchronously on some hosts because there
+            // is no handshake to force an in-progress state.
+            return error.SkipZigTest;
+        }
+
         fn packetPreservesDatagramBoundaries() !void {
             var receiver = try bindLoopback(AddrPort.from4(.{ 127, 0, 0, 1 }, 0));
             defer receiver.deinit();
@@ -158,9 +292,9 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             _ = try sender.writeTo("abcdef", dest);
             _ = try sender.writeTo("xy", dest);
 
-            var first: [3]u8 = undefined;
+            var first: [8]u8 = undefined;
             const r1 = try receiver.readFrom(&first);
-            try testing.expectEqualStrings("abc", first[0..r1.bytes_read]);
+            try testing.expectEqualStrings("abcdef", first[0..r1.bytes_read]);
 
             var second: [8]u8 = undefined;
             const r2 = try receiver.readFrom(&second);
@@ -273,6 +407,9 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             var packet = try Packet.initSocket(posix.AF.INET);
             packet.close();
             packet.close();
+
+            var buf: [1]u8 = undefined;
+            try testing.expectError(error.Closed, packet.readFrom(&buf));
         }
 
         fn makeIndexedMessage(buf: []u8, prefix: u8, index: usize) usize {
@@ -300,6 +437,17 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
     try Runner.packetIpv4Loopback();
     try Runner.packetIpv6Loopback();
     try Runner.packetConnectedReadWrite();
+    try Runner.packetConnectContextLoopback();
+    try Runner.packetConnectContextCanceledBeforeStart();
+    try Runner.packetConnectContextDeadlineExceededBeforeStart();
+    Runner.packetConnectContextCanceledDuringConnect() catch |err| switch (err) {
+        error.SkipZigTest => {},
+        else => return err,
+    };
+    Runner.packetConnectContextDeadlineExceededDuringConnect() catch |err| switch (err) {
+        error.SkipZigTest => {},
+        else => return err,
+    };
     try Runner.packetPreservesDatagramBoundaries();
     try Runner.packetReadDeadlineTimesOut();
     try Runner.packetReadDeadlineClearAllowsLaterRead();

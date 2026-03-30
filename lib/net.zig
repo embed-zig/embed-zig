@@ -114,6 +114,8 @@ pub const test_runner = struct {
 test "net/unit_tests" {
     _ = @import("net/fd.zig");
     _ = @import("net/test_runner/fd_packet.zig");
+    _ = @import("net/Dialer.zig");
+    _ = @import("net/TcpConn.zig");
     _ = @import("net/stack/Stack.zig");
     _ = @import("net/http/Header.zig");
     _ = @import("net/http/ReadCloser.zig");
@@ -131,5 +133,6 @@ test "net/unit_tests" {
     _ = @import("net/tls/server_handshake.zig");
     _ = @import("net/tls/Conn.zig");
     _ = @import("net/TcpListener.zig");
+    _ = @import("net/UdpConn.zig");
     _ = @import("net/url.zig");
 }

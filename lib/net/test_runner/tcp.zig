@@ -14,8 +14,6 @@ const net = @import("../../net.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
-        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
-
         pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
             _ = self;
             _ = allocator;
@@ -127,6 +125,7 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
                 error.ConnectionResetByPeer,
                 error.FileNotFound,
                 error.SystemResources,
+                error.ConnectFailed,
                 => return error.SkipZigTest,
                 else => return err,
             }
@@ -313,6 +312,78 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             return error.ExpectedDeadlineExceeded;
         }
 
+        fn tcpReadWithCanceledIoContextMapsToTimedOut() !void {
+            const Context = context_mod.make(lib);
+
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+
+            var io_ctx = try ctx_api.withCancel(ctx_api.background());
+            defer io_ctx.deinit();
+
+            var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
+            defer ln.deinit();
+
+            const port = try listenerPort(ln, Net);
+
+            var cc = try Net.dial(testing.allocator, .tcp, addr4(.{ 127, 0, 0, 1 }, port));
+            defer cc.deinit();
+
+            var ac = try ln.accept();
+            defer ac.deinit();
+
+            const accepted = try ac.as(Net.TcpConn);
+            accepted.pushIoContext(io_ctx);
+
+            const cancel_thread = try Thread.spawn(.{}, struct {
+                fn run(ctx: context_mod.Context, comptime thread_lib: type) void {
+                    thread_lib.Thread.sleep(30 * thread_lib.time.ns_per_ms);
+                    ctx.cancel();
+                }
+            }.run, .{ io_ctx, lib });
+            defer cancel_thread.join();
+
+            var buf: [16]u8 = undefined;
+            try testing.expectError(error.TimedOut, ac.read(&buf));
+
+            accepted.popIoContext();
+            try io.writeAll(@TypeOf(cc), &cc, "ok");
+            try io.readFull(@TypeOf(ac), &ac, buf[0..2]);
+            try testing.expectEqualStrings("ok", buf[0..2]);
+        }
+
+        fn tcpReadWithDeadlineIoContextMapsToTimedOut() !void {
+            const Context = context_mod.make(lib);
+
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+
+            var io_ctx = try ctx_api.withDeadline(ctx_api.background(), lib.time.nanoTimestamp() + 30 * lib.time.ns_per_ms);
+            defer io_ctx.deinit();
+
+            var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
+            defer ln.deinit();
+
+            const port = try listenerPort(ln, Net);
+
+            var cc = try Net.dial(testing.allocator, .tcp, addr4(.{ 127, 0, 0, 1 }, port));
+            defer cc.deinit();
+
+            var ac = try ln.accept();
+            defer ac.deinit();
+
+            const accepted = try ac.as(Net.TcpConn);
+            accepted.pushIoContext(io_ctx);
+
+            var buf: [16]u8 = undefined;
+            try testing.expectError(error.TimedOut, ac.read(&buf));
+
+            accepted.popIoContext();
+            try io.writeAll(@TypeOf(cc), &cc, "ok");
+            try io.readFull(@TypeOf(ac), &ac, buf[0..2]);
+            try testing.expectEqualStrings("ok", buf[0..2]);
+        }
+
         fn tcpReadTimeout() !void {
             var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
             defer ln.deinit();
@@ -355,6 +426,27 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             var buf: [5]u8 = undefined;
             try io.readFull(@TypeOf(ac), &ac, &buf);
             try testing.expectEqualStrings("hello", &buf);
+        }
+
+        fn tcpReadReportsEndOfStreamAfterPeerShutdownWrite() !void {
+            var ln = try Net.listen(testing.allocator, .{ .address = addr4(.{ 127, 0, 0, 1 }, 0) });
+            defer ln.deinit();
+
+            const port = try listenerPort(ln, Net);
+
+            var cc = try Net.dial(testing.allocator, .tcp, addr4(.{ 127, 0, 0, 1 }, port));
+            defer cc.deinit();
+
+            var ac = try ln.accept();
+            defer ac.deinit();
+
+            const accepted = try ac.as(Net.TcpConn);
+            try accepted.stream.shutdown(.write);
+
+            cc.setReadTimeout(1_000);
+
+            var buf: [16]u8 = undefined;
+            try testing.expectError(error.EndOfStream, cc.read(&buf));
         }
 
         fn tcpWriteTimeout() !void {
@@ -619,8 +711,11 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
         error.SkipZigTest => {},
         else => return err,
     };
+    try Runner.tcpReadWithCanceledIoContextMapsToTimedOut();
+    try Runner.tcpReadWithDeadlineIoContextMapsToTimedOut();
     try Runner.tcpReadTimeout();
     try Runner.tcpReadFull();
+    try Runner.tcpReadReportsEndOfStreamAfterPeerShutdownWrite();
     try Runner.tcpWriteTimeout();
     try Runner.tcpConnAsDowncast();
     try Runner.tcpMultipleAccept();

@@ -89,16 +89,23 @@ pub fn parse(input: []const u8) ParseError!Url {
         if (indexOfScalar(host_port, ']')) |bracket_end| {
             result.host = host_port[1..bracket_end];
             const after_bracket = host_port[bracket_end + 1 ..];
-            if (after_bracket.len > 0 and after_bracket[0] == ':') {
+            if (after_bracket.len > 0) {
+                if (after_bracket[0] != ':') return error.InvalidPort;
                 result.port = after_bracket[1..];
                 if (!validPort(result.port)) return error.InvalidPort;
             }
         } else {
-            result.host = host_port;
+            return error.InvalidPort;
         }
     } else {
+        if (countScalar(host_port, ':') > 1) return error.InvalidPort;
         if (lastIndexOfScalar(host_port, ':')) |colon| {
             const maybe_port = host_port[colon + 1 ..];
+            if (maybe_port.len == 0) return error.InvalidPort;
+            const maybe_port_digits = decimalPort(maybe_port);
+            if (maybe_port_digits != null and !validPort(maybe_port)) {
+                return error.InvalidPort;
+            }
             if (validPort(maybe_port)) {
                 result.host = host_port[0..colon];
                 result.port = maybe_port;
@@ -129,11 +136,18 @@ pub fn parse(input: []const u8) ParseError!Url {
 }
 
 fn validPort(s: []const u8) bool {
-    if (s.len == 0) return false;
+    const value = decimalPort(s) orelse return false;
+    return value <= 65535;
+}
+
+fn decimalPort(s: []const u8) ?u64 {
+    if (s.len == 0) return null;
+    var value: u64 = 0;
     for (s) |c| {
-        if (c < '0' or c > '9') return false;
+        if (c < '0' or c > '9') return null;
+        value = value * 10 + (c - '0');
     }
-    return true;
+    return value;
 }
 
 fn indexOf(haystack: []const u8, needle: []const u8) ?usize {
@@ -168,6 +182,14 @@ fn indexOfAny(haystack: []const u8, chars: []const u8) ?usize {
         }
     }
     return null;
+}
+
+fn countScalar(haystack: []const u8, needle: u8) usize {
+    var count: usize = 0;
+    for (haystack) |c| {
+        if (c == needle) count += 1;
+    }
+    return count;
 }
 
 fn eql(a: []const u8, b: []const u8) bool {
@@ -295,17 +317,20 @@ test "net/unit_tests/url/parse_errors" {
     try std.testing.expectError(error.EmptyInput, parse(""));
     try std.testing.expectError(error.MissingScheme, parse("example.com"));
     try std.testing.expectError(error.MissingScheme, parse("/path/only"));
+    try std.testing.expectError(error.InvalidPort, parse("http://[::1"));
+    try std.testing.expectError(error.InvalidPort, parse("http://example.com:99999"));
+    try std.testing.expectError(error.InvalidPort, parse("http://example.com:"));
+    try std.testing.expectError(error.InvalidPort, parse("http://[::1]garbage"));
+    try std.testing.expectError(error.InvalidPort, parse("http://2001:db8::1/path"));
 }
 
 test "net/unit_tests/url/portAsNumber_overflow" {
     const std = @import("std");
 
-    const overflow = try parse("http://example.com:99999");
-    try std.testing.expectEqual(@as(?u16, null), overflow.portAsNumber());
+    try std.testing.expectError(error.InvalidPort, parse("http://example.com:99999"));
 
     const max_port = try parse("http://example.com:65535");
     try std.testing.expectEqual(@as(u16, 65535), max_port.portAsNumber().?);
 
-    const over_max = try parse("http://example.com:65536");
-    try std.testing.expectEqual(@as(?u16, null), over_max.portAsNumber());
+    try std.testing.expectError(error.InvalidPort, parse("http://example.com:65536"));
 }

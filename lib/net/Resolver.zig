@@ -1036,7 +1036,12 @@ pub fn Resolver(comptime lib: type) type {
         fn parseResponse(pkt: []const u8, qtype: u16, out: []Addr) !usize {
             if (pkt.len < 12) return error.InvalidResponse;
 
+            const flags = readU16(pkt[2..4]);
+            const qdcount = readU16(pkt[4..6]);
             const ancount = readU16(pkt[6..8]);
+            if ((flags & 0x8000) == 0) return error.InvalidResponse;
+            if ((flags & 0x0200) != 0) return error.InvalidResponse;
+            if (qdcount != 1) return error.InvalidResponse;
             var pos: usize = 12;
 
             pos = try skipName(pkt, pos);
@@ -1083,6 +1088,7 @@ pub fn Resolver(comptime lib: type) type {
                 const len = pkt[pos];
                 if (len == 0) return pos + 1;
                 if (len & 0xC0 == 0xC0) return pos + 2;
+                if ((len & 0xC0) != 0 or len > 63) return error.InvalidResponse;
                 pos += @as(usize, len) + 1;
                 if (pos > pkt.len) return error.InvalidResponse;
             }
@@ -1105,4 +1111,103 @@ pub fn Resolver(comptime lib: type) type {
             return readU16(&buf);
         }
     };
+}
+
+fn writeResolverTestU16(buf: *[512]u8, pos: *usize, value: u16) void {
+    buf[pos.*] = @truncate(value >> 8);
+    buf[pos.* + 1] = @truncate(value);
+    pos.* += 2;
+}
+
+fn readResolverTestU16(bytes: []const u8) u16 {
+    return @as(u16, bytes[0]) << 8 | bytes[1];
+}
+
+fn buildResolverTestAResponse(comptime R: type, req: []const u8, flags: u16, qdcount: u16, out: *[512]u8) !usize {
+    if (req.len < 12) return error.InvalidResponse;
+
+    var pos: usize = 0;
+    writeResolverTestU16(out, &pos, readResolverTestU16(req[0..2]));
+    writeResolverTestU16(out, &pos, flags);
+    writeResolverTestU16(out, &pos, qdcount);
+    writeResolverTestU16(out, &pos, 1);
+    writeResolverTestU16(out, &pos, 0);
+    writeResolverTestU16(out, &pos, 0);
+
+    const question = req[12..];
+    if (pos + question.len + 16 > out.len) return error.InvalidResponse;
+    @memcpy(out[pos..][0..question.len], question);
+    pos += question.len;
+
+    out[pos] = 0xC0;
+    out[pos + 1] = 0x0C;
+    pos += 2;
+    writeResolverTestU16(out, &pos, R.QTYPE_A);
+    writeResolverTestU16(out, &pos, R.QCLASS_IN);
+    out[pos] = 0;
+    out[pos + 1] = 0;
+    out[pos + 2] = 0x01;
+    out[pos + 3] = 0x2C;
+    pos += 4;
+    writeResolverTestU16(out, &pos, 4);
+    @memcpy(out[pos..][0..4], &[_]u8{ 1, 2, 3, 4 });
+    pos += 4;
+    return pos;
+}
+
+test "net/unit_tests/resolver/parse_response_rejects_packets_without_qr" {
+    const testing = std.testing;
+    const R = Resolver(std);
+
+    var req_buf: [512]u8 = undefined;
+    const req_len = try R.buildQuery(&req_buf, "example.com", R.QTYPE_A, 0x1234);
+
+    var resp_buf: [512]u8 = undefined;
+    const resp_len = try buildResolverTestAResponse(R, req_buf[0..req_len], 0x0180, 1, &resp_buf);
+
+    var addrs: [1]netip.Addr = undefined;
+    try testing.expectError(error.InvalidResponse, R.parseResponse(resp_buf[0..resp_len], R.QTYPE_A, &addrs));
+}
+
+test "net/unit_tests/resolver/parse_response_rejects_truncated_udp_packets" {
+    const testing = std.testing;
+    const R = Resolver(std);
+
+    var req_buf: [512]u8 = undefined;
+    const req_len = try R.buildQuery(&req_buf, "example.com", R.QTYPE_A, 0x1234);
+
+    var resp_buf: [512]u8 = undefined;
+    const resp_len = try buildResolverTestAResponse(R, req_buf[0..req_len], 0x8380, 1, &resp_buf);
+
+    var addrs: [1]netip.Addr = undefined;
+    try testing.expectError(error.InvalidResponse, R.parseResponse(resp_buf[0..resp_len], R.QTYPE_A, &addrs));
+}
+
+test "net/unit_tests/resolver/parse_response_rejects_unexpected_question_count" {
+    const testing = std.testing;
+    const R = Resolver(std);
+
+    var req_buf: [512]u8 = undefined;
+    const req_len = try R.buildQuery(&req_buf, "example.com", R.QTYPE_A, 0x1234);
+
+    var resp_buf: [512]u8 = undefined;
+    const resp_len = try buildResolverTestAResponse(R, req_buf[0..req_len], 0x8180, 0, &resp_buf);
+
+    var addrs: [1]netip.Addr = undefined;
+    try testing.expectError(error.InvalidResponse, R.parseResponse(resp_buf[0..resp_len], R.QTYPE_A, &addrs));
+}
+
+test "net/unit_tests/resolver/parse_response_rejects_invalid_name_label_length" {
+    const testing = std.testing;
+    const R = Resolver(std);
+
+    var req_buf: [512]u8 = undefined;
+    const req_len = try R.buildQuery(&req_buf, "example.com", R.QTYPE_A, 0x1234);
+
+    var resp_buf: [512]u8 = undefined;
+    const resp_len = try buildResolverTestAResponse(R, req_buf[0..req_len], 0x8180, 1, &resp_buf);
+    resp_buf[12] = 0x40;
+
+    var addrs: [1]netip.Addr = undefined;
+    try testing.expectError(error.InvalidResponse, R.parseResponse(resp_buf[0..resp_len], R.QTYPE_A, &addrs));
 }

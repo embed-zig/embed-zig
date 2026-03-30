@@ -5,7 +5,7 @@
 //!
 //! Usage:
 //!   var ln = try TcpListener.init(allocator, .{
-//!       .address = Addr.from4(.{ 0, 0, 0, 0 }, 8080),
+//!       .address = netip.AddrPort.from4(.{ 0, 0, 0, 0 }, 8080),
 //!   });
 //!   defer ln.deinit();
 //!   try ln.listen();
@@ -34,10 +34,25 @@ pub const VTable = struct {
 pub const ListenError = anyerror;
 
 pub const AcceptError = error{
+    Closed,
+    BlockedByFirewall,
     ConnectionAborted,
-    SocketNotListening,
+    ConnectionResetByPeer,
+    DeadLock,
+    FileDescriptorNotASocket,
+    FileBusy,
+    Locked,
+    LockedRegionLimitExceeded,
+    NetworkSubsystemFailed,
+    OperationNotSupported,
+    OutOfMemory,
+    PermissionDenied,
     ProcessFdQuotaExceeded,
+    ProtocolFailure,
+    SocketNotListening,
     SystemFdQuotaExceeded,
+    SystemResources,
+    WouldBlock,
     Unexpected,
 };
 

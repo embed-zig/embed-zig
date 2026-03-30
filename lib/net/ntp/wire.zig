@@ -25,6 +25,9 @@ pub fn parseResponse(buf: *const [48]u8, expected_origin: types.NtpTimestamp) ty
     const li = (buf[0] >> 6) & 0x03;
     if (li == 3) return error.InvalidResponse;
 
+    const version = (buf[0] >> 3) & 0x07;
+    if (version != 4) return error.InvalidResponse;
+
     const mode = buf[0] & 0x07;
     if (mode != 4 and mode != 5) return error.InvalidResponse;
 
@@ -141,4 +144,20 @@ test "net/unit_tests/ntp/wire/parse_response_returns_timestamps" {
     try std.testing.expectEqual(@as(u8, 3), resp.stratum);
     try std.testing.expect(@abs(resp.receive_time_ms - (origin_ms + 15)) <= 1);
     try std.testing.expect(@abs(resp.transmit_time_ms - (origin_ms + 30)) <= 1);
+}
+
+test "net/unit_tests/ntp/wire/parse_response_rejects_unexpected_version" {
+    const origin_ms: i64 = 1_706_012_096_000;
+    const origin = unixMsToNtp(origin_ms);
+    const recv = unixMsToNtp(origin_ms + 15);
+    const xmit = unixMsToNtp(origin_ms + 30);
+
+    var buf: [48]u8 = [_]u8{0} ** 48;
+    buf[0] = 0b00_011_100;
+    buf[1] = 3;
+    writeTimestamp(buf[24..32], origin);
+    writeTimestamp(buf[32..40], recv);
+    writeTimestamp(buf[40..48], xmit);
+
+    try std.testing.expectError(error.InvalidResponse, parseResponse(&buf, origin));
 }

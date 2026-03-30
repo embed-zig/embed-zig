@@ -22,6 +22,7 @@ pub const cookie = "Cookie";
 pub const expect = "Expect";
 pub const host = "Host";
 pub const location = "Location";
+pub const proxy_authorization = "Proxy-Authorization";
 pub const set_cookie = "Set-Cookie";
 pub const trailer = "Trailer";
 pub const transfer_encoding = "Transfer-Encoding";
@@ -50,6 +51,7 @@ test "net/unit_tests/http/Header/names_expose_common_constants" {
     try std.testing.expectEqualStrings("Host", Header.host);
     try std.testing.expectEqualStrings("User-Agent", Header.user_agent);
     try std.testing.expectEqualStrings("Content-Length", Header.content_length);
+    try std.testing.expectEqualStrings("Proxy-Authorization", Header.proxy_authorization);
 }
 
 test "net/unit_tests/http/Header/is_compares_names_case_insensitively" {

@@ -12,6 +12,9 @@ pub fn make(comptime lib: type) type {
             RecordTooLarge,
             DecryptionFailed,
             BadRecordMac,
+            ConnectionRefused,
+            ConnectionReset,
+            BrokenPipe,
             UnexpectedRecord,
             TimedOut,
         };
@@ -286,10 +289,7 @@ pub fn make(comptime lib: type) type {
 
                 pub fn readRecord(self: *Self, buffer: []u8, plaintext_out: []u8) RecordError!ReadRecordResult {
                     var header_buf: [common.RecordHeader.SIZE]u8 = undefined;
-                    self.connReadAll(&header_buf) catch |err| switch (err) {
-                        error.TimedOut => return error.TimedOut,
-                        else => return error.UnexpectedRecord,
-                    };
+                    try self.connReadAll(&header_buf);
 
                     const header = common.RecordHeader.parse(&header_buf) catch return error.UnexpectedRecord;
                     const max_record_len: usize = if (self.version == .tls_1_2)
@@ -301,10 +301,7 @@ pub fn make(comptime lib: type) type {
                     if (buffer.len < header.length) return error.BufferTooSmall;
 
                     const record_body = buffer[0..header.length];
-                    self.connReadAll(record_body) catch |err| switch (err) {
-                        error.TimedOut => return error.TimedOut,
-                        else => return error.UnexpectedRecord,
-                    };
+                    try self.connReadAll(record_body);
 
                     if (header.content_type == .change_cipher_spec) {
                         if (plaintext_out.len < header.length) return error.BufferTooSmall;
@@ -356,10 +353,7 @@ pub fn make(comptime lib: type) type {
                     try header.serialize(buffer[0..common.RecordHeader.SIZE]);
                     @memcpy(buffer[common.RecordHeader.SIZE..][0..plaintext.len], plaintext);
 
-                    self.connWriteAll(buffer[0..total_len]) catch |err| switch (err) {
-                        error.TimedOut => return error.TimedOut,
-                        else => return error.UnexpectedRecord,
-                    };
+                    self.connWriteAll(buffer[0..total_len]) catch |err| return err;
                     return total_len;
                 }
 
@@ -401,10 +395,7 @@ pub fn make(comptime lib: type) type {
                     @memcpy(buffer[common.RecordHeader.SIZE + inner_len ..][0..16], &tag);
 
                     self.write_seq += 1;
-                    self.connWriteAll(buffer[0..total_len]) catch |err| switch (err) {
-                        error.TimedOut => return error.TimedOut,
-                        else => return error.UnexpectedRecord,
-                    };
+                    self.connWriteAll(buffer[0..total_len]) catch |err| return err;
                     return total_len;
                 }
 
@@ -446,10 +437,7 @@ pub fn make(comptime lib: type) type {
                     @memcpy(buffer[common.RecordHeader.SIZE + explicit_nonce_len + plaintext.len ..][0..16], &tag);
 
                     self.write_seq += 1;
-                    self.connWriteAll(buffer[0..total_len]) catch |err| switch (err) {
-                        error.TimedOut => return error.TimedOut,
-                        else => return error.UnexpectedRecord,
-                    };
+                    self.connWriteAll(buffer[0..total_len]) catch |err| return err;
                     return total_len;
                 }
 
@@ -486,6 +474,10 @@ pub fn make(comptime lib: type) type {
 
                     inner_len -= 1;
                     const inner_content_type: common.ContentType = @enumFromInt(plaintext_out[inner_len]);
+                    switch (inner_content_type) {
+                        .alert, .handshake, .application_data => {},
+                        else => return error.UnexpectedRecord,
+                    }
                     return .{ .content_type = inner_content_type, .length = inner_len };
                 }
 
@@ -544,25 +536,44 @@ pub fn make(comptime lib: type) type {
                 fn connReadAll(self: *Self, buf: []u8) RecordError!void {
                     var filled: usize = 0;
                     while (filled < buf.len) {
-                        const n = self.conn.read(buf[filled..]) catch |err| switch (err) {
-                            error.TimedOut => return error.TimedOut,
-                            else => return error.UnexpectedRecord,
-                        };
+                        const n = self.conn.read(buf[filled..]) catch |err| return mapConnReadError(err);
                         if (n == 0) return error.UnexpectedRecord;
                         filled += n;
                     }
                 }
 
+                fn mapConnReadError(err: anyerror) RecordError {
+                    if (errorNameEquals(err, "TimedOut")) return error.TimedOut;
+                    if (errorNameEquals(err, "ConnectionRefused")) return error.ConnectionRefused;
+                    if (errorNameEquals(err, "ConnectionReset")) return error.ConnectionReset;
+                    if (errorNameEquals(err, "BrokenPipe")) return error.BrokenPipe;
+                    return error.UnexpectedRecord;
+                }
+
                 fn connWriteAll(self: *Self, buf: []const u8) RecordError!void {
                     var written: usize = 0;
                     while (written < buf.len) {
-                        const n = self.conn.write(buf[written..]) catch |err| switch (err) {
-                            error.TimedOut => return error.TimedOut,
-                            else => return error.UnexpectedRecord,
-                        };
+                        const n = self.conn.write(buf[written..]) catch |err| return mapConnWriteError(err);
                         if (n == 0) return error.UnexpectedRecord;
                         written += n;
                     }
+                }
+
+                fn mapConnWriteError(err: anyerror) RecordError {
+                    if (errorNameEquals(err, "TimedOut")) return error.TimedOut;
+                    if (errorNameEquals(err, "ConnectionRefused")) return error.ConnectionRefused;
+                    if (errorNameEquals(err, "ConnectionReset")) return error.ConnectionReset;
+                    if (errorNameEquals(err, "BrokenPipe")) return error.BrokenPipe;
+                    return error.UnexpectedRecord;
+                }
+
+                fn errorNameEquals(err: anyerror, comptime expected: []const u8) bool {
+                    const name = @errorName(err);
+                    if (name.len != expected.len) return false;
+                    inline for (expected, 0..) |byte, i| {
+                        if (name[i] != byte) return false;
+                    }
+                    return true;
                 }
             };
         }
@@ -711,6 +722,76 @@ test "net/unit_tests/tls/record/layer_tls13_encrypted_roundtrip" {
     try std.testing.expectEqualSlices(u8, "hello", plaintext_out[0..result.length]);
 }
 
+test "net/unit_tests/tls/record/layer_tls13_rejects_unexpected_inner_content_type" {
+    const std = @import("std");
+    const common = @import("common.zig").make(std);
+    const record = make(std);
+
+    const MockConn = struct {
+        read_buf: [1024]u8 = undefined,
+        read_len: usize = 0,
+        read_pos: usize = 0,
+
+        pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
+            if (self.read_pos >= self.read_len) return error.EndOfStream;
+            const n = @min(buf.len, self.read_len - self.read_pos);
+            @memcpy(buf[0..n], self.read_buf[self.read_pos..][0..n]);
+            self.read_pos += n;
+            return n;
+        }
+
+        pub fn write(_: *@This(), _: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
+            return error.Unexpected;
+        }
+
+        pub fn close(_: *@This()) void {}
+        pub fn deinit(_: *@This()) void {}
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    const key = [_]u8{0x11} ** 16;
+    const iv = [_]u8{0x22} ** 12;
+
+    const cipher = try record.CipherState().init(.TLS_AES_128_GCM_SHA256, &key, &iv);
+    var mock = MockConn{};
+
+    const plaintext = "hello";
+    const inner_len = plaintext.len + 1;
+    const header = common.RecordHeader{
+        .content_type = .application_data,
+        .legacy_version = .tls_1_2,
+        .length = @intCast(inner_len + 16),
+    };
+    try header.serialize(mock.read_buf[0..common.RecordHeader.SIZE]);
+
+    var inner_plaintext: [plaintext.len + 1]u8 = undefined;
+    @memcpy(inner_plaintext[0..plaintext.len], plaintext);
+    inner_plaintext[plaintext.len] = @intFromEnum(common.ContentType.change_cipher_spec);
+
+    var tag: [16]u8 = undefined;
+    switch (cipher) {
+        .aes_128_gcm => |state| state.encrypt(
+            mock.read_buf[common.RecordHeader.SIZE..][0..inner_len],
+            &tag,
+            &inner_plaintext,
+            mock.read_buf[0..common.RecordHeader.SIZE],
+            0,
+        ),
+        else => unreachable,
+    }
+    @memcpy(mock.read_buf[common.RecordHeader.SIZE + inner_len ..][0..16], &tag);
+    mock.read_len = common.RecordHeader.SIZE + inner_len + 16;
+
+    var layer = record.RecordLayer(*MockConn).init(&mock);
+    layer.setVersion(.tls_1_3);
+    layer.setReadCipher(try record.CipherState().init(.TLS_AES_128_GCM_SHA256, &key, &iv));
+
+    var cipher_buf: [512]u8 = undefined;
+    var plaintext_out: [512]u8 = undefined;
+    try std.testing.expectError(error.UnexpectedRecord, layer.readRecord(&cipher_buf, &plaintext_out));
+}
+
 test "net/unit_tests/tls/record/layer_tls12_chacha_encrypted_roundtrip_omits_explicit_nonce" {
     const std = @import("std");
     const common = @import("common.zig").make(std);
@@ -812,4 +893,99 @@ test "net/unit_tests/tls/record/layer_preserves_timeout_while_reading" {
     var plaintext_out: [128]u8 = undefined;
 
     try std.testing.expectError(error.TimedOut, layer.readRecord(&cipher_buf, &plaintext_out));
+}
+
+test "net/unit_tests/tls/record/layer_preserves_typed_write_io_errors" {
+    const std = @import("std");
+    const record = make(std);
+
+    const Helper = struct {
+        fn expectWriteError(comptime expected: anyerror) !void {
+            const MockConn = struct {
+                pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
+                    return error.EndOfStream;
+                }
+
+                pub fn write(_: *@This(), _: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
+                    return expected;
+                }
+
+                pub fn close(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+            };
+
+            var mock = MockConn{};
+            var layer = record.RecordLayer(*MockConn).init(&mock);
+            var write_buf: [128]u8 = undefined;
+            var plaintext_buf: [128]u8 = undefined;
+            try std.testing.expectError(expected, layer.writeRecord(.application_data, "abc", &write_buf, &plaintext_buf));
+        }
+    };
+
+    inline for (.{ error.ConnectionRefused, error.ConnectionReset, error.BrokenPipe, error.TimedOut }) |expected| {
+        try Helper.expectWriteError(expected);
+    }
+}
+
+test "net/unit_tests/tls/record/layer_preserves_typed_read_io_errors" {
+    const std = @import("std");
+    const common = @import("common.zig").make(std);
+    const record = make(std);
+
+    const Helper = struct {
+        const FailStage = enum {
+            header,
+            body,
+        };
+
+        fn expectReadError(comptime fail_stage: FailStage, comptime expected: anyerror) !void {
+            const MockConn = struct {
+                step: u8 = 0,
+
+                pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
+                    switch (fail_stage) {
+                        .header => return expected,
+                        .body => switch (self.step) {
+                            0 => {
+                                self.step = 1;
+                                const header = [_]u8{
+                                    @intFromEnum(common.ContentType.handshake),
+                                    0x03,
+                                    0x03,
+                                    0x00,
+                                    0x03,
+                                };
+                                @memcpy(buf[0..header.len], &header);
+                                return header.len;
+                            },
+                            1 => return expected,
+                            else => return error.EndOfStream,
+                        },
+                    }
+                }
+
+                pub fn write(_: *@This(), _: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
+                    return error.Unexpected;
+                }
+
+                pub fn close(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+            };
+
+            var mock = MockConn{};
+            var layer = record.RecordLayer(*MockConn).init(&mock);
+            var cipher_buf: [128]u8 = undefined;
+            var plaintext_out: [128]u8 = undefined;
+            try std.testing.expectError(expected, layer.readRecord(&cipher_buf, &plaintext_out));
+        }
+    };
+
+    inline for (.{ error.ConnectionRefused, error.ConnectionReset, error.BrokenPipe, error.TimedOut }) |expected| {
+        try Helper.expectReadError(.header, expected);
+        try Helper.expectReadError(.body, expected);
+    }
 }

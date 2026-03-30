@@ -305,6 +305,34 @@ pub fn make(comptime lib: type) type {
                 .key_exchange = data[4..][0..key_len],
             };
         }
+
+        pub fn parseSelectedAlpn(data: []const u8) ExtensionError![]const u8 {
+            if (data.len < 3) return error.InvalidExtension;
+            const list_len = mem.readInt(u16, data[0..2], .big);
+            if (data.len != 2 + list_len or list_len < 2) return error.InvalidExtension;
+            const protocol_len = data[2];
+            if (protocol_len == 0 or data.len != 3 + protocol_len) return error.InvalidExtension;
+            return data[3..][0..protocol_len];
+        }
+
+        pub fn findMatchingAlpn(data: []const u8, supported: []const []const u8) ExtensionError!?[]const u8 {
+            if (data.len < 2) return error.InvalidExtension;
+            const list_len = mem.readInt(u16, data[0..2], .big);
+            if (data.len != 2 + list_len) return error.InvalidExtension;
+
+            var pos: usize = 2;
+            while (pos < data.len) {
+                const protocol_len = data[pos];
+                pos += 1;
+                if (protocol_len == 0 or pos + protocol_len > data.len) return error.InvalidExtension;
+                const protocol = data[pos..][0..protocol_len];
+                pos += protocol_len;
+                for (supported) |candidate| {
+                    if (mem.eql(u8, candidate, protocol)) return candidate;
+                }
+            }
+            return null;
+        }
     };
 }
 
@@ -418,4 +446,27 @@ test "net/unit_tests/tls/extensions/parseKeyShareServer_rejects_trailing_bytes" 
         error.InvalidExtension,
         extensions.parseKeyShareServer(&.{ 0x00, 0x1d, 0x00, 0x02, 0xaa, 0xbb, 0xcc }),
     );
+}
+
+test "net/unit_tests/tls/extensions/alpn_roundtrip_and_match" {
+    const std = @import("std");
+    const common = @import("common.zig").make(std);
+    const extensions = make(std);
+
+    var buf: [256]u8 = undefined;
+    var builder = extensions.ExtensionBuilder.init(&buf);
+    try builder.addAlpn(&.{ "h2", "http/1.1" });
+
+    const exts = try extensions.parseExtensions(builder.getData(), std.testing.allocator);
+    defer std.testing.allocator.free(exts);
+
+    const alpn = extensions.findExtension(exts, common.ExtensionType.application_layer_protocol_negotiation) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("h2", (try extensions.findMatchingAlpn(alpn.data, &.{ "h2" })).?);
+}
+
+test "net/unit_tests/tls/extensions/parseSelectedAlpn_reads_single_protocol" {
+    const std = @import("std");
+    const extensions = make(std);
+
+    try std.testing.expectEqualStrings("h2", try extensions.parseSelectedAlpn(&.{ 0x00, 0x03, 0x02, 'h', '2' }));
 }

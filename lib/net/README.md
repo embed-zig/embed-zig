@@ -21,7 +21,6 @@ networking primitives.
 - [net/ntp](#netntp)
 - [net/tls](#nettls)
 - [net/http](#nethttp)
-- [net/ws](#netws)
 - [Usage examples](#usage-examples)
 
 ## Design principles
@@ -53,70 +52,93 @@ const net = @import("net").make(embed);
 ```
 
 `lib/net` depends on the sealed `embed` namespace for:
-- `lib.posix` — socket, bind, listen, accept, connect, send, recv, poll, close
-- `lib.Thread` — Mutex (TLS thread safety)
-- `lib.time` — timeouts
-- `lib.net.Ip4Address` — address construction
+- `lib.posix` — socket, bind, listen, accept, connect, send, recv, sendto, recvfrom, poll, fcntl, getsockopt, close
+- `lib.Thread` — synchronization and worker threads used by TLS, resolver, and runners
+- `lib.time` — deadlines and timeout accounting
+- `net.netip` — `Addr` / `AddrPort` construction and parsing for public addresses
 
 ## Package structure
 
-```
-lib/net/
+```zig
+lib/
   net.zig              Root; make(lib) entry point, Conn, Listener, PacketConn, Dial, Listen
-  Conn.zig             Type-erased byte stream interface (Go's net.Conn)
-  Listener.zig         Type-erased stream listener interface (Go's net.Listener)
-  PacketConn.zig       Type-erased datagram interface (Go's net.PacketConn)
-  TcpConn.zig          Conn over TCP socket fd (Go's net.TCPConn)
-  UdpConn.zig          PacketConn + Conn over UDP socket fd (Go's net.UDPConn)
-  TcpListener.zig      Listener for TCP (Go's net.TCPListener)
-  Dialer.zig           Configurable network dialer (Go's net.Dialer)
-  url.zig              Zero-alloc URL parser (RFC 3986)
-  Resolver.zig         Pure-Zig DNS resolver (RFC 1035, per-server racer)
-  ntp.zig              UDP NTP client and wire helpers
-  tls/
-    Conn.zig           TLS client Conn wrapper
-    ServerConn.zig     TLS server Conn wrapper
-    Dialer.zig         TLS dial helper
-    Listener.zig       TLS listener wrapper
-    client_handshake.zig TLS client handshake state machine
-    server_handshake.zig TLS server handshake state machine
-    record.zig         TLS record layer
-    common.zig         TLS protocol constants and wire structs
-    alert.zig          TLS alert encoding/decoding
-    extensions.zig     TLS extension parsing/building
-    kdf.zig            TLS 1.2/1.3 key schedule helpers
-  http/
-    Header.zig         HTTP header entry
-    ReadCloser.zig     HTTP body read+close contract
-    RoundTripper.zig   RoundTripper contract
-    Request.zig        HTTP request builder/parser
-    Response.zig       HTTP response parser
-    Transport.zig      Default HTTP/1.1 client transport
-    status.zig         HTTP status codes and helpers
+  net/
+    Conn.zig           Type-erased byte stream interface (Go's net.Conn)
+    Listener.zig       Type-erased stream listener interface (Go's net.Listener)
+    PacketConn.zig     Type-erased datagram interface (Go's net.PacketConn)
+    Dialer.zig         Configurable network dialer (Go's net.Dialer)
+    TcpConn.zig        Conn over TCP socket fd (Go's net.TCPConn)
+    UdpConn.zig        PacketConn + Conn over UDP socket fd (Go's net.UDPConn)
+    TcpListener.zig    Listener for TCP (Go's net.TCPListener)
+    fd.zig             Internal fd-layer namespace and fd-local test runners
+    fd/
+      Stream.zig       Internal non-blocking stream socket wrapper
+      Packet.zig       Internal non-blocking datagram socket wrapper
+      Listener.zig     Internal non-blocking listen/accept wrapper
+      SockAddr.zig     AddrPort <-> sockaddr bridge
+    netip/
+      Addr.zig         IP address value type
+      AddrPort.zig     IP address + port value type
+    stack.zig          Network stack helpers
+    url.zig            Zero-alloc URL parser (RFC 3986)
+    Resolver.zig       Pure-Zig DNS resolver (RFC 1035, per-server racer)
+    ntp.zig            UDP NTP client and wire helpers
+    tls/
+      Conn.zig         TLS client Conn wrapper
+      ServerConn.zig   TLS server Conn wrapper
+      Dialer.zig       TLS dial helper
+      Listener.zig     TLS listener wrapper
+      client_handshake.zig TLS client handshake state machine
+      server_handshake.zig TLS server handshake state machine
+      record.zig       TLS record layer
+      common.zig       TLS protocol constants and wire structs
+      alert.zig        TLS alert encoding/decoding
+      extensions.zig   TLS extension parsing/building
+      kdf.zig          TLS 1.2/1.3 key schedule helpers
+    http/
+      Header.zig       HTTP header entry
+      ReadCloser.zig   HTTP body read+close contract
+      RoundTripper.zig RoundTripper contract
+      Request.zig      HTTP request builder/parser
+      Response.zig     HTTP response parser
+      Transport.zig    Default HTTP/1.1 client transport
+      status.zig       HTTP status codes and helpers
 ```
 
 ## Layer diagram
 
 ```
-┌─────────────────────────────────────────────────┐
-│                  User code                       │
-├──────────┬──────────┬───────────────────────────┤
-│ net/http │  net/ws  │       (future)             │
-├──────────┴──────────┤                            │
-│       net/tls       │                            │
-│  (Conn -> Conn)     │                            │
-├─────────────────────┼───────────────────────────┤
-│   Conn (stream)     │   PacketConn (datagram)    │
-│   TcpConn           │   UdpConn                  │
-├──────────┬──────────┼───────────────────────────┤
-│   Dial   │  Listen  │   ListenPacket             │
-├──────────┴──────────┴───────────────────────────┤
-│              net/Resolver    net/url              │
-├─────────────────────────────────────────────────┤
-│              lib (embed.make)                    │
-│   posix / Thread / time / net.Address           │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                      User code                       │
+├────────────┬────────────┬────────────────────────────┤
+│  net/http  │         (future)                       │
+├────────────┴────────────────────────────────────────┤
+│        net/tls          │                            │
+│       (Conn -> Conn)    │                            │
+├─────────────────────────┼────────────────────────────┤
+│ Conn / Listener         │ PacketConn                 │
+│ TcpConn / TcpListener   │ UdpConn                    │
+│ Dialer / listen         │ listenPacket               │
+├──────────────────────────────────────────────────────┤
+│ internal fd layer (not exported through make(lib))  │
+│ fd.Stream / fd.Packet / fd.Listener / fd.SockAddr   │
+├──────────────────────────────────────────────────────┤
+│ sibling helpers: netip / Resolver / url / stack     │
+├──────────────────────────────────────────────────────┤
+│ lib (embed.make)                                     │
+│ posix / Thread / time                                │
+└──────────────────────────────────────────────────────┘
 ```
+
+Internally, stream and packet sockets now run through `lib/net/fd` as the
+shared non-blocking substrate. Public callers still work with `Dialer`,
+`TcpConn`, `TcpListener`, `UdpConn`, `Conn`, `Listener`, and `PacketConn`;
+the fd layer remains an internal implementation detail.
+
+Regression coverage is split between fd-local runners
+(`lib/net/test_runner/fd_stream.zig`, `lib/net/test_runner/fd_packet.zig`)
+and public API runners (`lib/net/test_runner/tcp.zig`,
+`lib/net/test_runner/udp.zig`), all wired from `lib/integration.zig`.
 
 ## net (root)
 
@@ -138,6 +160,9 @@ pub const VTable = struct {
     setReadTimeout: *const fn (*anyopaque, ms: ?u32) void,
     setWriteTimeout: *const fn (*anyopaque, ms: ?u32) void,
 };
+
+pub const ReadError = error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected };
+pub const WriteError = error{ ConnectionRefused, ConnectionReset, BrokenPipe, TimedOut, Unexpected };
 ```
 
 Concrete implementations: **TcpConn** (TCP socket fd), **UdpConn** (connected UDP), **tls.Conn** (TLS client), **tls.ServerConn** (TLS server).
@@ -178,6 +203,8 @@ pub const VTable = struct {
     writeTo: *const fn (ptr: *anyopaque, buf: []const u8, addr: [*]const u8, addr_len: u32) WriteToError!usize,
     close: *const fn (ptr: *anyopaque) void,
     deinit: *const fn (ptr: *anyopaque) void,
+    setReadTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
+    setWriteTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
 };
 
 pub const AddrStorage = [128]u8;
@@ -188,8 +215,8 @@ pub const ReadFromResult = struct {
     addr_len: u32,
 };
 
-pub const ReadFromError = error{ ConnectionRefused, TimedOut, Unexpected };
-pub const WriteToError = error{ MessageTooLong, NetworkUnreachable, AccessDenied, TimedOut, Unexpected };
+pub const ReadFromError = error{ ConnectionReset, Closed, ConnectionRefused, TimedOut, Unexpected };
+pub const WriteToError = error{ Closed, MessageTooLong, NetworkUnreachable, AccessDenied, TimedOut, Unexpected };
 
 pub fn as(self: PacketConn, comptime T: type) error{TypeMismatch}!*T { ... }
 pub fn readFrom(self: PacketConn, buf: []u8) ReadFromError!ReadFromResult { ... }
@@ -226,11 +253,11 @@ TCP convenience functions (already implemented):
 
 ```zig
 // Connect to a remote address (TCP):
-var conn = try net.dial(allocator, .tcp, Addr.initIp4(.{127,0,0,1}, 80));
+var conn = try net.dial(allocator, .tcp, net.netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 80));
 defer conn.deinit();
 
 // Listen for TCP connections:
-var ln = try net.listen(allocator, .{ .address = Addr.initIp4(.{0,0,0,0}, 8080) });
+var ln = try net.listen(allocator, .{ .address = net.netip.AddrPort.from4(.{ 0, 0, 0, 0 }, 8080) });
 defer ln.deinit();
 ```
 
@@ -242,7 +269,7 @@ Bind a UDP socket and return a `PacketConn` (Go's `net.ListenPacket`):
 // Listen for UDP datagrams on port 5353:
 var pc = try net.listenPacket(.{
     .allocator = allocator,
-    .address = Addr.initIp4(.{ 0, 0, 0, 0 }, 5353),
+    .address = net.netip.AddrPort.from4(.{ 0, 0, 0, 0 }, 5353),
 });
 defer pc.deinit();
 
@@ -264,7 +291,7 @@ pub fn listenPacket(opts: ListenPacketOptions) !PacketConn {
 
 pub const ListenPacketOptions = struct {
     allocator: Allocator,
-    address: Addr = Addr.initIp4(.{ 0, 0, 0, 0 }, 0),
+    address: net.netip.AddrPort = net.netip.AddrPort.from4(.{ 0, 0, 0, 0 }, 0),
     reuse_addr: bool = true,
 };
 ```
@@ -296,7 +323,7 @@ no CGO, fully portable across embed platforms.
 | Result storage          | Heap `ArrayList(LookupAddr)`          | Caller-provided `[]Address` buffer          |
 | Timeout / retry         | From resolv.conf (`timeout`, `attempts`) | Explicit in `Options`                    |
 | Platform                | Linux-specific, musl port             | Platform-agnostic via `lib.posix`           |
-| Protocol                | UDP only (no TCP fallback)            | Per-server `Protocol`: udp, tcp, tls (`doh` planned) |
+| Protocol                | UDP only (no TCP fallback)            | Per-server `Protocol`: udp, tcp, tls, doh |
 
 ### Resolver struct
 
@@ -310,16 +337,19 @@ pub fn Resolver(comptime lib: type) type {
             udp = 0,
             tcp = 1,
             tls = 2,
-            doh = 3,   // planned
+            doh = 3,
         };
 
         pub const Server = struct {
-            addr: Addr,
+            addr: AddrPort,
             protocol: Protocol = .udp,
             tls_config: ?TlsConfig = null,
+            doh_path: []const u8 = "",
 
             pub fn init(comptime ip: []const u8, protocol: Protocol) Server;
             pub fn initTls(comptime ip: []const u8, comptime server_name: []const u8) Server;
+            pub fn initDoh(comptime ip: []const u8, comptime server_name: []const u8) Server;
+            pub fn initDohPath(comptime ip: []const u8, comptime server_name: []const u8, comptime path: []const u8) Server;
         };
 
         pub const dns = struct {
@@ -401,7 +431,8 @@ Key properties:
 ```zig
 const embed = @import("embed").make(platform);
 const net = @import("net").make(embed);
-const Addr = embed.net.Address;
+const Addr = net.netip.Addr;
+const AddrPort = net.netip.AddrPort;
 
 const R = net.Resolver;
 
@@ -435,7 +466,7 @@ defer r3.deinit();
 // Custom DNS-over-TLS server
 var r4 = try R.init(allocator, .{
     .servers = &.{.{
-        .addr = Addr.initIp4(.{ 127, 0, 0, 1 }, 853),
+        .addr = AddrPort.from4(.{ 127, 0, 0, 1 }, 853),
         .protocol = .tls,
         .tls_config = .{
             .server_name = "example.com",
@@ -445,8 +476,6 @@ var r4 = try R.init(allocator, .{
 });
 defer r4.deinit();
 ```
-
-## net/tls
 
 ## net/ntp
 
@@ -475,6 +504,8 @@ _ = resp;
 _ = current_time_ms;
 ```
 
+## net/tls
+
 TLS 1.2/1.3 client/server building blocks and concrete wrappers in the
 style of Go's `crypto/tls`. The client and server wrappers both return a
 type-erased `net.Conn`, and the concrete TLS state can be recovered with
@@ -486,6 +517,9 @@ Supported subset today:
 - Deterministic TLS 1.3 suite selection via `Config.tls13_cipher_suites` and `ServerConfig.tls13_cipher_suites`
 - Orderly shutdown with `close_notify`
 - Existing TLS 1.2 interoperability path for the currently implemented ECDHE + AES-GCM flow
+- Post-handshake application reads and writes preserve the same typed transport I/O failures as cleartext `net.Conn` where available (`ConnectionRefused`, `ConnectionReset`, `BrokenPipe`, `TimedOut`)
+- Handshake-stage peer alerts and malformed-record failures are kept more distinct than plain `RecordIoFailed`, but the handshake error surface still remains intentionally coarser than post-handshake application I/O
+- Handshake-stage transport write failures now stop outbound flights without synthesizing an extra local fatal alert, while local protocol/record failures still emit the matching fatal alert
 
 Core correctness is validated by local deterministic tests. Public-network
 smoke coverage lives in `lib/net/test_runner/tls.zig` as a separate optional
@@ -516,6 +550,9 @@ Today the package exposes:
 - `Transport` as the default HTTP/1.1 client transport
 
 Server/router layers are not landed yet.
+
+For package-local transport behavior, unsupported items, and the planned
+`Client` / `Server` structures, see `lib/net/http/README.md`.
 
 **Default transport**:
 
@@ -565,10 +602,10 @@ Planned, but not landed in the current tree yet.
 ```zig
 const embed = @import("embed").make(platform);
 const net = @import("net").make(embed);
-const Addr = embed.net.Address;
+const Addr = net.netip.AddrPort;
 
 var ln = try net.listen(embed.testing.allocator, .{
-    .address = Addr.initIp4(.{ 0, 0, 0, 0 }, 9000),
+    .address = Addr.from4(.{ 0, 0, 0, 0 }, 9000),
 });
 defer ln.deinit();
 
@@ -576,7 +613,7 @@ while (true) {
     var conn = try ln.accept();
     _ = try embed.Thread.spawn(.{}, struct {
         fn handle(c: *net.Conn) void {
-            defer c.close();
+            defer c.deinit();
             var buf: [1024]u8 = undefined;
             while (true) {
                 const n = c.read(&buf) catch break;

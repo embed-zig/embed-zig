@@ -13,6 +13,12 @@ const status_mod = @import("status.zig");
 
 const Response = @This();
 
+pub const TlsConnectionState = struct {
+    version: u16,
+    cipher_suite: u16,
+    peer_certificate_der: ?[]const u8 = null,
+};
+
 deinit_ptr: ?*anyopaque = null,
 deinit_fn: ?*const fn (ptr: *anyopaque) void = null,
 status: []const u8 = "",
@@ -25,6 +31,7 @@ body_reader: ?ReadCloser = null,
 content_length: i64 = -1,
 close: bool = false,
 request: ?Request = null,
+tls: ?TlsConnectionState = null,
 
 pub fn body(self: Response) ?ReadCloser {
     return self.body_reader;
@@ -70,6 +77,7 @@ test "net/unit_tests/http/Response/body_returns_response_read_closer" {
 
     try std.testing.expectEqualStrings("hello", buf[0..n]);
     try std.testing.expect(resp.ok());
+    try std.testing.expect(resp.tls == null);
 }
 
 test "net/unit_tests/http/Response/deinit_calls_custom_cleanup_hook" {
@@ -90,4 +98,12 @@ test "net/unit_tests/http/Response/deinit_calls_custom_cleanup_hook" {
 
     resp.deinit();
     try std.testing.expect(cleaned);
+}
+
+test "net/unit_tests/http/Response/tls_defaults_to_null" {
+    const resp: Response = .{
+        .status_code = 200,
+    };
+
+    try std.testing.expect(resp.tls == null);
 }

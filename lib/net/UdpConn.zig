@@ -34,6 +34,7 @@ pub fn UdpConn(comptime lib: type) type {
 
         pub fn read(self: *Self, buf: []u8) Conn.ReadError!usize {
             if (self.closed) return error.EndOfStream;
+            if (buf.len == 0) return 0;
             self.applyReadTimeout();
             return self.packet.read(buf) catch |err| return switch (err) {
                 error.Closed => error.EndOfStream,
@@ -50,6 +51,7 @@ pub fn UdpConn(comptime lib: type) type {
             return self.packet.write(buf) catch |err| return switch (err) {
                 error.Closed => error.BrokenPipe,
                 error.TimedOut => error.TimedOut,
+                error.ConnectionRefused => error.ConnectionRefused,
                 error.ConnectionResetByPeer => error.ConnectionReset,
                 error.BrokenPipe => error.BrokenPipe,
                 else => error.Unexpected,
@@ -57,12 +59,18 @@ pub fn UdpConn(comptime lib: type) type {
         }
 
         pub fn readFrom(self: *Self, buf: []u8) PacketConn.ReadFromError!PacketConn.ReadFromResult {
-            if (self.closed) return error.Unexpected;
+            if (self.closed) return error.Closed;
+            if (buf.len == 0) return .{
+                .bytes_read = 0,
+                .addr = @splat(0),
+                .addr_len = 0,
+            };
             self.applyReadTimeout();
             const packet_result = self.packet.readFrom(buf) catch |err| return switch (err) {
-                error.Closed => error.Unexpected,
+                error.Closed => error.Closed,
                 error.TimedOut => error.TimedOut,
                 error.ConnectionRefused => error.ConnectionRefused,
+                error.ConnectionResetByPeer => error.ConnectionReset,
                 else => error.Unexpected,
             };
             var result: PacketConn.ReadFromResult = .{
@@ -75,11 +83,11 @@ pub fn UdpConn(comptime lib: type) type {
         }
 
         pub fn writeTo(self: *Self, buf: []const u8, addr: [*]const u8, addr_len: u32) PacketConn.WriteToError!usize {
-            if (self.closed) return error.Unexpected;
+            if (self.closed) return error.Closed;
             self.applyWriteTimeout();
             const dest = rawSockaddrToAddr(addr, addr_len) catch return error.Unexpected;
             return self.packet.writeTo(buf, dest) catch |err| return switch (err) {
-                error.Closed => error.Unexpected,
+                error.Closed => error.Closed,
                 error.TimedOut => error.TimedOut,
                 error.MessageTooBig => error.MessageTooLong,
                 error.NetworkUnreachable => error.NetworkUnreachable,

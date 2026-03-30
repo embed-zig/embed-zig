@@ -10,6 +10,7 @@ const std = @import("std");
 const io = @import("io");
 const dialer_mod = @import("../Dialer.zig");
 const resolver_mod = @import("../Resolver.zig");
+const tcp_conn_mod = @import("../TcpConn.zig");
 const tls_mod = @import("../tls.zig");
 const Conn = @import("../Conn.zig");
 const Context = @import("context").Context;
@@ -20,6 +21,7 @@ const Request = @import("Request.zig");
 const Response = @import("Response.zig");
 const RoundTripper = @import("RoundTripper.zig");
 const url_mod = @import("../url.zig");
+const proxy_authorization_value_limit = 32 * 1024;
 
 pub fn Transport(comptime lib: type) type {
     const Allocator = lib.mem.Allocator;
@@ -27,6 +29,7 @@ pub fn Transport(comptime lib: type) type {
     const IpAddr = netip.Addr;
     const Dialer = dialer_mod.Dialer(lib);
     const Resolver = resolver_mod.Resolver(lib);
+    const TcpConn = tcp_conn_mod.TcpConn(lib);
     const Tls = tls_mod.make(lib);
     const Thread = lib.Thread;
     const Stream = io.PrefixReader(Conn);
@@ -36,21 +39,85 @@ pub fn Transport(comptime lib: type) type {
     const unlimited_body_bytes = std.math.maxInt(usize);
     const default_body_io_buf_len = 1024;
     const max_informational_responses = 8;
+    const default_http2_alpn = [_][]const u8{ "h2", "http/1.1" };
+    const context_timeout_grace_ns = 5 * lib.time.ns_per_ms;
     return struct {
         allocator: Allocator,
         options: Options,
         resolver: Resolver,
         idle_mu: Thread.Mutex = .{},
         idle_conns: std.ArrayList(IdleConn),
+        host_states: std.ArrayList(HostState),
         idle_generation: usize = 0,
 
         const Self = @This();
+
+        pub const AlternateTransport = struct {
+            ptr: *anyopaque,
+            vtable: *const VTable,
+
+            pub const VTable = struct {
+                roundTrip: *const fn (ptr: *anyopaque, req: *const Request) RoundTripper.RoundTripError!Response,
+                closeIdleConnections: *const fn (ptr: *anyopaque) void,
+            };
+
+            pub fn roundTrip(self: AlternateTransport, req: *const Request) RoundTripper.RoundTripError!Response {
+                return self.vtable.roundTrip(self.ptr, req);
+            }
+
+            pub fn closeIdleConnections(self: AlternateTransport) void {
+                self.vtable.closeIdleConnections(self.ptr);
+            }
+
+            pub fn init(pointer: anytype) AlternateTransport {
+                const Ptr = @TypeOf(pointer);
+                const info = @typeInfo(Ptr);
+                if (info != .pointer or info.pointer.size != .one)
+                    @compileError("AlternateTransport.init expects a single-item pointer");
+
+                const Impl = info.pointer.child;
+                const gen = struct {
+                    fn roundTripFn(ptr: *anyopaque, req: *const Request) RoundTripper.RoundTripError!Response {
+                        const self: *Impl = @ptrCast(@alignCast(ptr));
+                        return self.roundTrip(req);
+                    }
+
+                    fn closeIdleConnectionsFn(ptr: *anyopaque) void {
+                        const self: *Impl = @ptrCast(@alignCast(ptr));
+                        self.closeIdleConnections();
+                    }
+
+                    const vtable = VTable{
+                        .roundTrip = roundTripFn,
+                        .closeIdleConnections = closeIdleConnectionsFn,
+                    };
+                };
+
+                return .{
+                    .ptr = pointer,
+                    .vtable = &gen.vtable,
+                };
+            }
+        };
+
+        pub const AlternateProtocol = struct {
+            protocol: []const u8,
+            transport: AlternateTransport,
+        };
+
+        pub const ProxyConfig = struct {
+            url: url_mod.Url,
+            connect_headers: []const Header = &.{},
+        };
 
         pub const Options = struct {
             dialer: Dialer.Options = .{},
             resolver: Resolver.Options = .{},
             spawn_config: Thread.SpawnConfig = .{},
             tls_client_config: ?Tls.Config = null,
+            https_proxy: ?ProxyConfig = null,
+            force_attempt_http2: bool = false,
+            alternate_protocols: []const AlternateProtocol = &.{},
             user_agent: []const u8 = default_user_agent,
             body_io_buf_len: usize = default_body_io_buf_len,
             max_header_bytes: usize = default_max_header_bytes,
@@ -59,6 +126,7 @@ pub fn Transport(comptime lib: type) type {
             response_header_timeout_ms: ?u32 = null,
             expect_continue_timeout_ms: u32 = 1000,
             disable_keep_alives: bool = false,
+            max_conns_per_host: usize = 0,
             max_idle_conns: usize = 100,
             max_idle_conns_per_host: usize = 0,
             idle_conn_timeout_ms: ?u32 = 90 * 1000,
@@ -74,6 +142,20 @@ pub fn Transport(comptime lib: type) type {
             key: []u8,
             conn: Conn,
             generation: usize,
+        };
+
+        const HostState = struct {
+            key: []u8,
+            live_conns: usize = 0,
+            waiters: usize = 0,
+            cond: Thread.Condition = .{},
+        };
+
+        const RouteInfo = struct {
+            target_port: u16,
+            dial_host: []const u8,
+            dial_port: u16,
+            proxy: ?ProxyConfig = null,
         };
 
         const ConnLease = struct {
@@ -96,6 +178,7 @@ pub fn Transport(comptime lib: type) type {
             stream: Stream,
             ctx: ?Context,
             mode: BodyMode = .none,
+            max_header_bytes: usize = default_max_header_bytes,
             max_trailer_bytes: usize = default_max_header_bytes,
             max_body_bytes: usize,
             bytes_read: usize = 0,
@@ -136,8 +219,19 @@ pub fn Transport(comptime lib: type) type {
                 if (self.closed) return;
                 self.closed = true;
                 self.abortRequestBody();
-                if (self.owns_conn) self.stream.reader.close();
+                // Wait for any request-body writer to stop before discarding the shared
+                // connection; otherwise chunked/fixed body senders can race into BADF.
                 self.finishRequestBody() catch {};
+                if (self.owns_conn) {
+                    if (self.transport) |transport| {
+                        transport.discardConn(self.stream.reader, self.pool_key);
+                        self.owns_conn = false;
+                        self.released_conn = true;
+                        self.pool_key = &.{};
+                    } else {
+                        self.stream.reader.close();
+                    }
+                }
                 self.freePrefix();
                 self.freePoolKey();
             }
@@ -154,7 +248,7 @@ pub fn Transport(comptime lib: type) type {
             fn readFixed(self: *BodyState, buf: []u8, remaining: *usize) anyerror!usize {
                 if (remaining.* == 0) return self.finishAndReturnEof();
 
-                const n = self.stream.read(buf[0..@min(buf.len, remaining.*)]) catch |err| return self.mapReadError(err);
+                const n = self.streamRead(buf[0..@min(buf.len, remaining.*)]) catch |err| return self.mapReadError(err);
                 if (n == 0) return error.InvalidResponse;
                 remaining.* -= n;
                 return self.noteBytesRead(n);
@@ -179,22 +273,24 @@ pub fn Transport(comptime lib: type) type {
 
                 chunked.remaining_in_chunk -= n;
                 if (chunked.remaining_in_chunk == 0) {
-                    self.stream.expectCrlf() catch |err| return self.mapReadError(err);
+                    self.streamExpectCrlf() catch |err| return self.mapReadError(err);
                 }
                 return n;
             }
 
             fn readNextChunkSize(self: *BodyState) anyerror!usize {
-                var line_buf: [128]u8 = undefined;
-                const line = self.stream.readLine(&line_buf) catch |err| return self.mapReadError(err);
+                const line_buf = try self.allocator.alloc(u8, self.max_header_bytes);
+                defer self.allocator.free(line_buf);
+                const line = self.streamReadLine(line_buf) catch |err| return self.mapReadError(err);
                 const semi = std.mem.indexOfScalar(u8, line, ';') orelse line.len;
                 return std.fmt.parseInt(usize, std.mem.trim(u8, line[0..semi], " "), 16) catch error.InvalidResponse;
             }
 
             fn discardTrailers(self: *BodyState) anyerror!void {
-                var line_buf: [512]u8 = undefined;
+                const line_buf = try self.allocator.alloc(u8, self.max_trailer_bytes);
+                defer self.allocator.free(line_buf);
                 while (true) {
-                    const line = self.stream.readLine(&line_buf) catch |err| return self.mapReadError(err);
+                    const line = self.streamReadLine(line_buf) catch |err| return self.mapReadError(err);
                     if (line.len == 0) return;
                     if (line.len + 2 > self.max_trailer_bytes) return error.InvalidResponse;
                     self.max_trailer_bytes -= line.len + 2;
@@ -205,12 +301,12 @@ pub fn Transport(comptime lib: type) type {
                 const remaining_budget = self.remainingBudget();
                 if (remaining_budget == 0) {
                     var overflow_probe: [1]u8 = undefined;
-                    const n = self.stream.read(&overflow_probe) catch |err| return self.mapReadError(err);
+                    const n = self.streamRead(&overflow_probe) catch |err| return self.mapReadError(err);
                     if (n == 0) return 0;
                     return error.BodyTooLarge;
                 }
 
-                const n = self.stream.read(buf[0..@min(buf.len, remaining_budget)]) catch |err| return self.mapReadError(err);
+                const n = self.streamRead(buf[0..@min(buf.len, remaining_budget)]) catch |err| return self.mapReadError(err);
                 if (n == 0) return self.finishAndReturnEof();
                 return self.noteBytesRead(n);
             }
@@ -269,12 +365,52 @@ pub fn Transport(comptime lib: type) type {
                 }
             }
 
+            fn streamRead(self: *BodyState, buf: []u8) anyerror!usize {
+                const active = self.pushIoContext();
+                defer self.popIoContext(active);
+                return self.stream.read(buf);
+            }
+
+            fn streamReadLine(self: *BodyState, buf: []u8) anyerror![]const u8 {
+                const active = self.pushIoContext();
+                defer self.popIoContext(active);
+                return self.stream.readLine(buf);
+            }
+
+            fn streamExpectCrlf(self: *BodyState) anyerror!void {
+                const active = self.pushIoContext();
+                defer self.popIoContext(active);
+                try self.stream.expectCrlf();
+            }
+
+            fn pushIoContext(self: *BodyState) bool {
+                const ctx = self.ctx orelse return false;
+                if (self.stream.reader.as(TcpConn)) |tcp_conn| {
+                    tcp_conn.pushIoContext(ctx);
+                    return true;
+                } else |_| {}
+                if (self.stream.reader.as(Tls.Conn)) |tls_conn| {
+                    tls_conn.pushIoContext(ctx);
+                    return true;
+                } else |_| {}
+                return false;
+            }
+
+            fn popIoContext(self: *BodyState, active: bool) void {
+                if (!active) return;
+                if (self.stream.reader.as(TcpConn)) |tcp_conn| {
+                    tcp_conn.popIoContext();
+                    return;
+                } else |_| {}
+                if (self.stream.reader.as(Tls.Conn)) |tls_conn| {
+                    tls_conn.popIoContext();
+                } else |_| {}
+            }
+
             fn contextTimeoutError(self: *BodyState) anyerror {
                 if (self.ctx) |ctx| {
                     if (ctx.err()) |err| return err;
-                    if (ctx.deadline()) |deadline| {
-                        if (lib.time.nanoTimestamp() >= deadline) return error.DeadlineExceeded;
-                    }
+                    if (ctx.deadline() != null) return error.DeadlineExceeded;
                 }
                 return error.TimedOut;
             }
@@ -451,7 +587,8 @@ pub fn Transport(comptime lib: type) type {
 
             fn run(self: *RequestBodyState) void {
                 defer self.closeBody();
-                if (!self.waitForBodySend()) return;
+                const should_send = self.waitForBodySend();
+                if (!should_send) return;
                 if (self.send_chunked) {
                     self.transport.writeChunkedBody(self.conn, &self.req, self.body, self.io_buf) catch |err| {
                         self.recordResult(err);
@@ -470,6 +607,7 @@ pub fn Transport(comptime lib: type) type {
             head_storage: []u8,
             headers: []Header,
             body_state: ?*BodyState = null,
+            tls_state: ?Tls.Conn.ConnectionState = null,
         };
 
         const ParsedHead = struct {
@@ -495,24 +633,32 @@ pub fn Transport(comptime lib: type) type {
                 .options = owned_options,
                 .resolver = try Resolver.init(allocator, owned_options.resolver),
                 .idle_conns = try std.ArrayList(IdleConn).initCapacity(allocator, 0),
+                .host_states = try std.ArrayList(HostState).initCapacity(allocator, 0),
             };
         }
 
         pub fn deinit(self: *Self) void {
             self.closeIdleConnections();
             self.idle_conns.deinit(self.allocator);
+            for (self.host_states.items) |state| {
+                self.allocator.free(state.key);
+            }
+            self.host_states.deinit(self.allocator);
             self.resolver.deinit();
             self.* = undefined;
         }
 
         pub fn closeIdleConnections(self: *Self) void {
             self.idle_mu.lock();
-            defer self.idle_mu.unlock();
-
             self.idle_generation += 1;
             while (self.idle_conns.items.len != 0) {
                 const idle = self.idle_conns.orderedRemove(self.idle_conns.items.len - 1);
                 self.closeIdleConn(idle);
+            }
+            self.idle_mu.unlock();
+
+            for (self.options.alternate_protocols) |alt| {
+                alt.transport.closeIdleConnections();
             }
         }
 
@@ -545,8 +691,10 @@ pub fn Transport(comptime lib: type) type {
 
         fn roundTripAttempt(self: *Self, req: *const Request, reused: *bool) RoundTripper.RoundTripError!Response {
             var lease = try self.acquireConn(req);
-            defer lease.discard(self.allocator);
+            defer self.discardLease(&lease);
             reused.* = lease.reused;
+
+            if (try self.roundTripAlternateIfNeeded(&lease, req)) |resp| return resp;
 
             var request_body_state: ?*RequestBodyState = null;
             const send_chunked = self.shouldSendChunkedRequest(req);
@@ -564,8 +712,10 @@ pub fn Transport(comptime lib: type) type {
 
             defer if (request_body_state) |state| {
                 state.requestAbort();
-                if (lease.conn) |active_conn| active_conn.close();
+                // Wait for the request-body writer to observe cancellation before
+                // closing the shared connection, otherwise concurrent send() may hit BADF.
                 _ = state.finish();
+                if (lease.conn) |active_conn| active_conn.close();
                 state.destroy();
             };
 
@@ -588,13 +738,16 @@ pub fn Transport(comptime lib: type) type {
         }
 
         fn acquireConn(self: *Self, req: *const Request) RoundTripper.RoundTripError!ConnLease {
-            const port = defaultPort(req.url) orelse return error.UnsupportedScheme;
+            const route = try self.requestRoute(req);
+            if (self.maxConnsPerHost()) |_| {
+                return self.acquireConnWithLimit(req, route);
+            }
             if (!self.shouldAttemptConnectionReuse(req)) {
-                const addr = try self.resolve(req, req.url.host, port);
-                return .{ .conn = try self.dial(req, addr) };
+                const addr = try self.resolve(req, route.dial_host, route.dial_port);
+                return .{ .conn = try self.dialRoute(req, route, addr) };
             }
 
-            const pool_key = try self.connectionPoolKey(req.url, port);
+            const pool_key = try self.connectionPoolKeyForRoute(req, route);
             errdefer self.allocator.free(pool_key);
 
             if (self.takeIdleConn(pool_key)) |taken| {
@@ -608,13 +761,76 @@ pub fn Transport(comptime lib: type) type {
                 };
             }
 
-            const addr = try self.resolve(req, req.url.host, port);
+            const addr = try self.resolve(req, route.dial_host, route.dial_port);
             return .{
-                .conn = try self.dial(req, addr),
+                .conn = try self.dialRoute(req, route, addr),
                 .pool_key = pool_key,
                 .pool_generation = self.currentIdleGeneration(),
                 .reusable = true,
             };
+        }
+
+        fn acquireConnWithLimit(self: *Self, req: *const Request, route: RouteInfo) RoundTripper.RoundTripError!ConnLease {
+            const can_reuse = self.shouldAttemptConnectionReuse(req);
+            const cap = self.maxConnsPerHost() orelse unreachable;
+            const pool_key = try self.connectionPoolKeyForRoute(req, route);
+            errdefer self.allocator.free(pool_key);
+
+            while (true) {
+                self.idle_mu.lock();
+                self.pruneExpiredIdleLocked();
+
+                if (can_reuse) {
+                    if (self.takeIdleConnLocked(pool_key)) |taken| {
+                        self.idle_mu.unlock();
+                        self.allocator.free(pool_key);
+                        return .{
+                            .conn = taken.conn,
+                            .pool_key = taken.key,
+                            .pool_generation = taken.generation,
+                            .reused = true,
+                            .reusable = true,
+                        };
+                    }
+                }
+
+                const host_state = try self.getOrCreateHostStateLocked(pool_key);
+                if (host_state.live_conns < cap) {
+                    host_state.live_conns += 1;
+                    const pool_generation = self.idle_generation;
+                    self.idle_mu.unlock();
+
+                    const addr = self.resolve(req, route.dial_host, route.dial_port) catch |err| {
+                        self.idle_mu.lock();
+                        self.noteConnClosedLocked(pool_key);
+                        self.idle_mu.unlock();
+                        return err;
+                    };
+                    const conn = self.dialRoute(req, route, addr) catch |err| {
+                        self.idle_mu.lock();
+                        self.noteConnClosedLocked(pool_key);
+                        self.idle_mu.unlock();
+                        return err;
+                    };
+
+                    return .{
+                        .conn = conn,
+                        .pool_key = pool_key,
+                        .pool_generation = pool_generation,
+                        .reused = false,
+                        .reusable = can_reuse,
+                    };
+                }
+
+                host_state.waiters += 1;
+                self.waitForConnAvailableLocked(req, host_state) catch |err| {
+                    host_state.waiters -= 1;
+                    self.idle_mu.unlock();
+                    return err;
+                };
+                host_state.waiters -= 1;
+                self.idle_mu.unlock();
+            }
         }
 
         fn resolve(self: *Self, req: *const Request, host: []const u8, port: u16) RoundTripper.RoundTripError!Addr {
@@ -635,7 +851,8 @@ pub fn Transport(comptime lib: type) type {
             return Addr.init(addrs[0], port);
         }
 
-        fn dial(self: *Self, req: *const Request, addr: Addr) RoundTripper.RoundTripError!Conn {
+        fn dialRoute(self: *Self, req: *const Request, route: RouteInfo, addr: Addr) RoundTripper.RoundTripError!Conn {
+            if (route.proxy != null) return self.dialHttpsViaProxy(req, route, addr);
             if (std.mem.eql(u8, req.url.scheme, "http")) return self.dialTcp(req, addr);
             if (std.mem.eql(u8, req.url.scheme, "https")) return self.dialHttps(req, addr);
             return error.UnsupportedScheme;
@@ -643,20 +860,34 @@ pub fn Transport(comptime lib: type) type {
 
         fn dialTcp(self: *Self, req: *const Request, addr: Addr) RoundTripper.RoundTripError!Conn {
             var d = Dialer.init(self.allocator, self.options.dialer);
-            return d.dial(.tcp, addr) catch |err| return switch (err) {
+            const conn = if (req.context()) |ctx|
+                d.dialContext(ctx, .tcp, addr)
+            else
+                d.dial(.tcp, addr);
+            return conn catch |err| return switch (err) {
                 error.ConnectionRefused => error.ConnectionRefused,
+                error.DeadlineExceeded, error.Canceled => err,
                 error.ConnectionTimedOut, error.WouldBlock => self.contextTimeoutError(req),
+                error.OutOfMemory => error.OutOfMemory,
                 else => error.Unexpected,
             };
         }
 
         fn dialHttps(self: *Self, req: *const Request, addr: Addr) RoundTripper.RoundTripError!Conn {
-            var inner = try self.dialTcp(req, addr);
-            var inner_owned = true;
-            errdefer if (inner_owned) inner.deinit();
-
-            var tls_conn = try Tls.client(self.allocator, inner, self.tlsClientConfig(req));
-            inner_owned = false;
+            var tls_dialer = Tls.Dialer.init(
+                Dialer.init(self.allocator, self.options.dialer),
+                self.tlsClientConfig(req),
+            );
+            var tls_conn = (if (req.context()) |ctx|
+                tls_dialer.dialContext(ctx, .tcp, addr)
+            else
+                tls_dialer.dial(.tcp, addr)) catch |err| return switch (err) {
+                error.ConnectionRefused => error.ConnectionRefused,
+                error.DeadlineExceeded, error.Canceled => err,
+                error.ConnectionTimedOut, error.WouldBlock => self.contextTimeoutError(req),
+                error.OutOfMemory => error.OutOfMemory,
+                else => error.Unexpected,
+            };
             errdefer tls_conn.deinit();
 
             const handshake_timeout_ms = try self.tlsHandshakeTimeout(req);
@@ -665,6 +896,44 @@ pub fn Transport(comptime lib: type) type {
 
             const handshake_started_ms = lib.time.milliTimestamp();
             const typed = tls_conn.as(Tls.Conn) catch return error.Unexpected;
+            const handshake_ctx_active = self.pushConnIoContext(tls_conn, req.context());
+            defer self.popConnIoContext(tls_conn, handshake_ctx_active);
+            typed.handshake() catch |err| return switch (err) {
+                error.RecordIoFailed => self.mapTlsHandshakeIoError(req, handshake_timeout_ms, handshake_started_ms),
+                else => err,
+            };
+
+            return tls_conn;
+        }
+
+        fn dialHttpsViaProxy(self: *Self, req: *const Request, route: RouteInfo, proxy_addr: Addr) RoundTripper.RoundTripError!Conn {
+            const proxy = route.proxy orelse return error.Unexpected;
+            var proxy_conn = try self.dialTcp(req, proxy_addr);
+            {
+                errdefer proxy_conn.deinit();
+                try self.applyTimeouts(proxy_conn, req);
+                try self.writeConnectRequest(proxy_conn, req, proxy, route.target_port);
+                try self.applyResponseHeaderReadTimeout(proxy_conn, req);
+                try self.readConnectResponse(proxy_conn, req);
+            }
+
+            var tls_conn = blk: {
+                errdefer proxy_conn.deinit();
+                break :blk Tls.Conn.init(self.allocator, proxy_conn, self.tlsClientConfig(req)) catch |err| return switch (err) {
+                    error.OutOfMemory => error.OutOfMemory,
+                    else => error.Unexpected,
+                };
+            };
+            errdefer tls_conn.deinit();
+
+            const handshake_timeout_ms = try self.tlsHandshakeTimeout(req);
+            tls_conn.setReadTimeout(handshake_timeout_ms);
+            tls_conn.setWriteTimeout(handshake_timeout_ms);
+
+            const handshake_started_ms = lib.time.milliTimestamp();
+            const typed = tls_conn.as(Tls.Conn) catch return error.Unexpected;
+            const handshake_ctx_active = self.pushConnIoContext(tls_conn, req.context());
+            defer self.popConnIoContext(tls_conn, handshake_ctx_active);
             typed.handshake() catch |err| return switch (err) {
                 error.RecordIoFailed => self.mapTlsHandshakeIoError(req, handshake_timeout_ms, handshake_started_ms),
                 else => err,
@@ -677,6 +946,32 @@ pub fn Transport(comptime lib: type) type {
             const remaining = try self.contextDeadlineTimeout(req);
             conn.setReadTimeout(remaining);
             conn.setWriteTimeout(remaining);
+        }
+
+        fn pushConnIoContext(self: *Self, conn: Conn, ctx: ?Context) bool {
+            _ = self;
+            const active_ctx = ctx orelse return false;
+            if (conn.as(TcpConn)) |tcp_conn| {
+                tcp_conn.pushIoContext(active_ctx);
+                return true;
+            } else |_| {}
+            if (conn.as(Tls.Conn)) |tls_conn| {
+                tls_conn.pushIoContext(active_ctx);
+                return true;
+            } else |_| {}
+            return false;
+        }
+
+        fn popConnIoContext(self: *Self, conn: Conn, active: bool) void {
+            _ = self;
+            if (!active) return;
+            if (conn.as(TcpConn)) |tcp_conn| {
+                tcp_conn.popIoContext();
+                return;
+            } else |_| {}
+            if (conn.as(Tls.Conn)) |tls_conn| {
+                tls_conn.popIoContext();
+            } else |_| {}
         }
 
         fn applyResponseHeaderReadTimeout(self: *Self, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
@@ -719,7 +1014,39 @@ pub fn Transport(comptime lib: type) type {
         fn tlsClientConfig(self: *Self, req: *const Request) Tls.Config {
             var config = self.options.tls_client_config orelse Tls.Config{ .server_name = req.url.host };
             if (config.server_name.len == 0) config.server_name = req.url.host;
+            if (config.alpn_protocols.len == 0 and self.options.force_attempt_http2) {
+                config.alpn_protocols = &default_http2_alpn;
+            }
             return config;
+        }
+
+        fn roundTripAlternateIfNeeded(self: *Self, lease: *ConnLease, req: *const Request) RoundTripper.RoundTripError!?Response {
+            const conn = lease.conn orelse return null;
+            const alt = try self.alternateTransportForConn(req, conn) orelse return null;
+            const owned_conn = lease.conn.?;
+            const pool_key = lease.pool_key;
+            lease.conn = null;
+            lease.pool_key = &.{};
+            self.discardConn(owned_conn, pool_key);
+            return @as(?Response, try alt.roundTrip(req));
+        }
+
+        fn alternateTransportForConn(self: *Self, req: *const Request, conn: Conn) RoundTripper.RoundTripError!?AlternateTransport {
+            if (!std.mem.eql(u8, req.url.scheme, "https")) return null;
+            const tls_conn = conn.as(Tls.Conn) catch |err| return switch (err) {
+                error.TypeMismatch => null,
+            };
+            const negotiated = tls_conn.negotiatedProtocol() catch return error.Unexpected;
+            const protocol = negotiated orelse return null;
+            if (std.mem.eql(u8, protocol, "http/1.1")) return null;
+            return self.findAlternateProtocol(protocol) orelse error.UnsupportedProtocol;
+        }
+
+        fn findAlternateProtocol(self: *Self, protocol: []const u8) ?AlternateTransport {
+            for (self.options.alternate_protocols) |alt| {
+                if (std.mem.eql(u8, alt.protocol, protocol)) return alt.transport;
+            }
+            return null;
         }
 
         fn mapTlsHandshakeIoError(self: *Self, req: *const Request, handshake_timeout_ms: ?u32, started_ms: i64) RoundTripper.RoundTripError {
@@ -830,6 +1157,8 @@ pub fn Transport(comptime lib: type) type {
 
         fn writeAll(self: *Self, conn: Conn, req: *const Request, buf: []const u8) RoundTripper.RoundTripError!void {
             var c = conn;
+            const io_ctx_active = self.pushConnIoContext(conn, req.context());
+            defer self.popConnIoContext(conn, io_ctx_active);
             io.writeAll(@TypeOf(c), &c, buf) catch |err| return self.mapWriteError(err, req);
         }
 
@@ -921,14 +1250,49 @@ pub fn Transport(comptime lib: type) type {
         }
 
         fn validateRequest(self: *Self, req: *const Request) RoundTripper.RoundTripError!void {
-            _ = self;
             if (!isValidToken(req.effectiveMethod())) return error.InvalidMethod;
             if (req.effectiveHost().len == 0) return error.MissingHost;
 
             try validateHeaderList(req.header, false);
             try validateHeaderList(req.trailer, true);
+            try self.validateRequestFramingHeaders(req);
 
             if (req.trailer.len != 0 and !req.hasBody()) return error.InvalidTrailer;
+        }
+
+        fn validateRequestFramingHeaders(self: *Self, req: *const Request) RoundTripper.RoundTripError!void {
+            const body = req.body();
+            const send_chunked = body != null and self.shouldSendChunkedRequest(req);
+            const expected_content_length: i64 = if (req.content_length > 0) req.content_length else 0;
+
+            var header_content_length: ?i64 = null;
+            var saw_transfer_encoding = false;
+
+            for (req.header) |hdr| {
+                if (hdr.is(Header.content_length)) {
+                    const parsed = std.fmt.parseInt(i64, hdr.value, 10) catch return error.InvalidHeader;
+                    if (parsed < 0) return error.InvalidHeader;
+                    if (header_content_length) |existing| {
+                        if (existing != parsed) return error.InvalidHeader;
+                    } else {
+                        header_content_length = parsed;
+                    }
+                } else if (hdr.is(Header.transfer_encoding)) {
+                    if (saw_transfer_encoding) return error.InvalidHeader;
+                    if (!isSupportedChunkedTransferEncoding(hdr.value)) return error.InvalidHeader;
+                    saw_transfer_encoding = true;
+                }
+            }
+
+            if (saw_transfer_encoding) {
+                if (!send_chunked) return error.InvalidHeader;
+                if (header_content_length != null) return error.InvalidHeader;
+            }
+
+            if (header_content_length) |parsed| {
+                if (send_chunked) return error.InvalidHeader;
+                if (parsed != expected_content_length) return error.InvalidHeader;
+            }
         }
 
         fn readResponse(self: *Self, conn: *?Conn, req: *const Request) RoundTripper.RoundTripError!Response {
@@ -957,7 +1321,11 @@ pub fn Transport(comptime lib: type) type {
             var informational_responses: usize = 0;
 
             while (true) {
-                const head_storage = self.readResponseHead(&buffered, allocator) catch |err| return switch (err) {
+                const head_storage = blk: {
+                    const head_ctx_active = self.pushConnIoContext(conn_reader, req.context());
+                    defer self.popConnIoContext(conn_reader, head_ctx_active);
+                    break :blk self.readResponseHead(&buffered, allocator);
+                } catch |err| return switch (err) {
                     error.EndOfStream => if (lease.reused) error.ServerClosedIdle else error.InvalidResponse,
                     error.StreamTooLong, error.BufferTooSmall => error.BufferTooSmall,
                     error.ReadFailed => switch (buffered.err() orelse error.Unexpected) {
@@ -1007,9 +1375,11 @@ pub fn Transport(comptime lib: type) type {
                         body.deinit();
                         allocator.destroy(body);
                     }
+                    if (state.tls_state) |*tls_state| tls_state.deinit(allocator);
                     freeResponseStateParts(state);
                     allocator.destroy(state);
                 }
+                state.tls_state = try self.captureResponseTlsState(conn_reader, allocator);
 
                 const tail = buffered.ioReader().buffered();
                 const body_state = try allocator.create(BodyState);
@@ -1017,6 +1387,7 @@ pub fn Transport(comptime lib: type) type {
                     .allocator = allocator,
                     .stream = Stream.init(conn_reader, &.{}),
                     .ctx = req.context(),
+                    .max_header_bytes = self.options.max_header_bytes,
                     .max_trailer_bytes = self.options.max_header_bytes,
                     .max_body_bytes = self.options.max_body_bytes,
                     .transport = self,
@@ -1051,8 +1422,8 @@ pub fn Transport(comptime lib: type) type {
                     if (body_state.request_body_state != null) {
                         body_state.reusable = false;
                         body_state.abortRequestBody();
-                        if (body_state.owns_conn) body_state.stream.reader.close();
                         try body_state.finishRequestBody();
+                        if (body_state.owns_conn) body_state.stream.reader.close();
                     } else {
                         _ = try body_state.finishAndReturnEof();
                     }
@@ -1072,6 +1443,11 @@ pub fn Transport(comptime lib: type) type {
                     .content_length = if (parsed.content_length) |n| @intCast(n) else @as(i64, -1),
                     .close = !body_state.reusable,
                     .request = req.*,
+                    .tls = if (state.tls_state) |tls_state| .{
+                        .version = tls_state.version,
+                        .cipher_suite = tls_state.cipher_suite,
+                        .peer_certificate_der = if (tls_state.peer_certificate_der.len == 0) null else tls_state.peer_certificate_der,
+                    } else null,
                 };
             }
         }
@@ -1178,6 +1554,7 @@ pub fn Transport(comptime lib: type) type {
                 body.deinit();
                 state.allocator.destroy(body);
             }
+            if (state.tls_state) |*tls_state| tls_state.deinit(state.allocator);
             if (state.headers.len != 0) state.allocator.free(state.headers);
             state.allocator.free(state.head_storage);
             state.allocator.destroy(state);
@@ -1188,6 +1565,17 @@ pub fn Transport(comptime lib: type) type {
             if (state.head_storage.len != 0) state.allocator.free(state.head_storage);
         }
 
+        fn captureResponseTlsState(self: *Self, conn: Conn, allocator: Allocator) RoundTripper.RoundTripError!?Tls.Conn.ConnectionState {
+            _ = self;
+            const tls_conn = conn.as(Tls.Conn) catch |err| return switch (err) {
+                error.TypeMismatch => null,
+            };
+            return tls_conn.connectionState(allocator) catch |err| return switch (err) {
+                error.OutOfMemory => error.OutOfMemory,
+                else => error.Unexpected,
+            };
+        }
+
         fn validateResponseBodyLimit(self: *Self, req: *const Request, parsed: ParsedHead) RoundTripper.RoundTripError!void {
             if (responseMustBeBodyless(req, parsed.status_code)) return;
             if (parsed.content_length) |content_length| {
@@ -1195,12 +1583,126 @@ pub fn Transport(comptime lib: type) type {
             }
         }
 
-        fn connectionPoolKey(self: *Self, u: url_mod.Url, port: u16) Allocator.Error![]u8 {
-            const needs_brackets = std.mem.indexOfScalar(u8, u.host, ':') != null;
-            if (needs_brackets) {
-                return std.fmt.allocPrint(self.allocator, "{s}://[{s}]:{d}", .{ u.scheme, u.host, port });
+        fn requestRoute(self: *Self, req: *const Request) RoundTripper.RoundTripError!RouteInfo {
+            const target_port = defaultPort(req.url) orelse return error.UnsupportedScheme;
+            if (std.mem.eql(u8, req.url.scheme, "https")) {
+                if (self.options.https_proxy) |proxy| {
+                    if (proxy.url.host.len == 0) return error.InvalidProxy;
+                    if (!std.mem.eql(u8, proxy.url.scheme, "http")) return error.UnsupportedProxyScheme;
+                    const proxy_port = defaultPort(proxy.url) orelse return error.InvalidProxy;
+                    return .{
+                        .target_port = target_port,
+                        .dial_host = proxy.url.host,
+                        .dial_port = proxy_port,
+                        .proxy = proxy,
+                    };
+                }
             }
-            return std.fmt.allocPrint(self.allocator, "{s}://{s}:{d}", .{ u.scheme, u.host, port });
+            return .{
+                .target_port = target_port,
+                .dial_host = req.url.host,
+                .dial_port = target_port,
+            };
+        }
+
+        fn connectionPoolKeyForRoute(self: *Self, req: *const Request, route: RouteInfo) Allocator.Error![]u8 {
+            if (route.proxy) |proxy| {
+                const proxy_authority = try authorityValue(self.allocator, proxy.url.host, route.dial_port);
+                defer self.allocator.free(proxy_authority);
+                const target_authority = try authorityValue(self.allocator, req.url.host, route.target_port);
+                defer self.allocator.free(target_authority);
+                return std.fmt.allocPrint(self.allocator, "https+connect://{s}->{s}", .{ proxy_authority, target_authority });
+            }
+            return connectionPoolKey(self.allocator, req.url.scheme, req.url.host, route.target_port);
+        }
+
+        fn writeConnectRequest(
+            self: *Self,
+            conn: Conn,
+            req: *const Request,
+            proxy: ProxyConfig,
+            target_port: u16,
+        ) RoundTripper.RoundTripError!void {
+            try validateHeaderList(proxy.connect_headers, false);
+
+            const allocator = req.allocator;
+            const authority = try authorityValue(allocator, req.url.host, target_port);
+            defer allocator.free(authority);
+            const has_proxy_authorization = requestHasHeader(proxy.connect_headers, Header.proxy_authorization);
+            const proxy_authorization = if (has_proxy_authorization)
+                null
+            else
+                try proxyAuthorizationValue(allocator, proxy.url);
+            defer if (proxy_authorization) |value| allocator.free(value);
+
+            try self.writeAll(conn, req, "CONNECT ");
+            try self.writeAll(conn, req, authority);
+            try self.writeAll(conn, req, " HTTP/1.1\r\n");
+
+            var has_host = false;
+            for (proxy.connect_headers) |hdr| {
+                if (hdr.is(Header.host)) has_host = true;
+                try self.writeHeaderLine(conn, req, hdr.name, hdr.value);
+            }
+            if (proxy_authorization) |value| {
+                try self.writeHeaderLine(conn, req, Header.proxy_authorization, value);
+            }
+            if (!has_host) try self.writeHeaderLine(conn, req, Header.host, authority);
+            try self.writeAll(conn, req, "\r\n");
+        }
+
+        fn readConnectResponse(self: *Self, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
+            const allocator = req.allocator;
+            var conn_reader = conn;
+            var buffered = try BufferedConnReader.initAlloc(&conn_reader, allocator, self.options.max_header_bytes);
+            defer buffered.deinit();
+            var informational_responses: usize = 0;
+
+            while (true) {
+                const head_storage = blk: {
+                    const head_ctx_active = self.pushConnIoContext(conn_reader, req.context());
+                    defer self.popConnIoContext(conn_reader, head_ctx_active);
+                    break :blk self.readResponseHead(&buffered, allocator);
+                } catch |err| return switch (err) {
+                    error.EndOfStream => error.ProxyConnectFailed,
+                    error.StreamTooLong, error.BufferTooSmall => error.BufferTooSmall,
+                    error.ReadFailed => switch (buffered.err() orelse error.Unexpected) {
+                        error.TimedOut => self.contextTimeoutError(req),
+                        error.ConnectionReset => error.ConnectionReset,
+                        error.ConnectionRefused => error.ConnectionRefused,
+                        else => error.Unexpected,
+                    },
+                    else => error.Unexpected,
+                };
+
+                var parsed_state = ResponseState{
+                    .allocator = allocator,
+                    .head_storage = head_storage,
+                    .headers = &.{},
+                    .body_state = null,
+                };
+                defer freeResponseStateParts(&parsed_state);
+
+                const parsed = try self.parseHead(&parsed_state);
+                if (isInformationalResponse(parsed.status_code)) {
+                    informational_responses += 1;
+                    if (informational_responses > max_informational_responses) return error.InvalidResponse;
+                    continue;
+                }
+
+                switch (parsed.status_code) {
+                    200 => {
+                        if (parsed.chunked) return error.InvalidResponse;
+                        if (parsed.content_length) |content_length| {
+                            if (content_length != 0) return error.InvalidResponse;
+                        }
+                        if (buffered.ioReader().buffered().len != 0) return error.InvalidResponse;
+                        return;
+                    },
+                    407 => return error.ProxyAuthRequired,
+                    else => return error.ProxyConnectFailed,
+                }
+            }
         }
 
         fn currentIdleGeneration(self: *Self) usize {
@@ -1209,12 +1711,35 @@ pub fn Transport(comptime lib: type) type {
             return self.idle_generation;
         }
 
+        fn discardLease(self: *Self, lease: *ConnLease) void {
+            if (lease.conn) |owned_conn| {
+                self.discardConn(owned_conn, lease.pool_key);
+            } else if (lease.pool_key.len != 0) {
+                self.allocator.free(lease.pool_key);
+            }
+            lease.conn = null;
+            lease.pool_key = &.{};
+        }
+
+        fn discardConn(self: *Self, conn: Conn, pool_key: []u8) void {
+            if (pool_key.len != 0 and self.maxConnsPerHost() != null) {
+                self.idle_mu.lock();
+                self.noteConnClosedLocked(pool_key);
+                self.idle_mu.unlock();
+            }
+            conn.deinit();
+            if (pool_key.len != 0) self.allocator.free(pool_key);
+        }
+
         fn takeIdleConn(self: *Self, pool_key: []const u8) ?IdleConnTake {
             self.idle_mu.lock();
             defer self.idle_mu.unlock();
 
             self.pruneExpiredIdleLocked();
+            return self.takeIdleConnLocked(pool_key);
+        }
 
+        fn takeIdleConnLocked(self: *Self, pool_key: []const u8) ?IdleConnTake {
             var i = self.idle_conns.items.len;
             while (i > 0) {
                 i -= 1;
@@ -1249,13 +1774,19 @@ pub fn Transport(comptime lib: type) type {
                 }) catch {
                     should_close = true;
                 };
+                if (!should_close) {
+                    if (self.findHostStateIndexLocked(pool_key)) |idx| {
+                        if (self.host_states.items[idx].waiters != 0) {
+                            self.host_states.items[idx].cond.signal();
+                        }
+                    }
+                }
             }
 
             self.idle_mu.unlock();
 
             if (should_close) {
-                conn.deinit();
-                self.allocator.free(pool_key);
+                self.discardConn(conn, pool_key);
             }
         }
 
@@ -1273,6 +1804,7 @@ pub fn Transport(comptime lib: type) type {
         }
 
         fn closeIdleConn(self: *Self, idle: IdleConn) void {
+            self.noteConnClosedLocked(idle.key);
             idle.conn.deinit();
             self.allocator.free(idle.key);
         }
@@ -1288,6 +1820,70 @@ pub fn Transport(comptime lib: type) type {
         fn maxIdleConnsPerHost(self: *Self) usize {
             if (self.options.max_idle_conns_per_host != 0) return self.options.max_idle_conns_per_host;
             return 2;
+        }
+
+        fn maxConnsPerHost(self: *Self) ?usize {
+            if (self.options.max_conns_per_host == 0) return null;
+            return self.options.max_conns_per_host;
+        }
+
+        fn getOrCreateHostStateLocked(self: *Self, pool_key: []const u8) Allocator.Error!*HostState {
+            if (self.findHostStateIndexLocked(pool_key)) |idx| {
+                return &self.host_states.items[idx];
+            }
+
+            try self.host_states.append(self.allocator, .{
+                .key = try self.allocator.dupe(u8, pool_key),
+            });
+            return &self.host_states.items[self.host_states.items.len - 1];
+        }
+
+        fn findHostStateIndexLocked(self: *Self, pool_key: []const u8) ?usize {
+            for (self.host_states.items, 0..) |state, idx| {
+                if (std.ascii.eqlIgnoreCase(state.key, pool_key)) return idx;
+            }
+            return null;
+        }
+
+        fn noteConnClosedLocked(self: *Self, pool_key: []const u8) void {
+            if (self.maxConnsPerHost() == null) return;
+            const idx = self.findHostStateIndexLocked(pool_key) orelse return;
+            var should_cleanup = false;
+            {
+                const state = &self.host_states.items[idx];
+                if (state.live_conns != 0) state.live_conns -= 1;
+                if (state.waiters != 0) state.cond.signal();
+                should_cleanup = state.live_conns == 0 and state.waiters == 0;
+            }
+            if (should_cleanup) self.freeHostStateLocked(idx);
+        }
+
+        fn freeHostStateLocked(self: *Self, idx: usize) void {
+            const state = self.host_states.orderedRemove(idx);
+            self.allocator.free(state.key);
+        }
+
+        fn waitForConnAvailableLocked(self: *Self, req: *const Request, state: *HostState) RoundTripper.RoundTripError!void {
+            const ctx = req.context() orelse {
+                state.cond.wait(&self.idle_mu);
+                return;
+            };
+
+            if (ctx.err()) |err| return err;
+            if (ctx.deadline()) |deadline_ns| {
+                const remaining_ns = deadline_ns - lib.time.nanoTimestamp();
+                if (remaining_ns <= 0) return error.DeadlineExceeded;
+                state.cond.timedWait(
+                    &self.idle_mu,
+                    @intCast(@min(remaining_ns, @as(i128, 25 * lib.time.ns_per_ms))),
+                ) catch {};
+                if (ctx.err()) |err| return err;
+                if (deadline_ns <= lib.time.nanoTimestamp()) return error.DeadlineExceeded;
+                return;
+            }
+
+            state.cond.timedWait(&self.idle_mu, 25 * lib.time.ns_per_ms) catch {};
+            if (ctx.err()) |err| return err;
         }
 
         fn shouldAttemptConnectionReuse(self: *Self, req: *const Request) bool {
@@ -1345,7 +1941,7 @@ pub fn Transport(comptime lib: type) type {
             if (req.context()) |ctx| {
                 if (ctx.err()) |err| return err;
                 if (ctx.deadline()) |deadline| {
-                    if (lib.time.nanoTimestamp() >= deadline) return error.DeadlineExceeded;
+                    if (lib.time.nanoTimestamp() + context_timeout_grace_ns >= deadline) return error.DeadlineExceeded;
                 }
             }
             return error.TimedOut;
@@ -1363,10 +1959,20 @@ pub fn Transport(comptime lib: type) type {
         fn mapWriteError(self: *Self, err: anyerror, req: *const Request) RoundTripper.RoundTripError {
             return switch (err) {
                 error.BrokenPipe => error.BrokenPipe,
+                error.ConnectionRefused => error.ConnectionRefused,
                 error.ConnectionReset => error.ConnectionReset,
-                error.TimedOut => self.contextTimeoutError(req),
+                error.TimedOut => self.requestWriteTimeoutError(req),
                 else => error.Unexpected,
             };
+        }
+
+        fn requestWriteTimeoutError(self: *Self, req: *const Request) RoundTripper.RoundTripError {
+            _ = self;
+            if (req.context()) |ctx| {
+                if (ctx.err()) |err| return err;
+                if (ctx.deadline() != null) return error.DeadlineExceeded;
+            }
+            return error.TimedOut;
         }
     };
 }
@@ -1505,10 +2111,83 @@ fn defaultPort(u: url_mod.Url) ?u16 {
     return null;
 }
 
+fn authorityValue(allocator: std.mem.Allocator, host: []const u8, port: u16) std.mem.Allocator.Error![]u8 {
+    const needs_brackets = std.mem.indexOfScalar(u8, host, ':') != null;
+    if (needs_brackets) return std.fmt.allocPrint(allocator, "[{s}]:{d}", .{ host, port });
+    return std.fmt.allocPrint(allocator, "{s}:{d}", .{ host, port });
+}
+
+fn proxyAuthorizationValue(allocator: std.mem.Allocator, proxy_url: url_mod.Url) anyerror!?[]u8 {
+    if (proxy_url.username.len == 0 and proxy_url.password.len == 0) return null;
+
+    const raw_userpass_len = proxy_url.username.len + proxy_url.password.len + 1;
+    const max_encoded_len = proxy_authorization_value_limit - "Basic ".len;
+    if (std.base64.standard.Encoder.calcSize(raw_userpass_len) > max_encoded_len) return error.InvalidProxy;
+
+    var userpass = try std.ArrayList(u8).initCapacity(allocator, raw_userpass_len);
+    defer userpass.deinit(allocator);
+
+    try appendPercentDecoded(&userpass, allocator, proxy_url.username);
+    try userpass.append(allocator, ':');
+    try appendPercentDecoded(&userpass, allocator, proxy_url.password);
+
+    const encoded_len = std.base64.standard.Encoder.calcSize(userpass.items.len);
+    if ("Basic ".len + encoded_len > proxy_authorization_value_limit) return error.InvalidProxy;
+    const value = try allocator.alloc(u8, "Basic ".len + encoded_len);
+    @memcpy(value[0.."Basic ".len], "Basic ");
+    _ = std.base64.standard.Encoder.encode(value["Basic ".len..], userpass.items);
+    return value;
+}
+
+fn appendPercentDecoded(bytes: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) anyerror!void {
+    var i: usize = 0;
+    while (i < value.len) {
+        if (value[i] != '%') {
+            try bytes.append(allocator, value[i]);
+            i += 1;
+            continue;
+        }
+
+        if (i + 2 >= value.len) return error.InvalidProxy;
+        const hi = hexNibble(value[i + 1]) orelse return error.InvalidProxy;
+        const lo = hexNibble(value[i + 2]) orelse return error.InvalidProxy;
+        try bytes.append(allocator, (hi << 4) | lo);
+        i += 3;
+    }
+}
+
+fn hexNibble(c: u8) ?u8 {
+    return switch (c) {
+        '0'...'9' => c - '0',
+        'a'...'f' => c - 'a' + 10,
+        'A'...'F' => c - 'A' + 10,
+        else => null,
+    };
+}
+
+fn connectionPoolKey(allocator: std.mem.Allocator, scheme: []const u8, host: []const u8, port: u16) std.mem.Allocator.Error![]u8 {
+    const authority = try authorityValue(allocator, host, port);
+    defer allocator.free(authority);
+    return std.fmt.allocPrint(allocator, "{s}://{s}", .{ scheme, authority });
+}
+
 fn responseMustBeBodyless(req: *const Request, status_code: u16) bool {
     if (std.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) return true;
     if (status_code >= 100 and status_code < 200) return true;
     return status_code == 204 or status_code == 304;
+}
+
+test "net/unit_tests/http/Transport/init_defaults_max_header_bytes_to_embed_policy" {
+    const testing = std.testing;
+    const HttpTransport = Transport(std);
+
+    var transport = try HttpTransport.init(testing.allocator, .{
+        .max_header_bytes = 0,
+    });
+    defer transport.deinit();
+
+    try testing.expectEqual((HttpTransport.Options{}).max_header_bytes, transport.options.max_header_bytes);
+    try testing.expectEqual(@as(usize, 32 * 1024), transport.options.max_header_bytes);
 }
 
 test "net/unit_tests/http/Transport/writeRequest_rejects_body_larger_than_max_body_bytes" {
@@ -1572,6 +2251,35 @@ test "net/unit_tests/http/Transport/writeRequest_rejects_body_larger_than_max_bo
 
     try testing.expectError(error.BodyTooLarge, transport.writeRequest(Conn.init(&mock_conn), &req));
     try testing.expectEqual(@as(usize, 0), mock_conn.writes.items.len);
+}
+
+test "net/unit_tests/http/Transport/writeRequest_propagates_connection_refused" {
+    const testing = std.testing;
+    const HttpTransport = Transport(std);
+
+    const MockConn = struct {
+        pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
+            return error.EndOfStream;
+        }
+
+        pub fn write(_: *@This(), _: []const u8) Conn.WriteError!usize {
+            return error.ConnectionRefused;
+        }
+
+        pub fn close(_: *@This()) void {}
+        pub fn deinit(_: *@This()) void {}
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    var transport = try HttpTransport.init(testing.allocator, .{});
+    defer transport.deinit();
+
+    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
+    defer req.deinit();
+
+    var mock_conn = MockConn{};
+    try testing.expectError(error.ConnectionRefused, transport.writeRequest(Conn.init(&mock_conn), &req));
 }
 
 test "net/unit_tests/http/Transport/readResponse_transfers_conn_ownership_before_prefix_allocation" {
@@ -1906,6 +2614,140 @@ test "net/unit_tests/http/Transport/readResponse_propagates_request_body_write_e
     try testing.expect(source.closed);
 }
 
+test "net/unit_tests/http/Transport/BodyState_close_waits_for_request_body_writer_before_closing_conn" {
+    const testing = std.testing;
+    const HttpTransport = Transport(std);
+
+    const MockConn = struct {
+        mu: std.Thread.Mutex = .{},
+        cond: std.Thread.Condition = .{},
+        write_started: bool = false,
+        allow_write_return: bool = false,
+        write_finished: bool = false,
+        closed: bool = false,
+        close_before_write_finished: bool = false,
+        deinited: bool = false,
+
+        pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
+            return 0;
+        }
+
+        pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
+            self.mu.lock();
+            self.write_started = true;
+            self.cond.broadcast();
+            while (!self.allow_write_return) self.cond.wait(&self.mu);
+            self.write_finished = true;
+            self.cond.broadcast();
+            self.mu.unlock();
+            return buf.len;
+        }
+
+        pub fn close(self: *@This()) void {
+            self.mu.lock();
+            if (!self.write_finished) self.close_before_write_finished = true;
+            self.closed = true;
+            self.cond.broadcast();
+            self.mu.unlock();
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.deinited = true;
+        }
+
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    const BodySource = struct {
+        mu: std.Thread.Mutex = .{},
+        cond: std.Thread.Condition = .{},
+        payload: []const u8,
+        offset: usize = 0,
+        closed: bool = false,
+
+        pub fn read(self: *@This(), buf: []u8) anyerror!usize {
+            if (self.closed) return 0;
+            const remaining = self.payload[self.offset..];
+            if (remaining.len == 0) return 0;
+            const n = @min(buf.len, remaining.len);
+            @memcpy(buf[0..n], remaining[0..n]);
+            self.offset += n;
+            return n;
+        }
+
+        pub fn close(self: *@This()) void {
+            self.mu.lock();
+            self.closed = true;
+            self.cond.broadcast();
+            self.mu.unlock();
+        }
+    };
+
+    var transport = try HttpTransport.init(testing.allocator, .{});
+    defer transport.deinit();
+
+    var source = BodySource{ .payload = "x" };
+    var req = try Request.init(testing.allocator, "POST", "http://example.com/upload");
+    req = req.withBody(ReadCloser.init(&source));
+    req.content_length = 1;
+
+    var mock_conn = MockConn{};
+    const conn = Conn.init(&mock_conn);
+    const writer = try HttpTransport.RequestBodyState.spawn(
+        testing.allocator,
+        &transport,
+        conn,
+        &req,
+        req.body().?,
+        false,
+        1,
+        false,
+        transport.options.expect_continue_timeout_ms,
+    );
+
+    mock_conn.mu.lock();
+    while (!mock_conn.write_started) mock_conn.cond.wait(&mock_conn.mu);
+    mock_conn.mu.unlock();
+
+    var body_state: HttpTransport.BodyState = .{
+        .allocator = testing.allocator,
+        .stream = io.PrefixReader(Conn).init(conn, &.{}),
+        .ctx = null,
+        .max_body_bytes = transport.options.max_body_bytes,
+        .owns_conn = true,
+        .request_body_state = writer,
+        .transport = &transport,
+    };
+
+    const Closer = struct {
+        fn run(state: *HttpTransport.BodyState) void {
+            state.close();
+        }
+    };
+
+    var closer_thread = try std.Thread.spawn(.{}, Closer.run, .{&body_state});
+    source.mu.lock();
+    while (!source.closed) source.cond.wait(&source.mu);
+    source.mu.unlock();
+
+    mock_conn.mu.lock();
+    try testing.expect(!mock_conn.closed);
+    try testing.expect(!mock_conn.close_before_write_finished);
+    mock_conn.allow_write_return = true;
+    mock_conn.cond.broadcast();
+    while (!mock_conn.write_finished) mock_conn.cond.wait(&mock_conn.mu);
+    mock_conn.mu.unlock();
+
+    closer_thread.join();
+    body_state.deinit();
+
+    try testing.expect(source.closed);
+    try testing.expect(mock_conn.closed);
+    try testing.expect(mock_conn.deinited);
+    try testing.expect(!mock_conn.close_before_write_finished);
+}
+
 test "net/unit_tests/http/Transport/roundTrip_rejects_invalid_request_header_before_dialing" {
     const testing = std.testing;
     const HttpTransport = Transport(std);
@@ -1947,6 +2789,61 @@ test "net/unit_tests/http/Transport/roundTrip_rejects_invalid_request_trailer_be
     req = req.withBody(ReadCloser.init(&source)).withTrailers(&trailers);
 
     try testing.expectError(error.InvalidTrailer, transport.roundTrip(&req));
+}
+
+test "net/unit_tests/http/Transport/roundTrip_rejects_transfer_encoding_header_conflicting_with_fixed_request_body" {
+    const testing = std.testing;
+    const HttpTransport = Transport(std);
+
+    const BodySource = struct {
+        pub fn read(_: *@This(), _: []u8) anyerror!usize {
+            return 0;
+        }
+
+        pub fn close(_: *@This()) void {}
+    };
+
+    var transport = try HttpTransport.init(testing.allocator, .{});
+    defer transport.deinit();
+
+    const headers = [_]Header{
+        Header.init(Header.transfer_encoding, "chunked"),
+    };
+
+    var source = BodySource{};
+    var req = try Request.init(testing.allocator, "POST", "http://example.com/upload");
+    req = req.withBody(ReadCloser.init(&source));
+    req.content_length = 1;
+    req.header = &headers;
+
+    try testing.expectError(error.InvalidHeader, transport.roundTrip(&req));
+}
+
+test "net/unit_tests/http/Transport/roundTrip_rejects_content_length_header_conflicting_with_chunked_request_body" {
+    const testing = std.testing;
+    const HttpTransport = Transport(std);
+
+    const BodySource = struct {
+        pub fn read(_: *@This(), _: []u8) anyerror!usize {
+            return 0;
+        }
+
+        pub fn close(_: *@This()) void {}
+    };
+
+    var transport = try HttpTransport.init(testing.allocator, .{});
+    defer transport.deinit();
+
+    const headers = [_]Header{
+        Header.init(Header.content_length, "1"),
+    };
+
+    var source = BodySource{};
+    var req = try Request.init(testing.allocator, "POST", "http://example.com/upload");
+    req = req.withBody(ReadCloser.init(&source));
+    req.header = &headers;
+
+    try testing.expectError(error.InvalidHeader, transport.roundTrip(&req));
 }
 
 test "net/unit_tests/http/Transport/rewindRequest_refreshes_body_with_GetBody" {
@@ -2410,5 +3307,109 @@ test "net/unit_tests/http/Transport/chunked_body_accepts_trailers_that_exactly_m
     try testing.expectEqual(@as(usize, 1), try body.read(&buf));
     try testing.expectEqualStrings("a", &buf);
 
+    try testing.expectEqual(@as(usize, 0), try body.read(&buf));
+}
+
+test "net/unit_tests/http/Transport/chunked_body_accepts_long_chunk_extension_within_header_budget" {
+    const testing = std.testing;
+    const HttpTransport = Transport(std);
+
+    const MockConn = struct {
+        response: []const u8,
+        offset: usize = 0,
+
+        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+            const remaining = self.response[self.offset..];
+            if (remaining.len == 0) return 0;
+            const n = @min(buf.len, remaining.len);
+            @memcpy(buf[0..n], remaining[0..n]);
+            self.offset += n;
+            return n;
+        }
+
+        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+            return buf.len;
+        }
+
+        pub fn close(_: *@This()) void {}
+        pub fn deinit(_: *@This()) void {}
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    var transport = try HttpTransport.init(testing.allocator, .{ .max_header_bytes = 512 });
+    defer transport.deinit();
+
+    const extension = [_]u8{'x'} ** 180;
+    const response = try std.fmt.allocPrint(
+        testing.allocator,
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1;{s}\r\na\r\n0\r\n\r\n",
+        .{&extension},
+    );
+    defer testing.allocator.free(response);
+
+    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
+    var mock_conn = MockConn{ .response = response };
+    var conn: ?Conn = Conn.init(&mock_conn);
+
+    var resp = try transport.readResponse(&conn, &req);
+    defer resp.deinit();
+
+    const body = resp.body() orelse return error.TestUnexpectedResult;
+    var buf: [1]u8 = undefined;
+    try testing.expectEqual(@as(usize, 1), try body.read(&buf));
+    try testing.expectEqualStrings("a", &buf);
+    try testing.expectEqual(@as(usize, 0), try body.read(&buf));
+}
+
+test "net/unit_tests/http/Transport/chunked_body_accepts_long_trailer_line_within_budget" {
+    const testing = std.testing;
+    const HttpTransport = Transport(std);
+
+    const MockConn = struct {
+        response: []const u8,
+        offset: usize = 0,
+
+        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+            const remaining = self.response[self.offset..];
+            if (remaining.len == 0) return 0;
+            const n = @min(buf.len, remaining.len);
+            @memcpy(buf[0..n], remaining[0..n]);
+            self.offset += n;
+            return n;
+        }
+
+        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+            return buf.len;
+        }
+
+        pub fn close(_: *@This()) void {}
+        pub fn deinit(_: *@This()) void {}
+        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+    };
+
+    var transport = try HttpTransport.init(testing.allocator, .{ .max_header_bytes = 1024 });
+    defer transport.deinit();
+
+    const trailer_fill = [_]u8{'t'} ** 700;
+    const response = try std.fmt.allocPrint(
+        testing.allocator,
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\na\r\n0\r\nX-Large: {s}\r\n\r\n",
+        .{&trailer_fill},
+    );
+    defer testing.allocator.free(response);
+
+    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
+    var mock_conn = MockConn{ .response = response };
+    var conn: ?Conn = Conn.init(&mock_conn);
+
+    var resp = try transport.readResponse(&conn, &req);
+    defer resp.deinit();
+
+    const body = resp.body() orelse return error.TestUnexpectedResult;
+    var buf: [1]u8 = undefined;
+    try testing.expectEqual(@as(usize, 1), try body.read(&buf));
+    try testing.expectEqualStrings("a", &buf);
     try testing.expectEqual(@as(usize, 0), try body.read(&buf));
 }

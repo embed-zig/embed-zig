@@ -22,6 +22,10 @@ pub fn make(comptime lib: type) type {
             KeyExchangeFailed,
             RecordIoFailed,
             BadRecordMac,
+            ConnectionRefused,
+            ConnectionReset,
+            BrokenPipe,
+            TimedOut,
         };
 
         pub const HandshakeState = enum {
@@ -116,6 +120,7 @@ pub fn make(comptime lib: type) type {
             max_version: common.ProtocolVersion = .tls_1_3,
             tls12_cipher_suites: []const common.CipherSuite = &common.DEFAULT_TLS12_CIPHER_SUITES,
             tls13_cipher_suites: []const common.CipherSuite = &common.DEFAULT_TLS13_CIPHER_SUITES,
+            alpn_protocols: []const []const u8 = &.{},
         };
 
         pub fn ClientHandshake(comptime ConnType: type) type {
@@ -130,6 +135,7 @@ pub fn make(comptime lib: type) type {
                 max_version: common.ProtocolVersion,
                 tls12_cipher_suites: []const common.CipherSuite,
                 tls13_cipher_suites: []const common.CipherSuite,
+                alpn_protocols: []const []const u8,
                 client_random: [32]u8,
                 legacy_session_id: [32]u8,
                 server_random: [32]u8,
@@ -153,8 +159,10 @@ pub fn make(comptime lib: type) type {
                 client_application_traffic_secret: [kdf.MAX_TLS13_SECRET_LEN]u8,
                 server_application_traffic_secret: [kdf.MAX_TLS13_SECRET_LEN]u8,
                 server_finished_received: bool,
-                server_cert_der: [4096]u8,
+                server_cert_der: [common.MAX_HANDSHAKE_LEN]u8,
                 server_cert_der_len: usize,
+                negotiated_alpn: [255]u8,
+                negotiated_alpn_len: usize,
                 records: record.RecordLayer(ConnType),
 
                 const Self = @This();
@@ -194,6 +202,7 @@ pub fn make(comptime lib: type) type {
                         .max_version = options.max_version,
                         .tls12_cipher_suites = options.tls12_cipher_suites,
                         .tls13_cipher_suites = options.tls13_cipher_suites,
+                        .alpn_protocols = options.alpn_protocols,
                         .client_random = undefined,
                         .legacy_session_id = undefined,
                         .server_random = [_]u8{0} ** 32,
@@ -219,6 +228,8 @@ pub fn make(comptime lib: type) type {
                         .server_finished_received = false,
                         .server_cert_der = undefined,
                         .server_cert_der_len = 0,
+                        .negotiated_alpn = undefined,
+                        .negotiated_alpn_len = 0,
                         .records = record.RecordLayer(ConnType).init(conn),
                     };
                     crypto.random.bytes(&self.client_random);
@@ -241,8 +252,8 @@ pub fn make(comptime lib: type) type {
 
                 pub fn sendClientHello(self: *Self, handshake_buf: []u8, record_buf: []u8) HandshakeError!usize {
                     const len = try self.encodeClientHello(handshake_buf);
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..len], record_buf, handshake_buf) catch {
-                        return error.RecordIoFailed;
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..len], record_buf, handshake_buf) catch |err| {
+                        return mapWriteRecordError(err);
                     };
                     self.state = .wait_server_hello;
                     return len;
@@ -327,6 +338,9 @@ pub fn make(comptime lib: type) type {
                         .key_exchange = self.key_exchange.publicKey(),
                     }}) catch |err| return mapExtensionError(err);
                     ext_builder.addPskKeyExchangeModes(&.{.psk_dhe_ke}) catch |err| return mapExtensionError(err);
+                    if (self.alpn_protocols.len != 0) {
+                        ext_builder.addAlpn(self.alpn_protocols) catch |err| return mapExtensionError(err);
+                    }
 
                     const ext_data = ext_builder.getData();
                     mem.writeInt(u16, out[body_pos..][0..2], @intCast(ext_data.len), .big);
@@ -344,7 +358,7 @@ pub fn make(comptime lib: type) type {
                 }
 
                 pub fn processRecord(self: *Self, record_buf: []u8, plaintext_buf: []u8) HandshakeError!void {
-                    const res = self.records.readRecord(record_buf, plaintext_buf) catch return error.RecordIoFailed;
+                    const res = self.records.readRecord(record_buf, plaintext_buf) catch |err| return mapReadRecordError(err);
                     if (res.content_type != .handshake) return error.UnexpectedMessage;
                     try self.processHandshake(plaintext_buf[0..res.length]);
                 }
@@ -531,13 +545,37 @@ pub fn make(comptime lib: type) type {
                     const ext_end = 2 + total_ext_len;
                     while (pos < ext_end) {
                         if (pos + 4 > ext_end) return error.InvalidHandshake;
+                        const ext_type: common.ExtensionType = @enumFromInt(mem.readInt(u16, data[pos..][0..2], .big));
                         const ext_len = mem.readInt(u16, data[pos + 2 ..][0..2], .big);
                         pos += 4;
                         if (pos + ext_len > ext_end) return error.InvalidHandshake;
+                        const payload = data[pos..][0..ext_len];
+                        switch (ext_type) {
+                            .application_layer_protocol_negotiation => {
+                                const protocol = extensions.parseSelectedAlpn(payload) catch return error.InvalidHandshake;
+                                if (protocol.len > self.negotiated_alpn.len) return error.InvalidHandshake;
+                                var matched = false;
+                                for (self.alpn_protocols) |candidate| {
+                                    if (mem.eql(u8, candidate, protocol)) {
+                                        matched = true;
+                                        break;
+                                    }
+                                }
+                                if (!matched) return error.InvalidHandshake;
+                                @memcpy(self.negotiated_alpn[0..protocol.len], protocol);
+                                self.negotiated_alpn_len = protocol.len;
+                            },
+                            else => {},
+                        }
                         pos += ext_len;
                     }
 
                     self.state = .wait_certificate;
+                }
+
+                pub fn negotiatedProtocol(self: *const Self) ?[]const u8 {
+                    if (self.negotiated_alpn_len == 0) return null;
+                    return self.negotiated_alpn[0..self.negotiated_alpn_len];
                 }
 
                 fn processCertificate(self: *Self, data: []const u8) HandshakeError!void {
@@ -750,8 +788,8 @@ pub fn make(comptime lib: type) type {
                     try header.serialize(handshake_buf[0..common.HandshakeHeader.SIZE]);
                     @memcpy(handshake_buf[common.HandshakeHeader.SIZE..][0..verify_data.len], verify_data);
 
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..total_len], record_buf, handshake_buf) catch {
-                        return error.RecordIoFailed;
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..total_len], record_buf, handshake_buf) catch |err| {
+                        return mapWriteRecordError(err);
                     };
 
                     self.transcript_hash.update(handshake_buf[0..total_len]);
@@ -800,16 +838,16 @@ pub fn make(comptime lib: type) type {
                     handshake_buf[common.HandshakeHeader.SIZE] = @intCast(public_key.len);
                     @memcpy(handshake_buf[common.HandshakeHeader.SIZE + 1 ..][0..public_key.len], public_key);
                     self.records.setVersion(.tls_1_2);
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..total_len], record_buf, handshake_buf) catch {
-                        return error.RecordIoFailed;
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..total_len], record_buf, handshake_buf) catch |err| {
+                        return mapWriteRecordError(err);
                     };
                     self.transcript_hash.update(handshake_buf[0..total_len]);
 
                     try self.deriveTls12Secrets();
 
                     const ccs = [_]u8{@intFromEnum(common.ChangeCipherSpecType.change_cipher_spec)};
-                    _ = self.records.writeRecord(.change_cipher_spec, &ccs, record_buf, handshake_buf) catch {
-                        return error.RecordIoFailed;
+                    _ = self.records.writeRecord(.change_cipher_spec, &ccs, record_buf, handshake_buf) catch |err| {
+                        return mapWriteRecordError(err);
                     };
 
                     self.records.setWriteCipher(self.tls12_client_cipher);
@@ -824,12 +862,45 @@ pub fn make(comptime lib: type) type {
                     try finished_header.serialize(handshake_buf[0..common.HandshakeHeader.SIZE]);
                     @memcpy(handshake_buf[common.HandshakeHeader.SIZE..][0..verify_data.len], &verify_data);
 
-                    _ = self.records.writeRecord(.handshake, handshake_buf[0..finished_len], record_buf, handshake_buf) catch {
-                        return error.RecordIoFailed;
+                    _ = self.records.writeRecord(.handshake, handshake_buf[0..finished_len], record_buf, handshake_buf) catch |err| {
+                        return mapWriteRecordError(err);
                     };
                     self.transcript_hash.update(handshake_buf[0..finished_len]);
                     self.tls12_expected_server_verify_data = self.tls12ServerFinishedVerifyData();
                     self.tls12_client_flight_sent = true;
+                }
+
+                fn mapReadRecordError(err: record.RecordError) HandshakeError {
+                    return switch (err) {
+                        error.BadRecordMac => error.BadRecordMac,
+                        error.BufferTooSmall,
+                        error.RecordTooLarge,
+                        error.DecryptionFailed,
+                        error.UnexpectedRecord,
+                        => error.InvalidHandshake,
+
+                        error.ConnectionRefused => error.ConnectionRefused,
+                        error.ConnectionReset => error.ConnectionReset,
+                        error.BrokenPipe => error.BrokenPipe,
+                        error.TimedOut => error.TimedOut,
+
+                        else => error.RecordIoFailed,
+                    };
+                }
+
+                fn mapWriteRecordError(err: record.RecordError) HandshakeError {
+                    return switch (err) {
+                        error.BufferTooSmall,
+                        error.RecordTooLarge,
+                        => error.BufferTooSmall,
+
+                        error.ConnectionRefused => error.ConnectionRefused,
+                        error.ConnectionReset => error.ConnectionReset,
+                        error.BrokenPipe => error.BrokenPipe,
+                        error.TimedOut => error.TimedOut,
+
+                        else => error.RecordIoFailed,
+                    };
                 }
 
                 fn deriveTls12Secrets(self: *Self) HandshakeError!void {

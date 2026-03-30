@@ -1,7 +1,8 @@
 //! Conn — type-erased bidirectional byte stream (like Go's net.Conn).
 //!
 //! Uses a VTable for runtime dispatch, same pattern as std.mem.Allocator.
-//! Any concrete type with read/write/close methods can be wrapped into a Conn.
+//! Any concrete type with read/write/close/deinit plus timeout setter methods
+//! can be wrapped into a Conn.
 //!
 //!   var conn = try net.dial(allocator, .tcp, addr);
 //!   defer conn.deinit();
@@ -36,6 +37,7 @@ pub const ReadError = error{
 };
 
 pub const WriteError = error{
+    ConnectionRefused,
     ConnectionReset,
     BrokenPipe,
     TimedOut,
@@ -86,7 +88,15 @@ pub fn setWriteTimeout(self: Conn, ms: ?u32) void {
     self.vtable.setWriteTimeout(self.ptr, ms);
 }
 
-/// Wrap a pointer to any concrete type that has read/write/close into a Conn.
+/// Wrap a pointer to any concrete type that matches the `Conn` vtable contract.
+///
+/// The concrete type must provide:
+///   fn read(*Self, []u8) ReadError!usize
+///   fn write(*Self, []const u8) WriteError!usize
+///   fn close(*Self) void
+///   fn deinit(*Self) void
+///   fn setReadTimeout(*Self, ?u32) void
+///   fn setWriteTimeout(*Self, ?u32) void
 pub fn init(pointer: anytype) Conn {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);

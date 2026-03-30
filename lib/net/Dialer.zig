@@ -61,14 +61,12 @@ pub fn Dialer(comptime lib: type) type {
                     var stream = try Stream.initSocket(try SockAddr.family(addr.addr()));
                     errdefer stream.deinit();
                     try stream.connectContext(ctx, addr);
-                    try ensureContextActive(ctx);
                     break :blk try TC.initFromStream(self.allocator, stream);
                 },
                 .udp => blk: {
                     var packet = try Packet.initSocket(try SockAddr.family(addr.addr()));
                     errdefer packet.deinit();
-                    try packet.connect(addr);
-                    try ensureContextActive(ctx);
+                    try packet.connectContext(ctx, addr);
                     break :blk try UC.initFromPacket(self.allocator, packet);
                 },
             };

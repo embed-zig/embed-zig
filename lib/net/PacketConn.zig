@@ -1,7 +1,8 @@
 //! PacketConn — type-erased datagram interface (like Go's net.PacketConn).
 //!
 //! VTable-based runtime dispatch, same pattern as Conn and Listener.
-//! For connectionless protocols (UDP). Each readFrom/writeTo operates
+//! Concrete implementations must also provide close/deinit and timeout setter
+//! methods. For connectionless protocols (UDP), each readFrom/writeTo operates
 //! on a single datagram with an associated remote address.
 //!
 //! Usage:
@@ -35,12 +36,15 @@ pub const ReadFromResult = struct {
 };
 
 pub const ReadFromError = error{
+    ConnectionReset,
+    Closed,
     ConnectionRefused,
     TimedOut,
     Unexpected,
 };
 
 pub const WriteToError = error{
+    Closed,
     MessageTooLong,
     NetworkUnreachable,
     AccessDenied,
@@ -90,8 +94,15 @@ pub fn setWriteTimeout(self: PacketConn, ms: ?u32) void {
     self.vtable.setWriteTimeout(self.ptr, ms);
 }
 
-/// Wrap a pointer to any concrete type that has readFrom/writeTo/close
-/// into a PacketConn.
+/// Wrap a pointer to any concrete type that matches the `PacketConn` vtable contract.
+///
+/// The concrete type must provide:
+///   fn readFrom(*Self, []u8) ReadFromError!ReadFromResult
+///   fn writeTo(*Self, []const u8, [*]const u8, u32) WriteToError!usize
+///   fn close(*Self) void
+///   fn deinit(*Self) void
+///   fn setReadTimeout(*Self, ?u32) void
+///   fn setWriteTimeout(*Self, ?u32) void
 pub fn init(pointer: anytype) PacketConn {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);

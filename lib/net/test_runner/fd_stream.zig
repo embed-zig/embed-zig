@@ -112,10 +112,6 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             return Stream.adopt(fd);
         }
 
-        fn sleepMs(ms: u32) void {
-            Thread.sleep(@as(u64, ms) * lib.time.ns_per_ms);
-        }
-
         fn fillPattern(buf: []u8, seed: u8) void {
             for (buf, 0..) |*byte, i| {
                 byte.* = @truncate((i * 131 + seed) % 251);
@@ -131,6 +127,13 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             var offset: usize = 0;
             while (offset < data.len) {
                 offset += try stream.write(data[offset..]);
+            }
+        }
+
+        fn writeAllContext(stream: *Stream, ctx: context_mod.Context, data: []const u8) !void {
+            var offset: usize = 0;
+            while (offset < data.len) {
+                offset += try stream.writeContext(ctx, data[offset..]);
             }
         }
 
@@ -156,6 +159,7 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
                 error.ConnectionResetByPeer,
                 error.FileNotFound,
                 error.SystemResources,
+                error.ConnectFailed,
                 => return error.SkipZigTest,
                 else => return err,
             }
@@ -437,6 +441,54 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             try testing.expectError(error.TimedOut, stream.read(&buf));
         }
 
+        fn streamReadContextCanceledWhileBlocked() !void {
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+            var ctx = try ctx_api.withCancel(ctx_api.background());
+            defer ctx.deinit();
+
+            var listener = try listenLoopback();
+            defer listener.deinit();
+
+            var stream = try Stream.initSocket(posix.AF.INET);
+            defer stream.deinit();
+            try stream.connect(listener.addr());
+
+            const peer = try accept(listener.fd);
+            defer posix.close(peer);
+
+            const cancel_thread = try Thread.spawn(.{}, struct {
+                fn run(cancel_ctx: context_mod.Context, comptime thread_lib: type) void {
+                    thread_lib.Thread.sleep(30 * thread_lib.time.ns_per_ms);
+                    cancel_ctx.cancel();
+                }
+            }.run, .{ ctx, lib });
+            defer cancel_thread.join();
+
+            var buf: [16]u8 = undefined;
+            try testing.expectError(error.Canceled, stream.readContext(ctx, &buf));
+        }
+
+        fn streamReadContextDeadlineExceededWhileBlocked() !void {
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+            var ctx = try ctx_api.withDeadline(ctx_api.background(), lib.time.nanoTimestamp() + 30 * lib.time.ns_per_ms);
+            defer ctx.deinit();
+
+            var listener = try listenLoopback();
+            defer listener.deinit();
+
+            var stream = try Stream.initSocket(posix.AF.INET);
+            defer stream.deinit();
+            try stream.connect(listener.addr());
+
+            const peer = try accept(listener.fd);
+            defer posix.close(peer);
+
+            var buf: [16]u8 = undefined;
+            try testing.expectError(error.DeadlineExceeded, stream.readContext(ctx, &buf));
+        }
+
         fn streamWriteDeadlineTimesOut() !void {
             var listener = try listenLoopback();
             defer listener.deinit();
@@ -456,6 +508,64 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
 
             stream.setWriteDeadline(lib.time.milliTimestamp() + 30);
             try testing.expectError(error.TimedOut, writeAll(&stream, payload));
+        }
+
+        fn streamWriteContextCanceledWhileBlocked() !void {
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+            var ctx = try ctx_api.withCancel(ctx_api.background());
+            defer ctx.deinit();
+
+            var listener = try listenLoopback();
+            defer listener.deinit();
+
+            var stream = try Stream.initSocket(posix.AF.INET);
+            defer stream.deinit();
+            try stream.connect(listener.addr());
+
+            const peer = try accept(listener.fd);
+            defer posix.close(peer);
+
+            setSocketBuffer(stream.fd, posix.SO.SNDBUF, 4096);
+
+            const payload = try testing.allocator.alloc(u8, 512 * 1024);
+            defer testing.allocator.free(payload);
+            @memset(payload, 'c');
+
+            const cancel_thread = try Thread.spawn(.{}, struct {
+                fn run(cancel_ctx: context_mod.Context, comptime thread_lib: type) void {
+                    thread_lib.Thread.sleep(30 * thread_lib.time.ns_per_ms);
+                    cancel_ctx.cancel();
+                }
+            }.run, .{ ctx, lib });
+            defer cancel_thread.join();
+
+            try testing.expectError(error.Canceled, writeAllContext(&stream, ctx, payload));
+        }
+
+        fn streamWriteContextDeadlineExceededWhileBlocked() !void {
+            var ctx_api = try Context.init(testing.allocator);
+            defer ctx_api.deinit();
+            var ctx = try ctx_api.withDeadline(ctx_api.background(), lib.time.nanoTimestamp() + 30 * lib.time.ns_per_ms);
+            defer ctx.deinit();
+
+            var listener = try listenLoopback();
+            defer listener.deinit();
+
+            var stream = try Stream.initSocket(posix.AF.INET);
+            defer stream.deinit();
+            try stream.connect(listener.addr());
+
+            const peer = try accept(listener.fd);
+            defer posix.close(peer);
+
+            setSocketBuffer(stream.fd, posix.SO.SNDBUF, 4096);
+
+            const payload = try testing.allocator.alloc(u8, 512 * 1024);
+            defer testing.allocator.free(payload);
+            @memset(payload, 'd');
+
+            try testing.expectError(error.DeadlineExceeded, writeAllContext(&stream, ctx, payload));
         }
 
         fn streamReadDeadlineClearAllowsLaterRead() !void {
@@ -500,6 +610,9 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             var stream = try Stream.initSocket(posix.AF.INET);
             stream.close();
             stream.close();
+
+            var buf: [1]u8 = undefined;
+            try testing.expectError(error.Closed, stream.read(&buf));
         }
     };
 
@@ -520,7 +633,11 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
     try Runner.streamWriteWaitsUntilWritable();
     try Runner.streamFullDuplexConcurrentStreaming();
     try Runner.streamReadDeadlineTimesOut();
+    try Runner.streamReadContextCanceledWhileBlocked();
+    try Runner.streamReadContextDeadlineExceededWhileBlocked();
     try Runner.streamWriteDeadlineTimesOut();
+    try Runner.streamWriteContextCanceledWhileBlocked();
+    try Runner.streamWriteContextDeadlineExceededWhileBlocked();
     try Runner.streamReadDeadlineClearAllowsLaterRead();
     try Runner.streamOpsAfterCloseReturnClosed();
     try Runner.streamCloseIsIdempotent();

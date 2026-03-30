@@ -468,39 +468,45 @@ fn cancelTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     }
 }
 
-fn doneAndWaitTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const R = root.Racer(lib, u32);
+fn DoneAndWaitFlags(comptime lib: type) type {
     const BoolAtomic = lib.atomic.Value(bool);
-
-    const Flags = struct {
+    return struct {
         saw_done: BoolAtomic = BoolAtomic.init(false),
         allow_exit: BoolAtomic = BoolAtomic.init(false),
         finished: BoolAtomic = BoolAtomic.init(false),
         winner_rejected: BoolAtomic = BoolAtomic.init(false),
     };
+}
+
+fn doneAndWaitWorker(ctx: anytype, l: type, f: anytype) void {
+    while (!ctx.done()) {
+        l.Thread.sleep(l.time.ns_per_ms);
+    }
+
+    // `saw_done` acts as the publication fence for the test thread, so publish
+    // the rejection result first.
+    f.winner_rejected.store(!ctx.success(99), .release);
+    f.saw_done.store(true, .release);
+
+    while (!f.allow_exit.load(.acquire)) {
+        l.Thread.sleep(l.time.ns_per_ms);
+    }
+
+    f.finished.store(true, .release);
+}
+
+fn doneAndWaitTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
+    const testing = lib.testing;
+    const R = root.Racer(lib, u32);
+    const Flags = DoneAndWaitFlags(lib);
 
     var racer = try R.init(allocator);
     defer racer.deinit();
 
     var flags = Flags{};
+    errdefer flags.allow_exit.store(true, .release);
 
-    try racer.spawn(.{}, struct {
-        fn run(ctx: R.State, l: type, f: *Flags) void {
-            while (!ctx.done()) {
-                l.Thread.sleep(l.time.ns_per_ms);
-            }
-
-            f.saw_done.store(true, .release);
-            f.winner_rejected.store(!ctx.success(99), .release);
-
-            while (!f.allow_exit.load(.acquire)) {
-                l.Thread.sleep(l.time.ns_per_ms);
-            }
-
-            f.finished.store(true, .release);
-        }
-    }.run, .{ lib, &flags });
+    try racer.spawn(.{}, doneAndWaitWorker, .{ lib, &flags });
 
     try racer.spawn(.{}, struct {
         fn run(ctx: R.State, l: type) void {
@@ -525,6 +531,40 @@ fn doneAndWaitTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     racer.wait();
     racer.wait();
 
+    try testing.expect(flags.finished.load(.acquire));
+}
+
+test "sync/unit_tests/test_runner/racer_done_signal_publishes_rejection_before_ready_flag" {
+    const std = @import("std");
+    const testing = std.testing;
+    const R = root.Racer(std, u32);
+    const Flags = DoneAndWaitFlags(std);
+
+    var racer = try R.init(testing.allocator);
+    defer racer.deinit();
+
+    var flags = Flags{};
+    errdefer flags.allow_exit.store(true, .release);
+
+    try racer.spawn(.{}, doneAndWaitWorker, .{ std, &flags });
+    try racer.spawn(.{}, struct {
+        fn run(ctx: R.State, l: type) void {
+            l.Thread.sleep(5 * l.time.ns_per_ms);
+            _ = ctx.success(7);
+        }
+    }.run, .{std});
+
+    switch (racer.race()) {
+        .winner => |value| try testing.expectEqual(@as(u32, 7), value),
+        .exhausted => return error.ExpectedWinner,
+    }
+
+    try waitForTrue(std, &flags.saw_done, 200);
+    try testing.expect(flags.winner_rejected.load(.acquire));
+    try testing.expect(!flags.finished.load(.acquire));
+
+    flags.allow_exit.store(true, .release);
+    racer.wait();
     try testing.expect(flags.finished.load(.acquire));
 }
 

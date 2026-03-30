@@ -42,7 +42,10 @@ pub fn Listener(comptime lib: type) type {
             const conn = self.inner.accept() catch |err| return err;
             errdefer conn.deinit();
 
-            return SC.init(self.allocator, conn, self.config) catch return error.Unexpected;
+            return SC.init(self.allocator, conn, self.config) catch |err| switch (err) {
+                error.OutOfMemory => error.OutOfMemory,
+                else => error.Unexpected,
+            };
         }
 
         pub fn close(self: *Self) void {

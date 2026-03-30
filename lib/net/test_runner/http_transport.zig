@@ -224,6 +224,21 @@ fn runImpl(
             }
         };
 
+        const RepeatingBodySource = struct {
+            remaining: usize,
+            byte: u8,
+
+            pub fn read(self: *@This(), buf: []u8) anyerror!usize {
+                if (self.remaining == 0) return 0;
+                const n = @min(buf.len, self.remaining);
+                @memset(buf[0..n], self.byte);
+                self.remaining -= n;
+                return n;
+            }
+
+            pub fn close(_: *@This()) void {}
+        };
+
         const OwnedBodySource = struct {
             payload: []const u8,
             offset: usize = 0,
@@ -255,16 +270,33 @@ fn runImpl(
         };
 
         const RoundTripTask = struct {
+            mutex: Mutex = .{},
+            cond: Condition = .{},
             transport: *Http.Transport,
             req: *Http.Request,
             resp: ?Http.Response = null,
             err: ?anyerror = null,
+            finished: bool = false,
 
             fn run(self: *@This()) void {
+                defer {
+                    self.mutex.lock();
+                    self.finished = true;
+                    self.cond.broadcast();
+                    self.mutex.unlock();
+                }
                 self.resp = self.transport.roundTrip(self.req) catch |err| {
                     self.err = err;
                     return;
                 };
+            }
+
+            fn waitTimeout(self: *@This(), timeout_ms: u32) bool {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                if (self.finished) return true;
+                self.cond.timedWait(&self.mutex, @as(u64, timeout_ms) * lib.time.ns_per_ms) catch {};
+                return self.finished;
             }
         };
 
@@ -486,6 +518,322 @@ fn runImpl(
                         const body = try readBody(resp);
                         defer testing.allocator.free(body);
                         try testing.expectEqualStrings("hello", body);
+                    }
+                }.run,
+            );
+        }
+
+        pub fn responseBodyReadCanceledByContext() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "GET /body-cancel HTTP/1.1"));
+
+                        io.writeAll(
+                            @TypeOf(c),
+                            &c,
+                            "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n",
+                        ) catch {};
+                        lib.Thread.sleep(150 * lib.time.ns_per_ms);
+                        io.writeAll(@TypeOf(c), &c, "late") catch {};
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const Context = context_mod.make(lib);
+                        var ctx_api = try Context.init(testing.allocator);
+                        defer ctx_api.deinit();
+                        var ctx = try ctx_api.withCancel(ctx_api.background());
+                        defer ctx.deinit();
+
+                        var transport = try Http.Transport.init(testing.allocator, .{});
+                        defer transport.deinit();
+
+                        const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/body-cancel", .{port});
+                        defer testing.allocator.free(url);
+
+                        var req = try Http.Request.init(testing.allocator, "GET", url);
+                        req = req.withContext(ctx);
+
+                        var resp = try transport.roundTrip(&req);
+                        defer resp.deinit();
+
+                        const cancel_thread = try lib.Thread.spawn(.{}, struct {
+                            fn run(cancel_ctx: context_mod.Context, comptime thread_lib: type) void {
+                                thread_lib.Thread.sleep(30 * thread_lib.time.ns_per_ms);
+                                cancel_ctx.cancel();
+                            }
+                        }.run, .{ ctx, lib });
+                        defer cancel_thread.join();
+
+                        try testing.expectError(error.Canceled, readBody(resp));
+                    }
+                }.run,
+            );
+        }
+
+        pub fn responseBodyReadDeadlineExceededByContext() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "GET /body-deadline HTTP/1.1"));
+
+                        io.writeAll(
+                            @TypeOf(c),
+                            &c,
+                            "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n",
+                        ) catch {};
+                        lib.Thread.sleep(150 * lib.time.ns_per_ms);
+                        io.writeAll(@TypeOf(c), &c, "late") catch {};
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const Context = context_mod.make(lib);
+                        var ctx_api = try Context.init(testing.allocator);
+                        defer ctx_api.deinit();
+                        var ctx = try ctx_api.withDeadline(ctx_api.background(), lib.time.nanoTimestamp() + 30 * lib.time.ns_per_ms);
+                        defer ctx.deinit();
+
+                        var transport = try Http.Transport.init(testing.allocator, .{});
+                        defer transport.deinit();
+
+                        const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/body-deadline", .{port});
+                        defer testing.allocator.free(url);
+
+                        var req = try Http.Request.init(testing.allocator, "GET", url);
+                        req = req.withContext(ctx);
+
+                        var resp = try transport.roundTrip(&req);
+                        defer resp.deinit();
+
+                        try testing.expectError(error.DeadlineExceeded, readBody(resp));
+                    }
+                }.run,
+            );
+        }
+
+        pub fn requestBodyWriteCanceledByContext() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "POST /upload-cancel HTTP/1.1"));
+                        const head_end = lib.mem.indexOf(u8, req_head, "\r\n\r\n") orelse return error.TestUnexpectedResult;
+                        if (req_head[head_end + 4 ..].len == 0) {
+                            c.setReadTimeout(120);
+                            try testing.expectEqual(@as(usize, 1), try c.read(req_buf[0..1]));
+                        }
+                        lib.Thread.sleep(150 * lib.time.ns_per_ms);
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const Context = context_mod.make(lib);
+                        var ctx_api = try Context.init(testing.allocator);
+                        defer ctx_api.deinit();
+                        var ctx = try ctx_api.withCancel(ctx_api.background());
+                        defer ctx.deinit();
+
+                        var transport = try Http.Transport.init(testing.allocator, .{});
+                        defer transport.deinit();
+
+                        const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/upload-cancel", .{port});
+                        defer testing.allocator.free(url);
+
+                        const payload_len = 32 * 1024 * 1024;
+                        var source = RepeatingBodySource{
+                            .remaining = payload_len,
+                            .byte = 'w',
+                        };
+
+                        var req = try Http.Request.init(testing.allocator, "POST", url);
+                        req = req.withContext(ctx).withBody(Http.ReadCloser.init(&source));
+                        req.content_length = payload_len;
+
+                        var task = RoundTripTask{
+                            .transport = &transport,
+                            .req = &req,
+                        };
+                        var thread = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
+                        var joined = false;
+                        defer if (!joined) thread.join();
+
+                        try testing.expect(!task.waitTimeout(120));
+                        ctx.cancel();
+                        thread.join();
+                        joined = true;
+                        try testing.expectEqual(error.Canceled, task.err orelse return error.TestUnexpectedResult);
+                    }
+                }.run,
+            );
+        }
+
+        pub fn requestBodyWriteDeadlineExceededByContext() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "POST /upload-deadline HTTP/1.1"));
+                        const head_end = lib.mem.indexOf(u8, req_head, "\r\n\r\n") orelse return error.TestUnexpectedResult;
+                        if (req_head[head_end + 4 ..].len == 0) {
+                            c.setReadTimeout(120);
+                            try testing.expectEqual(@as(usize, 1), try c.read(req_buf[0..1]));
+                        }
+                        lib.Thread.sleep(150 * lib.time.ns_per_ms);
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const Context = context_mod.make(lib);
+                        var ctx_api = try Context.init(testing.allocator);
+                        defer ctx_api.deinit();
+                        var ctx = try ctx_api.withDeadline(ctx_api.background(), lib.time.nanoTimestamp() + 30 * lib.time.ns_per_ms);
+                        defer ctx.deinit();
+
+                        var transport = try Http.Transport.init(testing.allocator, .{});
+                        defer transport.deinit();
+
+                        const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/upload-deadline", .{port});
+                        defer testing.allocator.free(url);
+
+                        const payload_len = 32 * 1024 * 1024;
+                        var source = RepeatingBodySource{
+                            .remaining = payload_len,
+                            .byte = 'd',
+                        };
+
+                        var req = try Http.Request.init(testing.allocator, "POST", url);
+                        req = req.withContext(ctx).withBody(Http.ReadCloser.init(&source));
+                        req.content_length = payload_len;
+
+                        var task = RoundTripTask{
+                            .transport = &transport,
+                            .req = &req,
+                        };
+                        var thread = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
+                        var joined = false;
+                        defer if (!joined) thread.join();
+                        thread.join();
+                        joined = true;
+                        try testing.expectEqual(error.DeadlineExceeded, task.err orelse return error.TestUnexpectedResult);
+                    }
+                }.run,
+            );
+        }
+
+        pub fn chunkedRequestBodyWriteCanceledByContext() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "POST /upload-chunked-cancel HTTP/1.1"));
+                        try testing.expectEqualStrings("chunked", headerValue(req_head, Http.Header.transfer_encoding) orelse "");
+                        try testing.expectEqualStrings("100-continue", headerValue(req_head, Http.Header.expect) orelse "");
+                        const head_end = lib.mem.indexOf(u8, req_head, "\r\n\r\n") orelse return error.TestUnexpectedResult;
+                        try testing.expectEqual(@as(usize, 0), req_head[head_end + 4 ..].len);
+                        lib.Thread.sleep(150 * lib.time.ns_per_ms);
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const Context = context_mod.make(lib);
+                        var ctx_api = try Context.init(testing.allocator);
+                        defer ctx_api.deinit();
+                        var ctx = try ctx_api.withCancel(ctx_api.background());
+                        defer ctx.deinit();
+
+                        var transport = try Http.Transport.init(testing.allocator, .{});
+                        defer transport.deinit();
+
+                        const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/upload-chunked-cancel", .{port});
+                        defer testing.allocator.free(url);
+
+                        var source = ChunkedBodySource{ .chunks = &.{"cancel-me"} };
+
+                        var req = try Http.Request.init(testing.allocator, "POST", url);
+                        req = req.withContext(ctx).withBody(Http.ReadCloser.init(&source));
+                        req.header = &.{Http.Header.init(Http.Header.expect, "100-continue")};
+
+                        var task = RoundTripTask{
+                            .transport = &transport,
+                            .req = &req,
+                        };
+                        var thread = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
+                        var joined = false;
+                        defer if (!joined) thread.join();
+
+                        try testing.expect(!task.waitTimeout(120));
+                        ctx.cancel();
+                        thread.join();
+                        joined = true;
+                        try testing.expectEqual(error.Canceled, task.err orelse return error.TestUnexpectedResult);
+                    }
+                }.run,
+            );
+        }
+
+        pub fn chunkedRequestBodyWriteDeadlineExceededByContext() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "POST /upload-chunked-deadline HTTP/1.1"));
+                        try testing.expectEqualStrings("chunked", headerValue(req_head, Http.Header.transfer_encoding) orelse "");
+                        try testing.expectEqualStrings("100-continue", headerValue(req_head, Http.Header.expect) orelse "");
+                        const head_end = lib.mem.indexOf(u8, req_head, "\r\n\r\n") orelse return error.TestUnexpectedResult;
+                        try testing.expectEqual(@as(usize, 0), req_head[head_end + 4 ..].len);
+                        lib.Thread.sleep(150 * lib.time.ns_per_ms);
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const Context = context_mod.make(lib);
+                        var ctx_api = try Context.init(testing.allocator);
+                        defer ctx_api.deinit();
+                        var ctx = try ctx_api.withDeadline(ctx_api.background(), lib.time.nanoTimestamp() + 30 * lib.time.ns_per_ms);
+                        defer ctx.deinit();
+
+                        var transport = try Http.Transport.init(testing.allocator, .{});
+                        defer transport.deinit();
+
+                        const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/upload-chunked-deadline", .{port});
+                        defer testing.allocator.free(url);
+
+                        var source = ChunkedBodySource{ .chunks = &.{"deadline-me"} };
+
+                        var req = try Http.Request.init(testing.allocator, "POST", url);
+                        req = req.withContext(ctx).withBody(Http.ReadCloser.init(&source));
+                        req.header = &.{Http.Header.init(Http.Header.expect, "100-continue")};
+
+                        var task = RoundTripTask{
+                            .transport = &transport,
+                            .req = &req,
+                        };
+                        var thread = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
+                        var joined = false;
+                        defer if (!joined) thread.join();
+                        thread.join();
+                        joined = true;
+                        try testing.expectEqual(error.DeadlineExceeded, task.err orelse return error.TestUnexpectedResult);
                     }
                 }.run,
             );
@@ -723,6 +1071,359 @@ fn runImpl(
             try testing.expectError(error.UnsupportedMethod, transport.roundTrip(&req));
         }
 
+        pub fn httpsConnectProxyAuthRequired() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "CONNECT example.com:443 HTTP/1.1"));
+                        try testing.expectEqualStrings("proxy-test", headerValue(req_head, "X-Connect-Test") orelse "");
+                        try testing.expectEqualStrings("example.com:443", headerValue(req_head, Http.Header.host) orelse "");
+                        io.writeAll(@TypeOf(c), &c, "HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n") catch {};
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const proxy_raw_url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}", .{port});
+                        defer testing.allocator.free(proxy_raw_url);
+
+                        const connect_headers = [_]Http.Header{
+                            Http.Header.init("X-Connect-Test", "proxy-test"),
+                        };
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .https_proxy = .{
+                                .url = try net_mod.url.parse(proxy_raw_url),
+                                .connect_headers = &connect_headers,
+                            },
+                        });
+                        defer transport.deinit();
+
+                        var req = try Http.Request.init(testing.allocator, "GET", "https://example.com/through-proxy");
+                        try testing.expectError(error.ProxyAuthRequired, transport.roundTrip(&req));
+                    }
+                }.run,
+            );
+        }
+
+        pub fn httpsConnectProxyAuthRequiredWithBody() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "CONNECT example.com:443 HTTP/1.1"));
+                        io.writeAll(@TypeOf(c), &c, "HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 5\r\nConnection: close\r\n\r\nblock") catch {};
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const proxy_raw_url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}", .{port});
+                        defer testing.allocator.free(proxy_raw_url);
+
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .https_proxy = .{
+                                .url = try net_mod.url.parse(proxy_raw_url),
+                            },
+                        });
+                        defer transport.deinit();
+
+                        var req = try Http.Request.init(testing.allocator, "GET", "https://example.com/through-proxy");
+                        try testing.expectError(error.ProxyAuthRequired, transport.roundTrip(&req));
+                    }
+                }.run,
+            );
+        }
+
+        pub fn httpsConnectProxyRejected() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "CONNECT example.com:443 HTTP/1.1"));
+                        io.writeAll(@TypeOf(c), &c, "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n") catch {};
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const proxy_raw_url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}", .{port});
+                        defer testing.allocator.free(proxy_raw_url);
+
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .https_proxy = .{
+                                .url = try net_mod.url.parse(proxy_raw_url),
+                            },
+                        });
+                        defer transport.deinit();
+
+                        var req = try Http.Request.init(testing.allocator, "GET", "https://example.com/rejected");
+                        try testing.expectError(error.ProxyConnectFailed, transport.roundTrip(&req));
+                    }
+                }.run,
+            );
+        }
+
+        pub fn httpsConnectProxyRejectedWithBody() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "CONNECT example.com:443 HTTP/1.1"));
+                        io.writeAll(@TypeOf(c), &c, "HTTP/1.1 403 Forbidden\r\nContent-Length: 6\r\nConnection: close\r\n\r\nreject") catch {};
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const proxy_raw_url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}", .{port});
+                        defer testing.allocator.free(proxy_raw_url);
+
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .https_proxy = .{
+                                .url = try net_mod.url.parse(proxy_raw_url),
+                            },
+                        });
+                        defer transport.deinit();
+
+                        var req = try Http.Request.init(testing.allocator, "GET", "https://example.com/rejected");
+                        try testing.expectError(error.ProxyConnectFailed, transport.roundTrip(&req));
+                    }
+                }.run,
+            );
+        }
+
+        pub fn httpsConnectProxyResponseHeaderTimeout() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "CONNECT example.com:443 HTTP/1.1"));
+                        lib.Thread.sleep(150 * lib.time.ns_per_ms);
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const proxy_raw_url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}", .{port});
+                        defer testing.allocator.free(proxy_raw_url);
+
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .response_header_timeout_ms = 20,
+                            .https_proxy = .{
+                                .url = try net_mod.url.parse(proxy_raw_url),
+                            },
+                        });
+                        defer transport.deinit();
+
+                        var req = try Http.Request.init(testing.allocator, "GET", "https://example.com/connect-timeout");
+                        try testing.expectError(error.TimedOut, transport.roundTrip(&req));
+                    }
+                }.run,
+            );
+        }
+
+        pub fn httpsConnectProxyTlsInitFailureClosesTunnelConn() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "CONNECT example.com:443 HTTP/1.1"));
+                        try io.writeAll(@TypeOf(c), &c, "HTTP/1.1 200 Connection Established\r\nContent-Length: 0\r\n\r\n");
+
+                        c.setReadTimeout(200);
+                        var buf: [64]u8 = undefined;
+                        const n = c.read(&buf) catch |err| switch (err) {
+                            error.EndOfStream => return,
+                            else => return err,
+                        };
+                        try testing.expectEqual(@as(usize, 0), n);
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const proxy_raw_url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}", .{port});
+                        defer testing.allocator.free(proxy_raw_url);
+
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .https_proxy = .{
+                                .url = try net_mod.url.parse(proxy_raw_url),
+                            },
+                            .tls_client_config = .{
+                                .server_name = "example.com",
+                                .min_version = .tls_1_3,
+                                .max_version = .tls_1_2,
+                            },
+                        });
+                        defer transport.deinit();
+
+                        var req = try Http.Request.init(testing.allocator, "GET", "https://example.com/tls-init-cleanup");
+                        try testing.expectError(error.Unexpected, transport.roundTrip(&req));
+                    }
+                }.run,
+            );
+        }
+
+        pub fn httpsProxyUserinfoGeneratesProxyAuthorization() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "CONNECT example.com:443 HTTP/1.1"));
+                        try testing.expectEqualStrings("Basic dXNlcjpwQHNz", headerValue(req_head, Http.Header.proxy_authorization) orelse "");
+                        try testing.expectEqual(@as(usize, 1), headerCount(req_head, Http.Header.proxy_authorization));
+                        io.writeAll(@TypeOf(c), &c, "HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n") catch {};
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const proxy_raw_url = try lib.fmt.allocPrint(testing.allocator, "http://us%65r:p%40ss@127.0.0.1:{d}", .{port});
+                        defer testing.allocator.free(proxy_raw_url);
+
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .https_proxy = .{
+                                .url = try net_mod.url.parse(proxy_raw_url),
+                            },
+                        });
+                        defer transport.deinit();
+
+                        var req = try Http.Request.init(testing.allocator, "GET", "https://example.com/userinfo-auth");
+                        try testing.expectError(error.ProxyAuthRequired, transport.roundTrip(&req));
+                    }
+                }.run,
+            );
+        }
+
+        pub fn httpsProxyInvalidPercentEncodingIsRejected() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        c.setReadTimeout(100);
+                        var buf: [64]u8 = undefined;
+                        const n = c.read(&buf) catch |err| switch (err) {
+                            error.EndOfStream,
+                            error.TimedOut,
+                            => 0,
+                            else => return err,
+                        };
+                        try testing.expectEqual(@as(usize, 0), n);
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const proxy_raw_url = try lib.fmt.allocPrint(testing.allocator, "http://user%4:pass@127.0.0.1:{d}", .{port});
+                        defer testing.allocator.free(proxy_raw_url);
+
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .https_proxy = .{
+                                .url = try net_mod.url.parse(proxy_raw_url),
+                            },
+                        });
+                        defer transport.deinit();
+
+                        var req = try Http.Request.init(testing.allocator, "GET", "https://example.com/bad-userinfo");
+                        try testing.expectError(error.InvalidProxy, transport.roundTrip(&req));
+                    }
+                }.run,
+            );
+        }
+
+        pub fn httpsProxyOversizedUserinfoIsRejected() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        c.setReadTimeout(100);
+                        var buf: [64]u8 = undefined;
+                        const n = c.read(&buf) catch |err| switch (err) {
+                            error.EndOfStream,
+                            error.TimedOut,
+                            => 0,
+                            else => return err,
+                        };
+                        try testing.expectEqual(@as(usize, 0), n);
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const oversized_user = try testing.allocator.alloc(u8, 32 * 1024);
+                        defer testing.allocator.free(oversized_user);
+                        @memset(oversized_user, 'u');
+
+                        const proxy_raw_url = try lib.fmt.allocPrint(testing.allocator, "http://{s}:pass@127.0.0.1:{d}", .{ oversized_user, port });
+                        defer testing.allocator.free(proxy_raw_url);
+
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .https_proxy = .{
+                                .url = try net_mod.url.parse(proxy_raw_url),
+                            },
+                        });
+                        defer transport.deinit();
+
+                        var req = try Http.Request.init(testing.allocator, "GET", "https://example.com/oversized-userinfo");
+                        try testing.expectError(error.InvalidProxy, transport.roundTrip(&req));
+                    }
+                }.run,
+            );
+        }
+
+        pub fn httpsProxyConnectHeadersOverrideUrlUserinfo() !void {
+            try withServerState(
+                EmptyState{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *EmptyState) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "CONNECT example.com:443 HTTP/1.1"));
+                        try testing.expectEqualStrings("Basic ZXhwbGljaXQ=", headerValue(req_head, Http.Header.proxy_authorization) orelse "");
+                        try testing.expectEqual(@as(usize, 1), headerCount(req_head, Http.Header.proxy_authorization));
+                        try testing.expectEqualStrings("proxy-test", headerValue(req_head, "X-Connect-Test") orelse "");
+                        io.writeAll(@TypeOf(c), &c, "HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n") catch {};
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *EmptyState) !void {
+                        const proxy_raw_url = try lib.fmt.allocPrint(testing.allocator, "http://user:pass@127.0.0.1:{d}", .{port});
+                        defer testing.allocator.free(proxy_raw_url);
+
+                        const connect_headers = [_]Http.Header{
+                            Http.Header.init(Http.Header.proxy_authorization, "Basic ZXhwbGljaXQ="),
+                            Http.Header.init("X-Connect-Test", "proxy-test"),
+                        };
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .https_proxy = .{
+                                .url = try net_mod.url.parse(proxy_raw_url),
+                                .connect_headers = &connect_headers,
+                            },
+                        });
+                        defer transport.deinit();
+
+                        var req = try Http.Request.init(testing.allocator, "GET", "https://example.com/userinfo-override");
+                        try testing.expectError(error.ProxyAuthRequired, transport.roundTrip(&req));
+                    }
+                }.run,
+            );
+        }
+
         pub fn idleConnectionIsReused() !void {
             const accept_count = try withTwoRequestKeepAliveServer(.{
                 .first_request_line = "GET /reuse-1 HTTP/1.1",
@@ -795,6 +1496,332 @@ fn runImpl(
             try testing.expectEqual(@as(usize, 2), accept_count);
         }
 
+        pub fn disableKeepAlivesForcesNewConn() !void {
+            const accept_count = try withTwoRequestKeepAliveServer(.{
+                .first_request_line = "GET /disable-keepalive-1 HTTP/1.1",
+                .second_request_line = "GET /disable-keepalive-2 HTTP/1.1",
+                .first_body = "one",
+                .second_body = "two",
+            }, struct {
+                fn run(port: u16) !void {
+                    var transport = try Http.Transport.init(testing.allocator, .{
+                        .disable_keep_alives = true,
+                    });
+                    defer transport.deinit();
+
+                    const url1 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/disable-keepalive-1", .{port});
+                    defer testing.allocator.free(url1);
+                    const url2 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/disable-keepalive-2", .{port});
+                    defer testing.allocator.free(url2);
+
+                    var req1 = try Http.Request.init(testing.allocator, "GET", url1);
+                    var resp1 = try transport.roundTrip(&req1);
+                    defer resp1.deinit();
+                    const body1 = try readBody(resp1);
+                    defer testing.allocator.free(body1);
+                    try testing.expectEqualStrings("one", body1);
+
+                    var req2 = try Http.Request.init(testing.allocator, "GET", url2);
+                    var resp2 = try transport.roundTrip(&req2);
+                    defer resp2.deinit();
+                    const body2 = try readBody(resp2);
+                    defer testing.allocator.free(body2);
+                    try testing.expectEqualStrings("two", body2);
+                }
+            }.run);
+
+            try testing.expectEqual(@as(usize, 2), accept_count);
+        }
+
+        pub fn maxIdleConnsOneKeepsOnlyOneIdleConnAcrossHosts() !void {
+            var ln1 = try Net.listen(testing.allocator, .{
+                .address = addr4(0),
+            });
+            defer ln1.deinit();
+            var ln2 = try Net.listen(testing.allocator, .{
+                .address = addr4(0),
+            });
+            defer ln2.deinit();
+
+            const listener1 = try ln1.as(Net.TcpListener);
+            const listener2 = try ln2.as(Net.TcpListener);
+            const port1 = try listenerPort(ln1, Net);
+            const port2 = try listenerPort(ln2, Net);
+
+            const spec1 = TwoRequestSpec{
+                .first_request_line = "GET /global-idle-1 HTTP/1.1",
+                .second_request_line = "GET /global-idle-3 HTTP/1.1",
+                .first_body = "one",
+                .second_body = "three",
+            };
+            const spec2 = TwoRequestSpec{
+                .first_request_line = "GET /global-idle-2 HTTP/1.1",
+                .second_request_line = "GET /global-idle-4 HTTP/1.1",
+                .first_body = "two",
+                .second_body = "four",
+            };
+
+            var accept_count1: usize = 0;
+            var accept_count2: usize = 0;
+            var server_result1: ?anyerror = null;
+            var server_result2: ?anyerror = null;
+
+            var server_thread1 = try lib.Thread.spawn(.{}, struct {
+                fn run(tcp_listener: *Net.TcpListener, spec: TwoRequestSpec, accepts: *usize, result: *?anyerror) void {
+                    serveTwoKeepAliveRequests(tcp_listener, spec, accepts) catch |err| {
+                        result.* = err;
+                    };
+                }
+            }.run, .{ listener1, spec1, &accept_count1, &server_result1 });
+            var joined1 = false;
+            defer if (!joined1) server_thread1.join();
+
+            var server_thread2 = try lib.Thread.spawn(.{}, struct {
+                fn run(tcp_listener: *Net.TcpListener, spec: TwoRequestSpec, accepts: *usize, result: *?anyerror) void {
+                    serveTwoKeepAliveRequests(tcp_listener, spec, accepts) catch |err| {
+                        result.* = err;
+                    };
+                }
+            }.run, .{ listener2, spec2, &accept_count2, &server_result2 });
+            var joined2 = false;
+            defer if (!joined2) server_thread2.join();
+
+            var transport = try Http.Transport.init(testing.allocator, .{
+                .max_idle_conns = 1,
+            });
+            defer transport.deinit();
+
+            const url1 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/global-idle-1", .{port1});
+            defer testing.allocator.free(url1);
+            const url2 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/global-idle-2", .{port2});
+            defer testing.allocator.free(url2);
+            const url3 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/global-idle-3", .{port1});
+            defer testing.allocator.free(url3);
+            const url4 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/global-idle-4", .{port2});
+            defer testing.allocator.free(url4);
+
+            var req1 = try Http.Request.init(testing.allocator, "GET", url1);
+            var resp1 = try transport.roundTrip(&req1);
+            defer resp1.deinit();
+            const body1 = try readBody(resp1);
+            defer testing.allocator.free(body1);
+            try testing.expectEqualStrings("one", body1);
+
+            var req2 = try Http.Request.init(testing.allocator, "GET", url2);
+            var resp2 = try transport.roundTrip(&req2);
+            defer resp2.deinit();
+            const body2 = try readBody(resp2);
+            defer testing.allocator.free(body2);
+            try testing.expectEqualStrings("two", body2);
+
+            var req3 = try Http.Request.init(testing.allocator, "GET", url3);
+            var resp3 = try transport.roundTrip(&req3);
+            defer resp3.deinit();
+            const body3 = try readBody(resp3);
+            defer testing.allocator.free(body3);
+            try testing.expectEqualStrings("three", body3);
+
+            var req4 = try Http.Request.init(testing.allocator, "GET", url4);
+            var resp4 = try transport.roundTrip(&req4);
+            defer resp4.deinit();
+            const body4 = try readBody(resp4);
+            defer testing.allocator.free(body4);
+            try testing.expectEqualStrings("four", body4);
+
+            server_thread1.join();
+            joined1 = true;
+            server_thread2.join();
+            joined2 = true;
+
+            if (server_result1) |err| return err;
+            if (server_result2) |err| return err;
+            try testing.expectEqual(@as(usize, 3), accept_count1 + accept_count2);
+        }
+
+        pub fn maxIdleConnsPerHostOneKeepsOnlyOneIdleConn() !void {
+            var ln = try Net.listen(testing.allocator, .{
+                .address = addr4(0),
+            });
+            defer ln.deinit();
+
+            const listener = try ln.as(Net.TcpListener);
+            const port = try listenerPort(ln, Net);
+            var accept_count: usize = 0;
+            var server_result: ?anyerror = null;
+
+            var server_thread = try lib.Thread.spawn(.{}, struct {
+                fn writePathResponse(conn: net_mod.Conn, req_head: []const u8) !void {
+                    var c = conn;
+                    const body = if (hasRequestLine(req_head, "GET /idle-per-host-1 HTTP/1.1"))
+                        "one"
+                    else if (hasRequestLine(req_head, "GET /idle-per-host-2 HTTP/1.1"))
+                        "two"
+                    else if (hasRequestLine(req_head, "GET /idle-per-host-3 HTTP/1.1"))
+                        "three"
+                    else if (hasRequestLine(req_head, "GET /idle-per-host-4 HTTP/1.1"))
+                        "four"
+                    else
+                        return error.TestUnexpectedResult;
+
+                    var head_buf: [256]u8 = undefined;
+                    const head = try lib.fmt.bufPrint(
+                        &head_buf,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {d}\r\nConnection: keep-alive\r\n\r\n",
+                        .{body.len},
+                    );
+                    try io.writeAll(@TypeOf(c), &c, head);
+                    try io.writeAll(@TypeOf(c), &c, body);
+                }
+
+                fn serveConn(conn: net_mod.Conn, result: *?anyerror) void {
+                    var owned = conn;
+                    defer owned.deinit();
+
+                    var req_buf: [4096]u8 = undefined;
+                    while (true) {
+                        owned.setReadTimeout(200);
+                        const req_head = readRequestHead(owned, &req_buf) catch |err| switch (err) {
+                            error.TimedOut,
+                            error.EndOfStream,
+                            => return,
+                            else => {
+                                result.* = err;
+                                return;
+                            },
+                        };
+                        if (req_head.len == 0) return;
+                        writePathResponse(owned, req_head) catch |err| {
+                            result.* = err;
+                            return;
+                        };
+                    }
+                }
+
+                fn run(tcp_listener: *Net.TcpListener, accepts: *usize, result: *?anyerror) void {
+                    var handler_threads: [3]?lib.Thread = .{ null, null, null };
+                    var handler_count: usize = 0;
+                    defer {
+                        var i: usize = 0;
+                        while (i < handler_count) : (i += 1) {
+                            handler_threads[i].?.join();
+                        }
+                    }
+
+                    while (true) {
+                        var conn = tcp_listener.accept() catch |err| {
+                            result.* = err;
+                            return;
+                        };
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = readRequestHead(conn, &req_buf) catch |err| {
+                            conn.deinit();
+                            result.* = err;
+                            return;
+                        };
+                        if (lib.mem.eql(u8, req_head, "PING")) {
+                            conn.deinit();
+                            return;
+                        }
+                        if (handler_count >= handler_threads.len) {
+                            conn.deinit();
+                            result.* = error.TestUnexpectedResult;
+                            return;
+                        }
+
+                        accepts.* += 1;
+                        writePathResponse(conn, req_head) catch |err| {
+                            conn.deinit();
+                            result.* = err;
+                            return;
+                        };
+                        handler_threads[handler_count] = lib.Thread.spawn(.{}, struct {
+                            fn runConn(owned_conn: net_mod.Conn, run_result: *?anyerror) void {
+                                serveConn(owned_conn, run_result);
+                            }
+                        }.runConn, .{ conn, result }) catch |err| {
+                            conn.deinit();
+                            result.* = err;
+                            return;
+                        };
+                        handler_count += 1;
+                    }
+                }
+            }.run, .{ listener, &accept_count, &server_result });
+            var server_joined = false;
+            defer if (!server_joined) server_thread.join();
+
+            var transport = try Http.Transport.init(testing.allocator, .{
+                .max_idle_conns_per_host = 1,
+            });
+            defer transport.deinit();
+
+            const url1 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-per-host-1", .{port});
+            defer testing.allocator.free(url1);
+            const url2 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-per-host-2", .{port});
+            defer testing.allocator.free(url2);
+            const url3 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-per-host-3", .{port});
+            defer testing.allocator.free(url3);
+            const url4 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-per-host-4", .{port});
+            defer testing.allocator.free(url4);
+
+            var req1 = try Http.Request.init(testing.allocator, "GET", url1);
+            var resp1 = try transport.roundTrip(&req1);
+
+            var req2 = try Http.Request.init(testing.allocator, "GET", url2);
+            var task2 = RoundTripTask{
+                .transport = &transport,
+                .req = &req2,
+            };
+            var thread2 = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task2});
+            thread2.join();
+
+            if (task2.err) |err| return err;
+            var resp2 = task2.resp orelse return error.TestUnexpectedResult;
+
+            const body1 = try readBody(resp1);
+            defer testing.allocator.free(body1);
+            try testing.expectEqualStrings("one", body1);
+            resp1.deinit();
+
+            const body2 = try readBody(resp2);
+            defer testing.allocator.free(body2);
+            try testing.expectEqualStrings("two", body2);
+            resp2.deinit();
+
+            var req3 = try Http.Request.init(testing.allocator, "GET", url3);
+            var resp3 = try transport.roundTrip(&req3);
+
+            var req4 = try Http.Request.init(testing.allocator, "GET", url4);
+            var task4 = RoundTripTask{
+                .transport = &transport,
+                .req = &req4,
+            };
+            var thread4 = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task4});
+            thread4.join();
+
+            if (task4.err) |err| return err;
+            var resp4 = task4.resp orelse return error.TestUnexpectedResult;
+
+            const body4 = try readBody(resp4);
+            defer testing.allocator.free(body4);
+            try testing.expectEqualStrings("four", body4);
+            resp4.deinit();
+
+            const body3 = try readBody(resp3);
+            defer testing.allocator.free(body3);
+            try testing.expectEqualStrings("three", body3);
+            resp3.deinit();
+
+            var probe = try Net.dial(testing.allocator, .tcp, addr4(port));
+            try io.writeAll(@TypeOf(probe), &probe, "PING");
+            probe.deinit();
+
+            server_thread.join();
+            server_joined = true;
+            if (server_result) |err| return err;
+            try testing.expectEqual(@as(usize, 3), accept_count);
+        }
+
         pub fn earlyResponseBodyCloseDoesNotReuseConn() !void {
             const accept_count = try withTwoRequestKeepAliveServer(.{
                 .first_request_line = "GET /partial-close-1 HTTP/1.1",
@@ -837,7 +1864,7 @@ fn runImpl(
                 .second_request_line = "GET /idle-timeout-2 HTTP/1.1",
                 .first_body = "one",
                 .second_body = "two",
-                .reuse_wait_timeout_ms = 50,
+                .reuse_wait_timeout_ms = 150,
             }, struct {
                 fn run(port: u16) !void {
                     var transport = try Http.Transport.init(testing.allocator, .{
@@ -857,7 +1884,7 @@ fn runImpl(
                     try testing.expectEqualStrings("one", body1);
                     resp1.deinit();
 
-                    lib.Thread.sleep(30 * lib.time.ns_per_ms);
+                    lib.Thread.sleep(80 * lib.time.ns_per_ms);
 
                     var req2 = try Http.Request.init(testing.allocator, "GET", url2);
                     var resp2 = try transport.roundTrip(&req2);
@@ -877,7 +1904,7 @@ fn runImpl(
                 .second_request_line = "GET /body-open-2 HTTP/1.1",
                 .first_body = "hello",
                 .second_body = "world",
-                .reuse_wait_timeout_ms = 50,
+                .reuse_wait_timeout_ms = 150,
             }, struct {
                 fn run(port: u16) !void {
                     var transport = try Http.Transport.init(testing.allocator, .{});
@@ -908,6 +1935,302 @@ fn runImpl(
                     const body2 = try readBody(resp2);
                     defer testing.allocator.free(body2);
                     try testing.expectEqualStrings("world", body2);
+                }
+            }.run);
+
+            try testing.expectEqual(@as(usize, 2), accept_count);
+        }
+
+        pub fn maxConnsPerHostOneBlocksSecondRequestUntilFirstResponseCloses() !void {
+            const accept_count = try withTwoRequestKeepAliveServer(.{
+                .first_request_line = "GET /max-conns-1 HTTP/1.1",
+                .second_request_line = "GET /max-conns-2 HTTP/1.1",
+                .first_body = "hello",
+                .second_body = "world",
+                .reuse_wait_timeout_ms = 150,
+            }, struct {
+                fn run(port: u16) !void {
+                    var transport = try Http.Transport.init(testing.allocator, .{
+                        .max_conns_per_host = 1,
+                    });
+                    defer transport.deinit();
+
+                    const url1 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/max-conns-1", .{port});
+                    defer testing.allocator.free(url1);
+                    const url2 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/max-conns-2", .{port});
+                    defer testing.allocator.free(url2);
+
+                    var req1 = try Http.Request.init(testing.allocator, "GET", url1);
+                    var resp1 = try transport.roundTrip(&req1);
+
+                    var req2 = try Http.Request.init(testing.allocator, "GET", url2);
+                    var task = RoundTripTask{
+                        .transport = &transport,
+                        .req = &req2,
+                    };
+                    var thread = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
+                    var joined = false;
+                    defer if (!joined) thread.join();
+
+                    try testing.expect(!task.waitTimeout(120));
+                    resp1.deinit();
+                    thread.join();
+                    joined = true;
+
+                    if (task.err) |err| return err;
+                    var resp2 = task.resp orelse return error.TestUnexpectedResult;
+                    defer resp2.deinit();
+
+                    const body2 = try readBody(resp2);
+                    defer testing.allocator.free(body2);
+                    try testing.expectEqualStrings("world", body2);
+                }
+            }.run);
+
+            try testing.expectEqual(@as(usize, 2), accept_count);
+        }
+
+        pub fn maxConnsPerHostTwoAllowsSecondLiveConn() !void {
+            const accept_count = try withTwoRequestKeepAliveServer(.{
+                .first_request_line = "GET /max-two-1 HTTP/1.1",
+                .second_request_line = "GET /max-two-2 HTTP/1.1",
+                .first_body = "hello",
+                .second_body = "world",
+                .reuse_wait_timeout_ms = 150,
+            }, struct {
+                fn run(port: u16) !void {
+                    var transport = try Http.Transport.init(testing.allocator, .{
+                        .max_conns_per_host = 2,
+                    });
+                    defer transport.deinit();
+
+                    const url1 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/max-two-1", .{port});
+                    defer testing.allocator.free(url1);
+                    const url2 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/max-two-2", .{port});
+                    defer testing.allocator.free(url2);
+
+                    var req1 = try Http.Request.init(testing.allocator, "GET", url1);
+                    var resp1 = try transport.roundTrip(&req1);
+                    defer resp1.deinit();
+
+                    var req2 = try Http.Request.init(testing.allocator, "GET", url2);
+                    var task = RoundTripTask{
+                        .transport = &transport,
+                        .req = &req2,
+                    };
+                    var thread = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
+                    thread.join();
+                    try testing.expect(task.finished);
+                    if (task.err) |err| return err;
+                    var resp2 = task.resp orelse return error.TestUnexpectedResult;
+                    defer resp2.deinit();
+
+                    const body2 = try readBody(resp2);
+                    defer testing.allocator.free(body2);
+                    try testing.expectEqualStrings("world", body2);
+                }
+            }.run);
+
+            try testing.expectEqual(@as(usize, 2), accept_count);
+        }
+
+        pub fn maxConnsPerHostWaiterReusesReturnedIdleConn() !void {
+            const accept_count = try withTwoRequestKeepAliveServer(.{
+                .first_request_line = "GET /max-reuse-1 HTTP/1.1",
+                .second_request_line = "GET /max-reuse-2 HTTP/1.1",
+                .first_body = "hello",
+                .second_body = "world",
+                .reuse_wait_timeout_ms = 150,
+            }, struct {
+                fn run(port: u16) !void {
+                    var transport = try Http.Transport.init(testing.allocator, .{
+                        .max_conns_per_host = 1,
+                    });
+                    defer transport.deinit();
+
+                    const url1 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/max-reuse-1", .{port});
+                    defer testing.allocator.free(url1);
+                    const url2 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/max-reuse-2", .{port});
+                    defer testing.allocator.free(url2);
+
+                    var req1 = try Http.Request.init(testing.allocator, "GET", url1);
+                    var resp1 = try transport.roundTrip(&req1);
+                    defer resp1.deinit();
+                    const body1 = resp1.body() orelse return error.TestUnexpectedResult;
+                    var first: [1]u8 = undefined;
+                    try testing.expectEqual(@as(usize, 1), try body1.read(&first));
+
+                    var req2 = try Http.Request.init(testing.allocator, "GET", url2);
+                    var task = RoundTripTask{
+                        .transport = &transport,
+                        .req = &req2,
+                    };
+                    var thread = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
+                    var joined = false;
+                    defer if (!joined) thread.join();
+
+                    try testing.expect(!task.waitTimeout(120));
+                    const rest1 = try readBody(resp1);
+                    defer testing.allocator.free(rest1);
+                    thread.join();
+                    joined = true;
+
+                    if (task.err) |err| return err;
+                    var resp2 = task.resp orelse return error.TestUnexpectedResult;
+                    defer resp2.deinit();
+
+                    const body2 = try readBody(resp2);
+                    defer testing.allocator.free(body2);
+                    try testing.expectEqualStrings("world", body2);
+                }
+            }.run);
+
+            try testing.expectEqual(@as(usize, 1), accept_count);
+        }
+
+        pub fn maxConnsPerHostWaiterDeadlineExceeded() !void {
+            const State = struct {};
+            try withServerState(
+                State{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *State) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "GET /max-deadline-1 HTTP/1.1"));
+                        io.writeAll(@TypeOf(c), &c, "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: keep-alive\r\n\r\nhello") catch {};
+                        c.setReadTimeout(80);
+                        _ = c.read(&req_buf) catch |err| switch (err) {
+                            error.TimedOut, error.EndOfStream => return,
+                            else => return err,
+                        };
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *State) !void {
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .max_conns_per_host = 1,
+                        });
+                        defer transport.deinit();
+
+                        const Context = context_mod.make(lib);
+                        var ctx_api = try Context.init(testing.allocator);
+                        defer ctx_api.deinit();
+
+                        const url1 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/max-deadline-1", .{port});
+                        defer testing.allocator.free(url1);
+                        const url2 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/max-deadline-2", .{port});
+                        defer testing.allocator.free(url2);
+
+                        var req1 = try Http.Request.init(testing.allocator, "GET", url1);
+                        var resp1 = try transport.roundTrip(&req1);
+                        defer resp1.deinit();
+
+                        var timeout_ctx = try ctx_api.withTimeout(ctx_api.background(), 30 * lib.time.ns_per_ms);
+                        defer timeout_ctx.deinit();
+                        var req2 = try Http.Request.init(testing.allocator, "GET", url2);
+                        req2 = req2.withContext(timeout_ctx);
+
+                        try testing.expectError(error.DeadlineExceeded, transport.roundTrip(&req2));
+                    }
+                }.run,
+            );
+        }
+
+        pub fn maxConnsPerHostWaiterCanceled() !void {
+            const State = struct {};
+            try withServerState(
+                State{},
+                struct {
+                    fn run(conn: net_mod.Conn, _: *State) !void {
+                        var c = conn;
+                        var req_buf: [4096]u8 = undefined;
+                        const req_head = try readRequestHead(conn, &req_buf);
+                        try testing.expect(hasRequestLine(req_head, "GET /max-cancel-1 HTTP/1.1"));
+                        io.writeAll(@TypeOf(c), &c, "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: keep-alive\r\n\r\nhello") catch {};
+                        c.setReadTimeout(120);
+                        _ = c.read(&req_buf) catch |err| switch (err) {
+                            error.TimedOut, error.EndOfStream => return,
+                            else => return err,
+                        };
+                    }
+                }.run,
+                struct {
+                    fn run(port: u16, _: *State) !void {
+                        var transport = try Http.Transport.init(testing.allocator, .{
+                            .max_conns_per_host = 1,
+                        });
+                        defer transport.deinit();
+
+                        const Context = context_mod.make(lib);
+                        var ctx_api = try Context.init(testing.allocator);
+                        defer ctx_api.deinit();
+
+                        const url1 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/max-cancel-1", .{port});
+                        defer testing.allocator.free(url1);
+                        const url2 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/max-cancel-2", .{port});
+                        defer testing.allocator.free(url2);
+
+                        var req1 = try Http.Request.init(testing.allocator, "GET", url1);
+                        var resp1 = try transport.roundTrip(&req1);
+                        defer resp1.deinit();
+
+                        var cancel_ctx = try ctx_api.withCancel(ctx_api.background());
+                        defer cancel_ctx.deinit();
+                        var req2 = try Http.Request.init(testing.allocator, "GET", url2);
+                        req2 = req2.withContext(cancel_ctx);
+
+                        var task = RoundTripTask{
+                            .transport = &transport,
+                            .req = &req2,
+                        };
+                        var thread = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
+                        var joined = false;
+                        defer if (!joined) thread.join();
+                        try testing.expect(!task.waitTimeout(120));
+                        cancel_ctx.cancel();
+                        thread.join();
+                        joined = true;
+
+                        try testing.expect(task.err != null);
+                        try testing.expectEqual(error.Canceled, task.err.?);
+                    }
+                }.run,
+            );
+        }
+
+        pub fn closeIdleConnectionsWithMaxConnsPerHostDoesNotLeakCapacity() !void {
+            const accept_count = try withTwoRequestKeepAliveServer(.{
+                .first_request_line = "GET /close-idle-max-1 HTTP/1.1",
+                .second_request_line = "GET /close-idle-max-2 HTTP/1.1",
+                .first_body = "one",
+                .second_body = "two",
+            }, struct {
+                fn run(port: u16) !void {
+                    var transport = try Http.Transport.init(testing.allocator, .{
+                        .max_conns_per_host = 1,
+                    });
+                    defer transport.deinit();
+
+                    const url1 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/close-idle-max-1", .{port});
+                    defer testing.allocator.free(url1);
+                    const url2 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/close-idle-max-2", .{port});
+                    defer testing.allocator.free(url2);
+
+                    var req1 = try Http.Request.init(testing.allocator, "GET", url1);
+                    var resp1 = try transport.roundTrip(&req1);
+                    const body1 = try readBody(resp1);
+                    defer testing.allocator.free(body1);
+                    resp1.deinit();
+
+                    transport.closeIdleConnections();
+
+                    var req2 = try Http.Request.init(testing.allocator, "GET", url2);
+                    var resp2 = try transport.roundTrip(&req2);
+                    defer resp2.deinit();
+                    const body2 = try readBody(resp2);
+                    defer testing.allocator.free(body2);
+                    try testing.expectEqualStrings("two", body2);
                 }
             }.run);
 
@@ -1582,10 +2905,12 @@ fn runImpl(
                     };
                 }
             }.run, .{ listener_impl, spec, &accept_count, &server_result });
-            errdefer server_thread.join();
+            var server_joined = false;
+            errdefer if (!server_joined) server_thread.join();
 
             try ClientFn(port);
             server_thread.join();
+            server_joined = true;
             if (server_result) |err| return err;
             return accept_count;
         }
@@ -1608,10 +2933,12 @@ fn runImpl(
                     };
                 }
             }.run, .{ listener_impl, spec, &accept_count, &server_result });
-            errdefer server_thread.join();
+            var server_joined = false;
+            errdefer if (!server_joined) server_thread.join();
 
             try ClientFn(port);
             server_thread.join();
+            server_joined = true;
             if (server_result) |err| return err;
             return accept_count;
         }
@@ -1704,13 +3031,20 @@ fn runImpl(
 
             const listener_impl = try ln.as(Net.TcpListener);
             const port = try listenerPort(ln, Net);
+            var server_result: ?anyerror = null;
             var server_thread = try lib.Thread.spawn(.{}, struct {
-                fn run(tcp_listener: *Net.TcpListener, server_spec: ServerSpec) void {
-                    var conn = tcp_listener.accept() catch return;
+                fn run(tcp_listener: *Net.TcpListener, server_spec: ServerSpec, result: *?anyerror) void {
+                    var conn = tcp_listener.accept() catch |err| {
+                        result.* = err;
+                        return;
+                    };
                     defer conn.deinit();
 
                     var req_buf: [4096]u8 = undefined;
-                    const req_head = readRequestHead(conn, &req_buf) catch return;
+                    const req_head = readRequestHead(conn, &req_buf) catch |err| {
+                        result.* = err;
+                        return;
+                    };
 
                     const line_matches = hasRequestLine(req_head, server_spec.expected_request_line);
                     const body_match = if (line_matches)
@@ -1749,14 +3083,37 @@ fn runImpl(
                         &head_buf,
                         "HTTP/1.1 {d} {s}\r\nContent-Length: {d}\r\nContent-Type: {s}\r\nConnection: close\r\n\r\n",
                         .{ status_code, reason, body.len, content_type },
-                    ) catch return;
-                    io.writeAll(@TypeOf(conn), &conn, head) catch return;
-                    io.writeAll(@TypeOf(conn), &conn, body) catch {};
+                    ) catch |err| {
+                        result.* = err;
+                        return;
+                    };
+                    io.writeAll(@TypeOf(conn), &conn, head) catch |err| switch (err) {
+                        error.BrokenPipe,
+                        error.ConnectionReset,
+                        => return,
+                        else => {
+                            result.* = err;
+                            return;
+                        },
+                    };
+                    io.writeAll(@TypeOf(conn), &conn, body) catch |err| switch (err) {
+                        error.BrokenPipe,
+                        error.ConnectionReset,
+                        => return,
+                        else => {
+                            result.* = err;
+                            return;
+                        },
+                    };
                 }
-            }.run, .{ listener_impl, spec });
-            defer server_thread.join();
+            }.run, .{ listener_impl, spec, &server_result });
+            var server_joined = false;
+            errdefer if (!server_joined) server_thread.join();
 
             try ClientFn(port);
+            server_thread.join();
+            server_joined = true;
+            if (server_result) |err| return err;
         }
 
         fn withServerState(state_init: anytype, comptime ServerFn: anytype, comptime ClientFn: anytype) !void {
@@ -1784,10 +3141,12 @@ fn runImpl(
                     };
                 }
             }.run, .{ listener_impl, &state, &server_result });
-            errdefer server_thread.join();
+            var server_joined = false;
+            errdefer if (!server_joined) server_thread.join();
 
             try ClientFn(port, &state);
             server_thread.join();
+            server_joined = true;
             if (server_result) |err| return err;
         }
 
@@ -1850,6 +3209,26 @@ fn runImpl(
             }
 
             return null;
+        }
+
+        fn headerCount(head: []const u8, name: []const u8) usize {
+            var count: usize = 0;
+            var line_start: usize = 0;
+            while (line_start < head.len) {
+                const rel_end = lib.mem.indexOf(u8, head[line_start..], "\r\n") orelse head.len - line_start;
+                const line = head[line_start .. line_start + rel_end];
+                const colon = lib.mem.indexOfScalar(u8, line, ':') orelse {
+                    if (line_start + rel_end == head.len) break;
+                    line_start += rel_end + 2;
+                    continue;
+                };
+
+                const header_name = lib.mem.trim(u8, line[0..colon], " ");
+                if (Http.Header.init(header_name, "").is(name)) count += 1;
+                if (line_start + rel_end == head.len) break;
+                line_start += rel_end + 2;
+            }
+            return count;
         }
 
         fn readUntilTerminator(conn: net_mod.Conn, prefix: []const u8, terminator: []const u8) ![]u8 {
