@@ -146,23 +146,6 @@ const c_sources: []const []const u8 = &.{
     "silk/fixed/schur_FIX.c",
 };
 
-pub const Config = struct {
-    config_header: ?std.Build.LazyPath = null,
-};
-
-const ConfigHeaderValues = struct {
-    FIXED_POINT: u8 = 1,
-    OPUS_BUILD: u8 = 1,
-    VAR_ARRAYS: u8 = 1,
-    USE_ALLOCA: ?u8 = null,
-    NONTHREADSAFE_PSEUDOSTACK: ?u8 = null,
-    HAVE_LRINT: ?u8 = null,
-    HAVE_LRINTF: ?u8 = null,
-    DISABLE_FLOAT_API: ?u8 = null,
-    CUSTOM_MODES: ?u8 = null,
-    ENABLE_HARDENING: ?u8 = null,
-};
-
 pub fn create(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
@@ -172,14 +155,14 @@ pub fn create(
         .git_repo = "https://github.com/xiph/opus.git",
         .commit = "2d862ea14b233e5a3f3afaf74d96050691af3cd5",
     });
-    const config: Config = .{
-        .config_header = b.option(
+    const config_header = createConfigHeader(
+        b,
+        b.option(
             std.Build.LazyPath,
             "opus_config_header",
-            "Optional path to a complete Opus config header; otherwise embed-zig renders pkg/opus/config.h.in with Zig's config header support",
-        ),
-    };
-    const config_header = createConfigHeader(b, config);
+            "Optional path to a complete Opus config header; otherwise embed-zig includes pkg/opus/config.default.h",
+        ) orelse b.path("pkg/opus/config.default.h"),
+    );
     const c_wrappers = createWrappedCSources(b, repo);
 
     const lib = b.addLibrary(.{
@@ -242,28 +225,24 @@ pub fn linkTest(b: *std.Build, compile: *std.Build.Step.Compile) void {
     compile.root_module.addImport("testing", testing);
 }
 
-fn createConfigHeader(b: *std.Build, config: Config) *std.Build.Step.ConfigHeader {
-    if (config.config_header) |header| {
-        const write_files = b.addWriteFiles();
-        const template = write_files.add("config.h.in",
-            \\#ifndef EMBED_ZIG_OPUS_CONFIG_H
-            \\#define EMBED_ZIG_OPUS_CONFIG_H
-            \\#include "@OPUS_USER_CONFIG_HEADER@"
-            \\#endif
-            \\
-        );
-        return b.addConfigHeader(.{
-            .style = .{ .autoconf_at = template },
-            .include_path = "config.h",
-        }, .{
-            .OPUS_USER_CONFIG_HEADER = normalizeIncludePath(b, header),
-        });
-    }
-
+fn createConfigHeader(
+    b: *std.Build,
+    selected_header: std.Build.LazyPath,
+) *std.Build.Step.ConfigHeader {
+    const write_files = b.addWriteFiles();
+    const template = write_files.add("opus_config_header.template",
+        \\#ifndef EMBED_ZIG_OPUS_CONFIG_H
+        \\#define EMBED_ZIG_OPUS_CONFIG_H
+        \\#include "@OPUS_SELECTED_CONFIG_HEADER@"
+        \\#endif
+        \\
+    );
     return b.addConfigHeader(.{
-        .style = .{ .autoconf_undef = b.path("pkg/opus/config.h.in") },
+        .style = .{ .autoconf_at = template },
         .include_path = "config.h",
-    }, ConfigHeaderValues{});
+    }, .{
+        .OPUS_SELECTED_CONFIG_HEADER = normalizeIncludePath(b, selected_header),
+    });
 }
 
 fn createWrappedCSources(

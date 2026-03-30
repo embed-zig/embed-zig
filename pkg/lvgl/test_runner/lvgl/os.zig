@@ -77,6 +77,21 @@ pub fn make(comptime lib: type) testing.TestRunner {
                     try test_lib.expectEqual(binding.LV_RESULT_OK, binding.lv_thread_delete(&thread));
                     try test_lib.expectEqual(binding.LV_RESULT_INVALID, binding.lv_thread_sync_signal_isr(&sync));
                 }
+
+                fn customThreadSyncRetainsSignalsAcrossRepeatedWaits() !void {
+                    var sync = embed.mem.zeroes(binding.ThreadSync);
+                    try test_lib.expectEqual(binding.LV_RESULT_OK, binding.lv_thread_sync_init(&sync));
+                    defer {
+                        if (binding.lv_thread_sync_delete(&sync) != binding.LV_RESULT_OK) {
+                            @panic("lv_thread_sync_delete failed");
+                        }
+                    }
+
+                    try test_lib.expectEqual(binding.LV_RESULT_OK, binding.lv_thread_sync_signal(&sync));
+                    try test_lib.expectEqual(binding.LV_RESULT_OK, binding.lv_thread_sync_wait(&sync));
+                    try test_lib.expectEqual(binding.LV_RESULT_OK, binding.lv_thread_sync_signal(&sync));
+                    try test_lib.expectEqual(binding.LV_RESULT_OK, binding.lv_thread_sync_wait(&sync));
+                }
             };
 
             Cases.generalLockIsRecursive() catch |err| {
@@ -88,6 +103,10 @@ pub fn make(comptime lib: type) testing.TestRunner {
                 return false;
             };
             Cases.customThreadAndSyncLifecycle() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            Cases.customThreadSyncRetainsSignalsAcrossRepeatedWaits() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

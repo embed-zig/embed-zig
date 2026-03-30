@@ -3,14 +3,6 @@ const GitRepo = @import("../GitRepo.zig");
 
 var library: ?*std.Build.Step.Compile = null;
 
-pub const Config = struct {
-    config_header: ?std.Build.LazyPath = null,
-};
-
-const ConfigHeaderValues = struct {
-    DISABLE_CRC: ?u8 = null,
-};
-
 pub fn create(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
@@ -21,14 +13,14 @@ pub fn create(
         .commit = "06a5e0262cdc28aa4ae6797627a783b5010440f0",
     });
     const local_include = b.path("pkg/ogg/include");
-    const config: Config = .{
-        .config_header = b.option(
+    const config_header = createConfigHeader(
+        b,
+        b.option(
             std.Build.LazyPath,
             "ogg_config_header",
-            "Optional path to a complete Ogg config header; otherwise embed-zig renders pkg/ogg/config.h.in with Zig's config header support",
-        ),
-    };
-    const config_header = createConfigHeader(b, config);
+            "Optional path to a complete Ogg config header; otherwise embed-zig includes pkg/ogg/config.default.h",
+        ) orelse b.path("pkg/ogg/config.default.h"),
+    );
     const c_wrappers = createWrappedCSources(b, repo);
 
     const lib = b.addLibrary(.{
@@ -87,28 +79,24 @@ pub fn linkTest(b: *std.Build, compile: *std.Build.Step.Compile) void {
     compile.root_module.addImport("testing", testing);
 }
 
-fn createConfigHeader(b: *std.Build, config: Config) *std.Build.Step.ConfigHeader {
-    if (config.config_header) |header| {
-        const write_files = b.addWriteFiles();
-        const template = write_files.add("config.h.in",
-            \\#ifndef EMBED_ZIG_OGG_CONFIG_H
-            \\#define EMBED_ZIG_OGG_CONFIG_H
-            \\#include "@OGG_USER_CONFIG_HEADER@"
-            \\#endif
-            \\
-        );
-        return b.addConfigHeader(.{
-            .style = .{ .autoconf_at = template },
-            .include_path = "config.h",
-        }, .{
-            .OGG_USER_CONFIG_HEADER = normalizeIncludePath(b, header),
-        });
-    }
-
+fn createConfigHeader(
+    b: *std.Build,
+    selected_header: std.Build.LazyPath,
+) *std.Build.Step.ConfigHeader {
+    const write_files = b.addWriteFiles();
+    const template = write_files.add("ogg_config_header.template",
+        \\#ifndef EMBED_ZIG_OGG_CONFIG_H
+        \\#define EMBED_ZIG_OGG_CONFIG_H
+        \\#include "@OGG_SELECTED_CONFIG_HEADER@"
+        \\#endif
+        \\
+    );
     return b.addConfigHeader(.{
-        .style = .{ .autoconf_undef = b.path("pkg/ogg/config.h.in") },
+        .style = .{ .autoconf_at = template },
         .include_path = "config.h",
-    }, ConfigHeaderValues{});
+    }, .{
+        .OGG_SELECTED_CONFIG_HEADER = normalizeIncludePath(b, selected_header),
+    });
 }
 
 fn createWrappedCSources(

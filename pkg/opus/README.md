@@ -34,6 +34,23 @@ integer wrappers remain supported but float methods such as
 `Encoder.encodeFloat(...)`, `Decoder.decodeFloat(...)`, and `Decoder.plcFloat(...)`
 must not be used.
 
+## Configuration
+
+`pkg/opus` ships its default build configuration in `pkg/opus/config.default.h`.
+
+Downstream can override the entire header via:
+
+```text
+-Dopus=true -Dopus_config_header=path/to/opus_config.h
+```
+
+In `b.dependency(...)`, pass the same file via
+`.opus_config_header = b.path("...")`.
+
+`build/pkg/opus.zig` always forwards the selected full header to upstream as
+`config.h`, so the public build API stays package-scoped instead of exposing
+individual `libopus` macros as top-level Zig options.
+
 ## Package layout
 
 ```text

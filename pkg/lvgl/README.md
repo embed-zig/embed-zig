@@ -12,7 +12,7 @@ Today `pkg/lvgl` is past the bootstrap stage.
 Implemented so far:
 
 - LVGL `v9.5.0` sources are built by `build/pkg/lvgl.zig`
-- config is handled via generated or user-provided `lv_conf.h`
+- config is handled via the shipped `config.default.h` or a user-provided full `lv_conf.h` passed as `lvgl_config_header`
 - raw binding layer exists in `src/binding.c` and `src/binding.zig`
 - base value layer exists for color/point/area/style/types
 - core runtime layer has the first usable slice:
@@ -299,7 +299,7 @@ Goal:
 Deliverables:
 
 - `build/pkg/lvgl.zig`
-- `pkg/lvgl/config.h.in`
+- `pkg/lvgl/config.default.h`
 - `src/binding.c`
 - `src/binding.zig`
 
@@ -468,6 +468,35 @@ The inclusion logic is controlled by `lv_conf_internal.h`, which:
 In other words: yes, LVGL is designed to be overridden by a config
 header.
 
+In this repo, `build/pkg/lvgl.zig` selects one complete header source:
+
+- the shipped default at `pkg/lvgl/config.default.h`
+- or a downstream-provided full header passed as `lvgl_config_header`
+
+Downstream can override it via:
+
+```text
+-Dlvgl=true -Dlvgl_config_header=path/to/lv_conf.h
+```
+
+In `b.dependency(...)`, pass the same file via
+`.lvgl_config_header = b.path("...")`.
+
+That selected header is then forwarded internally as `lv_conf.h`.
+`build/pkg/lvgl.zig` applies the same selected `lv_conf.h` to the `lvgl`
+library, the `lvgl` Zig module, and the `lvgl_osal` Zig module.
+
+The wrapper also forces the OS contract used by the bundled `lvgl_osal`
+adapter:
+
+- `LV_USE_OS = LV_OS_CUSTOM`
+- `LV_OS_CUSTOM_INCLUDE = "lv_os_custom.h"`
+
+So custom `lv_conf.h` files do not need to set those macros themselves.
+If they do set them, the wrapper overrides them back to embed-zig's fixed
+custom-OS ABI, which must stay compatible with
+`pkg/lvgl/include/lv_os_custom.h` and `pkg/lvgl_osal.zig`.
+
 ### What `lv_conf.h` controls
 
 A non-exhaustive list:
@@ -501,14 +530,14 @@ concern, not as an afterthought.
 
 Short term:
 
-- keep the curated `lv_conf.h` generation model
-- keep the supported config surface explicit
+- ship a checked-in default header at `pkg/lvgl/config.default.h`
+- let downstream override it with a full `lv_conf.h` via `lvgl_config_header`
 - get the binding and basic Zig layers compiling first
 
 Medium term:
 
 - expose a curated set of build options in `build/pkg/lvgl.zig`
-- generate or provide a controlled `lv_conf.h`
+- continue forwarding one controlled full `lv_conf.h`
 - avoid forcing users to hand-edit upstream LVGL headers
 
 Examples of good future build options:

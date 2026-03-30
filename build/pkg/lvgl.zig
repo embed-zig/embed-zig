@@ -6,41 +6,11 @@ var osal_library: ?*std.Build.Step.Compile = null;
 var osal_module: ?*std.Build.Module = null;
 var resolved_target: ?std.Build.ResolvedTarget = null;
 var resolved_optimize: ?std.builtin.OptimizeMode = null;
+var has_custom_config_header: bool = false;
 
+const upstream_repo = "https://github.com/lvgl/lvgl.git";
+const upstream_commit = "85aa60d18b3d5e5588d7b247abf90198f07c8a63";
 const bundled_custom_include = "lv_os_custom.h";
-
-const StdlibBackend = enum {
-    LV_STDLIB_BUILTIN,
-    LV_STDLIB_CLIB,
-    LV_STDLIB_MICROPYTHON,
-    LV_STDLIB_RTTHREAD,
-    LV_STDLIB_CUSTOM,
-};
-
-const OsBackend = enum {
-    LV_OS_NONE,
-    LV_OS_PTHREAD,
-    LV_OS_FREERTOS,
-    LV_OS_CMSIS_RTOS2,
-    LV_OS_RTTHREAD,
-    LV_OS_WINDOWS,
-    LV_OS_MQX,
-    LV_OS_SDL2,
-    LV_OS_CUSTOM,
-};
-
-const ConfigHeaderValues = struct {
-    LV_COLOR_DEPTH: u8 = 16,
-    LV_USE_STDLIB_MALLOC: StdlibBackend = .LV_STDLIB_BUILTIN,
-    LV_USE_STDLIB_STRING: StdlibBackend = .LV_STDLIB_BUILTIN,
-    LV_USE_STDLIB_SPRINTF: StdlibBackend = .LV_STDLIB_BUILTIN,
-    LV_MEM_SIZE: u32 = 64 * 1024,
-    LV_USE_OS: OsBackend = .LV_OS_CUSTOM,
-    LV_OS_CUSTOM_INCLUDE: ?[]const u8 = null,
-    LV_USE_FLOAT: u8 = 0,
-    LV_USE_MATRIX: u8 = 0,
-    LV_USE_OBSERVER: u8 = 1,
-};
 
 pub fn create(
     b: *std.Build,
@@ -51,10 +21,19 @@ pub fn create(
     resolved_optimize = optimize;
 
     const repo = GitRepo.addGitRepo(b, .{
-        .git_repo = "https://github.com/lvgl/lvgl.git",
-        .commit = "85aa60d18b3d5e5588d7b247abf90198f07c8a63",
+        .git_repo = upstream_repo,
+        .commit = upstream_commit,
     });
-    const config_header = createConfigHeader(b);
+    const custom_config_header = b.option(
+        std.Build.LazyPath,
+        "lvgl_config_header",
+        "Optional path to a complete LVGL config header; otherwise embed-zig includes pkg/lvgl/config.default.h",
+    );
+    has_custom_config_header = custom_config_header != null;
+    const config_header = createConfigHeader(
+        b,
+        custom_config_header orelse b.path("pkg/lvgl/config.default.h"),
+    );
     const c_sources = collectCSources(b, repo);
 
     const lib = b.addLibrary(.{
@@ -126,12 +105,14 @@ pub fn link(b: *std.Build) void {
 }
 
 pub fn linkTest(_: *std.Build, compile: *std.Build.Step.Compile) void {
-    const osal = osal_library orelse createOsalLibrary(compile.step.owner);
     const embed = compile.step.owner.modules.get("embed") orelse @panic("lvgl tests require embed");
     const testing = compile.step.owner.modules.get("testing") orelse @panic("lvgl tests require testing");
     compile.root_module.addImport("embed", embed);
     compile.root_module.addImport("testing", testing);
-    compile.linkLibrary(osal);
+    if (!has_custom_config_header) {
+        const osal = osal_library orelse createOsalLibrary(compile.step.owner);
+        compile.linkLibrary(osal);
+    }
 }
 
 fn createOsalLibrary(b: *std.Build) *std.Build.Step.Compile {
@@ -140,8 +121,8 @@ fn createOsalLibrary(b: *std.Build) *std.Build.Step.Compile {
     const target = resolved_target orelse @panic("lvgl target missing");
     const optimize = resolved_optimize orelse @panic("lvgl optimize missing");
     const repo = GitRepo.addGitRepo(b, .{
-        .git_repo = "https://github.com/lvgl/lvgl.git",
-        .commit = "85aa60d18b3d5e5588d7b247abf90198f07c8a63",
+        .git_repo = upstream_repo,
+        .commit = upstream_commit,
     });
     const embed = b.modules.get("embed") orelse @panic("lvgl osal impl requires embed");
     const impl_mod = b.createModule(.{
@@ -186,14 +167,42 @@ fn createOsalLibrary(b: *std.Build) *std.Build.Step.Compile {
 
 fn createConfigHeader(
     b: *std.Build,
+    selected_header: std.Build.LazyPath,
 ) *std.Build.Step.ConfigHeader {
+    const write_files = b.addWriteFiles();
+    const template = write_files.add("lvgl_config_header.template",
+        \\#ifndef EMBED_ZIG_LV_CONF_WRAPPER_H
+        \\#define EMBED_ZIG_LV_CONF_WRAPPER_H
+        \\
+        \\/* embed-zig fixes LVGL to the custom OS ABI used by lvgl_osal. */
+        \\#define LV_USE_OS LV_OS_CUSTOM
+        \\#define LV_OS_CUSTOM_INCLUDE "@LVGL_OS_CUSTOM_INCLUDE@"
+        \\
+        \\#include "@LVGL_SELECTED_CONFIG_HEADER@"
+        \\
+        \\#undef LV_USE_OS
+        \\#define LV_USE_OS LV_OS_CUSTOM
+        \\#undef LV_OS_CUSTOM_INCLUDE
+        \\#define LV_OS_CUSTOM_INCLUDE "@LVGL_OS_CUSTOM_INCLUDE@"
+        \\#endif
+        \\
+    );
     return b.addConfigHeader(.{
-        .style = .{ .autoconf_undef = b.path("pkg/lvgl/config.h.in") },
+        .style = .{ .autoconf_at = template },
         .include_path = "lv_conf.h",
-    }, ConfigHeaderValues{
-        .LV_USE_OS = .LV_OS_CUSTOM,
-        .LV_OS_CUSTOM_INCLUDE = bundled_custom_include,
+    }, .{
+        .LVGL_SELECTED_CONFIG_HEADER = normalizeIncludePath(b, selected_header),
+        .LVGL_OS_CUSTOM_INCLUDE = bundled_custom_include,
     });
+}
+
+fn normalizeIncludePath(b: *std.Build, header: std.Build.LazyPath) []const u8 {
+    const raw = header.getPath(b);
+    const resolved = if (std.fs.path.isAbsolute(raw))
+        raw
+    else
+        b.pathFromRoot(raw);
+    return std.mem.replaceOwned(u8, b.allocator, resolved, "\\", "/") catch @panic("OOM");
 }
 
 fn collectCSources(

@@ -44,6 +44,24 @@ The root package exports:
 - `ogg.Sync` and `ogg.Stream` wrap mutable `libogg` state. Treat each instance
   as single-threaded unless you provide external synchronization.
 
+## Configuration
+
+`pkg/ogg` ships its default build configuration in `pkg/ogg/config.default.h`.
+That default keeps CRC verification enabled.
+
+Downstream can override the entire header via:
+
+```text
+-Dogg=true -Dogg_config_header=path/to/ogg_config.h
+```
+
+In `b.dependency(...)`, pass the same file via
+`.ogg_config_header = b.path("...")`.
+
+`build/pkg/ogg.zig` always forwards the selected full header to upstream as
+`config.h`, so configuration remains package-scoped instead of turning Ogg
+macros into top-level Zig dependency options.
+
 ## Package layout
 
 ```text

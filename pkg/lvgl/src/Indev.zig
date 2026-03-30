@@ -162,6 +162,8 @@ pub fn getGroup(self: *const Self) ?*Group {
 }
 
 /// `points` is stored by reference; keep the slice valid for as long as this indev may read button indices.
+/// Call this after configuring the device as `Type.button`.
+/// The active read callback must only report `btn_id` values in the `0..points.len` range.
 pub fn setButtonPoints(self: *const Self, points: []const binding.Point) void {
     binding.lv_indev_set_button_points(self.handle, points.ptr);
 }
@@ -299,18 +301,12 @@ test "lvgl/unit_tests/Indev/configuration_and_events_roundtrip_through_wrapper" 
     var driver_data: u32 = 2;
     var cursor = Obj.create(&fixture.screen()) orelse return error.OutOfMemory;
     defer cursor.delete();
-    var points = [_]binding.Point{
-        .{ .x = 1, .y = 2 },
-        .{ .x = 3, .y = 4 },
-    };
-
     indev.setDisplay(&fixture.display);
     indev.setType(.pointer);
     indev.setMode(.event);
     indev.setUserData(&user_data);
     indev.setDriverData(&driver_data);
     indev.setCursor(cursor);
-    indev.setButtonPoints(&points);
 
     try testing.expectEqual(fixture.display.raw(), indev.getDisplay().?.raw());
     try testing.expectEqual(Type.pointer, indev.getType());
@@ -330,4 +326,63 @@ test "lvgl/unit_tests/Indev/configuration_and_events_roundtrip_through_wrapper" 
     try testing.expectEqual(@as(?*anyopaque, @ptrCast(indev.raw())), ctx.target);
     try testing.expectEqual(@as(?*anyopaque, @ptrCast(&payload)), ctx.param);
     try testing.expectEqual(@as(?*anyopaque, @ptrCast(&ctx)), ctx.user_data);
+}
+
+test "lvgl/unit_tests/Indev/button_points_configuration_uses_button_devices" {
+    const testing = @import("std").testing;
+    const lvgl_testing = @import("testing.zig");
+
+    var fixture = try lvgl_testing.Fixture.init();
+    defer fixture.deinit();
+
+    var indev = Self.create() orelse return error.OutOfMemory;
+    defer indev.delete();
+
+    var points = [_]binding.Point{
+        .{ .x = 1, .y = 2 },
+        .{ .x = 3, .y = 4 },
+    };
+
+    indev.setDisplay(&fixture.display);
+    indev.setType(.button);
+    indev.setButtonPoints(&points);
+
+    try testing.expectEqual(fixture.display.raw(), indev.getDisplay().?.raw());
+    try testing.expectEqual(Type.button, indev.getType());
+}
+
+test "lvgl/unit_tests/Indev/remove_event_callback_with_user_data_stops_future_events" {
+    const testing = @import("std").testing;
+    const lvgl_testing = @import("testing.zig");
+    const Event = @import("Event.zig");
+
+    const CallbackCtx = struct {
+        calls: usize = 0,
+
+        fn callback(event: ?*binding.Event) callconv(.c) void {
+            const Context = @This();
+            const e = event orelse return;
+            const user_data = binding.lv_event_get_user_data(e) orelse return;
+            const ctx: *Context = @ptrCast(@alignCast(user_data));
+            ctx.calls += 1;
+        }
+    };
+
+    var fixture = try lvgl_testing.Fixture.init();
+    defer fixture.deinit();
+
+    var indev = Self.create() orelse return error.OutOfMemory;
+    defer indev.delete();
+    indev.setDisplay(&fixture.display);
+
+    var ctx = CallbackCtx{};
+    const custom_event = Event.codeFromInt(Event.registerId());
+    indev.addEventCb(CallbackCtx.callback, custom_event, &ctx);
+    try testing.expectEqual(@as(u32, 1), indev.eventCount());
+
+    try testing.expectEqual(@as(u32, 1), indev.removeEventCbWithUserData(CallbackCtx.callback, &ctx));
+    try testing.expectEqual(@as(u32, 0), indev.eventCount());
+
+    try testing.expectEqual(binding.LV_RESULT_OK, indev.sendEvent(custom_event, null));
+    try testing.expectEqual(@as(usize, 0), ctx.calls);
 }

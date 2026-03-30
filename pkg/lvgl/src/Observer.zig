@@ -83,3 +83,37 @@ test "lvgl/unit_tests/Observer/can_observe_subject_updates" {
 
     observer.remove();
 }
+
+test "lvgl/unit_tests/Observer/remove_stops_future_subject_notifications" {
+    const testing = @import("std").testing;
+    const Subject = @import("Subject.zig");
+
+    const CallbackCtx = struct {
+        calls: usize = 0,
+
+        fn callback(observer: ?*binding.Observer, _: ?*binding.Subject) callconv(.c) void {
+            const obs = observer orelse return;
+            const ctx: *@This() = @ptrCast(@alignCast(binding.lv_observer_get_user_data(obs).?));
+            ctx.calls += 1;
+        }
+    };
+
+    var subject = try Subject.initInt(1);
+    defer subject.deinit();
+
+    var ctx = CallbackCtx{};
+    const raw_observer = binding.lv_subject_add_observer(subject.rawPtr(), CallbackCtx.callback, &ctx) orelse {
+        return error.ExpectedObserver;
+    };
+    var observer = Self.fromRaw(raw_observer);
+    const calls_after_add = ctx.calls;
+
+    subject.setInt(2);
+    try testing.expectEqual(calls_after_add + 1, ctx.calls);
+
+    observer.remove();
+    const calls_after_remove = ctx.calls;
+    subject.setInt(3);
+
+    try testing.expectEqual(calls_after_remove, ctx.calls);
+}

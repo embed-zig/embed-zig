@@ -110,6 +110,9 @@ pub fn make(comptime lib: type, comptime allocator: lib.mem.Allocator) type {
             return c.LV_RESULT_INVALID;
         }
 
+        // The generic embed thread primitives used here do not expose
+        // interrupt-safe mutex or sync operations, so the ISR variants must
+        // fail explicitly instead of reusing the blocking thread path.
         fn unsupportedFromIsr() c.lv_result_t {
             return invalid();
         }
@@ -260,14 +263,16 @@ pub fn make(comptime lib: type, comptime allocator: lib.mem.Allocator) type {
             const thread = requireThread(handle) orelse return invalid();
             const cb = callback orelse return invalid();
             const impl = createImpl(ThreadImpl) orelse return invalid();
-            errdefer destroyImpl(ThreadImpl, impl);
 
             impl.* = .{
                 .handle = undefined,
                 .callback = cb,
                 .user_data = user_data,
             };
-            impl.handle = Thread.spawn(spawnConfig(name, prio, stack_size), threadMain, .{impl}) catch return invalid();
+            impl.handle = Thread.spawn(spawnConfig(name, prio, stack_size), threadMain, .{impl}) catch {
+                destroyImpl(ThreadImpl, impl);
+                return invalid();
+            };
 
             thread.impl = @ptrCast(impl);
             return ok();
