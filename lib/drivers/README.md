@@ -18,6 +18,7 @@ const Es7210 = drivers.audio.Es7210;
 const Es8311 = drivers.audio.Es8311;
 const Qmi8658 = drivers.imu.Qmi8658;
 const Tca9554 = drivers.gpio.Tca9554;
+const Fm175xx = drivers.nfc.Fm175xx;
 ```
 
 The root module also re-exports the first-wave driver types directly:
@@ -26,6 +27,7 @@ The root module also re-exports the first-wave driver types directly:
 - `drivers.Es8311`
 - `drivers.Qmi8658`
 - `drivers.Tca9554`
+- `drivers.Fm175xx`
 
 ## Package Shape
 
@@ -38,6 +40,7 @@ lib/
     io/
       I2c.zig
       Delay.zig
+      Spi.zig
     audio.zig
     audio/
       es7210.zig
@@ -56,6 +59,18 @@ lib/
       tca9554.zig
       tca9554.md
       tca9554.pdf
+    nfc.zig
+    nfc/
+      AGENTS.md
+      io.zig
+      io/
+        TypeA.zig
+      fm175xx.zig
+      fm175xx.md
+      fm175xx/
+        regs.zig
+        type_a.zig
+        ntag.zig
 ```
 
 Category files such as `drivers/audio.zig` and `drivers/imu.zig` are the
@@ -71,6 +86,7 @@ Current phase-1 contracts:
 
 - `drivers.io.I2c`: non-owning type-erased register/control bus
 - `drivers.io.Delay`: non-owning type-erased millisecond sleep hook
+- `drivers.io.Spi`: non-owning type-erased synchronous SPI bus
 
 These wrappers are intentionally narrow. They should expose only the operations
 that drivers actually need, and they should stay in `lib/drivers/io` rather
@@ -82,11 +98,14 @@ than being promoted into `lib/io`.
 - `drivers.audio.Es8311`: ES8311 mono codec control driver over I2C
 - `drivers.imu.Qmi8658`: QMI8658 IMU driver over I2C plus delay hook
 - `drivers.gpio.Tca9554`: TCA9554 GPIO expander driver over I2C
+- `drivers.nfc.Fm175xx`: FM175xx NFC reader driver over I2C or SPI, with
+  `ISO14443A` activation and raw `NTAG` reads
 
-Each driver keeps local reference material next to the implementation:
+Drivers keep local reference material next to the implementation:
 
 - a `.md` summary or notes file
-- a `.pdf` datasheet tracked with Git LFS
+- a `.pdf` datasheet tracked with Git LFS when that asset is checked into the
+  repo
 
 ## Usage
 
@@ -105,10 +124,23 @@ var imu = drivers.imu.Qmi8658.init(
 try imu.open();
 const raw = try imu.readRaw();
 _ = raw;
+
+var my_spi = MySpi{};
+var nfc = drivers.nfc.Fm175xx.initSpi(
+    drivers.io.Spi.init(&my_spi),
+    drivers.io.Delay.init(&my_delay),
+    .{},
+);
+
+try nfc.open();
+try nfc.setRf(.path1);
+const card = try nfc.activateTypeA();
+_ = card;
 ```
 
-Ownership remains with the caller. `drivers.io.I2c` and `drivers.io.Delay` do
-not allocate and do not manage teardown of the wrapped implementation.
+Ownership remains with the caller. `drivers.io.I2c`, `drivers.io.Spi`, and
+`drivers.io.Delay` do not allocate and do not manage teardown of the wrapped
+implementation.
 
 ## Design Rules
 
