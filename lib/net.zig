@@ -49,6 +49,7 @@ pub fn make(comptime lib: type) type {
 
     return struct {
         pub const Dialer = dialer_mod.Dialer(lib);
+        pub const TcpConn = tcp_conn.TcpConn(lib);
         pub const TcpListener = TL;
         pub const UdpConn = UC;
         pub const Resolver = resolver_mod.Resolver(lib);
@@ -107,6 +108,7 @@ pub const test_runner = struct {
     pub const resolver_dns = @import("net/test_runner/resolver_dns.zig");
     pub const ntp = @import("net/test_runner/ntp.zig");
     pub const http_client = @import("net/test_runner/http_client.zig");
+    pub const http_server = @import("net/test_runner/http_server.zig");
     pub const http_transport = @import("net/test_runner/http_transport_local.zig");
     pub const http_transport_layer01 = @import("net/test_runner/http_transport_layer01.zig");
     pub const https_transport = @import("net/test_runner/https_transport.zig");
@@ -123,6 +125,11 @@ test "net/unit_tests" {
     _ = @import("net/http/Request.zig");
     _ = @import("net/http/Response.zig");
     _ = @import("net/http/status.zig");
+    _ = @import("net/http/Handler.zig");
+    _ = @import("net/http/ResponseWriter.zig");
+    _ = @import("net/http/ServeMux.zig");
+    _ = @import("net/http/StaticServeMux.zig");
+    _ = @import("net/http/Server.zig");
     _ = @import("net/http/Client.zig");
     _ = @import("net/http/Transport.zig");
     _ = @import("net/ntp/wire.zig");

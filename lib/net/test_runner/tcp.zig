@@ -441,7 +441,7 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             defer ac.deinit();
 
             const accepted = try ac.as(Net.TcpConn);
-            try accepted.stream.shutdown(.write);
+            try accepted.stream.shutdown(.send);
 
             cc.setReadTimeout(1_000);
 

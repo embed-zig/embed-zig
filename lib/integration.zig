@@ -78,6 +78,7 @@ test "integration_tests/embed" {
     const tls_dial_tr = net_mod.test_runner.tls_dial.make(embed_std_mod.std, "dns.alidns.com");
     const ntp_tr = net_mod.test_runner.ntp.make(embed_std_mod.std);
     const http_client_tr = net_mod.test_runner.http_client.make(embed_std_mod.std);
+    const http_server_tr = net_mod.test_runner.http_server.make(embed_std_mod.std);
     const http_transport_tr = net_mod.test_runner.http_transport.make(embed_std_mod.std);
     const https_transport_tr = net_mod.test_runner.https_transport.make(embed_std_mod.std);
 
@@ -100,6 +101,7 @@ test "integration_tests/embed" {
     t.run("net/tls_dial", tls_dial_tr);
     t.run("net/ntp", ntp_tr);
     t.run("net/http_client", http_client_tr);
+    t.run("net/http_server", http_server_tr);
     t.run("net/http_transport", http_transport_tr);
     t.run("net/https_transport", https_transport_tr);
     if (!t.wait()) return error.TestFailed;
@@ -128,6 +130,7 @@ test "integration_tests/std" {
     const tls_dial_tr = net_mod.test_runner.tls_dial.make(std, "dns.alidns.com");
     const ntp_tr = net_mod.test_runner.ntp.make(std);
     const http_client_tr = net_mod.test_runner.http_client.make(std);
+    const http_server_tr = net_mod.test_runner.http_server.make(std);
     const http_transport_tr = net_mod.test_runner.http_transport.make(std);
     const https_transport_tr = net_mod.test_runner.https_transport.make(std);
 
@@ -149,6 +152,7 @@ test "integration_tests/std" {
     t.run("net/tls_dial", tls_dial_tr);
     t.run("net/ntp", ntp_tr);
     t.run("net/http_client", http_client_tr);
+    t.run("net/http_server", http_server_tr);
     t.run("net/http_transport", http_transport_tr);
     t.run("net/https_transport", https_transport_tr);
     if (!t.wait()) return error.TestFailed;
