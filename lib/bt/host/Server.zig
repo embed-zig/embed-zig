@@ -722,11 +722,15 @@ test "bt/integration_tests/host/ServerMux_routes_topics_over_single_characterist
     const HandlerState = struct {
         calls: usize = 0,
         last_topic: ?xfer_chunk.Topic = null,
+        last_metadata: [16]u8 = [_]u8{0} ** 16,
+        last_metadata_len: usize = 0,
 
         fn handleAlpha(ctx: ?*anyopaque, req: *const MuxRequest, rw: *ReadXResponseWriter) void {
             const self: *@This() = @ptrCast(@alignCast(ctx.?));
             self.calls += 1;
             self.last_topic = req.topic;
+            self.last_metadata_len = @min(self.last_metadata.len, req.metadata.len);
+            @memcpy(self.last_metadata[0..self.last_metadata_len], req.metadata[0..self.last_metadata_len]);
             rw.write("alpha");
         }
 
@@ -734,6 +738,8 @@ test "bt/integration_tests/host/ServerMux_routes_topics_over_single_characterist
             const self: *@This() = @ptrCast(@alignCast(ctx.?));
             self.calls += 1;
             self.last_topic = req.topic;
+            self.last_metadata_len = @min(self.last_metadata.len, req.metadata.len);
+            @memcpy(self.last_metadata[0..self.last_metadata_len], req.metadata[0..self.last_metadata_len]);
             rw.write("beta");
         }
     };
@@ -778,18 +784,22 @@ test "bt/integration_tests/host/ServerMux_routes_topics_over_single_characterist
 
     try std.testing.expectError(error.AttError, characteristic.write(&xfer_chunk.read_start_magic));
 
-    const alpha = try characteristic.get(topic_alpha, std.testing.allocator);
+    const alpha = try characteristic.get(topic_alpha, "alpha?", std.testing.allocator);
     defer std.testing.allocator.free(alpha);
     try std.testing.expectEqualSlices(u8, "alpha", alpha);
     try std.testing.expectEqual(@as(?xfer_chunk.Topic, topic_alpha), handler_state.last_topic);
+    try std.testing.expectEqual(@as(usize, 6), handler_state.last_metadata_len);
+    try std.testing.expectEqualSlices(u8, "alpha?", handler_state.last_metadata[0..handler_state.last_metadata_len]);
 
-    const beta = try characteristic.get(topic_beta, std.testing.allocator);
+    const beta = try characteristic.get(topic_beta, "beta!", std.testing.allocator);
     defer std.testing.allocator.free(beta);
     try std.testing.expectEqualSlices(u8, "beta", beta);
     try std.testing.expectEqual(@as(?xfer_chunk.Topic, topic_beta), handler_state.last_topic);
+    try std.testing.expectEqual(@as(usize, 5), handler_state.last_metadata_len);
+    try std.testing.expectEqualSlices(u8, "beta!", handler_state.last_metadata[0..handler_state.last_metadata_len]);
     try std.testing.expectEqual(@as(usize, 2), handler_state.calls);
 
-    try std.testing.expectError(error.AttError, characteristic.get(topic_missing, std.testing.allocator));
+    try std.testing.expectError(error.AttError, characteristic.get(topic_missing, &.{}, std.testing.allocator));
     try std.testing.expectError(error.TimedOut, server.accept(100));
 }
 

@@ -169,6 +169,10 @@ fn runPeripheralRole(comptime lib: type, host: anytype, allocator: embed.mem.All
         alpha_calls: usize = 0,
         beta_calls: usize = 0,
         last_topic: ?Chunk.Topic = null,
+        alpha_metadata: [16]u8 = [_]u8{0} ** 16,
+        alpha_metadata_len: usize = 0,
+        beta_metadata: [16]u8 = [_]u8{0} ** 16,
+        beta_metadata_len: usize = 0,
         read_value: [600]u8 = undefined,
         write_value: [600]u8 = undefined,
         write_len: usize = 0,
@@ -221,6 +225,8 @@ fn runPeripheralRole(comptime lib: type, host: anytype, allocator: embed.mem.All
             defer self.mutex.unlock();
             self.alpha_calls += 1;
             self.last_topic = req.topic;
+            self.alpha_metadata_len = @min(self.alpha_metadata.len, req.metadata.len);
+            @memcpy(self.alpha_metadata[0..self.alpha_metadata_len], req.metadata[0..self.alpha_metadata_len]);
             rw.write("alpha");
         }
 
@@ -230,6 +236,8 @@ fn runPeripheralRole(comptime lib: type, host: anytype, allocator: embed.mem.All
             defer self.mutex.unlock();
             self.beta_calls += 1;
             self.last_topic = req.topic;
+            self.beta_metadata_len = @min(self.beta_metadata.len, req.metadata.len);
+            @memcpy(self.beta_metadata[0..self.beta_metadata_len], req.metadata[0..self.beta_metadata_len]);
             rw.write("beta");
         }
     };
@@ -301,6 +309,10 @@ fn runPeripheralRole(comptime lib: type, host: anytype, allocator: embed.mem.All
     try testing.expectEqual(@as(usize, 1), state.alpha_calls);
     try testing.expectEqual(@as(usize, 1), state.beta_calls);
     try testing.expectEqual(@as(?Chunk.Topic, topic_beta), state.last_topic);
+    try testing.expectEqual(@as(usize, 6), state.alpha_metadata_len);
+    try testing.expect(lib.mem.eql(u8, state.alpha_metadata[0..state.alpha_metadata_len], "alpha?"));
+    try testing.expectEqual(@as(usize, 5), state.beta_metadata_len);
+    try testing.expect(lib.mem.eql(u8, state.beta_metadata[0..state.beta_metadata_len], "beta!"));
     try testing.expect(lib.mem.eql(u8, state.write_value[0..state.write_len], &expected_write));
 }
 
@@ -323,15 +335,15 @@ fn runPrimaryClientSession(comptime lib: type, conn: anytype, allocator: embed.m
     fillWritePayload(&write_value);
     try plain_char.writeX(&write_value);
 
-    const alpha = try mux_char.get(topic_alpha, allocator);
+    const alpha = try mux_char.get(topic_alpha, "alpha?", allocator);
     defer allocator.free(alpha);
     try testing.expect(lib.mem.eql(u8, alpha, "alpha"));
 
-    const beta = try mux_char.get(topic_beta, allocator);
+    const beta = try mux_char.get(topic_beta, "beta!", allocator);
     defer allocator.free(beta);
     try testing.expect(lib.mem.eql(u8, beta, "beta"));
 
-    try testing.expectError(error.AttError, mux_char.get(topic_missing, allocator));
+    try testing.expectError(error.AttError, mux_char.get(topic_missing, &.{}, allocator));
 }
 
 fn runReconnectClientSession(comptime lib: type, conn: anytype, allocator: embed.mem.Allocator) !void {

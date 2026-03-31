@@ -8,15 +8,12 @@ pub fn ServerMux(comptime lib: type, comptime ServerType: type) type {
         const Self = @This();
 
         pub const Topic = Chunk.Topic;
-        pub const RequestId = Chunk.RequestId;
         pub const Request = struct {
             conn_handle: u16,
             service_uuid: u16,
             char_uuid: u16,
             topic: Topic,
-            request_id: ?RequestId = null,
-            // Raw read-start metadata bytes after the magic prefix.
-            data: []const u8 = &.{},
+            metadata: []const u8 = &.{},
         };
         pub const HandlerFn = *const fn (?*anyopaque, *const Request, *ServerType.ReadXResponseWriter) void;
 
@@ -56,12 +53,12 @@ pub fn ServerMux(comptime lib: type, comptime ServerType: type) type {
                 return;
             };
             const self: *Self = @ptrCast(@alignCast(raw));
-            const meta = Chunk.decodeReadStartMetadata(req.data) catch {
+            const topic = req.topic orelse {
                 rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                 return;
             };
 
-            const route = self.routes.get(meta.topic) orelse {
+            const route = self.routes.get(topic) orelse {
                 rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                 return;
             };
@@ -70,9 +67,8 @@ pub fn ServerMux(comptime lib: type, comptime ServerType: type) type {
                 .conn_handle = req.conn_handle,
                 .service_uuid = req.service_uuid,
                 .char_uuid = req.char_uuid,
-                .topic = meta.topic,
-                .request_id = meta.request_id,
-                .data = req.data,
+                .topic = topic,
+                .metadata = req.metadata,
             };
             route.handler(route.ctx, &mux_req, rw);
         }
@@ -87,7 +83,8 @@ test "bt/unit_tests/host/xfer/ServerMux/handle_rejects_duplicate_topics" {
             conn_handle: u16,
             service_uuid: u16,
             char_uuid: u16,
-            data: []const u8 = &.{},
+            topic: ?Chunk.Topic = null,
+            metadata: []const u8 = &.{},
         };
         pub const ReadXResponseWriter = struct {
             pub fn write(_: *@This(), _: []const u8) void {}
@@ -110,4 +107,46 @@ test "bt/unit_tests/host/xfer/ServerMux/handle_rejects_duplicate_topics" {
 
     try mux.handle(1, Handler.handle, null);
     try std.testing.expectError(error.DuplicateTopic, mux.handle(1, Handler.handle, null));
+}
+
+test "bt/unit_tests/host/xfer/ServerMux/xHandler_rejects_null_topic" {
+    const std = @import("std");
+
+    const FakeServer = struct {
+        pub const ReadXRequest = struct {
+            conn_handle: u16,
+            service_uuid: u16,
+            char_uuid: u16,
+            topic: ?Chunk.Topic = null,
+            metadata: []const u8 = &.{},
+        };
+        pub const ReadXResponseWriter = struct {
+            err_code: ?u8 = null,
+
+            pub fn write(_: *@This(), _: []const u8) void {}
+
+            pub fn err(self: *@This(), code: u8) void {
+                self.err_code = code;
+            }
+        };
+        pub const XHandler = struct {
+            read: ?*const fn (?*anyopaque, *const ReadXRequest, *ReadXResponseWriter) void = null,
+            write: ?*const fn (?*anyopaque, *const anyopaque) void = null,
+        };
+    };
+
+    const Mux = ServerMux(std, FakeServer);
+    var mux = Mux.init(std.testing.allocator);
+    defer mux.deinit();
+
+    var rw = FakeServer.ReadXResponseWriter{};
+    const req: FakeServer.ReadXRequest = .{
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+    };
+
+    const handler = mux.xHandler();
+    handler.read.?( &mux, &req, &rw);
+    try std.testing.expectEqual(@as(?u8, @intFromEnum(att.ErrorCode.request_not_supported)), rw.err_code);
 }
