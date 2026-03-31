@@ -94,11 +94,13 @@ Client and server must use the same effective MTU for the same connection.
 It sends:
 
 ```text
-[read_start_magic][topic_id][request_id?]
+[read_start_magic][topic_id][metadata...]
 ```
 
-Current routing uses a binary `topic_id` (`u64`). An optional `request_id`
-(`u32`) can also be carried for correlation when a protocol needs it.
+Current routing uses a binary `topic_id` (`u64`). Any remaining bytes after
+that fixed-width topic are request metadata.
+
+`get()` emits `topic_id` plus caller-provided metadata.
 
 This is HTTP-like in intent, not literal HTTP:
 
@@ -116,7 +118,8 @@ Client side:
 
 - `Characteristic.readX(allocator)` reads a chunked response body
 - `Characteristic.writeX(data)` writes a chunked request body
-- `Characteristic.get(topic, allocator)` performs a topic-routed GET-like read
+- `Characteristic.get(topic, metadata, allocator)` performs a topic-routed
+  GET-like read
 
 Server side:
 
@@ -126,19 +129,22 @@ Server side:
   single xfer characteristic
 - `ServerMux.xHandler()` adapts the mux back into `handleX(... .read = ...)`
 
-`ServerMux.Request.data` exposes the raw metadata bytes after the magic prefix.
-That means the topic and optional request id are still present in `data`.
+`ReadXRequest` exposes `topic` and trailing `metadata` as separate fields.
+`ServerMux.Request` keeps the same split, but with a required `topic` because
+mux routing only applies to topic-addressed requests.
 
 ## Constraints
 
 - `xfer` requires notify or indicate delivery on the characteristic
 - `readX` and `get()` depend on a subscription-backed response stream
 - `writeX` still enters through ATT writes; only the body is chunked
+- one `(connection, characteristic)` supports at most one active read transfer at
+  a time; an identical re-request is treated as a replay, but a different
+  request must wait for the current read to finish
 - one connection may have independent xfer state per routed characteristic
 - the xfer engine owns xfer session cleanup; `host.Server` stays generic
 
 ## Future direction
 
-- the metadata format leaves room for request correlation through `request_id`
 - async accept-now, reply-later patterns should build on the existing topic and
-  request-id model rather than replacing the chunk transport
+  metadata model rather than replacing the chunk transport

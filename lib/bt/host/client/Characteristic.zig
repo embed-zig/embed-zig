@@ -61,8 +61,8 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
             return xfer.read(self, allocator);
         }
 
-        pub fn get(self: *Self, topic: xfer.Topic, allocator: lib.mem.Allocator) ![]u8 {
-            return xfer.get(self, topic, allocator);
+        pub fn get(self: *Self, topic: xfer.Topic, metadata: []const u8, allocator: lib.mem.Allocator) ![]u8 {
+            return xfer.get(self, topic, metadata, allocator);
         }
 
         pub fn subscribe(self: *Self) ClientType.GattError!SubscriptionType {

@@ -74,6 +74,8 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
             service_uuid: u16,
             char_uuid: u16,
             mode: PushMode,
+            topic: ?Chunk.Topic = null,
+            request_metadata: []u8,
             data: []u8,
             total: u16,
             dcs: usize,
@@ -111,6 +113,7 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
             fn deinit(self: *ConnState, allocator: lib.mem.Allocator) void {
                 var read_iter = self.read_x_states.iterator();
                 while (read_iter.next()) |entry| {
+                    allocator.free(entry.value_ptr.request_metadata);
                     allocator.free(entry.value_ptr.data);
                 }
 
@@ -265,6 +268,10 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
             return @max(att.DEFAULT_MTU, @min(mtu, att.MAX_MTU));
         }
 
+        fn readStartMatchesState(state: ReadXState, request_meta: Chunk.ReadStartMetadata) bool {
+            return state.topic == request_meta.topic and lib.mem.eql(u8, state.request_metadata, request_meta.metadata);
+        }
+
         fn getOrPutConnLocked(self: *Self, conn_handle: u16) !*ConnState {
             const gop = try self.conns.getOrPut(self.allocator, conn_handle);
             if (!gop.found_existing) {
@@ -338,12 +345,38 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
             var buffered = BufferedResponseState{ .allocator = self.allocator };
             defer buffered.deinit();
 
+            const request_meta = Chunk.decodeReadStartMetadata(req.data[Chunk.read_start_magic.len..]) catch {
+                rw.err(@intFromEnum(att.ErrorCode.invalid_attribute_value_length));
+                return;
+            };
+
+            self.mutex.lock();
+            const existing_read = blk: {
+                const conn = self.conns.getPtr(req.conn_handle) orelse break :blk null;
+                break :blk conn.read_x_states.get(charKey(req.service_uuid, req.char_uuid));
+            };
+            self.mutex.unlock();
+            if (existing_read) |state| {
+                if (!readStartMatchesState(state, request_meta)) {
+                    rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                    return;
+                }
+                rw.ok();
+                self.sendReadXChunks(req.conn_handle, req.service_uuid, req.char_uuid, null) catch {
+                    self.mutex.lock();
+                    self.clearReadXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
+                    self.mutex.unlock();
+                };
+                return;
+            }
+
             var handler_rw = buffered.writer();
             const handler_req: ReadXRequest = .{
                 .conn_handle = req.conn_handle,
                 .service_uuid = req.service_uuid,
                 .char_uuid = req.char_uuid,
-                .data = req.data[Chunk.read_start_magic.len..],
+                .topic = request_meta.topic,
+                .metadata = request_meta.metadata,
             };
             read_handler(route.ctx, &handler_req, &handler_rw);
 
@@ -352,25 +385,48 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
                 return;
             }
 
+            const owned_request_metadata = self.allocator.dupe(u8, request_meta.metadata) catch {
+                rw.err(@intFromEnum(att.ErrorCode.insufficient_resources));
+                return;
+            };
             const payload = buffered.takeOwned() catch {
+                self.allocator.free(owned_request_metadata);
                 rw.err(@intFromEnum(att.ErrorCode.insufficient_resources));
                 return;
             };
 
             self.mutex.lock();
-            self.clearReadXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
             self.clearWriteXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
             const conn = self.conns.getPtr(req.conn_handle) orelse {
                 self.mutex.unlock();
+                self.allocator.free(owned_request_metadata);
                 self.allocator.free(payload);
                 rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                 return;
             };
+            if (conn.read_x_states.get(charKey(req.service_uuid, req.char_uuid))) |state| {
+                const same_request = readStartMatchesState(state, request_meta);
+                self.mutex.unlock();
+                self.allocator.free(owned_request_metadata);
+                self.allocator.free(payload);
+                if (!same_request) {
+                    rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                    return;
+                }
+                rw.ok();
+                self.sendReadXChunks(req.conn_handle, req.service_uuid, req.char_uuid, null) catch {
+                    self.mutex.lock();
+                    self.clearReadXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
+                    self.mutex.unlock();
+                };
+                return;
+            }
             const mtu = effectiveMtu(conn.att_mtu);
             const dcs = Chunk.dataChunkSize(mtu);
             const total_usize = if (payload.len == 0) 1 else Chunk.chunksNeeded(payload.len, mtu);
             if (total_usize > Chunk.max_chunks) {
                 self.mutex.unlock();
+                self.allocator.free(owned_request_metadata);
                 self.allocator.free(payload);
                 rw.err(@intFromEnum(att.ErrorCode.invalid_attribute_value_length));
                 return;
@@ -380,11 +436,14 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
                 .service_uuid = req.service_uuid,
                 .char_uuid = req.char_uuid,
                 .mode = mode,
+                .topic = request_meta.topic,
+                .request_metadata = owned_request_metadata,
                 .data = payload,
                 .total = @intCast(total_usize),
                 .dcs = dcs,
             }) catch {
                 self.mutex.unlock();
+                self.allocator.free(owned_request_metadata);
                 self.allocator.free(payload);
                 rw.err(@intFromEnum(att.ErrorCode.insufficient_resources));
                 return;
@@ -694,6 +753,7 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
         fn resetXferStatesInConn(conn: *ConnState, allocator: lib.mem.Allocator) void {
             var read_iter = conn.read_x_states.iterator();
             while (read_iter.next()) |entry| {
+                allocator.free(entry.value_ptr.request_metadata);
                 allocator.free(entry.value_ptr.data);
             }
 
@@ -709,6 +769,7 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
         fn clearReadXStateInConnLocked(self: *Self, conn: *ConnState, key: CharKey) void {
             const state = conn.read_x_states.get(key) orelse return;
             _ = conn.read_x_states.remove(key);
+            self.allocator.free(state.request_metadata);
             self.allocator.free(state.data);
         }
 
@@ -874,6 +935,258 @@ test "bt/unit_tests/host/xfer/Server/handleXReadStart_clears_state_when_initial_
     try std.testing.expect(conn.read_x_states.get(Engine.charKey(0x180D, 0x2A57)) == null);
 }
 
+test "bt/unit_tests/host/xfer/Server/handleXReadStart_splits_topic_and_metadata" {
+    const std = @import("std");
+
+    const FakeHost = struct {
+        pub const PushMode = enum {
+            notify,
+            indicate,
+        };
+
+        fn push(_: *@This(), _: u16, _: u16, _: PushMode, _: []const u8) !void {}
+    };
+    const Engine = Server(std, FakeHost);
+
+    const RwState = struct {
+        ok_calls: usize = 0,
+        err_code: ?u8 = null,
+
+        fn writeFn(_: *anyopaque, _: []const u8) void {}
+
+        fn okFn(ptr: *anyopaque) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.ok_calls += 1;
+        }
+
+        fn errFn(ptr: *anyopaque, code: u8) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.err_code = code;
+        }
+    };
+
+    const HandlerState = struct {
+        seen_topic: ?Chunk.Topic = null,
+        seen_metadata: [3]u8 = [_]u8{0} ** 3,
+        metadata_len: usize = 0,
+
+        fn handle(ctx: ?*anyopaque, req: *const Engine.ReadXRequest, rw: *Engine.ReadXResponseWriter) void {
+            const self: *@This() = @ptrCast(@alignCast(ctx.?));
+            self.seen_topic = req.topic;
+            self.metadata_len = @min(self.seen_metadata.len, req.metadata.len);
+            @memcpy(self.seen_metadata[0..self.metadata_len], req.metadata[0..self.metadata_len]);
+            rw.write("ok");
+        }
+    };
+
+    var host = FakeHost{};
+    var engine = Engine.init(std.testing.allocator);
+    defer engine.deinit();
+    engine.bind(&host);
+
+    try engine.conns.put(std.testing.allocator, 1, .{});
+    const conn = engine.conns.getPtr(1).?;
+    try conn.push_modes.put(std.testing.allocator, Engine.charKey(0x180D, 0x2A57), .notify);
+
+    var handler_state = HandlerState{};
+    const route: Engine.Route = .{
+        .callbacks = .{ .read = HandlerState.handle },
+        .ctx = &handler_state,
+    };
+
+    var rw_state = RwState{};
+    var rw = bt.Peripheral.ResponseWriter{
+        ._impl = &rw_state,
+        ._write_fn = RwState.writeFn,
+        ._ok_fn = RwState.okFn,
+        ._err_fn = RwState.errFn,
+    };
+
+    var payload: [Chunk.read_start_magic.len + Chunk.topic_size + 3]u8 = undefined;
+    @memcpy(payload[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
+    const encoded = Chunk.encodeReadStartMetadata(
+        payload[Chunk.read_start_magic.len..],
+        0x0102030405060708,
+        &.{ 0xAA, 0xBB, 0xCC },
+    );
+    const req: bt.Peripheral.Request = .{
+        .op = .write,
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+        .data = payload[0 .. Chunk.read_start_magic.len + encoded.len],
+    };
+
+    engine.handleXReadStart(route, &req, &rw);
+
+    try std.testing.expectEqual(@as(usize, 1), rw_state.ok_calls);
+    try std.testing.expectEqual(@as(?u8, null), rw_state.err_code);
+    try std.testing.expectEqual(@as(?Chunk.Topic, 0x0102030405060708), handler_state.seen_topic);
+    try std.testing.expectEqual(@as(usize, 3), handler_state.metadata_len);
+    try std.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC }, handler_state.seen_metadata[0..handler_state.metadata_len]);
+}
+
+test "bt/unit_tests/host/xfer/Server/handleXReadStart_replays_same_request_but_rejects_different_active_request" {
+    const std = @import("std");
+
+    const FakeHost = struct {
+        pub const PushMode = enum {
+            notify,
+            indicate,
+        };
+
+        push_calls: usize = 0,
+
+        fn push(self: *@This(), _: u16, _: u16, _: PushMode, _: []const u8) !void {
+            self.push_calls += 1;
+        }
+    };
+    const Engine = Server(std, FakeHost);
+
+    const RwState = struct {
+        ok_calls: usize = 0,
+        err_code: ?u8 = null,
+
+        fn writeFn(_: *anyopaque, _: []const u8) void {}
+
+        fn okFn(ptr: *anyopaque) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.ok_calls += 1;
+        }
+
+        fn errFn(ptr: *anyopaque, code: u8) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.err_code = code;
+        }
+    };
+
+    const HandlerState = struct {
+        calls: usize = 0,
+
+        fn handle(ctx: ?*anyopaque, _: *const Engine.ReadXRequest, rw: *Engine.ReadXResponseWriter) void {
+            const self: *@This() = @ptrCast(@alignCast(ctx.?));
+            self.calls += 1;
+            rw.write("fresh");
+        }
+    };
+
+    var host = FakeHost{};
+    var engine = Engine.init(std.testing.allocator);
+    defer engine.deinit();
+    engine.bind(&host);
+
+    try engine.conns.put(std.testing.allocator, 1, .{});
+    const conn = engine.conns.getPtr(1).?;
+    const key = Engine.charKey(0x180D, 0x2A57);
+    try conn.push_modes.put(std.testing.allocator, key, .notify);
+    const payload = try std.testing.allocator.dupe(u8, "cached");
+    const request_metadata = try std.testing.allocator.dupe(u8, "alpha?");
+    try conn.read_x_states.put(std.testing.allocator, key, .{
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+        .mode = .notify,
+        .topic = 0x0102030405060708,
+        .request_metadata = request_metadata,
+        .data = payload,
+        .total = 1,
+        .dcs = payload.len,
+    });
+
+    var handler_state = HandlerState{};
+    const route: Engine.Route = .{
+        .callbacks = .{ .read = HandlerState.handle },
+        .ctx = &handler_state,
+    };
+
+    var same_rw_state = RwState{};
+    var same_rw = bt.Peripheral.ResponseWriter{
+        ._impl = &same_rw_state,
+        ._write_fn = RwState.writeFn,
+        ._ok_fn = RwState.okFn,
+        ._err_fn = RwState.errFn,
+    };
+    var same_payload: [Chunk.read_start_magic.len + Chunk.topic_size + 6]u8 = undefined;
+    @memcpy(same_payload[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
+    const same_encoded = Chunk.encodeReadStartMetadata(
+        same_payload[Chunk.read_start_magic.len..],
+        0x0102030405060708,
+        "alpha?",
+    );
+    const same_req: bt.Peripheral.Request = .{
+        .op = .write,
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+        .data = same_payload[0 .. Chunk.read_start_magic.len + same_encoded.len],
+    };
+
+    engine.handleXReadStart(route, &same_req, &same_rw);
+    try std.testing.expectEqual(@as(usize, 0), handler_state.calls);
+    try std.testing.expectEqual(@as(usize, 1), same_rw_state.ok_calls);
+    try std.testing.expectEqual(@as(?u8, null), same_rw_state.err_code);
+    try std.testing.expectEqual(@as(usize, 1), host.push_calls);
+
+    var different_rw_state = RwState{};
+    var different_rw = bt.Peripheral.ResponseWriter{
+        ._impl = &different_rw_state,
+        ._write_fn = RwState.writeFn,
+        ._ok_fn = RwState.okFn,
+        ._err_fn = RwState.errFn,
+    };
+    var different_payload: [Chunk.read_start_magic.len + Chunk.topic_size + 5]u8 = undefined;
+    @memcpy(different_payload[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
+    const different_encoded = Chunk.encodeReadStartMetadata(
+        different_payload[Chunk.read_start_magic.len..],
+        0x1112131415161718,
+        "beta!",
+    );
+    const different_req: bt.Peripheral.Request = .{
+        .op = .write,
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+        .data = different_payload[0 .. Chunk.read_start_magic.len + different_encoded.len],
+    };
+
+    engine.handleXReadStart(route, &different_req, &different_rw);
+    try std.testing.expectEqual(@as(usize, 0), handler_state.calls);
+    try std.testing.expectEqual(@as(usize, 0), different_rw_state.ok_calls);
+    try std.testing.expectEqual(@as(?u8, @intFromEnum(att.ErrorCode.request_not_supported)), different_rw_state.err_code);
+    try std.testing.expectEqual(@as(usize, 1), host.push_calls);
+    const active = conn.read_x_states.get(key) orelse return error.MissingReadState;
+    try std.testing.expectEqual(@as(?Chunk.Topic, 0x0102030405060708), active.topic);
+    try std.testing.expectEqualSlices(u8, "alpha?", active.request_metadata);
+
+    var same_topic_rw_state = RwState{};
+    var same_topic_rw = bt.Peripheral.ResponseWriter{
+        ._impl = &same_topic_rw_state,
+        ._write_fn = RwState.writeFn,
+        ._ok_fn = RwState.okFn,
+        ._err_fn = RwState.errFn,
+    };
+    var same_topic_payload: [Chunk.read_start_magic.len + Chunk.topic_size + 8]u8 = undefined;
+    @memcpy(same_topic_payload[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
+    const same_topic_encoded = Chunk.encodeReadStartMetadata(
+        same_topic_payload[Chunk.read_start_magic.len..],
+        0x0102030405060708,
+        "changed!",
+    );
+    const same_topic_req: bt.Peripheral.Request = .{
+        .op = .write,
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+        .data = same_topic_payload[0 .. Chunk.read_start_magic.len + same_topic_encoded.len],
+    };
+
+    engine.handleXReadStart(route, &same_topic_req, &same_topic_rw);
+    try std.testing.expectEqual(@as(usize, 0), handler_state.calls);
+    try std.testing.expectEqual(@as(usize, 0), same_topic_rw_state.ok_calls);
+    try std.testing.expectEqual(@as(?u8, @intFromEnum(att.ErrorCode.request_not_supported)), same_topic_rw_state.err_code);
+    try std.testing.expectEqual(@as(usize, 1), host.push_calls);
+}
+
 test "bt/unit_tests/host/xfer/Server/handleXWriteChunk_ack_failure_clears_state_before_handler" {
     const std = @import("std");
 
@@ -1023,6 +1336,8 @@ test "bt/unit_tests/host/xfer/Server/handleXReadLossList_rejects_out_of_range_se
         .service_uuid = 0x180D,
         .char_uuid = 0x2A57,
         .mode = .notify,
+        .topic = null,
+        .request_metadata = try std.testing.allocator.dupe(u8, &.{}),
         .data = payload,
         .total = 2,
         .dcs = 3,

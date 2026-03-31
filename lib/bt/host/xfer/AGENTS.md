@@ -101,16 +101,15 @@ The protocol must allow request metadata after the control prefix.
 Example future GET-like start packet:
 
 ```text
-[read_start_magic][topic_id][request_id?]
+[read_start_magic][topic_id][metadata...]
 ```
 
 Interpretation:
 
 - `topic_id` identifies the logical endpoint or resource
-- `request_id` identifies a specific in-flight request
 
-Do not conflate those fields. Even if the first implementation only uses a
-topic id, the layout should leave room for request correlation later.
+Any remaining bytes after `topic_id` are request metadata for that logical
+endpoint.
 
 ## Topic model
 
@@ -120,8 +119,7 @@ text path string on the wire.
 Current direction:
 
 - `topic_id` can fit in 8 bytes
-- `request_id` can fit in 4 bytes if needed
-- a 12-byte request header after the magic is enough for the initial design
+- request metadata follows the fixed-width topic id
 
 One characteristic should be able to host multiple logical topics.
 
@@ -150,7 +148,6 @@ Fast synchronous handlers are fine for the base protocol.
 The package layout must not block future async behavior, such as:
 
 - accept-now, reply-later flows
-- correlating later notifications with `request_id`
 - background work completing a response after the initial control write
 
 ## Migration direction
@@ -328,9 +325,8 @@ Planned work:
 
 Expected initial request model:
 
-- `read_x` start packet can carry `[read_start_magic][topic_id][request_id?]`
+- `read_x` start packet can carry `[read_start_magic][topic_id][metadata...]`
 - `topic_id` selects the logical endpoint
-- `request_id` remains reserved for future correlation or async flows
 
 Acceptance criteria:
 
@@ -380,8 +376,7 @@ These are intentionally deferred until the transport split is complete:
 
 - polished end-user docs or README updates
 - async accept-now, reply-later response flows
-- making `request_id` mandatory in the first wire format revision
-- richer request metadata beyond fixed-size topic and request identifiers
+- richer request metadata conventions above the fixed-size topic identifier
 - broader RPC features beyond the first topic-based GET-like design
 
 ### Execution order

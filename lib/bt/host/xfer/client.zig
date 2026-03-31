@@ -56,13 +56,18 @@ pub fn write(characteristic: anytype, data: []const u8) !void {
     }
 }
 
-pub fn get(characteristic: anytype, topic: Topic, allocator: embed.mem.Allocator) ![]u8 {
+pub fn get(characteristic: anytype, topic: Topic, metadata: []const u8, allocator: embed.mem.Allocator) ![]u8 {
     comptime requireReadableCharacteristic(@TypeOf(characteristic));
 
-    var request: [Chunk.read_start_magic.len + Chunk.topic_size]u8 = undefined;
+    const request = try allocator.alloc(
+        u8,
+        Chunk.read_start_magic.len + Chunk.topic_size + metadata.len,
+    );
+    defer allocator.free(request);
+
     @memcpy(request[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
-    _ = Chunk.encodeReadStartMetadata(request[Chunk.read_start_magic.len..], topic, null);
-    return readRequest(characteristic, &request, allocator);
+    _ = Chunk.encodeReadStartMetadata(request[Chunk.read_start_magic.len..], topic, metadata);
+    return readRequest(characteristic, request, allocator);
 }
 
 fn readRequest(characteristic: anytype, request: []const u8, allocator: embed.mem.Allocator) ![]u8 {
@@ -379,6 +384,168 @@ test "bt/unit_tests/host/xfer/client/read_retries_request_before_first_chunk_arr
 
     try std.testing.expectEqual(@as(usize, 3), characteristic.start_writes);
     try std.testing.expectEqual(@as(usize, 1), characteristic.ack_writes);
+    try std.testing.expectEqualSlices(u8, "hello", payload);
+}
+
+test "bt/unit_tests/host/xfer/client/get_sends_topic_and_metadata" {
+    const std = @import("std");
+
+    const Message = struct {
+        data: [Chunk.header_size + 2]u8 = undefined,
+        len: usize = 0,
+
+        fn payload(self: *const @This()) []const u8 {
+            return self.data[0..self.len];
+        }
+    };
+
+    const FakeSubscription = struct {
+        delivered: bool = false,
+        msg: Message,
+
+        fn deinit(_: *@This()) void {}
+
+        fn next(self: *@This(), _: u32) !?Message {
+            if (self.delivered) return null;
+            self.delivered = true;
+            return self.msg;
+        }
+    };
+
+    const FakeCharacteristic = struct {
+        mtu: u16 = 30,
+        writes: [2][Chunk.read_start_magic.len + Chunk.topic_size + 4]u8 = undefined,
+        lens: [2]usize = [_]usize{0} ** 2,
+        write_count: usize = 0,
+        subscription: FakeSubscription,
+
+        fn attMtu(self: *const @This()) u16 {
+            return self.mtu;
+        }
+
+        fn subscribe(self: *@This()) !*FakeSubscription {
+            return &self.subscription;
+        }
+
+        fn write(self: *@This(), data: []const u8) !void {
+            @memcpy(self.writes[self.write_count][0..data.len], data);
+            self.lens[self.write_count] = data.len;
+            self.write_count += 1;
+        }
+    };
+
+    var msg = Message{};
+    const hdr = (Chunk.Header{ .total = 1, .seq = 1 }).encode();
+    @memcpy(msg.data[0..Chunk.header_size], &hdr);
+    @memcpy(msg.data[Chunk.header_size .. Chunk.header_size + 2], "ok");
+    msg.len = Chunk.header_size + 2;
+
+    var characteristic = FakeCharacteristic{
+        .subscription = .{ .msg = msg },
+    };
+    const payload = try get(&characteristic, 0x0102030405060708, "meta", std.testing.allocator);
+    defer std.testing.allocator.free(payload);
+
+    var expected: [Chunk.read_start_magic.len + Chunk.topic_size + 4]u8 = undefined;
+    @memcpy(expected[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
+    const expected_len = Chunk.read_start_magic.len + Chunk.encodeReadStartMetadata(
+        expected[Chunk.read_start_magic.len..],
+        0x0102030405060708,
+        "meta",
+    ).len;
+
+    try std.testing.expectEqual(@as(usize, 2), characteristic.write_count);
+    try std.testing.expectEqual(expected_len, characteristic.lens[0]);
+    try std.testing.expectEqualSlices(u8, expected[0..expected_len], characteristic.writes[0][0..characteristic.lens[0]]);
+    try std.testing.expectEqual(@as(usize, Chunk.ack_signal.len), characteristic.lens[1]);
+    try std.testing.expectEqualSlices(u8, &Chunk.ack_signal, characteristic.writes[1][0..characteristic.lens[1]]);
+    try std.testing.expectEqualSlices(u8, "ok", payload);
+}
+
+test "bt/unit_tests/host/xfer/client/get_retries_same_topic_and_metadata_before_first_chunk" {
+    const std = @import("std");
+
+    const Message = struct {
+        data: [Chunk.header_size + 5]u8 = undefined,
+        len: usize = 0,
+
+        fn payload(self: *const @This()) []const u8 {
+            return self.data[0..self.len];
+        }
+    };
+
+    const FakeSubscription = struct {
+        step: usize = 0,
+        msg: Message,
+
+        fn deinit(_: *@This()) void {}
+
+        fn next(self: *@This(), _: u32) !?Message {
+            switch (self.step) {
+                0, 1 => {
+                    self.step += 1;
+                    return error.TimedOut;
+                },
+                2 => {
+                    self.step += 1;
+                    return self.msg;
+                },
+                else => return null,
+            }
+        }
+    };
+
+    const FakeCharacteristic = struct {
+        mtu: u16 = 30,
+        writes: [4][Chunk.read_start_magic.len + Chunk.topic_size + 4]u8 = undefined,
+        lens: [4]usize = [_]usize{0} ** 4,
+        write_count: usize = 0,
+        subscription: FakeSubscription,
+
+        fn attMtu(self: *const @This()) u16 {
+            return self.mtu;
+        }
+
+        fn subscribe(self: *@This()) !*FakeSubscription {
+            return &self.subscription;
+        }
+
+        fn write(self: *@This(), data: []const u8) !void {
+            @memcpy(self.writes[self.write_count][0..data.len], data);
+            self.lens[self.write_count] = data.len;
+            self.write_count += 1;
+        }
+    };
+
+    var msg = Message{};
+    const hdr = (Chunk.Header{ .total = 1, .seq = 1 }).encode();
+    @memcpy(msg.data[0..Chunk.header_size], &hdr);
+    @memcpy(msg.data[Chunk.header_size .. Chunk.header_size + 5], "hello");
+    msg.len = Chunk.header_size + 5;
+
+    var characteristic = FakeCharacteristic{
+        .subscription = .{ .msg = msg },
+    };
+    const payload = try get(&characteristic, 0x0102030405060708, "meta", std.testing.allocator);
+    defer std.testing.allocator.free(payload);
+
+    var expected: [Chunk.read_start_magic.len + Chunk.topic_size + 4]u8 = undefined;
+    @memcpy(expected[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
+    const expected_len = Chunk.read_start_magic.len + Chunk.encodeReadStartMetadata(
+        expected[Chunk.read_start_magic.len..],
+        0x0102030405060708,
+        "meta",
+    ).len;
+
+    try std.testing.expectEqual(@as(usize, 4), characteristic.write_count);
+    try std.testing.expectEqual(expected_len, characteristic.lens[0]);
+    try std.testing.expectEqual(expected_len, characteristic.lens[1]);
+    try std.testing.expectEqual(expected_len, characteristic.lens[2]);
+    try std.testing.expectEqualSlices(u8, expected[0..expected_len], characteristic.writes[0][0..characteristic.lens[0]]);
+    try std.testing.expectEqualSlices(u8, expected[0..expected_len], characteristic.writes[1][0..characteristic.lens[1]]);
+    try std.testing.expectEqualSlices(u8, expected[0..expected_len], characteristic.writes[2][0..characteristic.lens[2]]);
+    try std.testing.expectEqual(@as(usize, Chunk.ack_signal.len), characteristic.lens[3]);
+    try std.testing.expectEqualSlices(u8, &Chunk.ack_signal, characteristic.writes[3][0..characteristic.lens[3]]);
     try std.testing.expectEqualSlices(u8, "hello", payload);
 }
 
