@@ -7,6 +7,7 @@ const lib_testing = @import("build/lib/testing.zig");
 const lib_context = @import("build/lib/context.zig");
 const lib_sync = @import("build/lib/sync.zig");
 const lib_io = @import("build/lib/io.zig");
+const lib_drivers = @import("build/lib/drivers.zig");
 const lib_net = @import("build/lib/net.zig");
 const lib_mime = @import("build/lib/mime.zig");
 const lib_bt = @import("build/lib/bt.zig");
@@ -24,6 +25,7 @@ const Libraries = struct {
     pub const context = lib_context;
     pub const sync = lib_sync;
     pub const io = lib_io;
+    pub const drivers = lib_drivers;
     pub const net = lib_net;
     pub const mime = lib_mime;
     pub const bt = lib_bt;
@@ -66,6 +68,7 @@ pub fn build(b: *std.Build) void {
     tests.addTest(b, "embed", null);
     tests.addTest(b, "embed_std", null);
     tests.addTest(b, "io", null);
+    tests.addTest(b, "drivers", null);
     tests.addTest(b, "net", null);
     tests.addTest(b, "mime", null);
     tests.addTest(b, "bt", null);
