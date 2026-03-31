@@ -12,6 +12,7 @@ const lib_net = @import("build/lib/net.zig");
 const lib_mime = @import("build/lib/mime.zig");
 const lib_bt = @import("build/lib/bt.zig");
 const lib_embed_std = @import("build/lib/embed_std.zig");
+const lib_zux = @import("build/lib/zux.zig");
 
 const pkg_core_bluetooth = @import("build/pkg/core_bluetooth.zig");
 const pkg_ogg = @import("build/pkg/ogg.zig");
@@ -30,6 +31,7 @@ const Libraries = struct {
     pub const mime = lib_mime;
     pub const bt = lib_bt;
     pub const embed_std = lib_embed_std;
+    pub const zux = lib_zux;
 };
 
 const Packages = struct {
@@ -76,6 +78,7 @@ pub fn build(b: *std.Build) void {
     tests.addTest(b, "context", null);
     tests.addTest(b, "testing", null);
     tests.addTest(b, "integration", null);
+    tests.addTest(b, "zux", null);
 
     if (b.modules.get("core_bluetooth") != null) tests.addTest(b, "core_bluetooth", null);
     if (b.modules.get("ogg") != null) tests.addTest(b, "ogg", pkg_ogg.linkTest);

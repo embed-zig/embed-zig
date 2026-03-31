@@ -5,6 +5,11 @@ pub const store = struct {
     pub const State = @import("zux/store/State.zig");
 };
 
+pub const event = @import("zux/event.zig");
 pub const Subscriber = store.Subscriber;
 pub const StoreObject = store.Object;
 pub const Store = @import("zux/Store.zig");
+
+test {
+    _ = @import("zux/event.zig");
+}
