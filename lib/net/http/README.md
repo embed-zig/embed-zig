@@ -1,9 +1,11 @@
 # lib/net/http
 
-Go-style HTTP building blocks plus an early high-level `Client` for `lib/net`.
+Go-style HTTP building blocks plus early `Client` and `Server` layers for
+`lib/net`.
 
-Today this package is centered on the client-side request/response model and
-the default transport. A first `Client` layer is landed; `Server` is not.
+Today this package is still centered on the shared request/response model and
+the default transport, but first-landed `Client` and `Server` facades are both
+present.
 
 ## Public Surface
 
@@ -14,6 +16,12 @@ the default transport. A first `Client` layer is landed; `Server` is not.
 - `Request`
 - `Response`
 - `status`
+- `Handler`
+- `HandlerFunc`
+- `ResponseWriter`
+- `ServeMux`
+- `StaticServeMux`
+- `Server`
 - `Client`
 - `RoundTripper`
 - `Transport`
@@ -55,22 +63,71 @@ Current scope boundary:
 - Treat `deinit()` as exclusive teardown: once shutdown begins, do not race more
   `Client` method calls against it from other threads.
 
+## Server
+
+`Server` is the listener/serve-loop side of `lib/net/http`.
+
+Current behavior:
+
+- `Server.init(...)`, `serve(listener)`, `close()`, `shutdown(ctx)`, `deinit()`
+- builds on `net.Listener` / `net.Conn`, not TCP-only concrete types
+- supports a per-server owned default `ServeMux` when no explicit handler is
+  supplied
+- supports explicit `StaticServeMux(...).init(...).handler()` routing for fixed
+  comptime route sets
+- supports `Server.handle(...)` / `Server.handleFunc(...)` forwarding onto that
+  owned local mux
+- parses HTTP/1.1 requests into the shared `Request` type
+- uses server-side `ResponseWriter` for status/header/body serialization
+- supports exact-route and subtree-route matching, longest-match-wins, slash
+  redirect, cleaned-path redirect, and default `404`
+- keeps the dynamic `ServeMux` and comptime-built `StaticServeMux` on the same
+  `Handler` boundary rather than giving `Server` a second dispatch path
+- supports single-connection keep-alive loops, read-header/read-body/write and
+  keep-alive-idle timeout controls, and close-on-unread-request-body behavior
+- supports graceful shutdown and hard close over borrowed listeners
+- uses listener stacking for TLS rather than a separate `ServeTLS`-style core
+
+Important scope boundary:
+
+- `Server` is intentionally the first HTTP/1.1 landing, not the final Go-parity
+  surface.
+- Method-aware routing, host-aware routing, `405` generation, package-global
+  defaults, and richer writer/extensions remain deferred.
+- `StaticServeMux` is intentionally still limited to the same exact / subtree /
+  catch-all routing surface as the dynamic `ServeMux`; path parameters and
+  richer routing grammar remain follow-up work.
+- Treat `Server` as single-lifecycle once `close()` or `shutdown(...)` begins;
+  the current implementation does not support re-serving the same instance on a
+  new listener after shutdown.
+- TLS configuration belongs on listener construction (`net.tls.Listener`), not
+  on `Server` itself.
+- Integration coverage is wired through the shared `integration_tests` runners;
+  more matrix expansion remains follow-up work.
+
 ### Example
 
 ```zig
 const embed = @import("embed").make(platform);
 const net = @import("net").make(embed);
 
-var client = try net.http.Client.init(embed.testing.allocator, .{});
-defer client.deinit();
+var server = try net.http.Server.init(embed.testing.allocator, .{});
+defer server.deinit();
 
-var resp = try client.get("https://example.com/");
-defer resp.deinit();
+try server.handleFunc("/hello", struct {
+    fn run(rw: *net.http.ResponseWriter, _: *net.http.Request) void {
+        rw.setHeader(net.http.Header.content_length, "5") catch return;
+        _ = rw.write("hello") catch {};
+    }
+}.run);
 
-const body = resp.body() orelse return error.MissingBody;
-var buf: [1024]u8 = undefined;
-const n = try body.read(&buf);
-embed.log.info("status={} body={s}", .{ resp.status_code, buf[0..n] });
+var listener = try net.listen(
+    embed.testing.allocator,
+    .{ .address = @import("net").netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 8080) },
+);
+defer listener.deinit();
+
+try server.serve(listener);
 ```
 
 ## Transport
@@ -209,14 +266,10 @@ These are the main remaining HTTP gaps today.
 - a built-in HTTP/2 transport behind the current
   `force_attempt_http2` / `alternate_protocols` handoff model
 
-## Next Planned Type
+## Server Direction
 
-The next major package-level structure should be `Server`.
-
-### Planned `Server`
-
-`Server` should be the package's listener/serve-loop side and own request
-parsing plus response writing.
+The current `Server` landing follows the Go-style listener/serve-loop model and
+keeps request parsing plus response writing on the server side.
 
 Likely responsibilities:
 
