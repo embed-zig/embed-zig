@@ -15,6 +15,12 @@ const collections_runner = @import("integration/collections.zig");
 const crypto_runner = @import("integration/crypto.zig");
 const random_runner = @import("integration/random.zig");
 
+fn withStackSize(tr: testing_mod.TestRunner, stack_size: usize) testing_mod.TestRunner {
+    var r = tr;
+    r.spawn_config = .{ .stack_size = stack_size };
+    return r;
+}
+
 pub fn make(comptime lib: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
@@ -26,8 +32,6 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.parallel();
-
             t.run("thread", thread_runner.make(lib));
             t.run("log", log_runner.make(lib));
             t.run("context", context_runner.make(lib));
@@ -37,7 +41,7 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             t.run("mem", mem_runner.make(lib));
             t.run("fmt", fmt_runner.make(lib));
             t.run("collections", collections_runner.make(lib));
-            t.run("crypto", crypto_runner.make(lib));
+            t.run("crypto", withStackSize(crypto_runner.make(lib), 65536));
             t.run("random", random_runner.make(lib));
             return true;
         }

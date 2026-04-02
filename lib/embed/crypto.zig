@@ -75,7 +75,16 @@ pub fn make(comptime Impl: type) type {
                 pub const HkdfSha384 = makeHkdf(Impl.HkdfSha384);
 
                 pub fn Hkdf(comptime Hmac: type) type {
-                    return makeHkdf(re_export.Hkdf(unwrapInnerType(Hmac)));
+                    const Inner = unwrapInnerType(Hmac);
+
+                    if (@hasDecl(Impl, "HmacSha256") and @hasDecl(Impl, "HkdfSha256") and Inner == Impl.HmacSha256) {
+                        return makeHkdf(Impl.HkdfSha256);
+                    }
+                    if (@hasDecl(Impl, "HmacSha384") and @hasDecl(Impl, "HkdfSha384") and Inner == Impl.HmacSha384) {
+                        return makeHkdf(Impl.HkdfSha384);
+                    }
+
+                    return makeHkdf(re_export.Hkdf(Inner));
                 }
             };
         };
@@ -227,6 +236,11 @@ fn makeAead(comptime Impl: type) type {
         pub const nonce_length = Impl.nonce_length;
         pub const key_length = Impl.key_length;
 
+        pub fn isAvailable() bool {
+            if (@hasDecl(Impl, "isAvailable")) return Impl.isAvailable();
+            return true;
+        }
+
         pub fn encrypt(c: []u8, tag: *[tag_length]u8, m: []const u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) void {
             Impl.encrypt(c, tag, m, ad, npub, key);
         }
@@ -291,6 +305,11 @@ fn makeEd25519(comptime Impl: type) type {
         pub const Signature = Impl.Signature;
         pub const PublicKey = Impl.PublicKey;
         pub const SecretKey = Impl.SecretKey;
+
+        pub fn isAvailable() bool {
+            if (@hasDecl(Impl, "isAvailable")) return Impl.isAvailable();
+            return true;
+        }
     };
 }
 
@@ -354,6 +373,11 @@ fn makeX25519(comptime Impl: type) type {
         pub const shared_length = Impl.shared_length;
         pub const seed_length = Impl.seed_length;
         pub const KeyPair = Impl.KeyPair;
+
+        pub fn isAvailable() bool {
+            if (@hasDecl(Impl, "isAvailable")) return Impl.isAvailable();
+            return true;
+        }
 
         pub fn recoverPublicKey(secret_key: [secret_length]u8) re_export.IdentityElementError![public_length]u8 {
             return Impl.recoverPublicKey(secret_key);

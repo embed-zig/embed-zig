@@ -118,26 +118,28 @@ fn aeadTests(comptime lib: type) !void {
         const A = entry[0];
         _ = entry[1];
 
-        var key: [A.key_length]u8 = undefined;
-        var nonce: [A.nonce_length]u8 = undefined;
-        @memset(&key, 0x42);
-        @memset(&nonce, 0x24);
+        if (A.isAvailable()) {
+            var key: [A.key_length]u8 = undefined;
+            var nonce: [A.nonce_length]u8 = undefined;
+            @memset(&key, 0x42);
+            @memset(&nonce, 0x24);
 
-        const plaintext = "crypto test msg!";
-        var ciphertext: [plaintext.len]u8 = undefined;
-        var tag: [A.tag_length]u8 = undefined;
+            const plaintext = "crypto test msg!";
+            var ciphertext: [plaintext.len]u8 = undefined;
+            var tag: [A.tag_length]u8 = undefined;
 
-        A.encrypt(&ciphertext, &tag, plaintext, "", nonce, key);
+            A.encrypt(&ciphertext, &tag, plaintext, "", nonce, key);
 
-        var decrypted: [plaintext.len]u8 = undefined;
-        try A.decrypt(&decrypted, &ciphertext, tag, "", nonce, key);
+            var decrypted: [plaintext.len]u8 = undefined;
+            try A.decrypt(&decrypted, &ciphertext, tag, "", nonce, key);
 
-        if (!lib.mem.eql(u8, plaintext, &decrypted)) return error.AeadDecryptMismatch;
+            if (!lib.mem.eql(u8, plaintext, &decrypted)) return error.AeadDecryptMismatch;
 
-        tag[0] ^= 0xff;
-        if (A.decrypt(&decrypted, &ciphertext, tag, "", nonce, key)) |_| {
-            return error.AeadShouldFailBadTag;
-        } else |_| {}
+            tag[0] ^= 0xff;
+            if (A.decrypt(&decrypted, &ciphertext, tag, "", nonce, key)) |_| {
+                return error.AeadShouldFailBadTag;
+            } else |_| {}
+        }
     }
 }
 
@@ -200,6 +202,8 @@ fn hkdfTests(comptime lib: type) !void {
 fn ed25519Tests(comptime lib: type) !void {
     const Ed = lib.crypto.sign.Ed25519;
 
+    if (!Ed.isAvailable()) return;
+
     if (Ed.noise_length != 32) return error.Ed25519NoiseLenWrong;
     if (Ed.KeyPair.seed_length != 32) return error.Ed25519SeedLenWrong;
     if (Ed.Signature.encoded_length != 64) return error.Ed25519SigLenWrong;
@@ -242,6 +246,8 @@ fn ecdsaTests(comptime lib: type) !void {
 
 fn x25519Tests(comptime lib: type) !void {
     const X = lib.crypto.dh.X25519;
+
+    if (!X.isAvailable()) return;
 
     if (X.secret_length != 32) return error.X25519SecretLenWrong;
     if (X.public_length != 32) return error.X25519PublicLenWrong;
