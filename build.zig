@@ -13,6 +13,7 @@ const lib_mime = @import("build/lib/mime.zig");
 const lib_bt = @import("build/lib/bt.zig");
 const lib_motion = @import("build/lib/motion.zig");
 const lib_wifi = @import("build/lib/wifi.zig");
+const lib_ledstrip = @import("build/lib/ledstrip.zig");
 const lib_embed_std = @import("build/lib/embed_std.zig");
 const lib_zux = @import("build/lib/zux.zig");
 
@@ -35,6 +36,7 @@ const Libraries = struct {
     pub const bt = lib_bt;
     pub const motion = lib_motion;
     pub const wifi = lib_wifi;
+    pub const ledstrip = lib_ledstrip;
     pub const embed_std = lib_embed_std;
     pub const zux = lib_zux;
 };
@@ -82,6 +84,7 @@ pub fn build(b: *std.Build) void {
     tests.addTest(b, "bt", null);
     tests.addTest(b, "motion", null);
     tests.addTest(b, "wifi", null);
+    tests.addTest(b, "ledstrip", null);
     tests.addTest(b, "sync", null);
     tests.addTest(b, "context", null);
     tests.addTest(b, "testing", null);
