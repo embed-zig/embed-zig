@@ -51,13 +51,7 @@ fn typeSurfaceTest(comptime lib: type) !void {
 fn fileTest(comptime lib: type) !void {
     const posix = lib.posix;
 
-    const dir_path = "/tmp/embed_test_runner";
-    const file_path = dir_path ++ "/test.txt";
-
-    posix.mkdir(dir_path, 0o755) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
+    const file_path = "/tmp/embed_test_runner_test.txt";
 
     const fd = try posix.open(file_path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
     const msg = "hello from test_runner!\n";
@@ -79,12 +73,7 @@ fn fileTest(comptime lib: type) !void {
 fn seekTests(comptime lib: type) !void {
     const posix = lib.posix;
 
-    const path = "/tmp/embed_test_runner/seek_test.txt";
-    const dir_path = "/tmp/embed_test_runner";
-    posix.mkdir(dir_path, 0o755) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
+    const path = "/tmp/embed_seek_test.txt";
 
     const fd = try posix.open(path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
     _ = try posix.write(fd, "ABCDEFGHIJ");
