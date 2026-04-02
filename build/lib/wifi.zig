@@ -1,0 +1,24 @@
+const std = @import("std");
+
+pub fn create(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const mod = b.createModule(.{
+        .root_source_file = b.path("lib/wifi.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    b.modules.put("wifi", mod) catch @panic("OOM");
+}
+
+pub fn link(b: *std.Build) void {
+    const embed = b.modules.get("embed") orelse @panic("wifi requires embed");
+    const net = b.modules.get("net") orelse @panic("wifi requires net");
+    const testing = b.modules.get("testing") orelse @panic("wifi requires testing");
+    const mod = b.modules.get("wifi") orelse @panic("wifi module missing");
+    mod.addImport("embed", embed);
+    mod.addImport("net", net);
+    mod.addImport("testing", testing);
+}

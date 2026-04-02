@@ -12,10 +12,12 @@ const lib_net = @import("build/lib/net.zig");
 const lib_mime = @import("build/lib/mime.zig");
 const lib_bt = @import("build/lib/bt.zig");
 const lib_motion = @import("build/lib/motion.zig");
+const lib_wifi = @import("build/lib/wifi.zig");
 const lib_embed_std = @import("build/lib/embed_std.zig");
 const lib_zux = @import("build/lib/zux.zig");
 
 const pkg_core_bluetooth = @import("build/pkg/core_bluetooth.zig");
+const pkg_core_wlan = @import("build/pkg/core_wlan.zig");
 const pkg_ogg = @import("build/pkg/ogg.zig");
 const pkg_stb_truetype = @import("build/pkg/stb_truetype.zig");
 const pkg_opus = @import("build/pkg/opus.zig");
@@ -32,12 +34,14 @@ const Libraries = struct {
     pub const mime = lib_mime;
     pub const bt = lib_bt;
     pub const motion = lib_motion;
+    pub const wifi = lib_wifi;
     pub const embed_std = lib_embed_std;
     pub const zux = lib_zux;
 };
 
 const Packages = struct {
     pub const core_bluetooth = pkg_core_bluetooth;
+    pub const core_wlan = pkg_core_wlan;
     pub const ogg = pkg_ogg;
     pub const stb_truetype = pkg_stb_truetype;
     pub const opus = pkg_opus;
@@ -77,6 +81,7 @@ pub fn build(b: *std.Build) void {
     tests.addTest(b, "mime", null);
     tests.addTest(b, "bt", null);
     tests.addTest(b, "motion", null);
+    tests.addTest(b, "wifi", null);
     tests.addTest(b, "sync", null);
     tests.addTest(b, "context", null);
     tests.addTest(b, "testing", null);
@@ -84,6 +89,7 @@ pub fn build(b: *std.Build) void {
     tests.addTest(b, "zux", lib_zux.linkTest);
 
     if (b.modules.get("core_bluetooth") != null) tests.addTest(b, "core_bluetooth", null);
+    if (b.modules.get("core_wlan") != null) tests.addTest(b, "core_wlan", null);
     if (b.modules.get("ogg") != null) tests.addTest(b, "ogg", pkg_ogg.linkTest);
     if (b.modules.get("stb_truetype") != null) tests.addTest(b, "stb_truetype", pkg_stb_truetype.linkTest);
     if (b.modules.get("opus") != null) tests.addTest(b, "opus", pkg_opus.linkTest);
