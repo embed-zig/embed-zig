@@ -44,7 +44,7 @@ const OpError = enum { att, timeout, disconnected, unexpected };
 
 const EventHook = struct {
     ctx: ?*anyopaque,
-    cb: *const fn (?*anyopaque, Central.CentralEvent) void,
+    cb: *const fn (?*anyopaque, Central.Event) void,
 };
 
 const PeripheralSlot = struct {
@@ -389,10 +389,25 @@ pub fn getAddr(_: *CBCentral) ?Central.BdAddr {
     return null;
 }
 
-pub fn addEventHook(self: *CBCentral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Central.CentralEvent) void) void {
+pub fn addEventHook(self: *CBCentral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Central.Event) void) void {
     self.mutex.lock();
     defer self.mutex.unlock();
     self.hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch return;
+}
+
+pub fn removeEventHook(self: *CBCentral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Central.Event) void) void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
+    var i: usize = 0;
+    while (i < self.hooks.items.len) {
+        const hook = self.hooks.items[i];
+        if (hook.ctx == ctx and hook.cb == cb) {
+            _ = self.hooks.orderedRemove(i);
+            continue;
+        }
+        i += 1;
+    }
 }
 
 // ---- internal helpers ----
@@ -466,7 +481,7 @@ fn opErrorToGatt(e: OpError) Central.GattError {
     };
 }
 
-fn fireEvent(self: *CBCentral, event: Central.CentralEvent) void {
+fn fireEvent(self: *CBCentral, event: Central.Event) void {
     self.mutex.lock();
     const snapshot = self.allocator.dupe(EventHook, self.hooks.items) catch {
         self.mutex.unlock();

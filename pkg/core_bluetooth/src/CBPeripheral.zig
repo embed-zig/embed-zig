@@ -49,7 +49,7 @@ const CharEntry = struct {
 
 const EventHook = struct {
     ctx: ?*anyopaque,
-    cb: *const fn (?*anyopaque, Peripheral.PeripheralEvent) void,
+    cb: *const fn (?*anyopaque, Peripheral.Event) void,
 };
 
 // ---- lifecycle ----
@@ -247,10 +247,25 @@ pub fn getAddr(_: *CBPeripheral) ?Peripheral.BdAddr {
     return null;
 }
 
-pub fn addEventHook(self: *CBPeripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Peripheral.PeripheralEvent) void) void {
+pub fn addEventHook(self: *CBPeripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Peripheral.Event) void) void {
     self.mutex.lock();
     defer self.mutex.unlock();
     self.hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch return;
+}
+
+pub fn removeEventHook(self: *CBPeripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Peripheral.Event) void) void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
+    var i: usize = 0;
+    while (i < self.hooks.items.len) {
+        const hook = self.hooks.items[i];
+        if (hook.ctx == ctx and hook.cb == cb) {
+            _ = self.hooks.orderedRemove(i);
+            continue;
+        }
+        i += 1;
+    }
 }
 
 // ---- internal helpers ----
@@ -345,7 +360,7 @@ fn characteristicPermissions(config: Peripheral.CharConfig) objc.NSUInteger {
     return perms;
 }
 
-fn fireEvent(self: *CBPeripheral, event: Peripheral.PeripheralEvent) void {
+fn fireEvent(self: *CBPeripheral, event: Peripheral.Event) void {
     self.mutex.lock();
     const snapshot = self.allocator.dupe(EventHook, self.hooks.items) catch {
         self.mutex.unlock();

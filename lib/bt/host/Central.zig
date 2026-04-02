@@ -8,7 +8,7 @@ const bt = @import("../../bt.zig");
 const att = @import("att.zig");
 const gatt_client = @import("gatt/client.zig");
 
-pub fn Central(comptime lib: type) type {
+pub fn make(comptime lib: type) type {
     return struct {
         const Self = @This();
         const POLL_INTERVAL_NS: u64 = 1_000_000;
@@ -26,7 +26,7 @@ pub fn Central(comptime lib: type) type {
 
         const EventHook = struct {
             ctx: ?*anyopaque,
-            cb: *const fn (?*anyopaque, bt.Central.CentralEvent) void,
+            cb: *const fn (?*anyopaque, bt.Central.Event) void,
         };
 
         const ParsedAdvReport = struct {
@@ -370,13 +370,13 @@ pub fn Central(comptime lib: type) type {
             return self.hci.getAddr();
         }
 
-        pub fn addEventHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, bt.Central.CentralEvent) void) void {
+        pub fn addEventHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, bt.Central.Event) void) void {
             self.mutex.lock();
             defer self.mutex.unlock();
-            self.hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch return;
+            self.hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch @panic("bt.host.Central.addEventHook OOM");
         }
 
-        pub fn removeEventHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, bt.Central.CentralEvent) void) void {
+        pub fn removeEventHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, bt.Central.Event) void) void {
             self.mutex.lock();
             defer self.mutex.unlock();
             var i: usize = 0;
@@ -433,7 +433,7 @@ pub fn Central(comptime lib: type) type {
             };
         }
 
-        fn fireEvent(self: *Self, event: bt.Central.CentralEvent) void {
+        fn fireEvent(self: *Self, event: bt.Central.Event) void {
             self.mutex.lock();
             const snapshot = self.allocator.dupe(EventHook, self.hooks.items) catch {
                 self.mutex.unlock();
@@ -558,7 +558,7 @@ pub fn Central(comptime lib: type) type {
 }
 
 test "bt/unit_tests/host/Central_advertising_iterator_parses_one_report" {
-    const Impl = Central(std);
+    const Impl = make(std);
     const raw = [_]u8{
         1,
         0x00,
@@ -603,7 +603,7 @@ test "bt/unit_tests/host/Central_advertising_iterator_parses_one_report" {
 }
 
 test "bt/unit_tests/host/Central_advertising_filter_matches_uuid16_and_service_data" {
-    const Impl = Central(std);
+    const Impl = make(std);
 
     const uuid_list = [_]u8{
         0x03, 0x03, 0x0D, 0x18,
@@ -620,7 +620,7 @@ test "bt/unit_tests/host/Central_advertising_filter_matches_uuid16_and_service_d
 }
 
 test "bt/unit_tests/host/Central_advertising_iterator_maps_public_identity_address_to_public" {
-    const Impl = Central(std);
+    const Impl = make(std);
     const raw = [_]u8{
         1,
         0x00,
@@ -641,7 +641,7 @@ test "bt/unit_tests/host/Central_advertising_iterator_maps_public_identity_addre
 }
 
 test "bt/unit_tests/host/Central_connect_resets_state_after_rejected_link" {
-    const Impl = Central(std);
+    const Impl = make(std);
 
     const FakeHci = struct {
         connecting: bool = false,
@@ -693,7 +693,7 @@ test "bt/unit_tests/host/Central_connect_resets_state_after_rejected_link" {
 }
 
 test "bt/unit_tests/host/Central_connect_falls_back_to_default_mtu_when_exchange_fails" {
-    const Impl = Central(std);
+    const Impl = make(std);
 
     const FakeHci = struct {
         link: bt.Hci.Link = .{

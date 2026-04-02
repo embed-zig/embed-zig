@@ -25,7 +25,7 @@ const topic_missing: Chunk.Topic = 0x2122232425262728;
 const timeout_ms: u32 = 5000;
 const reconnect_timeout_ms: u32 = 10000;
 
-pub fn makeCentral(comptime lib: type, host: anytype) testing_api.TestRunner {
+pub fn makeCentral(comptime lib: type, comptime ClientType: type, host: anytype) testing_api.TestRunner {
     const HostPtr = @TypeOf(host);
     comptime requireHostPointer(HostPtr);
 
@@ -38,7 +38,7 @@ pub fn makeCentral(comptime lib: type, host: anytype) testing_api.TestRunner {
         }
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
-            runCentralRole(lib, self.host, allocator) catch |err| {
+            runCentralRole(lib, ClientType, self.host, allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -56,7 +56,7 @@ pub fn makeCentral(comptime lib: type, host: anytype) testing_api.TestRunner {
     return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-pub fn makePeripheral(comptime lib: type, host: anytype) testing_api.TestRunner {
+pub fn makePeripheral(comptime lib: type, comptime ServerType: type, host: anytype) testing_api.TestRunner {
     const HostPtr = @TypeOf(host);
     comptime requireHostPointer(HostPtr);
 
@@ -69,7 +69,7 @@ pub fn makePeripheral(comptime lib: type, host: anytype) testing_api.TestRunner 
         }
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
-            runPeripheralRole(lib, self.host, allocator) catch |err| {
+            runPeripheralRole(lib, ServerType, self.host, allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -87,7 +87,7 @@ pub fn makePeripheral(comptime lib: type, host: anytype) testing_api.TestRunner 
     return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-fn runCentralRole(comptime lib: type, host: anytype, allocator: embed.mem.Allocator) !void {
+fn runCentralRole(comptime lib: type, comptime ClientType: type, host: anytype, allocator: embed.mem.Allocator) !void {
     const testing = lib.testing;
 
     const State = struct {
@@ -99,7 +99,7 @@ fn runCentralRole(comptime lib: type, host: anytype, allocator: embed.mem.Alloca
     };
 
     const Hook = struct {
-        fn cb(ctx: ?*anyopaque, evt: Central.CentralEvent) void {
+        fn cb(ctx: ?*anyopaque, evt: Central.Event) void {
             const state: *State = @ptrCast(@alignCast(ctx.?));
             state.mutex.lock();
             defer state.mutex.unlock();
@@ -124,7 +124,9 @@ fn runCentralRole(comptime lib: type, host: anytype, allocator: embed.mem.Alloca
     const central = host.central();
     try central.start();
     defer central.stop();
-    const client = host.client();
+    var client = ClientType.init(allocator);
+    defer client.deinit();
+    client.bind(host.central());
     central.addEventHook(@ptrCast(&state), Hook.cb);
     defer central.removeEventHook(@ptrCast(&state), Hook.cb);
 
@@ -149,11 +151,12 @@ fn runCentralRole(comptime lib: type, host: anytype, allocator: embed.mem.Alloca
     try testing.expectEqual(@as(u32, 2), state.disconnected_count);
 }
 
-fn runPeripheralRole(comptime lib: type, host: anytype, allocator: embed.mem.Allocator) !void {
+fn runPeripheralRole(comptime lib: type, comptime ServerType: type, host: anytype, allocator: embed.mem.Allocator) !void {
     const testing = lib.testing;
-    const server = host.server();
+    var server = try ServerType.init(allocator);
+    defer server.deinit();
+    server.bind(host.peripheral());
     const peripheral = host.peripheral();
-    const ServerType = @TypeOf(server.*);
     const ReadXRequest = ServerType.ReadXRequest;
     const WriteXRequest = ServerType.WriteXRequest;
     const ReadXResponseWriter = ServerType.ReadXResponseWriter;
@@ -183,7 +186,7 @@ fn runPeripheralRole(comptime lib: type, host: anytype, allocator: embed.mem.All
             return self;
         }
 
-        fn onEvent(ctx: ?*anyopaque, evt: Peripheral.PeripheralEvent) void {
+        fn onEvent(ctx: ?*anyopaque, evt: Peripheral.Event) void {
             const self: *@This() = @ptrCast(@alignCast(ctx.?));
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -276,7 +279,7 @@ fn runPeripheralRole(comptime lib: type, host: anytype, allocator: embed.mem.All
 
     try server.start();
     defer server.stop();
-    try startAdvertising(server);
+    try startAdvertising(&server);
     defer server.stopAdvertising();
 
     var restarted_after_disconnects: u32 = 0;
@@ -291,7 +294,7 @@ fn runPeripheralRole(comptime lib: type, host: anytype, allocator: embed.mem.All
         if (disconnected_count > restarted_after_disconnects) {
             restarted_after_disconnects = disconnected_count;
             server.stopAdvertising();
-            try startAdvertising(server);
+            try startAdvertising(&server);
         }
         lib.Thread.sleep(1 * 1_000_000);
     }

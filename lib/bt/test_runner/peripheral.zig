@@ -165,7 +165,7 @@ fn runPeripheral(comptime lib: type, p: Peripheral) !void {
     // ---- event hook: single hook, verify it fires on advertising_started ----
     var hook_event_count = lib.atomic.Value(u32).init(0);
     p.addEventHook(@ptrCast(&hook_event_count), struct {
-        fn cb(ctx: ?*anyopaque, _: Peripheral.PeripheralEvent) void {
+        fn cb(ctx: ?*anyopaque, _: Peripheral.Event) void {
             const counter: *lib.atomic.Value(u32) = @ptrCast(@alignCast(ctx.?));
             _ = counter.fetchAdd(1, .monotonic);
         }
@@ -179,7 +179,7 @@ fn runPeripheral(comptime lib: type, p: Peripheral) !void {
     // ---- event hook: multiple hooks ----
     var hook2_count = lib.atomic.Value(u32).init(0);
     p.addEventHook(@ptrCast(&hook2_count), struct {
-        fn cb(ctx: ?*anyopaque, _: Peripheral.PeripheralEvent) void {
+        fn cb(ctx: ?*anyopaque, _: Peripheral.Event) void {
             const counter: *lib.atomic.Value(u32) = @ptrCast(@alignCast(ctx.?));
             _ = counter.fetchAdd(1, .monotonic);
         }

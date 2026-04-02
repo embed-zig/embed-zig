@@ -166,7 +166,7 @@ pub const SubscriptionInfo = struct {
     cccd_value: u16,
 };
 
-pub const PeripheralEvent = union(enum) {
+pub const Event = union(enum) {
     connected: ConnectionInfo,
     disconnected: u16,
     advertising_started: void,
@@ -212,8 +212,8 @@ pub const VTable = struct {
     indicate: *const fn (ptr: *anyopaque, conn_handle: u16, char_uuid: u16, data: []const u8) GattError!void,
     disconnect: *const fn (ptr: *anyopaque, conn_handle: u16) void,
     getState: *const fn (ptr: *anyopaque) State,
-    addEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, PeripheralEvent) void) void,
-    removeEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, PeripheralEvent) void) void,
+    addEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void,
+    removeEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void,
     addSubscriptionHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, SubscriptionInfo) void) void,
     removeSubscriptionHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, SubscriptionInfo) void) void,
     getAddr: *const fn (ptr: *anyopaque) ?BdAddr,
@@ -272,11 +272,11 @@ pub fn getAddr(self: Peripheral) ?BdAddr {
     return self.vtable.getAddr(self.ptr);
 }
 
-pub fn addEventHook(self: Peripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, PeripheralEvent) void) void {
+pub fn addEventHook(self: Peripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void {
     self.vtable.addEventHook(self.ptr, ctx, cb);
 }
 
-pub fn removeEventHook(self: Peripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, PeripheralEvent) void) void {
+pub fn removeEventHook(self: Peripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void {
     self.vtable.removeEventHook(self.ptr, ctx, cb);
 }
 
@@ -356,12 +356,12 @@ pub fn wrap(pointer: anytype) Peripheral {
             return self.getState();
         }
 
-        fn addEventHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, PeripheralEvent) void) void {
+        fn addEventHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             self.addEventHook(ctx, cb);
         }
 
-        fn removeEventHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, PeripheralEvent) void) void {
+        fn removeEventHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             if (@hasDecl(Impl, "removeEventHook")) {
                 self.removeEventHook(ctx, cb);
@@ -433,7 +433,7 @@ test "bt/unit_tests/Peripheral_wrap_allows_missing_subscription_hook" {
         pub fn getState(_: *@This()) State {
             return .idle;
         }
-        pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, PeripheralEvent) void) void {}
+        pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Event) void) void {}
         pub fn getAddr(_: *@This()) ?BdAddr {
             return null;
         }

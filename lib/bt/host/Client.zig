@@ -6,7 +6,7 @@ const ConnMod = @import("client/Conn.zig");
 const CharacteristicMod = @import("client/Characteristic.zig");
 const SubscriptionMod = @import("client/Subscription.zig");
 
-pub fn Client(comptime lib: type, comptime CentralType: type) type {
+pub fn make(comptime lib: type) type {
     return struct {
         const Self = @This();
 
@@ -19,7 +19,7 @@ pub fn Client(comptime lib: type, comptime CentralType: type) type {
         const SubscriptionState = Subscription.State;
 
         allocator: lib.mem.Allocator,
-        central: ?*CentralType = null,
+        central: ?bt.Central = null,
         hook_installed: bool = false,
         mutex: lib.Thread.Mutex = .{},
         subscriptions: std.ArrayListUnmanaged(*SubscriptionState) = .{},
@@ -30,11 +30,11 @@ pub fn Client(comptime lib: type, comptime CentralType: type) type {
             };
         }
 
-        pub fn bind(self: *Self, central: *CentralType) void {
+        pub fn bind(self: *Self, central: bt.Central) void {
             if (self.central == null) {
                 self.central = central;
             } else {
-                std.debug.assert(self.central.? == central);
+                std.debug.assert(sameCentral(self.central.?, central));
             }
 
             if (!self.hook_installed) {
@@ -168,8 +168,12 @@ pub fn Client(comptime lib: type, comptime CentralType: type) type {
             return removed;
         }
 
-        fn centralPtr(self: *Self) *CentralType {
-            return self.central orelse @panic("host.Client used before Host.client() binding");
+        fn centralPtr(self: *Self) bt.Central {
+            return self.central orelse @panic("host.Client used before bind()");
+        }
+
+        fn sameCentral(a: bt.Central, b: bt.Central) bool {
+            return a.ptr == b.ptr and a.vtable == b.vtable;
         }
 
         fn removeSubscriptionLocked(self: *Self, state: *SubscriptionState) bool {
@@ -182,7 +186,7 @@ pub fn Client(comptime lib: type, comptime CentralType: type) type {
             return false;
         }
 
-        fn onCentralEvent(ctx: ?*anyopaque, event: bt.Central.CentralEvent) void {
+        fn onCentralEvent(ctx: ?*anyopaque, event: bt.Central.Event) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
             switch (event) {
                 .notification => |notif| self.dispatchNotification(notif),
@@ -223,7 +227,8 @@ pub fn Client(comptime lib: type, comptime CentralType: type) type {
 test "bt/integration_tests/host/Client_connect_read_write_and_subscribe" {
     const Mocker = bt.Mocker(std);
     const TestChannel = @import("embed_std").sync.Channel;
-    const Host = @import("../Host.zig").Host(std, TestChannel);
+    const Bt = bt.make(std, TestChannel);
+    const ClientType = Bt.Client;
 
     const chars = [_]bt.Peripheral.CharDef{
         bt.Peripheral.Char(0x2A37, .{
@@ -274,7 +279,7 @@ test "bt/integration_tests/host/Client_connect_read_write_and_subscribe" {
         mutex: std.Thread.Mutex = .{},
         conn_handle: u16 = 0,
 
-        fn onEvent(ctx: ?*anyopaque, evt: bt.Peripheral.PeripheralEvent) void {
+        fn onEvent(ctx: ?*anyopaque, evt: bt.Peripheral.Event) void {
             const self: *@This() = @ptrCast(@alignCast(ctx.?));
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -301,15 +306,19 @@ test "bt/integration_tests/host/Client_connect_read_write_and_subscribe" {
     var mocker = Mocker.init(std.testing.allocator, .{});
     defer mocker.deinit();
 
-    var central_host: Host = try mocker.createHost(.{});
+    var central_host: bt.Host = try mocker.createHost(.{});
     defer central_host.deinit();
-    var peripheral_host: Host = try mocker.createHost(.{
+    var peripheral_host: bt.Host = try mocker.createHost(.{
         .hci = .{
             .controller_addr = .{ 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 },
             .peer_addr = .{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
         },
     });
     defer peripheral_host.deinit();
+
+    var client = ClientType.init(std.testing.allocator);
+    defer client.deinit();
+    client.bind(central_host.central());
 
     var peripheral = peripheral_host.peripheral();
     peripheral.setConfig(.{
@@ -329,7 +338,6 @@ test "bt/integration_tests/host/Client_connect_read_write_and_subscribe" {
     defer peripheral.stopAdvertising();
 
     const addr = peripheral.getAddr() orelse return error.NoPeripheralAddr;
-    const client = central_host.client();
     var conn = try client.connect(addr, .public, .{});
     var characteristic = try conn.characteristic(0x180D, 0x2A37);
 

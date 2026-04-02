@@ -11,6 +11,7 @@ const lib_drivers = @import("build/lib/drivers.zig");
 const lib_net = @import("build/lib/net.zig");
 const lib_mime = @import("build/lib/mime.zig");
 const lib_bt = @import("build/lib/bt.zig");
+const lib_motion = @import("build/lib/motion.zig");
 const lib_embed_std = @import("build/lib/embed_std.zig");
 const lib_zux = @import("build/lib/zux.zig");
 
@@ -30,6 +31,7 @@ const Libraries = struct {
     pub const net = lib_net;
     pub const mime = lib_mime;
     pub const bt = lib_bt;
+    pub const motion = lib_motion;
     pub const embed_std = lib_embed_std;
     pub const zux = lib_zux;
 };
@@ -74,11 +76,12 @@ pub fn build(b: *std.Build) void {
     tests.addTest(b, "net", null);
     tests.addTest(b, "mime", null);
     tests.addTest(b, "bt", null);
+    tests.addTest(b, "motion", null);
     tests.addTest(b, "sync", null);
     tests.addTest(b, "context", null);
     tests.addTest(b, "testing", null);
     tests.addTest(b, "integration", null);
-    tests.addTest(b, "zux", null);
+    tests.addTest(b, "zux", lib_zux.linkTest);
 
     if (b.modules.get("core_bluetooth") != null) tests.addTest(b, "core_bluetooth", null);
     if (b.modules.get("ogg") != null) tests.addTest(b, "ogg", pkg_ogg.linkTest);

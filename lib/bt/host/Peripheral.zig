@@ -8,7 +8,7 @@ const root = @import("../../bt.zig");
 const bt = @import("../Peripheral.zig");
 const att = @import("att.zig");
 
-pub fn Peripheral(comptime lib: type) type {
+pub fn make(comptime lib: type) type {
     return struct {
         const Self = @This();
 
@@ -28,7 +28,7 @@ pub fn Peripheral(comptime lib: type) type {
 
         const EventHook = struct {
             ctx: ?*anyopaque,
-            cb: *const fn (?*anyopaque, bt.PeripheralEvent) void,
+            cb: *const fn (?*anyopaque, bt.Event) void,
         };
 
         pub const SubscriptionInfo = bt.SubscriptionInfo;
@@ -248,13 +248,13 @@ pub fn Peripheral(comptime lib: type) type {
             return self.hci.getAddr();
         }
 
-        pub fn addEventHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, bt.PeripheralEvent) void) void {
+        pub fn addEventHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, bt.Event) void) void {
             self.mutex.lock();
             defer self.mutex.unlock();
-            self.hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch return;
+            self.hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch @panic("bt.host.Peripheral.addEventHook OOM");
         }
 
-        pub fn removeEventHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, bt.PeripheralEvent) void) void {
+        pub fn removeEventHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, bt.Event) void) void {
             self.mutex.lock();
             defer self.mutex.unlock();
             var i: usize = 0;
@@ -271,7 +271,7 @@ pub fn Peripheral(comptime lib: type) type {
         pub fn addSubscriptionHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, SubscriptionInfo) void) void {
             self.mutex.lock();
             defer self.mutex.unlock();
-            self.subscription_hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch return;
+            self.subscription_hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch @panic("bt.host.Peripheral.addSubscriptionHook OOM");
         }
 
         pub fn removeSubscriptionHook(self: *Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, SubscriptionInfo) void) void {
@@ -348,7 +348,7 @@ pub fn Peripheral(comptime lib: type) type {
             return true;
         }
 
-        fn fireEvent(self: *Self, event: bt.PeripheralEvent) void {
+        fn fireEvent(self: *Self, event: bt.Event) void {
             self.mutex.lock();
             const snapshot = self.allocator.dupe(EventHook, self.hooks.items) catch {
                 self.mutex.unlock();
@@ -731,7 +731,7 @@ pub fn Peripheral(comptime lib: type) type {
 }
 
 test "bt/unit_tests/host/Peripheral_handle_assigns_stable_value_handles" {
-    const Impl = Peripheral(std);
+    const Impl = make(std);
 
     var peripheral = Impl{
         .hci = undefined,
@@ -755,7 +755,7 @@ test "bt/unit_tests/host/Peripheral_handle_assigns_stable_value_handles" {
 }
 
 test "bt/unit_tests/host/Peripheral_setRequestHandler_replaces_previous_callback" {
-    const Impl = Peripheral(std);
+    const Impl = make(std);
 
     const dummy_a = struct {
         fn handler(_: ?*anyopaque, _: *const bt.Request, _: *bt.ResponseWriter) void {}
@@ -779,7 +779,7 @@ test "bt/unit_tests/host/Peripheral_setRequestHandler_replaces_previous_callback
 }
 
 test "bt/unit_tests/host/Peripheral_setConfig_applies_per_characteristic_properties" {
-    const Impl = Peripheral(std);
+    const Impl = make(std);
 
     const dummy = struct {
         fn handler(_: ?*anyopaque, _: *const bt.Request, rw: *bt.ResponseWriter) void {
@@ -833,7 +833,7 @@ test "bt/unit_tests/host/Peripheral_setConfig_applies_per_characteristic_propert
 }
 
 test "bt/unit_tests/host/Peripheral_short_cccd_write_returns_invalid_length" {
-    const Impl = Peripheral(std);
+    const Impl = make(std);
 
     var peripheral = Impl{
         .hci = undefined,

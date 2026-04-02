@@ -7,7 +7,7 @@ const SubscriptionMod = @import("server/Subscription.zig");
 const XferServerMod = @import("xfer/Server.zig");
 const xfer_chunk = @import("xfer/Chunk.zig");
 
-pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime PeripheralType: type) type {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
     return struct {
         const Self = @This();
         const XferImpl = XferServerMod.Server(lib, Self);
@@ -71,7 +71,7 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
         };
 
         allocator: lib.mem.Allocator,
-        peripheral: ?*PeripheralType = null,
+        peripheral: ?bt.Peripheral = null,
         hook_installed: bool = false,
         mutex: lib.Thread.Mutex = .{},
         cond: lib.Thread.Condition = .{},
@@ -91,11 +91,11 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             };
         }
 
-        pub fn bind(self: *Self, peripheral: *PeripheralType) void {
+        pub fn bind(self: *Self, peripheral: bt.Peripheral) void {
             if (self.peripheral == null) {
                 self.peripheral = peripheral;
             } else {
-                std.debug.assert(self.peripheral.? == peripheral);
+                std.debug.assert(samePeripheral(self.peripheral.?, peripheral));
             }
 
             if (!self.hook_installed) {
@@ -244,8 +244,12 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             };
         }
 
-        fn peripheralPtr(self: *Self) *PeripheralType {
-            return self.peripheral orelse @panic("host.Server used before Host.server() binding");
+        fn peripheralPtr(self: *Self) bt.Peripheral {
+            return self.peripheral orelse @panic("host.Server used before bind()");
+        }
+
+        fn samePeripheral(a: bt.Peripheral, b: bt.Peripheral) bool {
+            return a.ptr == b.ptr and a.vtable == b.vtable;
         }
 
         fn charKey(service_uuid: u16, char_uuid: u16) CharKey {
@@ -300,7 +304,7 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
         }
 
-        fn onPeripheralEvent(ctx: ?*anyopaque, event: bt.Peripheral.PeripheralEvent) void {
+        fn onPeripheralEvent(ctx: ?*anyopaque, event: bt.Peripheral.Event) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
             switch (event) {
                 .mtu_changed => |info| self.xfer_impl.handleMtuChanged(info.conn_handle, info.mtu),
@@ -312,12 +316,12 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             }
         }
 
-        fn onSubscriptionChanged(ctx: ?*anyopaque, info: PeripheralType.SubscriptionInfo) void {
+        fn onSubscriptionChanged(ctx: ?*anyopaque, info: bt.Peripheral.SubscriptionInfo) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
             self.handleSubscriptionChanged(info);
         }
 
-        fn handleSubscriptionChanged(self: *Self, info: PeripheralType.SubscriptionInfo) void {
+        fn handleSubscriptionChanged(self: *Self, info: bt.Peripheral.SubscriptionInfo) void {
             self.xfer_impl.handleSubscriptionChanged(info);
 
             self.mutex.lock();
@@ -485,7 +489,9 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
 test "bt/integration_tests/host/Server_handle_and_accept_subscription" {
     const Mocker = bt.Mocker(std);
     const TestChannel = @import("embed_std").sync.Channel;
-    const Host = @import("../Host.zig").Host(std, TestChannel);
+    const Bt = bt.make(std, TestChannel);
+    const ServerType = Bt.Server;
+    const ClientType = Bt.Client;
 
     const chars = [_]bt.Peripheral.CharDef{
         bt.Peripheral.Char(0x2A37, .{
@@ -530,9 +536,9 @@ test "bt/integration_tests/host/Server_handle_and_accept_subscription" {
     var mocker = Mocker.init(std.testing.allocator, .{});
     defer mocker.deinit();
 
-    var central_host: Host = try mocker.createHost(.{});
+    var central_host: bt.Host = try mocker.createHost(.{});
     defer central_host.deinit();
-    var peripheral_host: Host = try mocker.createHost(.{
+    var peripheral_host: bt.Host = try mocker.createHost(.{
         .hci = .{
             .controller_addr = .{ 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 },
             .peer_addr = .{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
@@ -540,7 +546,9 @@ test "bt/integration_tests/host/Server_handle_and_accept_subscription" {
     });
     defer peripheral_host.deinit();
 
-    var server = peripheral_host.server();
+    var server = try ServerType.init(std.testing.allocator);
+    defer server.deinit();
+    server.bind(peripheral_host.peripheral());
     server.setConfig(.{
         .services = &services,
     });
@@ -556,7 +564,9 @@ test "bt/integration_tests/host/Server_handle_and_accept_subscription" {
     defer server.stopAdvertising();
 
     const addr = server.getAddr() orelse return error.NoPeripheralAddr;
-    const client = central_host.client();
+    var client = ClientType.init(std.testing.allocator);
+    defer client.deinit();
+    client.bind(central_host.central());
     var conn = try client.connect(addr, .public, .{});
     var characteristic = try conn.characteristic(0x180D, 0x2A37);
 
@@ -588,8 +598,9 @@ test "bt/integration_tests/host/Server_handle_and_accept_subscription" {
 test "bt/integration_tests/host/Server_handleX_reads_and_writes_without_accept_queue" {
     const Mocker = bt.Mocker(std);
     const TestChannel = @import("embed_std").sync.Channel;
-    const Host = @import("../Host.zig").Host(std, TestChannel);
-    const ServerType = @FieldType(Host, "server_impl");
+    const Bt = bt.make(std, TestChannel);
+    const ServerType = Bt.Server;
+    const ClientType = Bt.Client;
     const ReadXRequest = ServerType.ReadXRequest;
     const WriteXRequest = ServerType.WriteXRequest;
     const ReadXResponseWriter = ServerType.ReadXResponseWriter;
@@ -641,9 +652,9 @@ test "bt/integration_tests/host/Server_handleX_reads_and_writes_without_accept_q
     var mocker = Mocker.init(std.testing.allocator, .{});
     defer mocker.deinit();
 
-    var central_host: Host = try mocker.createHost(.{});
+    var central_host: bt.Host = try mocker.createHost(.{});
     defer central_host.deinit();
-    var peripheral_host: Host = try mocker.createHost(.{
+    var peripheral_host: bt.Host = try mocker.createHost(.{
         .hci = .{
             .controller_addr = .{ 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6 },
             .peer_addr = .{ 0x21, 0x22, 0x23, 0x24, 0x25, 0x26 },
@@ -652,7 +663,9 @@ test "bt/integration_tests/host/Server_handleX_reads_and_writes_without_accept_q
     });
     defer peripheral_host.deinit();
 
-    var server = peripheral_host.server();
+    var server = try ServerType.init(std.testing.allocator);
+    defer server.deinit();
+    server.bind(peripheral_host.peripheral());
     server.setConfig(.{
         .services = &services,
     });
@@ -671,7 +684,9 @@ test "bt/integration_tests/host/Server_handleX_reads_and_writes_without_accept_q
     defer server.stopAdvertising();
 
     const addr = server.getAddr() orelse return error.NoPeripheralAddr;
-    const client = central_host.client();
+    var client = ClientType.init(std.testing.allocator);
+    defer client.deinit();
+    client.bind(central_host.central());
     var conn = try client.connect(addr, .public, .{});
     var characteristic = try conn.characteristic(0x180D, 0x2A57);
     try std.testing.expectEqual(negotiated_mtu, characteristic.attMtu());
@@ -699,8 +714,9 @@ test "bt/integration_tests/host/Server_handleX_reads_and_writes_without_accept_q
 test "bt/integration_tests/host/ServerMux_routes_topics_over_single_characteristic" {
     const Mocker = bt.Mocker(std);
     const TestChannel = @import("embed_std").sync.Channel;
-    const Host = @import("../Host.zig").Host(std, TestChannel);
-    const ServerType = @FieldType(Host, "server_impl");
+    const Bt = bt.make(std, TestChannel);
+    const ServerType = Bt.Server;
+    const ClientType = Bt.Client;
     const MuxRequest = ServerType.ServerMux.Request;
     const ReadXResponseWriter = ServerType.ReadXResponseWriter;
 
@@ -747,9 +763,9 @@ test "bt/integration_tests/host/ServerMux_routes_topics_over_single_characterist
     var mocker = Mocker.init(std.testing.allocator, .{});
     defer mocker.deinit();
 
-    var central_host: Host = try mocker.createHost(.{});
+    var central_host: bt.Host = try mocker.createHost(.{});
     defer central_host.deinit();
-    var peripheral_host: Host = try mocker.createHost(.{
+    var peripheral_host: bt.Host = try mocker.createHost(.{
         .hci = .{
             .controller_addr = .{ 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6 },
             .peer_addr = .{ 0x41, 0x42, 0x43, 0x44, 0x45, 0x46 },
@@ -757,7 +773,9 @@ test "bt/integration_tests/host/ServerMux_routes_topics_over_single_characterist
     });
     defer peripheral_host.deinit();
 
-    var server = peripheral_host.server();
+    var server = try ServerType.init(std.testing.allocator);
+    defer server.deinit();
+    server.bind(peripheral_host.peripheral());
     server.setConfig(.{
         .services = &services,
     });
@@ -778,7 +796,9 @@ test "bt/integration_tests/host/ServerMux_routes_topics_over_single_characterist
     defer server.stopAdvertising();
 
     const addr = server.getAddr() orelse return error.NoPeripheralAddr;
-    const client = central_host.client();
+    var client = ClientType.init(std.testing.allocator);
+    defer client.deinit();
+    client.bind(central_host.central());
     var conn = try client.connect(addr, .public, .{});
     var characteristic = try conn.characteristic(0x180D, 0x2A57);
 
@@ -806,8 +826,9 @@ test "bt/integration_tests/host/ServerMux_routes_topics_over_single_characterist
 test "bt/integration_tests/host/Server_disconnect_cleans_only_that_connection_state" {
     const Mocker = bt.Mocker(std);
     const TestChannel = @import("embed_std").sync.Channel;
-    const Host = @import("../Host.zig").Host(std, TestChannel);
-    const ServerType = @FieldType(Host, "server_impl");
+    const Bt = bt.make(std, TestChannel);
+    const ServerType = Bt.Server;
+    const ClientType = Bt.Client;
 
     const chars = [_]bt.Peripheral.CharDef{
         bt.Peripheral.Char(0x2A37, .{
@@ -821,11 +842,11 @@ test "bt/integration_tests/host/Server_disconnect_cleans_only_that_connection_st
     var mocker = Mocker.init(std.testing.allocator, .{});
     defer mocker.deinit();
 
-    var central_a: Host = try mocker.createHost(.{});
+    var central_a: bt.Host = try mocker.createHost(.{});
     defer central_a.deinit();
-    var central_b: Host = try mocker.createHost(.{});
+    var central_b: bt.Host = try mocker.createHost(.{});
     defer central_b.deinit();
-    var peripheral_host: Host = try mocker.createHost(.{
+    var peripheral_host: bt.Host = try mocker.createHost(.{
         .hci = .{
             .controller_addr = .{ 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6 },
             .peer_addr = .{ 0x31, 0x32, 0x33, 0x34, 0x35, 0x36 },
@@ -833,7 +854,9 @@ test "bt/integration_tests/host/Server_disconnect_cleans_only_that_connection_st
     });
     defer peripheral_host.deinit();
 
-    var server = peripheral_host.server();
+    var server = try ServerType.init(std.testing.allocator);
+    defer server.deinit();
+    server.bind(peripheral_host.peripheral());
     server.setConfig(.{
         .services = &services,
     });
@@ -847,13 +870,17 @@ test "bt/integration_tests/host/Server_disconnect_cleans_only_that_connection_st
 
     const addr = server.getAddr() orelse return error.NoPeripheralAddr;
 
-    const client_a = central_a.client();
+    var client_a = ClientType.init(std.testing.allocator);
+    defer client_a.deinit();
+    client_a.bind(central_a.central());
     var conn_a = try client_a.connect(addr, .public, .{});
     var char_a = try conn_a.characteristic(0x180D, 0x2A37);
     var client_sub_a = try char_a.subscribe();
     defer client_sub_a.deinit();
 
-    const client_b = central_b.client();
+    var client_b = ClientType.init(std.testing.allocator);
+    defer client_b.deinit();
+    client_b.bind(central_b.central());
     var conn_b = try client_b.connect(addr, .public, .{});
     var char_b = try conn_b.characteristic(0x180D, 0x2A37);
     var client_sub_b = try char_b.subscribe();

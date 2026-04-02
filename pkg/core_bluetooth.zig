@@ -1,30 +1,35 @@
 //! core_bluetooth — Apple CoreBluetooth backend for lib/bt.
 //!
-//! Implements a bt.Host-compatible backend by bridging to
+//! Implements a bt.Host-compatible backend impl by bridging to
 //! CBCentralManager and CBPeripheralManager via Objective-C runtime.
 //!
 //! Usage:
 //!   const cb = @import("core_bluetooth");
-//!   const Host = cb.Host;
+//!   const Bt = bt.make(embed_std.std, embed_std.sync.Channel);
+//!   const Host = Bt.makeHost(cb.Host);
 //!   _ = Host;
 
 const std = @import("std");
 const bt = @import("bt");
-const embed_std = @import("embed_std");
 const CBCentral = @import("core_bluetooth/src/CBCentral.zig");
 const CBPeripheral = @import("core_bluetooth/src/CBPeripheral.zig");
 
-pub const Host = bt.Host.make(embed_std.std, struct {
+pub const Host = struct {
     pub const CentralConfig = CBCentral.Config;
     pub const PeripheralConfig = CBPeripheral.Config;
     pub const Config = struct {
         allocator: std.mem.Allocator,
+        source_id: u32 = 0,
         central: CentralConfig = .{},
         peripheral: PeripheralConfig = .{},
     };
 
     central_impl: *CBCentral,
     peripheral_impl: *CBPeripheral,
+    source_id: u32,
+    callback_ctx: ?*const anyopaque = null,
+    callback_fn: ?bt.Host.CallbackFn = null,
+    callback_installed: bool = false,
 
     const Self = @This();
 
@@ -40,10 +45,12 @@ pub const Host = bt.Host.make(embed_std.std, struct {
         return .{
             .central_impl = central_impl,
             .peripheral_impl = peripheral_impl,
+            .source_id = config.source_id,
         };
     }
 
     pub fn deinit(self: *Self) void {
+        self.clearEventCallback();
         self.central_impl.deinit();
         self.peripheral_impl.deinit();
     }
@@ -55,7 +62,44 @@ pub const Host = bt.Host.make(embed_std.std, struct {
     pub fn peripheral(self: *Self) bt.Peripheral {
         return bt.Peripheral.wrap(self.peripheral_impl);
     }
-}, embed_std.sync.Channel);
+
+    pub fn setEventCallback(self: *Self, ctx: *const anyopaque, emit_fn: bt.Host.CallbackFn) void {
+        self.callback_ctx = ctx;
+        self.callback_fn = emit_fn;
+
+        if (!self.callback_installed) {
+            self.central().addEventHook(self, onCentralEvent);
+            self.peripheral().addEventHook(self, onPeripheralEvent);
+            self.callback_installed = true;
+        }
+    }
+
+    pub fn clearEventCallback(self: *Self) void {
+        if (self.callback_installed) {
+            self.central().removeEventHook(self, onCentralEvent);
+            self.peripheral().removeEventHook(self, onPeripheralEvent);
+            self.callback_installed = false;
+        }
+        self.callback_ctx = null;
+        self.callback_fn = null;
+    }
+
+    fn emitEvent(self: *Self, event: bt.Host.Event) void {
+        const ctx = self.callback_ctx orelse return;
+        const emit_fn = self.callback_fn orelse return;
+        emit_fn(ctx, self.source_id, event);
+    }
+
+    fn onCentralEvent(ctx: ?*anyopaque, event: bt.Central.Event) void {
+        const self: *Self = @ptrCast(@alignCast(ctx.?));
+        self.emitEvent(.{ .central = event });
+    }
+
+    fn onPeripheralEvent(ctx: ?*anyopaque, event: bt.Peripheral.Event) void {
+        const self: *Self = @ptrCast(@alignCast(ctx.?));
+        self.emitEvent(.{ .peripheral = event });
+    }
+};
 
 test "core_bluetooth/unit_tests" {}
 

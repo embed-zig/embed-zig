@@ -118,7 +118,7 @@ fn runCentral(comptime lib: type, c: Central) !void {
     // ---- event hook: register single hook ----
     var hook_called = lib.atomic.Value(bool).init(false);
     c.addEventHook(@ptrCast(&hook_called), struct {
-        fn cb(ctx: ?*anyopaque, _: Central.CentralEvent) void {
+        fn cb(ctx: ?*anyopaque, _: Central.Event) void {
             const flag: *lib.atomic.Value(bool) = @ptrCast(@alignCast(ctx.?));
             flag.store(true, .release);
         }
@@ -127,7 +127,7 @@ fn runCentral(comptime lib: type, c: Central) !void {
     // ---- event hook: register multiple hooks ----
     var hook2_called = lib.atomic.Value(bool).init(false);
     c.addEventHook(@ptrCast(&hook2_called), struct {
-        fn cb(ctx: ?*anyopaque, _: Central.CentralEvent) void {
+        fn cb(ctx: ?*anyopaque, _: Central.Event) void {
             const flag: *lib.atomic.Value(bool) = @ptrCast(@alignCast(ctx.?));
             flag.store(true, .release);
         }

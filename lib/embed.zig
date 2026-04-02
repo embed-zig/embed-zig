@@ -7,9 +7,9 @@
 //!   t.join();
 
 const root = @This();
+const collections = @import("embed/collections.zig");
 
 pub const ascii = @import("embed/ascii.zig");
-pub const collections = @import("embed/collections.zig");
 pub const crypto = @import("embed/crypto.zig");
 pub const fmt = @import("embed/fmt.zig");
 pub const heap = @import("embed/heap.zig");
@@ -29,6 +29,58 @@ pub const testing = @import("embed/testing.zig");
 pub const test_runner = struct {
     pub const logging = @import("embed/test_runner/logging.zig");
 };
+
+pub const array_list = collections.array_list;
+pub const ArrayList = collections.ArrayList;
+pub const ArrayListAligned = collections.ArrayListAligned;
+pub const ArrayListAlignedUnmanaged = collections.ArrayListAlignedUnmanaged;
+pub const ArrayListUnmanaged = collections.ArrayListUnmanaged;
+
+pub const MultiArrayList = collections.MultiArrayList;
+pub const SegmentedList = collections.SegmentedList;
+
+pub const hash_map = collections.hash_map;
+pub const HashMap = collections.HashMap;
+pub const HashMapUnmanaged = collections.HashMapUnmanaged;
+pub const AutoHashMap = collections.AutoHashMap;
+pub const AutoHashMapUnmanaged = collections.AutoHashMapUnmanaged;
+pub const StringHashMap = collections.StringHashMap;
+pub const StringHashMapUnmanaged = collections.StringHashMapUnmanaged;
+
+pub const array_hash_map = collections.array_hash_map;
+pub const ArrayHashMap = collections.ArrayHashMap;
+pub const ArrayHashMapUnmanaged = collections.ArrayHashMapUnmanaged;
+pub const AutoArrayHashMap = collections.AutoArrayHashMap;
+pub const AutoArrayHashMapUnmanaged = collections.AutoArrayHashMapUnmanaged;
+pub const StringArrayHashMap = collections.StringArrayHashMap;
+pub const StringArrayHashMapUnmanaged = collections.StringArrayHashMapUnmanaged;
+
+pub const BufMap = collections.BufMap;
+pub const BufSet = collections.BufSet;
+
+pub const PriorityQueue = collections.PriorityQueue;
+pub const PriorityDequeue = collections.PriorityDequeue;
+
+pub const bit_set = collections.bit_set;
+pub const StaticBitSet = collections.StaticBitSet;
+pub const DynamicBitSet = collections.DynamicBitSet;
+pub const DynamicBitSetUnmanaged = collections.DynamicBitSetUnmanaged;
+
+pub const DoublyLinkedList = collections.DoublyLinkedList;
+pub const SinglyLinkedList = collections.SinglyLinkedList;
+
+pub const Treap = collections.Treap;
+
+pub const enums = collections.enums;
+pub const EnumArray = collections.EnumArray;
+pub const EnumMap = collections.EnumMap;
+pub const EnumSet = collections.EnumSet;
+
+pub const static_string_map = collections.static_string_map;
+pub const StaticStringMap = collections.StaticStringMap;
+pub const StaticStringMapWithEql = collections.StaticStringMapWithEql;
+
+pub const BitStack = collections.BitStack;
 
 pub fn make(comptime Impl: type) type {
     return struct {
@@ -52,12 +104,10 @@ pub fn make(comptime Impl: type) type {
         pub const math = root.math;
         // Platform-independent data structures (from std)
         pub const array_list = collections.array_list;
-        pub fn ArrayList(comptime T: type) type {
-            return collections.ArrayList(T);
-        }
+        pub const ArrayList = collections.ArrayList;
         pub const ArrayListAligned = collections.ArrayListAligned;
         pub const ArrayListAlignedUnmanaged = collections.ArrayListAlignedUnmanaged;
-        pub const ArrayListUnmanaged = ArrayList;
+        pub const ArrayListUnmanaged = collections.ArrayListUnmanaged;
 
         pub const MultiArrayList = collections.MultiArrayList;
         pub const SegmentedList = collections.SegmentedList;

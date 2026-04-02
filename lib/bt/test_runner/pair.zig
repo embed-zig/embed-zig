@@ -118,7 +118,7 @@ fn runCentralRole(comptime lib: type, c: Central) !void {
     };
 
     const Hook = struct {
-        fn cb(ctx: ?*anyopaque, evt: Central.CentralEvent) void {
+        fn cb(ctx: ?*anyopaque, evt: Central.Event) void {
             const state: *State = @ptrCast(@alignCast(ctx.?));
             state.mutex.lock();
             defer state.mutex.unlock();
@@ -217,7 +217,7 @@ fn runPeripheralRole(comptime lib: type, p: Peripheral) !void {
     };
 
     const Hook = struct {
-        fn cb(ctx: ?*anyopaque, evt: Peripheral.PeripheralEvent) void {
+        fn cb(ctx: ?*anyopaque, evt: Peripheral.Event) void {
             const state: *State = @ptrCast(@alignCast(ctx.?));
             state.mutex.lock();
             defer state.mutex.unlock();

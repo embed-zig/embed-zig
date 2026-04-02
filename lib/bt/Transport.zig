@@ -12,7 +12,7 @@
 //!   const HciType = @import("bt/host/Hci.zig").Hci(embed);
 //!   var hci = HciType.init(transport, .{});
 
-const Transport = @This();
+const root = @This();
 
 ptr: *anyopaque,
 vtable: *const VTable,
@@ -41,31 +41,31 @@ pub const ReadError = error{
 pub const SendError = WriteError;
 pub const RecvError = ReadError;
 
-pub fn write(self: Transport, buf: []const u8) WriteError!usize {
+pub fn write(self: root, buf: []const u8) WriteError!usize {
     return self.vtable.write(self.ptr, buf);
 }
 
-pub fn read(self: Transport, buf: []u8) ReadError!usize {
+pub fn read(self: root, buf: []u8) ReadError!usize {
     return self.vtable.read(self.ptr, buf);
 }
 
-pub fn reset(self: Transport) void {
+pub fn reset(self: root) void {
     self.vtable.reset(self.ptr);
 }
 
-pub fn setReadDeadline(self: Transport, deadline_ns: ?i64) void {
+pub fn setReadDeadline(self: root, deadline_ns: ?i64) void {
     self.vtable.setReadDeadline(self.ptr, deadline_ns);
 }
 
-pub fn setWriteDeadline(self: Transport, deadline_ns: ?i64) void {
+pub fn setWriteDeadline(self: root, deadline_ns: ?i64) void {
     self.vtable.setWriteDeadline(self.ptr, deadline_ns);
 }
 
-pub fn deinit(self: Transport) void {
+pub fn deinit(self: root) void {
     self.vtable.deinit(self.ptr);
 }
 
-pub fn init(pointer: anytype) Transport {
+pub fn init(pointer: anytype) root {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);
     if (info != .pointer or info.pointer.size != .one)

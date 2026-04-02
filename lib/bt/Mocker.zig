@@ -12,7 +12,7 @@ const Hci = @import("mocker/Hci.zig").Hci;
 
 pub fn Mocker(comptime lib: type) type {
     const HciImpl = Hci(lib);
-    const Host = host_mod.Host(lib, embed_std.sync.Channel);
+    const HostCtor = host_mod.makeHci(lib, embed_std.sync.Channel);
 
     return struct {
         const Self = @This();
@@ -32,7 +32,7 @@ pub fn Mocker(comptime lib: type) type {
         pub const CreateHostConfig = struct {
             position: Vec3 = .{},
             hci: HciImpl.Config = .{},
-            host: Host.Config = .{ .allocator = undefined },
+            host: HostCtor.Config = .{ .allocator = undefined },
         };
 
         const Node = struct {
@@ -62,7 +62,7 @@ pub fn Mocker(comptime lib: type) type {
             self.nodes.deinit(self.allocator);
         }
 
-        pub fn createHost(self: *Self, config: CreateHostConfig) !Host {
+        pub fn createHost(self: *Self, config: CreateHostConfig) !root.Host {
             const ptr = try self.createHciNode(.{
                 .position = config.position,
                 .hci = config.hci,
@@ -71,7 +71,7 @@ pub fn Mocker(comptime lib: type) type {
 
             var host_config = config.host;
             host_config.allocator = self.allocator;
-            return try Host.init(ptr.asHci(), host_config);
+            return try HostCtor.init(ptr.asHci(), host_config);
         }
 
         const CreateHciNodeConfig = struct {

@@ -101,7 +101,7 @@ pub const NotificationData = struct {
     }
 };
 
-pub const CentralEvent = union(enum) {
+pub const Event = union(enum) {
     device_found: AdvReport,
     connected: ConnectionInfo,
     disconnected: u16,
@@ -149,8 +149,8 @@ pub const VTable = struct {
     unsubscribe: *const fn (ptr: *anyopaque, conn_handle: u16, cccd_handle: u16) GattError!void,
     getAttMtu: *const fn (ptr: *anyopaque, conn_handle: u16) u16,
     getState: *const fn (ptr: *anyopaque) State,
-    addEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void,
-    removeEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void,
+    addEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void,
+    removeEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void,
     getAddr: *const fn (ptr: *anyopaque) ?BdAddr,
     deinit: *const fn (ptr: *anyopaque) void,
 };
@@ -266,11 +266,11 @@ pub fn getAddr(self: Central) ?BdAddr {
 
 // -- events --
 
-pub fn addEventHook(self: Central, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void {
+pub fn addEventHook(self: Central, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void {
     self.vtable.addEventHook(self.ptr, ctx, cb);
 }
 
-pub fn removeEventHook(self: Central, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void {
+pub fn removeEventHook(self: Central, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void {
     self.vtable.removeEventHook(self.ptr, ctx, cb);
 }
 
@@ -364,11 +364,11 @@ pub fn wrap(pointer: anytype) Central {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             return self.getState();
         }
-        fn addEventHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void {
+        fn addEventHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             self.addEventHook(ctx, cb);
         }
-        fn removeEventHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, CentralEvent) void) void {
+        fn removeEventHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             if (@hasDecl(Impl, "removeEventHook")) {
                 self.removeEventHook(ctx, cb);
@@ -439,7 +439,7 @@ test "bt/unit_tests/Central_wrap_does_not_silently_downgrade_optional_gatt_ops" 
         pub fn getState(_: *@This()) State {
             return .idle;
         }
-        pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, CentralEvent) void) void {}
+        pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Event) void) void {}
         pub fn getAddr(_: *@This()) ?BdAddr {
             return null;
         }

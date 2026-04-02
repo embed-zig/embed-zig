@@ -8,7 +8,7 @@ const embed = @import("embed");
 
 const Context = @This();
 
-pub const DoublyLinkedList = embed.collections.DoublyLinkedList;
+pub const DoublyLinkedList = embed.DoublyLinkedList;
 
 ptr: *anyopaque,
 vtable: *const VTable,

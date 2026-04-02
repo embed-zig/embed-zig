@@ -15,7 +15,7 @@ const l2cap = @import("l2cap.zig");
 const att = @import("att.zig");
 const Gap = @import("Gap.zig");
 
-pub fn Hci(comptime lib: type) type {
+pub fn make(comptime lib: type) type {
     return struct {
         const Self = @This();
         const Role = Gap.Role;
@@ -739,7 +739,7 @@ pub fn Hci(comptime lib: type) type {
 }
 
 test "bt/unit_tests/host/Hci_unknown_disconnect_does_not_fire_role_callbacks" {
-    const Impl = Hci(@import("std"));
+    const Impl = make(@import("std"));
 
     const Counter = struct {
         fn onDisconnected(ctx: ?*anyopaque, _: u16, _: u8) void {
@@ -767,7 +767,7 @@ test "bt/unit_tests/host/Hci_unknown_disconnect_does_not_fire_role_callbacks" {
 }
 
 test "bt/unit_tests/host/Hci_failed_connection_complete_does_not_fire_connected_callback" {
-    const Impl = Hci(@import("std"));
+    const Impl = make(@import("std"));
 
     const Counter = struct {
         fn onConnected(ctx: ?*anyopaque, _: Api.Link) void {

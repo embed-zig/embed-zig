@@ -286,6 +286,7 @@ test "integration_tests/bt/xfer" {
     std.testing.log_level = .info;
 
     const bt_mod = @import("bt");
+    const Bt = bt_mod.make(std, @import("embed_std").sync.Channel);
     const Mocker = bt_mod.Mocker(std);
 
     var mocker = Mocker.init(std.testing.allocator, .{});
@@ -311,7 +312,7 @@ test "integration_tests/bt/xfer" {
     t.timeout(5 * std.time.ns_per_s);
 
     t.parallel();
-    t.run("xfer/peripheral", bt_mod.test_runner.pair_xfer.makePeripheral(std, &server_host));
-    t.run("xfer/central", bt_mod.test_runner.pair_xfer.makeCentral(std, &client_host));
+    t.run("xfer/peripheral", bt_mod.test_runner.pair_xfer.makePeripheral(std, Bt.Server, &server_host));
+    t.run("xfer/central", bt_mod.test_runner.pair_xfer.makeCentral(std, Bt.Client, &client_host));
     if (!t.wait()) return error.TestFailed;
 }

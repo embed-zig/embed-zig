@@ -12,68 +12,22 @@ pub const test_runner = struct {
     pub const pair_xfer = @import("bt/test_runner/pair_xfer.zig");
 };
 
-/// Build the built-in HCI-backed host bundle bound to `lib`.
-///
-/// Usage:
-///   const HciHostType = bt.HciHost(embed, platform.Channel);
-///   var host = try HciHostType.init(allocator, transport, .{});
-///   defer host.deinit();
-///
-///   var central = host.central();
-///   var peripheral = host.peripheral();
-pub fn HciHost(comptime lib: type, comptime Channel: fn (type) type) type {
-    const ConcreteHci = @import("bt/host/Hci.zig").Hci(lib);
-    const HostType = @import("bt/Host.zig").Host(lib, Channel);
-    const Allocator = lib.mem.Allocator;
+const Server = @import("bt/host/Server.zig");
+const Client = @import("bt/host/Client.zig");
 
+const bt = @This();
+
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
     return struct {
-        allocator: Allocator,
-        hci: *ConcreteHci,
-        host: HostType,
+        const self = @This();
 
-        const Self = @This();
-
-        pub fn init(allocator: Allocator, transport: Transport, config: ConcreteHci.Config) !Self {
-            const hci_ptr = try allocator.create(ConcreteHci);
-            hci_ptr.* = ConcreteHci.init(transport, config);
-            errdefer {
-                hci_ptr.deinit();
-                allocator.destroy(hci_ptr);
-            }
-
-            var host_impl = try HostType.init(Hci.wrap(hci_ptr), .{
-                .allocator = allocator,
-            });
-            errdefer host_impl.deinit();
-
-            return .{
-                .allocator = allocator,
-                .hci = hci_ptr,
-                .host = host_impl,
-            };
+        pub fn makeHost(comptime Impl: type) type {
+            return bt.Host.make(lib, Impl, Channel);
         }
-
-        pub fn deinit(self: *Self) void {
-            self.host.deinit();
-            self.hci.deinit();
-            self.allocator.destroy(self.hci);
-        }
-
-        pub fn central(self: *Self) Central {
-            return self.host.central();
-        }
-
-        pub fn peripheral(self: *Self) Peripheral {
-            return self.host.peripheral();
-        }
-
-        pub fn client(self: *Self) @TypeOf(self.host.client()) {
-            return self.host.client();
-        }
-
-        pub fn server(self: *Self) @TypeOf(self.host.server()) {
-            return self.host.server();
-        }
+        pub const HciHost = bt.Host.makeHci(lib, Channel);
+        pub const HciHostTransport = bt.Host.makeHciTransport(lib, Channel);
+        pub const Server = bt.Server.make(lib, Channel);
+        pub const Client = bt.Client.make(lib);
     };
 }
 
