@@ -57,11 +57,13 @@ test "integration_tests/embed" {
     const std = @import("std");
     std.testing.log_level = .info;
 
+    const audio_mod = @import("audio");
     const embed_std_mod = @import("embed_std");
     const net_mod = @import("net");
     const sync_mod = @import("sync");
     const Net = net_mod.make(embed_std_mod.std);
 
+    const audio_tr = audio_mod.test_runner.mixer.make(embed_std_mod.std);
     const channel_tr = sync_mod.test_runner.channel.make(embed_std_mod.std, embed_std_mod.sync.Channel);
     const racer_tr = sync_mod.test_runner.racer.make(embed_std_mod.std);
     const runner = make(embed_std_mod.std);
@@ -91,6 +93,7 @@ test "integration_tests/embed" {
     t.run("sync/channel", channel_tr);
     t.run("sync/racer", racer_tr);
     t.run("integration", runner);
+    t.run("audio/mixer", audio_tr);
     t.run("net/fd_stream", fd_stream_tr);
     t.run("net/fd_packet", fd_packet_tr);
     t.run("net/tcp", tcp_tr);
@@ -111,10 +114,12 @@ test "integration_tests/std" {
     const std = @import("std");
     std.testing.log_level = .info;
 
+    const audio_mod = @import("audio");
     const net_mod = @import("net");
     const sync_mod = @import("sync");
     const Net = net_mod.make(std);
 
+    const audio_tr = audio_mod.test_runner.mixer.make(std);
     const racer_tr = sync_mod.test_runner.racer.make(std);
     const runner = make(std);
     const fd_stream_tr = net_mod.test_runner.fd_stream.make(std);
@@ -142,6 +147,7 @@ test "integration_tests/std" {
 
     t.run("sync/racer", racer_tr);
     t.run("integration", runner);
+    t.run("audio/mixer", audio_tr);
     t.run("net/fd_stream", fd_stream_tr);
     t.run("net/fd_packet", fd_packet_tr);
     t.run("net/tcp", tcp_tr);

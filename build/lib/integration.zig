@@ -14,6 +14,7 @@ pub fn create(
 }
 
 pub fn link(b: *std.Build) void {
+    const audio = b.modules.get("audio") orelse @panic("integration requires audio");
     const embed = b.modules.get("embed") orelse @panic("integration requires embed");
     const context = b.modules.get("context") orelse @panic("integration requires context");
     const testing = b.modules.get("testing") orelse @panic("integration requires testing");
@@ -22,6 +23,7 @@ pub fn link(b: *std.Build) void {
     const net = b.modules.get("net") orelse @panic("integration requires net");
     const bt = b.modules.get("bt") orelse @panic("integration requires bt");
     const mod = b.modules.get("integration") orelse @panic("integration module missing");
+    mod.addImport("audio", audio);
     mod.addImport("embed", embed);
     mod.addImport("context", context);
     mod.addImport("testing", testing);
