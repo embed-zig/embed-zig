@@ -28,6 +28,7 @@ pub fn RecvResult(comptime T: type) type {
 ///   fn close(*Ch) void
 ///   fn send(*Ch, T) anyerror!SendResult()
 ///   fn recv(*Ch) anyerror!RecvResult(T)
+///   fn recvTimeout(*Ch, u32) anyerror!RecvResult(T)
 pub fn make(comptime impl: fn (type) type) fn (type) type {
     return struct {
         fn factory(comptime T: type) type {
@@ -36,6 +37,7 @@ pub fn make(comptime impl: fn (type) type) fn (type) type {
             comptime {
                 _ = @as(*const fn (*Ch, T) anyerror!SendResult(), &Ch.send);
                 _ = @as(*const fn (*Ch) anyerror!RecvResult(T), &Ch.recv);
+                _ = @as(*const fn (*Ch, u32) anyerror!RecvResult(T), &Ch.recvTimeout);
                 _ = @as(*const fn (*Ch) void, &Ch.close);
                 _ = @as(*const fn (*Ch) void, &Ch.deinit);
                 _ = @as(*const fn (embed.mem.Allocator, usize) anyerror!Ch, &Ch.init);
@@ -64,6 +66,10 @@ pub fn make(comptime impl: fn (type) type) fn (type) type {
 
                 pub fn recv(self: *Self) !RecvResult(T) {
                     return self.ch.recv();
+                }
+
+                pub fn recvTimeout(self: *Self, timeout_ms: u32) !RecvResult(T) {
+                    return self.ch.recvTimeout(timeout_ms);
                 }
             };
         }
@@ -106,6 +112,10 @@ test "sync/unit_tests/Channel/factory_forwards_contract" {
                     }
                     return .{ .value = undefined, .ok = false };
                 }
+
+                pub fn recvTimeout(self: *@This(), _: u32) !RecvResult(T) {
+                    return self.recv();
+                }
             };
         }
     }.make;
@@ -131,4 +141,7 @@ test "sync/unit_tests/Channel/factory_forwards_contract" {
 
     const recv_closed = try ch.recv();
     try std.testing.expect(!recv_closed.ok);
+
+    const recv_timeout_closed = try ch.recvTimeout(10);
+    try std.testing.expect(!recv_timeout_closed.ok);
 }

@@ -4,7 +4,7 @@
 //! 内部直接经由 `(u32)` 实例化测试对象，
 //! 运行全部测试，验证其行为与 Go channel 语义一致。
 //!
-//! 注意：本 runner 只使用 channel contract 暴露的 API（init/deinit/send/recv/close），
+//! 注意：本 runner 只使用 channel contract 暴露的 API（init/deinit/send/recv/recvTimeout/close），
 //! 不依赖 trySend/tryRecv/readFd/writeFd 等 impl 特有方法。
 //! 那些 impl 特有的行为（如 readiness/selector 可观测性）应在 impl 自己的测试中覆盖。
 //!
@@ -245,6 +245,7 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
 
             runOne("recvWokenBySend", allocator, &passed, &failed, testRecvWokenBySend);
             runOne("sendWokenByRecv", allocator, &passed, &failed, testSendWokenByRecv);
+            runOne("recvTimeoutContract", allocator, &passed, &failed, testRecvTimeoutContract);
             runOne("recvWokenByClose", allocator, &passed, &failed, testRecvWokenByClose);
             runOne("sendWokenByClose", allocator, &passed, &failed, testSendWokenByClose);
             runOne("closeWakesMultiRecv", allocator, &passed, &failed, testCloseWakesMultiRecv);
@@ -783,6 +784,33 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
             t.join();
 
             try testing.expect(send_ok.load(.acquire));
+        }
+
+        fn testRecvTimeoutContract(allocator: Allocator) !void {
+            const cases = [_]usize{ 0, 1 };
+
+            for (cases) |capacity| {
+                var ch = try Ch.make(allocator, capacity);
+                defer ch.deinit();
+
+                try testing.expectError(error.Timeout, ch.recvTimeout(5));
+
+                const sender = try Thread.spawn(.{}, struct {
+                    fn run(c: *Ch) void {
+                        Thread.sleep(time.ns_per_ms);
+                        _ = c.send(0xD00D) catch {};
+                    }
+                }.run, .{&ch});
+
+                const r = try ch.recvTimeout(200);
+                try testing.expect(r.ok);
+                try testing.expectEqual(@as(Event, 0xD00D), r.value);
+                sender.join();
+
+                ch.close();
+                const closed = try ch.recvTimeout(5);
+                try testing.expect(!closed.ok);
+            }
         }
 
         fn testRecvWokenByClose(allocator: Allocator) !void {
