@@ -1,12 +1,12 @@
 //! audio.Mixer — type-erased PCM mixer surface.
 
 const root = @This();
-const TrackMod = @import("mixer/Track.zig");
-const TrackCtrlMod = @import("mixer/TrackCtrl.zig");
 
-pub const Format = TrackMod.Format;
-pub const Track = TrackMod;
-pub const TrackCtrl = TrackCtrlMod;
+const TrackStateMod = @import("mixer/TrackState.zig");
+
+pub const Track = @import("mixer/Track.zig");
+pub const Format = Track.Format;
+pub const TrackCtrl = @import("mixer/TrackCtrl.zig");
 
 /// `TrackHandle` returns two views over one logical track. Callers must
 /// eventually `deinit()` both `track` and `ctrl` exactly once, and must not use
@@ -59,286 +59,326 @@ pub fn closeWithError(self: root) void {
     self.vtable.closeWithError(self.ptr);
 }
 
-pub fn DefaultImpl(comptime lib: type) type {
-    return @import("mixer/Default.zig").make(lib, TrackHandle);
-}
-
-pub fn makeDefault(comptime lib: type) type {
-    return make(lib, DefaultImpl(lib));
-}
-
-pub fn make(comptime lib: type, comptime Impl: type) type {
-    comptime {
-        if (!@hasDecl(Impl, "Config")) @compileError("Mixer impl must define Config");
-        if (!@hasDecl(Impl, "init")) @compileError("Mixer impl must define init");
-        if (!@hasDecl(Impl, "createTrack")) @compileError("Mixer impl must define createTrack");
-        if (!@hasDecl(Impl, "read")) @compileError("Mixer impl must define read");
-        if (!@hasDecl(Impl, "closeWrite")) @compileError("Mixer impl must define closeWrite");
-        if (!@hasDecl(Impl, "close")) @compileError("Mixer impl must define close");
-        if (!@hasDecl(Impl, "closeWithError")) @compileError("Mixer impl must define closeWithError");
-        if (!@hasDecl(Impl, "deinit")) @compileError("Mixer impl must define deinit");
-        if (!@hasField(Impl.Config, "allocator")) @compileError("Mixer impl Config must define allocator");
-
-        _ = @as(*const fn (Impl.Config) anyerror!Impl, &Impl.init);
-        _ = @as(*const fn (*Impl, Track.Config) CreateTrackError!TrackHandle, &Impl.createTrack);
-        _ = @as(*const fn (*Impl, []i16) ?usize, &Impl.read);
-        _ = @as(*const fn (*Impl) void, &Impl.closeWrite);
-        _ = @as(*const fn (*Impl) void, &Impl.close);
-        _ = @as(*const fn (*Impl) void, &Impl.closeWithError);
-        _ = @as(*const fn (*Impl) void, &Impl.deinit);
-    }
-
+pub fn make(comptime lib: type) type {
+    const Thread = lib.Thread;
     const Allocator = lib.mem.Allocator;
-    const Ctx = struct {
-        allocator: Allocator,
-        impl: Impl,
-
-        pub fn deinit(self: *@This()) void {
-            self.impl.deinit();
-            self.allocator.destroy(self);
-        }
-
-        pub fn createTrack(self: *@This(), config: Track.Config) CreateTrackError!TrackHandle {
-            return self.impl.createTrack(config);
-        }
-
-        pub fn read(self: *@This(), out: []i16) ?usize {
-            return self.impl.read(out);
-        }
-
-        pub fn closeWrite(self: *@This()) void {
-            self.impl.closeWrite();
-        }
-
-        pub fn close(self: *@This()) void {
-            self.impl.close();
-        }
-
-        pub fn closeWithError(self: *@This()) void {
-            self.impl.closeWithError();
-        }
-    };
-    const Gen = struct {
-        fn deinitFn(ptr: *anyopaque) void {
-            const self: *Ctx = @ptrCast(@alignCast(ptr));
-            self.deinit();
-        }
-
-        fn createTrackFn(ptr: *anyopaque, config: Track.Config) CreateTrackError!TrackHandle {
-            const self: *Ctx = @ptrCast(@alignCast(ptr));
-            return self.createTrack(config);
-        }
-
-        fn readFn(ptr: *anyopaque, out: []i16) ?usize {
-            const self: *Ctx = @ptrCast(@alignCast(ptr));
-            return self.read(out);
-        }
-
-        fn closeWriteFn(ptr: *anyopaque) void {
-            const self: *Ctx = @ptrCast(@alignCast(ptr));
-            self.closeWrite();
-        }
-
-        fn closeFn(ptr: *anyopaque) void {
-            const self: *Ctx = @ptrCast(@alignCast(ptr));
-            self.close();
-        }
-
-        fn closeWithErrorFn(ptr: *anyopaque) void {
-            const self: *Ctx = @ptrCast(@alignCast(ptr));
-            self.closeWithError();
-        }
-
-        const vtable = VTable{
-            .deinit = deinitFn,
-            .createTrack = createTrackFn,
-            .read = readFn,
-            .closeWrite = closeWriteFn,
-            .close = closeFn,
-            .closeWithError = closeWithErrorFn,
-        };
-    };
-
-    return struct {
-        pub const Config = Impl.Config;
-
-        pub fn init(config: Config) !root {
-            var impl = try Impl.init(config);
-            errdefer impl.deinit();
-
-            const storage = try config.allocator.create(Ctx);
-            errdefer config.allocator.destroy(storage);
-            storage.* = .{
-                .allocator = config.allocator,
-                .impl = impl,
-            };
-            return .{
-                .ptr = storage,
-                .vtable = &Gen.vtable,
-            };
-        }
-    };
-}
-
-test "audio/unit_tests/Mixer_exposes_vtable_surface" {
-    const std = @import("std");
+    const ArrayListUnmanaged = lib.ArrayListUnmanaged;
+    const TrackState = TrackStateMod.make(lib);
 
     const TrackImpl = struct {
         pub const Config = struct {
-            allocator: std.mem.Allocator,
-            writes: *usize,
+            allocator: Allocator,
+            state: *TrackState,
         };
 
-        writes: *usize,
+        state: *TrackState,
 
         pub fn init(config: Config) !@This() {
-            return .{
-                .writes = config.writes,
-            };
+            _ = config.allocator;
+            return .{ .state = config.state };
         }
 
-        pub fn write(self: *@This(), format: Track.Format, samples: []const i16) anyerror!void {
-            _ = format;
-            self.writes.* += samples.len;
+        pub fn write(self: *@This(), format: Format, samples: []const i16) !void {
+            return self.state.write(format, samples);
         }
 
         pub fn deinit(self: *@This()) void {
-            _ = self;
+            self.state.releaseHandle();
         }
-    };
-
-    const TrackCtrlState = struct {
-        current_gain: f32 = 1.0,
-        current_label: []const u8 = "track",
-        bytes_read: usize = 12,
-        closed: bool = false,
-        errored: bool = false,
     };
 
     const TrackCtrlImpl = struct {
         pub const Config = struct {
-            allocator: std.mem.Allocator,
-            state: *TrackCtrlState,
+            allocator: Allocator,
+            state: *TrackState,
         };
 
-        state: *TrackCtrlState,
+        state: *TrackState,
 
         pub fn init(config: Config) !@This() {
-            return .{
-                .state = config.state,
-            };
+            _ = config.allocator;
+            return .{ .state = config.state };
         }
 
         pub fn setGain(self: *@This(), value: f32) void {
-            self.state.current_gain = value;
+            self.state.setGain(value);
         }
 
         pub fn gain(self: *@This()) f32 {
-            return self.state.current_gain;
+            return self.state.gain();
         }
 
         pub fn label(self: *@This()) []const u8 {
-            return self.state.current_label;
+            return self.state.label();
         }
 
         pub fn readBytes(self: *@This()) usize {
-            return self.state.bytes_read;
+            return self.state.readBytes();
         }
 
-        pub fn setFadeOutDuration(_: *@This(), _: u32) void {}
+        pub fn setFadeOutDuration(self: *@This(), ms: u32) void {
+            self.state.setFadeOutDuration(ms);
+        }
 
         pub fn closeWrite(self: *@This()) void {
-            self.state.closed = true;
+            self.state.closeWrite();
         }
 
-        pub fn closeWriteWithSilence(self: *@This(), _: u32) void {
-            self.state.closed = true;
+        pub fn closeWriteWithSilence(self: *@This(), silence_ms: u32) void {
+            self.state.closeWriteWithSilence(silence_ms) catch self.state.closeWrite();
         }
 
         pub fn close(self: *@This()) void {
-            self.state.closed = true;
+            self.state.close();
         }
 
         pub fn closeWithError(self: *@This()) void {
-            self.state.closed = true;
-            self.state.errored = true;
+            self.state.closeWithError();
         }
 
-        pub fn setGainLinearTo(self: *@This(), to: f32, _: u32) void {
-            self.state.current_gain = to;
+        pub fn setGainLinearTo(self: *@This(), to: f32, duration_ms: u32) void {
+            self.state.setGainLinearTo(to, duration_ms);
         }
 
         pub fn deinit(self: *@This()) void {
-            _ = self;
+            self.state.releaseHandle();
         }
     };
 
-    const Impl = struct {
+    return struct {
+        const Self = @This();
+
         pub const Config = struct {
-            allocator: std.mem.Allocator,
+            allocator: Allocator,
+            output: Format,
         };
 
-        allocator: std.mem.Allocator,
-        track_writes: usize = 0,
-        ctrl_state: TrackCtrlState = .{},
+        allocator: Allocator,
+        output: Format,
+        mutex: Thread.Mutex = .{},
+        tracks: ArrayListUnmanaged(*TrackState) = .{},
+        close_write: bool = false,
         closed: bool = false,
-        close_err: bool = false,
+        close_error: bool = false,
 
-        pub fn init(config: Config) !@This() {
-            return .{
-                .allocator = config.allocator,
-            };
-        }
-
-        pub fn createTrack(self: *@This(), _: Track.Config) CreateTrackError!TrackHandle {
-            const TrackType = Track.make(std, TrackImpl);
-            const TrackCtrlType = TrackCtrl.make(std, TrackCtrlImpl);
-            return .{
-                .track = try TrackType.init(.{
-                    .allocator = self.allocator,
-                    .writes = &self.track_writes,
-                }),
-                .ctrl = try TrackCtrlType.init(.{
-                    .allocator = self.allocator,
-                    .state = &self.ctrl_state,
-                }),
-            };
-        }
-
-        pub fn read(_: *@This(), out: []i16) ?usize {
-            if (out.len >= 2) {
-                out[0] = 1;
-                out[1] = 2;
-                return 2;
+        const Gen = struct {
+            fn deinitFn(ptr: *anyopaque) void {
+                const self: *Self = @ptrCast(@alignCast(ptr));
+                self.deinit();
             }
-            return out.len;
+
+            fn createTrackFn(ptr: *anyopaque, config: Track.Config) CreateTrackError!TrackHandle {
+                const self: *Self = @ptrCast(@alignCast(ptr));
+                return self.createTrack(config);
+            }
+
+            fn readFn(ptr: *anyopaque, out: []i16) ?usize {
+                const self: *Self = @ptrCast(@alignCast(ptr));
+                return self.read(out);
+            }
+
+            fn closeWriteFn(ptr: *anyopaque) void {
+                const self: *Self = @ptrCast(@alignCast(ptr));
+                self.closeWrite();
+            }
+
+            fn closeFn(ptr: *anyopaque) void {
+                const self: *Self = @ptrCast(@alignCast(ptr));
+                self.close();
+            }
+
+            fn closeWithErrorFn(ptr: *anyopaque) void {
+                const self: *Self = @ptrCast(@alignCast(ptr));
+                self.closeWithError();
+            }
+
+            const vtable = VTable{
+                .deinit = deinitFn,
+                .createTrack = createTrackFn,
+                .read = readFn,
+                .closeWrite = closeWriteFn,
+                .close = closeFn,
+                .closeWithError = closeWithErrorFn,
+            };
+        };
+
+        pub fn init(config: Config) !root {
+            if (config.output.rate == 0) return error.InvalidConfig;
+
+            const self = try config.allocator.create(Self);
+            errdefer config.allocator.destroy(self);
+            self.* = .{
+                .allocator = config.allocator,
+                .output = config.output,
+            };
+
+            return .{
+                .ptr = self,
+                .vtable = &Gen.vtable,
+            };
         }
 
-        pub fn closeWrite(self: *@This()) void {
+        pub fn deinit(self: *Self) void {
+            self.mutex.lock();
+            self.close_write = true;
             self.closed = true;
+            self.close_error = true;
+            while (self.tracks.items.len > 0) {
+                const state = self.tracks.orderedRemove(self.tracks.items.len - 1);
+                state.closeWithError();
+                state.releaseMixerRef();
+            }
+            self.tracks.deinit(self.allocator);
+            self.mutex.unlock();
+            self.allocator.destroy(self);
         }
 
-        pub fn close(self: *@This()) void {
+        pub fn createTrack(self: *Self, config: Track.Config) !TrackHandle {
+            const TrackType = Track.make(lib, TrackImpl);
+            const TrackCtrlType = TrackCtrl.make(lib, TrackCtrlImpl);
+
+            self.mutex.lock();
+            const unavailable = self.close_write or self.closed or self.close_error;
+            self.mutex.unlock();
+            if (unavailable) return error.Closed;
+
+            const state = try TrackState.create(self.allocator, self.output, config);
+            state.owner_ptr = self;
+            state.on_last_handle_dropped = onLastHandleDroppedFn;
+
+            state.retain();
+            const track = TrackType.init(.{
+                .allocator = self.allocator,
+                .state = state,
+            }) catch |err| {
+                state.releaseSetupRef();
+                return err;
+            };
+            errdefer track.deinit();
+
+            state.retain();
+            const ctrl = TrackCtrlType.init(.{
+                .allocator = self.allocator,
+                .state = state,
+            }) catch |err| {
+                state.releaseSetupRef();
+                return err;
+            };
+            errdefer ctrl.deinit();
+
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            if (self.close_write or self.closed or self.close_error) return error.Closed;
+
+            state.retain();
+            self.tracks.append(self.allocator, state) catch |err| {
+                state.releaseSetupRef();
+                return err;
+            };
+
+            return .{
+                .track = track,
+                .ctrl = ctrl,
+            };
+        }
+
+        pub fn read(self: *Self, out: []i16) ?usize {
+            if (out.len == 0) return 0;
+
+            @memset(out, 0);
+
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            var read_n: usize = 0;
+            var i: usize = 0;
+            while (i < self.tracks.items.len) {
+                const state = self.tracks.items[i];
+                const mixed_n = state.mixInto(out);
+                if (mixed_n > read_n) read_n = mixed_n;
+
+                if (state.isDrained()) {
+                    _ = self.tracks.swapRemove(i);
+                    state.releaseMixerRef();
+                    continue;
+                }
+                i += 1;
+            }
+
+            if (read_n > 0) return read_n;
+            if (self.closed or self.close_error) return null;
+            if (self.close_write and self.tracks.items.len == 0) return null;
+            return 0;
+        }
+
+        pub fn closeWrite(self: *Self) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            if (self.close_write) return;
+            self.close_write = true;
+            for (self.tracks.items) |state| state.closeWrite();
+        }
+
+        pub fn close(self: *Self) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
             self.closed = true;
+            self.close_write = true;
+            while (self.tracks.items.len > 0) {
+                const state = self.tracks.orderedRemove(self.tracks.items.len - 1);
+                state.closeWithError();
+                state.releaseMixerRef();
+            }
         }
 
-        pub fn closeWithError(self: *@This()) void {
+        pub fn closeWithError(self: *Self) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
             self.closed = true;
-            self.close_err = true;
+            self.close_write = true;
+            self.close_error = true;
+            while (self.tracks.items.len > 0) {
+                const state = self.tracks.orderedRemove(self.tracks.items.len - 1);
+                state.closeWithError();
+                state.releaseMixerRef();
+            }
         }
 
-        pub fn deinit(self: *@This()) void {
-            _ = self;
+        fn onLastHandleDroppedFn(ptr: *anyopaque, state: *TrackState) void {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            self.onLastHandleDropped(state);
+        }
+
+        fn onLastHandleDropped(self: *Self, state: *TrackState) void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            var i: usize = 0;
+            while (i < self.tracks.items.len) : (i += 1) {
+                if (self.tracks.items[i] != state) continue;
+                if (state.isDrained()) {
+                    _ = self.tracks.swapRemove(i);
+                    state.releaseMixerRef();
+                }
+                return;
+            }
         }
     };
+}
+
+test "audio/unit_tests/Mixer_exposes_surface" {
+    const std = @import("std");
 
     comptime {
-        _ = root.DefaultImpl;
-        _ = root.makeDefault;
         _ = root.Format;
         _ = root.Track;
         _ = root.TrackCtrl;
         _ = root.TrackHandle;
+        _ = root.VTable;
         _ = root.deinit;
         _ = root.createTrack;
         _ = root.read;
@@ -346,6 +386,7 @@ test "audio/unit_tests/Mixer_exposes_vtable_surface" {
         _ = root.close;
         _ = root.closeWithError;
         _ = root.make;
+        _ = make(std).init;
         _ = Track.write;
         _ = Track.deinit;
         _ = Track.make;
@@ -358,31 +399,158 @@ test "audio/unit_tests/Mixer_exposes_vtable_surface" {
         _ = TrackCtrl.closeWithError;
         _ = TrackCtrl.deinit;
         _ = TrackCtrl.make;
-        _ = make(std, Impl).init;
-        if (!@hasField(make(std, Impl).Config, "allocator")) {
-            @compileError("make config must expose allocator");
-        }
     }
+}
 
-    const MixerType = make(std, Impl);
+test "audio/unit_tests/Mixer_default_backend_happy_path" {
+    const std = @import("std");
+
+    const MixerType = make(std);
     const mixer = try MixerType.init(.{
         .allocator = std.testing.allocator,
+        .output = .{ .rate = 16000, .channels = .mono },
     });
     defer mixer.deinit();
 
     const handle = try mixer.createTrack(.{ .label = "song" });
     defer handle.track.deinit();
     defer handle.ctrl.deinit();
-    try handle.track.write(.{ .rate = 16000 }, &.{ 1, 2, 3, 4 });
-    try std.testing.expectEqual(@as(f32, 1.0), handle.ctrl.gain());
-    handle.ctrl.setGain(0.5);
-    try std.testing.expectEqual(@as(f32, 0.5), handle.ctrl.gain());
-    try std.testing.expectEqualStrings("track", handle.ctrl.label());
-    try std.testing.expectEqual(@as(usize, 12), handle.ctrl.readBytes());
+
+    try handle.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 10, 20, 30 });
 
     var out: [4]i16 = undefined;
-    const read_n = mixer.read(&out) orelse 0;
-    try std.testing.expectEqual(@as(usize, 2), read_n);
-    try std.testing.expectEqual(@as(i16, 1), out[0]);
-    try std.testing.expectEqual(@as(i16, 2), out[1]);
+    const n = mixer.read(&out) orelse unreachable;
+    try std.testing.expectEqual(@as(usize, 3), n);
+    try std.testing.expectEqualSlices(i16, &.{ 10, 20, 30 }, out[0..3]);
+    try std.testing.expectEqual(@as(usize, 6), handle.ctrl.readBytes());
+}
+
+test "audio/unit_tests/Mixer_default_backend_mixes_gain" {
+    const std = @import("std");
+
+    const MixerType = make(std);
+    const mixer = try MixerType.init(.{
+        .allocator = std.testing.allocator,
+        .output = .{ .rate = 16000, .channels = .mono },
+    });
+    defer mixer.deinit();
+
+    const a = try mixer.createTrack(.{ .label = "a" });
+    defer a.track.deinit();
+    defer a.ctrl.deinit();
+    const b = try mixer.createTrack(.{ .label = "b" });
+    defer b.track.deinit();
+    defer b.ctrl.deinit();
+
+    b.ctrl.setGain(0.5);
+    try a.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 100, 200 });
+    try b.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 100, 200 });
+
+    var out: [4]i16 = undefined;
+    const n = mixer.read(&out) orelse unreachable;
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqualSlices(i16, &.{ 150, 300 }, out[0..2]);
+}
+
+test "audio/unit_tests/Mixer_default_backend_drains_after_close_write" {
+    const std = @import("std");
+
+    const MixerType = make(std);
+    const mixer = try MixerType.init(.{
+        .allocator = std.testing.allocator,
+        .output = .{ .rate = 8000, .channels = .mono },
+    });
+    defer mixer.deinit();
+
+    const handle = try mixer.createTrack(.{});
+    defer handle.track.deinit();
+    defer handle.ctrl.deinit();
+
+    try handle.track.write(.{ .rate = 8000, .channels = .mono }, &.{ 7, 8 });
+    mixer.closeWrite();
+
+    var out: [4]i16 = undefined;
+    try std.testing.expectEqual(@as(?usize, 2), mixer.read(&out));
+    try std.testing.expectEqual(@as(?usize, null), mixer.read(&out));
+}
+
+test "audio/unit_tests/Mixer_default_backend_rejects_create_after_mixer_close_write" {
+    const std = @import("std");
+
+    const MixerType = make(std);
+    const mixer = try MixerType.init(.{
+        .allocator = std.testing.allocator,
+        .output = .{ .rate = 8000, .channels = .mono },
+    });
+    defer mixer.deinit();
+
+    mixer.closeWrite();
+    try std.testing.expectError(error.Closed, mixer.createTrack(.{}));
+}
+
+test "audio/unit_tests/Mixer_default_backend_close_is_terminal_without_error_path" {
+    const std = @import("std");
+
+    const MixerType = make(std);
+    const mixer = try MixerType.init(.{
+        .allocator = std.testing.allocator,
+        .output = .{ .rate = 8000, .channels = .mono },
+    });
+    defer mixer.deinit();
+
+    const handle = try mixer.createTrack(.{});
+    defer handle.track.deinit();
+    defer handle.ctrl.deinit();
+
+    try handle.track.write(.{ .rate = 8000, .channels = .mono }, &.{ 1, 2 });
+    mixer.close();
+
+    var out: [4]i16 = undefined;
+    try std.testing.expectEqual(@as(?usize, null), mixer.read(&out));
+    try std.testing.expectError(error.Closed, mixer.createTrack(.{}));
+}
+
+test "audio/unit_tests/Mixer_default_backend_last_handle_drop_closes_track_and_preserves_buffered_audio" {
+    const std = @import("std");
+
+    const MixerType = make(std);
+    const mixer = try MixerType.init(.{
+        .allocator = std.testing.allocator,
+        .output = .{ .rate = 8000, .channels = .mono },
+    });
+    defer mixer.deinit();
+
+    var handle = try mixer.createTrack(.{});
+    try handle.track.write(.{ .rate = 8000, .channels = .mono }, &.{ 4, 5 });
+    handle.track.deinit();
+    handle.ctrl.deinit();
+
+    var out: [4]i16 = undefined;
+    try std.testing.expectEqual(@as(?usize, 2), mixer.read(&out));
+    try std.testing.expectEqualSlices(i16, &.{ 4, 5 }, out[0..2]);
+    try std.testing.expectEqual(@as(?usize, 0), mixer.read(&out));
+}
+
+test "audio/unit_tests/Mixer_default_backend_overflowing_silence_tail_falls_back_to_close_write" {
+    const std = @import("std");
+
+    const MixerType = make(std);
+    const mixer = try MixerType.init(.{
+        .allocator = std.testing.allocator,
+        .output = .{ .rate = std.math.maxInt(u32), .channels = .stereo },
+    });
+    defer mixer.deinit();
+
+    const handle = try mixer.createTrack(.{});
+    defer handle.track.deinit();
+    defer handle.ctrl.deinit();
+
+    try handle.track.write(.{ .rate = std.math.maxInt(u32), .channels = .stereo }, &.{ 1, 2 });
+    handle.ctrl.closeWriteWithSilence(std.math.maxInt(u32));
+
+    var out: [8]i16 = undefined;
+    const n = mixer.read(&out) orelse unreachable;
+    try std.testing.expectEqual(@as(usize, 2), n);
+    try std.testing.expectEqualSlices(i16, &.{ 1, 2 }, out[0..2]);
+    try std.testing.expectEqual(@as(?usize, 0), mixer.read(&out));
 }

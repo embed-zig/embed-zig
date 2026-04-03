@@ -50,7 +50,7 @@ fn SuiteType(comptime lib: type) type {
     const Thread = lib.Thread;
     const Atomic = lib.atomic.Value;
     const testing = lib.testing;
-    const DefaultMixerType = MixerMod.makeDefault(lib);
+    const DefaultMixerType = MixerMod.make(lib);
     const Track = MixerMod.Track;
     const CountingAllocator = CountingAllocatorType(lib);
     const run_log = lib.log.scoped(.audio_mixer_runner);
