@@ -24,6 +24,7 @@ const pkg_stb_truetype = @import("build/pkg/stb_truetype.zig");
 const pkg_opus = @import("build/pkg/opus.zig");
 const pkg_lvgl = @import("build/pkg/lvgl.zig");
 const pkg_portaudio = @import("build/pkg/portaudio.zig");
+const pkg_speexdsp = @import("build/pkg/speexdsp.zig");
 const Libraries = struct {
     pub const embed = lib_embed;
     pub const integration = lib_integration;
@@ -50,6 +51,7 @@ const Packages = struct {
     pub const opus = pkg_opus;
     pub const lvgl = pkg_lvgl;
     pub const portaudio = pkg_portaudio;
+    pub const speexdsp = pkg_speexdsp;
 };
 
 pub fn build(b: *std.Build) void {
@@ -100,4 +102,5 @@ pub fn build(b: *std.Build) void {
     if (b.modules.get("opus") != null) tests.addTest(b, "opus", pkg_opus.linkTest);
     if (b.modules.get("lvgl") != null) tests.addTest(b, "lvgl", pkg_lvgl.linkTest);
     if (b.modules.get("portaudio") != null) tests.addTest(b, "portaudio", pkg_portaudio.linkTest);
+    if (b.modules.get("speexdsp") != null) tests.addTest(b, "speexdsp", pkg_speexdsp.linkTest);
 }
