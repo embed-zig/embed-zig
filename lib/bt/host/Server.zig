@@ -183,6 +183,14 @@ pub fn Server(comptime lib: type, comptime Channel: fn (type) type, comptime Per
             return self.registerXferRoute(service_uuid, char_uuid, handler, ctx);
         }
 
+        pub fn setWriteIdleTimeout(self: *Self, timeout_ms: u32) void {
+            self.xfer_impl.setWriteIdleTimeout(timeout_ms);
+        }
+
+        pub fn getWriteIdleTimeout(self: *Self) u32 {
+            return self.xfer_impl.getWriteIdleTimeout();
+        }
+
         pub fn accept(self: *Self, timeout_ms: ?u32) AcceptError!?Subscription {
             while (true) {
                 self.mutex.lock();

@@ -19,6 +19,9 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
         };
         pub const HandleError = error{Unexpected};
 
+        pub const default_write_idle_timeout_ms: u32 = 1000;
+        const max_idle_retries: u8 = 5;
+
         const Request = bt.Peripheral.Request;
         const ResponseWriter = bt.Peripheral.ResponseWriter;
         const PushMode = HostServerType.PushMode;
@@ -91,6 +94,8 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
             initialized: bool = false,
             recv_buf: ?[]u8 = null,
             rcvmask: [Chunk.max_mask_bytes]u8 = [_]u8{0} ** Chunk.max_mask_bytes,
+            last_recv_ts: i64 = 0,
+            watchdog_active: bool = false,
 
             fn deinit(self: *WriteXState, allocator: lib.mem.Allocator) void {
                 if (self.recv_buf) |buf| allocator.free(buf);
@@ -134,6 +139,10 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
         mutex: lib.Thread.Mutex = .{},
         routes: lib.AutoHashMapUnmanaged(CharKey, Route) = .{},
         conns: lib.AutoHashMapUnmanaged(u16, ConnState) = .{},
+        closing: bool = false,
+        idle_watchdog_count: u32 = 0,
+        idle_watchdog_cond: lib.Thread.Condition = .{},
+        write_idle_timeout_ms: u32 = default_write_idle_timeout_ms,
 
         pub fn init(allocator: lib.mem.Allocator) Self {
             return .{ .allocator = allocator };
@@ -147,9 +156,25 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
             }
         }
 
-        pub fn deinit(self: *Self) void {
+        pub fn setWriteIdleTimeout(self: *Self, timeout_ms: u32) void {
             self.mutex.lock();
             defer self.mutex.unlock();
+            self.write_idle_timeout_ms = timeout_ms;
+        }
+
+        pub fn getWriteIdleTimeout(self: *Self) u32 {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            return self.write_idle_timeout_ms;
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.mutex.lock();
+            self.closing = true;
+            self.idle_watchdog_cond.broadcast();
+            while (self.idle_watchdog_count > 0) {
+                self.idle_watchdog_cond.timedWait(&self.mutex, @as(u64, 2000) * lib.time.ns_per_ms) catch {};
+            }
 
             var conn_iter = self.conns.iterator();
             while (conn_iter.next()) |entry| {
@@ -158,6 +183,7 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
             self.conns.deinit(self.allocator);
             self.routes.deinit(self.allocator);
             self.owner = null;
+            self.mutex.unlock();
         }
 
         pub fn handle(self: *Self, service_uuid: u16, char_uuid: u16, handler: XHandler, ctx: ?*anyopaque) HandleError!void {
@@ -235,6 +261,7 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
             if (self.takeConnLocked(conn_handle)) |conn_state| {
                 var conn = conn_state;
                 conn.deinit(self.allocator);
+                self.idle_watchdog_cond.broadcast();
             }
         }
 
@@ -245,6 +272,7 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
             const conn = self.getOrPutConnLocked(conn_handle) catch return;
             resetXferStatesInConn(conn, self.allocator);
             conn.att_mtu = effectiveMtu(mtu);
+            self.idle_watchdog_cond.broadcast();
         }
 
         fn ownerPtr(self: *Self) *HostServerType {
@@ -362,11 +390,7 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
                     return;
                 }
                 rw.ok();
-                self.sendReadXChunks(req.conn_handle, req.service_uuid, req.char_uuid, null) catch {
-                    self.mutex.lock();
-                    self.clearReadXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
-                    self.mutex.unlock();
-                };
+                self.sendReadXChunks(req.conn_handle, req.service_uuid, req.char_uuid, null) catch {};
                 return;
             }
 
@@ -414,11 +438,7 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
                     return;
                 }
                 rw.ok();
-                self.sendReadXChunks(req.conn_handle, req.service_uuid, req.char_uuid, null) catch {
-                    self.mutex.lock();
-                    self.clearReadXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
-                    self.mutex.unlock();
-                };
+                self.sendReadXChunks(req.conn_handle, req.service_uuid, req.char_uuid, null) catch {};
                 return;
             }
             const mtu = effectiveMtu(conn.att_mtu);
@@ -452,9 +472,6 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
 
             rw.ok();
             self.sendReadXChunks(req.conn_handle, req.service_uuid, req.char_uuid, null) catch {
-                self.mutex.lock();
-                self.clearReadXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
-                self.mutex.unlock();
                 return;
             };
         }
@@ -544,10 +561,18 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
                 state.last_chunk_len = payload_len;
             }
 
+            state.last_recv_ts = lib.time.milliTimestamp();
+
             const mask_len = Chunk.Bitmask.requiredBytes(state.total);
             Chunk.Bitmask.set(state.rcvmask[0..mask_len], hdr.seq);
             const complete = Chunk.Bitmask.isComplete(state.rcvmask[0..mask_len], state.total);
             const should_reply = complete or hdr.seq == state.total;
+
+            const should_start_watchdog = !should_reply and state.initialized and !state.watchdog_active;
+            if (should_start_watchdog) {
+                state.watchdog_active = true;
+                self.idle_watchdog_count += 1;
+            }
 
             const conn_handle = state.conn_handle;
             const service_uuid = state.service_uuid;
@@ -564,6 +589,11 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
             self.mutex.unlock();
 
             rw.ok();
+
+            if (should_start_watchdog) {
+                self.startIdleWatchdog(conn_handle, service_uuid, char_uuid);
+            }
+
             if (!should_reply) return true;
 
             if (complete) {
@@ -610,11 +640,13 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
             if (!exists) return false;
 
             self.sendReadXChunks(req.conn_handle, req.service_uuid, req.char_uuid, req.data) catch |err| {
-                self.mutex.lock();
-                self.clearReadXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
-                self.mutex.unlock();
                 switch (err) {
-                    error.InvalidSequence => rw.err(@intFromEnum(att.ErrorCode.invalid_attribute_value_length)),
+                    error.InvalidSequence => {
+                        self.mutex.lock();
+                        self.clearReadXStateLocked(req.conn_handle, req.service_uuid, req.char_uuid);
+                        self.mutex.unlock();
+                        rw.err(@intFromEnum(att.ErrorCode.invalid_attribute_value_length));
+                    },
                     else => rw.err(@intFromEnum(att.ErrorCode.unlikely_error)),
                 }
                 return true;
@@ -784,12 +816,89 @@ pub fn Server(comptime lib: type, comptime HostServerType: type) type {
             _ = conn.write_x_states.remove(key);
             var owned = state;
             owned.deinit(self.allocator);
+            self.idle_watchdog_cond.broadcast();
         }
 
         fn clearWriteXStateLocked(self: *Self, conn_handle: u16, service_uuid: u16, char_uuid: u16) void {
             const conn = self.conns.getPtr(conn_handle) orelse return;
             self.clearWriteXStateInConnLocked(conn, charKey(service_uuid, char_uuid));
             self.pruneConnIfEmptyLocked(conn_handle);
+        }
+
+        fn startIdleWatchdog(self: *Self, conn_handle: u16, service_uuid: u16, char_uuid: u16) void {
+            const t = lib.Thread.spawn(.{}, writeXIdleWatchdog, .{ self, conn_handle, service_uuid, char_uuid }) catch {
+                self.mutex.lock();
+                self.idle_watchdog_count -= 1;
+                if (self.conns.getPtr(conn_handle)) |conn| {
+                    if (conn.write_x_states.getPtr(charKey(service_uuid, char_uuid))) |state| {
+                        state.watchdog_active = false;
+                    }
+                }
+                self.idle_watchdog_cond.broadcast();
+                self.mutex.unlock();
+                return;
+            };
+            t.detach();
+        }
+
+        fn writeXIdleWatchdog(self: *Self, conn_handle: u16, service_uuid: u16, char_uuid: u16) void {
+            defer {
+                self.mutex.lock();
+                self.idle_watchdog_count -= 1;
+                self.idle_watchdog_cond.broadcast();
+                self.mutex.unlock();
+            }
+
+            const timeout_ms = self.write_idle_timeout_ms;
+            const timeout_ns = @as(u64, timeout_ms) * lib.time.ns_per_ms;
+            var retries: u8 = 0;
+            const key = charKey(service_uuid, char_uuid);
+
+            self.mutex.lock();
+            while (retries < max_idle_retries) {
+                self.idle_watchdog_cond.timedWait(&self.mutex, timeout_ns) catch {};
+
+                if (self.closing) {
+                    self.mutex.unlock();
+                    return;
+                }
+
+                const conn = self.conns.getPtr(conn_handle) orelse {
+                    self.mutex.unlock();
+                    return;
+                };
+                const state = conn.write_x_states.getPtr(key) orelse {
+                    self.mutex.unlock();
+                    return;
+                };
+
+                if (!state.initialized) continue;
+
+                const now = lib.time.milliTimestamp();
+                if (now - state.last_recv_ts < @as(i64, timeout_ms)) continue;
+
+                const mask_len = Chunk.Bitmask.requiredBytes(state.total);
+                if (Chunk.Bitmask.isComplete(state.rcvmask[0..mask_len], state.total)) {
+                    self.mutex.unlock();
+                    return;
+                }
+
+                const mode = state.mode;
+                self.mutex.unlock();
+
+                retries += 1;
+                self.sendWriteXLossList(conn_handle, service_uuid, char_uuid, mode) catch {
+                    self.mutex.lock();
+                    self.clearWriteXStateLocked(conn_handle, service_uuid, char_uuid);
+                    self.mutex.unlock();
+                    return;
+                };
+
+                self.mutex.lock();
+            }
+
+            self.clearWriteXStateLocked(conn_handle, service_uuid, char_uuid);
+            self.mutex.unlock();
         }
     };
 }
@@ -856,7 +965,7 @@ test "bt/unit_tests/host/xfer/Server/sendWriteXLossList_pages_large_loss_lists" 
     }
 }
 
-test "bt/unit_tests/host/xfer/Server/handleXReadStart_clears_state_when_initial_push_fails_after_ok" {
+test "bt/unit_tests/host/xfer/Server/handleXReadStart_preserves_state_when_initial_push_fails" {
     const std = @import("std");
 
     const FakeHost = struct {
@@ -932,7 +1041,7 @@ test "bt/unit_tests/host/xfer/Server/handleXReadStart_clears_state_when_initial_
     try std.testing.expectEqual(@as(usize, 1), rw_state.ok_calls);
     try std.testing.expectEqual(@as(?u8, null), rw_state.err_code);
     try std.testing.expectEqual(@as(usize, 1), host.push_calls);
-    try std.testing.expect(conn.read_x_states.get(Engine.charKey(0x180D, 0x2A57)) == null);
+    try std.testing.expect(conn.read_x_states.get(Engine.charKey(0x180D, 0x2A57)) != null);
 }
 
 test "bt/unit_tests/host/xfer/Server/handleXReadStart_splits_topic_and_metadata" {
@@ -1437,4 +1546,341 @@ test "bt/unit_tests/host/xfer/Server/handleXWriteStart_uses_connection_att_mtu" 
     try std.testing.expectEqual(@as(?u8, null), rw_state.err_code);
     const state = conn.write_x_states.get(Engine.charKey(0x180D, 0x2A57)) orelse return error.NoWriteState;
     try std.testing.expectEqual(Chunk.dataChunkSize(64), state.dcs);
+}
+
+test "bt/unit_tests/host/xfer/Server/idle_watchdog_sends_loss_list_on_timeout" {
+    const std = @import("std");
+
+    const FakeHost = struct {
+        pub const PushMode = enum { notify, indicate };
+
+        mutex: std.Thread.Mutex = .{},
+        payloads: [8][Chunk.max_mtu]u8 = undefined,
+        lens: [8]usize = [_]usize{0} ** 8,
+        count: usize = 0,
+
+        fn push(self: *@This(), _: u16, _: u16, _: PushMode, data: []const u8) !void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            @memcpy(self.payloads[self.count][0..data.len], data);
+            self.lens[self.count] = data.len;
+            self.count += 1;
+        }
+    };
+
+    const RwState = struct {
+        ok_calls: usize = 0,
+        err_code: ?u8 = null,
+        fn writeFn(_: *anyopaque, _: []const u8) void {}
+        fn okFn(ptr: *anyopaque) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.ok_calls += 1;
+        }
+        fn errFn(ptr: *anyopaque, code: u8) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.err_code = code;
+        }
+    };
+
+    const Engine = Server(std, FakeHost);
+
+    var host = FakeHost{};
+    var engine = Engine.init(std.testing.allocator);
+    defer engine.deinit();
+    engine.bind(&host);
+
+    try engine.conns.put(std.testing.allocator, 1, .{});
+    const conn = engine.conns.getPtr(1).?;
+    try conn.push_modes.put(std.testing.allocator, Engine.charKey(0x180D, 0x2A57), .notify);
+
+    const route: Engine.Route = .{
+        .callbacks = .{
+            .write = struct {
+                fn handle(_: ?*anyopaque, _: *const Engine.WriteXRequest) void {}
+            }.handle,
+        },
+        .ctx = null,
+    };
+
+    // Send write start magic
+    var rw_state = RwState{};
+    var rw = bt.Peripheral.ResponseWriter{
+        ._impl = &rw_state,
+        ._write_fn = RwState.writeFn,
+        ._ok_fn = RwState.okFn,
+        ._err_fn = RwState.errFn,
+    };
+    const start_req: bt.Peripheral.Request = .{
+        .op = .write,
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+        .data = &Chunk.write_start_magic,
+    };
+    engine.handleXWriteStart(route, &start_req, &rw);
+    try std.testing.expectEqual(@as(usize, 1), rw_state.ok_calls);
+
+    // Send chunk 1 of 3 (only this one — simulate chunks 2,3 lost including last)
+    const dcs = Chunk.dataChunkSize(att.DEFAULT_MTU);
+    const total: u16 = 3;
+    const hdr = (Chunk.Header{ .total = total, .seq = 1 }).encode();
+    var chunk_data: [Chunk.header_size + 17]u8 = undefined;
+    @memcpy(chunk_data[0..Chunk.header_size], &hdr);
+    for (chunk_data[Chunk.header_size..]) |*b| b.* = 0xAB;
+    const chunk_len = Chunk.header_size + @min(dcs, 17);
+
+    var rw_state2 = RwState{};
+    var rw2 = bt.Peripheral.ResponseWriter{
+        ._impl = &rw_state2,
+        ._write_fn = RwState.writeFn,
+        ._ok_fn = RwState.okFn,
+        ._err_fn = RwState.errFn,
+    };
+    const chunk_req: bt.Peripheral.Request = .{
+        .op = .write_without_response,
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+        .data = chunk_data[0..chunk_len],
+    };
+    const handled = engine.handleXWriteChunk(route, &chunk_req, &rw2);
+    try std.testing.expect(handled);
+
+    // Verify watchdog was armed
+    engine.mutex.lock();
+    const ws = conn.write_x_states.getPtr(Engine.charKey(0x180D, 0x2A57)).?;
+    try std.testing.expect(ws.watchdog_active);
+    try std.testing.expect(ws.initialized);
+    try std.testing.expectEqual(@as(u32, 1), engine.idle_watchdog_count);
+    engine.mutex.unlock();
+
+    // Wait for idle timeout to fire (default 1000ms + margin)
+    std.time.sleep(1500 * std.time.ns_per_ms);
+
+    // Verify the watchdog sent a loss list via push
+    host.mutex.lock();
+    const push_count = host.count;
+    host.mutex.unlock();
+
+    try std.testing.expect(push_count >= 1);
+
+    // Decode pushed data and verify it's a loss list containing seq 2 and 3
+    var decoded: [Chunk.max_mtu / 2]u16 = undefined;
+    const loss_count = Chunk.decodeLossList(host.payloads[0][0..host.lens[0]], &decoded);
+    try std.testing.expectEqual(@as(usize, 2), loss_count);
+    try std.testing.expectEqual(@as(u16, 2), decoded[0]);
+    try std.testing.expectEqual(@as(u16, 3), decoded[1]);
+}
+
+test "bt/unit_tests/host/xfer/Server/idle_watchdog_exits_when_transfer_completes" {
+    const std = @import("std");
+
+    const FakeHost = struct {
+        pub const PushMode = enum { notify, indicate };
+
+        mutex: std.Thread.Mutex = .{},
+        count: usize = 0,
+
+        fn push(self: *@This(), _: u16, _: u16, _: PushMode, _: []const u8) !void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            self.count += 1;
+        }
+    };
+
+    const RwState = struct {
+        ok_calls: usize = 0,
+        fn writeFn(_: *anyopaque, _: []const u8) void {}
+        fn okFn(ptr: *anyopaque) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.ok_calls += 1;
+        }
+        fn errFn(_: *anyopaque, _: u8) void {}
+    };
+
+    const Engine = Server(std, FakeHost);
+
+    var host = FakeHost{};
+    var engine = Engine.init(std.testing.allocator);
+    defer engine.deinit();
+    engine.bind(&host);
+
+    try engine.conns.put(std.testing.allocator, 1, .{});
+    const conn = engine.conns.getPtr(1).?;
+    try conn.push_modes.put(std.testing.allocator, Engine.charKey(0x180D, 0x2A57), .notify);
+
+    const route: Engine.Route = .{
+        .callbacks = .{
+            .write = struct {
+                fn handle(_: ?*anyopaque, _: *const Engine.WriteXRequest) void {}
+            }.handle,
+        },
+        .ctx = null,
+    };
+
+    // Write start
+    var rw_state = RwState{};
+    var rw = bt.Peripheral.ResponseWriter{
+        ._impl = &rw_state,
+        ._write_fn = RwState.writeFn,
+        ._ok_fn = RwState.okFn,
+        ._err_fn = RwState.errFn,
+    };
+    engine.handleXWriteStart(route, &(bt.Peripheral.Request{
+        .op = .write,
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+        .data = &Chunk.write_start_magic,
+    }), &rw);
+
+    const dcs = Chunk.dataChunkSize(att.DEFAULT_MTU);
+    const total: u16 = 2;
+
+    // Send chunk 1 of 2 (triggers watchdog)
+    const hdr1 = (Chunk.Header{ .total = total, .seq = 1 }).encode();
+    var c1: [Chunk.header_size + 17]u8 = undefined;
+    @memcpy(c1[0..Chunk.header_size], &hdr1);
+    for (c1[Chunk.header_size..]) |*b| b.* = 0x11;
+    var rw2 = RwState{};
+    var rw2w = bt.Peripheral.ResponseWriter{
+        ._impl = &rw2,
+        ._write_fn = RwState.writeFn,
+        ._ok_fn = RwState.okFn,
+        ._err_fn = RwState.errFn,
+    };
+    _ = engine.handleXWriteChunk(route, &(bt.Peripheral.Request{
+        .op = .write_without_response,
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+        .data = c1[0 .. Chunk.header_size + @min(dcs, 17)],
+    }), &rw2w);
+
+    // Now send chunk 2 (last chunk) — completes the transfer
+    const hdr2 = (Chunk.Header{ .total = total, .seq = 2 }).encode();
+    var c2: [Chunk.header_size + 17]u8 = undefined;
+    @memcpy(c2[0..Chunk.header_size], &hdr2);
+    for (c2[Chunk.header_size..]) |*b| b.* = 0x22;
+    var rw3 = RwState{};
+    var rw3w = bt.Peripheral.ResponseWriter{
+        ._impl = &rw3,
+        ._write_fn = RwState.writeFn,
+        ._ok_fn = RwState.okFn,
+        ._err_fn = RwState.errFn,
+    };
+    _ = engine.handleXWriteChunk(route, &(bt.Peripheral.Request{
+        .op = .write,
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+        .data = c2[0 .. Chunk.header_size + @min(dcs, 17)],
+    }), &rw3w);
+
+    // State should be cleared (ACK sent, transfer complete)
+    engine.mutex.lock();
+    const state_gone = conn.write_x_states.get(Engine.charKey(0x180D, 0x2A57)) == null;
+    engine.mutex.unlock();
+    try std.testing.expect(state_gone);
+
+    // Wait briefly — watchdog should exit cleanly (state gone)
+    std.time.sleep(200 * std.time.ns_per_ms);
+
+    engine.mutex.lock();
+    try std.testing.expectEqual(@as(u32, 0), engine.idle_watchdog_count);
+    engine.mutex.unlock();
+
+    // Push should have the ACK (from completing the transfer), not a loss list
+    host.mutex.lock();
+    const push_count = host.count;
+    host.mutex.unlock();
+    try std.testing.expectEqual(@as(usize, 1), push_count);
+}
+
+test "bt/unit_tests/host/xfer/Server/idle_watchdog_exits_on_disconnect" {
+    const std = @import("std");
+
+    const FakeHost = struct {
+        pub const PushMode = enum { notify, indicate };
+        fn push(_: *@This(), _: u16, _: u16, _: PushMode, _: []const u8) !void {}
+    };
+
+    const RwState = struct {
+        ok_calls: usize = 0,
+        fn writeFn(_: *anyopaque, _: []const u8) void {}
+        fn okFn(ptr: *anyopaque) void {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.ok_calls += 1;
+        }
+        fn errFn(_: *anyopaque, _: u8) void {}
+    };
+
+    const Engine = Server(std, FakeHost);
+
+    var host = FakeHost{};
+    var engine = Engine.init(std.testing.allocator);
+    defer engine.deinit();
+    engine.bind(&host);
+
+    try engine.conns.put(std.testing.allocator, 1, .{});
+    const conn = engine.conns.getPtr(1).?;
+    try conn.push_modes.put(std.testing.allocator, Engine.charKey(0x180D, 0x2A57), .notify);
+
+    const route: Engine.Route = .{
+        .callbacks = .{
+            .write = struct {
+                fn handle(_: ?*anyopaque, _: *const Engine.WriteXRequest) void {}
+            }.handle,
+        },
+        .ctx = null,
+    };
+
+    // Write start + one chunk to arm watchdog
+    var rw = RwState{};
+    var rww = bt.Peripheral.ResponseWriter{
+        ._impl = &rw,
+        ._write_fn = RwState.writeFn,
+        ._ok_fn = RwState.okFn,
+        ._err_fn = RwState.errFn,
+    };
+    engine.handleXWriteStart(route, &(bt.Peripheral.Request{
+        .op = .write,
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+        .data = &Chunk.write_start_magic,
+    }), &rww);
+
+    const dcs = Chunk.dataChunkSize(att.DEFAULT_MTU);
+    const hdr = (Chunk.Header{ .total = 5, .seq = 1 }).encode();
+    var cd: [Chunk.header_size + 17]u8 = undefined;
+    @memcpy(cd[0..Chunk.header_size], &hdr);
+    for (cd[Chunk.header_size..]) |*b| b.* = 0xFF;
+    var rw2 = RwState{};
+    var rw2w = bt.Peripheral.ResponseWriter{
+        ._impl = &rw2,
+        ._write_fn = RwState.writeFn,
+        ._ok_fn = RwState.okFn,
+        ._err_fn = RwState.errFn,
+    };
+    _ = engine.handleXWriteChunk(route, &(bt.Peripheral.Request{
+        .op = .write_without_response,
+        .conn_handle = 1,
+        .service_uuid = 0x180D,
+        .char_uuid = 0x2A57,
+        .data = cd[0 .. Chunk.header_size + @min(dcs, 17)],
+    }), &rw2w);
+
+    engine.mutex.lock();
+    try std.testing.expectEqual(@as(u32, 1), engine.idle_watchdog_count);
+    engine.mutex.unlock();
+
+    // Simulate disconnect — should wake watchdog and cause it to exit
+    engine.handleDisconnect(1);
+
+    std.time.sleep(200 * std.time.ns_per_ms);
+
+    engine.mutex.lock();
+    try std.testing.expectEqual(@as(u32, 0), engine.idle_watchdog_count);
+    engine.mutex.unlock();
 }
