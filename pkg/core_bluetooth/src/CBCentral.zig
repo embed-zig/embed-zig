@@ -347,6 +347,19 @@ pub fn gattWrite(self: *CBCentral, conn_handle: u16, attr_handle: u16, data: []c
     if (err) |e| return opErrorToGatt(e);
 }
 
+pub fn gattWriteNoResp(self: *CBCentral, conn_handle: u16, attr_handle: u16, data: []const u8) Central.GattError!void {
+    const peripheral = self.getPeripheral(conn_handle) orelse return error.Disconnected;
+    const char_obj = self.findCharByHandle(peripheral, attr_handle) orelse return error.AttError;
+
+    const ns_data = objc.nsData(data);
+
+    objc.msgSend(void, peripheral, objc.sel("writeValue:forCharacteristic:type:"), .{
+        ns_data,
+        char_obj,
+        @as(objc.NSInteger, 1), // CBCharacteristicWriteWithoutResponse
+    });
+}
+
 // ---- subscribe/unsubscribe ----
 
 pub fn subscribe(self: *CBCentral, conn_handle: u16, cccd_handle: u16) Central.GattError!void {
@@ -442,7 +455,6 @@ fn findCharByHandle(self: *CBCentral, peripheral: objc.Id, attr_handle: u16) ?ob
     var handle_idx: u16 = 1;
     for (0..svc_count) |si| {
         const svc: objc.Id = objc.msgSend(objc.Id, services, objc.sel("objectAtIndex:"), .{@as(objc.NSUInteger, si)});
-        handle_idx += 1;
 
         const chars: objc.Id = objc.msgSend(objc.Id, svc, objc.sel("characteristics"), .{});
         if (@intFromPtr(chars) == 0) continue;
@@ -548,6 +560,14 @@ fn cbDidDiscover(delegate: objc.Id, _: objc.SEL, _: objc.Id, peripheral: objc.Id
     if (name_obj) |name| {
         const name_slice = objc.nsStringGetBytes(name, &report.name);
         report.name_len = @truncate(name_slice.len);
+    }
+
+    if (report.name_len == 0) {
+        const peripheral_name: ?objc.Id = objc.msgSend(?objc.Id, peripheral, objc.sel("name"), .{});
+        if (peripheral_name) |name| {
+            const name_slice = objc.nsStringGetBytes(name, &report.name);
+            report.name_len = @truncate(name_slice.len);
+        }
     }
 
     const uuid_obj: objc.Id = objc.msgSend(objc.Id, peripheral, objc.sel("identifier"), .{});
@@ -674,7 +694,7 @@ fn cbDidDiscoverChars(delegate: objc.Id, _: objc.SEL, _: objc.Id, service: objc.
     self.char_count = written;
 }
 
-fn cbDidUpdateValue(delegate: objc.Id, _: objc.SEL, _: objc.Id, characteristic: objc.Id, err: ?objc.Id) callconv(.c) void {
+fn cbDidUpdateValue(delegate: objc.Id, _: objc.SEL, peripheral_obj: objc.Id, characteristic: objc.Id, err: ?objc.Id) callconv(.c) void {
     const self = getSelf(delegate) orelse return;
 
     const value: objc.Id = objc.msgSend(objc.Id, characteristic, objc.sel("value"), .{});
@@ -693,16 +713,46 @@ fn cbDidUpdateValue(delegate: objc.Id, _: objc.SEL, _: objc.Id, characteristic: 
         self.signalDone();
         self.mutex.unlock();
     } else {
+        const conn_handle = self.connHandleForPeripheral(peripheral_obj);
         self.signalDone();
         self.mutex.unlock();
+
+        const attr_handle = handleForChar(peripheral_obj, characteristic);
         var notif = Central.NotificationData{
-            .conn_handle = 0,
-            .attr_handle = 0,
+            .conn_handle = conn_handle,
+            .attr_handle = attr_handle,
         };
         const data_slice = objc.nsDataGetBytes(value, &notif.data);
         notif.len = @truncate(data_slice.len);
         self.fireEvent(.{ .notification = notif });
     }
+}
+
+fn connHandleForPeripheral(self: *CBCentral, peripheral: objc.Id) u16 {
+    for (self.peripherals.items) |slot| {
+        if (slot.peripheral == peripheral) return slot.handle;
+    }
+    return 0;
+}
+
+fn handleForChar(peripheral: objc.Id, target_char: objc.Id) u16 {
+    const services: objc.Id = objc.msgSend(objc.Id, peripheral, objc.sel("services"), .{});
+    const svc_count: objc.NSUInteger = objc.msgSend(objc.NSUInteger, services, objc.sel("count"), .{});
+
+    var handle_idx: u16 = 1;
+    for (0..svc_count) |si| {
+        const svc: objc.Id = objc.msgSend(objc.Id, services, objc.sel("objectAtIndex:"), .{@as(objc.NSUInteger, si)});
+        const chars: objc.Id = objc.msgSend(objc.Id, svc, objc.sel("characteristics"), .{});
+        if (@intFromPtr(chars) == 0) continue;
+        const char_count: objc.NSUInteger = objc.msgSend(objc.NSUInteger, chars, objc.sel("count"), .{});
+
+        for (0..char_count) |ci| {
+            const char_obj: objc.Id = objc.msgSend(objc.Id, chars, objc.sel("objectAtIndex:"), .{@as(objc.NSUInteger, ci)});
+            if (char_obj == target_char) return handle_idx;
+            handle_idx += 1;
+        }
+    }
+    return 0;
 }
 
 fn cbDidWriteValue(delegate: objc.Id, _: objc.SEL, _: objc.Id, _: objc.Id, err: ?objc.Id) callconv(.c) void {
