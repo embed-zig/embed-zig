@@ -24,6 +24,7 @@ started: bool = false,
 mutex: std.Thread.Mutex = .{},
 cond: std.Thread.Condition = .{},
 operation_done: bool = false,
+pending_notifications: std.ArrayListUnmanaged(PendingNotify) = .{},
 op_error: ?OpError = null,
 request_ctx: ?*anyopaque = null,
 request_handler: ?Peripheral.RequestHandlerFn = null,
@@ -31,8 +32,14 @@ services: std.ArrayListUnmanaged(ServiceEntry) = .{},
 chars: std.ArrayListUnmanaged(CharEntry) = .{},
 
 hooks: std.ArrayListUnmanaged(EventHook) = .{},
+sub_hooks: std.ArrayListUnmanaged(SubscriptionHook) = .{},
 
 const OpError = enum { invalid_config, already_advertising, unexpected };
+
+const PendingNotify = struct {
+    cb_char: objc.Id,
+    data: []const u8,
+};
 
 const ServiceEntry = struct {
     uuid: u16 = 0,
@@ -50,6 +57,11 @@ const CharEntry = struct {
 const EventHook = struct {
     ctx: ?*anyopaque,
     cb: *const fn (?*anyopaque, Peripheral.Event) void,
+};
+
+const SubscriptionHook = struct {
+    ctx: ?*anyopaque,
+    cb: *const fn (?*anyopaque, Peripheral.SubscriptionInfo) void,
 };
 
 // ---- lifecycle ----
@@ -110,9 +122,14 @@ pub fn stop(self: *CBPeripheral) void {
 
 pub fn deinit(self: *CBPeripheral) void {
     self.stop();
+    for (self.pending_notifications.items) |entry| {
+        self.allocator.free(entry.data);
+    }
+    self.pending_notifications.deinit(self.allocator);
     self.services.deinit(self.allocator);
     self.chars.deinit(self.allocator);
     self.hooks.deinit(self.allocator);
+    self.sub_hooks.deinit(self.allocator);
     const alloc = self.allocator;
     self.* = undefined;
     alloc.destroy(self);
@@ -169,7 +186,7 @@ pub fn startAdvertising(self: *CBPeripheral, config: Peripheral.AdvConfig) Perip
     var count: objc.NSUInteger = 0;
 
     if (config.device_name.len > 0) {
-        keys[count] = objc.nsString("CBAdvertisementDataLocalNameKey");
+        keys[count] = objc.nsString("kCBAdvDataLocalName");
         vals[count] = objc.nsString(config.device_name);
         count += 1;
     }
@@ -178,7 +195,7 @@ pub fn startAdvertising(self: *CBPeripheral, config: Peripheral.AdvConfig) Perip
         const uuid_objs = self.allocator.alloc(objc.Id, config.service_uuids.len) catch return error.Unexpected;
         defer self.allocator.free(uuid_objs);
         for (config.service_uuids, 0..) |uuid, i| uuid_objs[i] = objc.cbuuid(uuid);
-        keys[count] = objc.nsString("CBAdvertisementDataServiceUUIDsKey");
+        keys[count] = objc.nsString("kCBAdvDataServiceUUIDs");
         vals[count] = objc.nsArray(uuid_objs, uuid_objs.len);
         count += 1;
     }
@@ -220,13 +237,37 @@ pub fn stopAdvertising(self: *CBPeripheral) void {
 
 pub fn notify(self: *CBPeripheral, _: u16, char_uuid: u16, data: []const u8) Peripheral.GattError!void {
     const cb_char = self.findCBChar(char_uuid) orelse return error.InvalidHandle;
+    self.drainPendingNotifications();
     const ns_data = objc.nsData(data);
     const ok: objc.BOOL = objc.msgSend(objc.BOOL, self.manager.?, objc.sel("updateValue:forCharacteristic:onSubscribedCentrals:"), .{
         ns_data,
         cb_char,
         @as(?*anyopaque, null),
     });
-    if (ok != objc.YES) return error.Unexpected;
+    if (ok == objc.YES) return;
+    const owned = self.allocator.dupe(u8, data) catch return error.Unexpected;
+    self.pending_notifications.append(self.allocator, .{
+        .cb_char = cb_char,
+        .data = owned,
+    }) catch {
+        self.allocator.free(owned);
+        return error.Unexpected;
+    };
+}
+
+fn drainPendingNotifications(self: *CBPeripheral) void {
+    while (self.pending_notifications.items.len > 0) {
+        const entry = self.pending_notifications.items[0];
+        const ns_data = objc.nsData(entry.data);
+        const ok: objc.BOOL = objc.msgSend(objc.BOOL, self.manager.?, objc.sel("updateValue:forCharacteristic:onSubscribedCentrals:"), .{
+            ns_data,
+            entry.cb_char,
+            @as(?*anyopaque, null),
+        });
+        if (ok != objc.YES) return;
+        self.allocator.free(entry.data);
+        _ = self.pending_notifications.orderedRemove(0);
+    }
 }
 
 pub fn indicate(self: *CBPeripheral, conn_handle: u16, char_uuid: u16, data: []const u8) Peripheral.GattError!void {
@@ -265,6 +306,39 @@ pub fn removeEventHook(self: *CBPeripheral, ctx: ?*anyopaque, cb: *const fn (?*a
             continue;
         }
         i += 1;
+    }
+}
+
+pub fn addSubscriptionHook(self: *CBPeripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Peripheral.SubscriptionInfo) void) void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+    self.sub_hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch return;
+}
+
+pub fn removeSubscriptionHook(self: *CBPeripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Peripheral.SubscriptionInfo) void) void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+    var i: usize = 0;
+    while (i < self.sub_hooks.items.len) {
+        const hook = self.sub_hooks.items[i];
+        if (hook.ctx == ctx and hook.cb == cb) {
+            _ = self.sub_hooks.orderedRemove(i);
+            continue;
+        }
+        i += 1;
+    }
+}
+
+fn fireSubscriptionEvent(self: *CBPeripheral, info: Peripheral.SubscriptionInfo) void {
+    self.mutex.lock();
+    const snapshot = self.allocator.dupe(SubscriptionHook, self.sub_hooks.items) catch {
+        self.mutex.unlock();
+        return;
+    };
+    self.mutex.unlock();
+    defer self.allocator.free(snapshot);
+    for (snapshot) |hook| {
+        hook.cb(hook.ctx, info);
     }
 }
 
@@ -399,6 +473,7 @@ fn initDelegateClass() void {
     builder.addMethod("peripheralManager:didReceiveWriteRequests:", @ptrCast(&pmDidReceiveWrite), "v@:@@");
     builder.addMethod("peripheralManager:central:didSubscribeToCharacteristic:", @ptrCast(&pmDidSubscribe), "v@:@@@");
     builder.addMethod("peripheralManager:central:didUnsubscribeFromCharacteristic:", @ptrCast(&pmDidUnsubscribe), "v@:@@@");
+    builder.addMethod("peripheralManagerIsReadyToUpdateSubscribers:", @ptrCast(&pmIsReadyToUpdate), "v@:@");
 
     delegate_class = builder.register();
 }
@@ -491,6 +566,13 @@ fn pmDidReceiveWrite(delegate: objc.Id, _: objc.SEL, manager: objc.Id, requests:
     const self = getSelf(delegate) orelse return;
 
     const count: objc.NSUInteger = objc.msgSend(objc.NSUInteger, requests, objc.sel("count"), .{});
+    if (count == 0) return;
+
+    // Apple docs: "Call respondToRequest:withResult: exactly once,
+    // passing in the first request of the requests array."
+    const first_request: objc.Id = objc.msgSend(objc.Id, requests, objc.sel("objectAtIndex:"), .{@as(objc.NSUInteger, 0)});
+    var final_result: objc.NSInteger = 0; // CBATTErrorSuccess
+
     for (0..count) |i| {
         const request: objc.Id = objc.msgSend(objc.Id, requests, objc.sel("objectAtIndex:"), .{@as(objc.NSUInteger, i)});
         const characteristic: objc.Id = objc.msgSend(objc.Id, request, objc.sel("characteristic"), .{});
@@ -501,37 +583,41 @@ fn pmDidReceiveWrite(delegate: objc.Id, _: objc.SEL, manager: objc.Id, requests:
         const char_uuid = objc.cbuuidToU16(uuid_obj);
 
         const char_entry = self.findChar(svc_uuid, char_uuid) orelse {
-            objc.msgSend(void, manager, objc.sel("respondToRequest:withResult:"), .{
-                request,
-                @as(objc.NSInteger, 10), // CBATTErrorAttributeNotFound
-            });
-            continue;
+            final_result = 10; // CBATTErrorAttributeNotFound
+            break;
         };
         if (!(char_entry.config.write or char_entry.config.write_without_response)) {
-            objc.msgSend(void, manager, objc.sel("respondToRequest:withResult:"), .{
-                request,
-                @as(objc.NSInteger, 3), // CBATTErrorWriteNotPermitted
-            });
-            continue;
+            final_result = 3; // CBATTErrorWriteNotPermitted
+            break;
         }
         const handler = self.request_handler orelse {
-            objc.msgSend(void, manager, objc.sel("respondToRequest:withResult:"), .{
-                request,
-                @as(objc.NSInteger, 6), // CBATTErrorRequestNotSupported
-            });
-            continue;
+            final_result = 6; // CBATTErrorRequestNotSupported
+            break;
         };
 
         const value: objc.Id = objc.msgSend(objc.Id, request, objc.sel("value"), .{});
         var data_buf: [512]u8 = undefined;
         const data_slice = objc.nsDataGetBytes(value, &data_buf);
 
-        var rw_impl = ResponseWriterImpl{ .manager = manager, .request = request };
+        std.debug.print("[CB] write svc=0x{X:0>4} char=0x{X:0>4} len={d}", .{ svc_uuid, char_uuid, data_slice.len });
+        if (data_slice.len > 0) {
+            const show = @min(data_slice.len, 8);
+            std.debug.print(" data=[", .{});
+            for (data_slice[0..show], 0..) |b, bi| {
+                if (bi > 0) std.debug.print(" ", .{});
+                std.debug.print("{X:0>2}", .{b});
+            }
+            if (data_slice.len > show) std.debug.print(" ...", .{});
+            std.debug.print("]", .{});
+        }
+        std.debug.print("\n", .{});
+
+        var deferred = DeferredResponseWriterImpl{};
         var rw = Peripheral.ResponseWriter{
-            ._impl = @ptrCast(&rw_impl),
-            ._write_fn = @ptrCast(&ResponseWriterImpl.writeFn),
-            ._ok_fn = @ptrCast(&ResponseWriterImpl.okFn),
-            ._err_fn = @ptrCast(&ResponseWriterImpl.errFn),
+            ._impl = @ptrCast(&deferred),
+            ._write_fn = @ptrCast(&DeferredResponseWriterImpl.writeFn),
+            ._ok_fn = @ptrCast(&DeferredResponseWriterImpl.okFn),
+            ._err_fn = @ptrCast(&DeferredResponseWriterImpl.errFn),
         };
 
         var req = Peripheral.Request{
@@ -543,11 +629,30 @@ fn pmDidReceiveWrite(delegate: objc.Id, _: objc.SEL, manager: objc.Id, requests:
         };
 
         handler(self.request_ctx, &req, &rw);
+
+        if (deferred.result != 0) {
+            final_result = deferred.result;
+            break;
+        }
     }
+
+    objc.msgSend(void, manager, objc.sel("respondToRequest:withResult:"), .{
+        first_request,
+        final_result,
+    });
 }
 
-fn pmDidSubscribe(delegate: objc.Id, _: objc.SEL, _: objc.Id, _: objc.Id, _: objc.Id) callconv(.c) void {
+fn pmDidSubscribe(delegate: objc.Id, _: objc.SEL, _: objc.Id, central: objc.Id, characteristic: objc.Id) callconv(.c) void {
     const self = getSelf(delegate) orelse return;
+
+    const service: objc.Id = objc.msgSend(objc.Id, characteristic, objc.sel("service"), .{});
+    const svc_uuid = objc.cbuuidToU16(objc.msgSend(objc.Id, service, objc.sel("UUID"), .{}));
+    const char_uuid = objc.cbuuidToU16(objc.msgSend(objc.Id, characteristic, objc.sel("UUID"), .{}));
+
+    const max_update_len: objc.NSUInteger = objc.msgSend(objc.NSUInteger, central, objc.sel("maximumUpdateValueLength"), .{});
+    const mtu: u16 = @intCast(@min(max_update_len + 3, 517));
+    std.debug.print("[CB] subscribe svc=0x{X:0>4} char=0x{X:0>4} central.maxUpdateLen={d} mtu={d}\n", .{ svc_uuid, char_uuid, max_update_len, mtu });
+
     self.fireEvent(.{ .connected = .{
         .conn_handle = 0,
         .peer_addr = .{0} ** 6,
@@ -556,14 +661,65 @@ fn pmDidSubscribe(delegate: objc.Id, _: objc.SEL, _: objc.Id, _: objc.Id, _: obj
         .latency = 0,
         .timeout = 0,
     } });
+
+    self.fireEvent(.{ .mtu_changed = .{
+        .conn_handle = 0,
+        .mtu = mtu,
+    } });
+
+    self.fireSubscriptionEvent(.{
+        .conn_handle = 0,
+        .service_uuid = svc_uuid,
+        .char_uuid = char_uuid,
+        .cccd_value = 0x0001,
+    });
 }
 
-fn pmDidUnsubscribe(delegate: objc.Id, _: objc.SEL, _: objc.Id, _: objc.Id, _: objc.Id) callconv(.c) void {
+fn pmDidUnsubscribe(delegate: objc.Id, _: objc.SEL, _: objc.Id, _: objc.Id, characteristic: objc.Id) callconv(.c) void {
     const self = getSelf(delegate) orelse return;
+
+    const service: objc.Id = objc.msgSend(objc.Id, characteristic, objc.sel("service"), .{});
+    const svc_uuid = objc.cbuuidToU16(objc.msgSend(objc.Id, service, objc.sel("UUID"), .{}));
+    const char_uuid = objc.cbuuidToU16(objc.msgSend(objc.Id, characteristic, objc.sel("UUID"), .{}));
+    std.debug.print("[CB] unsubscribe svc=0x{X:0>4} char=0x{X:0>4}\n", .{ svc_uuid, char_uuid });
+
+    self.fireSubscriptionEvent(.{
+        .conn_handle = 0,
+        .service_uuid = svc_uuid,
+        .char_uuid = char_uuid,
+        .cccd_value = 0x0000,
+    });
+
     self.fireEvent(.{ .disconnected = 0 });
 }
 
-// ---- ResponseWriter implementation ----
+fn pmIsReadyToUpdate(delegate: objc.Id, _: objc.SEL, _: objc.Id) callconv(.c) void {
+    const self = getSelf(delegate) orelse return;
+    self.drainPendingNotifications();
+}
+
+// ---- ResponseWriter implementations ----
+
+// Captures the handler result without calling respondToRequest:.
+// Used by pmDidReceiveWrite to batch-respond once with requests[0].
+const DeferredResponseWriterImpl = struct {
+    result: objc.NSInteger = 0,
+
+    fn writeFn(impl_ptr: *anyopaque, _: []const u8) void {
+        const self: *DeferredResponseWriterImpl = @ptrCast(@alignCast(impl_ptr));
+        self.result = 0;
+    }
+
+    fn okFn(impl_ptr: *anyopaque) void {
+        const self: *DeferredResponseWriterImpl = @ptrCast(@alignCast(impl_ptr));
+        self.result = 0;
+    }
+
+    fn errFn(impl_ptr: *anyopaque, code: u8) void {
+        const self: *DeferredResponseWriterImpl = @ptrCast(@alignCast(impl_ptr));
+        self.result = @intCast(code);
+    }
+};
 
 const ResponseWriterImpl = struct {
     manager: objc.Id,
