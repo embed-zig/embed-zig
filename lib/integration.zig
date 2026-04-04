@@ -1,5 +1,4 @@
 //! integration — shared integration helpers and embed compatibility runners.
-pub const logging = @import("embed").test_runner.logging;
 const embed = @import("embed");
 const testing_mod = @import("testing");
 
@@ -11,11 +10,18 @@ const time_runner = @import("integration/time.zig");
 const atomic_runner = @import("integration/atomic.zig");
 const mem_runner = @import("integration/mem.zig");
 const fmt_runner = @import("integration/fmt.zig");
+const json_runner = @import("integration/json.zig");
 const collections_runner = @import("integration/collections.zig");
 const crypto_runner = @import("integration/crypto.zig");
 const random_runner = @import("integration/random.zig");
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime lib: type, comptime ChannelFactory: fn (type) type) testing_mod.TestRunner {
+    const audio_mod = @import("audio");
+    const net_mod = @import("net");
+    const sync_mod = @import("sync");
+    const Net = net_mod.make(lib);
+    const Channel = sync_mod.Channel(ChannelFactory);
+
     const Runner = struct {
         pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
             _ = self;
@@ -28,17 +34,37 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
 
             t.parallel();
 
-            t.run("thread", thread_runner.make(lib));
-            t.run("log", log_runner.make(lib));
-            t.run("context", context_runner.make(lib));
-            t.run("posix", posix_runner.make(lib));
-            t.run("time", time_runner.make(lib));
-            t.run("atomic", atomic_runner.make(lib));
-            t.run("mem", mem_runner.make(lib));
-            t.run("fmt", fmt_runner.make(lib));
-            t.run("collections", collections_runner.make(lib));
-            t.run("crypto", crypto_runner.make(lib));
-            t.run("random", random_runner.make(lib));
+            t.run("std/thread", thread_runner.make(lib));
+            t.run("std/log", log_runner.make(lib));
+            t.run("std/context", context_runner.make(lib));
+            t.run("std/posix", posix_runner.make(lib));
+            t.run("std/time", time_runner.make(lib));
+            t.run("std/atomic", atomic_runner.make(lib));
+            t.run("std/mem", mem_runner.make(lib));
+            t.run("std/fmt", fmt_runner.make(lib));
+            t.run("std/json", json_runner.make(lib));
+            t.run("std/collections", collections_runner.make(lib));
+            t.run("std/crypto", crypto_runner.make(lib));
+            t.run("std/random", random_runner.make(lib));
+            t.run("sync/channel", sync_mod.test_runner.channel.make(lib, Channel));
+            t.run("sync/racer", sync_mod.test_runner.racer.make(lib));
+            t.run("audio/mixer", audio_mod.test_runner.mixer.make(lib));
+            t.run("net/fd_stream", net_mod.test_runner.fd_stream.make(lib));
+            t.run("net/fd_packet", net_mod.test_runner.fd_packet.make(lib));
+            t.run("net/tcp", net_mod.test_runner.tcp.make(lib));
+            t.run("net/udp", net_mod.test_runner.udp.make(lib));
+            t.run("net/resolver", net_mod.test_runner.resolver.make(lib));
+            t.run("net/resolver_dns", net_mod.test_runner.resolver_dns.make(lib, &.{
+                Net.Resolver.dns.ali.v4_1,
+                Net.Resolver.dns.ali.v4_2,
+            }, "dns.alidns.com"));
+            t.run("net/tls", net_mod.test_runner.tls.make(lib));
+            t.run("net/tls_dial", net_mod.test_runner.tls_dial.make(lib, "dns.alidns.com"));
+            t.run("net/ntp", net_mod.test_runner.ntp.make(lib));
+            t.run("net/http_client", net_mod.test_runner.http_client.make(lib));
+            t.run("net/http_server", net_mod.test_runner.http_server.make(lib));
+            t.run("net/http_transport", net_mod.test_runner.http_transport.make(lib));
+            t.run("net/https_transport", net_mod.test_runner.https_transport.make(lib));
             return true;
         }
 
@@ -57,32 +83,8 @@ test "integration_tests/embed" {
     const std = @import("std");
     std.testing.log_level = .info;
 
-    const audio_mod = @import("audio");
     const embed_std_mod = @import("embed_std");
-    const net_mod = @import("net");
-    const sync_mod = @import("sync");
-    const Net = net_mod.make(embed_std_mod.std);
-
-    const audio_tr = audio_mod.test_runner.mixer.make(embed_std_mod.std);
-    const channel_tr = sync_mod.test_runner.channel.make(embed_std_mod.std, embed_std_mod.sync.Channel);
-    const racer_tr = sync_mod.test_runner.racer.make(embed_std_mod.std);
-    const runner = make(embed_std_mod.std);
-    const fd_stream_tr = net_mod.test_runner.fd_stream.make(embed_std_mod.std);
-    const fd_packet_tr = net_mod.test_runner.fd_packet.make(embed_std_mod.std);
-    const tcp_tr = net_mod.test_runner.tcp.make(embed_std_mod.std);
-    const udp_tr = net_mod.test_runner.udp.make(embed_std_mod.std);
-    const resolver_tr = net_mod.test_runner.resolver.make(embed_std_mod.std);
-    const resolver_dns_tr = net_mod.test_runner.resolver_dns.make(embed_std_mod.std, &.{
-        Net.Resolver.dns.ali.v4_1,
-        Net.Resolver.dns.ali.v4_2,
-    }, "dns.alidns.com");
-    const tls_tr = net_mod.test_runner.tls.make(embed_std_mod.std);
-    const tls_dial_tr = net_mod.test_runner.tls_dial.make(embed_std_mod.std, "dns.alidns.com");
-    const ntp_tr = net_mod.test_runner.ntp.make(embed_std_mod.std);
-    const http_client_tr = net_mod.test_runner.http_client.make(embed_std_mod.std);
-    const http_server_tr = net_mod.test_runner.http_server.make(embed_std_mod.std);
-    const http_transport_tr = net_mod.test_runner.http_transport.make(embed_std_mod.std);
-    const https_transport_tr = net_mod.test_runner.https_transport.make(embed_std_mod.std);
+    const runner = make(embed_std_mod.std, embed_std_mod.sync.ChannelFactory(embed_std_mod.std));
 
     var t = testing_mod.T.new(embed_std_mod.std, .embed);
     defer t.deinit();
@@ -90,23 +92,7 @@ test "integration_tests/embed" {
     t.parallel();
     t.timeout(10 * embed_std_mod.std.time.ns_per_s);
 
-    t.run("sync/channel", channel_tr);
-    t.run("sync/racer", racer_tr);
     t.run("integration", runner);
-    t.run("audio/mixer", audio_tr);
-    t.run("net/fd_stream", fd_stream_tr);
-    t.run("net/fd_packet", fd_packet_tr);
-    t.run("net/tcp", tcp_tr);
-    t.run("net/udp", udp_tr);
-    t.run("net/resolver", resolver_tr);
-    t.run("net/resolver_dns", resolver_dns_tr);
-    t.run("net/tls", tls_tr);
-    t.run("net/tls_dial", tls_dial_tr);
-    t.run("net/ntp", ntp_tr);
-    t.run("net/http_client", http_client_tr);
-    t.run("net/http_server", http_server_tr);
-    t.run("net/http_transport", http_transport_tr);
-    t.run("net/https_transport", https_transport_tr);
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -114,30 +100,8 @@ test "integration_tests/std" {
     const std = @import("std");
     std.testing.log_level = .info;
 
-    const audio_mod = @import("audio");
-    const net_mod = @import("net");
-    const sync_mod = @import("sync");
-    const Net = net_mod.make(std);
-
-    const audio_tr = audio_mod.test_runner.mixer.make(std);
-    const racer_tr = sync_mod.test_runner.racer.make(std);
-    const runner = make(std);
-    const fd_stream_tr = net_mod.test_runner.fd_stream.make(std);
-    const fd_packet_tr = net_mod.test_runner.fd_packet.make(std);
-    const tcp_tr = net_mod.test_runner.tcp.make(std);
-    const udp_tr = net_mod.test_runner.udp.make(std);
-    const resolver_tr = net_mod.test_runner.resolver.make(std);
-    const resolver_dns_tr = net_mod.test_runner.resolver_dns.make(std, &.{
-        Net.Resolver.dns.ali.v4_1,
-        Net.Resolver.dns.ali.v4_2,
-    }, "dns.alidns.com");
-    const tls_tr = net_mod.test_runner.tls.make(std);
-    const tls_dial_tr = net_mod.test_runner.tls_dial.make(std, "dns.alidns.com");
-    const ntp_tr = net_mod.test_runner.ntp.make(std);
-    const http_client_tr = net_mod.test_runner.http_client.make(std);
-    const http_server_tr = net_mod.test_runner.http_server.make(std);
-    const http_transport_tr = net_mod.test_runner.http_transport.make(std);
-    const https_transport_tr = net_mod.test_runner.https_transport.make(std);
+    const embed_std_mod = @import("embed_std");
+    const runner = make(std, embed_std_mod.sync.ChannelFactory(std));
 
     var t = testing_mod.T.new(std, .std);
     defer t.deinit();
@@ -145,22 +109,7 @@ test "integration_tests/std" {
     t.parallel();
     t.timeout(10 * std.time.ns_per_s);
 
-    t.run("sync/racer", racer_tr);
     t.run("integration", runner);
-    t.run("audio/mixer", audio_tr);
-    t.run("net/fd_stream", fd_stream_tr);
-    t.run("net/fd_packet", fd_packet_tr);
-    t.run("net/tcp", tcp_tr);
-    t.run("net/udp", udp_tr);
-    t.run("net/resolver", resolver_tr);
-    t.run("net/resolver_dns", resolver_dns_tr);
-    t.run("net/tls", tls_tr);
-    t.run("net/tls_dial", tls_dial_tr);
-    t.run("net/ntp", ntp_tr);
-    t.run("net/http_client", http_client_tr);
-    t.run("net/http_server", http_server_tr);
-    t.run("net/http_transport", http_transport_tr);
-    t.run("net/https_transport", https_transport_tr);
     if (!t.wait()) return error.TestFailed;
 }
 

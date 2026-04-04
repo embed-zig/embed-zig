@@ -6,31 +6,27 @@
 - If code needs a more complete `std`-shaped environment, build it at comptime with `embed.make(...)` and use the resulting namespace.
 - The long-term goal of `embed` is to be a drop-in replacement for the `std` package.
 - Outside `lib/embed` and `lib/embed_std`, non-test library code should not import `std` directly. Runtime, concurrency, networking, time, allocator, and similar capabilities should come from the injected `lib` / `embed` namespace.
-- Direct `std` imports are allowed in `test` blocks. Integration tests and compatibility tests should use `std`, and `embed_std` remains the std-backed adapter layer.
+- Direct `std` imports are allowed in `test` blocks. Shared test entrypoints may exercise the same runner through both `std` and `embed_std.std`, and `embed_std` remains the std-backed adapter layer.
 - `make` is a function. New type / namespace construction entry points should use lowercase `make`.
 
 ## Testing Rules
 
-- Put `test_runner` under `<module>/test_runner/` or `<package>/test_runner/`.
-- By default, `test_runner` should be portable: prefer forms such as `run(comptime lib: type, ...)` that can run against different injected `embed` implementations on different platforms.
-- If a runner is explicitly host-only / std-only, say so in the name and only call it from `compat_tests` or from clearly host-only test entry points.
-- Test names must preserve these tokens because the build system filters by them: `unit_tests`, `integration_tests`, `compat_tests`.
+- Put reusable runner logic under `<module>/test_runner/` or `<package>/test_runner/`.
+- By default, `test_runner` should be portable: prefer forms such as `run(comptime lib: type, ...)` or `make(comptime lib: type, ...)` that can run against different injected `embed` implementations on different platforms.
+- Shared test entrypoints should live under the shared `integration/` tree whenever the coverage exercises `embed`, `embed_std`, or other foundational modules that are widely depended on. Do not put those entrypoints back into `lib/embed.zig` or `lib/embed_std.zig`; that makes dependency cycles much easier to introduce over time.
+- If a runner is explicitly host-only / std-only, say so in the name and only call it from clearly host-only test entry points.
+- Test names must preserve the tokens used by the shared test entrypoints, especially `unit_tests` and `integration_tests`.
 
 ### Unit Tests
 
 - `unit test` should live next to the implementation file, directly inside that file, and should not require network access or external dependencies.
-- Root-file `test "<name>/unit_tests"` imports nearby unit tests.
+- Keep unit tests local to the implementation they cover; do not turn `lib/embed.zig` or `lib/embed_std.zig` into aggregation points for broader test coverage.
 
 ### Integration Tests
 
 - `integration test` should live under the shared `integration/` tree rather than being scattered under each module or package, should use `std`, should call one or more cases from `test_runner`, should be exposed through `test {}` or `test "..." {}` blocks, and is the right place for tests that use network access, depend on external systems, or take longer to run.
+- Cross-platform coverage that compares `embed_std.std` against native `std` should also enter through the shared `integration/` tree so the same runner can be exercised without creating root-module dependency cycles.
 - Root-file `test "<name>/integration_tests"` imports integration tests from the shared `integration/` tree.
-
-### Compat Tests
-
-- `compat test` is compatibility coverage, should live in the `embed_std` module, and should usually avoid network access and long-running scenarios.
-- Compatibility coverage has two parts: tests against `embed_std`, and tests against `std`.
-- `embed_std` hosts `test "<name>/compat_tests/embed"` and `test "<name>/compat_tests/std"` compatibility coverage.
 
 ## Read Before Editing
 

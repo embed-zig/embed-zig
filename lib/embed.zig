@@ -27,9 +27,6 @@ pub const meta = @import("embed/meta.zig");
 pub const atomic = @import("embed/atomic.zig");
 pub const builtin = @import("embed/builtin.zig");
 pub const testing = @import("embed/testing.zig");
-pub const test_runner = struct {
-    pub const logging = @import("embed/test_runner/logging.zig");
-};
 
 pub const array_list = collections.array_list;
 pub const ArrayList = collections.ArrayList;
