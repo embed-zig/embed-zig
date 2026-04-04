@@ -14,6 +14,7 @@ pub const crypto = @import("embed/crypto.zig");
 pub const fmt = @import("embed/fmt.zig");
 pub const heap = @import("embed/heap.zig");
 pub const Io = @import("embed/Io.zig");
+pub const json = @import("embed/json.zig");
 pub const log = @import("embed/log.zig");
 pub const mem = @import("embed/mem.zig");
 pub const posix = @import("embed/posix.zig");
@@ -93,6 +94,7 @@ pub fn make(comptime Impl: type) type {
         pub const ascii = root.ascii;
         pub const mem = root.mem;
         pub const fmt = root.fmt;
+        pub const json = root.json;
         pub const meta = root.meta;
         pub const Io = root.Io;
         pub const debug = root.debug;
@@ -159,6 +161,7 @@ pub fn make(comptime Impl: type) type {
 
 test "embed/unit_tests" {
     _ = @import("embed/Thread.zig");
+    _ = @import("embed/json.zig");
     _ = @import("embed/time.zig");
     _ = @import("embed/testing.zig");
 }
