@@ -171,7 +171,7 @@ test "wifi/unit_tests/sta_runner_observes_scan_events_when_required" {
         impl: *Impl,
 
         pub fn sta(self: *@This()) wifi.Sta {
-            return wifi.Sta.wrap(self.impl);
+            return wifi.Sta.make(self.impl);
         }
     };
 

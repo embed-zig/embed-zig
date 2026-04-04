@@ -54,11 +54,11 @@ pub const Wifi = struct {
     }
 
     pub fn sta(self: *Self) wifi.Sta {
-        return wifi.Sta.wrap(self.sta_impl);
+        return wifi.Sta.make(self.sta_impl);
     }
 
     pub fn ap(self: *Self) wifi.Ap {
-        return wifi.Ap.wrap(self.ap_impl);
+        return wifi.Ap.make(self.ap_impl);
     }
 
     pub fn setEventCallback(self: *Self, ctx: *const anyopaque, emit_fn: wifi.Wifi.CallbackFn) void {

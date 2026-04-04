@@ -106,11 +106,11 @@ pub fn deinit(self: Ap) void {
     self.vtable.deinit(self.ptr);
 }
 
-pub fn wrap(pointer: anytype) Ap {
+pub fn make(pointer: anytype) Ap {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);
     if (info != .pointer or info.pointer.size != .one)
-        @compileError("Ap.wrap expects a single-item pointer");
+        @compileError("Ap.make expects a single-item pointer");
 
     const Impl = info.pointer.child;
 
@@ -178,7 +178,7 @@ pub fn wrap(pointer: anytype) Ap {
     };
 }
 
-test "wifi/unit_tests/Ap_wrap_allows_missing_optional_introspection" {
+test "wifi/unit_tests/Ap_make_allows_missing_optional_introspection" {
     const std = @import("std");
 
     const Impl = struct {
@@ -193,7 +193,7 @@ test "wifi/unit_tests/Ap_wrap_allows_missing_optional_introspection" {
     };
 
     var impl = Impl{};
-    const ap = wrap(&impl);
+    const ap = make(&impl);
 
     ap.removeEventHook(null, struct {
         fn onEvent(_: ?*anyopaque, _: Event) void {}

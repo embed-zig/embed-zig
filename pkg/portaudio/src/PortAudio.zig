@@ -69,13 +69,13 @@ pub fn defaultHostApi(self: Self) error_mod.Error!HostApi {
 pub fn hostApiInfo(self: Self, index: types.HostApiIndex) error_mod.Error!HostApi {
     _ = self;
     const info = binding.Pa_GetHostApiInfo(index) orelse return error_mod.Error.InvalidHostApi;
-    return HostApi.wrap(index, info);
+    return HostApi.make(index, info);
 }
 
 pub fn deviceInfo(self: Self, index: types.DeviceIndex) error_mod.Error!Device {
     _ = self;
     const info = binding.Pa_GetDeviceInfo(index) orelse return error_mod.Error.InvalidDevice;
-    return Device.wrap(index, info);
+    return Device.make(index, info);
 }
 
 pub fn isFormatSupported(
@@ -153,7 +153,7 @@ fn openStream(
         null,
     ));
 
-    return Stream.wrap(
+    return Stream.make(
         handle.?,
         mode,
         if (input) |value| value.channel_count else output.?.channel_count,

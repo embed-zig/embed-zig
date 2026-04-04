@@ -163,7 +163,7 @@ test "wifi/unit_tests/ap_runner_keeps_hook_installed_during_probe" {
         impl: *Impl,
 
         pub fn ap(self: *@This()) wifi.Ap {
-            return wifi.Ap.wrap(self.impl);
+            return wifi.Ap.make(self.impl);
         }
     };
 

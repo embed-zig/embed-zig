@@ -194,11 +194,11 @@ test "wifi/unit_tests/Wifi_exposes_sta_and_ap_vtable_surface" {
         }
 
         pub fn sta(self: *@This()) Sta {
-            return Sta.wrap(&self.sta_impl);
+            return Sta.make(&self.sta_impl);
         }
 
         pub fn ap(self: *@This()) Ap {
-            return Ap.wrap(&self.ap_impl);
+            return Ap.make(&self.ap_impl);
         }
 
         pub fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: CallbackFn) void {

@@ -6,7 +6,7 @@ const Self = @This();
 index: types.DeviceIndex,
 info: *const binding.PaDeviceInfo,
 
-pub fn wrap(index: types.DeviceIndex, info: *const binding.PaDeviceInfo) Self {
+pub fn make(index: types.DeviceIndex, info: *const binding.PaDeviceInfo) Self {
     return .{
         .index = index,
         .info = info,
@@ -49,7 +49,7 @@ pub fn defaultSampleRate(self: Self) f64 {
     return self.info.defaultSampleRate;
 }
 
-test "portaudio/unit_tests/device/wraps_device_info" {
+test "portaudio/unit_tests/device/makes_device_info" {
     const std = @import("std");
     const testing = std.testing;
 
@@ -65,7 +65,7 @@ test "portaudio/unit_tests/device/wraps_device_info" {
         .defaultHighOutputLatency = 0.12,
         .defaultSampleRate = 48_000,
     };
-    const device = wrap(7, &info);
+    const device = make(7, &info);
 
     try testing.expectEqual(@as(types.DeviceIndex, 7), device.index);
     try testing.expectEqual(@as(u32, 2), device.maxInputChannels());

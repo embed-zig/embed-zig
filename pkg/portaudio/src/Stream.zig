@@ -15,7 +15,7 @@ mode: Mode,
 channel_count: u16,
 closed: bool = false,
 
-pub fn wrap(handle: *binding.PaStream, mode: Mode, channel_count: u16) Self {
+pub fn make(handle: *binding.PaStream, mode: Mode, channel_count: u16) Self {
     return .{
         .handle = handle,
         .mode = mode,
@@ -93,8 +93,8 @@ test "portaudio/unit_tests/stream/mode_guards_reject_wrong_direction" {
     const std = @import("std");
     const testing = std.testing;
 
-    var input_stream = wrap(undefined, .input, 1);
-    var output_stream = wrap(undefined, .output, 1);
+    var input_stream = make(undefined, .input, 1);
+    var output_stream = make(undefined, .output, 1);
     var read_buf = [_]i16{0};
 
     try testing.expectError(
@@ -111,14 +111,14 @@ test "portaudio/unit_tests/stream/frame_length_checks_follow_channel_count" {
     const std = @import("std");
     const testing = std.testing;
 
-    var duplex_stream = wrap(undefined, .duplex, 2);
+    var duplex_stream = make(undefined, .duplex, 2);
 
     try testing.expectEqual(@as(usize, 8), duplex_stream.frameSampleCount(4));
     try testing.expectError(error_mod.Error.BufferTooSmall, duplex_stream.write(&.{ 1, 2, 3 }, 2));
 }
 
 test "portaudio/unit_tests/stream/deinit_is_noop_when_already_closed" {
-    var stream = wrap(undefined, .input, 1);
+    var stream = make(undefined, .input, 1);
     stream.closed = true;
     try stream.deinit();
 }
