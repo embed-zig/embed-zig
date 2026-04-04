@@ -1,7 +1,9 @@
 //! host.client.Characteristic — resolved characteristic bound to one connection.
 
+const att = @import("../att.zig");
 const bt = @import("../../../bt.zig");
-const xfer = @import("../xfer/client.zig");
+const xfer = @import("../xfer.zig");
+const Chunk = xfer.Chunk;
 
 pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime SubscriptionType: type) type {
     return struct {
@@ -20,6 +22,82 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
         const PROP_WRITE: u8 = 0x08;
         const PROP_NOTIFY: u8 = 0x10;
         const PROP_INDICATE: u8 = 0x20;
+        const default_read_timeout_ms: u32 = 1_000;
+        const default_read_max_retries: u8 = 5;
+        const default_write_timeout_ms: u32 = 5_000;
+        const default_send_redundancy: u8 = 3;
+        const ReadTx = struct {
+            characteristic: *Self,
+            subscription: SubscriptionType,
+
+            const Transport = @This();
+
+            pub fn init(characteristic: *Self) !Transport {
+                return .{
+                    .characteristic = characteristic,
+                    .subscription = try characteristic.subscribe(),
+                };
+            }
+
+            pub fn read(self: *Transport, timeout_ms: u32, out: []u8) !usize {
+                const notif = self.subscription.next(timeout_ms) catch |err| switch (err) {
+                    error.TimedOut => return error.Timeout,
+                    else => return err,
+                } orelse return error.Closed;
+
+                const payload = notif.payload();
+                if (payload.len > out.len) return error.NoSpaceLeft;
+                @memcpy(out[0..payload.len], payload);
+                return payload.len;
+            }
+
+            pub fn write(self: *Transport, data: []const u8) !usize {
+                try self.characteristic.write(data);
+                return data.len;
+            }
+
+            pub fn deinit(self: *Transport) void {
+                self.subscription.deinit();
+            }
+        };
+        const WriteTx = struct {
+            characteristic: *Self,
+            subscription: SubscriptionType,
+
+            const Transport = @This();
+
+            pub fn init(characteristic: *Self) !Transport {
+                return .{
+                    .characteristic = characteristic,
+                    .subscription = try characteristic.subscribe(),
+                };
+            }
+
+            pub fn read(self: *Transport, timeout_ms: u32, out: []u8) anyerror!usize {
+                const notif = (try self.subscription.next(timeout_ms)) orelse return error.Closed;
+                const payload = notif.payload();
+                if (payload.len > out.len) return error.NoSpaceLeft;
+                @memcpy(out[0..payload.len], payload);
+                return payload.len;
+            }
+
+            pub fn write(self: *Transport, payload: []const u8) !usize {
+                try self.characteristic.write(payload);
+                return payload.len;
+            }
+
+            pub fn writeNoResp(self: *Transport, payload: []const u8) !usize {
+                self.characteristic.writeNoResp(payload) catch |err| switch (err) {
+                    error.AttError => try self.characteristic.write(payload),
+                    else => return err,
+                };
+                return payload.len;
+            }
+
+            pub fn deinit(self: *Transport) void {
+                self.subscription.deinit();
+            }
+        };
 
         pub fn init(client: *ClientType, conn_handle: u16, service_uuid: u16, characteristic_uuid: u16, desc: bt.Central.DiscoveredChar) Self {
             return .{
@@ -54,15 +132,28 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
         }
 
         pub fn writeX(self: *Self, data: []const u8) !void {
-            return xfer.write(self, data);
+            var transport = try WriteTx.init(self);
+            const mtu = effectiveMtu(self);
+            return xfer.write(lib, self.client.allocator, &transport, data, .{
+                .att_mtu = mtu,
+                .timeout_ms = default_write_timeout_ms,
+                .send_redundancy = default_send_redundancy,
+            });
         }
 
-        pub fn readX(self: *Self, allocator: lib.mem.Allocator) ![]u8 {
-            return xfer.read(self, allocator);
-        }
-
-        pub fn get(self: *Self, topic: xfer.Topic, metadata: []const u8, allocator: lib.mem.Allocator) ![]u8 {
-            return xfer.get(self, topic, metadata, allocator);
+        pub fn readX(self: *Self, allocator: lib.mem.Allocator, topic: Chunk.Topic, metadata: []const u8) ![]u8 {
+            var transport = try ReadTx.init(self);
+            const mtu = effectiveMtu(self);
+            return xfer.read(lib, allocator, &transport, .{
+                .att_mtu = mtu,
+                .timeout_ms = default_read_timeout_ms,
+                .max_timeout_retries = default_read_max_retries,
+                .topic = topic,
+                .metadata = metadata,
+            }) catch |err| switch (err) {
+                error.Closed => return error.SubscriptionClosed,
+                else => return err,
+            };
         }
 
         pub fn subscribe(self: *Self) ClientType.GattError!SubscriptionType {
@@ -94,6 +185,12 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
 
         pub fn hasIndicate(self: *const Self) bool {
             return (self.properties & PROP_INDICATE) != 0;
+        }
+
+        fn effectiveMtu(self: *Self) u16 {
+            const raw_mtu = self.attMtu();
+            if (raw_mtu < att.DEFAULT_MTU) return att.DEFAULT_MTU;
+            return @min(raw_mtu, @as(u16, @intCast(Chunk.max_mtu)));
         }
     };
 }

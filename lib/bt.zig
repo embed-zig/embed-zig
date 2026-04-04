@@ -10,6 +10,7 @@ pub const test_runner = struct {
     pub const peripheral = @import("bt/test_runner/peripheral.zig");
     pub const pair = @import("bt/test_runner/pair.zig");
     pub const pair_xfer = @import("bt/test_runner/pair_xfer.zig");
+    pub const xfer = @import("bt/test_runner/xfer.zig");
 };
 
 const Server = @import("bt/host/Server.zig");
@@ -43,7 +44,6 @@ test "bt/unit_tests" {
     _ = @import("bt/host/gatt/client.zig");
     _ = @import("bt/host/Central.zig");
     _ = @import("bt/host/Peripheral.zig");
-    _ = @import("bt/host/client/xfer.zig");
     _ = @import("bt/host/Server.zig");
     _ = @import("bt/Host.zig");
 }

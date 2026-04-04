@@ -685,7 +685,7 @@ test "bt/unit_tests/host/Central_connect_resets_state_after_rejected_link" {
     };
 
     var fake_hci = FakeHci{};
-    var central = Impl.init(bt.Hci.wrap(&fake_hci), std.testing.allocator);
+    var central = Impl.init(bt.Hci.make(&fake_hci), std.testing.allocator);
     defer central.deinit();
 
     try std.testing.expectError(error.Rejected, central.connect(.{ 1, 2, 3, 4, 5, 6 }, .public, .{}));
@@ -745,7 +745,7 @@ test "bt/unit_tests/host/Central_connect_falls_back_to_default_mtu_when_exchange
     };
 
     var fake_hci = FakeHci{};
-    var central = Impl.init(bt.Hci.wrap(&fake_hci), std.testing.allocator);
+    var central = Impl.init(bt.Hci.make(&fake_hci), std.testing.allocator);
     defer central.deinit();
 
     const info = try central.connect(fake_hci.link.peer_addr, .public, .{});

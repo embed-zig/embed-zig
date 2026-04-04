@@ -144,15 +144,17 @@ lib/bt/
     att.zig                   ATT PDU codec, UUID, opcodes (Vol 3 Part F)
     Gap.zig                   LE GAP state machine: adv, scan, connect
     client/
-      // host.Client submodules
-      xfer.zig                Compatibility entrypoint to host/xfer/client.zig
+      Characteristic.zig      Host-level characteristic helpers including readX/writeX
     server/
-      // host.Server submodules
+      Receiver.zig            Chunked write receiver bound to one characteristic
+      ServeMux.zig            Topic-routed chunked read responder
     xfer/
+      // host.Server / host.Client protocol helpers
       Chunk.zig               Shared xfer wire helpers
-      client.zig              Client-side xfer helpers: readX, writeX, get
-      Server.zig              Server-side xfer engine
-      ServerMux.zig           Topic router over one xfer characteristic
+      read.zig                Client read-side transfer loop
+      write.zig               Client write-side transfer loop
+      send.zig                Server send-side transfer loop
+      recv.zig                Server receive-side transfer loop
     gatt/
       server.zig              GATT server: comptime service table, PDU dispatch
       client.zig              GATT client: discovery, read, write, subscribe
@@ -246,7 +248,7 @@ pub fn start(self: Central) StartError!void {
 ```
 
 Any concrete type with matching methods wraps into a Central via
-`Central.wrap(&my_hci_central)` or `Central.wrap(&my_corebluetooth)`.
+`Central.make(&my_hci_central)` or `Central.make(&my_corebluetooth)`.
 
 Events: `device_found`, `connected`, `disconnected`, `notification`.
 
@@ -405,8 +407,8 @@ bt.Host
 
 ### Transfer extensions
 
-The existing transfer-oriented helpers such as `readX`, `writeX`, and
-`get()` live under the host-only `host/xfer/` package instead of as a
+The existing transfer-oriented helpers such as `readX` and `writeX` live
+under the host-only `host/xfer/` package instead of as a
 top-level `bt/xfer` package.
 
 Reasoning:
@@ -414,26 +416,32 @@ Reasoning:
 - They are not backend-agnostic transport primitives.
 - They build on host client/server connection semantics and GATT conventions.
 - Future features such as RPC-style topic routing belong next to the existing
-  xfer engine and mux rather than inside generic client or server wrappers.
+  xfer engine and host server helpers rather than inside generic client or
+  server wrappers.
 
 The layout is:
 
 ```text
 host/xfer/
   Chunk.zig
-  client.zig
-  Server.zig
-  ServerMux.zig
+  read.zig
+  write.zig
+  send.zig
+  recv.zig
+
+host/server/
+  ServeMux.zig
+  Receiver.zig
 ```
 
 In other words, `xfer` becomes a **host-only transfer extension layer**,
 not a separate top-level Bluetooth abstraction.
 
 `host/client/Characteristic.zig` exposes the client convenience methods
-such as `readX`, `writeX`, and `get()`, while `host.Server.handleX()` is
-the matching endpoint for routed xfer traffic. `host/xfer/Server.zig`
-keeps xfer-specific runtime state per connection so disconnect handling can
-tear down one peer without scanning unrelated peers.
+`readX` and `writeX`. On the server side, `host/server/ServeMux.zig` and
+`host/server/Receiver.zig` bind one xfer characteristic each, while
+`host/xfer/send.zig` and `host/xfer/recv.zig` carry the shared protocol
+loops.
 
 Internally, `Hci` orchestrates:
 1. Send HCI commands via `Transport.send`
@@ -651,23 +659,22 @@ var host = try Host.init(allocator, transport, .{});
 var central = host.central();
 var peripheral = host.peripheral();
 
-// Planned host-only extension views:
-// var client = host.client();
-// var server = host.server();
+var client = host.client();
+var server = host.server();
 ```
 
 **Apple (CoreBluetooth)** — platform bridges CBCentralManager:
 
 ```zig
 var cb_central = platform.CoreBluetoothCentral.init();
-var central = bt.Central.wrap(&cb_central);
+var central = bt.Central.make(&cb_central);
 ```
 
 **Android** — platform bridges android.bluetooth.le:
 
 ```zig
 var android_central = platform.AndroidBleCentral.init(context);
-var central = bt.Central.wrap(&android_central);
+var central = bt.Central.make(&android_central);
 ```
 
 Application code is identical in all three cases:
@@ -734,7 +741,8 @@ pub fn CommandClient(comptime bt: type) type {
         const Self = @This();
 
         pub fn connect(self: *Self, addr: bt.Central.BdAddr) !void {
-            try self.central.connect(addr, .public, .{});
+            const info = try self.central.connect(addr, .public, .{});
+            self.conn_handle = info.conn_handle;
         }
 
         pub fn sendCommand(self: *Self, cmd: []const u8) !void {

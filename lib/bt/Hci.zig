@@ -203,12 +203,12 @@ pub fn deinit(self: Hci) void {
     self.vtable.deinit(self.ptr);
 }
 
-/// Wrap a pointer to any concrete Hci implementation into a type-erased Hci.
-pub fn wrap(pointer: anytype) Hci {
+/// Make a type-erased Hci from a concrete implementation pointer.
+pub fn make(pointer: anytype) Hci {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);
     if (info != .pointer or info.pointer.size != .one)
-        @compileError("Hci.wrap expects a single-item pointer");
+        @compileError("Hci.make expects a single-item pointer");
 
     const Impl = info.pointer.child;
 
@@ -446,7 +446,7 @@ test "bt/unit_tests/Hci/wrap_delegates_to_concrete_implementation" {
     };
 
     var impl = Impl{};
-    const hci = wrap(&impl);
+    const hci = make(&impl);
 
     try hci.retain();
     try testing.expect(impl.retained);

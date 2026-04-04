@@ -56,11 +56,11 @@ pub const Host = struct {
     }
 
     pub fn central(self: *Self) bt.Central {
-        return bt.Central.wrap(self.central_impl);
+        return bt.Central.make(self.central_impl);
     }
 
     pub fn peripheral(self: *Self) bt.Peripheral {
-        return bt.Peripheral.wrap(self.peripheral_impl);
+        return bt.Peripheral.make(self.peripheral_impl);
     }
 
     pub fn setEventCallback(self: *Self, ctx: *const anyopaque, emit_fn: bt.Host.CallbackFn) void {

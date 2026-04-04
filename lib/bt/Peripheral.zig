@@ -290,11 +290,12 @@ pub fn removeSubscriptionHook(self: Peripheral, ctx: ?*anyopaque, cb: *const fn 
     self.vtable.removeSubscriptionHook(self.ptr, ctx, cb);
 }
 
-pub fn wrap(pointer: anytype) Peripheral {
+/// Make a type-erased Peripheral from a concrete implementation pointer.
+pub fn make(pointer: anytype) Peripheral {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);
     if (info != .pointer or info.pointer.size != .one)
-        @compileError("Peripheral.wrap expects a single-item pointer");
+        @compileError("Peripheral.make expects a single-item pointer");
 
     const Impl = info.pointer.child;
 
@@ -441,7 +442,7 @@ test "bt/unit_tests/Peripheral_wrap_allows_missing_subscription_hook" {
     };
 
     var impl = Impl{};
-    const peripheral = wrap(&impl);
+    const peripheral = make(&impl);
     peripheral.addSubscriptionHook(null, struct {
         fn onHook(_: ?*anyopaque, _: SubscriptionInfo) void {}
     }.onHook);

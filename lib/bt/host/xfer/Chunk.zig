@@ -26,8 +26,6 @@ pub const read_start_magic = [4]u8{ 0xFF, 0xFF, 0x00, 0x01 };
 /// Start marker sent by the client to begin a `write_x` transfer.
 pub const write_start_magic = [4]u8{ 0xFF, 0xFF, 0x00, 0x02 };
 
-pub const start_magic = read_start_magic;
-
 /// ACK marker sent by the receiver once all chunks arrive.
 pub const ack_signal = [2]u8{ 0xFF, 0xFF };
 
@@ -35,7 +33,7 @@ pub const Topic = u64;
 pub const topic_size: usize = @sizeOf(Topic);
 
 pub const ReadStartMetadata = struct {
-    topic: ?Topic = null,
+    topic: Topic,
     metadata: []const u8 = &.{},
 };
 
@@ -64,10 +62,6 @@ pub const Header = struct {
     }
 };
 
-pub fn isStartMagic(data: []const u8) bool {
-    return isReadStartMagic(data);
-}
-
 pub fn isReadStartMagic(data: []const u8) bool {
     return data.len >= read_start_magic.len and embed.mem.eql(u8, data[0..read_start_magic.len], &read_start_magic);
 }
@@ -82,30 +76,18 @@ pub fn isAck(data: []const u8) bool {
 
 pub fn encodeReadStartMetadata(buf: []u8, topic: Topic, metadata: []const u8) []u8 {
     if (buf.len < topic_size + metadata.len) unreachable;
-
-    var offset: usize = 0;
-    writeInt(Topic, buf[offset .. offset + topic_size], topic);
-    offset += topic_size;
-
+    writeInt(Topic, buf[0..topic_size], topic);
     if (metadata.len > 0) {
-        @memcpy(buf[offset .. offset + metadata.len], metadata);
-        offset += metadata.len;
+        @memcpy(buf[topic_size .. topic_size + metadata.len], metadata);
     }
-
-    return buf[0..offset];
+    return buf[0 .. topic_size + metadata.len];
 }
 
 pub fn decodeReadStartMetadata(data: []const u8) error{InvalidReadStartMetadata}!ReadStartMetadata {
-    if (data.len == 0) return .{};
     if (data.len < topic_size) return error.InvalidReadStartMetadata;
-
-    var offset: usize = 0;
-    const topic = readInt(Topic, data[offset .. offset + topic_size]);
-    offset += topic_size;
-
     return .{
-        .topic = topic,
-        .metadata = data[offset..],
+        .topic = readInt(Topic, data[0..topic_size]),
+        .metadata = data[topic_size..],
     };
 }
 
@@ -254,12 +236,10 @@ test "bt/unit_tests/host/xfer/Chunk/Header_validate_rejects_out_of_range_values"
 test "bt/unit_tests/host/xfer/Chunk/control_message_detection" {
     const std = @import("std");
 
-    try std.testing.expect(isStartMagic(&read_start_magic));
     try std.testing.expect(isReadStartMagic(&read_start_magic));
     try std.testing.expect(isWriteStartMagic(&write_start_magic));
     try std.testing.expect(!isReadStartMagic(&write_start_magic));
     try std.testing.expect(!isWriteStartMagic(&read_start_magic));
-    try std.testing.expect(!isStartMagic(&[_]u8{ 0xFF, 0xFF }));
 
     try std.testing.expect(isAck(&ack_signal));
     try std.testing.expect(isAck(&[_]u8{ 0xFF, 0xFF, 0x00 }));
@@ -360,24 +340,21 @@ test "bt/unit_tests/host/xfer/Chunk/size_helpers" {
 test "bt/unit_tests/host/xfer/Chunk/read_start_metadata_roundtrip" {
     const std = @import("std");
 
-    const decoded_empty = try decodeReadStartMetadata(&.{});
-    try std.testing.expectEqual(@as(?Topic, null), decoded_empty.topic);
-    try std.testing.expectEqual(@as(usize, 0), decoded_empty.metadata.len);
-
     var buf: [topic_size + 3]u8 = undefined;
     const topic_only = encodeReadStartMetadata(buf[0..], 0x0102030405060708, &.{});
     try std.testing.expectEqual(@as(usize, topic_size), topic_only.len);
 
     const decoded_topic_only = try decodeReadStartMetadata(topic_only);
-    try std.testing.expectEqual(@as(?Topic, 0x0102030405060708), decoded_topic_only.topic);
+    try std.testing.expectEqual(@as(Topic, 0x0102030405060708), decoded_topic_only.topic);
     try std.testing.expectEqual(@as(usize, 0), decoded_topic_only.metadata.len);
 
     const topic_and_metadata = encodeReadStartMetadata(buf[0..], 0x0102030405060708, &.{ 0xAA, 0xBB, 0xCC });
     try std.testing.expectEqual(@as(usize, topic_size + 3), topic_and_metadata.len);
 
     const decoded_topic_and_metadata = try decodeReadStartMetadata(topic_and_metadata);
-    try std.testing.expectEqual(@as(?Topic, 0x0102030405060708), decoded_topic_and_metadata.topic);
+    try std.testing.expectEqual(@as(Topic, 0x0102030405060708), decoded_topic_and_metadata.topic);
     try std.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC }, decoded_topic_and_metadata.metadata);
 
+    try std.testing.expectError(error.InvalidReadStartMetadata, decodeReadStartMetadata(&.{}));
     try std.testing.expectError(error.InvalidReadStartMetadata, decodeReadStartMetadata(&.{ 0x01, 0x02, 0x03 }));
 }

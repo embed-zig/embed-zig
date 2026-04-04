@@ -185,11 +185,11 @@ pub fn makeHci(comptime lib: type, comptime Channel: fn (type) type) type {
         }
 
         pub fn central(self: *Self) bt.Central {
-            return bt.Central.wrap(&self.central_impl);
+            return bt.Central.make(&self.central_impl);
         }
 
         pub fn peripheral(self: *Self) bt.Peripheral {
-            return bt.Peripheral.wrap(&self.peripheral_impl);
+            return bt.Peripheral.make(&self.peripheral_impl);
         }
 
         pub fn setEventCallback(self: *Self, ctx: *const anyopaque, emit_fn: CallbackFn) void {
@@ -258,7 +258,7 @@ pub fn makeHciTransport(
             hci_ptr.* = HciType.init(transport, config.hci);
             errdefer hci_ptr.deinit();
 
-            const inner_host = try Base.init(bt.Hci.wrap(hci_ptr), .{
+            const inner_host = try Base.init(bt.Hci.make(hci_ptr), .{
                 .allocator = allocator,
                 .source_id = config.source_id,
             });

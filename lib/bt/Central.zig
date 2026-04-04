@@ -274,12 +274,12 @@ pub fn removeEventHook(self: Central, ctx: ?*anyopaque, cb: *const fn (?*anyopaq
     self.vtable.removeEventHook(self.ptr, ctx, cb);
 }
 
-/// Wrap a pointer to any concrete Central implementation into a Central.
-pub fn wrap(pointer: anytype) Central {
+/// Make a type-erased Central from a concrete implementation pointer.
+pub fn make(pointer: anytype) Central {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);
     if (info != .pointer or info.pointer.size != .one)
-        @compileError("Central.wrap expects a single-item pointer");
+        @compileError("Central.make expects a single-item pointer");
 
     const Impl = info.pointer.child;
 
@@ -447,7 +447,7 @@ test "bt/unit_tests/Central_wrap_does_not_silently_downgrade_optional_gatt_ops" 
     };
 
     var impl = Impl{};
-    const central = wrap(&impl);
+    const central = make(&impl);
 
     try @import("std").testing.expectError(error.Unexpected, central.gattWriteNoResp(1, 2, "x"));
     try @import("std").testing.expectError(error.Unexpected, central.exchangeMtu(1, MAX_ATT_MTU));
