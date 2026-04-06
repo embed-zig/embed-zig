@@ -155,10 +155,3 @@ pub fn make(comptime Impl: type) type {
         pub const BitStack = collections.BitStack;
     };
 }
-
-test "embed/unit_tests" {
-    _ = @import("embed/Thread.zig");
-    _ = @import("embed/json.zig");
-    _ = @import("embed/time.zig");
-    _ = @import("embed/testing.zig");
-}

@@ -10,6 +10,7 @@ networking primitives.
 - [Dependency](#dependency)
 - [Package structure](#package-structure)
 - [Layer diagram](#layer-diagram)
+- [Test layout](#test-layout)
 - [net (root)](#net-root)
   - [Conn](#conn)
   - [Listener](#listener)
@@ -136,10 +137,17 @@ shared non-blocking substrate. Public callers still work with `Dialer`,
 `TcpConn`, `TcpListener`, `UdpConn`, `Conn`, `Listener`, and `PacketConn`;
 the fd layer remains an internal implementation detail.
 
-Regression coverage is split between fd-local runners
-(`lib/net/test_runner/fd_stream.zig`, `lib/net/test_runner/fd_packet.zig`)
-and public API runners (`lib/net/test_runner/tcp.zig`,
-`lib/net/test_runner/udp.zig`), all wired from `lib/integration.zig`.
+Regression coverage is split between unit topic aggregators under
+`lib/net/test_runner/unit/` and deterministic local integration aggregators
+under `lib/net/test_runner/integration/`, all wired from `lib/test.zig`.
+
+## Test layout
+
+- `lib/net.zig` exports only `net.test_runner.unit` and `net.test_runner.integration`.
+- `lib/test.zig` wires `net/unit/std`, `net/unit/embed_std`, `net/integration/std`, and `net/integration/embed_std`.
+- `lib/net/test_runner/unit.zig` fans out into topic suites such as `netip`, `http`, `resolver`, `tls`, `fd`, and `core`.
+- `lib/net/test_runner/integration.zig` fans out into deterministic local runners such as `fd_stream`, `tcp`, `resolver_local`, `http_transport_local`, and `http_transport_layer01`.
+- Host-only or optional public-network helpers live under `lib/net/test_runner/integration/compat/` and `integration/public/` and are not wired from `integration.zig`; examples include `integration/compat/tls_std_compat.zig`, `integration/public/tls_dial.zig`, and `integration/public/resolver_dns.zig`.
 
 ## net (root)
 
@@ -495,7 +503,7 @@ Highlights:
 - Pure timestamp conversion and packet encode/decode helpers at module root
 - `Client(lib)` with single-server query and multi-server race support
 - Per-server race workers built on `sync.Racer`
-- Public-network Aliyun test coverage in `lib/net/test_runner/ntp.zig`
+- Public-network Aliyun test coverage in `lib/net/test_runner/integration/public/ntp.zig`
 
 ```zig
 const embed = @import("embed").make(platform);
@@ -530,9 +538,11 @@ Supported subset today:
 - Handshake-stage peer alerts and malformed-record failures are kept more distinct than plain `RecordIoFailed`, but the handshake error surface still remains intentionally coarser than post-handshake application I/O
 - Handshake-stage transport write failures now stop outbound flights without synthesizing an extra local fatal alert, while local protocol/record failures still emit the matching fatal alert
 
-Core correctness is validated by local deterministic tests. Public-network
-smoke coverage lives in `lib/net/test_runner/tls.zig` as a separate optional
-runner so `zig test` does not depend on the public internet.
+Core correctness is validated by the default local deterministic unit and
+integration runners. Host-only and optional public-network TLS smoke coverage
+is kept out of the root `net.test_runner` surface; use helpers such as
+`lib/net/test_runner/integration/compat/tls_std_compat.zig` and `lib/net/test_runner/integration/public/tls_dial.zig`
+when you explicitly want that extra coverage.
 
 ```zig
 var tls_conn = try net.tls.dial(allocator, .tcp, ip, .{

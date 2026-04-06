@@ -20,6 +20,7 @@
 
 const io = @import("../io.zig");
 const tca9554 = @This();
+const testing_api = @import("testing");
 
 /// TCA9554 register addresses
 pub const Register = enum(u8) {
@@ -90,232 +91,262 @@ pub const Level = enum(u1) {
 /// TCA9554 GPIO Expander Driver using `drivers.io.I2c`.
 const Self = @This();
 
-    i2c: io.I2c,
-    address: u7,
+i2c: io.I2c,
+address: u7,
 
-    output_cache: u8 = 0xFF,
-    config_cache: u8 = 0xFF,
+output_cache: u8 = 0xFF,
+config_cache: u8 = 0xFF,
 
-    pub fn init(i2c: io.I2c, address: u7) Self {
-        return .{
-            .i2c = i2c,
-            .address = address,
-        };
+pub fn init(i2c: io.I2c, address: u7) Self {
+    return .{
+        .i2c = i2c,
+        .address = address,
+    };
+}
+
+pub fn readRegister(self: *Self, reg: Register) !u8 {
+    var buf: [1]u8 = undefined;
+    try self.i2c.writeRead(self.address, &.{@intFromEnum(reg)}, &buf);
+    return buf[0];
+}
+
+pub fn writeRegister(self: *Self, reg: Register, value: u8) !void {
+    try self.i2c.write(self.address, &.{ @intFromEnum(reg), value });
+}
+
+// ====================================================================
+// High-level API
+// ====================================================================
+
+pub fn setDirection(self: *Self, pin: Pin, dir: Direction) !void {
+    const m = pin.mask();
+    if (dir == .output) {
+        self.config_cache &= ~m;
+    } else {
+        self.config_cache |= m;
     }
+    try self.writeRegister(.config, self.config_cache);
+}
 
-    pub fn readRegister(self: *Self, reg: Register) !u8 {
-        var buf: [1]u8 = undefined;
-        try self.i2c.writeRead(self.address, &.{@intFromEnum(reg)}, &buf);
-        return buf[0];
+pub fn setDirectionMask(self: *Self, output_mask: u8) !void {
+    self.config_cache = ~output_mask;
+    try self.writeRegister(.config, self.config_cache);
+}
+
+pub fn write(self: *Self, pin: Pin, level: Level) !void {
+    const m = pin.mask();
+    if (level == .high) {
+        self.output_cache |= m;
+    } else {
+        self.output_cache &= ~m;
     }
+    try self.writeRegister(.output, self.output_cache);
+}
 
-    pub fn writeRegister(self: *Self, reg: Register, value: u8) !void {
-        try self.i2c.write(self.address, &.{ @intFromEnum(reg), value });
+pub fn writeMask(self: *Self, m: u8, levels: u8) !void {
+    self.output_cache = (self.output_cache & ~m) | (levels & m);
+    try self.writeRegister(.output, self.output_cache);
+}
+
+pub fn writeAll(self: *Self, value: u8) !void {
+    self.output_cache = value;
+    try self.writeRegister(.output, value);
+}
+
+pub fn read(self: *Self, pin: Pin) !Level {
+    const value = try self.readRegister(.input);
+    return if ((value & pin.mask()) != 0) .high else .low;
+}
+
+pub fn readAll(self: *Self) !u8 {
+    return try self.readRegister(.input);
+}
+
+pub fn toggle(self: *Self, pin: Pin) !void {
+    self.output_cache ^= pin.mask();
+    try self.writeRegister(.output, self.output_cache);
+}
+
+pub fn setPolarity(self: *Self, pin: Pin, inverted: bool) !void {
+    var polarity = try self.readRegister(.polarity);
+    const m = pin.mask();
+    if (inverted) {
+        polarity |= m;
+    } else {
+        polarity &= ~m;
     }
+    try self.writeRegister(.polarity, polarity);
+}
 
-        // ====================================================================
-        // High-level API
-        // ====================================================================
+// ====================================================================
+// Convenience functions
+// ====================================================================
 
-    pub fn setDirection(self: *Self, pin: Pin, dir: Direction) !void {
-            const m = pin.mask();
-            if (dir == .output) {
-                self.config_cache &= ~m;
-            } else {
-                self.config_cache |= m;
-            }
-            try self.writeRegister(.config, self.config_cache);
-    }
+pub fn configureOutput(self: *Self, pin: Pin, initial: Level) !void {
+    try self.write(pin, initial);
+    try self.setDirection(pin, .output);
+}
 
-    pub fn setDirectionMask(self: *Self, output_mask: u8) !void {
-            self.config_cache = ~output_mask;
-            try self.writeRegister(.config, self.config_cache);
-    }
+pub fn configureInput(self: *Self, pin: Pin) !void {
+    try self.setDirection(pin, .input);
+}
 
-    pub fn write(self: *Self, pin: Pin, level: Level) !void {
-            const m = pin.mask();
-            if (level == .high) {
-                self.output_cache |= m;
-            } else {
-                self.output_cache &= ~m;
-            }
-            try self.writeRegister(.output, self.output_cache);
-    }
+pub fn reset(self: *Self) !void {
+    self.output_cache = Defaults.OUTPUT;
+    self.config_cache = Defaults.CONFIG;
+    try self.writeRegister(.output, Defaults.OUTPUT);
+    try self.writeRegister(.polarity, Defaults.POLARITY);
+    try self.writeRegister(.config, Defaults.CONFIG);
+}
 
-    pub fn writeMask(self: *Self, m: u8, levels: u8) !void {
-            self.output_cache = (self.output_cache & ~m) | (levels & m);
-            try self.writeRegister(.output, self.output_cache);
-    }
+pub fn syncFromDevice(self: *Self) !void {
+    self.config_cache = try self.readRegister(.config);
+    self.output_cache = try self.readRegister(.output);
+}
 
-    pub fn writeAll(self: *Self, value: u8) !void {
-            self.output_cache = value;
-            try self.writeRegister(.output, value);
-    }
+pub fn getDirection(self: *Self, pin: Pin) Direction {
+    const m = pin.mask();
+    return if ((self.config_cache & m) != 0) .input else .output;
+}
 
-    pub fn read(self: *Self, pin: Pin) !Level {
-            const value = try self.readRegister(.input);
-            return if ((value & pin.mask()) != 0) .high else .low;
-    }
+pub fn getOutput(self: *Self, pin: Pin) Level {
+    const m = pin.mask();
+    return if ((self.output_cache & m) != 0) .high else .low;
+}
 
-    pub fn readAll(self: *Self) !u8 {
-        return try self.readRegister(.input);
-    }
+pub fn getOutputAll(self: *Self) u8 {
+    return self.output_cache;
+}
 
-    pub fn toggle(self: *Self, pin: Pin) !void {
-            self.output_cache ^= pin.mask();
-            try self.writeRegister(.output, self.output_cache);
-    }
+pub fn getConfigAll(self: *Self) u8 {
+    return self.config_cache;
+}
 
-    pub fn setPolarity(self: *Self, pin: Pin, inverted: bool) !void {
-            var polarity = try self.readRegister(.polarity);
-            const m = pin.mask();
-            if (inverted) {
-                polarity |= m;
-            } else {
-                polarity &= ~m;
-            }
-            try self.writeRegister(.polarity, polarity);
-    }
+pub fn isOutput(self: *Self, pin: Pin) bool {
+    return self.getDirection(pin) == .output;
+}
 
-        // ====================================================================
-        // Convenience functions
-        // ====================================================================
+pub fn isInput(self: *Self, pin: Pin) bool {
+    return self.getDirection(pin) == .input;
+}
 
-    pub fn configureOutput(self: *Self, pin: Pin, initial: Level) !void {
-            try self.write(pin, initial);
-            try self.setDirection(pin, .output);
-    }
+pub fn setAllOutputs(self: *Self) !void {
+    self.config_cache = PinMask.NONE;
+    try self.writeRegister(.config, self.config_cache);
+}
 
-    pub fn configureInput(self: *Self, pin: Pin) !void {
-        try self.setDirection(pin, .input);
-    }
+pub fn setAllInputs(self: *Self) !void {
+    self.config_cache = PinMask.ALL;
+    try self.writeRegister(.config, self.config_cache);
+}
 
-    pub fn reset(self: *Self) !void {
-            self.output_cache = Defaults.OUTPUT;
-            self.config_cache = Defaults.CONFIG;
-            try self.writeRegister(.output, Defaults.OUTPUT);
-            try self.writeRegister(.polarity, Defaults.POLARITY);
-            try self.writeRegister(.config, Defaults.CONFIG);
-    }
+pub fn setAllHigh(self: *Self) !void {
+    self.output_cache = PinMask.ALL;
+    try self.writeRegister(.output, self.output_cache);
+}
 
-    pub fn syncFromDevice(self: *Self) !void {
-            self.config_cache = try self.readRegister(.config);
-            self.output_cache = try self.readRegister(.output);
-    }
+pub fn setAllLow(self: *Self) !void {
+    self.output_cache = PinMask.NONE;
+    try self.writeRegister(.output, self.output_cache);
+}
 
-    pub fn getDirection(self: *Self, pin: Pin) Direction {
-            const m = pin.mask();
-            return if ((self.config_cache & m) != 0) .input else .output;
-    }
+pub fn setPolarityMask(self: *Self, invert_mask: u8) !void {
+    try self.writeRegister(.polarity, invert_mask);
+}
 
-    pub fn getOutput(self: *Self, pin: Pin) Level {
-            const m = pin.mask();
-            return if ((self.output_cache & m) != 0) .high else .low;
-    }
+pub fn getPolarity(self: *Self) !u8 {
+    return try self.readRegister(.polarity);
+}
 
-    pub fn getOutputAll(self: *Self) u8 {
-        return self.output_cache;
-    }
+pub fn configureMultiple(self: *Self, output_pins: u8, initial_levels: u8) !void {
+    self.output_cache = initial_levels;
+    self.config_cache = ~output_pins;
+    try self.writeRegister(.output, self.output_cache);
+    try self.writeRegister(.config, self.config_cache);
+}
 
-    pub fn getConfigAll(self: *Self) u8 {
-        return self.config_cache;
-    }
+pub fn pulse(self: *Self, pin: Pin) !void {
+    try self.toggle(pin);
+    try self.toggle(pin);
+}
 
-    pub fn isOutput(self: *Self, pin: Pin) bool {
-        return self.getDirection(pin) == .output;
-    }
+pub fn setHigh(self: *Self, pin: Pin) !void {
+    try self.write(pin, .high);
+}
 
-    pub fn isInput(self: *Self, pin: Pin) bool {
-        return self.getDirection(pin) == .input;
-    }
+pub fn setLow(self: *Self, pin: Pin) !void {
+    try self.write(pin, .low);
+}
 
-    pub fn setAllOutputs(self: *Self) !void {
-            self.config_cache = PinMask.NONE;
-            try self.writeRegister(.config, self.config_cache);
-    }
+pub fn isHigh(self: *Self, pin: Pin) !bool {
+    return (try self.read(pin)) == .high;
+}
 
-    pub fn setAllInputs(self: *Self) !void {
-            self.config_cache = PinMask.ALL;
-            try self.writeRegister(.config, self.config_cache);
-    }
+pub fn isLow(self: *Self, pin: Pin) !bool {
+    return (try self.read(pin)) == .low;
+}
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn setDirectionAndWriteUpdateCachedRegisters() !void {
+            const FakeI2c = struct {
+                writes: [4][2]u8 = [_][2]u8{[_]u8{ 0, 0 }} ** 4,
+                write_count: usize = 0,
 
-    pub fn setAllHigh(self: *Self) !void {
-            self.output_cache = PinMask.ALL;
-            try self.writeRegister(.output, self.output_cache);
-    }
+                pub fn write(self: *@This(), _: io.I2c.Address, data: []const u8) io.I2c.Error!void {
+                    self.writes[self.write_count] = .{ data[0], data[1] };
+                    self.write_count += 1;
+                }
 
-    pub fn setAllLow(self: *Self) !void {
-            self.output_cache = PinMask.NONE;
-            try self.writeRegister(.output, self.output_cache);
-    }
+                pub fn read(self: *@This(), _: io.I2c.Address, _: []u8) io.I2c.Error!void {
+                    _ = self;
+                    return error.Unexpected;
+                }
 
-    pub fn setPolarityMask(self: *Self, invert_mask: u8) !void {
-        try self.writeRegister(.polarity, invert_mask);
-    }
+                pub fn writeRead(self: *@This(), _: io.I2c.Address, _: []const u8, _: []u8) io.I2c.Error!void {
+                    _ = self;
+                    return error.Unexpected;
+                }
+            };
 
-    pub fn getPolarity(self: *Self) !u8 {
-        return try self.readRegister(.polarity);
-    }
+            var fake = FakeI2c{};
+            var gpio = tca9554.init(io.I2c.init(&fake), Address.TCA9554_BASE);
 
-    pub fn configureMultiple(self: *Self, output_pins: u8, initial_levels: u8) !void {
-            self.output_cache = initial_levels;
-            self.config_cache = ~output_pins;
-            try self.writeRegister(.output, self.output_cache);
-            try self.writeRegister(.config, self.config_cache);
-    }
+            try gpio.setDirection(.pin6, .output);
+            try gpio.write(.pin6, .low);
 
-    pub fn pulse(self: *Self, pin: Pin) !void {
-            try self.toggle(pin);
-            try self.toggle(pin);
-    }
-
-    pub fn setHigh(self: *Self, pin: Pin) !void {
-        try self.write(pin, .high);
-    }
-
-    pub fn setLow(self: *Self, pin: Pin) !void {
-        try self.write(pin, .low);
-    }
-
-    pub fn isHigh(self: *Self, pin: Pin) !bool {
-        return (try self.read(pin)) == .high;
-    }
-
-    pub fn isLow(self: *Self, pin: Pin) !bool {
-        return (try self.read(pin)) == .low;
-    }
-test "drivers/unit_tests/gpio/Tca9554/setDirection_and_write_update_cached_registers" {
-    const std = @import("std");
-
-    const FakeI2c = struct {
-        writes: [4][2]u8 = [_][2]u8{[_]u8{ 0, 0 }} ** 4,
-        write_count: usize = 0,
-
-        pub fn write(self: *@This(), _: io.I2c.Address, data: []const u8) io.I2c.Error!void {
-            self.writes[self.write_count] = .{ data[0], data[1] };
-            self.write_count += 1;
-        }
-
-        pub fn read(self: *@This(), _: io.I2c.Address, _: []u8) io.I2c.Error!void {
-            _ = self;
-            return error.Unexpected;
-        }
-
-        pub fn writeRead(self: *@This(), _: io.I2c.Address, _: []const u8, _: []u8) io.I2c.Error!void {
-            _ = self;
-            return error.Unexpected;
+            try lib.testing.expectEqual(@as(usize, 2), fake.write_count);
+            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.config), 0xBF }, fake.writes[0]);
+            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.output), 0xBF }, fake.writes[1]);
+            try lib.testing.expectEqual(@as(u8, 0xBF), gpio.getConfigAll());
+            try lib.testing.expectEqual(@as(u8, 0xBF), gpio.getOutputAll());
         }
     };
 
-    var fake = FakeI2c{};
-    var gpio = tca9554.init(io.I2c.init(&fake), Address.TCA9554_BASE);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    try gpio.setDirection(.pin6, .output);
-    try gpio.write(.pin6, .low);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    try std.testing.expectEqual(@as(usize, 2), fake.write_count);
-    try std.testing.expectEqual([2]u8{ @intFromEnum(Register.config), 0xBF }, fake.writes[0]);
-    try std.testing.expectEqual([2]u8{ @intFromEnum(Register.output), 0xBF }, fake.writes[1]);
-    try std.testing.expectEqual(@as(u8, 0xBF), gpio.getConfigAll());
-    try std.testing.expectEqual(@as(u8, 0xBF), gpio.getOutputAll());
+            TestCase.setDirectionAndWriteUpdateCachedRegisters() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

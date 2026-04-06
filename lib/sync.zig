@@ -27,12 +27,6 @@ pub fn Racer(comptime lib: type, comptime T: type) type {
 }
 
 pub const test_runner = struct {
-    pub const channel = @import("sync/test_runner/channel.zig");
-    pub const racer = @import("sync/test_runner/racer.zig");
+    pub const unit = @import("sync/test_runner/unit.zig");
+    pub const integration = @import("sync/test_runner/integration.zig");
 };
-
-test "sync/unit_tests" {
-    _ = @import("sync/Channel.zig");
-    _ = @import("sync/Racer.zig");
-    _ = @import("sync/test_runner/racer.zig");
-}

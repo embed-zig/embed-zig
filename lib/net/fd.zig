@@ -3,6 +3,7 @@
 //! This namespace is intentionally kept separate from the public `net` API
 //! while the new stream/packet implementation is validated in isolation.
 
+const testing_api = @import("testing");
 const stream_mod = @import("fd/Stream.zig");
 const packet_mod = @import("fd/Packet.zig");
 const listener_mod = @import("fd/Listener.zig");
@@ -20,15 +21,20 @@ pub fn Listener(comptime lib: type) type {
 }
 
 pub const test_runner = struct {
-    pub const stream = @import("test_runner/fd_stream.zig");
-    pub const packet = @import("test_runner/fd_packet.zig");
+    pub const stream = @import("test_runner/integration/fd_stream.zig");
+    pub const packet = @import("test_runner/integration/fd_packet.zig");
 };
 
-test "net/unit_tests/fd" {
-    _ = @import("fd/SockAddr.zig");
-    _ = @import("fd/Listener.zig");
-    _ = @import("fd/Stream.zig");
-    _ = @import("fd/Packet.zig");
-    _ = @import("test_runner/fd_stream.zig");
-    _ = @import("test_runner/fd_packet.zig");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = allocator;
+            _ = @import("fd/SockAddr.zig");
+            _ = @import("fd/Listener.zig");
+            _ = @import("fd/Stream.zig");
+            _ = @import("fd/Packet.zig");
+            _ = @import("test_runner/integration/fd_stream.zig");
+            _ = @import("test_runner/integration/fd_packet.zig");
+        }
+    }.run);
 }

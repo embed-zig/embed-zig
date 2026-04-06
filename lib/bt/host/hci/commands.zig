@@ -7,6 +7,7 @@
 //! Indicator byte 0x01 = HCI Command.
 
 const std = @import("std");
+const testing_api = @import("testing");
 
 pub const INDICATOR: u8 = 0x01;
 pub const HEADER_LEN: usize = 4; // indicator + opcode(2) + param_len(1)
@@ -266,50 +267,68 @@ pub const ConnParams = struct {
     max_ce_length: u16 = 0,
 };
 
-// --- Tests ---
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            var buf: [MAX_CMD_LEN]u8 = undefined;
 
-test "bt/unit_tests/host/hci/commands/reset" {
-    var buf: [MAX_CMD_LEN]u8 = undefined;
-    const pkt = reset(&buf);
-    try std.testing.expectEqual(@as(usize, 4), pkt.len);
-    try std.testing.expectEqual(INDICATOR, pkt[0]);
-    try std.testing.expectEqual(@as(u8, 0x03), pkt[1]); // OCF low
-    try std.testing.expectEqual(@as(u8, 0x0C), pkt[2]); // OGF high
-    try std.testing.expectEqual(@as(u8, 0), pkt[3]); // param len
+            const reset_cmd = reset(&buf);
+            try lib.testing.expectEqual(@as(usize, 4), reset_cmd.len);
+            try lib.testing.expectEqual(INDICATOR, reset_cmd[0]);
+            try lib.testing.expectEqual(@as(u8, 0x03), reset_cmd[1]);
+            try lib.testing.expectEqual(@as(u8, 0x0C), reset_cmd[2]);
+            try lib.testing.expectEqual(@as(u8, 0), reset_cmd[3]);
+
+            const adv_enable = leSetAdvEnable(&buf, true);
+            try lib.testing.expectEqual(@as(usize, 5), adv_enable.len);
+            try lib.testing.expectEqual(INDICATOR, adv_enable[0]);
+            try lib.testing.expectEqual(@as(u8, 0x0A), adv_enable[1]);
+            try lib.testing.expectEqual(@as(u8, 0x20), adv_enable[2]);
+            try lib.testing.expectEqual(@as(u8, 1), adv_enable[3]);
+            try lib.testing.expectEqual(@as(u8, 1), adv_enable[4]);
+
+            const scan_enable = leSetScanEnable(&buf, true, false);
+            try lib.testing.expectEqual(@as(usize, 6), scan_enable.len);
+            try lib.testing.expectEqual(@as(u8, 1), scan_enable[4]);
+            try lib.testing.expectEqual(@as(u8, 0), scan_enable[5]);
+
+            const disconnect_cmd = disconnect(&buf, 0x0040, 0x13);
+            try lib.testing.expectEqual(@as(usize, 7), disconnect_cmd.len);
+            try lib.testing.expectEqual(@as(u8, 0x40), disconnect_cmd[4]);
+            try lib.testing.expectEqual(@as(u8, 0x00), disconnect_cmd[5]);
+            try lib.testing.expectEqual(@as(u8, 0x13), disconnect_cmd[6]);
+
+            const generic = encode(&buf, READ_BD_ADDR, &.{});
+            try lib.testing.expectEqual(@as(usize, 4), generic.len);
+            try lib.testing.expectEqual(@as(u8, 0x09), generic[1]);
+            try lib.testing.expectEqual(@as(u8, 0x10), generic[2]);
+        }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-test "bt/unit_tests/host/hci/commands/leSetAdvEnable" {
-    var buf: [MAX_CMD_LEN]u8 = undefined;
-    const pkt = leSetAdvEnable(&buf, true);
-    try std.testing.expectEqual(@as(usize, 5), pkt.len);
-    try std.testing.expectEqual(INDICATOR, pkt[0]);
-    try std.testing.expectEqual(@as(u8, 0x0A), pkt[1]);
-    try std.testing.expectEqual(@as(u8, 0x20), pkt[2]);
-    try std.testing.expectEqual(@as(u8, 1), pkt[3]); // param len
-    try std.testing.expectEqual(@as(u8, 1), pkt[4]); // enable=true
-}
-
-test "bt/unit_tests/host/hci/commands/leSetScanEnable" {
-    var buf: [MAX_CMD_LEN]u8 = undefined;
-    const pkt = leSetScanEnable(&buf, true, false);
-    try std.testing.expectEqual(@as(usize, 6), pkt.len);
-    try std.testing.expectEqual(@as(u8, 1), pkt[4]); // enable
-    try std.testing.expectEqual(@as(u8, 0), pkt[5]); // no filter dup
-}
-
-test "bt/unit_tests/host/hci/commands/disconnect" {
-    var buf: [MAX_CMD_LEN]u8 = undefined;
-    const pkt = disconnect(&buf, 0x0040, 0x13);
-    try std.testing.expectEqual(@as(usize, 7), pkt.len);
-    try std.testing.expectEqual(@as(u8, 0x40), pkt[4]); // handle low
-    try std.testing.expectEqual(@as(u8, 0x00), pkt[5]); // handle high
-    try std.testing.expectEqual(@as(u8, 0x13), pkt[6]); // reason
-}
-
-test "bt/unit_tests/host/hci/commands/generic_encode" {
-    var buf: [MAX_CMD_LEN]u8 = undefined;
-    const pkt = encode(&buf, READ_BD_ADDR, &.{});
-    try std.testing.expectEqual(@as(usize, 4), pkt.len);
-    try std.testing.expectEqual(@as(u8, 0x09), pkt[1]);
-    try std.testing.expectEqual(@as(u8, 0x10), pkt[2]);
-}

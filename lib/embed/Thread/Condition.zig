@@ -72,30 +72,3 @@ pub fn make(comptime Impl: type) type {
     };
 }
 
-test "embed/unit_tests/Thread/Condition/make_accepts_matching_mutex_impl" {
-    const MutexImpl = struct {
-        state: u8 = 0,
-    };
-    const ConditionImpl = struct {
-        pub fn wait(_: *@This(), _: *MutexImpl) void {}
-
-        pub fn timedWait(_: *@This(), _: *MutexImpl, _: u64) error{Timeout}!void {}
-
-        pub fn signal(_: *@This()) void {}
-
-        pub fn broadcast(_: *@This()) void {}
-    };
-
-    const Condition = make(ConditionImpl);
-    const Mutex = struct {
-        impl: MutexImpl = .{},
-    };
-
-    var cond: Condition = .{};
-    var mutex: Mutex = .{};
-
-    cond.wait(&mutex);
-    try cond.timedWait(&mutex, 1);
-    cond.signal();
-    cond.broadcast();
-}

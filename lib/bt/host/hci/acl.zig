@@ -7,6 +7,7 @@
 //! Indicator byte 0x02 = ACL Data.
 
 const std = @import("std");
+const testing_api = @import("testing");
 
 pub const INDICATOR: u8 = 0x02;
 pub const HEADER_LEN: usize = 5; // indicator(1) + handle+flags(2) + data_len(2)
@@ -82,46 +83,69 @@ pub fn getPayload(raw: []const u8) ?[]const u8 {
     return raw[HEADER_LEN..end];
 }
 
-// --- Tests ---
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            var buf: [MAX_PACKET_LEN]u8 = undefined;
+            const payload = "hello BLE";
+            const pkt = encode(&buf, 0x0040, .first_auto_flush, payload);
 
-test "bt/unit_tests/host/hci/acl/encode_and_parse_roundtrip" {
-    var buf: [MAX_PACKET_LEN]u8 = undefined;
-    const payload = "hello BLE";
-    const pkt = encode(&buf, 0x0040, .first_auto_flush, payload);
+            try lib.testing.expectEqual(INDICATOR, pkt[0]);
+            try lib.testing.expectEqual(@as(usize, HEADER_LEN + payload.len), pkt.len);
 
-    try std.testing.expectEqual(INDICATOR, pkt[0]);
-    try std.testing.expectEqual(@as(usize, HEADER_LEN + payload.len), pkt.len);
+            const hdr = parsePacketHeader(pkt) orelse return error.ParseFailed;
+            try lib.testing.expectEqual(@as(u16, 0x0040), hdr.conn_handle);
+            try lib.testing.expectEqual(PbFlag.first_auto_flush, hdr.pb_flag);
+            try lib.testing.expectEqual(BcFlag.point_to_point, hdr.bc_flag);
+            try lib.testing.expectEqual(@as(u16, payload.len), hdr.data_len);
 
-    const hdr = parsePacketHeader(pkt) orelse return error.ParseFailed;
-    try std.testing.expectEqual(@as(u16, 0x0040), hdr.conn_handle);
-    try std.testing.expectEqual(PbFlag.first_auto_flush, hdr.pb_flag);
-    try std.testing.expectEqual(BcFlag.point_to_point, hdr.bc_flag);
-    try std.testing.expectEqual(@as(u16, payload.len), hdr.data_len);
+            const data = getPayload(pkt) orelse return error.PayloadFailed;
+            try lib.testing.expectEqualSlices(u8, payload, data);
 
-    const data = getPayload(pkt) orelse return error.PayloadFailed;
-    try std.testing.expectEqualSlices(u8, payload, data);
+            var raw: [4]u8 = undefined;
+            const handle_flags: u16 = 0x0040 | (@as(u16, @intFromEnum(PbFlag.continuing)) << 12);
+            lib.mem.writeInt(u16, raw[0..2], handle_flags, .little);
+            lib.mem.writeInt(u16, raw[2..4], 27, .little);
+
+            const parsed = parseHeader(&raw) orelse return error.ParseFailed;
+            try lib.testing.expectEqual(@as(u16, 0x0040), parsed.conn_handle);
+            try lib.testing.expectEqual(PbFlag.continuing, parsed.pb_flag);
+            try lib.testing.expectEqual(@as(u16, 27), parsed.data_len);
+
+            try lib.testing.expectEqual(@as(?Header, null), parseHeader(&.{ 0x00, 0x00 }));
+
+            var empty_buf: [HEADER_LEN]u8 = undefined;
+            const empty_pkt = encode(&empty_buf, 0x0001, .first_auto_flush, &.{});
+            try lib.testing.expectEqual(@as(usize, HEADER_LEN), empty_pkt.len);
+            const empty_hdr = parsePacketHeader(empty_pkt) orelse return error.ParseFailed;
+            try lib.testing.expectEqual(@as(u16, 0), empty_hdr.data_len);
+        }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-test "bt/unit_tests/host/hci/acl/parseHeader_without_indicator" {
-    var raw: [4]u8 = undefined;
-    const handle_flags: u16 = 0x0040 | (@as(u16, @intFromEnum(PbFlag.continuing)) << 12);
-    std.mem.writeInt(u16, raw[0..2], handle_flags, .little);
-    std.mem.writeInt(u16, raw[2..4], 27, .little);
-
-    const hdr = parseHeader(&raw) orelse return error.ParseFailed;
-    try std.testing.expectEqual(@as(u16, 0x0040), hdr.conn_handle);
-    try std.testing.expectEqual(PbFlag.continuing, hdr.pb_flag);
-    try std.testing.expectEqual(@as(u16, 27), hdr.data_len);
-}
-
-test "bt/unit_tests/host/hci/acl/parseHeader_returns_null_for_short_input" {
-    try std.testing.expectEqual(@as(?Header, null), parseHeader(&.{ 0x00, 0x00 }));
-}
-
-test "bt/unit_tests/host/hci/acl/encode_empty_payload" {
-    var buf: [HEADER_LEN]u8 = undefined;
-    const pkt = encode(&buf, 0x0001, .first_auto_flush, &.{});
-    try std.testing.expectEqual(@as(usize, HEADER_LEN), pkt.len);
-    const hdr = parsePacketHeader(pkt) orelse return error.ParseFailed;
-    try std.testing.expectEqual(@as(u16, 0), hdr.data_len);
-}

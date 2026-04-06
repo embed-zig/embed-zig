@@ -13,6 +13,8 @@ const status = @import("status.zig");
 const transport_mod = @import("Transport.zig");
 const url_mod = @import("../url.zig");
 
+const testing_api = @import("testing");
+
 const RedirectAction = enum {
     none,
     rewrite_to_get,
@@ -624,625 +626,487 @@ fn splitReference(comptime lib: type, input: []const u8) ReferenceParts {
     return parts;
 }
 
-test "net/unit_tests/http/Client/init_without_custom_roundtripper_owns_default_transport" {
-    const std = @import("std");
-    const testing = std.testing;
-    const HttpClient = Client(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const HttpClient = Client(lib);
 
-    var client = try HttpClient.init(testing.allocator, .{});
-    defer client.deinit();
-
-    try testing.expect(client.transport_source == .owned);
-    client.closeIdleConnections();
-}
-
-test "net/unit_tests/http/Client/do_with_borrowed_roundtripper_tracks_response_until_deinit" {
-    const std = @import("std");
-    const testing = std.testing;
-    const HttpClient = Client(std);
-
-    const MockRoundTripper = struct {
-        cleaned: bool = false,
-        calls: usize = 0,
-
-        pub fn roundTrip(self: *@This(), req: *const Request) anyerror!Response {
-            _ = req;
-            self.calls += 1;
-            return .{
-                .status_code = 200,
-                .deinit_ptr = @ptrCast(&self.cleaned),
-                .deinit_fn = cleanup,
-            };
-        }
-
-        fn cleanup(ptr: *anyopaque) void {
-            const cleaned: *bool = @ptrCast(@alignCast(ptr));
-            cleaned.* = true;
-        }
-    };
-
-    var mock = MockRoundTripper{};
-    var client = try HttpClient.init(testing.allocator, .{
-        .round_tripper = RoundTripper.init(&mock),
-    });
-    defer client.deinit();
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    defer req.deinit();
-
-    try testing.expectEqual(@as(usize, 0), client.shared.active_requests);
-
-    var resp = try client.do(&req);
-    try testing.expectEqual(@as(usize, 1), mock.calls);
-    try testing.expectEqual(@as(usize, 1), client.shared.active_requests);
-    try testing.expect(!mock.cleaned);
-
-    resp.deinit();
-    try testing.expect(mock.cleaned);
-    try testing.expectEqual(@as(usize, 0), client.shared.active_requests);
-}
-
-test "net/unit_tests/http/Client/do_follows_redirects_with_internal_request_hops" {
-    const std = @import("std");
-    const testing = std.testing;
-    const HttpClient = Client(std);
-
-    const MockBody = struct {
-        allocator: std.mem.Allocator,
-        closed: *bool,
-
-        pub fn read(_: *@This(), _: []u8) anyerror!usize {
-            return 0;
-        }
-
-        pub fn close(self: *@This()) void {
-            self.closed.* = true;
-            self.allocator.destroy(self);
-        }
-    };
-
-    const SeenRequest = struct {
-        method: []u8,
-        raw_url: []u8,
-    };
-
-    const MockRoundTripper = struct {
-        allocator: std.mem.Allocator,
-        seen: std.ArrayList(SeenRequest),
-        first_closed: bool = false,
-        calls: usize = 0,
-
-        fn init(allocator: std.mem.Allocator) @This() {
-            return .{
-                .allocator = allocator,
-                .seen = .{},
-            };
-        }
-
-        fn deinit(self: *@This()) void {
-            for (self.seen.items) |item| {
-                self.allocator.free(item.method);
-                self.allocator.free(item.raw_url);
+            {
+                var client = try HttpClient.init(allocator, .{});
+                defer client.deinit();
+                try testing.expect(client.transport_source == .owned);
+                client.closeIdleConnections();
             }
-            self.seen.deinit(self.allocator);
-        }
 
-        pub fn roundTrip(self: *@This(), req: *const Request) anyerror!Response {
-            try self.seen.append(self.allocator, .{
-                .method = try self.allocator.dupe(u8, req.effectiveMethod()),
-                .raw_url = try self.allocator.dupe(u8, req.url.raw),
-            });
-
-            self.calls += 1;
-            if (self.calls == 1) {
-                const body = try self.allocator.create(MockBody);
-                body.* = .{
-                    .allocator = self.allocator,
-                    .closed = &self.first_closed,
+            {
+                const MockRoundTripper = struct {
+                    cleaned: bool = false,
+                    calls: usize = 0,
+                    pub fn roundTrip(self: *@This(), req: *const Request) anyerror!Response {
+                        _ = req;
+                        self.calls += 1;
+                        return .{
+                            .status_code = 200,
+                            .deinit_ptr = @ptrCast(&self.cleaned),
+                            .deinit_fn = cleanup,
+                        };
+                    }
+                    fn cleanup(ptr: *anyopaque) void {
+                        const cleaned: *bool = @ptrCast(@alignCast(ptr));
+                        cleaned.* = true;
+                    }
                 };
-                return .{
-                    .status_code = status.found,
-                    .header = &.{Header.init(Header.location, "/next")},
-                    .body_reader = ReadCloser.init(body),
+                var mock = MockRoundTripper{};
+                var client = try HttpClient.init(allocator, .{
+                    .round_tripper = RoundTripper.init(&mock),
+                });
+                defer client.deinit();
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                defer req.deinit();
+                try testing.expectEqual(@as(usize, 0), client.shared.active_requests);
+                var resp = try client.do(&req);
+                try testing.expectEqual(@as(usize, 1), mock.calls);
+                try testing.expectEqual(@as(usize, 1), client.shared.active_requests);
+                try testing.expect(!mock.cleaned);
+                resp.deinit();
+                try testing.expect(mock.cleaned);
+                try testing.expectEqual(@as(usize, 0), client.shared.active_requests);
+            }
+
+            {
+                const MockBody = struct {
+                    allocator: lib.mem.Allocator,
+                    closed: *bool,
+                    pub fn read(_: *@This(), _: []u8) anyerror!usize {
+                        return 0;
+                    }
+                    pub fn close(self: *@This()) void {
+                        self.closed.* = true;
+                        self.allocator.destroy(self);
+                    }
                 };
+                const SeenRequest = struct {
+                    method: []u8,
+                    raw_url: []u8,
+                };
+                const MockRoundTripper = struct {
+                    allocator: lib.mem.Allocator,
+                    seen: lib.ArrayList(SeenRequest),
+                    first_closed: bool = false,
+                    calls: usize = 0,
+                    /// Stable storage: anonymous `&.{Header...}` in return can dangle after roundTrip returns.
+                    redirect_headers: [1]Header = .{Header.init(Header.location, "/next")},
+                    fn init(a: lib.mem.Allocator) @This() {
+                        return .{ .allocator = a, .seen = .{} };
+                    }
+                    fn deinit(self: *@This()) void {
+                        for (self.seen.items) |item| {
+                            self.allocator.free(item.method);
+                            self.allocator.free(item.raw_url);
+                        }
+                        self.seen.deinit(self.allocator);
+                    }
+                    pub fn roundTrip(self: *@This(), req: *const Request) anyerror!Response {
+                        try self.seen.append(self.allocator, .{
+                            .method = try self.allocator.dupe(u8, req.effectiveMethod()),
+                            .raw_url = try self.allocator.dupe(u8, req.url.raw),
+                        });
+                        self.calls += 1;
+                        if (self.calls == 1) {
+                            const body = try self.allocator.create(MockBody);
+                            body.* = .{
+                                .allocator = self.allocator,
+                                .closed = &self.first_closed,
+                            };
+                            return .{
+                                .status_code = status.found,
+                                .header = self.redirect_headers[0..],
+                                .body_reader = ReadCloser.init(body),
+                            };
+                        }
+                        return .{ .status_code = status.ok };
+                    }
+                };
+                var mock = MockRoundTripper.init(allocator);
+                defer mock.deinit();
+                var client = try HttpClient.init(allocator, .{
+                    .round_tripper = RoundTripper.init(&mock),
+                });
+                defer client.deinit();
+                var req = try Request.init(allocator, "POST", "http://example.com/start");
+                defer req.deinit();
+                var resp = try client.do(&req);
+                defer resp.deinit();
+                try testing.expectEqual(@as(usize, 2), mock.calls);
+                try testing.expect(mock.first_closed);
+                try testing.expectEqualStrings("POST", mock.seen.items[0].method);
+                try testing.expectEqualStrings("http://example.com/start", mock.seen.items[0].raw_url);
+                try testing.expectEqualStrings("GET", mock.seen.items[1].method);
+                try testing.expectEqualStrings("http://example.com/next", mock.seen.items[1].raw_url);
+                try testing.expectEqualStrings("POST", req.effectiveMethod());
+                try testing.expectEqualStrings("http://example.com/start", req.url.raw);
             }
 
-            return .{
-                .status_code = status.ok,
-            };
-        }
-    };
-
-    var mock = MockRoundTripper.init(testing.allocator);
-    defer mock.deinit();
-
-    var client = try HttpClient.init(testing.allocator, .{
-        .round_tripper = RoundTripper.init(&mock),
-    });
-    defer client.deinit();
-
-    var req = try Request.init(testing.allocator, "POST", "http://example.com/start");
-    defer req.deinit();
-
-    var resp = try client.do(&req);
-    defer resp.deinit();
-
-    try testing.expectEqual(@as(usize, 2), mock.calls);
-    try testing.expect(mock.first_closed);
-    try testing.expectEqualStrings("POST", mock.seen.items[0].method);
-    try testing.expectEqualStrings("http://example.com/start", mock.seen.items[0].raw_url);
-    try testing.expectEqualStrings("GET", mock.seen.items[1].method);
-    try testing.expectEqualStrings("http://example.com/next", mock.seen.items[1].raw_url);
-    try testing.expectEqualStrings("POST", req.effectiveMethod());
-    try testing.expectEqualStrings("http://example.com/start", req.url.raw);
-}
-
-test "net/unit_tests/http/Client/do_returns_redirect_response_when_replay_is_not_possible" {
-    const std = @import("std");
-    const testing = std.testing;
-    const HttpClient = Client(std);
-
-    const MockBody = struct {
-        pub fn read(_: *@This(), _: []u8) anyerror!usize {
-            return 0;
-        }
-
-        pub fn close(_: *@This()) void {}
-    };
-
-    const MockRoundTripper = struct {
-        calls: usize = 0,
-
-        pub fn roundTrip(self: *@This(), _: *const Request) anyerror!Response {
-            self.calls += 1;
-            return .{
-                .status_code = status.temporary_redirect,
-                .header = &.{Header.init(Header.location, "/preserve")},
-            };
-        }
-    };
-
-    var body = MockBody{};
-    var req = try Request.init(testing.allocator, "POST", "http://example.com/upload");
-    defer req.deinit();
-    req = req.withBody(ReadCloser.init(&body));
-    req.content_length = 3;
-
-    var mock = MockRoundTripper{};
-    var client = try HttpClient.init(testing.allocator, .{
-        .round_tripper = RoundTripper.init(&mock),
-    });
-    defer client.deinit();
-
-    var resp = try client.do(&req);
-    defer resp.deinit();
-
-    try testing.expectEqual(@as(usize, 1), mock.calls);
-    try testing.expectEqual(status.temporary_redirect, resp.status_code);
-}
-
-test "net/unit_tests/http/Client/do_errors_when_redirect_limit_is_exceeded" {
-    const std = @import("std");
-    const testing = std.testing;
-    const HttpClient = Client(std);
-
-    const MockRoundTripper = struct {
-        calls: usize = 0,
-
-        pub fn roundTrip(self: *@This(), _: *const Request) anyerror!Response {
-            self.calls += 1;
-            return .{
-                .status_code = status.moved_permanently,
-                .header = &.{Header.init(Header.location, "/loop")},
-            };
-        }
-    };
-
-    var mock = MockRoundTripper{};
-    var client = try HttpClient.init(testing.allocator, .{
-        .round_tripper = RoundTripper.init(&mock),
-        .redirect_limit = 1,
-    });
-    defer client.deinit();
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/start");
-    defer req.deinit();
-
-    try testing.expectError(error.TooManyRedirects, client.do(&req));
-    try testing.expectEqual(@as(usize, 2), mock.calls);
-    try testing.expectEqual(@as(usize, 0), client.shared.active_requests);
-}
-
-test "net/unit_tests/http/Client/do_preserves_HEAD_across_found_redirect" {
-    const std = @import("std");
-    const testing = std.testing;
-    const HttpClient = Client(std);
-
-    const SeenRequest = struct {
-        method: []u8,
-        raw_url: []u8,
-    };
-
-    const MockRoundTripper = struct {
-        allocator: std.mem.Allocator,
-        seen: std.ArrayList(SeenRequest),
-        calls: usize = 0,
-
-        fn init(allocator: std.mem.Allocator) @This() {
-            return .{
-                .allocator = allocator,
-                .seen = .{},
-            };
-        }
-
-        fn deinit(self: *@This()) void {
-            for (self.seen.items) |item| {
-                self.allocator.free(item.method);
-                self.allocator.free(item.raw_url);
+            {
+                const MockBody = struct {
+                    pub fn read(_: *@This(), _: []u8) anyerror!usize {
+                        return 0;
+                    }
+                    pub fn close(_: *@This()) void {}
+                };
+                const MockRoundTripper = struct {
+                    calls: usize = 0,
+                    pub fn roundTrip(self: *@This(), _: *const Request) anyerror!Response {
+                        self.calls += 1;
+                        return .{
+                            .status_code = status.temporary_redirect,
+                            .header = &.{Header.init(Header.location, "/preserve")},
+                        };
+                    }
+                };
+                var body = MockBody{};
+                var req = try Request.init(allocator, "POST", "http://example.com/upload");
+                defer req.deinit();
+                req = req.withBody(ReadCloser.init(&body));
+                req.content_length = 3;
+                var mock = MockRoundTripper{};
+                var client = try HttpClient.init(allocator, .{
+                    .round_tripper = RoundTripper.init(&mock),
+                });
+                defer client.deinit();
+                var resp = try client.do(&req);
+                defer resp.deinit();
+                try testing.expectEqual(@as(usize, 1), mock.calls);
+                try testing.expectEqual(status.temporary_redirect, resp.status_code);
             }
-            self.seen.deinit(self.allocator);
-        }
 
-        pub fn roundTrip(self: *@This(), req: *const Request) anyerror!Response {
-            try self.seen.append(self.allocator, .{
-                .method = try self.allocator.dupe(u8, req.effectiveMethod()),
-                .raw_url = try self.allocator.dupe(u8, req.url.raw),
-            });
-            self.calls += 1;
-            return if (self.calls == 1)
-                .{
-                    .status_code = status.found,
-                    .header = &.{Header.init(Header.location, "/head-next")},
+            {
+                const MockRoundTripper = struct {
+                    calls: usize = 0,
+                    pub fn roundTrip(self: *@This(), _: *const Request) anyerror!Response {
+                        self.calls += 1;
+                        return .{
+                            .status_code = status.moved_permanently,
+                            .header = &.{Header.init(Header.location, "/loop")},
+                        };
+                    }
+                };
+                var mock = MockRoundTripper{};
+                var client = try HttpClient.init(allocator, .{
+                    .round_tripper = RoundTripper.init(&mock),
+                    .redirect_limit = 1,
+                });
+                defer client.deinit();
+                var req = try Request.init(allocator, "GET", "http://example.com/start");
+                defer req.deinit();
+                try testing.expectError(error.TooManyRedirects, client.do(&req));
+                try testing.expectEqual(@as(usize, 2), mock.calls);
+                try testing.expectEqual(@as(usize, 0), client.shared.active_requests);
+            }
+
+            {
+                const SeenRequest = struct {
+                    method: []u8,
+                    raw_url: []u8,
+                };
+                const MockRoundTripper = struct {
+                    allocator: lib.mem.Allocator,
+                    seen: lib.ArrayList(SeenRequest),
+                    calls: usize = 0,
+                    fn init(a: lib.mem.Allocator) @This() {
+                        return .{ .allocator = a, .seen = .{} };
+                    }
+                    fn deinit(self: *@This()) void {
+                        for (self.seen.items) |item| {
+                            self.allocator.free(item.method);
+                            self.allocator.free(item.raw_url);
+                        }
+                        self.seen.deinit(self.allocator);
+                    }
+                    pub fn roundTrip(self: *@This(), req: *const Request) anyerror!Response {
+                        try self.seen.append(self.allocator, .{
+                            .method = try self.allocator.dupe(u8, req.effectiveMethod()),
+                            .raw_url = try self.allocator.dupe(u8, req.url.raw),
+                        });
+                        self.calls += 1;
+                        return if (self.calls == 1)
+                            .{
+                                .status_code = status.found,
+                                .header = &.{Header.init(Header.location, "/head-next")},
+                            }
+                        else
+                            .{ .status_code = status.ok };
+                    }
+                };
+                var mock = MockRoundTripper.init(allocator);
+                defer mock.deinit();
+                var client = try HttpClient.init(allocator, .{
+                    .round_tripper = RoundTripper.init(&mock),
+                });
+                defer client.deinit();
+                var req = try Request.init(allocator, "HEAD", "http://example.com/head-start");
+                defer req.deinit();
+                var resp = try client.do(&req);
+                defer resp.deinit();
+                try testing.expectEqual(@as(usize, 2), mock.seen.items.len);
+                try testing.expectEqualStrings("HEAD", mock.seen.items[0].method);
+                try testing.expectEqualStrings("HEAD", mock.seen.items[1].method);
+                try testing.expectEqualStrings("http://example.com/head-next", mock.seen.items[1].raw_url);
+            }
+
+            {
+                const SeenRequest = struct {
+                    method: []u8,
+                    raw_url: []u8,
+                };
+                const MockRoundTripper = struct {
+                    allocator: lib.mem.Allocator,
+                    seen: lib.ArrayList(SeenRequest),
+                    fn init(a: lib.mem.Allocator) @This() {
+                        return .{ .allocator = a, .seen = .{} };
+                    }
+                    fn deinit(self: *@This()) void {
+                        for (self.seen.items) |item| {
+                            self.allocator.free(item.method);
+                            self.allocator.free(item.raw_url);
+                        }
+                        self.seen.deinit(self.allocator);
+                    }
+                    pub fn roundTrip(self: *@This(), req: *const Request) anyerror!Response {
+                        try self.seen.append(self.allocator, .{
+                            .method = try self.allocator.dupe(u8, req.effectiveMethod()),
+                            .raw_url = try self.allocator.dupe(u8, req.url.raw),
+                        });
+                        return .{
+                            .status_code = status.ok,
+                            .request = req.*,
+                        };
+                    }
+                };
+                var mock = MockRoundTripper.init(allocator);
+                defer mock.deinit();
+                var client = try HttpClient.init(allocator, .{
+                    .round_tripper = RoundTripper.init(&mock),
+                });
+                defer client.deinit();
+                var get_resp = try client.get("https://example.com/a");
+                try testing.expectEqualStrings("GET", get_resp.request.?.effectiveMethod());
+                try testing.expectEqualStrings("https://example.com/a", get_resp.request.?.url.raw);
+                get_resp.deinit();
+                var head_resp = try client.head("https://example.com/b");
+                try testing.expectEqualStrings("HEAD", head_resp.request.?.effectiveMethod());
+                try testing.expectEqualStrings("https://example.com/b", head_resp.request.?.url.raw);
+                head_resp.deinit();
+                try testing.expectEqual(@as(usize, 2), mock.seen.items.len);
+                try testing.expectEqualStrings("GET", mock.seen.items[0].method);
+                try testing.expectEqualStrings("https://example.com/a", mock.seen.items[0].raw_url);
+                try testing.expectEqualStrings("HEAD", mock.seen.items[1].method);
+                try testing.expectEqualStrings("https://example.com/b", mock.seen.items[1].raw_url);
+                try testing.expectEqual(@as(usize, 0), client.shared.active_requests);
+            }
+
+            {
+                const base = try url_mod.parse("https://example.com/dir/sub/index.html?old=1#frag");
+                const relative = try resolveRedirectUrl(lib, allocator, base, "../next?q=1#new");
+                defer allocator.free(relative);
+                try testing.expectEqualStrings("https://example.com/dir/next?q=1#new", relative);
+                const query_only = try resolveRedirectUrl(lib, allocator, base, "?updated=1");
+                defer allocator.free(query_only);
+                try testing.expectEqualStrings("https://example.com/dir/sub/index.html?updated=1", query_only);
+                const fragment_only = try resolveRedirectUrl(lib, allocator, base, "#section");
+                defer allocator.free(fragment_only);
+                try testing.expectEqualStrings("https://example.com/dir/sub/index.html?old=1#section", fragment_only);
+                const authority_relative = try resolveRedirectUrl(lib, allocator, base, "//cdn.example.com/assets");
+                defer allocator.free(authority_relative);
+                try testing.expectEqualStrings("https://cdn.example.com/assets", authority_relative);
+            }
+
+            {
+                const MockRoundTripper = struct {
+                    pub fn roundTrip(_: *@This(), _: *const Request) anyerror!Response {
+                        return .{ .status_code = 204 };
+                    }
+                };
+                var mock = MockRoundTripper{};
+                var client = try HttpClient.init(allocator, .{
+                    .round_tripper = RoundTripper.init(&mock),
+                });
+                defer client.deinit();
+                client.shared.mutex.lock();
+                client.shared.deiniting = true;
+                client.shared.mutex.unlock();
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                defer req.deinit();
+                try testing.expectError(error.Closed, client.do(&req));
+                try testing.expectEqual(@as(usize, 0), client.shared.active_requests);
+            }
+
+            {
+                const MockRoundTripper = struct {
+                    pub fn roundTrip(_: *@This(), _: *const Request) anyerror!Response {
+                        return .{ .status_code = 200 };
+                    }
+                };
+                const Flags = struct {
+                    started: lib.atomic.Value(bool) = lib.atomic.Value(bool).init(false),
+                    finished: lib.atomic.Value(bool) = lib.atomic.Value(bool).init(false),
+                };
+                const gen = struct {
+                    fn run(client: *HttpClient, flags: *Flags) void {
+                        flags.started.store(true, .seq_cst);
+                        client.deinit();
+                        flags.finished.store(true, .seq_cst);
+                    }
+                };
+                var mock = MockRoundTripper{};
+                var client = try HttpClient.init(allocator, .{
+                    .round_tripper = RoundTripper.init(&mock),
+                });
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                defer req.deinit();
+                var resp = try client.do(&req);
+                try testing.expectEqual(@as(usize, 1), client.shared.active_requests);
+                var flags = Flags{};
+                const thread = try lib.Thread.spawn(.{}, gen.run, .{ &client, &flags });
+                while (!flags.started.load(.seq_cst)) {
+                    lib.Thread.yield() catch {};
                 }
-            else
-                .{
-                    .status_code = status.ok,
-                };
-        }
-    };
-
-    var mock = MockRoundTripper.init(testing.allocator);
-    defer mock.deinit();
-
-    var client = try HttpClient.init(testing.allocator, .{
-        .round_tripper = RoundTripper.init(&mock),
-    });
-    defer client.deinit();
-
-    var req = try Request.init(testing.allocator, "HEAD", "http://example.com/head-start");
-    defer req.deinit();
-
-    var resp = try client.do(&req);
-    defer resp.deinit();
-
-    try testing.expectEqual(@as(usize, 2), mock.seen.items.len);
-    try testing.expectEqualStrings("HEAD", mock.seen.items[0].method);
-    try testing.expectEqualStrings("HEAD", mock.seen.items[1].method);
-    try testing.expectEqualStrings("http://example.com/head-next", mock.seen.items[1].raw_url);
-}
-
-test "net/unit_tests/http/Client/get_and_head_are_thin_wrappers_over_do" {
-    const std = @import("std");
-    const testing = std.testing;
-    const HttpClient = Client(std);
-
-    const SeenRequest = struct {
-        method: []u8,
-        raw_url: []u8,
-    };
-
-    const MockRoundTripper = struct {
-        allocator: std.mem.Allocator,
-        seen: std.ArrayList(SeenRequest),
-
-        fn init(allocator: std.mem.Allocator) @This() {
-            return .{
-                .allocator = allocator,
-                .seen = .{},
-            };
-        }
-
-        fn deinit(self: *@This()) void {
-            for (self.seen.items) |item| {
-                self.allocator.free(item.method);
-                self.allocator.free(item.raw_url);
-            }
-            self.seen.deinit(self.allocator);
-        }
-
-        pub fn roundTrip(self: *@This(), req: *const Request) anyerror!Response {
-            try self.seen.append(self.allocator, .{
-                .method = try self.allocator.dupe(u8, req.effectiveMethod()),
-                .raw_url = try self.allocator.dupe(u8, req.url.raw),
-            });
-            return .{
-                .status_code = status.ok,
-                .request = req.*,
-            };
-        }
-    };
-
-    var mock = MockRoundTripper.init(testing.allocator);
-    defer mock.deinit();
-
-    var client = try HttpClient.init(testing.allocator, .{
-        .round_tripper = RoundTripper.init(&mock),
-    });
-    defer client.deinit();
-
-    var get_resp = try client.get("https://example.com/a");
-    try testing.expectEqualStrings("GET", get_resp.request.?.effectiveMethod());
-    try testing.expectEqualStrings("https://example.com/a", get_resp.request.?.url.raw);
-    get_resp.deinit();
-
-    var head_resp = try client.head("https://example.com/b");
-    try testing.expectEqualStrings("HEAD", head_resp.request.?.effectiveMethod());
-    try testing.expectEqualStrings("https://example.com/b", head_resp.request.?.url.raw);
-    head_resp.deinit();
-
-    try testing.expectEqual(@as(usize, 2), mock.seen.items.len);
-    try testing.expectEqualStrings("GET", mock.seen.items[0].method);
-    try testing.expectEqualStrings("https://example.com/a", mock.seen.items[0].raw_url);
-    try testing.expectEqualStrings("HEAD", mock.seen.items[1].method);
-    try testing.expectEqualStrings("https://example.com/b", mock.seen.items[1].raw_url);
-    try testing.expectEqual(@as(usize, 0), client.shared.active_requests);
-}
-
-test "net/unit_tests/http/Client/resolveRedirectUrl_handles_relative_query_and_fragment_forms" {
-    const std = @import("std");
-    const testing = std.testing;
-
-    const base = try url_mod.parse("https://example.com/dir/sub/index.html?old=1#frag");
-
-    const relative = try resolveRedirectUrl(std, testing.allocator, base, "../next?q=1#new");
-    defer testing.allocator.free(relative);
-    try testing.expectEqualStrings("https://example.com/dir/next?q=1#new", relative);
-
-    const query_only = try resolveRedirectUrl(std, testing.allocator, base, "?updated=1");
-    defer testing.allocator.free(query_only);
-    try testing.expectEqualStrings("https://example.com/dir/sub/index.html?updated=1", query_only);
-
-    const fragment_only = try resolveRedirectUrl(std, testing.allocator, base, "#section");
-    defer testing.allocator.free(fragment_only);
-    try testing.expectEqualStrings("https://example.com/dir/sub/index.html?old=1#section", fragment_only);
-
-    const authority_relative = try resolveRedirectUrl(std, testing.allocator, base, "//cdn.example.com/assets");
-    defer testing.allocator.free(authority_relative);
-    try testing.expectEqualStrings("https://cdn.example.com/assets", authority_relative);
-}
-
-test "net/unit_tests/http/Client/do_rejects_new_work_after_deinit_starts" {
-    const std = @import("std");
-    const testing = std.testing;
-    const HttpClient = Client(std);
-
-    const MockRoundTripper = struct {
-        pub fn roundTrip(_: *@This(), _: *const Request) anyerror!Response {
-            return .{ .status_code = 204 };
-        }
-    };
-
-    var mock = MockRoundTripper{};
-    var client = try HttpClient.init(testing.allocator, .{
-        .round_tripper = RoundTripper.init(&mock),
-    });
-    defer client.deinit();
-
-    client.shared.mutex.lock();
-    client.shared.deiniting = true;
-    client.shared.mutex.unlock();
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    defer req.deinit();
-
-    try testing.expectError(error.Closed, client.do(&req));
-    try testing.expectEqual(@as(usize, 0), client.shared.active_requests);
-}
-
-test "net/unit_tests/http/Client/deinit_waits_for_active_response_cleanup" {
-    const std = @import("std");
-    const testing = std.testing;
-    const HttpClient = Client(std);
-
-    const MockRoundTripper = struct {
-        pub fn roundTrip(_: *@This(), _: *const Request) anyerror!Response {
-            return .{ .status_code = 200 };
-        }
-    };
-
-    const Flags = struct {
-        started: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-        finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    };
-
-    const gen = struct {
-        fn run(client: *HttpClient, flags: *Flags) void {
-            flags.started.store(true, .seq_cst);
-            client.deinit();
-            flags.finished.store(true, .seq_cst);
-        }
-    };
-
-    var mock = MockRoundTripper{};
-    var client = try HttpClient.init(testing.allocator, .{
-        .round_tripper = RoundTripper.init(&mock),
-    });
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    defer req.deinit();
-
-    var resp = try client.do(&req);
-    try testing.expectEqual(@as(usize, 1), client.shared.active_requests);
-
-    var flags = Flags{};
-    const thread = try std.Thread.spawn(.{}, gen.run, .{ &client, &flags });
-
-    while (!flags.started.load(.seq_cst)) {
-        std.Thread.yield() catch {};
-    }
-    for (0..16) |_| {
-        std.Thread.yield() catch {};
-    }
-    try testing.expect(!flags.finished.load(.seq_cst));
-
-    resp.deinit();
-    thread.join();
-
-    try testing.expect(flags.finished.load(.seq_cst));
-}
-
-test "net/unit_tests/http/Client/deinit_waits_for_redirect_chain_midflight" {
-    const std = @import("std");
-    const testing = std.testing;
-    const HttpClient = Client(std);
-
-    const InitialBody = struct {
-        pub fn read(_: *@This(), _: []u8) anyerror!usize {
-            return 0;
-        }
-
-        pub fn close(_: *@This()) void {}
-    };
-
-    const FreshBody = struct {
-        pub fn read(_: *@This(), _: []u8) anyerror!usize {
-            return 0;
-        }
-
-        pub fn close(self: *@This()) void {
-            testing.allocator.destroy(self);
-        }
-    };
-
-    const BlockingFactory = struct {
-        mutex: std.Thread.Mutex = .{},
-        cond: std.Thread.Condition = .{},
-        started: bool = false,
-        allow_return: bool = false,
-
-        pub fn getBody(self: *@This()) anyerror!ReadCloser {
-            self.mutex.lock();
-            self.started = true;
-            self.cond.broadcast();
-            while (!self.allow_return) self.cond.wait(&self.mutex);
-            self.mutex.unlock();
-
-            const body = try testing.allocator.create(FreshBody);
-            body.* = .{};
-            return ReadCloser.init(body);
-        }
-
-        fn waitUntilStarted(self: *@This()) void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            while (!self.started) self.cond.wait(&self.mutex);
-        }
-
-        fn allow(self: *@This()) void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            self.allow_return = true;
-            self.cond.broadcast();
-        }
-    };
-
-    const MockRoundTripper = struct {
-        calls: usize = 0,
-
-        pub fn roundTrip(self: *@This(), _: *const Request) anyerror!Response {
-            self.calls += 1;
-            return if (self.calls == 1)
-                .{
-                    .status_code = status.temporary_redirect,
-                    .header = &.{Header.init(Header.location, "/next")},
+                for (0..16) |_| {
+                    lib.Thread.yield() catch {};
                 }
-            else
-                .{
-                    .status_code = status.ok,
-                };
-        }
-    };
-
-    const DoState = struct {
-        mutex: std.Thread.Mutex = .{},
-        cond: std.Thread.Condition = .{},
-        finished: bool = false,
-        resp: ?Response = null,
-        err: ?anyerror = null,
-    };
-
-    const DoTask = struct {
-        fn run(client: *HttpClient, req: *Request, state: *DoState) void {
-            const result = client.do(req);
-            state.mutex.lock();
-            defer state.mutex.unlock();
-            if (result) |resp| {
-                state.resp = resp;
-            } else |err| {
-                state.err = err;
+                try testing.expect(!flags.finished.load(.seq_cst));
+                resp.deinit();
+                thread.join();
+                try testing.expect(flags.finished.load(.seq_cst));
             }
-            state.finished = true;
-            state.cond.broadcast();
+
+            {
+                const InitialBody = struct {
+                    pub fn read(_: *@This(), _: []u8) anyerror!usize {
+                        return 0;
+                    }
+                    pub fn close(_: *@This()) void {}
+                };
+                const FreshBody = struct {
+                    alloc: lib.mem.Allocator,
+                    pub fn read(_: *@This(), _: []u8) anyerror!usize {
+                        return 0;
+                    }
+                    pub fn close(self: *@This()) void {
+                        self.alloc.destroy(self);
+                    }
+                };
+                const BlockingFactory = struct {
+                    alloc: lib.mem.Allocator,
+                    mutex: lib.Thread.Mutex = .{},
+                    cond: lib.Thread.Condition = .{},
+                    started: bool = false,
+                    allow_return: bool = false,
+                    pub fn getBody(self: *@This()) anyerror!ReadCloser {
+                        self.mutex.lock();
+                        self.started = true;
+                        self.cond.broadcast();
+                        while (!self.allow_return) self.cond.wait(&self.mutex);
+                        self.mutex.unlock();
+                        const body = try self.alloc.create(FreshBody);
+                        body.* = .{ .alloc = self.alloc };
+                        return ReadCloser.init(body);
+                    }
+                    fn waitUntilStarted(self: *@This()) void {
+                        self.mutex.lock();
+                        defer self.mutex.unlock();
+                        while (!self.started) self.cond.wait(&self.mutex);
+                    }
+                    fn allow(self: *@This()) void {
+                        self.mutex.lock();
+                        defer self.mutex.unlock();
+                        self.allow_return = true;
+                        self.cond.broadcast();
+                    }
+                };
+                const MockRoundTripper = struct {
+                    calls: usize = 0,
+                    pub fn roundTrip(self: *@This(), _: *const Request) anyerror!Response {
+                        self.calls += 1;
+                        return if (self.calls == 1)
+                            .{
+                                .status_code = status.temporary_redirect,
+                                .header = &.{Header.init(Header.location, "/next")},
+                            }
+                        else
+                            .{ .status_code = status.ok };
+                    }
+                };
+                const DoState = struct {
+                    mutex: lib.Thread.Mutex = .{},
+                    cond: lib.Thread.Condition = .{},
+                    finished: bool = false,
+                    resp: ?Response = null,
+                    err: ?anyerror = null,
+                };
+                const DoTask = struct {
+                    fn run(client: *HttpClient, req: *Request, state: *DoState) void {
+                        const result = client.do(req);
+                        state.mutex.lock();
+                        defer state.mutex.unlock();
+                        if (result) |r| {
+                            state.resp = r;
+                        } else |e| {
+                            state.err = e;
+                        }
+                        state.finished = true;
+                        state.cond.broadcast();
+                    }
+                };
+                const DeinitState = struct {
+                    started: lib.atomic.Value(bool) = lib.atomic.Value(bool).init(false),
+                    finished: lib.atomic.Value(bool) = lib.atomic.Value(bool).init(false),
+                };
+                const DeinitTask = struct {
+                    fn run(client: *HttpClient, state: *DeinitState) void {
+                        state.started.store(true, .seq_cst);
+                        client.deinit();
+                        state.finished.store(true, .seq_cst);
+                    }
+                };
+                var factory = BlockingFactory{ .alloc = allocator };
+                var mock = MockRoundTripper{};
+                var client = try HttpClient.init(allocator, .{
+                    .round_tripper = RoundTripper.init(&mock),
+                });
+                var initial_body = InitialBody{};
+                var req = try Request.init(allocator, "POST", "http://example.com/start");
+                defer req.deinit();
+                req = req.withBody(ReadCloser.init(&initial_body));
+                req = req.withGetBody(Request.GetBody.init(&factory));
+                req.content_length = 1;
+                var do_state = DoState{};
+                const do_thread = try lib.Thread.spawn(.{}, DoTask.run, .{ &client, &req, &do_state });
+                factory.waitUntilStarted();
+                var deinit_state = DeinitState{};
+                const deinit_thread = try lib.Thread.spawn(.{}, DeinitTask.run, .{ &client, &deinit_state });
+                while (!deinit_state.started.load(.seq_cst)) {
+                    lib.Thread.yield() catch {};
+                }
+                for (0..16) |_| {
+                    lib.Thread.yield() catch {};
+                }
+                try testing.expect(!deinit_state.finished.load(.seq_cst));
+                factory.allow();
+                do_thread.join();
+                do_state.mutex.lock();
+                try testing.expect(do_state.finished);
+                try testing.expect(do_state.err == null);
+                try testing.expect(do_state.resp != null);
+                var resp = do_state.resp.?;
+                do_state.mutex.unlock();
+                try testing.expect(!deinit_state.finished.load(.seq_cst));
+                resp.deinit();
+                deinit_thread.join();
+                try testing.expectEqual(@as(usize, 2), mock.calls);
+                try testing.expect(deinit_state.finished.load(.seq_cst));
+            }
         }
-    };
-
-    const DeinitState = struct {
-        started: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-        finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    };
-
-    const DeinitTask = struct {
-        fn run(client: *HttpClient, state: *DeinitState) void {
-            state.started.store(true, .seq_cst);
-            client.deinit();
-            state.finished.store(true, .seq_cst);
-        }
-    };
-
-    var factory = BlockingFactory{};
-    var mock = MockRoundTripper{};
-    var client = try HttpClient.init(testing.allocator, .{
-        .round_tripper = RoundTripper.init(&mock),
-    });
-
-    var initial_body = InitialBody{};
-    var req = try Request.init(testing.allocator, "POST", "http://example.com/start");
-    defer req.deinit();
-    req = req.withBody(ReadCloser.init(&initial_body));
-    req = req.withGetBody(Request.GetBody.init(&factory));
-    req.content_length = 1;
-
-    var do_state = DoState{};
-    const do_thread = try std.Thread.spawn(.{}, DoTask.run, .{ &client, &req, &do_state });
-
-    factory.waitUntilStarted();
-
-    var deinit_state = DeinitState{};
-    const deinit_thread = try std.Thread.spawn(.{}, DeinitTask.run, .{ &client, &deinit_state });
-
-    while (!deinit_state.started.load(.seq_cst)) {
-        std.Thread.yield() catch {};
-    }
-    for (0..16) |_| {
-        std.Thread.yield() catch {};
-    }
-    try testing.expect(!deinit_state.finished.load(.seq_cst));
-
-    factory.allow();
-    do_thread.join();
-
-    do_state.mutex.lock();
-    try testing.expect(do_state.finished);
-    try testing.expect(do_state.err == null);
-    try testing.expect(do_state.resp != null);
-    var resp = do_state.resp.?;
-    do_state.mutex.unlock();
-
-    try testing.expect(!deinit_state.finished.load(.seq_cst));
-
-    resp.deinit();
-    deinit_thread.join();
-
-    try testing.expectEqual(@as(usize, 2), mock.calls);
-    try testing.expect(deinit_state.finished.load(.seq_cst));
+    }.run);
 }

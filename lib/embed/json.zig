@@ -80,28 +80,3 @@ pub const Stringify = re_export.Stringify;
 pub const fmt = re_export.fmt;
 pub const Formatter = re_export.Formatter;
 
-test "embed/json/unit_tests/declaration_parity" {
-    inline for (comptime re_export.std.meta.declarations(re_export.std.json)) |decl| {
-        try re_export.std.testing.expect(@hasDecl(root, decl.name));
-    }
-    inline for (comptime re_export.std.meta.declarations(root)) |decl| {
-        try re_export.std.testing.expect(@hasDecl(re_export.std.json, decl.name));
-    }
-}
-
-test "embed/json/unit_tests/type_identity" {
-    try re_export.std.testing.expect(root.ObjectMap == re_export.std.json.ObjectMap);
-    try re_export.std.testing.expect(root.Array == re_export.std.json.Array);
-    try re_export.std.testing.expect(root.Value == re_export.std.json.Value);
-    try re_export.std.testing.expect(root.ArrayHashMap == re_export.std.json.ArrayHashMap);
-    try re_export.std.testing.expect(root.Scanner == re_export.std.json.Scanner);
-    try re_export.std.testing.expect(root.Reader == re_export.std.json.Reader);
-    try re_export.std.testing.expect(root.Token == re_export.std.json.Token);
-    try re_export.std.testing.expect(root.ParseOptions == re_export.std.json.ParseOptions);
-    try re_export.std.testing.expect(root.Stringify == re_export.std.json.Stringify);
-    try re_export.std.testing.expect(@TypeOf(root.parseFromSlice) == @TypeOf(re_export.std.json.parseFromSlice));
-    try re_export.std.testing.expect(@TypeOf(root.parseFromTokenSource) == @TypeOf(re_export.std.json.parseFromTokenSource));
-    try re_export.std.testing.expect(@TypeOf(root.parseFromValue) == @TypeOf(re_export.std.json.parseFromValue));
-    try re_export.std.testing.expect(@TypeOf(root.fmt) == @TypeOf(re_export.std.json.fmt));
-    try re_export.std.testing.expect(@TypeOf(root.Formatter) == @TypeOf(re_export.std.json.Formatter));
-}

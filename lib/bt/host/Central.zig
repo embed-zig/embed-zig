@@ -7,6 +7,7 @@ const std = @import("std");
 const bt = @import("../../bt.zig");
 const att = @import("att.zig");
 const gatt_client = @import("gatt/client.zig");
+const testing_api = @import("testing");
 
 pub fn make(comptime lib: type) type {
     return struct {
@@ -557,199 +558,159 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-test "bt/unit_tests/host/Central_advertising_iterator_parses_one_report" {
-    const Impl = make(std);
-    const raw = [_]u8{
-        1,
-        0x00,
-        0x00,
-        0xA1,
-        0xA2,
-        0xA3,
-        0xA4,
-        0xA5,
-        0xA6,
-        12,
-        0x02,
-        0x01,
-        0x06,
-        0x03,
-        0x03,
-        0x0D,
-        0x18,
-        0x04,
-        0x09,
-        'Z',
-        'i',
-        'g',
-        0xC5,
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const Impl = make(lib);
+
+            const raw = [_]u8{
+                1,
+                0x00,
+                0x00,
+                0xA1,
+                0xA2,
+                0xA3,
+                0xA4,
+                0xA5,
+                0xA6,
+                12,
+                0x02,
+                0x01,
+                0x06,
+                0x03,
+                0x03,
+                0x0D,
+                0x18,
+                0x04,
+                0x09,
+                'Z',
+                'i',
+                'g',
+                0xC5,
+            };
+
+            var iter = Impl.AdvIterator.init(&raw);
+            const report = iter.next() orelse return error.NoReport;
+            try lib.testing.expectEqualSlices(u8, &[_]u8{ 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 }, &report.addr);
+            try lib.testing.expectEqual(bt.Central.AddrType.public, report.addr_type);
+            try lib.testing.expectEqual(@as(i8, -59), report.rssi);
+            try lib.testing.expect(iter.next() == null);
+
+            var adv: bt.Central.AdvReport = .{
+                .addr = report.addr,
+                .addr_type = report.addr_type,
+                .rssi = report.rssi,
+            };
+            Impl.fillAdvReport(&adv, report);
+            try lib.testing.expectEqualSlices(u8, "Zig", adv.getName());
+            try lib.testing.expectEqual(@as(u8, 12), adv.data_len);
+
+            const uuid_list = [_]u8{
+                0x03, 0x03, 0x0D, 0x18,
+                0x02, 0x01, 0x06,
+            };
+            try lib.testing.expect(Impl.matchesServiceFilter(&uuid_list, &.{0x180D}));
+            try lib.testing.expect(!Impl.matchesServiceFilter(&uuid_list, &.{0x180F}));
+
+            const service_data = [_]u8{
+                0x05, 0x16, 0x0F, 0x18, 0x01, 0x02,
+            };
+            try lib.testing.expect(Impl.matchesServiceFilter(&service_data, &.{0x180F}));
+            try lib.testing.expect(!Impl.matchesServiceFilter(&service_data, &.{0x180D}));
+
+            const identity_raw = [_]u8{
+                1,
+                0x00,
+                0x02,
+                0xA1,
+                0xA2,
+                0xA3,
+                0xA4,
+                0xA5,
+                0xA6,
+                0,
+                0xC5,
+            };
+            iter = Impl.AdvIterator.init(&identity_raw);
+            const identity_report = iter.next() orelse return error.NoReport;
+            try lib.testing.expectEqual(bt.Central.AddrType.public, identity_report.addr_type);
+
+            const RejectingHci = struct {
+                connecting: bool = false,
+
+                pub fn retain(_: *@This()) bt.Hci.Error!void {}
+                pub fn release(_: *@This()) void {}
+                pub fn setCentralListener(_: *@This(), _: bt.Hci.CentralListener) void {}
+                pub fn setPeripheralListener(_: *@This(), _: bt.Hci.PeripheralListener) void {}
+                pub fn startScanning(_: *@This(), _: bt.Hci.ScanConfig) bt.Hci.Error!void {}
+                pub fn stopScanning(_: *@This()) void {}
+                pub fn startAdvertising(_: *@This(), _: bt.Hci.AdvConfig) bt.Hci.Error!void {}
+                pub fn stopAdvertising(_: *@This()) void {}
+                pub fn connect(self: *@This(), _: bt.Hci.BdAddr, _: bt.Hci.AddrType, _: bt.Hci.ConnConfig) bt.Hci.Error!void {
+                    self.connecting = false;
+                }
+                pub fn cancelConnect(_: *@This()) void {}
+                pub fn disconnect(_: *@This(), _: u16, _: u8) void {}
+                pub fn sendAcl(_: *@This(), _: u16, _: []const u8) bt.Hci.Error!void {}
+                pub fn sendAttRequest(_: *@This(), _: u16, _: []const u8, _: []u8) bt.Hci.Error!usize {
+                    return error.Unexpected;
+                }
+                pub fn getAddr(_: *@This()) ?bt.Hci.BdAddr {
+                    return null;
+                }
+                pub fn getLink(_: *@This(), _: bt.Hci.Role) ?bt.Hci.Link {
+                    return null;
+                }
+                pub fn getLinkByHandle(_: *@This(), _: u16) ?bt.Hci.Link {
+                    return null;
+                }
+                pub fn isScanning(_: *@This()) bool {
+                    return false;
+                }
+                pub fn isAdvertising(_: *@This()) bool {
+                    return false;
+                }
+                pub fn isConnectingCentral(self: *@This()) bool {
+                    return self.connecting;
+                }
+                pub fn deinit(_: *@This()) void {}
+            };
+
+            var rejecting_hci = RejectingHci{};
+            var central = Impl.init(bt.Hci.make(&rejecting_hci), lib.testing.allocator);
+            defer central.deinit();
+
+            try lib.testing.expectError(error.Rejected, central.connect(.{ 1, 2, 3, 4, 5, 6 }, .public, .{}));
+            try lib.testing.expectEqual(bt.Central.State.idle, central.getState());
+        }
     };
 
-    var iter = Impl.AdvIterator.init(&raw);
-    const report = iter.next() orelse return error.NoReport;
-    try std.testing.expectEqualSlices(u8, &[_]u8{ 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 }, &report.addr);
-    try std.testing.expectEqual(bt.Central.AddrType.public, report.addr_type);
-    try std.testing.expectEqual(@as(i8, -59), report.rssi);
-    try std.testing.expect(iter.next() == null);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var adv: bt.Central.AdvReport = .{
-        .addr = report.addr,
-        .addr_type = report.addr_type,
-        .rssi = report.rssi,
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
     };
-    Impl.fillAdvReport(&adv, report);
-    try std.testing.expectEqualSlices(u8, "Zig", adv.getName());
-    try std.testing.expectEqual(@as(u8, 12), adv.data_len);
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-test "bt/unit_tests/host/Central_advertising_filter_matches_uuid16_and_service_data" {
-    const Impl = make(std);
-
-    const uuid_list = [_]u8{
-        0x03, 0x03, 0x0D, 0x18,
-        0x02, 0x01, 0x06,
-    };
-    try std.testing.expect(Impl.matchesServiceFilter(&uuid_list, &.{0x180D}));
-    try std.testing.expect(!Impl.matchesServiceFilter(&uuid_list, &.{0x180F}));
-
-    const service_data = [_]u8{
-        0x05, 0x16, 0x0F, 0x18, 0x01, 0x02,
-    };
-    try std.testing.expect(Impl.matchesServiceFilter(&service_data, &.{0x180F}));
-    try std.testing.expect(!Impl.matchesServiceFilter(&service_data, &.{0x180D}));
-}
-
-test "bt/unit_tests/host/Central_advertising_iterator_maps_public_identity_address_to_public" {
-    const Impl = make(std);
-    const raw = [_]u8{
-        1,
-        0x00,
-        0x02,
-        0xA1,
-        0xA2,
-        0xA3,
-        0xA4,
-        0xA5,
-        0xA6,
-        0,
-        0xC5,
-    };
-
-    var iter = Impl.AdvIterator.init(&raw);
-    const report = iter.next() orelse return error.NoReport;
-    try std.testing.expectEqual(bt.Central.AddrType.public, report.addr_type);
-}
-
-test "bt/unit_tests/host/Central_connect_resets_state_after_rejected_link" {
-    const Impl = make(std);
-
-    const FakeHci = struct {
-        connecting: bool = false,
-
-        pub fn retain(_: *@This()) bt.Hci.Error!void {}
-        pub fn release(_: *@This()) void {}
-        pub fn setCentralListener(_: *@This(), _: bt.Hci.CentralListener) void {}
-        pub fn setPeripheralListener(_: *@This(), _: bt.Hci.PeripheralListener) void {}
-        pub fn startScanning(_: *@This(), _: bt.Hci.ScanConfig) bt.Hci.Error!void {}
-        pub fn stopScanning(_: *@This()) void {}
-        pub fn startAdvertising(_: *@This(), _: bt.Hci.AdvConfig) bt.Hci.Error!void {}
-        pub fn stopAdvertising(_: *@This()) void {}
-        pub fn connect(self: *@This(), _: bt.Hci.BdAddr, _: bt.Hci.AddrType, _: bt.Hci.ConnConfig) bt.Hci.Error!void {
-            self.connecting = false;
-        }
-        pub fn cancelConnect(_: *@This()) void {}
-        pub fn disconnect(_: *@This(), _: u16, _: u8) void {}
-        pub fn sendAcl(_: *@This(), _: u16, _: []const u8) bt.Hci.Error!void {}
-        pub fn sendAttRequest(_: *@This(), _: u16, _: []const u8, _: []u8) bt.Hci.Error!usize {
-            return error.Unexpected;
-        }
-        pub fn getAddr(_: *@This()) ?bt.Hci.BdAddr {
-            return null;
-        }
-        pub fn getLink(_: *@This(), _: bt.Hci.Role) ?bt.Hci.Link {
-            return null;
-        }
-        pub fn getLinkByHandle(_: *@This(), _: u16) ?bt.Hci.Link {
-            return null;
-        }
-        pub fn isScanning(_: *@This()) bool {
-            return false;
-        }
-        pub fn isAdvertising(_: *@This()) bool {
-            return false;
-        }
-        pub fn isConnectingCentral(self: *@This()) bool {
-            return self.connecting;
-        }
-        pub fn deinit(_: *@This()) void {}
-    };
-
-    var fake_hci = FakeHci{};
-    var central = Impl.init(bt.Hci.make(&fake_hci), std.testing.allocator);
-    defer central.deinit();
-
-    try std.testing.expectError(error.Rejected, central.connect(.{ 1, 2, 3, 4, 5, 6 }, .public, .{}));
-    try std.testing.expectEqual(bt.Central.State.idle, central.getState());
-}
-
-test "bt/unit_tests/host/Central_connect_falls_back_to_default_mtu_when_exchange_fails" {
-    const Impl = make(std);
-
-    const FakeHci = struct {
-        link: bt.Hci.Link = .{
-            .role = .central,
-            .conn_handle = 7,
-            .peer_addr = .{ 1, 2, 3, 4, 5, 6 },
-            .peer_addr_type = .public,
-            .interval = 24,
-            .latency = 0,
-            .timeout = 200,
-        },
-
-        pub fn retain(_: *@This()) bt.Hci.Error!void {}
-        pub fn release(_: *@This()) void {}
-        pub fn setCentralListener(_: *@This(), _: bt.Hci.CentralListener) void {}
-        pub fn setPeripheralListener(_: *@This(), _: bt.Hci.PeripheralListener) void {}
-        pub fn startScanning(_: *@This(), _: bt.Hci.ScanConfig) bt.Hci.Error!void {}
-        pub fn stopScanning(_: *@This()) void {}
-        pub fn startAdvertising(_: *@This(), _: bt.Hci.AdvConfig) bt.Hci.Error!void {}
-        pub fn stopAdvertising(_: *@This()) void {}
-        pub fn connect(_: *@This(), _: bt.Hci.BdAddr, _: bt.Hci.AddrType, _: bt.Hci.ConnConfig) bt.Hci.Error!void {}
-        pub fn cancelConnect(_: *@This()) void {}
-        pub fn disconnect(_: *@This(), _: u16, _: u8) void {}
-        pub fn sendAcl(_: *@This(), _: u16, _: []const u8) bt.Hci.Error!void {}
-        pub fn sendAttRequest(_: *@This(), _: u16, _: []const u8, _: []u8) bt.Hci.Error!usize {
-            return error.Unexpected;
-        }
-        pub fn getAddr(_: *@This()) ?bt.Hci.BdAddr {
-            return null;
-        }
-        pub fn getLink(self: *@This(), role: bt.Hci.Role) ?bt.Hci.Link {
-            if (role != .central) return null;
-            return self.link;
-        }
-        pub fn getLinkByHandle(self: *@This(), conn_handle: u16) ?bt.Hci.Link {
-            if (conn_handle != self.link.conn_handle) return null;
-            return self.link;
-        }
-        pub fn isScanning(_: *@This()) bool {
-            return false;
-        }
-        pub fn isAdvertising(_: *@This()) bool {
-            return false;
-        }
-        pub fn isConnectingCentral(_: *@This()) bool {
-            return false;
-        }
-        pub fn deinit(_: *@This()) void {}
-    };
-
-    var fake_hci = FakeHci{};
-    var central = Impl.init(bt.Hci.make(&fake_hci), std.testing.allocator);
-    defer central.deinit();
-
-    const info = try central.connect(fake_hci.link.peer_addr, .public, .{});
-    try std.testing.expectEqual(fake_hci.link.conn_handle, info.conn_handle);
-    try std.testing.expectEqual(bt.Central.State.connected, central.getState());
-    try std.testing.expectEqual(bt.Central.DEFAULT_ATT_MTU, central.getAttMtu(fake_hci.link.conn_handle));
-}

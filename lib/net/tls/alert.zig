@@ -1,3 +1,5 @@
+const testing_api = @import("testing");
+
 pub fn make(comptime lib: type) type {
     const common = @import("common.zig").make(lib);
 
@@ -122,41 +124,30 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-test "net/unit_tests/tls/alert/parse_and_serialize_roundtrip" {
-    const std = @import("std");
-    const common = @import("common.zig").make(std);
-    const alert = make(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const common = @import("common.zig").make(lib);
+            const alert = make(lib);
 
-    const expected = common.Alert{
-        .level = .fatal,
-        .description = .decode_error,
-    };
+            const expected = common.Alert{
+                .level = .fatal,
+                .description = .decode_error,
+            };
 
-    var buf: [2]u8 = undefined;
-    try alert.serializeAlert(expected, &buf);
+            var buf: [2]u8 = undefined;
+            try alert.serializeAlert(expected, &buf);
 
-    const parsed = try alert.parseAlert(&buf);
-    try std.testing.expectEqual(expected.level, parsed.level);
-    try std.testing.expectEqual(expected.description, parsed.description);
-}
+            const parsed = try alert.parseAlert(&buf);
+            try testing.expectEqual(expected.level, parsed.level);
+            try testing.expectEqual(expected.description, parsed.description);
 
-test "net/unit_tests/tls/alert/maps_common_protocol_alerts" {
-    const std = @import("std");
-    const common = @import("common.zig").make(std);
-    const alert = make(std);
+            try testing.expectEqual(error.NoApplicationProtocol, alert.alertToError(.no_application_protocol));
+            try testing.expectEqual(common.AlertDescription.handshake_failure, alert.errorToAlert(error.HandshakeFailure));
 
-    try std.testing.expectEqual(error.NoApplicationProtocol, alert.alertToError(.no_application_protocol));
-    try std.testing.expectEqual(common.AlertDescription.handshake_failure, alert.errorToAlert(error.HandshakeFailure));
-}
-
-test "net/unit_tests/tls/alert/parseAlert_rejects_short_payloads" {
-    const std = @import("std");
-    const alert = make(std);
-    try std.testing.expectError(error.DecodeError, alert.parseAlert(&.{0x02}));
-}
-
-test "net/unit_tests/tls/alert/parseAlert_rejects_invalid_alert_level" {
-    const std = @import("std");
-    const alert = make(std);
-    try std.testing.expectError(error.DecodeError, alert.parseAlert(&.{ 0x03, 0x0a }));
+            try testing.expectError(error.DecodeError, alert.parseAlert(&.{0x02}));
+            try testing.expectError(error.DecodeError, alert.parseAlert(&.{ 0x03, 0x0a }));
+        }
+    }.run);
 }

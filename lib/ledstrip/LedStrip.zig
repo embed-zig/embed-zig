@@ -2,6 +2,7 @@
 
 const embed = @import("embed");
 const Color = @import("Color.zig");
+const testing_api = @import("testing");
 
 const root = @This();
 
@@ -156,149 +157,178 @@ pub fn make(comptime Impl: type) type {
     };
 }
 
-test "ledstrip/unit_tests/LedStrip_exposes_vtable_surface" {
-    const std = @import("std");
-    const testing = std.testing;
-
-    const State = struct {
-        deinit_calls: usize = 0,
-        refresh_calls: usize = 0,
-        pixels: [8]Color = [_]Color{Color.black} ** 8,
-    };
-
-    const Impl = struct {
-        pub const Config = struct {
-            allocator: std.mem.Allocator,
-            state: *State,
-            pixel_count: usize = 8,
-        };
-
-        state: *State,
-        pixel_count: usize,
-
-        pub fn init(config: Config) !@This() {
-            return .{
-                .state = config.state,
-                .pixel_count = config.pixel_count,
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn exposesVtableSurface(allocator: lib.mem.Allocator) !void {
+            const State = struct {
+                deinit_calls: usize = 0,
+                refresh_calls: usize = 0,
+                pixels: [8]Color = [_]Color{Color.black} ** 8,
             };
+
+            const Impl = struct {
+                pub const Config = struct {
+                    allocator: lib.mem.Allocator,
+                    state: *State,
+                    pixel_count: usize = 8,
+                };
+
+                state: *State,
+                pixel_count: usize,
+
+                pub fn init(config: Config) !@This() {
+                    return .{
+                        .state = config.state,
+                        .pixel_count = config.pixel_count,
+                    };
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    self.state.deinit_calls += 1;
+                }
+
+                pub fn count(self: *@This()) usize {
+                    return self.pixel_count;
+                }
+
+                pub fn setPixel(self: *@This(), index: usize, color: Color) void {
+                    if (index >= self.pixel_count) return;
+                    self.state.pixels[index] = color;
+                }
+
+                pub fn pixel(self: *@This(), index: usize) Color {
+                    if (index >= self.pixel_count) return Color.black;
+                    return self.state.pixels[index];
+                }
+
+                pub fn refresh(self: *@This()) void {
+                    self.state.refresh_calls += 1;
+                }
+            };
+
+            var state = State{};
+            var strip = try make(Impl).init(.{
+                .allocator = allocator,
+                .state = &state,
+                .pixel_count = 5,
+            });
+            defer strip.deinit();
+
+            strip.setPixel(0, Color.red);
+            strip.setPixels(1, &[_]Color{ Color.green, Color.blue, Color.white });
+            strip.refresh();
+
+            try lib.testing.expectEqual(@as(usize, 5), strip.count());
+            try lib.testing.expectEqual(Color.red, strip.pixel(0));
+            try lib.testing.expectEqual(Color.green, strip.pixel(1));
+            try lib.testing.expectEqual(Color.blue, strip.pixel(2));
+            try lib.testing.expectEqual(Color.white, strip.pixel(3));
+            try lib.testing.expectEqual(@as(usize, 1), state.refresh_calls);
+
+            comptime {
+                _ = root.deinit;
+                _ = root.count;
+                _ = root.setPixel;
+                _ = root.pixel;
+                _ = root.setPixels;
+                _ = root.fill;
+                _ = root.clear;
+                _ = root.refresh;
+                _ = root.make;
+                _ = make(Impl).init;
+                if (!@hasField(make(Impl).Config, "allocator")) {
+                    @compileError("make config must expose allocator");
+                }
+            }
         }
 
-        pub fn deinit(self: *@This()) void {
-            self.state.deinit_calls += 1;
-        }
+        fn helperMethodsRespectStripBounds(allocator: lib.mem.Allocator) !void {
+            const State = struct {
+                pixels: [4]Color = [_]Color{Color.black} ** 4,
+            };
 
-        pub fn count(self: *@This()) usize {
-            return self.pixel_count;
-        }
+            const Impl = struct {
+                pub const Config = struct {
+                    allocator: lib.mem.Allocator,
+                    state: *State,
+                };
 
-        pub fn setPixel(self: *@This(), index: usize, color: Color) void {
-            if (index >= self.pixel_count) return;
-            self.state.pixels[index] = color;
-        }
+                state: *State,
 
-        pub fn pixel(self: *@This(), index: usize) Color {
-            if (index >= self.pixel_count) return Color.black;
-            return self.state.pixels[index];
-        }
+                pub fn init(config: Config) !@This() {
+                    return .{ .state = config.state };
+                }
 
-        pub fn refresh(self: *@This()) void {
-            self.state.refresh_calls += 1;
+                pub fn deinit(_: *@This()) void {}
+
+                pub fn count(_: *@This()) usize {
+                    return 4;
+                }
+
+                pub fn setPixel(self: *@This(), index: usize, color: Color) void {
+                    if (index >= self.state.pixels.len) return;
+                    self.state.pixels[index] = color;
+                }
+
+                pub fn pixel(self: *@This(), index: usize) Color {
+                    if (index >= self.state.pixels.len) return Color.black;
+                    return self.state.pixels[index];
+                }
+
+                pub fn refresh(_: *@This()) void {}
+            };
+
+            var state = State{};
+            var strip = try make(Impl).init(.{
+                .allocator = allocator,
+                .state = &state,
+            });
+            defer strip.deinit();
+
+            strip.setPixels(2, &[_]Color{ Color.red, Color.green, Color.blue });
+            try lib.testing.expectEqual(Color.red, strip.pixel(2));
+            try lib.testing.expectEqual(Color.green, strip.pixel(3));
+
+            strip.fill(Color.white);
+            for (0..strip.count()) |index| {
+                try lib.testing.expectEqual(Color.white, strip.pixel(index));
+            }
+
+            strip.clear();
+            for (0..strip.count()) |index| {
+                try lib.testing.expectEqual(Color.black, strip.pixel(index));
+            }
         }
     };
 
-    var state = State{};
-    var strip = try make(Impl).init(.{
-        .allocator = testing.allocator,
-        .state = &state,
-        .pixel_count = 5,
-    });
-    defer strip.deinit();
-
-    strip.setPixel(0, Color.red);
-    strip.setPixels(1, &[_]Color{ Color.green, Color.blue, Color.white });
-    strip.refresh();
-
-    try testing.expectEqual(@as(usize, 5), strip.count());
-    try testing.expectEqual(Color.red, strip.pixel(0));
-    try testing.expectEqual(Color.green, strip.pixel(1));
-    try testing.expectEqual(Color.blue, strip.pixel(2));
-    try testing.expectEqual(Color.white, strip.pixel(3));
-    try testing.expectEqual(@as(usize, 1), state.refresh_calls);
-
-    comptime {
-        _ = root.deinit;
-        _ = root.count;
-        _ = root.setPixel;
-        _ = root.pixel;
-        _ = root.setPixels;
-        _ = root.fill;
-        _ = root.clear;
-        _ = root.refresh;
-        _ = root.make;
-        _ = make(Impl).init;
-        if (!@hasField(make(Impl).Config, "allocator")) {
-            @compileError("make config must expose allocator");
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
         }
-    }
-}
 
-test "ledstrip/unit_tests/LedStrip_helper_methods_respect_strip_bounds" {
-    const std = @import("std");
-    const testing = std.testing;
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
 
-    const State = struct {
-        pixels: [4]Color = [_]Color{Color.black} ** 4,
+            TestCase.exposesVtableSurface(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.helperMethodsRespectStripBounds(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
     };
 
-    const Impl = struct {
-        pub const Config = struct {
-            allocator: std.mem.Allocator,
-            state: *State,
-        };
-
-        state: *State,
-
-        pub fn init(config: Config) !@This() {
-            return .{ .state = config.state };
-        }
-
-        pub fn deinit(_: *@This()) void {}
-
-        pub fn count(_: *@This()) usize {
-            return 4;
-        }
-
-        pub fn setPixel(self: *@This(), index: usize, color: Color) void {
-            if (index >= self.state.pixels.len) return;
-            self.state.pixels[index] = color;
-        }
-
-        pub fn pixel(self: *@This(), index: usize) Color {
-            if (index >= self.state.pixels.len) return Color.black;
-            return self.state.pixels[index];
-        }
-
-        pub fn refresh(_: *@This()) void {}
+    const Holder = struct {
+        var runner: Runner = .{};
     };
-
-    var state = State{};
-    var strip = try make(Impl).init(.{
-        .allocator = testing.allocator,
-        .state = &state,
-    });
-    defer strip.deinit();
-
-    strip.setPixels(2, &[_]Color{ Color.red, Color.green, Color.blue });
-    try testing.expectEqual(Color.red, strip.pixel(2));
-    try testing.expectEqual(Color.green, strip.pixel(3));
-
-    strip.fill(Color.white);
-    for (0..strip.count()) |index| {
-        try testing.expectEqual(Color.white, strip.pixel(index));
-    }
-
-    strip.clear();
-    for (0..strip.count()) |index| {
-        try testing.expectEqual(Color.black, strip.pixel(index));
-    }
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

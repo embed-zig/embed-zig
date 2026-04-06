@@ -1,5 +1,6 @@
 const Context = @import("../event/Context.zig");
 const event = @import("../event.zig");
+const testing_api = @import("testing");
 
 const Button = @This();
 
@@ -60,28 +61,59 @@ pub fn init(comptime T: type, impl: *T, source_id: u32) Button {
     };
 }
 
-test "zux/button/Button/unit_tests/init_and_poll" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn initAndPoll(testing: anytype) !void {
+            const Impl = struct {
+                called: bool = false,
 
-    const Impl = struct {
-        called: bool = false,
+                pub fn isPressed(self: *@This()) !bool {
+                    self.called = true;
+                    return true;
+                }
+            };
 
-        pub fn isPressed(self: *@This()) !bool {
-            self.called = true;
-            return true;
+            var impl = Impl{};
+            const button = Button.init(Impl, &impl, 1);
+            const polled = try button.poll();
+            switch (polled) {
+                .raw_single_button => |single| {
+                    try testing.expectEqual(@as(u32, 1), single.source_id);
+                    try testing.expect(single.pressed);
+                    try testing.expect(single.ctx == null);
+                },
+                else => try testing.expect(false),
+            }
+            try testing.expect(impl.called);
         }
     };
 
-    var impl = Impl{};
-    const button = Button.init(Impl, &impl, 1);
-    const polled = try button.poll();
-    switch (polled) {
-        .raw_single_button => |single| {
-            try std.testing.expectEqual(@as(u32, 1), single.source_id);
-            try std.testing.expect(single.pressed);
-            try std.testing.expect(single.ctx == null);
-        },
-        else => try std.testing.expect(false),
-    }
-    try std.testing.expect(impl.called);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
+
+            TestCase.initAndPoll(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

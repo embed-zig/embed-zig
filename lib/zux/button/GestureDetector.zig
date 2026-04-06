@@ -3,6 +3,7 @@ const Context = @import("../event/Context.zig");
 const Emitter = @import("../pipeline/Emitter.zig");
 const Message = @import("../pipeline/Message.zig");
 const Node = @import("../pipeline/Node.zig");
+const testing_api = @import("testing");
 
 const GestureDetector = @This();
 
@@ -241,203 +242,235 @@ fn forward(self: *GestureDetector, message: Message) !usize {
     return 0;
 }
 
-test "zux/button/GestureDetector/unit_tests/raw_single_button_click_emits_count_after_tick" {
-    const embed_std = @import("embed_std");
-    const testing = embed_std.std.testing;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn rawSingleButtonClickEmitsCountAfterTick(testing: anytype) !void {
+            const Collector = struct {
+                count: usize = 0,
+                last_click_count: u16 = 0,
+                last_long_press_ns: u64 = 0,
+                last_button_id: ?u32 = 123,
 
-    const Collector = struct {
-        count: usize = 0,
-        last_click_count: u16 = 0,
-        last_long_press_ns: u64 = 0,
-        last_button_id: ?u32 = 123,
-
-        pub fn emit(self: *@This(), message: Message) !void {
-            switch (message.body) {
-                .button_gesture => |button| {
-                    self.last_button_id = button.button_id;
-                    switch (button.gesture) {
-                        .click => |click_count| self.last_click_count = click_count,
-                        .long_press_ns => |hold_ns| self.last_long_press_ns = hold_ns,
+                pub fn emit(self: *@This(), message: Message) !void {
+                    switch (message.body) {
+                        .button_gesture => |button| {
+                            self.last_button_id = button.button_id;
+                            switch (button.gesture) {
+                                .click => |click_count| self.last_click_count = click_count,
+                                .long_press_ns => |hold_ns| self.last_long_press_ns = hold_ns,
+                            }
+                            self.count += 1;
+                        },
+                        else => return error.UnexpectedMessage,
                     }
-                    self.count += 1;
-                },
-                else => return error.UnexpectedMessage,
-            }
-        }
-    };
+                }
+            };
 
-    var detector_impl: GestureDetector = undefined;
-    defer detector_impl.deinit();
-    var collector = Collector{};
-    var detector = detector_impl.init(testing.allocator);
-    detector.bindOutput(Emitter.init(&collector));
+            var detector_impl: GestureDetector = undefined;
+            defer detector_impl.deinit();
+            var collector = Collector{};
+            var detector = detector_impl.init(testing.allocator);
+            detector.bindOutput(Emitter.init(&collector));
 
-    try testing.expectEqual(@as(usize, 0), try detector.process(.{
-        .origin = .source,
-        .timestamp_ns = 10,
-        .body = .{
-            .raw_single_button = .{
-                .source_id = 1,
-                .pressed = true,
-            },
-        },
-    }));
-    try testing.expectEqual(@as(usize, 0), try detector.process(.{
-        .origin = .source,
-        .timestamp_ns = 20,
-        .body = .{
-            .raw_single_button = .{
-                .source_id = 1,
-                .pressed = false,
-            },
-        },
-    }));
-    try testing.expectEqual(
-        @as(usize, 1),
-        try detector.process(.{
-            .origin = .timer,
-            .timestamp_ns = 20 + @as(i128, default_multi_click_window_ns),
-            .body = .{
-                .tick = .{},
-            },
-        }),
-    );
-
-    try testing.expectEqual(@as(usize, 1), collector.count);
-    try testing.expectEqual(@as(u16, 1), collector.last_click_count);
-    try testing.expectEqual(@as(u64, 0), collector.last_long_press_ns);
-    try testing.expectEqual(@as(?u32, null), collector.last_button_id);
-}
-
-test "zux/button/GestureDetector/unit_tests/raw_grouped_button_four_clicks_emit_click_count" {
-    const embed_std = @import("embed_std");
-    const testing = embed_std.std.testing;
-
-    const Collector = struct {
-        last_click_count: u16 = 0,
-        last_button_id: ?u32 = null,
-        count: usize = 0,
-
-        pub fn emit(self: *@This(), message: Message) !void {
-            switch (message.body) {
-                .button_gesture => |button| {
-                    switch (button.gesture) {
-                        .click => |click_count| self.last_click_count = click_count,
-                        .long_press_ns => return error.UnexpectedGesture,
-                    }
-                    self.last_button_id = button.button_id;
-                    self.count += 1;
-                },
-                else => return error.UnexpectedMessage,
-            }
-        }
-    };
-
-    var detector_impl: GestureDetector = undefined;
-    defer detector_impl.deinit();
-    var collector = Collector{};
-    var detector = detector_impl.init(testing.allocator);
-    detector.bindOutput(Emitter.init(&collector));
-
-    inline for ([_]i128{ 10, 30, 50, 70 }) |start_ns| {
-        _ = try detector.process(.{
-            .origin = .source,
-            .timestamp_ns = start_ns,
-            .body = .{
-                .raw_grouped_button = .{
-                    .source_id = 7,
-                    .button_id = 3,
-                    .pressed = true,
-                },
-            },
-        });
-        _ = try detector.process(.{
-            .origin = .source,
-            .timestamp_ns = start_ns + 10,
-            .body = .{
-                .raw_grouped_button = .{
-                    .source_id = 7,
-                    .button_id = 3,
-                    .pressed = false,
-                },
-            },
-        });
-    }
-    try testing.expectEqual(
-        @as(usize, 1),
-        try detector.process(.{
-            .origin = .timer,
-            .timestamp_ns = 80 + @as(i128, default_multi_click_window_ns),
-            .body = .{
-                .tick = .{},
-            },
-        }),
-    );
-
-    try testing.expectEqual(@as(u16, 4), collector.last_click_count);
-    try testing.expectEqual(@as(?u32, 3), collector.last_button_id);
-    try testing.expectEqual(@as(usize, 1), collector.count);
-}
-
-test "zux/button/GestureDetector/unit_tests_long_press_emits_duration" {
-    const embed_std = @import("embed_std");
-    const testing = embed_std.std.testing;
-
-    const Collector = struct {
-        count: usize = 0,
-        last_long_press_ns: u64 = 0,
-
-        pub fn emit(self: *@This(), message: Message) !void {
-            switch (message.body) {
-                .button_gesture => |button| switch (button.gesture) {
-                    .click => return error.UnexpectedGesture,
-                    .long_press_ns => |hold_ns| {
-                        self.last_long_press_ns = hold_ns;
-                        self.count += 1;
+            try testing.expectEqual(@as(usize, 0), try detector.process(.{
+                .origin = .source,
+                .timestamp_ns = 10,
+                .body = .{
+                    .raw_single_button = .{
+                        .source_id = 1,
+                        .pressed = true,
                     },
                 },
-                else => return error.UnexpectedMessage,
+            }));
+            try testing.expectEqual(@as(usize, 0), try detector.process(.{
+                .origin = .source,
+                .timestamp_ns = 20,
+                .body = .{
+                    .raw_single_button = .{
+                        .source_id = 1,
+                        .pressed = false,
+                    },
+                },
+            }));
+            try testing.expectEqual(
+                @as(usize, 1),
+                try detector.process(.{
+                    .origin = .timer,
+                    .timestamp_ns = 20 + @as(i128, default_multi_click_window_ns),
+                    .body = .{
+                        .tick = .{},
+                    },
+                }),
+            );
+
+            try testing.expectEqual(@as(usize, 1), collector.count);
+            try testing.expectEqual(@as(u16, 1), collector.last_click_count);
+            try testing.expectEqual(@as(u64, 0), collector.last_long_press_ns);
+            try testing.expectEqual(@as(?u32, null), collector.last_button_id);
+        }
+
+        fn rawGroupedButtonFourClicksEmitClickCount(testing: anytype) !void {
+            const Collector = struct {
+                last_click_count: u16 = 0,
+                last_button_id: ?u32 = null,
+                count: usize = 0,
+
+                pub fn emit(self: *@This(), message: Message) !void {
+                    switch (message.body) {
+                        .button_gesture => |button| {
+                            switch (button.gesture) {
+                                .click => |click_count| self.last_click_count = click_count,
+                                .long_press_ns => return error.UnexpectedGesture,
+                            }
+                            self.last_button_id = button.button_id;
+                            self.count += 1;
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+                }
+            };
+
+            var detector_impl: GestureDetector = undefined;
+            defer detector_impl.deinit();
+            var collector = Collector{};
+            var detector = detector_impl.init(testing.allocator);
+            detector.bindOutput(Emitter.init(&collector));
+
+            inline for ([_]i128{ 10, 30, 50, 70 }) |start_ns| {
+                _ = try detector.process(.{
+                    .origin = .source,
+                    .timestamp_ns = start_ns,
+                    .body = .{
+                        .raw_grouped_button = .{
+                            .source_id = 7,
+                            .button_id = 3,
+                            .pressed = true,
+                        },
+                    },
+                });
+                _ = try detector.process(.{
+                    .origin = .source,
+                    .timestamp_ns = start_ns + 10,
+                    .body = .{
+                        .raw_grouped_button = .{
+                            .source_id = 7,
+                            .button_id = 3,
+                            .pressed = false,
+                        },
+                    },
+                });
             }
+            try testing.expectEqual(
+                @as(usize, 1),
+                try detector.process(.{
+                    .origin = .timer,
+                    .timestamp_ns = 80 + @as(i128, default_multi_click_window_ns),
+                    .body = .{
+                        .tick = .{},
+                    },
+                }),
+            );
+
+            try testing.expectEqual(@as(u16, 4), collector.last_click_count);
+            try testing.expectEqual(@as(?u32, 3), collector.last_button_id);
+            try testing.expectEqual(@as(usize, 1), collector.count);
+        }
+
+        fn longPressEmitsDuration(testing: anytype) !void {
+            const Collector = struct {
+                count: usize = 0,
+                last_long_press_ns: u64 = 0,
+
+                pub fn emit(self: *@This(), message: Message) !void {
+                    switch (message.body) {
+                        .button_gesture => |button| switch (button.gesture) {
+                            .click => return error.UnexpectedGesture,
+                            .long_press_ns => |hold_ns| {
+                                self.last_long_press_ns = hold_ns;
+                                self.count += 1;
+                            },
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+                }
+            };
+
+            var detector_impl: GestureDetector = undefined;
+            defer detector_impl.deinit();
+            var collector = Collector{};
+            var detector = detector_impl.init(testing.allocator);
+            detector.bindOutput(Emitter.init(&collector));
+
+            _ = try detector.process(.{
+                .origin = .source,
+                .timestamp_ns = 10,
+                .body = .{
+                    .raw_single_button = .{
+                        .source_id = 9,
+                        .pressed = true,
+                    },
+                },
+            });
+            try testing.expectEqual(
+                @as(usize, 1),
+                try detector.process(.{
+                    .origin = .timer,
+                    .timestamp_ns = 10 + @as(i128, default_long_press_ns) + 25,
+                    .body = .{
+                        .tick = .{},
+                    },
+                }),
+            );
+            try testing.expectEqual(default_long_press_ns + 25, collector.last_long_press_ns);
+            try testing.expectEqual(@as(usize, 1), collector.count);
+
+            try testing.expectEqual(@as(usize, 0), try detector.process(.{
+                .origin = .source,
+                .timestamp_ns = 10 + @as(i128, default_long_press_ns) + 50,
+                .body = .{
+                    .raw_single_button = .{
+                        .source_id = 9,
+                        .pressed = false,
+                    },
+                },
+            }));
         }
     };
 
-    var detector_impl: GestureDetector = undefined;
-    defer detector_impl.deinit();
-    var collector = Collector{};
-    var detector = detector_impl.init(testing.allocator);
-    detector.bindOutput(Emitter.init(&collector));
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    _ = try detector.process(.{
-        .origin = .source,
-        .timestamp_ns = 10,
-        .body = .{
-            .raw_single_button = .{
-                .source_id = 9,
-                .pressed = true,
-            },
-        },
-    });
-    try testing.expectEqual(
-        @as(usize, 1),
-        try detector.process(.{
-            .origin = .timer,
-            .timestamp_ns = 10 + @as(i128, default_long_press_ns) + 25,
-            .body = .{
-                .tick = .{},
-            },
-        }),
-    );
-    try testing.expectEqual(default_long_press_ns + 25, collector.last_long_press_ns);
-    try testing.expectEqual(@as(usize, 1), collector.count);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
 
-    try testing.expectEqual(@as(usize, 0), try detector.process(.{
-        .origin = .source,
-        .timestamp_ns = 10 + @as(i128, default_long_press_ns) + 50,
-        .body = .{
-            .raw_single_button = .{
-                .source_id = 9,
-                .pressed = false,
-            },
-        },
-    }));
+            TestCase.rawSingleButtonClickEmitsCountAfterTick(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.rawGroupedButtonFourClicksEmitClickCount(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.longPressEmitsDuration(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

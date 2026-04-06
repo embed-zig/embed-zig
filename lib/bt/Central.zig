@@ -5,6 +5,8 @@
 //! Higher-level concepts like Conn/Char/Subscription are built on top
 //! in the host-side helpers under `lib/bt/host/`.
 
+const testing_api = @import("testing");
+
 const Central = @This();
 
 ptr: *anyopaque,
@@ -414,43 +416,74 @@ pub fn make(pointer: anytype) Central {
     };
 }
 
-test "bt/unit_tests/Central_wrap_does_not_silently_downgrade_optional_gatt_ops" {
-    const Impl = struct {
-        pub fn start(_: *@This()) StartError!void {}
-        pub fn stop(_: *@This()) void {}
-        pub fn startScanning(_: *@This(), _: ScanConfig) ScanError!void {}
-        pub fn stopScanning(_: *@This()) void {}
-        pub fn connect(_: *@This(), _: BdAddr, _: AddrType, _: ConnParams) ConnectError!ConnectionInfo {
-            return error.Rejected;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const Impl = struct {
+                pub fn start(_: *@This()) StartError!void {}
+                pub fn stop(_: *@This()) void {}
+                pub fn startScanning(_: *@This(), _: ScanConfig) ScanError!void {}
+                pub fn stopScanning(_: *@This()) void {}
+                pub fn connect(_: *@This(), _: BdAddr, _: AddrType, _: ConnParams) ConnectError!ConnectionInfo {
+                    return error.Rejected;
+                }
+                pub fn disconnect(_: *@This(), _: u16) void {}
+                pub fn discoverServices(_: *@This(), _: u16, _: []DiscoveredService) GattError!usize {
+                    return 0;
+                }
+                pub fn discoverChars(_: *@This(), _: u16, _: u16, _: u16, _: []DiscoveredChar) GattError!usize {
+                    return 0;
+                }
+                pub fn gattRead(_: *@This(), _: u16, _: u16, _: []u8) GattError!usize {
+                    return 0;
+                }
+                pub fn gattWrite(_: *@This(), _: u16, _: u16, _: []const u8) GattError!void {}
+                pub fn subscribe(_: *@This(), _: u16, _: u16) GattError!void {}
+                pub fn unsubscribe(_: *@This(), _: u16, _: u16) GattError!void {}
+                pub fn getState(_: *@This()) State {
+                    return .idle;
+                }
+                pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Event) void) void {}
+                pub fn getAddr(_: *@This()) ?BdAddr {
+                    return null;
+                }
+                pub fn deinit(_: *@This()) void {}
+            };
+
+            var impl = Impl{};
+            const central = make(&impl);
+
+            try lib.testing.expectError(error.Unexpected, central.gattWriteNoResp(1, 2, "x"));
+            try lib.testing.expectError(error.Unexpected, central.exchangeMtu(1, MAX_ATT_MTU));
+            try lib.testing.expectError(error.Unexpected, central.subscribeIndications(1, 2));
+            try lib.testing.expectEqual(DEFAULT_ATT_MTU, central.getAttMtu(1));
         }
-        pub fn disconnect(_: *@This(), _: u16) void {}
-        pub fn discoverServices(_: *@This(), _: u16, _: []DiscoveredService) GattError!usize {
-            return 0;
-        }
-        pub fn discoverChars(_: *@This(), _: u16, _: u16, _: u16, _: []DiscoveredChar) GattError!usize {
-            return 0;
-        }
-        pub fn gattRead(_: *@This(), _: u16, _: u16, _: []u8) GattError!usize {
-            return 0;
-        }
-        pub fn gattWrite(_: *@This(), _: u16, _: u16, _: []const u8) GattError!void {}
-        pub fn subscribe(_: *@This(), _: u16, _: u16) GattError!void {}
-        pub fn unsubscribe(_: *@This(), _: u16, _: u16) GattError!void {}
-        pub fn getState(_: *@This()) State {
-            return .idle;
-        }
-        pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Event) void) void {}
-        pub fn getAddr(_: *@This()) ?BdAddr {
-            return null;
-        }
-        pub fn deinit(_: *@This()) void {}
     };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var impl = Impl{};
-    const central = make(&impl);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    try @import("std").testing.expectError(error.Unexpected, central.gattWriteNoResp(1, 2, "x"));
-    try @import("std").testing.expectError(error.Unexpected, central.exchangeMtu(1, MAX_ATT_MTU));
-    try @import("std").testing.expectError(error.Unexpected, central.subscribeIndications(1, 2));
-    try @import("std").testing.expectEqual(DEFAULT_ATT_MTU, central.getAttMtu(1));
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
+

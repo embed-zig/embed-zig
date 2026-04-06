@@ -211,7 +211,7 @@ lib/zux/
   Bus.zig
   Reducer.zig
   Registry.zig
-  Store.zig
+  store.zig
   Snapshot.zig
   DirtySet.zig
   Subscription.zig
@@ -228,7 +228,7 @@ Suggested responsibilities:
 - `Bus.zig` - queueing and dispatch order
 - `Reducer.zig` - reducer function contracts
 - `Registry.zig` - event-to-reducer registration
-- `Store.zig` - working state and commit logic
+- `store.zig` - store namespace and Builder-based store construction surface
 - `Snapshot.zig` - read-only committed view
 - `DirtySet.zig` - path and prefix dirtiness tracking
 - `Subscription.zig` - exact and prefix subscriptions

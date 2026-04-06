@@ -1,5 +1,7 @@
 //! audio.mixer.RingBuffer — blocking PCM sample ring buffer.
 
+const testing_api = @import("testing");
+
 pub fn make(comptime lib: type) type {
     const Allocator = lib.mem.Allocator;
     const Thread = lib.Thread;
@@ -140,66 +142,103 @@ fn clampToI16(value: f32) i16 {
     return @intFromFloat(value);
 }
 
-test "audio/unit_tests/RingBuffer_mixInto_applies_gain_and_clamps" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const Buffer = make(lib);
 
-    const Buffer = make(std);
-    var buffer = try Buffer.init(std.testing.allocator, 4);
-    defer buffer.deinit();
+    const TestCase = struct {
+        fn mixIntoAppliesGainAndClamps(testing: anytype) !void {
+            var buffer = try Buffer.init(lib.testing.allocator, 4);
+            defer buffer.deinit();
 
-    try buffer.write(&.{ 30000, -30000 });
+            try buffer.write(&.{ 30000, -30000 });
 
-    var out = [_]i16{ 30000, -30000 };
-    const n = buffer.mixInto(&out, 1.0);
-    try std.testing.expectEqual(@as(usize, 2), n);
-    try std.testing.expectEqualSlices(i16, &.{ 32767, -32768 }, out[0..2]);
-}
+            var out = [_]i16{ 30000, -30000 };
+            const n = buffer.mixInto(&out, 1.0);
+            try testing.expectEqual(@as(usize, 2), n);
+            try testing.expectEqualSlices(i16, &.{ 32767, -32768 }, out[0..2]);
+        }
 
-test "audio/unit_tests/RingBuffer_closeWrite_drains_then_reports_drained" {
-    const std = @import("std");
+        fn closeWriteDrainsThenReportsDrained(testing: anytype) !void {
+            var buffer = try Buffer.init(lib.testing.allocator, 4);
+            defer buffer.deinit();
 
-    const Buffer = make(std);
-    var buffer = try Buffer.init(std.testing.allocator, 4);
-    defer buffer.deinit();
+            try buffer.write(&.{ 7, 8 });
+            buffer.closeWrite();
+            try testing.expect(!buffer.isDrained());
 
-    try buffer.write(&.{ 7, 8 });
-    buffer.closeWrite();
-    try std.testing.expect(!buffer.isDrained());
+            var out: [4]i16 = @splat(0);
+            const n = buffer.mixInto(&out, 1.0);
+            try testing.expectEqual(@as(usize, 2), n);
+            try testing.expectEqualSlices(i16, &.{ 7, 8 }, out[0..2]);
+            try testing.expect(buffer.isDrained());
+        }
 
-    var out: [4]i16 = @splat(0);
-    const n = buffer.mixInto(&out, 1.0);
-    try std.testing.expectEqual(@as(usize, 2), n);
-    try std.testing.expectEqualSlices(i16, &.{ 7, 8 }, out[0..2]);
-    try std.testing.expect(buffer.isDrained());
-}
+        fn closeWithErrorUnblocksBlockedWriter(testing: anytype) !void {
+            const Thread = lib.Thread;
+            const ns_per_ms = lib.time.ns_per_ms;
 
-test "audio/unit_tests/RingBuffer_closeWithError_unblocks_blocked_writer" {
-    const std = @import("std");
+            var buffer = try Buffer.init(lib.testing.allocator, 2);
+            defer buffer.deinit();
 
-    const Buffer = make(std);
-    var buffer = try Buffer.init(std.testing.allocator, 2);
-    defer buffer.deinit();
+            try buffer.write(&.{ 1, 2 });
 
-    try buffer.write(&.{ 1, 2 });
+            const State = struct {
+                buffer: *Buffer,
+                result: ?anyerror = null,
+            };
 
-    const State = struct {
-        buffer: *Buffer,
-        result: ?anyerror = null,
+            var state = State{ .buffer = &buffer };
+            const worker = try Thread.spawn(.{}, struct {
+                fn run(s: *State) void {
+                    s.buffer.write(&.{ 3, 4 }) catch |err| {
+                        s.result = err;
+                        return;
+                    };
+                }
+            }.run, .{&state});
+
+            Thread.sleep(10 * ns_per_ms);
+            buffer.closeWithError();
+            worker.join();
+
+            try testing.expectEqual(error.Closed, state.result.?);
+        }
     };
 
-    var state = State{ .buffer = &buffer };
-    const worker = try std.Thread.spawn(.{}, struct {
-        fn run(s: *State) void {
-            s.buffer.write(&.{ 3, 4 }) catch |err| {
-                s.result = err;
-                return;
-            };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
         }
-    }.run, .{&state});
 
-    std.Thread.sleep(10 * std.time.ns_per_ms);
-    buffer.closeWithError();
-    worker.join();
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
 
-    try std.testing.expectEqual(error.Closed, state.result.?);
+            TestCase.mixIntoAppliesGainAndClamps(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.closeWriteDrainsThenReportsDrained(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.closeWithErrorUnblocksBlockedWriter(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

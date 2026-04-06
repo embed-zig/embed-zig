@@ -5,6 +5,7 @@ const CentralMod = @import("host/Central.zig");
 const Hci = @import("host/Hci.zig");
 const PeripheralMod = @import("host/Peripheral.zig");
 const Transport = @import("Transport.zig");
+const testing_api = @import("testing");
 
 const root = @This();
 
@@ -342,25 +343,56 @@ pub fn makeHciTransport(
     };
 }
 
-test "bt/unit_tests/Host_exposes_vtable_surface" {
-    const std = @import("std");
-    const TestChannel = @import("embed_std").sync.Channel;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const embed_std = @import("embed_std");
+            const ChannelFactory = embed_std.sync.ChannelFactory(lib);
 
-    comptime {
-        _ = root.deinit;
-        _ = root.central;
-        _ = root.peripheral;
-        _ = root.setEventCallback;
-        _ = root.clearEventCallback;
-        _ = root.Event;
-        _ = root.CallbackFn;
-        _ = root.make;
-        _ = root.makeHci;
-        _ = root.makeHciTransport;
-        _ = makeHci(std, TestChannel).init;
-        _ = makeHciTransport(std, TestChannel).init;
-        if (!@hasField(makeHciTransport(std, TestChannel).Config, "source_id")) {
-            @compileError("makeHciTransport config must expose source_id");
+            comptime {
+                _ = deinit;
+                _ = central;
+                _ = peripheral;
+                _ = setEventCallback;
+                _ = clearEventCallback;
+                _ = Event;
+                _ = CallbackFn;
+                _ = make;
+                _ = makeHci;
+                _ = makeHciTransport;
+                _ = makeHci(lib, ChannelFactory).init;
+                _ = makeHciTransport(lib, ChannelFactory).init;
+                if (!@hasField(makeHciTransport(lib, ChannelFactory).Config, "source_id")) {
+                    @compileError("makeHciTransport config must expose source_id");
+                }
+            }
         }
-    }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
+

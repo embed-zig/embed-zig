@@ -2,6 +2,7 @@
 
 const Color = @import("Color.zig");
 const Frame = @import("Frame.zig");
+const testing_api = @import("testing");
 
 pub fn stepChannel(cur: u8, tgt: u8, amount: u8) u8 {
     if (cur < tgt) {
@@ -65,76 +66,116 @@ fn lerpChannel(cur: u8, tgt: u8, steps: u8) u8 {
     return @intCast(@as(i16, cur) + step);
 }
 
-test "ledstrip/unit_tests/Transition_stepToward_reaches_target" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn stepTowardReachesTarget() !void {
+            var color = Color.black;
+            const target = Color.rgb(50, 100, 150);
 
-    var color = Color.black;
-    const target = Color.rgb(50, 100, 150);
+            for (0..256) |_| {
+                color = stepToward(color, target, 5);
+            }
 
-    for (0..256) |_| {
-        color = stepToward(color, target, 5);
-    }
+            try lib.testing.expectEqual(target, color);
+        }
 
-    try std.testing.expectEqual(target, color);
-}
+        fn stepTowardSnapsWhenWithinRange() !void {
+            const current = Color.rgb(3, 3, 3);
+            const target = Color.black;
+            const stepped = stepToward(current, target, 5);
 
-test "ledstrip/unit_tests/Transition_stepToward_snaps_when_within_range" {
-    const std = @import("std");
+            try lib.testing.expectEqual(Color.black, stepped);
+        }
 
-    const current = Color.rgb(3, 3, 3);
-    const target = Color.black;
-    const stepped = stepToward(current, target, 5);
+        fn stepFrameConverges() !void {
+            const F = Frame.make(4);
+            var current = F.solid(Color.black);
+            const target = F.solid(Color.red);
 
-    try std.testing.expectEqual(Color.black, stepped);
-}
+            var steps: u32 = 0;
+            while (!current.eql(target)) : (steps += 1) {
+                _ = stepFrame(4, &current, target, 10);
+                if (steps > 100) break;
+            }
 
-test "ledstrip/unit_tests/Transition_stepFrame_converges" {
-    const std = @import("std");
+            try lib.testing.expect(current.eql(target));
+        }
 
-    const F = Frame.make(4);
-    var current = F.solid(Color.black);
-    const target = F.solid(Color.red);
+        fn stepFrameReportsNoChangeWhenAlreadyEqual() !void {
+            const F = Frame.make(2);
+            var current = F.solid(Color.green);
+            const target = F.solid(Color.green);
 
-    var steps: u32 = 0;
-    while (!current.eql(target)) : (steps += 1) {
-        _ = stepFrame(4, &current, target, 10);
-        if (steps > 100) break;
-    }
+            try lib.testing.expect(!stepFrame(2, &current, target, 8));
+        }
 
-    try std.testing.expect(current.eql(target));
-}
+        fn lerpFrameRemainingOneSnapsToTarget() !void {
+            const F = Frame.make(2);
+            var current = F.solid(Color.black);
+            const target = F.solid(Color.white);
 
-test "ledstrip/unit_tests/Transition_stepFrame_reports_no_change_when_already_equal" {
-    const std = @import("std");
+            try lib.testing.expect(lerpFrame(2, &current, target, 1));
+            try lib.testing.expect(current.eql(target));
+        }
 
-    const F = Frame.make(2);
-    var current = F.solid(Color.green);
-    const target = F.solid(Color.green);
+        fn lerpFrameConvergesOverSteps() !void {
+            const F = Frame.make(2);
+            var current = F.solid(Color.black);
+            const target = F.solid(Color.rgb(100, 200, 50));
 
-    try std.testing.expect(!stepFrame(2, &current, target, 8));
-}
+            for (0..64) |_| {
+                _ = lerpFrame(2, &current, target, 8);
+            }
 
-test "ledstrip/unit_tests/Transition_lerpFrame_remaining_one_snaps_to_target" {
-    const std = @import("std");
+            try lib.testing.expect(current.eql(target));
+        }
+    };
 
-    const F = Frame.make(2);
-    var current = F.solid(Color.black);
-    const target = F.solid(Color.white);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    try std.testing.expect(lerpFrame(2, &current, target, 1));
-    try std.testing.expect(current.eql(target));
-}
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-test "ledstrip/unit_tests/Transition_lerpFrame_converges_over_steps" {
-    const std = @import("std");
+            TestCase.stepTowardReachesTarget() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.stepTowardSnapsWhenWithinRange() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.stepFrameConverges() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.stepFrameReportsNoChangeWhenAlreadyEqual() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.lerpFrameRemainingOneSnapsToTarget() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.lerpFrameConvergesOverSteps() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    const F = Frame.make(2);
-    var current = F.solid(Color.black);
-    const target = F.solid(Color.rgb(100, 200, 50));
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
 
-    for (0..64) |_| {
-        _ = lerpFrame(2, &current, target, 8);
-    }
-
-    try std.testing.expect(current.eql(target));
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

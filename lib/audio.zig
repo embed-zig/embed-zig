@@ -3,9 +3,9 @@
 pub const AudioSystem = @import("audio/AudioSystem.zig");
 pub const Mixer = @import("audio/Mixer.zig");
 pub const Mic = @import("audio/Mic.zig");
+pub const ogg = @import("audio/ogg.zig");
 pub const Speaker = @import("audio/Speaker.zig");
 pub const test_runner = struct {
-    pub const mixer = @import("audio/test_runner/mixer.zig");
+    pub const unit = @import("audio/test_runner/unit.zig");
+    pub const integration = @import("audio/test_runner/integration.zig");
 };
-
-test "audio/unit_tests" {}

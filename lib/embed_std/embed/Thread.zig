@@ -236,28 +236,3 @@ pub fn getName(buffer_ptr: *[max_name_len:0]u8) embed_thread.GetNameError!?[]con
 
     return error.Unsupported;
 }
-
-test "embed_std/unit_tests/thread/current_name_roundtrip" {
-    if (std_max_name_len == 0) return error.SkipZigTest;
-
-    var original_buf: [max_name_len:0]u8 = undefined;
-    const original_name = getName(&original_buf) catch |err| switch (err) {
-        error.Unsupported => return error.SkipZigTest,
-        else => return err,
-    };
-    defer if (original_name) |name| setName(name) catch @panic("failed to restore thread name");
-
-    const requested_name = "embed-std";
-    try setName(requested_name);
-
-    var buf: [max_name_len:0]u8 = undefined;
-    const actual_name = (try getName(&buf)) orelse return error.ExpectedThreadName;
-    try std.testing.expectEqualStrings(requested_name, actual_name);
-}
-
-test "embed_std/unit_tests/thread/setName_rejects_too_long_names" {
-    if (std_max_name_len == 0) return error.SkipZigTest;
-
-    const too_long_name = [_]u8{'x'} ** (max_name_len + 1);
-    try std.testing.expectError(error.NameTooLong, setName(too_long_name[0..]));
-}

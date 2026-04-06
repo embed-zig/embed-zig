@@ -10,6 +10,7 @@ const Header = @import("Header.zig");
 const Request = @import("Request.zig");
 const ReadCloser = @import("ReadCloser.zig");
 const status_mod = @import("status.zig");
+const testing_api = @import("testing");
 
 const Response = @This();
 
@@ -49,61 +50,61 @@ pub fn deinit(self: *Response) void {
     self.* = undefined;
 }
 
-test "net/unit_tests/http/Response/body_returns_response_read_closer" {
-    const MockBody = struct {
-        payload: []const u8 = "hello",
-        offset: usize = 0,
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-        pub fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
+            const MockBody = struct {
+                payload: []const u8 = "hello",
+                offset: usize = 0,
+
+                pub fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+
+                pub fn close(_: *@This()) void {}
+            };
+
+            var mock_body = MockBody{};
+            const resp: Response = .{
+                .status_code = 200,
+                .body_reader = ReadCloser.init(&mock_body),
+            };
+
+            var buf: [8]u8 = undefined;
+            const reader = resp.body().?;
+            const n = try reader.read(&buf);
+
+            try testing.expectEqualStrings("hello", buf[0..n]);
+            try testing.expect(resp.ok());
+            try testing.expect(resp.tls == null);
+
+            var cleaned = false;
+            const gen = struct {
+                fn cleanup(ptr: *anyopaque) void {
+                    const flag: *bool = @ptrCast(@alignCast(ptr));
+                    flag.* = true;
+                }
+            };
+
+            var cleanup_resp: Response = .{
+                .status_code = 204,
+                .deinit_ptr = @ptrCast(&cleaned),
+                .deinit_fn = gen.cleanup,
+            };
+
+            cleanup_resp.deinit();
+            try testing.expect(cleaned);
+
+            const plain_resp: Response = .{
+                .status_code = 200,
+            };
+            try testing.expect(plain_resp.tls == null);
         }
-
-        pub fn close(_: *@This()) void {}
-    };
-
-    var mock_body = MockBody{};
-    const resp: Response = .{
-        .status_code = 200,
-        .body_reader = ReadCloser.init(&mock_body),
-    };
-
-    var buf: [8]u8 = undefined;
-    const reader = resp.body().?;
-    const n = try reader.read(&buf);
-
-    try std.testing.expectEqualStrings("hello", buf[0..n]);
-    try std.testing.expect(resp.ok());
-    try std.testing.expect(resp.tls == null);
-}
-
-test "net/unit_tests/http/Response/deinit_calls_custom_cleanup_hook" {
-    var cleaned = false;
-
-    const gen = struct {
-        fn cleanup(ptr: *anyopaque) void {
-            const flag: *bool = @ptrCast(@alignCast(ptr));
-            flag.* = true;
-        }
-    };
-
-    var resp: Response = .{
-        .status_code = 204,
-        .deinit_ptr = @ptrCast(&cleaned),
-        .deinit_fn = gen.cleanup,
-    };
-
-    resp.deinit();
-    try std.testing.expect(cleaned);
-}
-
-test "net/unit_tests/http/Response/tls_defaults_to_null" {
-    const resp: Response = .{
-        .status_code = 200,
-    };
-
-    try std.testing.expect(resp.tls == null);
+    }.run);
 }

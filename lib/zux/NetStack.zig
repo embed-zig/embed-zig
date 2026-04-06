@@ -1,6 +1,7 @@
 const Context = @import("event/Context.zig");
 const event = @import("event.zig");
 const net = @import("net");
+const testing_api = @import("testing");
 
 const Addr = net.netip.Addr;
 const EventReceiver = event.EventReceiver;
@@ -627,282 +628,319 @@ fn eventReceiverEmitUpdate(ctx: *const anyopaque, update: Update) void {
     receiver.emit(value);
 }
 
-test "zux/NetStack/unit_tests/make_event_copies_dhcp_and_dns_fields" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn makeEventCopiesDhcpAndDnsFields(testing: anytype) !void {
+            const dns = [_]Addr{
+                Addr.from4(.{ 1, 1, 1, 1 }),
+                Addr.from4(.{ 8, 8, 8, 8 }),
+            };
 
-    const dns = [_]Addr{
-        Addr.from4(.{ 1, 1, 1, 1 }),
-        Addr.from4(.{ 8, 8, 8, 8 }),
-    };
-
-    const value = try makeEvent(.{
-        .dhcp_lease_acquired = .{
-            .source_id = 51,
-            .netif_id = 7,
-            .addr = Addr.from4(.{ 192, 168, 10, 23 }),
-            .gateway = Addr.from4(.{ 192, 168, 10, 1 }),
-            .netmask = Addr.from4(.{ 255, 255, 255, 0 }),
-            .dns_servers = dns[0..],
-            .lease_time_s = 7200,
-        },
-    });
-
-    switch (value) {
-        .netstack_dhcp_lease_acquired => |lease| {
-            try std.testing.expectEqual(@as(u32, 51), lease.source_id);
-            try std.testing.expectEqual(@as(u32, 7), lease.netif_id);
-            try std.testing.expectEqual(@as(u32, 7200), lease.lease_time_s);
-            try std.testing.expectEqual(@as([4]u8, .{ 192, 168, 10, 23 }), lease.addr.as4().?);
-            try std.testing.expectEqual(@as([4]u8, .{ 192, 168, 10, 1 }), lease.gateway.as4().?);
-            try std.testing.expectEqual(@as(usize, 2), lease.dnsServers().len);
-            try std.testing.expectEqual(@as([4]u8, .{ 1, 1, 1, 1 }), lease.dnsServers()[0].as4().?);
-            try std.testing.expectEqual(@as([4]u8, .{ 8, 8, 8, 8 }), lease.dnsServers()[1].as4().?);
-        },
-        else => try std.testing.expect(false),
-    }
-}
-
-test "zux/NetStack/unit_tests/make_event_copies_netif_metadata" {
-    const std = @import("std");
-
-    const value = try makeEvent(.{
-        .netif_created = .{
-            .source_id = 60,
-            .netif_id = 2,
-            .netif_type = .wifi,
-            .name = "wlan0",
-        },
-    });
-
-    switch (value) {
-        .netstack_netif_created => |netif| {
-            try std.testing.expectEqual(@as(u32, 60), netif.source_id);
-            try std.testing.expectEqual(@as(u32, 2), netif.netif_id);
-            try std.testing.expectEqual(@as(NetifType, .wifi), netif.netif_type);
-            try std.testing.expectEqualStrings("wlan0", netif.name());
-        },
-        else => try std.testing.expect(false),
-    }
-}
-
-test "zux/NetStack/unit_tests/make_event_maps_ppp_fields" {
-    const std = @import("std");
-
-    const value = try makeEvent(.{
-        .ppp_up = .{
-            .source_id = 61,
-            .netif_id = 9,
-            .local_addr = Addr.from4(.{ 10, 64, 0, 2 }),
-            .peer_addr = Addr.from4(.{ 10, 64, 0, 1 }),
-        },
-    });
-
-    switch (value) {
-        .netstack_ppp_up => |ppp| {
-            try std.testing.expectEqual(@as(u32, 61), ppp.source_id);
-            try std.testing.expectEqual(@as(u32, 9), ppp.netif_id);
-            try std.testing.expectEqual(@as([4]u8, .{ 10, 64, 0, 2 }), ppp.local_addr.as4().?);
-            try std.testing.expectEqual(@as([4]u8, .{ 10, 64, 0, 1 }), ppp.peer_addr.as4().?);
-        },
-        else => try std.testing.expect(false),
-    }
-}
-
-test "zux/NetStack/unit_tests/register_and_emit_updates_through_callback" {
-    const std = @import("std");
-
-    const Sink = struct {
-        created_count: usize = 0,
-        destroyed_count: usize = 0,
-        up_count: usize = 0,
-        dns_count: usize = 0,
-        ppp_down_count: usize = 0,
-        last_netif_type: ?NetifType = null,
-        last_netif_name_len: usize = 0,
-        last_ppp_phase: ?PppPhase = null,
-        last_netif_id: u32 = 0,
-        last_dns_count: usize = 0,
-        last_ppp_down_reason: ?PppDownReason = null,
-
-        fn emitFn(ctx: *const anyopaque, update: Update) void {
-            const self: *@This() = @ptrCast(@alignCast(@constCast(ctx)));
-            switch (update) {
-                .netif_created => |value| {
-                    self.created_count += 1;
-                    self.last_netif_id = value.netif_id;
-                    self.last_netif_type = value.netif_type;
-                    self.last_netif_name_len = (value.name orelse "").len;
+            const value = try makeEvent(.{
+                .dhcp_lease_acquired = .{
+                    .source_id = 51,
+                    .netif_id = 7,
+                    .addr = Addr.from4(.{ 192, 168, 10, 23 }),
+                    .gateway = Addr.from4(.{ 192, 168, 10, 1 }),
+                    .netmask = Addr.from4(.{ 255, 255, 255, 0 }),
+                    .dns_servers = dns[0..],
+                    .lease_time_s = 7200,
                 },
-                .netif_destroyed => |value| {
-                    self.destroyed_count += 1;
-                    self.last_netif_id = value.netif_id;
-                    self.last_netif_type = value.netif_type;
-                    self.last_netif_name_len = (value.name orelse "").len;
+            });
+
+            switch (value) {
+                .netstack_dhcp_lease_acquired => |lease| {
+                    try testing.expectEqual(@as(u32, 51), lease.source_id);
+                    try testing.expectEqual(@as(u32, 7), lease.netif_id);
+                    try testing.expectEqual(@as(u32, 7200), lease.lease_time_s);
+                    try testing.expectEqual(@as([4]u8, .{ 192, 168, 10, 23 }), lease.addr.as4().?);
+                    try testing.expectEqual(@as([4]u8, .{ 192, 168, 10, 1 }), lease.gateway.as4().?);
+                    try testing.expectEqual(@as(usize, 2), lease.dnsServers().len);
+                    try testing.expectEqual(@as([4]u8, .{ 1, 1, 1, 1 }), lease.dnsServers()[0].as4().?);
+                    try testing.expectEqual(@as([4]u8, .{ 8, 8, 8, 8 }), lease.dnsServers()[1].as4().?);
                 },
-                .netif_up => |value| {
-                    self.up_count += 1;
-                    self.last_netif_id = value.netif_id;
-                },
-                .dns_servers_changed => |value| {
-                    self.dns_count += 1;
-                    self.last_netif_id = value.netif_id;
-                    self.last_dns_count = value.dns_servers.len;
-                },
-                .ppp_phase_changed => |value| {
-                    self.last_netif_id = value.netif_id;
-                    self.last_ppp_phase = value.phase;
-                },
-                .ppp_down => |value| {
-                    self.ppp_down_count += 1;
-                    self.last_netif_id = value.netif_id;
-                    self.last_ppp_down_reason = value.reason;
-                },
-                else => {},
+                else => try testing.expect(false),
             }
         }
-    };
 
-    const Impl = struct {
-        receiver_ctx: ?*const anyopaque = null,
-        emit_fn: ?CallbackFn = null,
-
-        pub fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: CallbackFn) void {
-            self.receiver_ctx = ctx;
-            self.emit_fn = emit_fn;
-        }
-
-        pub fn clearEventCallback(self: *@This()) void {
-            self.receiver_ctx = null;
-            self.emit_fn = null;
-        }
-
-        pub fn emit(self: *@This()) !void {
-            const receiver_ctx = self.receiver_ctx orelse return error.MissingReceiver;
-            const emit_fn = self.emit_fn orelse return error.MissingReceiver;
-
-            const dns = [_]Addr{
-                Addr.from4(.{ 9, 9, 9, 9 }),
-                Addr.from4(.{ 1, 0, 0, 1 }),
-            };
-
-            emit_fn(receiver_ctx, .{
+        fn makeEventCopiesNetifMetadata(testing: anytype) !void {
+            const value = try makeEvent(.{
                 .netif_created = .{
-                    .source_id = 52,
-                    .netif_id = 3,
-                    .netif_type = .ppp,
-                    .name = "ppp0",
+                    .source_id = 60,
+                    .netif_id = 2,
+                    .netif_type = .wifi,
+                    .name = "wlan0",
                 },
             });
-            emit_fn(receiver_ctx, .{
-                .netif_up = .{
-                    .source_id = 52,
-                    .netif_id = 3,
+
+            switch (value) {
+                .netstack_netif_created => |netif| {
+                    try testing.expectEqual(@as(u32, 60), netif.source_id);
+                    try testing.expectEqual(@as(u32, 2), netif.netif_id);
+                    try testing.expectEqual(@as(NetifType, .wifi), netif.netif_type);
+                    try testing.expectEqualStrings("wlan0", netif.name());
+                },
+                else => try testing.expect(false),
+            }
+        }
+
+        fn makeEventMapsPppFields(testing: anytype) !void {
+            const value = try makeEvent(.{
+                .ppp_up = .{
+                    .source_id = 61,
+                    .netif_id = 9,
+                    .local_addr = Addr.from4(.{ 10, 64, 0, 2 }),
+                    .peer_addr = Addr.from4(.{ 10, 64, 0, 1 }),
                 },
             });
-            emit_fn(receiver_ctx, .{
-                .dns_servers_changed = .{
-                    .source_id = 52,
-                    .netif_id = 3,
-                    .dns_servers = dns[0..],
+
+            switch (value) {
+                .netstack_ppp_up => |ppp| {
+                    try testing.expectEqual(@as(u32, 61), ppp.source_id);
+                    try testing.expectEqual(@as(u32, 9), ppp.netif_id);
+                    try testing.expectEqual(@as([4]u8, .{ 10, 64, 0, 2 }), ppp.local_addr.as4().?);
+                    try testing.expectEqual(@as([4]u8, .{ 10, 64, 0, 1 }), ppp.peer_addr.as4().?);
                 },
-            });
-            emit_fn(receiver_ctx, .{
-                .ppp_phase_changed = .{
-                    .source_id = 52,
-                    .netif_id = 3,
-                    .phase = .running,
-                },
-            });
-            emit_fn(receiver_ctx, .{
-                .ppp_down = .{
-                    .source_id = 52,
-                    .netif_id = 3,
-                    .reason = .carrier_lost,
-                },
-            });
-            emit_fn(receiver_ctx, .{
-                .netif_destroyed = .{
-                    .source_id = 52,
-                    .netif_id = 3,
-                    .netif_type = .ppp,
-                    .name = "ppp0",
-                },
-            });
+                else => try testing.expect(false),
+            }
+        }
+
+        fn registerAndEmitUpdatesThroughCallback(testing: anytype) !void {
+            const Sink = struct {
+                created_count: usize = 0,
+                destroyed_count: usize = 0,
+                up_count: usize = 0,
+                dns_count: usize = 0,
+                ppp_down_count: usize = 0,
+                last_netif_type: ?NetifType = null,
+                last_netif_name_len: usize = 0,
+                last_ppp_phase: ?PppPhase = null,
+                last_netif_id: u32 = 0,
+                last_dns_count: usize = 0,
+                last_ppp_down_reason: ?PppDownReason = null,
+
+                fn emitFn(ctx: *const anyopaque, update: Update) void {
+                    const self: *@This() = @ptrCast(@alignCast(@constCast(ctx)));
+                    switch (update) {
+                        .netif_created => |value| {
+                            self.created_count += 1;
+                            self.last_netif_id = value.netif_id;
+                            self.last_netif_type = value.netif_type;
+                            self.last_netif_name_len = (value.name orelse "").len;
+                        },
+                        .netif_destroyed => |value| {
+                            self.destroyed_count += 1;
+                            self.last_netif_id = value.netif_id;
+                            self.last_netif_type = value.netif_type;
+                            self.last_netif_name_len = (value.name orelse "").len;
+                        },
+                        .netif_up => |value| {
+                            self.up_count += 1;
+                            self.last_netif_id = value.netif_id;
+                        },
+                        .dns_servers_changed => |value| {
+                            self.dns_count += 1;
+                            self.last_netif_id = value.netif_id;
+                            self.last_dns_count = value.dns_servers.len;
+                        },
+                        .ppp_phase_changed => |value| {
+                            self.last_netif_id = value.netif_id;
+                            self.last_ppp_phase = value.phase;
+                        },
+                        .ppp_down => |value| {
+                            self.ppp_down_count += 1;
+                            self.last_netif_id = value.netif_id;
+                            self.last_ppp_down_reason = value.reason;
+                        },
+                        else => {},
+                    }
+                }
+            };
+
+            const Impl = struct {
+                receiver_ctx: ?*const anyopaque = null,
+                emit_fn: ?CallbackFn = null,
+
+                pub fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: CallbackFn) void {
+                    self.receiver_ctx = ctx;
+                    self.emit_fn = emit_fn;
+                }
+
+                pub fn clearEventCallback(self: *@This()) void {
+                    self.receiver_ctx = null;
+                    self.emit_fn = null;
+                }
+
+                pub fn emit(self: *@This()) !void {
+                    const receiver_ctx = self.receiver_ctx orelse return error.MissingReceiver;
+                    const emit_fn = self.emit_fn orelse return error.MissingReceiver;
+
+                    const dns = [_]Addr{
+                        Addr.from4(.{ 9, 9, 9, 9 }),
+                        Addr.from4(.{ 1, 0, 0, 1 }),
+                    };
+
+                    emit_fn(receiver_ctx, .{
+                        .netif_created = .{
+                            .source_id = 52,
+                            .netif_id = 3,
+                            .netif_type = .ppp,
+                            .name = "ppp0",
+                        },
+                    });
+                    emit_fn(receiver_ctx, .{
+                        .netif_up = .{
+                            .source_id = 52,
+                            .netif_id = 3,
+                        },
+                    });
+                    emit_fn(receiver_ctx, .{
+                        .dns_servers_changed = .{
+                            .source_id = 52,
+                            .netif_id = 3,
+                            .dns_servers = dns[0..],
+                        },
+                    });
+                    emit_fn(receiver_ctx, .{
+                        .ppp_phase_changed = .{
+                            .source_id = 52,
+                            .netif_id = 3,
+                            .phase = .running,
+                        },
+                    });
+                    emit_fn(receiver_ctx, .{
+                        .ppp_down = .{
+                            .source_id = 52,
+                            .netif_id = 3,
+                            .reason = .carrier_lost,
+                        },
+                    });
+                    emit_fn(receiver_ctx, .{
+                        .netif_destroyed = .{
+                            .source_id = 52,
+                            .netif_id = 3,
+                            .netif_type = .ppp,
+                            .name = "ppp0",
+                        },
+                    });
+                }
+            };
+
+            var sink = Sink{};
+            var impl = Impl{};
+            const netstack = NetStack.init(Impl, &impl);
+            const receiver = EventReceiver.init(@ptrCast(&sink), struct {
+                fn emitFn(ctx: *anyopaque, value: event.Event) void {
+                    const sink_ptr: *Sink = @ptrCast(@alignCast(ctx));
+                    const update = switch (value) {
+                        .netstack_netif_created => |v| Update{
+                            .netif_created = .{
+                                .source_id = v.source_id,
+                                .netif_id = v.netif_id,
+                                .netif_type = v.netif_type,
+                                .name = v.name(),
+                                .ctx = v.ctx,
+                            },
+                        },
+                        .netstack_netif_destroyed => |v| Update{
+                            .netif_destroyed = .{
+                                .source_id = v.source_id,
+                                .netif_id = v.netif_id,
+                                .netif_type = v.netif_type,
+                                .name = v.name(),
+                                .ctx = v.ctx,
+                            },
+                        },
+                        .netstack_netif_up => |v| Update{ .netif_up = .{ .source_id = v.source_id, .netif_id = v.netif_id, .ctx = v.ctx } },
+                        .netstack_dns_servers_changed => |v| Update{
+                            .dns_servers_changed = .{
+                                .source_id = v.source_id,
+                                .netif_id = v.netif_id,
+                                .dns_servers = v.dnsServers(),
+                                .ctx = v.ctx,
+                            },
+                        },
+                        .netstack_ppp_phase_changed => |v| Update{
+                            .ppp_phase_changed = .{
+                                .source_id = v.source_id,
+                                .netif_id = v.netif_id,
+                                .phase = v.phase,
+                                .ctx = v.ctx,
+                            },
+                        },
+                        .netstack_ppp_down => |v| Update{
+                            .ppp_down = .{
+                                .source_id = v.source_id,
+                                .netif_id = v.netif_id,
+                                .reason = v.reason,
+                                .ctx = v.ctx,
+                            },
+                        },
+                        else => return,
+                    };
+                    Sink.emitFn(@ptrCast(sink_ptr), update);
+                }
+            }.emitFn);
+
+            netstack.setEventReceiver(&receiver);
+            try impl.emit();
+
+            try testing.expectEqual(@as(usize, 1), sink.created_count);
+            try testing.expectEqual(@as(usize, 1), sink.destroyed_count);
+            try testing.expectEqual(@as(usize, 1), sink.up_count);
+            try testing.expectEqual(@as(usize, 1), sink.dns_count);
+            try testing.expectEqual(@as(usize, 1), sink.ppp_down_count);
+            try testing.expectEqual(@as(u32, 3), sink.last_netif_id);
+            try testing.expectEqual(@as(usize, 2), sink.last_dns_count);
+            try testing.expectEqual(@as(?NetifType, .ppp), sink.last_netif_type);
+            try testing.expectEqual(@as(usize, 4), sink.last_netif_name_len);
+            try testing.expectEqual(@as(?PppPhase, .running), sink.last_ppp_phase);
+            try testing.expectEqual(@as(?PppDownReason, .carrier_lost), sink.last_ppp_down_reason);
+
+            netstack.clearEventReceiver();
+            try testing.expect(impl.receiver_ctx == null);
+            try testing.expect(impl.emit_fn == null);
         }
     };
 
-    var sink = Sink{};
-    var impl = Impl{};
-    const netstack = NetStack.init(Impl, &impl);
-    const receiver = EventReceiver.init(@ptrCast(&sink), struct {
-        fn emitFn(ctx: *anyopaque, value: event.Event) void {
-            const sink_ptr: *Sink = @ptrCast(@alignCast(ctx));
-            const update = switch (value) {
-                .netstack_netif_created => |v| Update{
-                    .netif_created = .{
-                        .source_id = v.source_id,
-                        .netif_id = v.netif_id,
-                        .netif_type = v.netif_type,
-                        .name = v.name(),
-                        .ctx = v.ctx,
-                    },
-                },
-                .netstack_netif_destroyed => |v| Update{
-                    .netif_destroyed = .{
-                        .source_id = v.source_id,
-                        .netif_id = v.netif_id,
-                        .netif_type = v.netif_type,
-                        .name = v.name(),
-                        .ctx = v.ctx,
-                    },
-                },
-                .netstack_netif_up => |v| Update{ .netif_up = .{ .source_id = v.source_id, .netif_id = v.netif_id, .ctx = v.ctx } },
-                .netstack_dns_servers_changed => |v| Update{
-                    .dns_servers_changed = .{
-                        .source_id = v.source_id,
-                        .netif_id = v.netif_id,
-                        .dns_servers = v.dnsServers(),
-                        .ctx = v.ctx,
-                    },
-                },
-                .netstack_ppp_phase_changed => |v| Update{
-                    .ppp_phase_changed = .{
-                        .source_id = v.source_id,
-                        .netif_id = v.netif_id,
-                        .phase = v.phase,
-                        .ctx = v.ctx,
-                    },
-                },
-                .netstack_ppp_down => |v| Update{
-                    .ppp_down = .{
-                        .source_id = v.source_id,
-                        .netif_id = v.netif_id,
-                        .reason = v.reason,
-                        .ctx = v.ctx,
-                    },
-                },
-                else => return,
-            };
-            Sink.emitFn(@ptrCast(sink_ptr), update);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
         }
-    }.emitFn);
 
-    netstack.setEventReceiver(&receiver);
-    try impl.emit();
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
 
-    try std.testing.expectEqual(@as(usize, 1), sink.created_count);
-    try std.testing.expectEqual(@as(usize, 1), sink.destroyed_count);
-    try std.testing.expectEqual(@as(usize, 1), sink.up_count);
-    try std.testing.expectEqual(@as(usize, 1), sink.dns_count);
-    try std.testing.expectEqual(@as(usize, 1), sink.ppp_down_count);
-    try std.testing.expectEqual(@as(u32, 3), sink.last_netif_id);
-    try std.testing.expectEqual(@as(usize, 2), sink.last_dns_count);
-    try std.testing.expectEqual(@as(?NetifType, .ppp), sink.last_netif_type);
-    try std.testing.expectEqual(@as(usize, 4), sink.last_netif_name_len);
-    try std.testing.expectEqual(@as(?PppPhase, .running), sink.last_ppp_phase);
-    try std.testing.expectEqual(@as(?PppDownReason, .carrier_lost), sink.last_ppp_down_reason);
+            TestCase.makeEventCopiesDhcpAndDnsFields(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.makeEventCopiesNetifMetadata(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.makeEventMapsPppFields(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.registerAndEmitUpdatesThroughCallback(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    netstack.clearEventReceiver();
-    try std.testing.expect(impl.receiver_ctx == null);
-    try std.testing.expect(impl.emit_fn == null);
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

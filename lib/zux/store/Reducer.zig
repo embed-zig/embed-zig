@@ -1,3 +1,4 @@
+const testing_api = @import("testing");
 const Emitter = @import("../pipeline/Emitter.zig");
 const Message = @import("../pipeline/Message.zig");
 const Node = @import("../pipeline/Node.zig");
@@ -39,90 +40,121 @@ pub fn make(comptime Store: type) type {
     };
 }
 
-test "zux/store/Reducer/unit_tests/use_case_shape" {
-    const std = @import("std");
-    const embed_std = @import("embed_std");
-    const Store = @import("../Store.zig");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn use_case_shape(testing: anytype, _: lib.mem.Allocator) !void {
+            const embed_std = @import("embed_std");
+            const store = @import("../store.zig");
 
-    const ButtonStore = struct {
-        pressed: bool = false,
-    };
+            const ButtonStore = struct {
+                pressed: bool = false,
+            };
 
-    const AppStore = Store.make(embed_std.std, .{
-        .stores = .{
-            .button = ButtonStore,
-        },
-        .state = .{},
-    });
+            const AppStore = comptime blk: {
+                const B = store.Builder(.{});
+                var builder = B.init();
+                builder.setStore(.button, ButtonStore);
+                break :blk builder.make(embed_std.std);
+            };
 
-    const Reducer = make(AppStore);
+            const ReducerTy = make(AppStore);
 
-    const Sink = struct {
-        called: bool = false,
-        last_button_id: ?u32 = 999,
-        last_pressed: bool = false,
+            const Sink = struct {
+                called: bool = false,
+                last_button_id: ?u32 = 999,
+                last_pressed: bool = false,
 
-        pub fn emit(self: *@This(), message: Message) !void {
-            self.called = true;
-            switch (message.body) {
-                .raw_grouped_button => |group| {
-                    self.last_button_id = group.button_id;
-                    self.last_pressed = group.pressed;
-                },
-                else => {},
-            }
-        }
-    };
-
-    const ButtonReducer = struct {
-        fn reduce(stores: *AppStore.Stores, message: Message, emit: Emitter) !usize {
-            switch (message.body) {
-                .raw_single_button => |button| {
-                    stores.button.pressed = button.pressed;
-
-                    if (button.pressed) {
-                        try emit.emit(.{
-                            .origin = .node,
-                            .body = .{
-                                .raw_grouped_button = .{
-                                    .source_id = button.source_id,
-                                    .button_id = 0,
-                                    .pressed = true,
-                                },
-                            },
-                        });
-                        return 1;
+                pub fn emit(self: *@This(), message: Message) !void {
+                    self.called = true;
+                    switch (message.body) {
+                        .raw_grouped_button => |group| {
+                            self.last_button_id = group.button_id;
+                            self.last_pressed = group.pressed;
+                        },
+                        else => {},
                     }
+                }
+            };
 
-                    return 0;
+            const ButtonReducer = struct {
+                fn reduce(stores: *AppStore.Stores, message: Message, emit: Emitter) !usize {
+                    switch (message.body) {
+                        .raw_single_button => |button| {
+                            stores.button.pressed = button.pressed;
+
+                            if (button.pressed) {
+                                try emit.emit(.{
+                                    .origin = .node,
+                                    .body = .{
+                                        .raw_grouped_button = .{
+                                            .source_id = button.source_id,
+                                            .button_id = 0,
+                                            .pressed = true,
+                                        },
+                                    },
+                                });
+                                return 1;
+                            }
+
+                            return 0;
+                        },
+                        else => return 0,
+                    }
+                }
+            };
+
+            var stores: AppStore.Stores = .{
+                .button = .{},
+            };
+            var reducer_impl: ReducerTy = undefined;
+            var sink = Sink{};
+
+            var node = reducer_impl.init(&stores, ButtonReducer.reduce);
+            node.bindOutput(Emitter.init(&sink));
+
+            const emitted = try node.process(.{
+                .origin = .source,
+                .body = .{
+                    .raw_single_button = .{
+                        .source_id = 1,
+                        .pressed = true,
+                    },
                 },
-                else => return 0,
-            }
+            });
+
+            try testing.expect(stores.button.pressed);
+            try testing.expect(sink.called);
+            try testing.expectEqual(@as(?u32, 0), sink.last_button_id);
+            try testing.expect(sink.last_pressed);
+            try testing.expectEqual(@as(usize, 1), emitted);
         }
     };
 
-    var stores: AppStore.Stores = .{
-        .button = .{},
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            const testing = lib.testing;
+
+            TestCase.use_case_shape(testing, allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
     };
-    var reducer_impl: Reducer = undefined;
-    var sink = Sink{};
 
-    var node = reducer_impl.init(&stores, ButtonReducer.reduce);
-    node.bindOutput(Emitter.init(&sink));
-
-    const emitted = try node.process(.{
-        .origin = .source,
-        .body = .{
-            .raw_single_button = .{
-                .source_id = 1,
-                .pressed = true,
-            },
-        },
-    });
-
-    try std.testing.expect(stores.button.pressed);
-    try std.testing.expect(sink.called);
-    try std.testing.expectEqual(@as(?u32, 0), sink.last_button_id);
-    try std.testing.expect(sink.last_pressed);
-    try std.testing.expectEqual(@as(usize, 1), emitted);
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

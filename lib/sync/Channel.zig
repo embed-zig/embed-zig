@@ -10,6 +10,7 @@
 //!   const result = try ch.recv();
 
 const embed = @import("embed");
+const testing_api = @import("testing");
 
 pub fn SendResult() type {
     return struct { ok: bool };
@@ -76,72 +77,100 @@ pub fn make(comptime impl: fn (type) type) fn (type) type {
     }.factory;
 }
 
-test "sync/unit_tests/Channel/factory_forwards_contract" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const FakeChannelFactory = struct {
+                fn make(comptime T: type) type {
+                    return struct {
+                        slot: ?T = null,
+                        closed: bool = false,
+                        init_capacity: usize = 0,
 
-    const FakeChannelFactory = struct {
-        fn make(comptime T: type) type {
-            return struct {
-                slot: ?T = null,
-                closed: bool = false,
-                init_capacity: usize = 0,
+                        pub fn init(allocator: embed.mem.Allocator, capacity: usize) !@This() {
+                            _ = allocator;
+                            return .{ .init_capacity = capacity };
+                        }
 
-                pub fn init(allocator: embed.mem.Allocator, capacity: usize) !@This() {
-                    _ = allocator;
-                    return .{ .init_capacity = capacity };
+                        pub fn deinit(self: *@This()) void {
+                            self.* = undefined;
+                        }
+
+                        pub fn close(self: *@This()) void {
+                            self.closed = true;
+                        }
+
+                        pub fn send(self: *@This(), value: T) !SendResult() {
+                            if (self.closed) return .{ .ok = false };
+                            self.slot = value;
+                            return .{ .ok = true };
+                        }
+
+                        pub fn recv(self: *@This()) !RecvResult(T) {
+                            if (self.slot) |value| {
+                                self.slot = null;
+                                return .{ .value = value, .ok = true };
+                            }
+                            return .{ .value = undefined, .ok = false };
+                        }
+
+                        pub fn recvTimeout(self: *@This(), _: u32) !RecvResult(T) {
+                            return self.recv();
+                        }
+                    };
                 }
+            }.make;
 
-                pub fn deinit(self: *@This()) void {
-                    self.* = undefined;
-                }
+            const Channel = make(FakeChannelFactory);
+            const U32Channel = Channel(u32);
 
-                pub fn close(self: *@This()) void {
-                    self.closed = true;
-                }
+            var ch = try U32Channel.make(lib.testing.allocator, 7);
+            defer ch.deinit();
 
-                pub fn send(self: *@This(), value: T) !SendResult() {
-                    if (self.closed) return .{ .ok = false };
-                    self.slot = value;
-                    return .{ .ok = true };
-                }
+            try lib.testing.expectEqual(@as(usize, 7), ch.ch.init_capacity);
 
-                pub fn recv(self: *@This()) !RecvResult(T) {
-                    if (self.slot) |value| {
-                        self.slot = null;
-                        return .{ .value = value, .ok = true };
-                    }
-                    return .{ .value = undefined, .ok = false };
-                }
+            const send_ok = try ch.send(42);
+            try lib.testing.expect(send_ok.ok);
 
-                pub fn recvTimeout(self: *@This(), _: u32) !RecvResult(T) {
-                    return self.recv();
-                }
-            };
+            const recv_ok = try ch.recv();
+            try lib.testing.expect(recv_ok.ok);
+            try lib.testing.expectEqual(@as(u32, 42), recv_ok.value);
+
+            ch.close();
+            const send_closed = try ch.send(99);
+            try lib.testing.expect(!send_closed.ok);
+
+            const recv_closed = try ch.recv();
+            try lib.testing.expect(!recv_closed.ok);
+
+            const recv_timeout_closed = try ch.recvTimeout(10);
+            try lib.testing.expect(!recv_timeout_closed.ok);
         }
-    }.make;
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    const Channel = make(FakeChannelFactory);
-    const U32Channel = Channel(u32);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    var ch = try U32Channel.make(std.testing.allocator, 7);
-    defer ch.deinit();
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    try std.testing.expectEqual(@as(usize, 7), ch.ch.init_capacity);
-
-    const send_ok = try ch.send(42);
-    try std.testing.expect(send_ok.ok);
-
-    const recv_ok = try ch.recv();
-    try std.testing.expect(recv_ok.ok);
-    try std.testing.expectEqual(@as(u32, 42), recv_ok.value);
-
-    ch.close();
-    const send_closed = try ch.send(99);
-    try std.testing.expect(!send_closed.ok);
-
-    const recv_closed = try ch.recv();
-    try std.testing.expect(!recv_closed.ok);
-
-    const recv_timeout_closed = try ch.recvTimeout(10);
-    try std.testing.expect(!recv_timeout_closed.ok);
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

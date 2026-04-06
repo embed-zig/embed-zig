@@ -1,8 +1,7 @@
 const std = @import("std");
-const Tests = @import("build/Tests.zig");
+const build_test = @import("build/test.zig");
 
 const lib_embed = @import("build/lib/embed.zig");
-const lib_integration = @import("build/lib/integration.zig");
 const lib_testing = @import("build/lib/testing.zig");
 const lib_context = @import("build/lib/context.zig");
 const lib_sync = @import("build/lib/sync.zig");
@@ -13,7 +12,9 @@ const lib_mime = @import("build/lib/mime.zig");
 const lib_bt = @import("build/lib/bt.zig");
 const lib_motion = @import("build/lib/motion.zig");
 const lib_wifi = @import("build/lib/wifi.zig");
+const lib_modem = @import("build/lib/modem.zig");
 const lib_audio = @import("build/lib/audio.zig");
+const lib_display = @import("build/lib/display.zig");
 const lib_ledstrip = @import("build/lib/ledstrip.zig");
 const lib_embed_std = @import("build/lib/embed_std.zig");
 const lib_zux = @import("build/lib/zux.zig");
@@ -26,9 +27,9 @@ const pkg_opus = @import("build/pkg/opus.zig");
 const pkg_lvgl = @import("build/pkg/lvgl.zig");
 const pkg_portaudio = @import("build/pkg/portaudio.zig");
 const pkg_speexdsp = @import("build/pkg/speexdsp.zig");
+
 const Libraries = struct {
     pub const embed = lib_embed;
-    pub const integration = lib_integration;
     pub const testing = lib_testing;
     pub const context = lib_context;
     pub const sync = lib_sync;
@@ -39,7 +40,9 @@ const Libraries = struct {
     pub const bt = lib_bt;
     pub const motion = lib_motion;
     pub const wifi = lib_wifi;
+    pub const modem = lib_modem;
     pub const audio = lib_audio;
+    pub const display = lib_display;
     pub const ledstrip = lib_ledstrip;
     pub const embed_std = lib_embed_std;
     pub const zux = lib_zux;
@@ -80,30 +83,5 @@ pub fn build(b: *std.Build) void {
         }
     }
 
-    const tests = Tests.create(b);
-    tests.addTest(b, "embed", null);
-    tests.addTest(b, "embed_std", null);
-    tests.addTest(b, "io", null);
-    tests.addTest(b, "drivers", null);
-    tests.addTest(b, "net", null);
-    tests.addTest(b, "mime", null);
-    tests.addTest(b, "bt", null);
-    tests.addTest(b, "motion", null);
-    tests.addTest(b, "wifi", null);
-    tests.addTest(b, "audio", null);
-    tests.addTest(b, "ledstrip", null);
-    tests.addTest(b, "sync", null);
-    tests.addTest(b, "context", null);
-    tests.addTest(b, "testing", null);
-    tests.addTest(b, "integration", null);
-    tests.addTest(b, "zux", lib_zux.linkTest);
-
-    if (b.modules.get("core_bluetooth") != null) tests.addTest(b, "core_bluetooth", null);
-    if (b.modules.get("core_wlan") != null) tests.addTest(b, "core_wlan", null);
-    if (b.modules.get("ogg") != null) tests.addTest(b, "ogg", pkg_ogg.linkTest);
-    if (b.modules.get("stb_truetype") != null) tests.addTest(b, "stb_truetype", pkg_stb_truetype.linkTest);
-    if (b.modules.get("opus") != null) tests.addTest(b, "opus", pkg_opus.linkTest);
-    if (b.modules.get("lvgl") != null) tests.addTest(b, "lvgl", pkg_lvgl.linkTest);
-    if (b.modules.get("portaudio") != null) tests.addTest(b, "portaudio", pkg_portaudio.linkTest);
-    if (b.modules.get("speexdsp") != null) tests.addTest(b, "speexdsp", pkg_speexdsp.linkTest);
+    build_test.create(b, target, optimize, Libraries, Packages);
 }

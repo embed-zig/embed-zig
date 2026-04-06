@@ -1,5 +1,5 @@
-const std = @import("std");
 const event = @import("../event.zig");
+const testing_api = @import("testing");
 
 const Message = @This();
 
@@ -23,33 +23,70 @@ pub fn kind(self: Message) Kind {
     };
 }
 
-test "zux/pipeline/Message/unit_tests/tag_tracks_body_variant" {
-    const message: Message = .{
-        .origin = .source,
-        .timestamp_ns = 42,
-        .body = .{
-            .button_gesture = .{
-                .source_id = 1,
-                .gesture = .{ .click = 1 },
-            },
-        },
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn tagTracksBodyVariant(testing: anytype) !void {
+            const message: Message = .{
+                .origin = .source,
+                .timestamp_ns = 42,
+                .body = .{
+                    .button_gesture = .{
+                        .source_id = 1,
+                        .gesture = .{ .click = 1 },
+                    },
+                },
+            };
+
+            try testing.expectEqual(Kind.button_gesture, message.kind());
+            try testing.expectEqual(Origin.source, message.origin);
+            try testing.expectEqual(@as(i128, 42), message.timestamp_ns);
+        }
+
+        fn tickVariantUsesTickKind(testing: anytype) !void {
+            const message: Message = .{
+                .origin = .timer,
+                .timestamp_ns = 99,
+                .body = .{
+                    .tick = .{},
+                },
+            };
+
+            try testing.expectEqual(Kind.tick, message.kind());
+            try testing.expectEqual(Origin.timer, message.origin);
+            try testing.expectEqual(@as(i128, 99), message.timestamp_ns);
+        }
     };
 
-    try std.testing.expectEqual(Kind.button_gesture, message.kind());
-    try std.testing.expectEqual(Origin.source, message.origin);
-    try std.testing.expectEqual(@as(i128, 42), message.timestamp_ns);
-}
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-test "zux/pipeline/Message/unit_tests/tick_variant_uses_tick_kind" {
-    const message: Message = .{
-        .origin = .timer,
-        .timestamp_ns = 99,
-        .body = .{
-            .tick = .{},
-        },
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
+
+            TestCase.tagTracksBodyVariant(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.tickVariantUsesTickKind(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
     };
 
-    try std.testing.expectEqual(Kind.tick, message.kind());
-    try std.testing.expectEqual(Origin.timer, message.origin);
-    try std.testing.expectEqual(@as(i128, 99), message.timestamp_ns);
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

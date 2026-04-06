@@ -82,9 +82,3 @@ pub const Event = make(.{
     @import("NetStack.zig").PppUpEvent,
     @import("NetStack.zig").PppDownEvent,
 });
-
-test {
-    _ = @import("event/Context.zig");
-    _ = @import("event/EventReceiver.zig");
-    _ = @import("pipeline/Tick.zig");
-}

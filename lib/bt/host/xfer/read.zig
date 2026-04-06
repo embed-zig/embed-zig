@@ -9,6 +9,7 @@
 
 const att = @import("../att.zig");
 const Chunk = @import("Chunk.zig");
+const testing_api = @import("testing");
 
 pub const Config = struct {
     att_mtu: u16 = att.DEFAULT_MTU,
@@ -140,153 +141,173 @@ fn sendMissingReadChunks(transport: anytype, rcvmask: []const u8, total: u16, ma
     }
 }
 
-test "bt/unit_tests/host/xfer/read/assembles_chunks_and_sends_ack" {
-    const std = @import("std");
-    const embed_std = @import("embed_std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const HappyTransport = struct {
+                chunk1: [Chunk.header_size + 3]u8 = undefined,
+                chunk2: [Chunk.header_size + 2]u8 = undefined,
+                read_index: usize = 0,
+                writes: [4][Chunk.max_mtu]u8 = undefined,
+                write_lens: [4]usize = [_]usize{0} ** 4,
+                write_count: usize = 0,
+                deinited: bool = false,
 
-    const FakeTransport = struct {
-        chunk1: [Chunk.header_size + 3]u8 = undefined,
-        chunk2: [Chunk.header_size + 2]u8 = undefined,
-        read_index: usize = 0,
-        writes: [4][Chunk.max_mtu]u8 = undefined,
-        write_lens: [4]usize = [_]usize{0} ** 4,
-        write_count: usize = 0,
-        deinited: bool = false,
+                fn init() @This() {
+                    var self: @This() = .{};
+                    const hdr1 = (Chunk.Header{ .total = 2, .seq = 1 }).encode();
+                    const hdr2 = (Chunk.Header{ .total = 2, .seq = 2 }).encode();
+                    @memcpy(self.chunk1[0..Chunk.header_size], &hdr1);
+                    @memcpy(self.chunk1[Chunk.header_size..], "hel");
+                    @memcpy(self.chunk2[0..Chunk.header_size], &hdr2);
+                    @memcpy(self.chunk2[Chunk.header_size..], "lo");
+                    return self;
+                }
 
-        fn init() @This() {
-            var self: @This() = .{};
-            const hdr1 = (Chunk.Header{ .total = 2, .seq = 1 }).encode();
-            const hdr2 = (Chunk.Header{ .total = 2, .seq = 2 }).encode();
-            @memcpy(self.chunk1[0..Chunk.header_size], &hdr1);
-            @memcpy(self.chunk1[Chunk.header_size..], "hel");
-            @memcpy(self.chunk2[0..Chunk.header_size], &hdr2);
-            @memcpy(self.chunk2[Chunk.header_size..], "lo");
-            return self;
-        }
-
-        fn read(self: *@This(), _: u32, out: []u8) !usize {
-            const payload = switch (self.read_index) {
-                0 => self.chunk1[0..],
-                1 => self.chunk2[0..],
-                else => return error.Closed,
-            };
-            self.read_index += 1;
-            @memcpy(out[0..payload.len], payload);
-            return payload.len;
-        }
-
-        fn write(self: *@This(), data: []const u8) !usize {
-            @memcpy(self.writes[self.write_count][0..data.len], data);
-            self.write_lens[self.write_count] = data.len;
-            self.write_count += 1;
-            return data.len;
-        }
-
-        fn deinit(self: *@This()) void {
-            self.deinited = true;
-        }
-    };
-
-    var transport = FakeTransport.init();
-    const payload = try read(embed_std.std, std.testing.allocator, &transport, .{
-        .topic = 0x0102030405060708,
-    });
-    defer std.testing.allocator.free(payload);
-
-    var expected_req: [Chunk.read_start_magic.len + Chunk.topic_size]u8 = undefined;
-    @memcpy(expected_req[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
-    _ = Chunk.encodeReadStartMetadata(expected_req[Chunk.read_start_magic.len..], 0x0102030405060708, &.{});
-
-    try std.testing.expectEqual(@as(usize, 5), payload.len);
-    try std.testing.expectEqualStrings("hello", payload);
-    try std.testing.expect(transport.deinited);
-    try std.testing.expectEqual(@as(usize, 2), transport.write_count);
-    try std.testing.expectEqualSlices(u8, &expected_req, transport.writes[0][0..transport.write_lens[0]]);
-    try std.testing.expectEqualSlices(u8, &Chunk.ack_signal, transport.writes[1][0..transport.write_lens[1]]);
-}
-
-test "bt/unit_tests/host/xfer/read/requests_missing_chunks_after_timeout" {
-    const std = @import("std");
-    const embed_std = @import("embed_std");
-
-    const Step = union(enum) {
-        payload: usize,
-        timeout,
-    };
-
-    const script = [_]Step{
-        .{ .payload = 0 },
-        .timeout,
-        .{ .payload = 1 },
-    };
-
-    const FakeTransport = struct {
-        steps: [script.len]Step = script,
-        chunk1: [Chunk.header_size + 3]u8 = undefined,
-        chunk2: [Chunk.header_size + 2]u8 = undefined,
-        step_index: usize = 0,
-        writes: [4][Chunk.max_mtu]u8 = undefined,
-        write_lens: [4]usize = [_]usize{0} ** 4,
-        write_count: usize = 0,
-        deinited: bool = false,
-
-        fn init() @This() {
-            var self: @This() = .{};
-            const hdr1 = (Chunk.Header{ .total = 2, .seq = 1 }).encode();
-            const hdr2 = (Chunk.Header{ .total = 2, .seq = 2 }).encode();
-            @memcpy(self.chunk1[0..Chunk.header_size], &hdr1);
-            @memcpy(self.chunk1[Chunk.header_size..], "hel");
-            @memcpy(self.chunk2[0..Chunk.header_size], &hdr2);
-            @memcpy(self.chunk2[Chunk.header_size..], "lo");
-            return self;
-        }
-
-        fn read(self: *@This(), _: u32, out: []u8) !usize {
-            const step = self.steps[self.step_index];
-            self.step_index += 1;
-            return switch (step) {
-                .timeout => error.Timeout,
-                .payload => |idx| blk: {
-                    const payload = switch (idx) {
+                pub fn read(self: *@This(), _: u32, out: []u8) anyerror!usize {
+                    const payload = switch (self.read_index) {
                         0 => self.chunk1[0..],
                         1 => self.chunk2[0..],
                         else => return error.Closed,
                     };
+                    self.read_index += 1;
                     @memcpy(out[0..payload.len], payload);
-                    break :blk payload.len;
-                },
+                    return payload.len;
+                }
+
+                pub fn write(self: *@This(), data: []const u8) !usize {
+                    @memcpy(self.writes[self.write_count][0..data.len], data);
+                    self.write_lens[self.write_count] = data.len;
+                    self.write_count += 1;
+                    return data.len;
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    self.deinited = true;
+                }
             };
-        }
 
-        fn write(self: *@This(), data: []const u8) !usize {
-            @memcpy(self.writes[self.write_count][0..data.len], data);
-            self.write_lens[self.write_count] = data.len;
-            self.write_count += 1;
-            return data.len;
-        }
+            var transport = HappyTransport.init();
+            const payload_bytes = try read(lib, lib.testing.allocator, &transport, .{
+                .att_mtu = 9,
+                .topic = 0x0102030405060708,
+            });
+            defer lib.testing.allocator.free(payload_bytes);
 
-        fn deinit(self: *@This()) void {
-            self.deinited = true;
+            var expected_req: [Chunk.read_start_magic.len + Chunk.topic_size]u8 = undefined;
+            @memcpy(expected_req[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
+            _ = Chunk.encodeReadStartMetadata(expected_req[Chunk.read_start_magic.len..], 0x0102030405060708, &.{});
+
+            try lib.testing.expectEqual(@as(usize, 5), payload_bytes.len);
+            try lib.testing.expectEqualSlices(u8, "hello", payload_bytes);
+            try lib.testing.expect(transport.deinited);
+            try lib.testing.expectEqual(@as(usize, 2), transport.write_count);
+            try lib.testing.expectEqualSlices(u8, &expected_req, transport.writes[0][0..transport.write_lens[0]]);
+            try lib.testing.expectEqualSlices(u8, &Chunk.ack_signal, transport.writes[1][0..transport.write_lens[1]]);
+
+            const Step = union(enum) {
+                payload: usize,
+                timeout,
+            };
+            const script = [_]Step{
+                .{ .payload = 0 },
+                .timeout,
+                .{ .payload = 1 },
+            };
+
+            const RetryTransport = struct {
+                steps: [script.len]Step = script,
+                chunk1: [Chunk.header_size + 3]u8 = undefined,
+                chunk2: [Chunk.header_size + 2]u8 = undefined,
+                step_index: usize = 0,
+                writes: [4][Chunk.max_mtu]u8 = undefined,
+                write_lens: [4]usize = [_]usize{0} ** 4,
+                write_count: usize = 0,
+                deinited: bool = false,
+
+                fn init() @This() {
+                    var self: @This() = .{};
+                    const hdr1 = (Chunk.Header{ .total = 2, .seq = 1 }).encode();
+                    const hdr2 = (Chunk.Header{ .total = 2, .seq = 2 }).encode();
+                    @memcpy(self.chunk1[0..Chunk.header_size], &hdr1);
+                    @memcpy(self.chunk1[Chunk.header_size..], "hel");
+                    @memcpy(self.chunk2[0..Chunk.header_size], &hdr2);
+                    @memcpy(self.chunk2[Chunk.header_size..], "lo");
+                    return self;
+                }
+
+                pub fn read(self: *@This(), _: u32, out: []u8) anyerror!usize {
+                    const step = self.steps[self.step_index];
+                    self.step_index += 1;
+                    return switch (step) {
+                        .timeout => error.Timeout,
+                        .payload => |idx| blk: {
+                            const chunk_payload = switch (idx) {
+                                0 => self.chunk1[0..],
+                                1 => self.chunk2[0..],
+                                else => return error.Closed,
+                            };
+                            @memcpy(out[0..chunk_payload.len], chunk_payload);
+                            break :blk chunk_payload.len;
+                        },
+                    };
+                }
+
+                pub fn write(self: *@This(), data: []const u8) !usize {
+                    @memcpy(self.writes[self.write_count][0..data.len], data);
+                    self.write_lens[self.write_count] = data.len;
+                    self.write_count += 1;
+                    return data.len;
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    self.deinited = true;
+                }
+            };
+
+            var retry_transport = RetryTransport.init();
+            const retry_payload = try read(lib, lib.testing.allocator, &retry_transport, .{
+                .att_mtu = 9,
+                .topic = 0x0102030405060708,
+            });
+            defer lib.testing.allocator.free(retry_payload);
+
+            var expected_loss: [Chunk.max_mtu]u8 = undefined;
+            const expected = Chunk.encodeLossList(&.{2}, &expected_loss);
+            try lib.testing.expectEqual(@as(usize, 5), retry_payload.len);
+            try lib.testing.expectEqualSlices(u8, "hello", retry_payload);
+            try lib.testing.expect(retry_transport.deinited);
+            try lib.testing.expectEqual(@as(usize, 3), retry_transport.write_count);
+            try lib.testing.expectEqualSlices(u8, &expected_req, retry_transport.writes[0][0..retry_transport.write_lens[0]]);
+            try lib.testing.expectEqualSlices(u8, expected, retry_transport.writes[1][0..retry_transport.write_lens[1]]);
+            try lib.testing.expectEqualSlices(u8, &Chunk.ack_signal, retry_transport.writes[2][0..retry_transport.write_lens[2]]);
         }
     };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var transport = FakeTransport.init();
-    const payload = try read(embed_std.std, std.testing.allocator, &transport, .{
-        .topic = 0x0102030405060708,
-    });
-    defer std.testing.allocator.free(payload);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    var expected_loss: [Chunk.max_mtu]u8 = undefined;
-    const expected = Chunk.encodeLossList(&.{2}, &expected_loss);
-    var expected_req: [Chunk.read_start_magic.len + Chunk.topic_size]u8 = undefined;
-    @memcpy(expected_req[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
-    _ = Chunk.encodeReadStartMetadata(expected_req[Chunk.read_start_magic.len..], 0x0102030405060708, &.{});
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    try std.testing.expectEqual(@as(usize, 5), payload.len);
-    try std.testing.expectEqualStrings("hello", payload);
-    try std.testing.expect(transport.deinited);
-    try std.testing.expectEqual(@as(usize, 3), transport.write_count);
-    try std.testing.expectEqualSlices(u8, &expected_req, transport.writes[0][0..transport.write_lens[0]]);
-    try std.testing.expectEqualSlices(u8, expected, transport.writes[1][0..transport.write_lens[1]]);
-    try std.testing.expectEqualSlices(u8, &Chunk.ack_signal, transport.writes[2][0..transport.write_lens[2]]);
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
+

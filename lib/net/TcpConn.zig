@@ -59,14 +59,14 @@ pub fn TcpConn(comptime lib: type) type {
 
         pub fn close(self: *Self) void {
             if (!self.closed) {
-                self.stream.shutdown(.both) catch {};
-                self.stream.close();
                 self.closed = true;
+                self.stream.shutdown(.both) catch {};
             }
         }
 
         pub fn deinit(self: *Self) void {
             self.close();
+            if (!self.stream.closed) self.stream.close();
             const a = self.allocator;
             a.destroy(self);
         }

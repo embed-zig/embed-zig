@@ -5,6 +5,7 @@
 //! introducing a generic reader object.
 
 const TypeA = @This();
+const testing_api = @import("testing");
 
 ptr: *anyopaque,
 vtable: *const VTable,
@@ -69,106 +70,138 @@ pub fn init(pointer: anytype) TypeA {
     };
 }
 
-test "drivers/unit_tests/nfc/io/TypeA/dispatches_transceive_with_exchange_flags" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn dispatchesTransceiveWithExchangeFlags() !void {
+            const Fake = struct {
+                last_tx: [8]u8 = [_]u8{0} ** 8,
+                last_tx_len: usize = 0,
+                last_tx_bits: usize = 0,
+                last_timeout_ms: u32 = 0,
+                last_tx_crc: bool = false,
+                last_rx_crc: bool = false,
+                last_reset_collision: bool = false,
 
-    const Fake = struct {
-        last_tx: [8]u8 = [_]u8{0} ** 8,
-        last_tx_len: usize = 0,
-        last_tx_bits: usize = 0,
-        last_timeout_ms: u32 = 0,
-        last_tx_crc: bool = false,
-        last_rx_crc: bool = false,
-        last_reset_collision: bool = false,
+                fn transceive(self: *@This(), exchange: Exchange, rx: []u8) Error!usize {
+                    self.last_tx_len = exchange.tx.len;
+                    self.last_tx_bits = exchange.tx_bits;
+                    self.last_timeout_ms = exchange.timeout_ms;
+                    self.last_tx_crc = exchange.tx_crc;
+                    self.last_rx_crc = exchange.rx_crc;
+                    self.last_reset_collision = exchange.reset_collision;
+                    @memcpy(self.last_tx[0..exchange.tx.len], exchange.tx);
+                    rx[0] = 0x44;
+                    rx[1] = 0x00;
+                    return 16;
+                }
+            };
 
-        fn transceive(self: *@This(), exchange: Exchange, rx: []u8) Error!usize {
-            self.last_tx_len = exchange.tx.len;
-            self.last_tx_bits = exchange.tx_bits;
-            self.last_timeout_ms = exchange.timeout_ms;
-            self.last_tx_crc = exchange.tx_crc;
-            self.last_rx_crc = exchange.rx_crc;
-            self.last_reset_collision = exchange.reset_collision;
-            @memcpy(self.last_tx[0..exchange.tx.len], exchange.tx);
-            rx[0] = 0x44;
-            rx[1] = 0x00;
-            return 16;
+            var fake = Fake{};
+            const type_a = TypeA.init(&fake);
+            var rx: [2]u8 = undefined;
+
+            const bits = try type_a.transceive(.{
+                .tx = &.{0x26},
+                .tx_bits = 7,
+                .timeout_ms = 1,
+                .tx_crc = false,
+                .rx_crc = false,
+                .reset_collision = true,
+            }, &rx);
+
+            try lib.testing.expectEqual(@as(usize, 16), bits);
+            try lib.testing.expectEqual(@as(usize, 1), fake.last_tx_len);
+            try lib.testing.expectEqual(@as(usize, 7), fake.last_tx_bits);
+            try lib.testing.expectEqual(@as(u32, 1), fake.last_timeout_ms);
+            try lib.testing.expect(!fake.last_tx_crc);
+            try lib.testing.expect(!fake.last_rx_crc);
+            try lib.testing.expect(fake.last_reset_collision);
+            try lib.testing.expectEqualSlices(u8, &.{0x26}, fake.last_tx[0..1]);
+            try lib.testing.expectEqualSlices(u8, &.{ 0x44, 0x00 }, &rx);
+        }
+
+        fn validatesExchangeAndPropagatesErrors() !void {
+            const Fake = struct {
+                fail: bool = false,
+
+                fn transceive(self: *@This(), _: Exchange, _: []u8) Error!usize {
+                    if (self.fail) return error.Timeout;
+                    return 0;
+                }
+            };
+
+            var fake = Fake{ .fail = true };
+            const type_a = TypeA.init(&fake);
+            var rx: [1]u8 = undefined;
+
+            try lib.testing.expectError(error.Timeout, type_a.transceive(.{
+                .tx = &.{0x00},
+                .tx_bits = 8,
+                .timeout_ms = 1,
+            }, &rx));
+
+            fake.fail = false;
+            try lib.testing.expectError(error.InvalidArgument, type_a.transceive(.{
+                .tx = &.{0x00},
+                .tx_bits = 9,
+                .timeout_ms = 1,
+            }, &rx));
+
+            try lib.testing.expectError(error.InvalidArgument, type_a.transceive(.{
+                .tx = &.{0x00},
+                .tx_bits = 8,
+                .timeout_ms = 0,
+            }, &rx));
+
+            try lib.testing.expectError(error.InvalidArgument, type_a.transceive(.{
+                .tx = &.{},
+                .tx_bits = 0,
+                .timeout_ms = 1,
+            }, &rx));
+
+            try lib.testing.expectError(error.InvalidArgument, type_a.transceive(.{
+                .tx = &.{0x00},
+                .tx_bits = 0,
+                .timeout_ms = 1,
+            }, &rx));
+
+            try lib.testing.expectError(error.InvalidArgument, type_a.transceive(.{
+                .tx = &.{0x00},
+                .tx_bits = 8,
+                .timeout_ms = max_timeout_ms + 1,
+            }, &rx));
         }
     };
 
-    var fake = Fake{};
-    const type_a = TypeA.init(&fake);
-    var rx: [2]u8 = undefined;
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    const bits = try type_a.transceive(.{
-        .tx = &.{0x26},
-        .tx_bits = 7,
-        .timeout_ms = 1,
-        .tx_crc = false,
-        .rx_crc = false,
-        .reset_collision = true,
-    }, &rx);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    try std.testing.expectEqual(@as(usize, 16), bits);
-    try std.testing.expectEqual(@as(usize, 1), fake.last_tx_len);
-    try std.testing.expectEqual(@as(usize, 7), fake.last_tx_bits);
-    try std.testing.expectEqual(@as(u32, 1), fake.last_timeout_ms);
-    try std.testing.expect(!fake.last_tx_crc);
-    try std.testing.expect(!fake.last_rx_crc);
-    try std.testing.expect(fake.last_reset_collision);
-    try std.testing.expectEqualSlices(u8, &.{0x26}, fake.last_tx[0..1]);
-    try std.testing.expectEqualSlices(u8, &.{ 0x44, 0x00 }, &rx);
-}
+            TestCase.dispatchesTransceiveWithExchangeFlags() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.validatesExchangeAndPropagatesErrors() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-test "drivers/unit_tests/nfc/io/TypeA/validates_exchange_and_propagates_errors" {
-    const std = @import("std");
-
-    const Fake = struct {
-        fail: bool = false,
-
-        fn transceive(self: *@This(), _: Exchange, _: []u8) Error!usize {
-            if (self.fail) return error.Timeout;
-            return 0;
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    var fake = Fake{ .fail = true };
-    const type_a = TypeA.init(&fake);
-    var rx: [1]u8 = undefined;
-
-    try std.testing.expectError(error.Timeout, type_a.transceive(.{
-        .tx = &.{0x00},
-        .tx_bits = 8,
-        .timeout_ms = 1,
-    }, &rx));
-
-    fake.fail = false;
-    try std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
-        .tx = &.{0x00},
-        .tx_bits = 9,
-        .timeout_ms = 1,
-    }, &rx));
-
-    try std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
-        .tx = &.{0x00},
-        .tx_bits = 8,
-        .timeout_ms = 0,
-    }, &rx));
-
-    try std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
-        .tx = &.{},
-        .tx_bits = 0,
-        .timeout_ms = 1,
-    }, &rx));
-
-    try std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
-        .tx = &.{0x00},
-        .tx_bits = 0,
-        .timeout_ms = 1,
-    }, &rx));
-
-    try std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
-        .tx = &.{0x00},
-        .tx_bits = 8,
-        .timeout_ms = max_timeout_ms + 1,
-    }, &rx));
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

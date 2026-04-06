@@ -1,5 +1,6 @@
 const Context = @import("../event/Context.zig");
 const event = @import("../event.zig");
+const testing_api = @import("testing");
 
 const Gyro = @This();
 
@@ -72,34 +73,65 @@ pub fn init(comptime T: type, impl: *T, source_id: u32) Gyro {
     };
 }
 
-test "zux/imu/Gyro/unit_tests/init_and_read" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn initAndRead(testing: anytype) !void {
+            const Impl = struct {
+                called: bool = false,
 
-    const Impl = struct {
-        called: bool = false,
-
-        pub fn read(self: *@This()) !Sample {
-            self.called = true;
-            return .{
-                .x = -11.0,
-                .y = 0.5,
-                .z = 42.25,
+                pub fn read(self: *@This()) !Sample {
+                    self.called = true;
+                    return .{
+                        .x = -11.0,
+                        .y = 0.5,
+                        .z = 42.25,
+                    };
+                }
             };
+
+            var impl = Impl{};
+            const gyro = Gyro.init(Impl, &impl, 13);
+            const value = try gyro.read();
+            switch (value) {
+                .raw_imu_gyro => |report| {
+                    try testing.expectEqual(@as(u32, 13), report.source_id);
+                    try testing.expectEqual(@as(f32, -11.0), report.x);
+                    try testing.expectEqual(@as(f32, 0.5), report.y);
+                    try testing.expectEqual(@as(f32, 42.25), report.z);
+                    try testing.expect(report.ctx == null);
+                },
+                else => try testing.expect(false),
+            }
+            try testing.expect(impl.called);
         }
     };
 
-    var impl = Impl{};
-    const gyro = Gyro.init(Impl, &impl, 13);
-    const value = try gyro.read();
-    switch (value) {
-        .raw_imu_gyro => |report| {
-            try std.testing.expectEqual(@as(u32, 13), report.source_id);
-            try std.testing.expectEqual(@as(f32, -11.0), report.x);
-            try std.testing.expectEqual(@as(f32, 0.5), report.y);
-            try std.testing.expectEqual(@as(f32, 42.25), report.z);
-            try std.testing.expect(report.ctx == null);
-        },
-        else => try std.testing.expect(false),
-    }
-    try std.testing.expect(impl.called);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
+
+            TestCase.initAndRead(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

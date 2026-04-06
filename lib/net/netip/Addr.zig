@@ -4,6 +4,7 @@ const debug = embed.debug;
 const fmt = embed.fmt;
 const math = embed.math;
 const mem = embed.mem;
+const testing_api = @import("testing");
 
 const Addr = @This();
 
@@ -590,118 +591,104 @@ fn mulAddU16(base: u16, factor: u16, addend: u16) error{Overflow}!u16 {
     return sum[0];
 }
 
-test "net/unit_tests/netip/addr/parse_format_ipv4" {
-    const testing = @import("std").testing;
-    const addr = try Addr.parse("192.168.1.10");
-    try testing.expect(addr.is4());
-    try testing.expectEqual(@as(u8, 32), addr.bitLen());
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    var buf: [64]u8 = undefined;
-    const n = try addr.formatBuf(&buf);
-    try testing.expectEqualStrings("192.168.1.10", buf[0..n]);
-}
+            {
+                const addr = try Addr.parse("192.168.1.10");
+                try testing.expect(addr.is4());
+                try testing.expectEqual(@as(u8, 32), addr.bitLen());
 
-test "net/unit_tests/netip/addr/parse_format_ipv6_compressed" {
-    const testing = @import("std").testing;
-    const addr = try Addr.parse("2001:db8::1");
-    try testing.expect(addr.is6());
-    try testing.expect(!addr.is4In6());
+                var buf: [64]u8 = undefined;
+                const n = try addr.formatBuf(&buf);
+                try testing.expectEqualStrings("192.168.1.10", buf[0..n]);
+            }
 
-    var buf: [64]u8 = undefined;
-    const n = try addr.formatBuf(&buf);
-    try testing.expectEqualStrings("2001:db8::1", buf[0..n]);
-}
+            {
+                const addr = try Addr.parse("2001:db8::1");
+                try testing.expect(addr.is6());
+                try testing.expect(!addr.is4In6());
 
-test "net/unit_tests/netip/addr/parse_scoped_ipv6" {
-    const testing = @import("std").testing;
-    const addr = try Addr.parse("fe80::1%eth0");
-    try testing.expect(addr.is6());
+                var buf: [64]u8 = undefined;
+                const n = try addr.formatBuf(&buf);
+                try testing.expectEqualStrings("2001:db8::1", buf[0..n]);
+            }
 
-    var buf: [80]u8 = undefined;
-    const n = try addr.formatBuf(&buf);
-    try testing.expectEqualStrings("fe80::1%eth0", buf[0..n]);
-}
+            {
+                const addr = try Addr.parse("fe80::1%eth0");
+                try testing.expect(addr.is6());
 
-test "net/unit_tests/netip/addr/reject_zone_on_ipv4" {
-    const testing = @import("std").testing;
-    try testing.expectError(error.ZoneOnIPv4, Addr.parse("192.0.2.1%eth0"));
-}
+                var buf: [80]u8 = undefined;
+                const n = try addr.formatBuf(&buf);
+                try testing.expectEqualStrings("fe80::1%eth0", buf[0..n]);
+            }
 
-test "net/unit_tests/netip/addr/from16_keeps_ipv4_mapped_ipv6_until_unmap" {
-    const testing = @import("std").testing;
-    const addr = Addr.from16(.{
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 1, 2, 3, 4,
-    });
-    try testing.expect(addr.is6());
-    try testing.expect(addr.is4In6());
-    try testing.expect(!addr.is4());
+            try testing.expectError(error.ZoneOnIPv4, Addr.parse("192.0.2.1%eth0"));
 
-    const unmapped = addr.unmap();
-    try testing.expect(unmapped.is4());
-    try testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, &unmapped.as4().?);
-}
+            {
+                const addr = Addr.from16(.{
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 1, 2, 3, 4,
+                });
+                try testing.expect(addr.is6());
+                try testing.expect(addr.is4In6());
+                try testing.expect(!addr.is4());
 
-test "net/unit_tests/netip/addr/compare_orders_invalid_ipv4_ipv6" {
-    const testing = @import("std").testing;
-    const invalid = Addr{};
-    const v4 = Addr.from4(.{ 1, 1, 1, 1 });
-    const v6 = try Addr.parse("::1");
+                const unmapped = addr.unmap();
+                try testing.expect(unmapped.is4());
+                try testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, &unmapped.as4().?);
+            }
 
-    try testing.expect(Addr.less(invalid, v4));
-    try testing.expect(Addr.less(v4, v6));
-    try testing.expectEqual(math.Order.eq, Addr.compare(v6, v6));
-}
+            {
+                const invalid = Addr{};
+                const v4 = Addr.from4(.{ 1, 1, 1, 1 });
+                const v6 = try Addr.parse("::1");
 
-test "net/unit_tests/netip/addr/next_prev_ipv4" {
-    const testing = @import("std").testing;
-    const a = try Addr.parse("10.0.0.1");
-    const b = a.next().?;
-    const c = b.prev().?;
+                try testing.expect(Addr.less(invalid, v4));
+                try testing.expect(Addr.less(v4, v6));
+                try testing.expectEqual(math.Order.eq, Addr.compare(v6, v6));
+            }
 
-    try testing.expectEqualSlices(u8, &.{ 10, 0, 0, 2 }, &b.as4().?);
-    try testing.expectEqualSlices(u8, &.{ 10, 0, 0, 1 }, &c.as4().?);
-    try testing.expect((try Addr.parse("255.255.255.255")).next() == null);
-    try testing.expect((try Addr.parse("0.0.0.0")).prev() == null);
-}
+            {
+                const a = try Addr.parse("10.0.0.1");
+                const b = a.next().?;
+                const c = b.prev().?;
 
-test "net/unit_tests/netip/addr/classification_helpers" {
-    const testing = @import("std").testing;
-    try testing.expect((try Addr.parse("127.0.0.1")).isLoopback());
-    try testing.expect((try Addr.parse("10.1.2.3")).isPrivate());
-    try testing.expect((try Addr.parse("224.0.0.1")).isMulticast());
-    try testing.expect((try Addr.parse("169.254.1.2")).isLinkLocalUnicast());
-    try testing.expect((try Addr.parse("224.0.0.9")).isLinkLocalMulticast());
-    try testing.expect((try Addr.parse("0.0.0.0")).isUnspecified());
-    try testing.expect((try Addr.parse("8.8.8.8")).isGlobalUnicast());
+                try testing.expectEqualSlices(u8, &.{ 10, 0, 0, 2 }, &b.as4().?);
+                try testing.expectEqualSlices(u8, &.{ 10, 0, 0, 1 }, &c.as4().?);
+                try testing.expect((try Addr.parse("255.255.255.255")).next() == null);
+                try testing.expect((try Addr.parse("0.0.0.0")).prev() == null);
+            }
 
-    try testing.expect((try Addr.parse("::1")).isLoopback());
-    try testing.expect((try Addr.parse("fc00::1")).isPrivate());
-    try testing.expect((try Addr.parse("ff02::1")).isMulticast());
-    try testing.expect((try Addr.parse("fe80::1")).isLinkLocalUnicast());
-    try testing.expect((try Addr.parse("ff02::2")).isLinkLocalMulticast());
-    try testing.expect((try Addr.parse("::")).isUnspecified());
-    try testing.expect((try Addr.parse("2001:db8::1")).isGlobalUnicast());
-}
+            try testing.expect((try Addr.parse("127.0.0.1")).isLoopback());
+            try testing.expect((try Addr.parse("10.1.2.3")).isPrivate());
+            try testing.expect((try Addr.parse("224.0.0.1")).isMulticast());
+            try testing.expect((try Addr.parse("169.254.1.2")).isLinkLocalUnicast());
+            try testing.expect((try Addr.parse("224.0.0.9")).isLinkLocalMulticast());
+            try testing.expect((try Addr.parse("0.0.0.0")).isUnspecified());
+            try testing.expect((try Addr.parse("8.8.8.8")).isGlobalUnicast());
+            try testing.expect((try Addr.parse("::1")).isLoopback());
+            try testing.expect((try Addr.parse("fc00::1")).isPrivate());
+            try testing.expect((try Addr.parse("ff02::1")).isMulticast());
+            try testing.expect((try Addr.parse("fe80::1")).isLinkLocalUnicast());
+            try testing.expect((try Addr.parse("ff02::2")).isLinkLocalMulticast());
+            try testing.expect((try Addr.parse("::")).isUnspecified());
+            try testing.expect((try Addr.parse("2001:db8::1")).isGlobalUnicast());
 
-test "net/unit_tests/netip/addr/as16_maps_ipv4_into_ipv4_mapped_ipv6" {
-    const testing = @import("std").testing;
-    const addr = Addr.from4(.{ 1, 2, 3, 4 });
-    const got = addr.as16().?;
-    try testing.expectEqualSlices(u8, &v4_in_v6_prefix, got[0..12]);
-    try testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, got[12..16]);
-}
+            {
+                const addr = Addr.from4(.{ 1, 2, 3, 4 });
+                const got = addr.as16().?;
+                try testing.expectEqualSlices(u8, &v4_in_v6_prefix, got[0..12]);
+                try testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, got[12..16]);
+            }
 
-test "net/unit_tests/netip/addr/formatAllocater" {
-    const testing = @import("std").testing;
-    const allocator = testing.allocator;
-    const formatted = try (try Addr.parse("fe80::1%eth0")).formatAllocator(allocator);
-    defer allocator.free(formatted);
+            const formatted = try (try Addr.parse("fe80::1%eth0")).formatAllocator(allocator);
+            defer allocator.free(formatted);
+            try testing.expectEqualStrings("fe80::1%eth0", formatted);
 
-    try testing.expectEqualStrings("fe80::1%eth0", formatted);
-}
-
-test "net/unit_tests/netip/addr/formatBuf_buffer_too_small" {
-    const testing = @import("std").testing;
-    var buf: [3]u8 = undefined;
-    try testing.expectError(error.BufferTooSmall, (try Addr.parse("1.2.3.4")).formatBuf(&buf));
+            var buf: [3]u8 = undefined;
+            try testing.expectError(error.BufferTooSmall, (try Addr.parse("1.2.3.4")).formatBuf(&buf));
+        }
+    }.run);
 }

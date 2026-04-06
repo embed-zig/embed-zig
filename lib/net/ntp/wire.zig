@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("types.zig");
+const testing_api = @import("testing");
 
 pub fn generateNonce(comptime lib: type) i64 {
     var buf: [8]u8 = undefined;
@@ -78,86 +79,92 @@ pub fn unixMsToNtp(unix_ms: i64) types.NtpTimestamp {
     };
 }
 
-test "net/unit_tests/ntp/wire/timestamp_conversion_round_trip" {
-    const test_ms: i64 = 1_706_000_000_000;
-    const ntp = unixMsToNtp(test_ms);
-    const back = ntpToUnixMs(ntp);
-    try std.testing.expect(@abs(back - test_ms) <= 1);
-}
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-test "net/unit_tests/ntp/wire/request_packet_format" {
-    var buf: [48]u8 = undefined;
-    buildRequest(&buf, 0);
+            const test_ms: i64 = 1_706_000_000_000;
+            const ntp = unixMsToNtp(test_ms);
+            const back = ntpToUnixMs(ntp);
+            try testing.expect(@abs(back - test_ms) <= 1);
 
-    try std.testing.expectEqual(@as(u8, 0x23), buf[0]);
-    try std.testing.expectEqual(@as(u8, 6), buf[2]);
-    for (buf[40..48]) |b| try std.testing.expectEqual(@as(u8, 0), b);
-}
+            {
+                var buf: [48]u8 = undefined;
+                buildRequest(&buf, 0);
 
-test "net/unit_tests/ntp/wire/request_packet_writes_transmit_timestamp" {
-    var buf: [48]u8 = undefined;
-    buildRequest(&buf, 1_706_012_096_000);
+                try testing.expectEqual(@as(u8, 0x23), buf[0]);
+                try testing.expectEqual(@as(u8, 6), buf[2]);
+                for (buf[40..48]) |b| try testing.expectEqual(@as(u8, 0), b);
+            }
 
-    var saw_nonzero = false;
-    for (buf[40..48]) |b| {
-        if (b != 0) saw_nonzero = true;
-    }
-    try std.testing.expect(saw_nonzero);
-}
+            {
+                var buf: [48]u8 = undefined;
+                buildRequest(&buf, 1_706_012_096_000);
 
-test "net/unit_tests/ntp/wire/parse_response_validates_origin_before_stratum" {
-    const origin_ms: i64 = 1_706_012_096_000;
-    const origin = unixMsToNtp(origin_ms);
-    const recv = unixMsToNtp(origin_ms + 12);
-    const xmit = unixMsToNtp(origin_ms + 20);
+                var saw_nonzero = false;
+                for (buf[40..48]) |b| {
+                    if (b != 0) saw_nonzero = true;
+                }
+                try testing.expect(saw_nonzero);
+            }
 
-    var buf: [48]u8 = [_]u8{0} ** 48;
-    buf[0] = 0b00_100_100;
-    buf[1] = 0;
-    writeTimestamp(buf[24..32], origin);
-    writeTimestamp(buf[32..40], recv);
-    writeTimestamp(buf[40..48], xmit);
+            {
+                const origin_ms: i64 = 1_706_012_096_000;
+                const origin = unixMsToNtp(origin_ms);
+                const recv = unixMsToNtp(origin_ms + 12);
+                const xmit = unixMsToNtp(origin_ms + 20);
 
-    try std.testing.expectError(error.KissOfDeath, parseResponse(&buf, origin));
+                var buf: [48]u8 = [_]u8{0} ** 48;
+                buf[0] = 0b00_100_100;
+                buf[1] = 0;
+                writeTimestamp(buf[24..32], origin);
+                writeTimestamp(buf[32..40], recv);
+                writeTimestamp(buf[40..48], xmit);
 
-    buf[1] = 2;
-    var wrong_origin = origin;
-    wrong_origin.fraction +%= 1;
-    writeTimestamp(buf[24..32], wrong_origin);
-    try std.testing.expectError(error.OriginMismatch, parseResponse(&buf, origin));
-}
+                try testing.expectError(error.KissOfDeath, parseResponse(&buf, origin));
 
-test "net/unit_tests/ntp/wire/parse_response_returns_timestamps" {
-    const origin_ms: i64 = 1_706_012_096_000;
-    const origin = unixMsToNtp(origin_ms);
-    const recv = unixMsToNtp(origin_ms + 15);
-    const xmit = unixMsToNtp(origin_ms + 30);
+                buf[1] = 2;
+                var wrong_origin = origin;
+                wrong_origin.fraction +%= 1;
+                writeTimestamp(buf[24..32], wrong_origin);
+                try testing.expectError(error.OriginMismatch, parseResponse(&buf, origin));
+            }
 
-    var buf: [48]u8 = [_]u8{0} ** 48;
-    buf[0] = 0b00_100_100;
-    buf[1] = 3;
-    writeTimestamp(buf[24..32], origin);
-    writeTimestamp(buf[32..40], recv);
-    writeTimestamp(buf[40..48], xmit);
+            {
+                const origin_ms: i64 = 1_706_012_096_000;
+                const origin = unixMsToNtp(origin_ms);
+                const recv = unixMsToNtp(origin_ms + 15);
+                const xmit = unixMsToNtp(origin_ms + 30);
 
-    const resp = try parseResponse(&buf, origin);
-    try std.testing.expectEqual(@as(u8, 3), resp.stratum);
-    try std.testing.expect(@abs(resp.receive_time_ms - (origin_ms + 15)) <= 1);
-    try std.testing.expect(@abs(resp.transmit_time_ms - (origin_ms + 30)) <= 1);
-}
+                var buf: [48]u8 = [_]u8{0} ** 48;
+                buf[0] = 0b00_100_100;
+                buf[1] = 3;
+                writeTimestamp(buf[24..32], origin);
+                writeTimestamp(buf[32..40], recv);
+                writeTimestamp(buf[40..48], xmit);
 
-test "net/unit_tests/ntp/wire/parse_response_rejects_unexpected_version" {
-    const origin_ms: i64 = 1_706_012_096_000;
-    const origin = unixMsToNtp(origin_ms);
-    const recv = unixMsToNtp(origin_ms + 15);
-    const xmit = unixMsToNtp(origin_ms + 30);
+                const resp = try parseResponse(&buf, origin);
+                try testing.expectEqual(@as(u8, 3), resp.stratum);
+                try testing.expect(@abs(resp.receive_time_ms - (origin_ms + 15)) <= 1);
+                try testing.expect(@abs(resp.transmit_time_ms - (origin_ms + 30)) <= 1);
+            }
 
-    var buf: [48]u8 = [_]u8{0} ** 48;
-    buf[0] = 0b00_011_100;
-    buf[1] = 3;
-    writeTimestamp(buf[24..32], origin);
-    writeTimestamp(buf[32..40], recv);
-    writeTimestamp(buf[40..48], xmit);
+            {
+                const origin_ms: i64 = 1_706_012_096_000;
+                const origin = unixMsToNtp(origin_ms);
+                const recv = unixMsToNtp(origin_ms + 15);
+                const xmit = unixMsToNtp(origin_ms + 30);
 
-    try std.testing.expectError(error.InvalidResponse, parseResponse(&buf, origin));
+                var buf: [48]u8 = [_]u8{0} ** 48;
+                buf[0] = 0b00_011_100;
+                buf[1] = 3;
+                writeTimestamp(buf[24..32], origin);
+                writeTimestamp(buf[32..40], recv);
+                writeTimestamp(buf[40..48], xmit);
+
+                try testing.expectError(error.InvalidResponse, parseResponse(&buf, origin));
+            }
+        }
+    }.run);
 }

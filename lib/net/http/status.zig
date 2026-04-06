@@ -3,6 +3,8 @@
 //! Mirrors the role of Go's `net/http/status.go`: a shared place for
 //! standard status code constants plus a small lookup helper.
 
+const testing_api = @import("testing");
+
 pub const @"continue": u16 = 100;
 pub const switching_protocols: u16 = 101;
 pub const processing: u16 = 102;
@@ -163,21 +165,21 @@ pub fn isServerError(code: u16) bool {
     return code >= 500 and code < 600;
 }
 
-test "net/unit_tests/http/status/text_returns_reason_phrase_for_common_codes" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    try std.testing.expectEqualStrings("OK", text(ok).?);
-    try std.testing.expectEqualStrings("No Content", text(no_content).?);
-    try std.testing.expectEqualStrings("Not Found", text(not_found).?);
-    try std.testing.expect(text(999) == null);
-}
+            try testing.expectEqualStrings("OK", text(ok).?);
+            try testing.expectEqualStrings("No Content", text(no_content).?);
+            try testing.expectEqualStrings("Not Found", text(not_found).?);
+            try testing.expect(text(999) == null);
 
-test "net/unit_tests/http/status/class_helpers_classify_status_codes" {
-    const std = @import("std");
-
-    try std.testing.expect(isInformational(@"continue"));
-    try std.testing.expect(isSuccess(ok));
-    try std.testing.expect(isRedirect(found));
-    try std.testing.expect(isClientError(not_found));
-    try std.testing.expect(isServerError(internal_server_error));
+            try testing.expect(isInformational(@"continue"));
+            try testing.expect(isSuccess(ok));
+            try testing.expect(isRedirect(found));
+            try testing.expect(isClientError(not_found));
+            try testing.expect(isServerError(internal_server_error));
+        }
+    }.run);
 }

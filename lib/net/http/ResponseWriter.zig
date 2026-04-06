@@ -5,6 +5,7 @@ const Conn = @import("../Conn.zig");
 const Header = @import("Header.zig");
 const Request = @import("Request.zig");
 const status = @import("status.zig");
+const testing_api = @import("testing");
 
 pub fn ResponseWriter(comptime lib: type) type {
     const Allocator = lib.mem.Allocator;
@@ -173,24 +174,25 @@ fn bodyAllowed(method: []const u8, status_code: u16) bool {
     return true;
 }
 
-test "net/unit_tests/http/ResponseWriter/headers_lock_after_commit" {
-    const std = @import("std");
-    const Writer = ResponseWriter(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const Writer = ResponseWriter(lib);
 
-    var writer = Writer.init(std.testing.allocator, undefined, null, false);
-    defer writer.deinit();
+            var writer = Writer.init(allocator, undefined, null, false);
+            defer writer.deinit();
 
-    try writer.setHeader("X-Test", "one");
-    writer.committed_flag = true;
-    try writer.setHeader("X-Test", "two");
+            try writer.setHeader("X-Test", "one");
+            writer.committed_flag = true;
+            try writer.setHeader("X-Test", "two");
 
-    try std.testing.expectEqual(@as(usize, 1), writer.header.items.len);
-    try std.testing.expectEqualStrings("one", writer.header.items[0].value);
-}
+            try testing.expectEqual(@as(usize, 1), writer.header.items.len);
+            try testing.expectEqualStrings("one", writer.header.items[0].value);
 
-test "net/unit_tests/http/ResponseWriter/bodyAllowed_blocks_head_and_bodyless_status" {
-    const std = @import("std");
-    try std.testing.expect(!bodyAllowed("HEAD", status.ok));
-    try std.testing.expect(!bodyAllowed("GET", status.no_content));
-    try std.testing.expect(bodyAllowed("GET", status.ok));
+            try testing.expect(!bodyAllowed("HEAD", status.ok));
+            try testing.expect(!bodyAllowed("GET", status.no_content));
+            try testing.expect(bodyAllowed("GET", status.ok));
+        }
+    }.run);
 }

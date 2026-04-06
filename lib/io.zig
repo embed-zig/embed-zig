@@ -12,8 +12,6 @@ pub const PrefixReader = io.PrefixReader;
 pub const readFull = io.readFull;
 pub const readAll = io.readAll;
 pub const writeAll = io.writeAll;
-
-test "io/unit_tests" {
-    _ = @import("io/bufio.zig");
-    _ = @import("io/io.zig");
-}
+pub const test_runner = struct {
+    pub const unit = @import("io/test_runner/unit.zig");
+};

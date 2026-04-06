@@ -29,8 +29,11 @@ lib/sync/
   Channel.zig
   Racer.zig
   test_runner/
-    channel.zig
-    racer.zig
+    unit.zig
+    integration.zig
+    integration/
+      channel.zig
+      racer.zig
 ```
 
 ## Testing
@@ -38,7 +41,8 @@ lib/sync/
 `lib/sync` follows the shared runner layout:
 
 - unit tests live next to `Channel.zig` and `Racer.zig`
-- portable runners live under `sync/test_runner/`
+- aggregate runners live under `sync/test_runner/`
+- integration cases live under `sync/test_runner/integration/`
 - integration or compatibility entrypoints call those runners from the shared
   test trees
 

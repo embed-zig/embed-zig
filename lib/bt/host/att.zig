@@ -4,6 +4,7 @@
 //! No I/O, no state.
 
 const std = @import("std");
+const testing_api = @import("testing");
 
 // --- Constants ---
 
@@ -456,75 +457,130 @@ pub fn encodeConfirmation(buf: []u8) []const u8 {
     return buf[0..1];
 }
 
-test "bt/unit_tests/host/att/UUID" {
-    const a = UUID.from16(0x180D);
-    const b = UUID.from16(0x180D);
-    const c = UUID.from16(0x2A37);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const uuid16 = UUID.from16(0x180D);
+            const uuid128 = UUID.from128([_]u8{1} ** 16);
+            try lib.testing.expectEqual(@as(usize, 2), uuid16.byteLen());
+            try lib.testing.expectEqual(@as(usize, 16), uuid128.byteLen());
+            try lib.testing.expect(uuid16.eql(UUID.from16(0x180D)));
+            try lib.testing.expect(!uuid16.eql(uuid128));
 
-    try std.testing.expect(a.eql(b));
-    try std.testing.expect(!a.eql(c));
-    try std.testing.expectEqual(@as(usize, 2), a.byteLen());
+            var uuid_buf: [16]u8 = undefined;
+            try lib.testing.expectEqual(@as(usize, 2), uuid16.writeTo(uuid_buf[0..]));
+            try lib.testing.expectEqual(@as(u8, 0x0D), uuid_buf[0]);
+            try lib.testing.expectEqual(@as(u8, 0x18), uuid_buf[1]);
+            try lib.testing.expect(UUID.readFrom(uuid_buf[0..2], 2).?.eql(uuid16));
+            try lib.testing.expect(UUID.readFrom(&.{ 1, 2, 3 }, 16) == null);
+
+            {
+                var buf: [32]u8 = undefined;
+                const req = encodeMtuRequest(&buf, 256);
+                const pdu = decodePdu(req) orelse return error.DecodeFailed;
+                switch (pdu) {
+                    .exchange_mtu_request => |mtu| try lib.testing.expectEqual(@as(u16, 256), mtu.client_mtu),
+                    else => return error.WrongVariant,
+                }
+
+                const resp = encodeMtuResponse(&buf, 185);
+                const resp_pdu = decodePdu(resp) orelse return error.DecodeFailed;
+                switch (resp_pdu) {
+                    .exchange_mtu_response => |mtu| try lib.testing.expectEqual(@as(u16, 185), mtu.server_mtu),
+                    else => return error.WrongVariant,
+                }
+            }
+
+            {
+                var buf: [64]u8 = undefined;
+                const req = encodeReadByTypeRequest(&buf, 1, 0xFFFF, UUID.from16(PRIMARY_SERVICE_UUID));
+                const pdu = decodePdu(req) orelse return error.DecodeFailed;
+                switch (pdu) {
+                    .read_by_type_request => |typed| {
+                        try lib.testing.expectEqual(@as(u16, 1), typed.start_handle);
+                        try lib.testing.expectEqual(@as(u16, 0xFFFF), typed.end_handle);
+                        try lib.testing.expect(typed.uuid.eql(UUID.from16(PRIMARY_SERVICE_UUID)));
+                    },
+                    else => return error.WrongVariant,
+                }
+            }
+
+            {
+                var buf: [64]u8 = undefined;
+                const req = encodeWriteRequest(&buf, 0x0025, "zig");
+                const pdu = decodePdu(req) orelse return error.DecodeFailed;
+                switch (pdu) {
+                    .write_request => |write_req| {
+                        try lib.testing.expectEqual(@as(u16, 0x0025), write_req.handle);
+                        try lib.testing.expectEqualSlices(u8, "zig", write_req.value);
+                    },
+                    else => return error.WrongVariant,
+                }
+
+                const cmd = encodeWriteCommand(&buf, 0x0026, "bee");
+                const cmd_pdu = decodePdu(cmd) orelse return error.DecodeFailed;
+                switch (cmd_pdu) {
+                    .write_command => |write_cmd| {
+                        try lib.testing.expectEqual(@as(u16, 0x0026), write_cmd.handle);
+                        try lib.testing.expectEqualSlices(u8, "bee", write_cmd.value);
+                    },
+                    else => return error.WrongVariant,
+                }
+            }
+
+            {
+                var buf: [64]u8 = undefined;
+                const notify = encodeNotification(&buf, 0x0042, "ok");
+                const notify_pdu = decodePdu(notify) orelse return error.DecodeFailed;
+                switch (notify_pdu) {
+                    .notification => |n| {
+                        try lib.testing.expectEqual(@as(u16, 0x0042), n.handle);
+                        try lib.testing.expectEqualSlices(u8, "ok", n.value);
+                    },
+                    else => return error.WrongVariant,
+                }
+
+                const err_pdu = encodeErrorResponse(&buf, READ_REQUEST, 0x0001, .invalid_handle);
+                const decoded_err = decodePdu(err_pdu) orelse return error.DecodeFailed;
+                switch (decoded_err) {
+                    .error_response => |err_resp| {
+                        try lib.testing.expectEqual(READ_REQUEST, err_resp.request_opcode);
+                        try lib.testing.expectEqual(@as(u16, 0x0001), err_resp.handle);
+                        try lib.testing.expectEqual(ErrorCode.invalid_handle, err_resp.error_code);
+                    },
+                    else => return error.WrongVariant,
+                }
+            }
+
+            try lib.testing.expect(decodePdu(&.{}) == null);
+            try lib.testing.expect(decodePdu(&.{ READ_REQUEST }) == null);
+        }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-test "bt/unit_tests/host/att/decode_error_response" {
-    const raw = [_]u8{ ERROR_RESPONSE, READ_REQUEST, 0x01, 0x00, @intFromEnum(ErrorCode.invalid_handle) };
-    const pdu = decodePdu(&raw) orelse return error.DecodeFailed;
-    switch (pdu) {
-        .error_response => |err_resp| {
-            try std.testing.expectEqual(READ_REQUEST, err_resp.request_opcode);
-            try std.testing.expectEqual(@as(u16, 0x0001), err_resp.handle);
-            try std.testing.expectEqual(ErrorCode.invalid_handle, err_resp.error_code);
-        },
-        else => return error.WrongVariant,
-    }
-}
-
-test "bt/unit_tests/host/att/encode_decode_mtu_request_roundtrip" {
-    var buf: [8]u8 = undefined;
-    const raw = encodeMtuRequest(&buf, 185);
-    const pdu = decodePdu(raw) orelse return error.DecodeFailed;
-    switch (pdu) {
-        .exchange_mtu_request => |req| try std.testing.expectEqual(@as(u16, 185), req.client_mtu),
-        else => return error.WrongVariant,
-    }
-}
-
-test "bt/unit_tests/host/att/encode_decode_read_request_roundtrip" {
-    var buf: [8]u8 = undefined;
-    const raw = encodeReadRequest(&buf, 0x0025);
-    const pdu = decodePdu(raw) orelse return error.DecodeFailed;
-    switch (pdu) {
-        .read_request => |req| try std.testing.expectEqual(@as(u16, 0x0025), req.handle),
-        else => return error.WrongVariant,
-    }
-}
-
-test "bt/unit_tests/host/att/encode_decode_write_request_roundtrip" {
-    var buf: [16]u8 = undefined;
-    const raw = encodeWriteRequest(&buf, 0x0025, "abc");
-    const pdu = decodePdu(raw) orelse return error.DecodeFailed;
-    switch (pdu) {
-        .write_request => |req| {
-            try std.testing.expectEqual(@as(u16, 0x0025), req.handle);
-            try std.testing.expectEqualSlices(u8, "abc", req.value);
-        },
-        else => return error.WrongVariant,
-    }
-}
-
-test "bt/unit_tests/host/att/encode_decode_notification_roundtrip" {
-    var buf: [16]u8 = undefined;
-    const raw = encodeNotification(&buf, 0x0025, "xy");
-    const pdu = decodePdu(raw) orelse return error.DecodeFailed;
-    switch (pdu) {
-        .notification => |ntf| {
-            try std.testing.expectEqual(@as(u16, 0x0025), ntf.handle);
-            try std.testing.expectEqualSlices(u8, "xy", ntf.value);
-        },
-        else => return error.WrongVariant,
-    }
-}
-
-test "bt/unit_tests/host/att/decode_returns_null_for_empty_input" {
-    try std.testing.expectEqual(@as(?Pdu, null), decodePdu(&.{}));
-}

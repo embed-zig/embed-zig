@@ -1,3 +1,5 @@
+const testing_api = @import("testing");
+
 const Subscriber = @This();
 
 ctx: *anyopaque,
@@ -41,26 +43,56 @@ pub fn init(pointer: anytype) Subscriber {
     };
 }
 
-test "zux/unit_tests/store/Subscriber/init_and_notify" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn init_and_notify(testing: anytype, _: lib.mem.Allocator) !void {
+            const Impl = struct {
+                called: bool = false,
+                label: []const u8 = "",
+                tick_count: u64 = 0,
 
-    const Impl = struct {
-        called: bool = false,
-        label: []const u8 = "",
-        tick_count: u64 = 0,
+                pub fn notify(self: *@This(), notification: Notification) void {
+                    self.called = true;
+                    self.label = notification.label;
+                    self.tick_count = notification.tick_count;
+                }
+            };
 
-        pub fn notify(self: *@This(), notification: Notification) void {
-            self.called = true;
-            self.label = notification.label;
-            self.tick_count = notification.tick_count;
+            var impl = Impl{};
+            const subscriber = Subscriber.init(&impl);
+            subscriber.notify(.{ .label = "zux/test", .tick_count = 7 });
+
+            try testing.expect(impl.called);
+            try testing.expectEqualStrings("zux/test", impl.label);
+            try testing.expectEqual(@as(u64, 7), impl.tick_count);
         }
     };
 
-    var impl = Impl{};
-    const subscriber = Subscriber.init(&impl);
-    subscriber.notify(.{ .label = "zux/test", .tick_count = 7 });
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    try std.testing.expect(impl.called);
-    try std.testing.expectEqualStrings("zux/test", impl.label);
-    try std.testing.expectEqual(@as(u64, 7), impl.tick_count);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            const testing = lib.testing;
+
+            TestCase.init_and_notify(testing, allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

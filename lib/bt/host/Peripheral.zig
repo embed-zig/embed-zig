@@ -7,6 +7,7 @@ const std = @import("std");
 const root = @import("../../bt.zig");
 const bt = @import("../Peripheral.zig");
 const att = @import("att.zig");
+const testing_api = @import("testing");
 
 pub fn make(comptime lib: type) type {
     return struct {
@@ -730,138 +731,163 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-test "bt/unit_tests/host/Peripheral_handle_assigns_stable_value_handles" {
-    const Impl = make(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const Impl = make(lib);
+            const findCharHandle = struct {
+                fn get(peripheral: *Impl, char_uuid: u16) ?u16 {
+                    for (peripheral.chars.items) |entry| {
+                        if (entry.char_uuid == char_uuid) return entry.value_handle;
+                    }
+                    return null;
+                }
+            }.get;
 
-    var peripheral = Impl{
-        .hci = undefined,
-        .allocator = std.testing.allocator,
-    };
-    defer peripheral.chars.deinit(std.testing.allocator);
-    defer peripheral.hooks.deinit(std.testing.allocator);
-    defer peripheral.services.deinit(std.testing.allocator);
+            {
+                var peripheral = Impl{
+                    .hci = undefined,
+                    .allocator = lib.testing.allocator,
+                };
+                defer peripheral.chars.deinit(lib.testing.allocator);
+                defer peripheral.hooks.deinit(lib.testing.allocator);
+                defer peripheral.services.deinit(lib.testing.allocator);
 
-    peripheral.setConfig(.{
-        .services = &.{
-            bt.Service(0x180D, &.{
-                bt.Char(0x2A37, bt.CharConfig.default()),
-                bt.Char(0x2A38, bt.CharConfig.default()),
-            }),
-        },
-    });
+                peripheral.setConfig(.{
+                    .services = &.{
+                        bt.Service(0x180D, &.{
+                            bt.Char(0x2A37, bt.CharConfig.default()),
+                            bt.Char(0x2A38, bt.CharConfig.default()),
+                        }),
+                    },
+                });
 
-    try std.testing.expectEqual(@as(?u16, 3), peripheral.findCharHandle(0x2A37));
-    try std.testing.expectEqual(@as(?u16, 6), peripheral.findCharHandle(0x2A38));
-}
+                try lib.testing.expectEqual(@as(?u16, 3), findCharHandle(&peripheral, 0x2A37));
+                try lib.testing.expectEqual(@as(?u16, 6), findCharHandle(&peripheral, 0x2A38));
 
-test "bt/unit_tests/host/Peripheral_setRequestHandler_replaces_previous_callback" {
-    const Impl = make(std);
+                const dummy_a = struct {
+                    fn handler(_: ?*anyopaque, _: *const bt.Request, _: *bt.ResponseWriter) void {}
+                };
+                const dummy_b = struct {
+                    fn handler(_: ?*anyopaque, _: *const bt.Request, _: *bt.ResponseWriter) void {}
+                };
 
-    const dummy_a = struct {
-        fn handler(_: ?*anyopaque, _: *const bt.Request, _: *bt.ResponseWriter) void {}
-    };
-    const dummy_b = struct {
-        fn handler(_: ?*anyopaque, _: *const bt.Request, _: *bt.ResponseWriter) void {}
-    };
+                peripheral.setRequestHandler(null, dummy_a.handler);
+                try lib.testing.expectEqual(@as(?bt.RequestHandlerFn, dummy_a.handler), peripheral.request_handler);
+                peripheral.setRequestHandler(null, dummy_b.handler);
+                try lib.testing.expectEqual(@as(?bt.RequestHandlerFn, dummy_b.handler), peripheral.request_handler);
+            }
 
-    var peripheral = Impl{
-        .hci = undefined,
-        .allocator = std.testing.allocator,
-    };
-    defer peripheral.chars.deinit(std.testing.allocator);
-    defer peripheral.hooks.deinit(std.testing.allocator);
-    defer peripheral.services.deinit(std.testing.allocator);
+            {
+                var peripheral = Impl{
+                    .hci = undefined,
+                    .allocator = lib.testing.allocator,
+                };
+                defer peripheral.chars.deinit(lib.testing.allocator);
+                defer peripheral.hooks.deinit(lib.testing.allocator);
+                defer peripheral.services.deinit(lib.testing.allocator);
 
-    peripheral.setRequestHandler(null, dummy_a.handler);
-    try std.testing.expectEqual(@as(?bt.RequestHandlerFn, dummy_a.handler), peripheral.request_handler);
-    peripheral.setRequestHandler(null, dummy_b.handler);
-    try std.testing.expectEqual(@as(?bt.RequestHandlerFn, dummy_b.handler), peripheral.request_handler);
-}
+                const dummy = struct {
+                    fn handler(_: ?*anyopaque, _: *const bt.Request, rw: *bt.ResponseWriter) void {
+                        rw.ok();
+                    }
+                };
 
-test "bt/unit_tests/host/Peripheral_setConfig_applies_per_characteristic_properties" {
-    const Impl = make(std);
+                peripheral.setConfig(.{
+                    .services = &.{
+                        bt.Service(0x180D, &.{
+                            bt.Char(0x2A37, (bt.CharConfig{}).withRead().withNotify()),
+                            bt.Char(0x2A38, (bt.CharConfig{}).withWrite()),
+                        }),
+                    },
+                });
+                peripheral.setRequestHandler(null, dummy.handler);
 
-    const dummy = struct {
-        fn handler(_: ?*anyopaque, _: *const bt.Request, rw: *bt.ResponseWriter) void {
-            rw.ok();
+                try lib.testing.expectEqual(@as(u8, 0x12), peripheral.chars.items[0].config.properties());
+                try lib.testing.expect(peripheral.chars.items[0].cccd_handle != 0);
+                try lib.testing.expectEqual(@as(u8, 0x08), peripheral.chars.items[1].config.properties());
+                try lib.testing.expectEqual(@as(u16, 0), peripheral.chars.items[1].cccd_handle);
+
+                var out: [att.MAX_PDU_LEN]u8 = undefined;
+
+                const read_denied_len = peripheral.handleRead(1, peripheral.chars.items[1].value_handle, &out);
+                switch (att.decodePdu(out[0..read_denied_len]).?) {
+                    .error_response => |err| try lib.testing.expectEqual(att.ErrorCode.read_not_permitted, err.error_code),
+                    else => return error.ExpectedReadNotPermitted,
+                }
+
+                const write_denied_len = peripheral.handleWrite(
+                    1,
+                    .write,
+                    peripheral.chars.items[0].value_handle,
+                    "x",
+                    &out,
+                    true,
+                );
+                switch (att.decodePdu(out[0..write_denied_len]).?) {
+                    .error_response => |err| try lib.testing.expectEqual(att.ErrorCode.write_not_permitted, err.error_code),
+                    else => return error.ExpectedWriteNotPermitted,
+                }
+            }
+
+            {
+                var peripheral = Impl{
+                    .hci = undefined,
+                    .allocator = lib.testing.allocator,
+                };
+                defer peripheral.chars.deinit(lib.testing.allocator);
+                defer peripheral.hooks.deinit(lib.testing.allocator);
+                defer peripheral.services.deinit(lib.testing.allocator);
+
+                peripheral.setConfig(.{
+                    .services = &.{
+                        bt.Service(0x180D, &.{
+                            bt.Char(0x2A37, (bt.CharConfig{}).withNotify()),
+                        }),
+                    },
+                });
+
+                var out: [att.MAX_PDU_LEN]u8 = undefined;
+                const resp_len = peripheral.handleWrite(
+                    1,
+                    .write,
+                    peripheral.chars.items[0].cccd_handle,
+                    &.{0x01},
+                    &out,
+                    true,
+                );
+                switch (att.decodePdu(out[0..resp_len]).?) {
+                    .error_response => |err| try lib.testing.expectEqual(att.ErrorCode.invalid_attribute_value_length, err.error_code),
+                    else => return error.ExpectedInvalidLength,
+                }
+            }
         }
     };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var peripheral = Impl{
-        .hci = undefined,
-        .allocator = std.testing.allocator,
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
     };
-    defer peripheral.chars.deinit(std.testing.allocator);
-    defer peripheral.hooks.deinit(std.testing.allocator);
-    defer peripheral.services.deinit(std.testing.allocator);
-
-    peripheral.setConfig(.{
-        .services = &.{
-            bt.Service(0x180D, &.{
-                bt.Char(0x2A37, (bt.CharConfig{}).withRead().withNotify()),
-                bt.Char(0x2A38, (bt.CharConfig{}).withWrite()),
-            }),
-        },
-    });
-    peripheral.setRequestHandler(null, dummy.handler);
-
-    try std.testing.expectEqual(@as(u8, 0x12), peripheral.chars.items[0].config.properties());
-    try std.testing.expect(peripheral.chars.items[0].cccd_handle != 0);
-    try std.testing.expectEqual(@as(u8, 0x08), peripheral.chars.items[1].config.properties());
-    try std.testing.expectEqual(@as(u16, 0), peripheral.chars.items[1].cccd_handle);
-
-    var out: [att.MAX_PDU_LEN]u8 = undefined;
-
-    const read_denied_len = peripheral.handleRead(1, peripheral.chars.items[1].value_handle, &out);
-    switch (att.decodePdu(out[0..read_denied_len]).?) {
-        .error_response => |err| try std.testing.expectEqual(att.ErrorCode.read_not_permitted, err.error_code),
-        else => return error.ExpectedReadNotPermitted,
-    }
-
-    const write_denied_len = peripheral.handleWrite(
-        1,
-        .write,
-        peripheral.chars.items[0].value_handle,
-        "x",
-        &out,
-        true,
-    );
-    switch (att.decodePdu(out[0..write_denied_len]).?) {
-        .error_response => |err| try std.testing.expectEqual(att.ErrorCode.write_not_permitted, err.error_code),
-        else => return error.ExpectedWriteNotPermitted,
-    }
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-test "bt/unit_tests/host/Peripheral_short_cccd_write_returns_invalid_length" {
-    const Impl = make(std);
-
-    var peripheral = Impl{
-        .hci = undefined,
-        .allocator = std.testing.allocator,
-    };
-    defer peripheral.chars.deinit(std.testing.allocator);
-    defer peripheral.hooks.deinit(std.testing.allocator);
-    defer peripheral.services.deinit(std.testing.allocator);
-
-    peripheral.setConfig(.{
-        .services = &.{
-            bt.Service(0x180D, &.{
-                bt.Char(0x2A37, (bt.CharConfig{}).withNotify()),
-            }),
-        },
-    });
-
-    var out: [att.MAX_PDU_LEN]u8 = undefined;
-    const resp_len = peripheral.handleWrite(
-        1,
-        .write,
-        peripheral.chars.items[0].cccd_handle,
-        &.{0x01},
-        &out,
-        true,
-    );
-    switch (att.decodePdu(out[0..resp_len]).?) {
-        .error_response => |err| try std.testing.expectEqual(att.ErrorCode.invalid_attribute_value_length, err.error_code),
-        else => return error.ExpectedInvalidLength,
-    }
-}

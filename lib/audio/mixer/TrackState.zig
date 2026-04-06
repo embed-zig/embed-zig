@@ -3,6 +3,7 @@
 const Track = @import("Track.zig");
 const Format = @import("Format.zig");
 const RingBufferMod = @import("RingBuffer.zig");
+const testing_api = @import("testing");
 
 pub fn make(comptime lib: type) type {
     const Allocator = lib.mem.Allocator;
@@ -234,51 +235,85 @@ fn convertSample(input: []const i16, input_format: Format, output_format: Format
     return @intCast(@divTrunc(left + right, 2));
 }
 
-test "audio/unit_tests/TrackState_closeWriteWithSilence_appends_tail" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const State = make(lib);
 
-    const State = make(std);
-    const state = try State.create(std.testing.allocator, .{ .rate = 1000, .channels = .mono }, .{});
-    defer state.destroy();
+    const TestCase = struct {
+        fn closeWriteWithSilenceAppendsTail(testing: anytype) !void {
+            const state = try State.create(lib.testing.allocator, .{ .rate = 1000, .channels = .mono }, .{});
+            defer state.destroy();
 
-    try state.write(.{ .rate = 1000, .channels = .mono }, &.{9});
-    try state.closeWriteWithSilence(2);
+            try state.write(.{ .rate = 1000, .channels = .mono }, &.{9});
+            try state.closeWriteWithSilence(2);
 
-    var out: [4]i16 = @splat(0);
-    const n = state.mixInto(&out);
-    try std.testing.expectEqual(@as(usize, 3), n);
-    try std.testing.expectEqualSlices(i16, &.{ 9, 0, 0 }, out[0..3]);
-    try std.testing.expectEqual(@as(usize, 6), state.readBytes());
-    try std.testing.expect(state.isDrained());
-}
+            var out: [4]i16 = @splat(0);
+            const n = state.mixInto(&out);
+            try testing.expectEqual(@as(usize, 3), n);
+            try testing.expectEqualSlices(i16, &.{ 9, 0, 0 }, out[0..3]);
+            try testing.expectEqual(@as(usize, 6), state.readBytes());
+            try testing.expect(state.isDrained());
+        }
 
-test "audio/unit_tests/TrackState_sanitizes_nan_gain" {
-    const std = @import("std");
+        fn sanitizesNanGain(testing: anytype) !void {
+            const state = try State.create(lib.testing.allocator, .{ .rate = 1000, .channels = .mono }, .{});
+            defer state.destroy();
 
-    const State = make(std);
-    const state = try State.create(std.testing.allocator, .{ .rate = 1000, .channels = .mono }, .{});
-    defer state.destroy();
+            state.setGain(lib.math.nan(f32));
+            try state.write(.{ .rate = 1000, .channels = .mono }, &.{ 9, 9 });
 
-    state.setGain(std.math.nan(f32));
-    try state.write(.{ .rate = 1000, .channels = .mono }, &.{ 9, 9 });
+            var out: [4]i16 = @splat(0);
+            const n = state.mixInto(&out);
+            try testing.expectEqual(@as(usize, 2), n);
+            try testing.expectEqualSlices(i16, &.{ 0, 0 }, out[0..2]);
+        }
 
-    var out: [4]i16 = @splat(0);
-    const n = state.mixInto(&out);
-    try std.testing.expectEqual(@as(usize, 2), n);
-    try std.testing.expectEqualSlices(i16, &.{ 0, 0 }, out[0..2]);
-}
+        fn convertsFormat(testing: anytype) !void {
+            const state = try State.create(lib.testing.allocator, .{ .rate = 2000, .channels = .mono }, .{});
+            defer state.destroy();
 
-test "audio/unit_tests/TrackState_converts_format" {
-    const std = @import("std");
+            try state.write(.{ .rate = 1000, .channels = .stereo }, &.{ 10, 30, 20, 40 });
 
-    const State = make(std);
-    const state = try State.create(std.testing.allocator, .{ .rate = 2000, .channels = .mono }, .{});
-    defer state.destroy();
+            var out: [8]i16 = @splat(0);
+            const n = state.mixInto(&out);
+            try testing.expectEqual(@as(usize, 4), n);
+            try testing.expectEqualSlices(i16, &.{ 20, 20, 30, 30 }, out[0..4]);
+        }
+    };
 
-    try state.write(.{ .rate = 1000, .channels = .stereo }, &.{ 10, 30, 20, 40 });
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var out: [8]i16 = @splat(0);
-    const n = state.mixInto(&out);
-    try std.testing.expectEqual(@as(usize, 4), n);
-    try std.testing.expectEqualSlices(i16, &.{ 20, 20, 30, 30 }, out[0..4]);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
+
+            TestCase.closeWriteWithSilenceAppendsTail(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.sanitizesNanGain(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.convertsFormat(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

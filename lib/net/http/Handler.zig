@@ -5,6 +5,7 @@
 
 const Request = @import("Request.zig");
 const response_writer_mod = @import("ResponseWriter.zig");
+const testing_api = @import("testing");
 
 pub fn HandlerFunc(comptime lib: type) type {
     return *const fn (rw: *response_writer_mod.ResponseWriter(lib), req: *Request) void;
@@ -68,24 +69,29 @@ pub fn Handler(comptime lib: type) type {
     };
 }
 
-test "net/unit_tests/http/Handler/fromFunc_dispatches_plain_function" {
-    const std = @import("std");
-    const Writer = response_writer_mod.ResponseWriter(std);
-    const H = Handler(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const Writer = response_writer_mod.ResponseWriter(lib);
+            const H = Handler(lib);
 
-    const Counter = struct {
-        var calls: usize = 0;
-        fn run(_: *Writer, _: *Request) void {
-            calls += 1;
+            const Counter = struct {
+                var calls: usize = 0;
+                fn run(_: *Writer, _: *Request) void {
+                    calls += 1;
+                }
+            };
+
+            Counter.calls = 0;
+            var writer = Writer.init(allocator, undefined, null, false);
+            defer writer.deinit();
+            var req = try Request.init(allocator, "GET", "https://example.com");
+            defer req.deinit();
+
+            const handler = H.fromFunc(Counter.run);
+            handler.serveHTTP(&writer, &req);
+            try testing.expectEqual(@as(usize, 1), Counter.calls);
         }
-    };
-
-    var writer = Writer.init(std.testing.allocator, undefined, null, false);
-    defer writer.deinit();
-    var req = try Request.init(std.testing.allocator, "GET", "https://example.com");
-    defer req.deinit();
-
-    const handler = H.fromFunc(Counter.run);
-    handler.serveHTTP(&writer, &req);
-    try std.testing.expectEqual(@as(usize, 1), Counter.calls);
+    }.run);
 }

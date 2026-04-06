@@ -1,6 +1,7 @@
 //! ledstrip.Color — RGB color helpers for LED strips.
 
 const root = @This();
+const testing_api = @import("testing");
 
 r: u8 = 0,
 g: u8 = 0,
@@ -33,31 +34,65 @@ pub fn lerp(a: root, b: root, t: u8) root {
     };
 }
 
-test "ledstrip/unit_tests/Color_rgb_and_named_constants_match" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn rgbAndNamedConstantsMatch() !void {
+            try lib.testing.expectEqual(red, rgb(255, 0, 0));
+            try lib.testing.expectEqual(green, rgb(0, 255, 0));
+            try lib.testing.expectEqual(blue, rgb(0, 0, 255));
+            try lib.testing.expectEqual(white, rgb(255, 255, 255));
+            try lib.testing.expectEqual(black, rgb(0, 0, 0));
+        }
 
-    try std.testing.expectEqual(red, rgb(255, 0, 0));
-    try std.testing.expectEqual(green, rgb(0, 255, 0));
-    try std.testing.expectEqual(blue, rgb(0, 0, 255));
-    try std.testing.expectEqual(white, rgb(255, 255, 255));
-    try std.testing.expectEqual(black, rgb(0, 0, 0));
-}
+        fn withBrightnessScalesChannels() !void {
+            const color = rgb(255, 128, 64).withBrightness(128);
+            try lib.testing.expectEqual(root.rgb(128, 64, 32), color);
+        }
 
-test "ledstrip/unit_tests/Color_withBrightness_scales_channels" {
-    const std = @import("std");
+        fn lerpInterpolatesEndpointsAndMidpoint() !void {
+            try lib.testing.expectEqual(red, lerp(red, blue, 0));
+            try lib.testing.expectEqual(blue, lerp(red, blue, 255));
 
-    const color = rgb(255, 128, 64).withBrightness(128);
-    try std.testing.expectEqual(root.rgb(128, 64, 32), color);
-}
+            const mid = lerp(red, blue, 128);
+            try lib.testing.expectEqual(@as(u8, 127), mid.r);
+            try lib.testing.expectEqual(@as(u8, 0), mid.g);
+            try lib.testing.expectEqual(@as(u8, 128), mid.b);
+        }
+    };
 
-test "ledstrip/unit_tests/Color_lerp_interpolates_endpoints_and_midpoint" {
-    const std = @import("std");
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    try std.testing.expectEqual(red, lerp(red, blue, 0));
-    try std.testing.expectEqual(blue, lerp(red, blue, 255));
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    const mid = lerp(red, blue, 128);
-    try std.testing.expectEqual(@as(u8, 127), mid.r);
-    try std.testing.expectEqual(@as(u8, 0), mid.g);
-    try std.testing.expectEqual(@as(u8, 128), mid.b);
+            TestCase.rgbAndNamedConstantsMatch() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.withBrightnessScalesChannels() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.lerpInterpolatesEndpointsAndMidpoint() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

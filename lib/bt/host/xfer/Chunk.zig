@@ -1,6 +1,7 @@
 //! Chunk — BLE xfer chunk encoding and bitmask utilities.
 
 const embed = @import("embed");
+const testing_api = @import("testing");
 
 /// Maximum number of chunks supported by the 12-bit header fields.
 pub const max_chunks: u16 = 4095;
@@ -201,160 +202,153 @@ fn readInt(comptime T: type, buf: []const u8) T {
     return value;
 }
 
-test "bt/unit_tests/host/xfer/Chunk/Header_encode_decode_roundtrip" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const headers = [_]Header{
+                .{ .total = 1, .seq = 1 },
+                .{ .total = 100, .seq = 50 },
+                .{ .total = 256, .seq = 128 },
+                .{ .total = 4095, .seq = 1 },
+                .{ .total = 4095, .seq = 4095 },
+                .{ .total = 0xABC, .seq = 0x123 },
+            };
+            for (headers) |header| {
+                const encoded = header.encode();
+                const decoded = Header.decode(&encoded);
+                try lib.testing.expectEqual(header.total, decoded.total);
+                try lib.testing.expectEqual(header.seq, decoded.seq);
+            }
 
-    const cases = [_]Header{
-        .{ .total = 1, .seq = 1 },
-        .{ .total = 100, .seq = 50 },
-        .{ .total = 256, .seq = 128 },
-        .{ .total = 4095, .seq = 1 },
-        .{ .total = 4095, .seq = 4095 },
-        .{ .total = 0xABC, .seq = 0x123 },
+            try (Header{ .total = 1, .seq = 1 }).validate();
+            try (Header{ .total = 4095, .seq = 4095 }).validate();
+            try lib.testing.expectError(error.InvalidHeader, (Header{ .total = 0, .seq = 1 }).validate());
+            try lib.testing.expectError(error.InvalidHeader, (Header{ .total = 1, .seq = 0 }).validate());
+            try lib.testing.expectError(error.InvalidHeader, (Header{ .total = 1, .seq = 2 }).validate());
+            try lib.testing.expectError(error.InvalidHeader, (Header{ .total = 4096, .seq = 1 }).validate());
+
+            try lib.testing.expect(isReadStartMagic(&read_start_magic));
+            try lib.testing.expect(isWriteStartMagic(&write_start_magic));
+            try lib.testing.expect(!isReadStartMagic(&write_start_magic));
+            try lib.testing.expect(!isWriteStartMagic(&read_start_magic));
+            try lib.testing.expect(isAck(&ack_signal));
+            try lib.testing.expect(isAck(&[_]u8{ 0xFF, 0xFF, 0x00 }));
+            try lib.testing.expect(!isAck(&[_]u8{0xFF}));
+
+            const seqs = [_]u16{ 1, 42, 4095 };
+            var loss_buf: [6]u8 = undefined;
+            const encoded_loss = encodeLossList(&seqs, &loss_buf);
+            try lib.testing.expectEqual(@as(usize, 6), encoded_loss.len);
+
+            var decoded: [3]u16 = undefined;
+            const decoded_count = decodeLossList(encoded_loss, &decoded);
+            try lib.testing.expectEqual(@as(usize, 3), decoded_count);
+            try lib.testing.expectEqualSlices(u16, &seqs, decoded[0..decoded_count]);
+
+            var short_buf: [4]u8 = undefined;
+            const truncated = encodeLossList(&seqs, &short_buf);
+            try lib.testing.expectEqual(@as(usize, 4), truncated.len);
+
+            var truncated_out: [2]u16 = undefined;
+            const truncated_count = decodeLossList(truncated, &truncated_out);
+            try lib.testing.expectEqual(@as(usize, 2), truncated_count);
+            try lib.testing.expectEqual(@as(u16, 1), truncated_out[0]);
+            try lib.testing.expectEqual(@as(u16, 42), truncated_out[1]);
+
+            var mask_buf: [2]u8 = undefined;
+            Bitmask.initClear(&mask_buf, 10);
+            try lib.testing.expectEqual(@as(usize, 2), Bitmask.requiredBytes(10));
+            try lib.testing.expect(!Bitmask.isSet(&mask_buf, 1));
+            try lib.testing.expect(!Bitmask.isComplete(&mask_buf, 10));
+
+            Bitmask.set(&mask_buf, 1);
+            Bitmask.set(&mask_buf, 2);
+            Bitmask.set(&mask_buf, 4);
+            Bitmask.set(&mask_buf, 5);
+            Bitmask.set(&mask_buf, 6);
+            Bitmask.set(&mask_buf, 8);
+            Bitmask.set(&mask_buf, 9);
+            Bitmask.set(&mask_buf, 10);
+
+            try lib.testing.expect(Bitmask.isSet(&mask_buf, 1));
+            try lib.testing.expect(!Bitmask.isSet(&mask_buf, 3));
+            try lib.testing.expect(!Bitmask.isSet(&mask_buf, 7));
+
+            var missing: [10]u16 = undefined;
+            const missing_count = Bitmask.collectMissing(&mask_buf, 10, &missing);
+            try lib.testing.expectEqual(@as(usize, 2), missing_count);
+            try lib.testing.expectEqual(@as(u16, 3), missing[0]);
+            try lib.testing.expectEqual(@as(u16, 7), missing[1]);
+
+            Bitmask.set(&mask_buf, 3);
+            Bitmask.set(&mask_buf, 7);
+            try lib.testing.expect(Bitmask.isComplete(&mask_buf, 10));
+            Bitmask.clear(&mask_buf, 5);
+            try lib.testing.expect(!Bitmask.isComplete(&mask_buf, 10));
+            try lib.testing.expect(!Bitmask.isSet(&mask_buf, 5));
+
+            var all_set: [2]u8 = undefined;
+            Bitmask.initAllSet(&all_set, 10);
+            try lib.testing.expectEqual(@as(u8, 0xFF), all_set[0]);
+            try lib.testing.expectEqual(@as(u8, 0x03), all_set[1]);
+            try lib.testing.expect(Bitmask.isComplete(&all_set, 10));
+
+            var one_byte: [1]u8 = undefined;
+            Bitmask.initAllSet(&one_byte, 3);
+            try lib.testing.expectEqual(@as(u8, 0x07), one_byte[0]);
+
+            try lib.testing.expectEqual(@as(usize, 241), dataChunkSize(247));
+            try lib.testing.expectEqual(@as(usize, 24), dataChunkSize(30));
+            try lib.testing.expectEqual(@as(usize, 1), dataChunkSize(7));
+            try lib.testing.expectEqual(@as(usize, 1), dataChunkSize(6));
+            try lib.testing.expectEqual(@as(usize, 1), dataChunkSize(1));
+            try lib.testing.expectEqual(@as(usize, 0), chunksNeeded(0, 247));
+            try lib.testing.expectEqual(@as(usize, 1), chunksNeeded(1, 247));
+            try lib.testing.expectEqual(@as(usize, 4), chunksNeeded(964, 247));
+            try lib.testing.expectEqual(@as(usize, 5), chunksNeeded(1000, 247));
+            try lib.testing.expectEqual(@as(usize, 3), chunksNeeded(56, 30));
+
+            var metadata_buf: [topic_size + 3]u8 = undefined;
+            const topic_only = encodeReadStartMetadata(metadata_buf[0..], 0x0102030405060708, &.{});
+            try lib.testing.expectEqual(@as(usize, topic_size), topic_only.len);
+            const decoded_topic_only = try decodeReadStartMetadata(topic_only);
+            try lib.testing.expectEqual(@as(Topic, 0x0102030405060708), decoded_topic_only.topic);
+            try lib.testing.expectEqual(@as(usize, 0), decoded_topic_only.metadata.len);
+
+            const topic_and_metadata = encodeReadStartMetadata(metadata_buf[0..], 0x0102030405060708, &.{ 0xAA, 0xBB, 0xCC });
+            try lib.testing.expectEqual(@as(usize, topic_size + 3), topic_and_metadata.len);
+            const decoded_topic_and_metadata = try decodeReadStartMetadata(topic_and_metadata);
+            try lib.testing.expectEqual(@as(Topic, 0x0102030405060708), decoded_topic_and_metadata.topic);
+            try lib.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC }, decoded_topic_and_metadata.metadata);
+            try lib.testing.expectError(error.InvalidReadStartMetadata, decodeReadStartMetadata(&.{}));
+            try lib.testing.expectError(error.InvalidReadStartMetadata, decodeReadStartMetadata(&.{ 0x01, 0x02, 0x03 }));
+        }
     };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    for (cases) |header| {
-        const encoded = header.encode();
-        const decoded = Header.decode(&encoded);
-        try std.testing.expectEqual(header.total, decoded.total);
-        try std.testing.expectEqual(header.seq, decoded.seq);
-    }
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-test "bt/unit_tests/host/xfer/Chunk/Header_validate_rejects_out_of_range_values" {
-    const std = @import("std");
-
-    try (Header{ .total = 1, .seq = 1 }).validate();
-    try (Header{ .total = 4095, .seq = 4095 }).validate();
-
-    try std.testing.expectError(error.InvalidHeader, (Header{ .total = 0, .seq = 1 }).validate());
-    try std.testing.expectError(error.InvalidHeader, (Header{ .total = 1, .seq = 0 }).validate());
-    try std.testing.expectError(error.InvalidHeader, (Header{ .total = 1, .seq = 2 }).validate());
-    try std.testing.expectError(error.InvalidHeader, (Header{ .total = 4096, .seq = 1 }).validate());
-}
-
-test "bt/unit_tests/host/xfer/Chunk/control_message_detection" {
-    const std = @import("std");
-
-    try std.testing.expect(isReadStartMagic(&read_start_magic));
-    try std.testing.expect(isWriteStartMagic(&write_start_magic));
-    try std.testing.expect(!isReadStartMagic(&write_start_magic));
-    try std.testing.expect(!isWriteStartMagic(&read_start_magic));
-
-    try std.testing.expect(isAck(&ack_signal));
-    try std.testing.expect(isAck(&[_]u8{ 0xFF, 0xFF, 0x00 }));
-    try std.testing.expect(!isAck(&[_]u8{0xFF}));
-}
-
-test "bt/unit_tests/host/xfer/Chunk/loss_list_roundtrip_and_truncation" {
-    const std = @import("std");
-
-    const seqs = [_]u16{ 1, 42, 4095 };
-    var buf: [6]u8 = undefined;
-    const encoded = encodeLossList(&seqs, &buf);
-    try std.testing.expectEqual(@as(usize, 6), encoded.len);
-
-    var decoded: [3]u16 = undefined;
-    const decoded_count = decodeLossList(encoded, &decoded);
-    try std.testing.expectEqual(@as(usize, 3), decoded_count);
-    try std.testing.expectEqualSlices(u16, &seqs, decoded[0..decoded_count]);
-
-    var short_buf: [4]u8 = undefined;
-    const truncated = encodeLossList(&seqs, &short_buf);
-    try std.testing.expectEqual(@as(usize, 4), truncated.len);
-
-    var truncated_out: [2]u16 = undefined;
-    const truncated_count = decodeLossList(truncated, &truncated_out);
-    try std.testing.expectEqual(@as(usize, 2), truncated_count);
-    try std.testing.expectEqual(@as(u16, 1), truncated_out[0]);
-    try std.testing.expectEqual(@as(u16, 42), truncated_out[1]);
-}
-
-test "bt/unit_tests/host/xfer/Chunk/bitmask_set_clear_complete_and_collect_missing" {
-    const std = @import("std");
-
-    var buf: [2]u8 = undefined;
-    Bitmask.initClear(&buf, 10);
-    try std.testing.expectEqual(@as(usize, 2), Bitmask.requiredBytes(10));
-    try std.testing.expect(!Bitmask.isSet(&buf, 1));
-    try std.testing.expect(!Bitmask.isComplete(&buf, 10));
-
-    Bitmask.set(&buf, 1);
-    Bitmask.set(&buf, 2);
-    Bitmask.set(&buf, 4);
-    Bitmask.set(&buf, 5);
-    Bitmask.set(&buf, 6);
-    Bitmask.set(&buf, 8);
-    Bitmask.set(&buf, 9);
-    Bitmask.set(&buf, 10);
-
-    try std.testing.expect(Bitmask.isSet(&buf, 1));
-    try std.testing.expect(!Bitmask.isSet(&buf, 3));
-    try std.testing.expect(!Bitmask.isSet(&buf, 7));
-
-    var missing: [10]u16 = undefined;
-    const missing_count = Bitmask.collectMissing(&buf, 10, &missing);
-    try std.testing.expectEqual(@as(usize, 2), missing_count);
-    try std.testing.expectEqual(@as(u16, 3), missing[0]);
-    try std.testing.expectEqual(@as(u16, 7), missing[1]);
-
-    Bitmask.set(&buf, 3);
-    Bitmask.set(&buf, 7);
-    try std.testing.expect(Bitmask.isComplete(&buf, 10));
-
-    Bitmask.clear(&buf, 5);
-    try std.testing.expect(!Bitmask.isComplete(&buf, 10));
-    try std.testing.expect(!Bitmask.isSet(&buf, 5));
-}
-
-test "bt/unit_tests/host/xfer/Chunk/bitmask_initAllSet_masks_partial_last_byte" {
-    const std = @import("std");
-
-    var buf: [2]u8 = undefined;
-    Bitmask.initAllSet(&buf, 10);
-    try std.testing.expectEqual(@as(u8, 0xFF), buf[0]);
-    try std.testing.expectEqual(@as(u8, 0x03), buf[1]);
-    try std.testing.expect(Bitmask.isComplete(&buf, 10));
-
-    var one_byte: [1]u8 = undefined;
-    Bitmask.initAllSet(&one_byte, 3);
-    try std.testing.expectEqual(@as(u8, 0x07), one_byte[0]);
-}
-
-test "bt/unit_tests/host/xfer/Chunk/size_helpers" {
-    const std = @import("std");
-
-    try std.testing.expectEqual(@as(usize, 241), dataChunkSize(247));
-    try std.testing.expectEqual(@as(usize, 24), dataChunkSize(30));
-    try std.testing.expectEqual(@as(usize, 1), dataChunkSize(7));
-    try std.testing.expectEqual(@as(usize, 1), dataChunkSize(6));
-    try std.testing.expectEqual(@as(usize, 1), dataChunkSize(1));
-
-    try std.testing.expectEqual(@as(usize, 0), chunksNeeded(0, 247));
-    try std.testing.expectEqual(@as(usize, 1), chunksNeeded(1, 247));
-    try std.testing.expectEqual(@as(usize, 4), chunksNeeded(964, 247));
-    try std.testing.expectEqual(@as(usize, 5), chunksNeeded(1000, 247));
-    try std.testing.expectEqual(@as(usize, 3), chunksNeeded(56, 30));
-}
-
-test "bt/unit_tests/host/xfer/Chunk/read_start_metadata_roundtrip" {
-    const std = @import("std");
-
-    var buf: [topic_size + 3]u8 = undefined;
-    const topic_only = encodeReadStartMetadata(buf[0..], 0x0102030405060708, &.{});
-    try std.testing.expectEqual(@as(usize, topic_size), topic_only.len);
-
-    const decoded_topic_only = try decodeReadStartMetadata(topic_only);
-    try std.testing.expectEqual(@as(Topic, 0x0102030405060708), decoded_topic_only.topic);
-    try std.testing.expectEqual(@as(usize, 0), decoded_topic_only.metadata.len);
-
-    const topic_and_metadata = encodeReadStartMetadata(buf[0..], 0x0102030405060708, &.{ 0xAA, 0xBB, 0xCC });
-    try std.testing.expectEqual(@as(usize, topic_size + 3), topic_and_metadata.len);
-
-    const decoded_topic_and_metadata = try decodeReadStartMetadata(topic_and_metadata);
-    try std.testing.expectEqual(@as(Topic, 0x0102030405060708), decoded_topic_and_metadata.topic);
-    try std.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC }, decoded_topic_and_metadata.metadata);
-
-    try std.testing.expectError(error.InvalidReadStartMetadata, decodeReadStartMetadata(&.{}));
-    try std.testing.expectError(error.InvalidReadStartMetadata, decodeReadStartMetadata(&.{ 0x01, 0x02, 0x03 }));
-}

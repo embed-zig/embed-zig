@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const att = @import("../att.zig");
+const testing_api = @import("testing");
 
 pub const DiscoveredService = struct {
     start_handle: u16,
@@ -163,63 +164,72 @@ pub fn isErrorFor(data: []const u8, request_opcode: u8) ?att.ErrorCode {
     }
 }
 
-// --- Tests ---
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            {
+                var buf: [att.MAX_PDU_LEN]u8 = undefined;
+                const req = encodeRead(&buf, 0x0003);
+                try lib.testing.expectEqual(att.READ_REQUEST, req[0]);
 
-test "bt/unit_tests/host/gatt/client/encodeDiscoverServices_roundtrip_with_server" {
-    const server_mod = @import("server.zig");
-    const Server = server_mod.GattServer(&[_]server_mod.ServiceDef{
-        server_mod.Service(0x180D, &[_]server_mod.CharDef{
-            server_mod.Char(0x2A37, .{ .read = true, .notify = true }),
-        }),
-    });
-    var server = Server.init();
+                var resp_buf: [att.MAX_PDU_LEN]u8 = undefined;
+                const resp = att.encodeReadResponse(&resp_buf, "hello");
 
-    var req_buf: [att.MAX_PDU_LEN]u8 = undefined;
-    var resp_buf: [att.MAX_PDU_LEN]u8 = undefined;
+                var out: [64]u8 = undefined;
+                const n = parseReadResponse(resp, &out);
+                try lib.testing.expectEqual(@as(usize, 5), n);
+                try lib.testing.expectEqualSlices(u8, "hello", out[0..5]);
+            }
 
-    const req = encodeDiscoverServices(&req_buf, 0x0001);
-    const resp_len = server.handlePdu(req, &resp_buf);
-    try std.testing.expect(resp_len > 0);
+            {
+                var buf: [att.MAX_PDU_LEN]u8 = undefined;
 
-    var services: [4]DiscoveredService = undefined;
-    const count = parseDiscoverServicesResponse(resp_buf[0..resp_len], &services);
-    try std.testing.expectEqual(@as(usize, 1), count);
-    try std.testing.expectEqual(@as(u16, 0x180D), services[0].uuid);
+                const sub = encodeSubscribe(&buf, 0x0004);
+                try lib.testing.expectEqual(att.WRITE_REQUEST, sub[0]);
+                try lib.testing.expectEqual(@as(u8, 0x01), sub[3]);
+                try lib.testing.expectEqual(@as(u8, 0x00), sub[4]);
+
+                const unsub = encodeUnsubscribe(&buf, 0x0004);
+                try lib.testing.expectEqual(@as(u8, 0x00), unsub[3]);
+                try lib.testing.expectEqual(@as(u8, 0x00), unsub[4]);
+            }
+
+            {
+                var buf: [att.MAX_PDU_LEN]u8 = undefined;
+                const err_pdu = att.encodeErrorResponse(&buf, att.READ_REQUEST, 0x0001, .invalid_handle);
+                const code = isErrorFor(err_pdu, att.READ_REQUEST);
+                try lib.testing.expectEqual(att.ErrorCode.invalid_handle, code.?);
+
+                const wrong = isErrorFor(err_pdu, att.WRITE_REQUEST);
+                try lib.testing.expectEqual(@as(?att.ErrorCode, null), wrong);
+            }
+        }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-test "bt/unit_tests/host/gatt/client/encodeRead_parseReadResponse" {
-    var buf: [att.MAX_PDU_LEN]u8 = undefined;
-    const req = encodeRead(&buf, 0x0003);
-    try std.testing.expectEqual(att.READ_REQUEST, req[0]);
-
-    var resp_buf: [att.MAX_PDU_LEN]u8 = undefined;
-    const resp = att.encodeReadResponse(&resp_buf, "hello");
-
-    var out: [64]u8 = undefined;
-    const n = parseReadResponse(resp, &out);
-    try std.testing.expectEqual(@as(usize, 5), n);
-    try std.testing.expectEqualSlices(u8, "hello", out[0..5]);
-}
-
-test "bt/unit_tests/host/gatt/client/subscribe_unsubscribe_encode" {
-    var buf: [att.MAX_PDU_LEN]u8 = undefined;
-
-    const sub = encodeSubscribe(&buf, 0x0004);
-    try std.testing.expectEqual(att.WRITE_REQUEST, sub[0]);
-    try std.testing.expectEqual(@as(u8, 0x01), sub[3]); // notifications enabled
-    try std.testing.expectEqual(@as(u8, 0x00), sub[4]);
-
-    const unsub = encodeUnsubscribe(&buf, 0x0004);
-    try std.testing.expectEqual(@as(u8, 0x00), unsub[3]);
-    try std.testing.expectEqual(@as(u8, 0x00), unsub[4]);
-}
-
-test "bt/unit_tests/host/gatt/client/isErrorFor" {
-    var buf: [att.MAX_PDU_LEN]u8 = undefined;
-    const err_pdu = att.encodeErrorResponse(&buf, att.READ_REQUEST, 0x0001, .invalid_handle);
-    const code = isErrorFor(err_pdu, att.READ_REQUEST);
-    try std.testing.expectEqual(att.ErrorCode.invalid_handle, code.?);
-
-    const wrong = isErrorFor(err_pdu, att.WRITE_REQUEST);
-    try std.testing.expectEqual(@as(?att.ErrorCode, null), wrong);
-}

@@ -15,6 +15,8 @@ pub fn create(
 
 pub fn link(b: *std.Build) void {
     const embed = b.modules.get("embed") orelse @panic("io requires embed");
+    const testing = b.modules.get("testing") orelse @panic("io requires testing");
     const mod = b.modules.get("io") orelse @panic("io module missing");
     mod.addImport("embed", embed);
+    mod.addImport("testing", testing);
 }

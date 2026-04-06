@@ -4,6 +4,8 @@
 const embed = @import("embed");
 const atomic = embed.atomic;
 const mem = embed.mem;
+const T = @import("T.zig");
+const TestRunnerApi = @import("TestRunner.zig");
 
 const AtomicBool = atomic.Value(bool);
 const Self = @This();
@@ -140,158 +142,198 @@ const vtable: mem.Allocator.VTable = .{
     .free = free,
 };
 
-test "testing/unit_tests/TestingAllocator/enforces_limit_and_tracks_peak" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) TestRunnerApi {
+    const TestCase = struct {
+        fn testEnforcesLimitAndTracksPeak() !void {
+            const std = @import("std");
 
-    var allocator_state = Self.init(std.testing.allocator, 24);
-    const alloc_inst = allocator_state.allocator();
+            var allocator_state = Self.init(std.testing.allocator, 24);
+            const alloc_inst = allocator_state.allocator();
 
-    const first = try alloc_inst.alloc(u8, 16);
-    defer alloc_inst.free(first);
+            const first = try alloc_inst.alloc(u8, 16);
+            defer alloc_inst.free(first);
 
-    try std.testing.expectEqual(@as(usize, 16), allocator_state.peakLiveBytes());
+            try std.testing.expectEqual(@as(usize, 16), allocator_state.peakLiveBytes());
 
-    try std.testing.expectError(error.OutOfMemory, alloc_inst.alloc(u8, 16));
-    try std.testing.expectEqual(@as(usize, 16), allocator_state.peakLiveBytes());
+            try std.testing.expectError(error.OutOfMemory, alloc_inst.alloc(u8, 16));
+            try std.testing.expectEqual(@as(usize, 16), allocator_state.peakLiveBytes());
 
-    const second = try alloc_inst.alloc(u8, 8);
-    defer alloc_inst.free(second);
+            const second = try alloc_inst.alloc(u8, 8);
+            defer alloc_inst.free(second);
 
-    const current = allocator_state.stats();
-    try std.testing.expectEqual(@as(usize, 24), current.peak_live_bytes);
-}
+            const current = allocator_state.stats();
+            try std.testing.expectEqual(@as(usize, 24), current.peak_live_bytes);
+        }
 
-test "testing/unit_tests/TestingAllocator/tracks_peak_concurrent_live_bytes" {
-    const std = @import("std");
+        fn testTracksPeakConcurrentLiveBytes() !void {
+            const std = @import("std");
 
-    const Sync = struct {
-        mutex: std.Thread.Mutex = .{},
-        cond: std.Thread.Condition = .{},
-        ready_count: usize = 0,
-        release: bool = false,
-    };
+            const Sync = struct {
+                mutex: std.Thread.Mutex = .{},
+                cond: std.Thread.Condition = .{},
+                ready_count: usize = 0,
+                release: bool = false,
+            };
 
-    const Worker = struct {
-        fn run(sync: *Sync, alloc_inst: mem.Allocator) !void {
-            const bytes = try alloc_inst.alloc(u8, 16);
-            defer alloc_inst.free(bytes);
+            const Worker = struct {
+                fn run(sync: *Sync, alloc_inst: mem.Allocator) !void {
+                    const bytes = try alloc_inst.alloc(u8, 16);
+                    defer alloc_inst.free(bytes);
+
+                    sync.mutex.lock();
+                    sync.ready_count += 1;
+                    sync.cond.broadcast();
+                    while (!sync.release) {
+                        sync.cond.wait(&sync.mutex);
+                    }
+                    sync.mutex.unlock();
+                }
+            };
+
+            var allocator_state = Self.init(std.heap.page_allocator, null);
+            const alloc_inst = allocator_state.allocator();
+            var sync: Sync = .{};
+
+            const t1 = try std.Thread.spawn(.{}, Worker.run, .{ &sync, alloc_inst });
+            const t2 = try std.Thread.spawn(.{}, Worker.run, .{ &sync, alloc_inst });
 
             sync.mutex.lock();
-            sync.ready_count += 1;
-            sync.cond.broadcast();
-            while (!sync.release) {
+            while (sync.ready_count < 2) {
                 sync.cond.wait(&sync.mutex);
             }
+            try std.testing.expectEqual(@as(usize, 32), allocator_state.peakLiveBytes());
+            sync.release = true;
+            sync.cond.broadcast();
             sync.mutex.unlock();
+
+            t1.join();
+            t2.join();
+
+            try std.testing.expectEqual(@as(usize, 32), allocator_state.peakLiveBytes());
+        }
+
+        fn testResizeAndRemapRespectLimit() !void {
+            const std = @import("std");
+
+            const FixedBufferAllocator = struct {
+                storage: [64]u8 = undefined,
+                allocated_len: usize = 0,
+                resize_calls: usize = 0,
+                remap_calls: usize = 0,
+
+                fn allocator(self: *@This()) mem.Allocator {
+                    return .{
+                        .ptr = self,
+                        .vtable = &backing_vtable,
+                    };
+                }
+
+                fn backingAlloc(ptr: *anyopaque, len: usize, alignment: mem.Alignment, ret_addr: usize) ?[*]u8 {
+                    const self: *@This() = @ptrCast(@alignCast(ptr));
+                    _ = alignment;
+                    _ = ret_addr;
+                    if (self.allocated_len != 0 or len > self.storage.len) return null;
+                    self.allocated_len = len;
+                    return self.storage[0..len].ptr;
+                }
+
+                fn backingResize(ptr: *anyopaque, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) bool {
+                    const self: *@This() = @ptrCast(@alignCast(ptr));
+                    _ = alignment;
+                    _ = ret_addr;
+                    self.resize_calls += 1;
+                    if (@intFromPtr(memory.ptr) != @intFromPtr(self.storage[0..].ptr)) return false;
+                    if (new_len > self.storage.len) return false;
+                    self.allocated_len = new_len;
+                    return true;
+                }
+
+                fn backingRemap(ptr: *anyopaque, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+                    const self: *@This() = @ptrCast(@alignCast(ptr));
+                    _ = alignment;
+                    _ = ret_addr;
+                    self.remap_calls += 1;
+                    if (@intFromPtr(memory.ptr) != @intFromPtr(self.storage[0..].ptr)) return null;
+                    if (new_len > self.storage.len) return null;
+                    self.allocated_len = new_len;
+                    return self.storage[0..new_len].ptr;
+                }
+
+                fn backingFree(ptr: *anyopaque, memory: []u8, alignment: mem.Alignment, ret_addr: usize) void {
+                    const self: *@This() = @ptrCast(@alignCast(ptr));
+                    _ = memory;
+                    _ = alignment;
+                    _ = ret_addr;
+                    self.allocated_len = 0;
+                }
+
+                const backing_vtable: mem.Allocator.VTable = .{
+                    .alloc = backingAlloc,
+                    .resize = backingResize,
+                    .remap = backingRemap,
+                    .free = backingFree,
+                };
+            };
+
+            var backing = FixedBufferAllocator{};
+            var allocator_state = Self.init(backing.allocator(), 16);
+            const alloc_inst = allocator_state.allocator();
+
+            var bytes = try alloc_inst.alloc(u8, 12);
+            defer alloc_inst.free(bytes);
+
+            try std.testing.expectEqual(@as(usize, 12), allocator_state.peakLiveBytes());
+
+            try std.testing.expect(!alloc_inst.resize(bytes, 20));
+            try std.testing.expectEqual(@as(usize, 0), backing.resize_calls);
+            try std.testing.expectEqual(@as(usize, 12), allocator_state.peakLiveBytes());
+
+            try std.testing.expect(alloc_inst.resize(bytes, 8));
+            bytes = bytes[0..8];
+            try std.testing.expectEqual(@as(usize, 1), backing.resize_calls);
+
+            bytes = alloc_inst.remap(bytes, 16) orelse return error.ExpectedRemap;
+            try std.testing.expectEqual(@as(usize, 1), backing.remap_calls);
+            try std.testing.expectEqual(@as(usize, 16), allocator_state.peakLiveBytes());
+
+            try std.testing.expect(alloc_inst.remap(bytes, 17) == null);
+            try std.testing.expectEqual(@as(usize, 1), backing.remap_calls);
         }
     };
 
-    var allocator_state = Self.init(std.heap.page_allocator, null);
-    const alloc_inst = allocator_state.allocator();
-    var sync: Sync = .{};
+    const Runner = struct {
+        pub fn init(self: *@This(), gpa: lib.mem.Allocator) !void {
+            _ = self;
+            _ = gpa;
+        }
 
-    const t1 = try std.Thread.spawn(.{}, Worker.run, .{ &sync, alloc_inst });
-    const t2 = try std.Thread.spawn(.{}, Worker.run, .{ &sync, alloc_inst });
+        pub fn run(self: *@This(), t: *T, gpa: lib.mem.Allocator) bool {
+            _ = self;
+            _ = gpa;
 
-    sync.mutex.lock();
-    while (sync.ready_count < 2) {
-        sync.cond.wait(&sync.mutex);
-    }
-    try std.testing.expectEqual(@as(usize, 32), allocator_state.peakLiveBytes());
-    sync.release = true;
-    sync.cond.broadcast();
-    sync.mutex.unlock();
-
-    t1.join();
-    t2.join();
-
-    try std.testing.expectEqual(@as(usize, 32), allocator_state.peakLiveBytes());
-}
-
-test "testing/unit_tests/TestingAllocator/resize_and_remap_respect_limit" {
-    const std = @import("std");
-
-    const FixedBufferAllocator = struct {
-        storage: [64]u8 = undefined,
-        allocated_len: usize = 0,
-        resize_calls: usize = 0,
-        remap_calls: usize = 0,
-
-        fn allocator(self: *@This()) mem.Allocator {
-            return .{
-                .ptr = self,
-                .vtable = &backing_vtable,
+            TestCase.testEnforcesLimitAndTracksPeak() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
             };
-        }
-
-        fn backingAlloc(ptr: *anyopaque, len: usize, alignment: mem.Alignment, ret_addr: usize) ?[*]u8 {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            _ = alignment;
-            _ = ret_addr;
-            if (self.allocated_len != 0 or len > self.storage.len) return null;
-            self.allocated_len = len;
-            return self.storage[0..len].ptr;
-        }
-
-        fn backingResize(ptr: *anyopaque, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) bool {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            _ = alignment;
-            _ = ret_addr;
-            self.resize_calls += 1;
-            if (@intFromPtr(memory.ptr) != @intFromPtr(self.storage[0..].ptr)) return false;
-            if (new_len > self.storage.len) return false;
-            self.allocated_len = new_len;
+            TestCase.testTracksPeakConcurrentLiveBytes() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testResizeAndRemapRespectLimit() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
             return true;
         }
 
-        fn backingRemap(ptr: *anyopaque, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            _ = alignment;
-            _ = ret_addr;
-            self.remap_calls += 1;
-            if (@intFromPtr(memory.ptr) != @intFromPtr(self.storage[0..].ptr)) return null;
-            if (new_len > self.storage.len) return null;
-            self.allocated_len = new_len;
-            return self.storage[0..new_len].ptr;
+        pub fn deinit(self: *@This(), gpa: lib.mem.Allocator) void {
+            _ = self;
+            _ = gpa;
         }
-
-        fn backingFree(ptr: *anyopaque, memory: []u8, alignment: mem.Alignment, ret_addr: usize) void {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            _ = memory;
-            _ = alignment;
-            _ = ret_addr;
-            self.allocated_len = 0;
-        }
-
-        const backing_vtable: mem.Allocator.VTable = .{
-            .alloc = backingAlloc,
-            .resize = backingResize,
-            .remap = backingRemap,
-            .free = backingFree,
-        };
     };
 
-    var backing = FixedBufferAllocator{};
-    var allocator_state = Self.init(backing.allocator(), 16);
-    const alloc_inst = allocator_state.allocator();
-
-    var bytes = try alloc_inst.alloc(u8, 12);
-    defer alloc_inst.free(bytes);
-
-    try std.testing.expectEqual(@as(usize, 12), allocator_state.peakLiveBytes());
-
-    try std.testing.expect(!alloc_inst.resize(bytes, 20));
-    try std.testing.expectEqual(@as(usize, 0), backing.resize_calls);
-    try std.testing.expectEqual(@as(usize, 12), allocator_state.peakLiveBytes());
-
-    try std.testing.expect(alloc_inst.resize(bytes, 8));
-    bytes = bytes[0..8];
-    try std.testing.expectEqual(@as(usize, 1), backing.resize_calls);
-
-    bytes = alloc_inst.remap(bytes, 16) orelse return error.ExpectedRemap;
-    try std.testing.expectEqual(@as(usize, 1), backing.remap_calls);
-    try std.testing.expectEqual(@as(usize, 16), allocator_state.peakLiveBytes());
-
-    try std.testing.expect(alloc_inst.remap(bytes, 17) == null);
-    try std.testing.expectEqual(@as(usize, 1), backing.remap_calls);
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return TestRunnerApi.make(Runner).new(&Holder.runner);
 }

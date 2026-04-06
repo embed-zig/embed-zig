@@ -11,15 +11,6 @@ pub const Es8311 = audio.Es8311;
 pub const Qmi8658 = imu.Qmi8658;
 pub const Tca9554 = gpio.Tca9554;
 pub const Fm175xx = nfc.Fm175xx;
-
-test "drivers/unit_tests" {
-    _ = @import("drivers/io/I2c.zig");
-    _ = @import("drivers/io/Delay.zig");
-    _ = @import("drivers/io/Spi.zig");
-    _ = @import("drivers/audio/es7210.zig");
-    _ = @import("drivers/audio/es8311.zig");
-    _ = @import("drivers/imu/qmi8658.zig");
-    _ = @import("drivers/gpio/tca9554.zig");
-    _ = @import("drivers/nfc/io/TypeA.zig");
-    _ = @import("drivers/nfc/fm175xx.zig");
-}
+pub const test_runner = struct {
+    pub const unit = @import("drivers/test_runner/unit.zig");
+};

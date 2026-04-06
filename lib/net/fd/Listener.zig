@@ -36,12 +36,12 @@ pub fn Listener(comptime lib: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            self.close();
+            self.closed = true;
+            posix.close(self.fd);
         }
 
         pub fn close(self: *Self) void {
             if (self.closed) return;
-            posix.close(self.fd);
             self.closed = true;
         }
 
@@ -57,6 +57,8 @@ pub fn Listener(comptime lib: type) type {
             if (!self.listening) return error.SocketNotListening;
 
             while (true) {
+                if (self.closed) return error.Closed;
+
                 var client_addr: posix.sockaddr.storage = undefined;
                 var client_len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
                 const client_fd = posix.accept(self.fd, @ptrCast(&client_addr), &client_len, 0) catch |err| switch (err) {
@@ -97,8 +99,11 @@ pub fn Listener(comptime lib: type) type {
             }};
 
             while (true) {
+                if (self.closed) return error.Closed;
+                if (!self.listening) return error.SocketNotListening;
+
                 poll_fds[0].revents = 0;
-                const ready = posix.poll(poll_fds[0..], -1) catch |err| {
+                const ready = posix.poll(poll_fds[0..], 50) catch |err| {
                     if (errorNameEquals(err, "Interrupted")) continue;
                     return err;
                 };

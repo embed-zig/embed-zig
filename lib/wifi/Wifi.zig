@@ -3,6 +3,7 @@
 const Ap = @import("Ap.zig");
 const Sta = @import("Sta.zig");
 const types = @import("types.zig");
+const testing_api = @import("testing");
 
 const root = @This();
 
@@ -150,80 +151,110 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
     };
 }
 
-test "wifi/unit_tests/Wifi_exposes_sta_and_ap_vtable_surface" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn exposesStaAndApVtableSurface() !void {
+            const StaImpl = struct {
+                pub fn startScan(_: *@This(), _: Sta.ScanConfig) Sta.ScanError!void {}
+                pub fn stopScan(_: *@This()) void {}
+                pub fn connect(_: *@This(), _: Sta.ConnectConfig) Sta.ConnectError!void {}
+                pub fn disconnect(_: *@This()) void {}
+                pub fn getState(_: *@This()) Sta.State {
+                    return .idle;
+                }
+                pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Sta.Event) void) void {}
+                pub fn deinit(_: *@This()) void {}
+            };
 
-    const StaImpl = struct {
-        pub fn startScan(_: *@This(), _: Sta.ScanConfig) Sta.ScanError!void {}
-        pub fn stopScan(_: *@This()) void {}
-        pub fn connect(_: *@This(), _: Sta.ConnectConfig) Sta.ConnectError!void {}
-        pub fn disconnect(_: *@This()) void {}
-        pub fn getState(_: *@This()) Sta.State {
-            return .idle;
+            const ApImpl = struct {
+                pub fn start(_: *@This(), _: Ap.Config) Ap.StartError!void {}
+                pub fn stop(_: *@This()) void {}
+                pub fn disconnectClient(_: *@This(), _: Ap.MacAddr) void {}
+                pub fn getState(_: *@This()) Ap.State {
+                    return .idle;
+                }
+                pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Ap.Event) void) void {}
+                pub fn deinit(_: *@This()) void {}
+            };
+
+            const Impl = struct {
+                pub const Config = struct {
+                    allocator: lib.mem.Allocator,
+                };
+
+                sta_impl: StaImpl = .{},
+                ap_impl: ApImpl = .{},
+
+                pub fn init(config: Config) !@This() {
+                    _ = config;
+                    return .{};
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    _ = self;
+                }
+
+                pub fn sta(self: *@This()) Sta {
+                    return Sta.make(&self.sta_impl);
+                }
+
+                pub fn ap(self: *@This()) Ap {
+                    return Ap.make(&self.ap_impl);
+                }
+
+                pub fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: CallbackFn) void {
+                    _ = self;
+                    _ = ctx;
+                    _ = emit_fn;
+                }
+
+                pub fn clearEventCallback(self: *@This()) void {
+                    _ = self;
+                }
+            };
+
+            comptime {
+                _ = root.deinit;
+                _ = root.sta;
+                _ = root.ap;
+                _ = root.setEventCallback;
+                _ = root.clearEventCallback;
+                _ = root.Event;
+                _ = root.CallbackFn;
+                _ = root.make;
+                _ = make(lib, Impl).init;
+                if (!@hasField(make(lib, Impl).Config, "allocator")) {
+                    @compileError("make config must expose allocator");
+                }
+            }
         }
-        pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Sta.Event) void) void {}
-        pub fn deinit(_: *@This()) void {}
     };
 
-    const ApImpl = struct {
-        pub fn start(_: *@This(), _: Ap.Config) Ap.StartError!void {}
-        pub fn stop(_: *@This()) void {}
-        pub fn disconnectClient(_: *@This(), _: Ap.MacAddr) void {}
-        pub fn getState(_: *@This()) Ap.State {
-            return .idle;
-        }
-        pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Ap.Event) void) void {}
-        pub fn deinit(_: *@This()) void {}
-    };
-
-    const Impl = struct {
-        pub const Config = struct {
-            allocator: std.mem.Allocator,
-        };
-
-        sta_impl: StaImpl = .{},
-        ap_impl: ApImpl = .{},
-
-        pub fn init(config: Config) !@This() {
-            _ = config;
-            return .{};
-        }
-
-        pub fn deinit(self: *@This()) void {
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
+            _ = allocator;
         }
 
-        pub fn sta(self: *@This()) Sta {
-            return Sta.make(&self.sta_impl);
-        }
-
-        pub fn ap(self: *@This()) Ap {
-            return Ap.make(&self.ap_impl);
-        }
-
-        pub fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: CallbackFn) void {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
-            _ = ctx;
-            _ = emit_fn;
+            _ = allocator;
+
+            TestCase.exposesStaAndApVtableSurface() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
         }
 
-        pub fn clearEventCallback(self: *@This()) void {
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
             _ = self;
+            _ = allocator;
         }
     };
 
-    comptime {
-        _ = root.deinit;
-        _ = root.sta;
-        _ = root.ap;
-        _ = root.setEventCallback;
-        _ = root.clearEventCallback;
-        _ = root.Event;
-        _ = root.CallbackFn;
-        _ = root.make;
-        _ = make(std, Impl).init;
-        if (!@hasField(make(std, Impl).Config, "allocator")) {
-            @compileError("make config must expose allocator");
-        }
-    }
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

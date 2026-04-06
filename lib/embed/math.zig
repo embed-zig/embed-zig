@@ -5,9 +5,11 @@ const re_export = struct {
 
     pub const Order = std.math.Order;
     pub const maxInt = std.math.maxInt;
+    pub const nan = std.math.nan;
     pub const order = std.math.order;
 };
 
 pub const Order = re_export.Order;
 pub const maxInt = re_export.maxInt;
+pub const nan = re_export.nan;
 pub const order = re_export.order;

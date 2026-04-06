@@ -4,6 +4,8 @@ const Request = @import("Request.zig");
 const ResponseWriter = @import("ResponseWriter.zig").ResponseWriter;
 const handler_mod = @import("Handler.zig");
 const mux_common = @import("mux_common.zig");
+const Conn = @import("../Conn.zig");
+const testing_api = @import("testing");
 
 pub fn StaticServeMux(comptime lib: type, comptime spec: anytype) type {
     if (validationError(spec)) |err| @compileError(err);
@@ -337,248 +339,245 @@ fn comptimeIntToString(comptime value: usize) []const u8 {
     };
 }
 
-test "net/unit_tests/http/StaticServeMux/validation_reports_invalid_and_duplicate_patterns" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const Writer = ResponseWriter(lib);
+            const DynamicMux = @import("ServeMux.zig").ServeMux(lib);
+            const StaticMux = StaticServeMux(lib, .{
+                "/redirect/",
+                "/exact",
+            });
 
-    try std.testing.expect(validationError(.{"hello"}) != null);
-    try std.testing.expect(validationError(.{
-        .{ .pattern = "/dup" },
-        "/dup",
-    }) != null);
-    try std.testing.expect(validationError(.{
-        .{ .pattern = "/" },
-        .{ .pattern = "/api/" },
-    }) == null);
-}
+            try testing.expect(validationError(.{"hello"}) != null);
+            try testing.expect(validationError(.{
+                .{ .pattern = "/dup" },
+                "/dup",
+            }) != null);
+            try testing.expect(validationError(.{
+                .{ .pattern = "/" },
+                .{ .pattern = "/api/" },
+            }) == null);
 
-test "net/unit_tests/http/StaticServeMux/handler_prefers_longest_match_and_catch_all" {
-    const std = @import("std");
-    const Writer = ResponseWriter(std);
-    const Mux = StaticServeMux(std, .{
-        "/",
-        "/api/",
-        "/api/users",
-    });
+            {
+                const Mux = StaticServeMux(lib, .{
+                    "/",
+                    "/api/",
+                    "/api/users",
+                });
 
-    const State = struct {
-        value: []const u8 = "",
-    };
+                const State = struct {
+                    value: []const u8 = "",
+                };
 
-    const RootHandler = struct {
-        state: *State,
-        pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
-            self.state.value = "root";
-        }
-    };
+                const RootHandler = struct {
+                    state: *State,
+                    pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
+                        self.state.value = "root";
+                    }
+                };
 
-    const ApiHandler = struct {
-        state: *State,
-        pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
-            self.state.value = "api";
-        }
-    };
+                const ApiHandler = struct {
+                    state: *State,
+                    pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
+                        self.state.value = "api";
+                    }
+                };
 
-    const UsersHandler = struct {
-        state: *State,
-        pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
-            self.state.value = "users";
-        }
-    };
+                const UsersHandler = struct {
+                    state: *State,
+                    pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
+                        self.state.value = "users";
+                    }
+                };
 
-    var state = State{};
-    var root_handler = RootHandler{ .state = &state };
-    var api_handler = ApiHandler{ .state = &state };
-    var users_handler = UsersHandler{ .state = &state };
-    var mux = Mux.init(.{ &root_handler, &api_handler, &users_handler });
+                var state = State{};
+                var root_handler = RootHandler{ .state = &state };
+                var api_handler = ApiHandler{ .state = &state };
+                var users_handler = UsersHandler{ .state = &state };
+                var mux = Mux.init(.{ &root_handler, &api_handler, &users_handler });
 
-    var req = try Request.init(std.testing.allocator, "GET", "https://example.com/api/users");
-    defer req.deinit();
-    var writer = Writer.init(std.testing.allocator, undefined, &req, false);
-    defer writer.deinit();
-    mux.serveHTTP(&writer, &req);
-    try std.testing.expectEqualStrings("users", state.value);
+                var req = try Request.init(allocator, "GET", "https://example.com/api/users");
+                defer req.deinit();
+                var writer = Writer.init(allocator, undefined, &req, false);
+                defer writer.deinit();
+                mux.serveHTTP(&writer, &req);
+                try testing.expectEqualStrings("users", state.value);
 
-    var miss_req = try Request.init(std.testing.allocator, "GET", "https://example.com/missing");
-    defer miss_req.deinit();
-    var miss_writer = Writer.init(std.testing.allocator, undefined, &miss_req, false);
-    defer miss_writer.deinit();
-    mux.serveHTTP(&miss_writer, &miss_req);
-    try std.testing.expectEqualStrings("root", state.value);
-}
-
-test "net/unit_tests/http/StaticServeMux/exact_and_subtree_share_leaf_correctly" {
-    const std = @import("std");
-    const Writer = ResponseWriter(std);
-    const ExactOnlyMux = StaticServeMux(std, .{
-        "/api",
-    });
-    const ExactAndSubtreeMux = StaticServeMux(std, .{
-        "/api",
-        "/api/",
-    });
-
-    const State = struct {
-        value: []const u8 = "",
-    };
-
-    const ExactHandler = struct {
-        state: *State,
-        pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
-            self.state.value = "exact";
-        }
-    };
-
-    const SubtreeHandler = struct {
-        state: *State,
-        pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
-            self.state.value = "subtree";
-        }
-    };
-
-    var state = State{};
-    var exact_handler = ExactHandler{ .state = &state };
-    var exact_only_mux = ExactOnlyMux.init(.{&exact_handler});
-
-    var exact_req = try Request.init(std.testing.allocator, "GET", "https://example.com/api");
-    defer exact_req.deinit();
-    var exact_writer = Writer.init(std.testing.allocator, undefined, &exact_req, false);
-    defer exact_writer.deinit();
-    exact_only_mux.serveHTTP(&exact_writer, &exact_req);
-    try std.testing.expectEqualStrings("exact", state.value);
-
-    var subtree_handler = SubtreeHandler{ .state = &state };
-    var pair_mux = ExactAndSubtreeMux.init(.{ &exact_handler, &subtree_handler });
-
-    var subtree_req = try Request.init(std.testing.allocator, "GET", "https://example.com/api/");
-    defer subtree_req.deinit();
-    var subtree_writer = Writer.init(std.testing.allocator, undefined, &subtree_req, false);
-    defer subtree_writer.deinit();
-    pair_mux.serveHTTP(&subtree_writer, &subtree_req);
-    try std.testing.expectEqualStrings("subtree", state.value);
-}
-
-test "net/unit_tests/http/StaticServeMux/redirect_and_not_found_match_dynamic_mux" {
-    const std = @import("std");
-    const Conn = @import("../Conn.zig");
-    const Writer = ResponseWriter(std);
-    const DynamicMux = @import("ServeMux.zig").ServeMux(std);
-    const StaticMux = StaticServeMux(std, .{
-        "/redirect/",
-        "/exact",
-    });
-
-    const MockConn = struct {
-        allocator: std.mem.Allocator,
-        writes: std.ArrayList(u8),
-
-        fn init(allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
-            return .{
-                .allocator = allocator,
-                .writes = try std.ArrayList(u8).initCapacity(allocator, 0),
-            };
-        }
-
-        pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
-            return error.EndOfStream;
-        }
-
-        pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
-            self.writes.appendSlice(self.allocator, buf) catch return error.Unexpected;
-            return buf.len;
-        }
-
-        pub fn close(_: *@This()) void {}
-        pub fn deinit(self: *@This()) void {
-            self.writes.deinit(self.allocator);
-        }
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    const SinkHandler = struct {
-        pub fn serveHTTP(_: *@This(), rw: *Writer, _: *Request) void {
-            rw.setHeader("Content-Length", "2") catch return;
-            _ = rw.write("ok") catch {};
-        }
-    };
-
-    const Captured = struct {
-        status_line: []u8,
-        location: ?[]const u8,
-
-        fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
-            allocator.free(self.status_line);
-            if (self.location) |loc| allocator.free(loc);
-        }
-    };
-
-    const captureResponse = struct {
-        fn run(mux: anytype, allocator: std.mem.Allocator, url: []const u8) !Captured {
-            var raw = try MockConn.init(allocator);
-            defer raw.deinit();
-            var req = try Request.init(allocator, "GET", url);
-            defer req.deinit();
-            var writer = Writer.init(allocator, Conn.init(&raw), &req, false);
-            defer writer.deinit();
-
-            mux.serveHTTP(&writer, &req);
-            try writer.finish();
-
-            const head = raw.writes.items;
-            const first_end = std.mem.indexOf(u8, head, "\r\n") orelse return error.TestUnexpectedResult;
-            const header_end = std.mem.indexOf(u8, head, "\r\n\r\n") orelse return error.TestUnexpectedResult;
-            const status_line = head[0..first_end];
-            const location = headerValue(head[0..header_end], "Location");
-            return .{
-                .status_line = try allocator.dupe(u8, status_line),
-                .location = if (location) |loc| try allocator.dupe(u8, loc) else null,
-            };
-        }
-
-        fn headerValue(head: []const u8, name: []const u8) ?[]const u8 {
-            var start: usize = 0;
-            while (start < head.len) {
-                const line_end = std.mem.indexOfScalarPos(u8, head, start, '\n') orelse head.len;
-                const line = std.mem.trimRight(u8, head[start..line_end], "\r");
-                if (line.len == 0) return null;
-                if (std.mem.startsWith(u8, line, name) and line.len > name.len + 1 and line[name.len] == ':') {
-                    return std.mem.trimLeft(u8, line[name.len + 1 ..], " ");
-                }
-                start = @min(line_end + 1, head.len);
+                var miss_req = try Request.init(allocator, "GET", "https://example.com/missing");
+                defer miss_req.deinit();
+                var miss_writer = Writer.init(allocator, undefined, &miss_req, false);
+                defer miss_writer.deinit();
+                mux.serveHTTP(&miss_writer, &miss_req);
+                try testing.expectEqualStrings("root", state.value);
             }
-            return null;
+
+            {
+                const ExactOnlyMux = StaticServeMux(lib, .{
+                    "/api",
+                });
+                const ExactAndSubtreeMux = StaticServeMux(lib, .{
+                    "/api",
+                    "/api/",
+                });
+
+                const State = struct {
+                    value: []const u8 = "",
+                };
+
+                const ExactHandler = struct {
+                    state: *State,
+                    pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
+                        self.state.value = "exact";
+                    }
+                };
+
+                const SubtreeHandler = struct {
+                    state: *State,
+                    pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
+                        self.state.value = "subtree";
+                    }
+                };
+
+                var state = State{};
+                var exact_handler = ExactHandler{ .state = &state };
+                var exact_only_mux = ExactOnlyMux.init(.{&exact_handler});
+
+                var exact_req = try Request.init(allocator, "GET", "https://example.com/api");
+                defer exact_req.deinit();
+                var exact_writer = Writer.init(allocator, undefined, &exact_req, false);
+                defer exact_writer.deinit();
+                exact_only_mux.serveHTTP(&exact_writer, &exact_req);
+                try testing.expectEqualStrings("exact", state.value);
+
+                var subtree_handler = SubtreeHandler{ .state = &state };
+                var pair_mux = ExactAndSubtreeMux.init(.{ &exact_handler, &subtree_handler });
+
+                var subtree_req = try Request.init(allocator, "GET", "https://example.com/api/");
+                defer subtree_req.deinit();
+                var subtree_writer = Writer.init(allocator, undefined, &subtree_req, false);
+                defer subtree_writer.deinit();
+                pair_mux.serveHTTP(&subtree_writer, &subtree_req);
+                try testing.expectEqualStrings("subtree", state.value);
+            }
+
+            {
+                const MockConn = struct {
+                    allocator: lib.mem.Allocator,
+                    writes: lib.ArrayList(u8),
+
+                    fn init(local_allocator: lib.mem.Allocator) lib.mem.Allocator.Error!@This() {
+                        return .{
+                            .allocator = local_allocator,
+                            .writes = try lib.ArrayList(u8).initCapacity(local_allocator, 0),
+                        };
+                    }
+
+                    pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
+                        return error.EndOfStream;
+                    }
+
+                    pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        self.writes.appendSlice(self.allocator, buf) catch return error.Unexpected;
+                        return buf.len;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                    pub fn deinit(self: *@This()) void {
+                        self.writes.deinit(self.allocator);
+                    }
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                const SinkHandler = struct {
+                    pub fn serveHTTP(_: *@This(), rw: *Writer, _: *Request) void {
+                        rw.setHeader("Content-Length", "2") catch return;
+                        _ = rw.write("ok") catch {};
+                    }
+                };
+
+                const Captured = struct {
+                    status_line: []u8,
+                    location: ?[]const u8,
+
+                    fn deinit(self: *@This(), local_allocator: lib.mem.Allocator) void {
+                        local_allocator.free(self.status_line);
+                        if (self.location) |loc| local_allocator.free(loc);
+                    }
+                };
+
+                const captureResponse = struct {
+                    fn run(mux: anytype, local_allocator: lib.mem.Allocator, url: []const u8) !Captured {
+                        var raw = try MockConn.init(local_allocator);
+                        defer raw.deinit();
+                        var req = try Request.init(local_allocator, "GET", url);
+                        defer req.deinit();
+                        var writer = Writer.init(local_allocator, Conn.init(&raw), &req, false);
+                        defer writer.deinit();
+
+                        mux.serveHTTP(&writer, &req);
+                        try writer.finish();
+
+                        const head = raw.writes.items;
+                        const first_end = lib.mem.indexOf(u8, head, "\r\n") orelse return error.TestUnexpectedResult;
+                        const header_end = lib.mem.indexOf(u8, head, "\r\n\r\n") orelse return error.TestUnexpectedResult;
+                        const status_line = head[0..first_end];
+                        const location = headerValue(head[0..header_end], "Location");
+                        return .{
+                            .status_line = try local_allocator.dupe(u8, status_line),
+                            .location = if (location) |loc| try local_allocator.dupe(u8, loc) else null,
+                        };
+                    }
+
+                    fn headerValue(head: []const u8, name: []const u8) ?[]const u8 {
+                        var start: usize = 0;
+                        while (start < head.len) {
+                            const line_end = lib.mem.indexOfScalarPos(u8, head, start, '\n') orelse head.len;
+                            const line = lib.mem.trimRight(u8, head[start..line_end], "\r");
+                            if (line.len == 0) return null;
+                            if (lib.mem.startsWith(u8, line, name) and line.len > name.len + 1 and line[name.len] == ':') {
+                                return lib.mem.trimLeft(u8, line[name.len + 1 ..], " ");
+                            }
+                            start = @min(line_end + 1, head.len);
+                        }
+                        return null;
+                    }
+                };
+
+                var dynamic = DynamicMux.init(allocator);
+                defer dynamic.deinit();
+                var sink_a = SinkHandler{};
+                var sink_b = SinkHandler{};
+                try dynamic.handle("/redirect/", handler_mod.Handler(lib).init(&sink_a));
+                try dynamic.handle("/exact", handler_mod.Handler(lib).init(&sink_b));
+
+                var static_sink_a = SinkHandler{};
+                var static_sink_b = SinkHandler{};
+                var statik = StaticMux.init(.{ &static_sink_a, &static_sink_b });
+
+                var cleaned_dynamic = try captureResponse.run(&dynamic, allocator, "https://example.com/redirect/../redirect");
+                defer cleaned_dynamic.deinit(allocator);
+                var cleaned_static = try captureResponse.run(&statik, allocator, "https://example.com/redirect/../redirect");
+                defer cleaned_static.deinit(allocator);
+                try testing.expectEqualStrings(cleaned_dynamic.status_line, cleaned_static.status_line);
+                try testing.expectEqualStrings(cleaned_dynamic.location orelse "", cleaned_static.location orelse "");
+
+                var slash_dynamic = try captureResponse.run(&dynamic, allocator, "https://example.com/redirect");
+                defer slash_dynamic.deinit(allocator);
+                var slash_static = try captureResponse.run(&statik, allocator, "https://example.com/redirect");
+                defer slash_static.deinit(allocator);
+                try testing.expectEqualStrings(slash_dynamic.status_line, slash_static.status_line);
+                try testing.expectEqualStrings(slash_dynamic.location orelse "", slash_static.location orelse "");
+
+                var missing_dynamic = try captureResponse.run(&dynamic, allocator, "https://example.com/missing");
+                defer missing_dynamic.deinit(allocator);
+                var missing_static = try captureResponse.run(&statik, allocator, "https://example.com/missing");
+                defer missing_static.deinit(allocator);
+                try testing.expectEqualStrings(missing_dynamic.status_line, missing_static.status_line);
+                try testing.expectEqualStrings(missing_dynamic.location orelse "", missing_static.location orelse "");
+            }
         }
-    };
-
-    var dynamic = DynamicMux.init(std.testing.allocator);
-    defer dynamic.deinit();
-    var sink_a = SinkHandler{};
-    var sink_b = SinkHandler{};
-    try dynamic.handle("/redirect/", handler_mod.Handler(std).init(&sink_a));
-    try dynamic.handle("/exact", handler_mod.Handler(std).init(&sink_b));
-
-    var static_sink_a = SinkHandler{};
-    var static_sink_b = SinkHandler{};
-    var statik = StaticMux.init(.{ &static_sink_a, &static_sink_b });
-
-    var cleaned_dynamic = try captureResponse.run(&dynamic, std.testing.allocator, "https://example.com/redirect/../redirect");
-    defer cleaned_dynamic.deinit(std.testing.allocator);
-    var cleaned_static = try captureResponse.run(&statik, std.testing.allocator, "https://example.com/redirect/../redirect");
-    defer cleaned_static.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings(cleaned_dynamic.status_line, cleaned_static.status_line);
-    try std.testing.expectEqualStrings(cleaned_dynamic.location orelse "", cleaned_static.location orelse "");
-
-    var slash_dynamic = try captureResponse.run(&dynamic, std.testing.allocator, "https://example.com/redirect");
-    defer slash_dynamic.deinit(std.testing.allocator);
-    var slash_static = try captureResponse.run(&statik, std.testing.allocator, "https://example.com/redirect");
-    defer slash_static.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings(slash_dynamic.status_line, slash_static.status_line);
-    try std.testing.expectEqualStrings(slash_dynamic.location orelse "", slash_static.location orelse "");
-
-    var missing_dynamic = try captureResponse.run(&dynamic, std.testing.allocator, "https://example.com/missing");
-    defer missing_dynamic.deinit(std.testing.allocator);
-    var missing_static = try captureResponse.run(&statik, std.testing.allocator, "https://example.com/missing");
-    defer missing_static.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings(missing_dynamic.status_line, missing_static.status_line);
-    try std.testing.expectEqualStrings(missing_dynamic.location orelse "", missing_static.location orelse "");
+    }.run);
 }

@@ -4,6 +4,7 @@
 //! It forwards `sleepMs` to an externally owned implementation.
 
 const Delay = @This();
+const testing_api = @import("testing");
 
 ptr: *anyopaque,
 vtable: *const VTable,
@@ -41,25 +42,55 @@ pub fn init(pointer: anytype) Delay {
     };
 }
 
-test "drivers/unit_tests/io/Delay/dispatches_sleepMs" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn dispatchesSleepMs() !void {
+            const Fake = struct {
+                calls: usize = 0,
+                last_ms: u32 = 0,
 
-    const Fake = struct {
-        calls: usize = 0,
-        last_ms: u32 = 0,
+                fn sleepMs(self: *@This(), ms: u32) void {
+                    self.calls += 1;
+                    self.last_ms = ms;
+                }
+            };
 
-        fn sleepMs(self: *@This(), ms: u32) void {
-            self.calls += 1;
-            self.last_ms = ms;
+            var fake = Fake{};
+            const delay = Delay.init(&fake);
+
+            delay.sleepMs(10);
+            delay.sleepMs(25);
+
+            try lib.testing.expectEqual(@as(usize, 2), fake.calls);
+            try lib.testing.expectEqual(@as(u32, 25), fake.last_ms);
         }
     };
 
-    var fake = Fake{};
-    const delay = Delay.init(&fake);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    delay.sleepMs(10);
-    delay.sleepMs(25);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    try std.testing.expectEqual(@as(usize, 2), fake.calls);
-    try std.testing.expectEqual(@as(u32, 25), fake.last_ms);
+            TestCase.dispatchesSleepMs() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

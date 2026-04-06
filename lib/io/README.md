@@ -44,7 +44,7 @@ Keep it out of `lib/io` when it is:
 
 ## Tests
 
-`lib/io` keeps unit tests next to the implementation files:
+`lib/io` exports unit coverage through `io.test_runner.unit`.
 
-- `io/unit_tests` imports `io/bufio.zig`
-- `io/unit_tests` imports `io/io.zig`
+Implementation files that need unit tests export `TestRunner(comptime lib: type)`,
+and `lib/io/test_runner/unit.zig` composes those runners for `lib/test.zig`.

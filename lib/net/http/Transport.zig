@@ -7,6 +7,8 @@
 //! application from `Request.context()`.
 
 const std = @import("std");
+const testing_api = @import("testing");
+
 const io = @import("io");
 const dialer_mod = @import("../Dialer.zig");
 const resolver_mod = @import("../Resolver.zig");
@@ -301,12 +303,18 @@ pub fn Transport(comptime lib: type) type {
                 const remaining_budget = self.remainingBudget();
                 if (remaining_budget == 0) {
                     var overflow_probe: [1]u8 = undefined;
-                    const n = self.streamRead(&overflow_probe) catch |err| return self.mapReadError(err);
+                    const n = self.streamRead(&overflow_probe) catch |err| switch (err) {
+                        error.EndOfStream => return self.finishAndReturnEof(),
+                        else => return self.mapReadError(err),
+                    };
                     if (n == 0) return 0;
                     return error.BodyTooLarge;
                 }
 
-                const n = self.streamRead(buf[0..@min(buf.len, remaining_budget)]) catch |err| return self.mapReadError(err);
+                const n = self.streamRead(buf[0..@min(buf.len, remaining_budget)]) catch |err| switch (err) {
+                    error.EndOfStream => return self.finishAndReturnEof(),
+                    else => return self.mapReadError(err),
+                };
                 if (n == 0) return self.finishAndReturnEof();
                 return self.noteBytesRead(n);
             }
@@ -2177,1239 +2185,1188 @@ fn responseMustBeBodyless(req: *const Request, status_code: u16) bool {
     return status_code == 204 or status_code == 304;
 }
 
-test "net/unit_tests/http/Transport/init_defaults_max_header_bytes_to_embed_policy" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const HttpTransport = Transport(lib);
+            {
+                var transport = try HttpTransport.init(allocator, .{
+                    .max_header_bytes = 0,
+                });
+                defer transport.deinit();
 
-    var transport = try HttpTransport.init(testing.allocator, .{
-        .max_header_bytes = 0,
-    });
-    defer transport.deinit();
-
-    try testing.expectEqual((HttpTransport.Options{}).max_header_bytes, transport.options.max_header_bytes);
-    try testing.expectEqual(@as(usize, 32 * 1024), transport.options.max_header_bytes);
-}
-
-test "net/unit_tests/http/Transport/writeRequest_rejects_body_larger_than_max_body_bytes" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        allocator: std.mem.Allocator,
-        writes: std.ArrayList(u8),
-
-        fn init(allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
-            return .{
-                .allocator = allocator,
-                .writes = try std.ArrayList(u8).initCapacity(allocator, 0),
-            };
-        }
-
-        pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
-            return error.EndOfStream;
-        }
-
-        pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
-            self.writes.appendSlice(self.allocator, buf) catch return error.Unexpected;
-            return buf.len;
-        }
-
-        pub fn close(_: *@This()) void {}
-        pub fn deinit(self: *@This()) void {
-            self.writes.deinit(self.allocator);
-        }
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    const BodySource = struct {
-        payload: []const u8,
-        offset: usize = 0,
-
-        pub fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn close(_: *@This()) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{ .max_body_bytes = 16 });
-    defer transport.deinit();
-
-    var mock_conn = try MockConn.init(testing.allocator);
-    defer mock_conn.deinit();
-
-    const payload = [_]u8{'x'} ** 32;
-    var source = BodySource{ .payload = &payload };
-    var req = try Request.init(testing.allocator, "POST", "http://example.com/upload");
-    req = req.withBody(ReadCloser.init(&source));
-    req.content_length = payload.len;
-
-    try testing.expectError(error.BodyTooLarge, transport.writeRequest(Conn.init(&mock_conn), &req));
-    try testing.expectEqual(@as(usize, 0), mock_conn.writes.items.len);
-}
-
-test "net/unit_tests/http/Transport/writeRequest_propagates_connection_refused" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
-            return error.EndOfStream;
-        }
-
-        pub fn write(_: *@This(), _: []const u8) Conn.WriteError!usize {
-            return error.ConnectionRefused;
-        }
-
-        pub fn close(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    defer req.deinit();
-
-    var mock_conn = MockConn{};
-    try testing.expectError(error.ConnectionRefused, transport.writeRequest(Conn.init(&mock_conn), &req));
-}
-
-test "net/unit_tests/http/Transport/readResponse_transfers_conn_ownership_before_prefix_allocation" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-    const AllocFn = @typeInfo(@TypeOf(testing.allocator.vtable.alloc)).pointer.child;
-    const Alignment = @typeInfo(AllocFn).@"fn".params[2].type.?;
-
-    const FailOnLenAllocator = struct {
-        backing: std.mem.Allocator,
-        fail_len: usize,
-        failed: bool = false,
-
-        fn init(backing: std.mem.Allocator, fail_len: usize) @This() {
-            return .{
-                .backing = backing,
-                .fail_len = fail_len,
-            };
-        }
-
-        fn allocator(self: *@This()) std.mem.Allocator {
-            return .{
-                .ptr = self,
-                .vtable = &vtable,
-            };
-        }
-
-        fn alloc(ptr: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            if (!self.failed and len == self.fail_len) {
-                self.failed = true;
-                return null;
+                try testing.expectEqual((HttpTransport.Options{}).max_header_bytes, transport.options.max_header_bytes);
+                try testing.expectEqual(@as(usize, 32 * 1024), transport.options.max_header_bytes);
             }
-            return self.backing.rawAlloc(len, alignment, ret_addr);
+
+            {
+                const MockConn = struct {
+                    allocator: lib.mem.Allocator,
+                    writes: lib.ArrayList(u8),
+
+                    fn init(backing: lib.mem.Allocator) lib.mem.Allocator.Error!@This() {
+                        return .{
+                            .allocator = backing,
+                            .writes = try lib.ArrayList(u8).initCapacity(backing, 0),
+                        };
+                    }
+
+                    pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
+                        return error.EndOfStream;
+                    }
+
+                    pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        self.writes.appendSlice(self.allocator, buf) catch return error.Unexpected;
+                        return buf.len;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                    pub fn deinit(self: *@This()) void {
+                        self.writes.deinit(self.allocator);
+                    }
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                const BodySource = struct {
+                    payload: []const u8,
+                    offset: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) anyerror!usize {
+                        const remaining = self.payload[self.offset..];
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{ .max_body_bytes = 16 });
+                defer transport.deinit();
+
+                var mock_conn = try MockConn.init(allocator);
+                defer mock_conn.deinit();
+
+                const payload = [_]u8{'x'} ** 32;
+                var source = BodySource{ .payload = &payload };
+                var req = try Request.init(allocator, "POST", "http://example.com/upload");
+                req = req.withBody(ReadCloser.init(&source));
+                req.content_length = payload.len;
+
+                try testing.expectError(error.BodyTooLarge, transport.writeRequest(Conn.init(&mock_conn), &req));
+                try testing.expectEqual(@as(usize, 0), mock_conn.writes.items.len);
+            }
+
+            {
+                const MockConn = struct {
+                    pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
+                        return error.EndOfStream;
+                    }
+
+                    pub fn write(_: *@This(), _: []const u8) Conn.WriteError!usize {
+                        return error.ConnectionRefused;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                    pub fn deinit(_: *@This()) void {}
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                defer req.deinit();
+
+                var mock_conn = MockConn{};
+                try testing.expectError(error.ConnectionRefused, transport.writeRequest(Conn.init(&mock_conn), &req));
+            }
+
+            {
+                const AllocFn = @typeInfo(@TypeOf(allocator.vtable.alloc)).pointer.child;
+                const Alignment = @typeInfo(AllocFn).@"fn".params[2].type.?;
+
+                const FailOnLenAllocator = struct {
+                    backing: lib.mem.Allocator,
+                    fail_len: usize,
+                    failed: bool = false,
+
+                    fn init(backing: lib.mem.Allocator, fail_len: usize) @This() {
+                        return .{
+                            .backing = backing,
+                            .fail_len = fail_len,
+                        };
+                    }
+
+                    fn wrap(self: *@This()) lib.mem.Allocator {
+                        return .{
+                            .ptr = self,
+                            .vtable = &vtable,
+                        };
+                    }
+
+                    fn alloc(ptr: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
+                        const self: *@This() = @ptrCast(@alignCast(ptr));
+                        if (!self.failed and len == self.fail_len) {
+                            self.failed = true;
+                            return null;
+                        }
+                        return self.backing.rawAlloc(len, alignment, ret_addr);
+                    }
+
+                    fn resize(ptr: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
+                        const self: *@This() = @ptrCast(@alignCast(ptr));
+                        return self.backing.rawResize(memory, alignment, new_len, ret_addr);
+                    }
+
+                    fn remap(ptr: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+                        const self: *@This() = @ptrCast(@alignCast(ptr));
+                        return self.backing.rawRemap(memory, alignment, new_len, ret_addr);
+                    }
+
+                    fn free(ptr: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
+                        const self: *@This() = @ptrCast(@alignCast(ptr));
+                        self.backing.rawFree(memory, alignment, ret_addr);
+                    }
+
+                    const vtable: lib.mem.Allocator.VTable = .{
+                        .alloc = alloc,
+                        .resize = resize,
+                        .remap = remap,
+                        .free = free,
+                    };
+                };
+
+                const MockConn = struct {
+                    response: []const u8,
+                    offset: usize = 0,
+                    close_count: usize = 0,
+                    deinit_count: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+                        const remaining = self.response[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        return buf.len;
+                    }
+
+                    pub fn close(self: *@This()) void {
+                        self.close_count += 1;
+                    }
+
+                    pub fn deinit(self: *@This()) void {
+                        self.deinit_count += 1;
+                    }
+
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                const body = "payload-tail!";
+                var failing_allocator = FailOnLenAllocator.init(allocator, body.len);
+                var req = try Request.init(failing_allocator.wrap(), "GET", "http://example.com/");
+                var mock_conn = MockConn{
+                    .response = "HTTP/1.1 200 OK\r\n" ++
+                        "Content-Length: 13\r\n" ++
+                        "\r\n" ++
+                        body,
+                };
+                var conn: ?Conn = Conn.init(&mock_conn);
+
+                try testing.expectError(error.OutOfMemory, transport.readResponse(&conn, &req));
+                if (conn) |owned_conn| owned_conn.deinit();
+
+                try testing.expect(failing_allocator.failed);
+                try testing.expectEqual(@as(usize, 1), mock_conn.close_count);
+                try testing.expectEqual(@as(usize, 1), mock_conn.deinit_count);
+            }
+
+            {
+                const MockConn = struct {
+                    response: []const u8,
+                    offset: usize = 0,
+                    closed: bool = false,
+                    deinited: bool = false,
+
+                    pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+                        const remaining = self.response[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        return buf.len;
+                    }
+
+                    pub fn close(self: *@This()) void {
+                        self.closed = true;
+                    }
+
+                    pub fn deinit(self: *@This()) void {
+                        self.deinited = true;
+                    }
+
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                var mock_conn = MockConn{
+                    .response = "HTTP/1.1 100 Continue\r\n\r\n" ++
+                        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                };
+                var conn: ?Conn = Conn.init(&mock_conn);
+
+                var resp = try transport.readResponse(&conn, &req);
+                defer resp.deinit();
+
+                try testing.expect(conn == null);
+                try testing.expectEqual(@as(u16, 200), resp.status_code);
+                try testing.expectEqualStrings("200 OK", resp.status);
+
+                const body = resp.body() orelse return error.TestUnexpectedResult;
+                var buf: [2]u8 = undefined;
+                try testing.expectEqual(@as(usize, 2), try body.read(&buf));
+                try testing.expectEqualStrings("ok", &buf);
+            }
+
+            {
+                const too_many_informational_responses = 9;
+
+                const MockConn = struct {
+                    response: []const u8,
+                    offset: usize = 0,
+                    closed: bool = false,
+                    deinited: bool = false,
+
+                    pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+                        const remaining = self.response[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        return buf.len;
+                    }
+
+                    pub fn close(self: *@This()) void {
+                        self.closed = true;
+                    }
+
+                    pub fn deinit(self: *@This()) void {
+                        self.deinited = true;
+                    }
+
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                defer req.deinit();
+
+                var response = lib.ArrayList(u8){};
+                defer response.deinit(allocator);
+                for (0..too_many_informational_responses) |_| {
+                    try response.appendSlice(allocator, "HTTP/1.1 103 Early Hints\r\n\r\n");
+                }
+                try response.appendSlice(
+                    allocator,
+                    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                );
+
+                var mock_conn = MockConn{ .response = response.items };
+                var conn: ?Conn = Conn.init(&mock_conn);
+
+                try testing.expectError(error.InvalidResponse, transport.readResponse(&conn, &req));
+                if (conn) |owned_conn| owned_conn.deinit();
+            }
+
+            {
+                const MockConn = struct {
+                    response: []const u8,
+                    offset: usize = 0,
+                    fail_writes: bool = false,
+                    closed: bool = false,
+                    deinited: bool = false,
+
+                    pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+                        const remaining = self.response[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        if (self.fail_writes) return error.BrokenPipe;
+                        return buf.len;
+                    }
+
+                    pub fn close(self: *@This()) void {
+                        self.closed = true;
+                    }
+
+                    pub fn deinit(self: *@This()) void {
+                        self.deinited = true;
+                    }
+
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                const BodySource = struct {
+                    payload: []const u8,
+                    sent: bool = false,
+                    closed: bool = false,
+
+                    pub fn read(self: *@This(), buf: []u8) anyerror!usize {
+                        if (self.sent or self.closed) return 0;
+                        self.sent = true;
+                        @memcpy(buf[0..self.payload.len], self.payload);
+                        return self.payload.len;
+                    }
+
+                    pub fn close(self: *@This()) void {
+                        self.closed = true;
+                    }
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                const payload = "payload";
+                var source = BodySource{ .payload = payload };
+                var req = try Request.init(allocator, "POST", "http://example.com/upload");
+                req = req.withBody(ReadCloser.init(&source));
+                req.content_length = payload.len;
+
+                var mock_conn = MockConn{
+                    .response = "HTTP/1.1 200 OK\r\n" ++
+                        "Content-Length: 2\r\n" ++
+                        "Connection: close\r\n" ++
+                        "\r\n" ++
+                        "ok",
+                };
+                var conn: ?Conn = Conn.init(&mock_conn);
+                try transport.writeRequestHead(conn.?, &req);
+                mock_conn.fail_writes = true;
+
+                const writer = try HttpTransport.RequestBodyState.spawn(
+                    allocator,
+                    &transport,
+                    conn.?,
+                    &req,
+                    req.body().?,
+                    false,
+                    payload.len,
+                    false,
+                    transport.options.expect_continue_timeout_ms,
+                );
+                var request_body_state: ?*HttpTransport.RequestBodyState = writer;
+                var lease: HttpTransport.ConnLease = .{ .conn = conn };
+
+                var resp = try transport.readResponseWithWriter(&lease, &req, &request_body_state);
+                conn = lease.conn;
+                defer resp.deinit();
+
+                try testing.expect(conn == null);
+                try testing.expect(request_body_state == null);
+
+                const body = resp.body() orelse return error.TestUnexpectedResult;
+                var ok: [2]u8 = undefined;
+                try testing.expectEqual(@as(usize, 2), try body.read(&ok));
+                try testing.expectEqualStrings("ok", &ok);
+
+                var eof_buf: [1]u8 = undefined;
+                try testing.expectError(error.BrokenPipe, body.read(&eof_buf));
+                try testing.expect(source.closed);
+            }
+
+            {
+                const MockConn = struct {
+                    mu: lib.Thread.Mutex = .{},
+                    cond: lib.Thread.Condition = .{},
+                    write_started: bool = false,
+                    allow_write_return: bool = false,
+                    write_finished: bool = false,
+                    closed: bool = false,
+                    close_before_write_finished: bool = false,
+                    deinited: bool = false,
+
+                    pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
+                        return 0;
+                    }
+
+                    pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        self.mu.lock();
+                        self.write_started = true;
+                        self.cond.broadcast();
+                        while (!self.allow_write_return) self.cond.wait(&self.mu);
+                        self.write_finished = true;
+                        self.cond.broadcast();
+                        self.mu.unlock();
+                        return buf.len;
+                    }
+
+                    pub fn close(self: *@This()) void {
+                        self.mu.lock();
+                        if (!self.write_finished) self.close_before_write_finished = true;
+                        self.closed = true;
+                        self.cond.broadcast();
+                        self.mu.unlock();
+                    }
+
+                    pub fn deinit(self: *@This()) void {
+                        self.deinited = true;
+                    }
+
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                const BodySource = struct {
+                    mu: lib.Thread.Mutex = .{},
+                    cond: lib.Thread.Condition = .{},
+                    payload: []const u8,
+                    offset: usize = 0,
+                    closed: bool = false,
+
+                    pub fn read(self: *@This(), buf: []u8) anyerror!usize {
+                        if (self.closed) return 0;
+                        const remaining = self.payload[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn close(self: *@This()) void {
+                        self.mu.lock();
+                        self.closed = true;
+                        self.cond.broadcast();
+                        self.mu.unlock();
+                    }
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                var source = BodySource{ .payload = "x" };
+                var req = try Request.init(allocator, "POST", "http://example.com/upload");
+                req = req.withBody(ReadCloser.init(&source));
+                req.content_length = 1;
+
+                var mock_conn = MockConn{};
+                const conn = Conn.init(&mock_conn);
+                const writer = try HttpTransport.RequestBodyState.spawn(
+                    allocator,
+                    &transport,
+                    conn,
+                    &req,
+                    req.body().?,
+                    false,
+                    1,
+                    false,
+                    transport.options.expect_continue_timeout_ms,
+                );
+
+                mock_conn.mu.lock();
+                while (!mock_conn.write_started) mock_conn.cond.wait(&mock_conn.mu);
+                mock_conn.mu.unlock();
+
+                var body_state: HttpTransport.BodyState = .{
+                    .allocator = allocator,
+                    .stream = io.PrefixReader(Conn).init(conn, &.{}),
+                    .ctx = null,
+                    .max_body_bytes = transport.options.max_body_bytes,
+                    .owns_conn = true,
+                    .request_body_state = writer,
+                    .transport = &transport,
+                };
+
+                const Closer = struct {
+                    fn run(state: *HttpTransport.BodyState) void {
+                        state.close();
+                    }
+                };
+
+                var closer_thread = try lib.Thread.spawn(.{}, Closer.run, .{&body_state});
+                source.mu.lock();
+                while (!source.closed) source.cond.wait(&source.mu);
+                source.mu.unlock();
+
+                mock_conn.mu.lock();
+                try testing.expect(!mock_conn.closed);
+                try testing.expect(!mock_conn.close_before_write_finished);
+                mock_conn.allow_write_return = true;
+                mock_conn.cond.broadcast();
+                while (!mock_conn.write_finished) mock_conn.cond.wait(&mock_conn.mu);
+                mock_conn.mu.unlock();
+
+                closer_thread.join();
+                body_state.deinit();
+
+                try testing.expect(source.closed);
+                try testing.expect(mock_conn.closed);
+                try testing.expect(mock_conn.deinited);
+                try testing.expect(!mock_conn.close_before_write_finished);
+            }
+
+            {
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                const headers = [_]Header{
+                    .{ .name = "Bad Header", .value = "x" },
+                };
+
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                req.header = &headers;
+
+                try testing.expectError(error.InvalidHeader, transport.roundTrip(&req));
+            }
+
+            {
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                const trailers = [_]Header{
+                    Header.init(Header.content_length, "1"),
+                };
+
+                const BodySource = struct {
+                    pub fn read(_: *@This(), _: []u8) anyerror!usize {
+                        return 0;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                };
+
+                var source = BodySource{};
+                var req = try Request.init(allocator, "POST", "http://example.com/upload");
+                req = req.withBody(ReadCloser.init(&source)).withTrailers(&trailers);
+
+                try testing.expectError(error.InvalidTrailer, transport.roundTrip(&req));
+            }
+
+            {
+                const BodySource = struct {
+                    pub fn read(_: *@This(), _: []u8) anyerror!usize {
+                        return 0;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                const headers = [_]Header{
+                    Header.init(Header.transfer_encoding, "chunked"),
+                };
+
+                var source = BodySource{};
+                var req = try Request.init(allocator, "POST", "http://example.com/upload");
+                req = req.withBody(ReadCloser.init(&source));
+                req.content_length = 1;
+                req.header = &headers;
+
+                try testing.expectError(error.InvalidHeader, transport.roundTrip(&req));
+            }
+
+            {
+                const BodySource = struct {
+                    pub fn read(_: *@This(), _: []u8) anyerror!usize {
+                        return 0;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                const headers = [_]Header{
+                    Header.init(Header.content_length, "1"),
+                };
+
+                var source = BodySource{};
+                var req = try Request.init(allocator, "POST", "http://example.com/upload");
+                req = req.withBody(ReadCloser.init(&source));
+                req.header = &headers;
+
+                try testing.expectError(error.InvalidHeader, transport.roundTrip(&req));
+            }
+
+            {
+                const OwnedBody = struct {
+                    alloc: lib.mem.Allocator,
+                    payload: []const u8,
+                    offset: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) anyerror!usize {
+                        const remaining = self.payload[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn close(self: *@This()) void {
+                        self.alloc.destroy(self);
+                    }
+                };
+
+                const Factory = struct {
+                    alloc: lib.mem.Allocator,
+                    payload: []const u8,
+                    calls: usize = 0,
+
+                    pub fn getBody(self: *@This()) anyerror!ReadCloser {
+                        self.calls += 1;
+                        const body = try self.alloc.create(OwnedBody);
+                        body.* = .{ .alloc = self.alloc, .payload = self.payload };
+                        return ReadCloser.init(body);
+                    }
+                };
+
+                var factory = Factory{ .alloc = allocator, .payload = "retry me" };
+                const initial_body = try allocator.create(OwnedBody);
+                initial_body.* = .{ .alloc = allocator, .payload = "retry me" };
+
+                var req = try Request.init(allocator, "POST", "http://example.com/retry");
+                req = req.withBody(ReadCloser.init(initial_body));
+                req = req.withGetBody(Request.GetBody.init(&factory));
+                req.content_length = "retry me".len;
+
+                var rewound = try rewindRequest(&req);
+                defer rewound.body().?.close();
+                defer req.body().?.close();
+
+                try testing.expectEqual(@as(usize, 1), factory.calls);
+
+                var reader = rewound.body().?;
+                var buf: [16]u8 = undefined;
+                const n = try reader.read(&buf);
+                try testing.expectEqualStrings("retry me", buf[0..n]);
+            }
+
+            {
+                const OwnedBody = struct {
+                    alloc: lib.mem.Allocator,
+                    payload: []const u8,
+                    offset: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) anyerror!usize {
+                        const remaining = self.payload[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn close(self: *@This()) void {
+                        self.alloc.destroy(self);
+                    }
+                };
+
+                const Factory = struct {
+                    alloc: lib.mem.Allocator,
+                    payload: []const u8,
+
+                    pub fn getBody(self: *@This()) anyerror!ReadCloser {
+                        const body = try self.alloc.create(OwnedBody);
+                        body.* = .{ .alloc = self.alloc, .payload = self.payload };
+                        return ReadCloser.init(body);
+                    }
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                var get_req = try Request.init(allocator, "GET", "http://example.com/");
+                try testing.expect(transport.shouldRetryRequest(&get_req, true, error.ServerClosedIdle));
+                try testing.expect(!transport.shouldRetryRequest(&get_req, false, error.ServerClosedIdle));
+
+                const post_body = try allocator.create(OwnedBody);
+                post_body.* = .{ .alloc = allocator, .payload = "x" };
+                var post_req = try Request.init(allocator, "POST", "http://example.com/");
+                post_req = post_req.withBody(ReadCloser.init(post_body));
+                post_req.content_length = 1;
+                defer post_req.body().?.close();
+                try testing.expect(!transport.shouldRetryRequest(&post_req, true, error.ServerClosedIdle));
+
+                var factory = Factory{ .alloc = allocator, .payload = "x" };
+                const headers = [_]Header{
+                    Header.init("Idempotency-Key", "abc"),
+                };
+                const replay_body = try allocator.create(OwnedBody);
+                replay_body.* = .{ .alloc = allocator, .payload = "x" };
+                var replay_req = try Request.init(allocator, "POST", "http://example.com/");
+                replay_req = replay_req.withBody(ReadCloser.init(replay_body));
+                replay_req = replay_req.withGetBody(Request.GetBody.init(&factory));
+                replay_req.header = &headers;
+                replay_req.content_length = 1;
+                defer replay_req.body().?.close();
+                try testing.expect(transport.shouldRetryRequest(&replay_req, true, error.ServerClosedIdle));
+            }
+
+            {
+                const MockConn = struct {
+                    allocator: lib.mem.Allocator,
+                    writes: lib.ArrayList(u8),
+
+                    fn init(backing: lib.mem.Allocator) lib.mem.Allocator.Error!@This() {
+                        return .{
+                            .allocator = backing,
+                            .writes = try lib.ArrayList(u8).initCapacity(backing, 0),
+                        };
+                    }
+
+                    pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
+                        return error.EndOfStream;
+                    }
+
+                    pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        self.writes.appendSlice(self.allocator, buf) catch return error.Unexpected;
+                        return buf.len;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                    pub fn deinit(self: *@This()) void {
+                        self.writes.deinit(self.allocator);
+                    }
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                const BodySource = struct {
+                    payload: []const u8,
+                    offset: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) anyerror!usize {
+                        const remaining = self.payload[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+                var mock_conn = try MockConn.init(allocator);
+                defer mock_conn.deinit();
+
+                var source = BodySource{ .payload = "hello" };
+                var req = try Request.init(allocator, "POST", "http://example.com/continue");
+                req = req.withBody(ReadCloser.init(&source));
+                req.content_length = 5;
+
+                const writer = try HttpTransport.RequestBodyState.spawn(
+                    allocator,
+                    &transport,
+                    Conn.init(&mock_conn),
+                    &req,
+                    req.body().?,
+                    false,
+                    5,
+                    true,
+                    1000,
+                );
+                defer writer.destroy();
+
+                lib.Thread.sleep(10 * lib.time.ns_per_ms);
+                try testing.expectEqual(@as(usize, 0), mock_conn.writes.items.len);
+
+                writer.allowBodySend();
+                try testing.expect(writer.finish() == null);
+                try testing.expectEqualStrings("hello", mock_conn.writes.items);
+            }
+
+            {
+                const MockConn = struct {
+                    allocator: lib.mem.Allocator,
+                    writes: lib.ArrayList(u8),
+
+                    fn init(backing: lib.mem.Allocator) lib.mem.Allocator.Error!@This() {
+                        return .{
+                            .allocator = backing,
+                            .writes = try lib.ArrayList(u8).initCapacity(backing, 0),
+                        };
+                    }
+
+                    pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
+                        return error.EndOfStream;
+                    }
+
+                    pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        self.writes.appendSlice(self.allocator, buf) catch return error.Unexpected;
+                        return buf.len;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                    pub fn deinit(self: *@This()) void {
+                        self.writes.deinit(self.allocator);
+                    }
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                const BodySource = struct {
+                    payload: []const u8,
+                    offset: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) anyerror!usize {
+                        const remaining = self.payload[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+                var mock_conn = try MockConn.init(allocator);
+                defer mock_conn.deinit();
+
+                var source = BodySource{ .payload = "later" };
+                var req = try Request.init(allocator, "POST", "http://example.com/continue-timeout");
+                req = req.withBody(ReadCloser.init(&source));
+                req.content_length = 5;
+
+                const writer = try HttpTransport.RequestBodyState.spawn(
+                    allocator,
+                    &transport,
+                    Conn.init(&mock_conn),
+                    &req,
+                    req.body().?,
+                    false,
+                    5,
+                    true,
+                    10,
+                );
+                defer writer.destroy();
+
+                try testing.expect(writer.finish() == null);
+                try testing.expectEqualStrings("later", mock_conn.writes.items);
+            }
+
+            {
+                const MockConn = struct {
+                    response: []const u8,
+                    offset: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+                        const remaining = self.response[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        return buf.len;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                    pub fn deinit(_: *@This()) void {}
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                var mock_conn = MockConn{
+                    .response = "HTTP/1.1 200 OK\r\n" ++
+                        "Content-Length: 1\r\n" ++
+                        "Content-Length: 2\r\n" ++
+                        "Connection: close\r\n\r\nx",
+                };
+                var conn: ?Conn = Conn.init(&mock_conn);
+
+                try testing.expectError(error.InvalidResponse, transport.readResponse(&conn, &req));
+                if (conn) |owned_conn| owned_conn.deinit();
+            }
+
+            {
+                const MockConn = struct {
+                    response: []const u8,
+                    offset: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+                        const remaining = self.response[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        return buf.len;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                    pub fn deinit(_: *@This()) void {}
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{});
+                defer transport.deinit();
+
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                var mock_conn = MockConn{
+                    .response = "HTTP/1.1 200 OK\r\n" ++
+                        "Content-Length: 1\r\n" ++
+                        "Transfer-Encoding: chunked\r\n" ++
+                        "Connection: close\r\n\r\n" ++
+                        "1\r\na\r\n0\r\n\r\n",
+                };
+                var conn: ?Conn = Conn.init(&mock_conn);
+
+                try testing.expectError(error.InvalidResponse, transport.readResponse(&conn, &req));
+                if (conn) |owned_conn| owned_conn.deinit();
+            }
+
+            {
+                const MockConn = struct {
+                    response: []const u8,
+                    offset: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+                        const remaining = self.response[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        return buf.len;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                    pub fn deinit(_: *@This()) void {}
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{ .max_header_bytes = 80 });
+                defer transport.deinit();
+
+                const trailer_fill = [_]u8{'a'} ** 96;
+                const response = try lib.fmt.allocPrint(
+                    allocator,
+                    "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\na\r\nX-Long: {s}\r\n\r\n",
+                    .{&trailer_fill},
+                );
+                defer allocator.free(response);
+
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                var mock_conn = MockConn{ .response = response };
+                var conn: ?Conn = Conn.init(&mock_conn);
+
+                var resp = try transport.readResponse(&conn, &req);
+                defer resp.deinit();
+
+                const body = resp.body() orelse return error.TestUnexpectedResult;
+                var first: [1]u8 = undefined;
+                try testing.expectEqual(@as(usize, 1), try body.read(&first));
+                try testing.expectEqualStrings("a", &first);
+
+                var eof_buf: [1]u8 = undefined;
+                try testing.expectError(error.InvalidResponse, body.read(&eof_buf));
+            }
+
+            {
+                const MockConn = struct {
+                    response: []const u8,
+                    offset: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+                        const remaining = self.response[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        return buf.len;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                    pub fn deinit(_: *@This()) void {}
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{ .max_header_bytes = 80 });
+                defer transport.deinit();
+
+                const trailer_fill = [_]u8{'b'} ** 70;
+                const response = try lib.fmt.allocPrint(
+                    allocator,
+                    "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\na\r\n0\r\nX-Test: {s}\r\n\r\n",
+                    .{&trailer_fill},
+                );
+                defer allocator.free(response);
+
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                var mock_conn = MockConn{ .response = response };
+                var conn: ?Conn = Conn.init(&mock_conn);
+
+                var resp = try transport.readResponse(&conn, &req);
+                defer resp.deinit();
+
+                const body = resp.body() orelse return error.TestUnexpectedResult;
+                var buf: [1]u8 = undefined;
+                try testing.expectEqual(@as(usize, 1), try body.read(&buf));
+                try testing.expectEqualStrings("a", &buf);
+
+                try testing.expectEqual(@as(usize, 0), try body.read(&buf));
+            }
+
+            {
+                const MockConn = struct {
+                    response: []const u8,
+                    offset: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+                        const remaining = self.response[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        return buf.len;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                    pub fn deinit(_: *@This()) void {}
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{ .max_header_bytes = 512 });
+                defer transport.deinit();
+
+                const extension = [_]u8{'x'} ** 180;
+                const response = try lib.fmt.allocPrint(
+                    allocator,
+                    "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1;{s}\r\na\r\n0\r\n\r\n",
+                    .{&extension},
+                );
+                defer allocator.free(response);
+
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                var mock_conn = MockConn{ .response = response };
+                var conn: ?Conn = Conn.init(&mock_conn);
+
+                var resp = try transport.readResponse(&conn, &req);
+                defer resp.deinit();
+
+                const body = resp.body() orelse return error.TestUnexpectedResult;
+                var buf: [1]u8 = undefined;
+                try testing.expectEqual(@as(usize, 1), try body.read(&buf));
+                try testing.expectEqualStrings("a", &buf);
+                try testing.expectEqual(@as(usize, 0), try body.read(&buf));
+            }
+
+            {
+                const MockConn = struct {
+                    response: []const u8,
+                    offset: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
+                        const remaining = self.response[self.offset..];
+                        if (remaining.len == 0) return 0;
+                        const n = @min(buf.len, remaining.len);
+                        @memcpy(buf[0..n], remaining[0..n]);
+                        self.offset += n;
+                        return n;
+                    }
+
+                    pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
+                        return buf.len;
+                    }
+
+                    pub fn close(_: *@This()) void {}
+                    pub fn deinit(_: *@This()) void {}
+                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                };
+
+                var transport = try HttpTransport.init(allocator, .{ .max_header_bytes = 1024 });
+                defer transport.deinit();
+
+                const trailer_fill = [_]u8{'t'} ** 700;
+                const response = try lib.fmt.allocPrint(
+                    allocator,
+                    "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\na\r\n0\r\nX-Large: {s}\r\n\r\n",
+                    .{&trailer_fill},
+                );
+                defer allocator.free(response);
+
+                var req = try Request.init(allocator, "GET", "http://example.com/");
+                var mock_conn = MockConn{ .response = response };
+                var conn: ?Conn = Conn.init(&mock_conn);
+
+                var resp = try transport.readResponse(&conn, &req);
+                defer resp.deinit();
+
+                const body = resp.body() orelse return error.TestUnexpectedResult;
+                var buf: [1]u8 = undefined;
+                try testing.expectEqual(@as(usize, 1), try body.read(&buf));
+                try testing.expectEqualStrings("a", &buf);
+                try testing.expectEqual(@as(usize, 0), try body.read(&buf));
+            }
         }
-
-        fn resize(ptr: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            return self.backing.rawResize(memory, alignment, new_len, ret_addr);
-        }
-
-        fn remap(ptr: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            return self.backing.rawRemap(memory, alignment, new_len, ret_addr);
-        }
-
-        fn free(ptr: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            self.backing.rawFree(memory, alignment, ret_addr);
-        }
-
-        const vtable: std.mem.Allocator.VTable = .{
-            .alloc = alloc,
-            .resize = resize,
-            .remap = remap,
-            .free = free,
-        };
-    };
-
-    const MockConn = struct {
-        response: []const u8,
-        offset: usize = 0,
-        close_count: usize = 0,
-        deinit_count: usize = 0,
-
-        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
-            const remaining = self.response[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
-            return buf.len;
-        }
-
-        pub fn close(self: *@This()) void {
-            self.close_count += 1;
-        }
-
-        pub fn deinit(self: *@This()) void {
-            self.deinit_count += 1;
-        }
-
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    const body = "payload-tail!";
-    var failing_allocator = FailOnLenAllocator.init(testing.allocator, body.len);
-    var req = try Request.init(failing_allocator.allocator(), "GET", "http://example.com/");
-    var mock_conn = MockConn{
-        .response = "HTTP/1.1 200 OK\r\n" ++
-            "Content-Length: 13\r\n" ++
-            "\r\n" ++
-            body,
-    };
-    var conn: ?Conn = Conn.init(&mock_conn);
-
-    try testing.expectError(error.OutOfMemory, transport.readResponse(&conn, &req));
-    if (conn) |owned_conn| owned_conn.deinit();
-
-    try testing.expect(failing_allocator.failed);
-    try testing.expectEqual(@as(usize, 1), mock_conn.close_count);
-    try testing.expectEqual(@as(usize, 1), mock_conn.deinit_count);
-}
-
-test "net/unit_tests/http/Transport/readResponse_skips_informational_responses" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        response: []const u8,
-        offset: usize = 0,
-        closed: bool = false,
-        deinited: bool = false,
-
-        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
-            const remaining = self.response[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
-            return buf.len;
-        }
-
-        pub fn close(self: *@This()) void {
-            self.closed = true;
-        }
-
-        pub fn deinit(self: *@This()) void {
-            self.deinited = true;
-        }
-
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    var mock_conn = MockConn{
-        .response = "HTTP/1.1 100 Continue\r\n\r\n" ++
-            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-    };
-    var conn: ?Conn = Conn.init(&mock_conn);
-
-    var resp = try transport.readResponse(&conn, &req);
-    defer resp.deinit();
-
-    try testing.expect(conn == null);
-    try testing.expectEqual(@as(u16, 200), resp.status_code);
-    try testing.expectEqualStrings("200 OK", resp.status);
-
-    const body = resp.body() orelse return error.TestUnexpectedResult;
-    var buf: [2]u8 = undefined;
-    try testing.expectEqual(@as(usize, 2), try body.read(&buf));
-    try testing.expectEqualStrings("ok", &buf);
-}
-
-test "net/unit_tests/http/Transport/readResponse_rejects_too_many_informational_responses" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-    const too_many_informational_responses = 9;
-
-    const MockConn = struct {
-        response: []const u8,
-        offset: usize = 0,
-        closed: bool = false,
-        deinited: bool = false,
-
-        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
-            const remaining = self.response[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
-            return buf.len;
-        }
-
-        pub fn close(self: *@This()) void {
-            self.closed = true;
-        }
-
-        pub fn deinit(self: *@This()) void {
-            self.deinited = true;
-        }
-
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    defer req.deinit();
-
-    var response = std.ArrayList(u8){};
-    defer response.deinit(testing.allocator);
-    for (0..too_many_informational_responses) |_| {
-        try response.appendSlice(testing.allocator, "HTTP/1.1 103 Early Hints\r\n\r\n");
-    }
-    try response.appendSlice(
-        testing.allocator,
-        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-    );
-
-    var mock_conn = MockConn{ .response = response.items };
-    var conn: ?Conn = Conn.init(&mock_conn);
-
-    try testing.expectError(error.InvalidResponse, transport.readResponse(&conn, &req));
-    if (conn) |owned_conn| owned_conn.deinit();
-}
-
-test "net/unit_tests/http/Transport/readResponse_propagates_request_body_write_error_at_response_EOF" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        response: []const u8,
-        offset: usize = 0,
-        fail_writes: bool = false,
-        closed: bool = false,
-        deinited: bool = false,
-
-        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
-            const remaining = self.response[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
-            if (self.fail_writes) return error.BrokenPipe;
-            return buf.len;
-        }
-
-        pub fn close(self: *@This()) void {
-            self.closed = true;
-        }
-
-        pub fn deinit(self: *@This()) void {
-            self.deinited = true;
-        }
-
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    const BodySource = struct {
-        payload: []const u8,
-        sent: bool = false,
-        closed: bool = false,
-
-        pub fn read(self: *@This(), buf: []u8) anyerror!usize {
-            if (self.sent or self.closed) return 0;
-            self.sent = true;
-            @memcpy(buf[0..self.payload.len], self.payload);
-            return self.payload.len;
-        }
-
-        pub fn close(self: *@This()) void {
-            self.closed = true;
-        }
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    const payload = "payload";
-    var source = BodySource{ .payload = payload };
-    var req = try Request.init(testing.allocator, "POST", "http://example.com/upload");
-    req = req.withBody(ReadCloser.init(&source));
-    req.content_length = payload.len;
-
-    var mock_conn = MockConn{
-        .response = "HTTP/1.1 200 OK\r\n" ++
-            "Content-Length: 2\r\n" ++
-            "Connection: close\r\n" ++
-            "\r\n" ++
-            "ok",
-    };
-    var conn: ?Conn = Conn.init(&mock_conn);
-    try transport.writeRequestHead(conn.?, &req);
-    mock_conn.fail_writes = true;
-
-    const writer = try HttpTransport.RequestBodyState.spawn(
-        testing.allocator,
-        &transport,
-        conn.?,
-        &req,
-        req.body().?,
-        false,
-        payload.len,
-        false,
-        transport.options.expect_continue_timeout_ms,
-    );
-    var request_body_state: ?*HttpTransport.RequestBodyState = writer;
-    var lease: HttpTransport.ConnLease = .{ .conn = conn };
-
-    var resp = try transport.readResponseWithWriter(&lease, &req, &request_body_state);
-    conn = lease.conn;
-    defer resp.deinit();
-
-    try testing.expect(conn == null);
-    try testing.expect(request_body_state == null);
-
-    const body = resp.body() orelse return error.TestUnexpectedResult;
-    var ok: [2]u8 = undefined;
-    try testing.expectEqual(@as(usize, 2), try body.read(&ok));
-    try testing.expectEqualStrings("ok", &ok);
-
-    var eof_buf: [1]u8 = undefined;
-    try testing.expectError(error.BrokenPipe, body.read(&eof_buf));
-    try testing.expect(source.closed);
-}
-
-test "net/unit_tests/http/Transport/BodyState_close_waits_for_request_body_writer_before_closing_conn" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        mu: std.Thread.Mutex = .{},
-        cond: std.Thread.Condition = .{},
-        write_started: bool = false,
-        allow_write_return: bool = false,
-        write_finished: bool = false,
-        closed: bool = false,
-        close_before_write_finished: bool = false,
-        deinited: bool = false,
-
-        pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
-            return 0;
-        }
-
-        pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
-            self.mu.lock();
-            self.write_started = true;
-            self.cond.broadcast();
-            while (!self.allow_write_return) self.cond.wait(&self.mu);
-            self.write_finished = true;
-            self.cond.broadcast();
-            self.mu.unlock();
-            return buf.len;
-        }
-
-        pub fn close(self: *@This()) void {
-            self.mu.lock();
-            if (!self.write_finished) self.close_before_write_finished = true;
-            self.closed = true;
-            self.cond.broadcast();
-            self.mu.unlock();
-        }
-
-        pub fn deinit(self: *@This()) void {
-            self.deinited = true;
-        }
-
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    const BodySource = struct {
-        mu: std.Thread.Mutex = .{},
-        cond: std.Thread.Condition = .{},
-        payload: []const u8,
-        offset: usize = 0,
-        closed: bool = false,
-
-        pub fn read(self: *@This(), buf: []u8) anyerror!usize {
-            if (self.closed) return 0;
-            const remaining = self.payload[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn close(self: *@This()) void {
-            self.mu.lock();
-            self.closed = true;
-            self.cond.broadcast();
-            self.mu.unlock();
-        }
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    var source = BodySource{ .payload = "x" };
-    var req = try Request.init(testing.allocator, "POST", "http://example.com/upload");
-    req = req.withBody(ReadCloser.init(&source));
-    req.content_length = 1;
-
-    var mock_conn = MockConn{};
-    const conn = Conn.init(&mock_conn);
-    const writer = try HttpTransport.RequestBodyState.spawn(
-        testing.allocator,
-        &transport,
-        conn,
-        &req,
-        req.body().?,
-        false,
-        1,
-        false,
-        transport.options.expect_continue_timeout_ms,
-    );
-
-    mock_conn.mu.lock();
-    while (!mock_conn.write_started) mock_conn.cond.wait(&mock_conn.mu);
-    mock_conn.mu.unlock();
-
-    var body_state: HttpTransport.BodyState = .{
-        .allocator = testing.allocator,
-        .stream = io.PrefixReader(Conn).init(conn, &.{}),
-        .ctx = null,
-        .max_body_bytes = transport.options.max_body_bytes,
-        .owns_conn = true,
-        .request_body_state = writer,
-        .transport = &transport,
-    };
-
-    const Closer = struct {
-        fn run(state: *HttpTransport.BodyState) void {
-            state.close();
-        }
-    };
-
-    var closer_thread = try std.Thread.spawn(.{}, Closer.run, .{&body_state});
-    source.mu.lock();
-    while (!source.closed) source.cond.wait(&source.mu);
-    source.mu.unlock();
-
-    mock_conn.mu.lock();
-    try testing.expect(!mock_conn.closed);
-    try testing.expect(!mock_conn.close_before_write_finished);
-    mock_conn.allow_write_return = true;
-    mock_conn.cond.broadcast();
-    while (!mock_conn.write_finished) mock_conn.cond.wait(&mock_conn.mu);
-    mock_conn.mu.unlock();
-
-    closer_thread.join();
-    body_state.deinit();
-
-    try testing.expect(source.closed);
-    try testing.expect(mock_conn.closed);
-    try testing.expect(mock_conn.deinited);
-    try testing.expect(!mock_conn.close_before_write_finished);
-}
-
-test "net/unit_tests/http/Transport/roundTrip_rejects_invalid_request_header_before_dialing" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    const headers = [_]Header{
-        .{ .name = "Bad Header", .value = "x" },
-    };
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    req.header = &headers;
-
-    try testing.expectError(error.InvalidHeader, transport.roundTrip(&req));
-}
-
-test "net/unit_tests/http/Transport/roundTrip_rejects_invalid_request_trailer_before_dialing" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    const trailers = [_]Header{
-        Header.init(Header.content_length, "1"),
-    };
-
-    const BodySource = struct {
-        pub fn read(_: *@This(), _: []u8) anyerror!usize {
-            return 0;
-        }
-
-        pub fn close(_: *@This()) void {}
-    };
-
-    var source = BodySource{};
-    var req = try Request.init(testing.allocator, "POST", "http://example.com/upload");
-    req = req.withBody(ReadCloser.init(&source)).withTrailers(&trailers);
-
-    try testing.expectError(error.InvalidTrailer, transport.roundTrip(&req));
-}
-
-test "net/unit_tests/http/Transport/roundTrip_rejects_transfer_encoding_header_conflicting_with_fixed_request_body" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const BodySource = struct {
-        pub fn read(_: *@This(), _: []u8) anyerror!usize {
-            return 0;
-        }
-
-        pub fn close(_: *@This()) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    const headers = [_]Header{
-        Header.init(Header.transfer_encoding, "chunked"),
-    };
-
-    var source = BodySource{};
-    var req = try Request.init(testing.allocator, "POST", "http://example.com/upload");
-    req = req.withBody(ReadCloser.init(&source));
-    req.content_length = 1;
-    req.header = &headers;
-
-    try testing.expectError(error.InvalidHeader, transport.roundTrip(&req));
-}
-
-test "net/unit_tests/http/Transport/roundTrip_rejects_content_length_header_conflicting_with_chunked_request_body" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const BodySource = struct {
-        pub fn read(_: *@This(), _: []u8) anyerror!usize {
-            return 0;
-        }
-
-        pub fn close(_: *@This()) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    const headers = [_]Header{
-        Header.init(Header.content_length, "1"),
-    };
-
-    var source = BodySource{};
-    var req = try Request.init(testing.allocator, "POST", "http://example.com/upload");
-    req = req.withBody(ReadCloser.init(&source));
-    req.header = &headers;
-
-    try testing.expectError(error.InvalidHeader, transport.roundTrip(&req));
-}
-
-test "net/unit_tests/http/Transport/rewindRequest_refreshes_body_with_GetBody" {
-    const testing = std.testing;
-
-    const OwnedBody = struct {
-        payload: []const u8,
-        offset: usize = 0,
-
-        pub fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn close(self: *@This()) void {
-            testing.allocator.destroy(self);
-        }
-    };
-
-    const Factory = struct {
-        payload: []const u8,
-        calls: usize = 0,
-
-        pub fn getBody(self: *@This()) anyerror!ReadCloser {
-            self.calls += 1;
-            const body = try testing.allocator.create(OwnedBody);
-            body.* = .{ .payload = self.payload };
-            return ReadCloser.init(body);
-        }
-    };
-
-    var factory = Factory{ .payload = "retry me" };
-    const initial_body = try testing.allocator.create(OwnedBody);
-    initial_body.* = .{ .payload = "retry me" };
-
-    var req = try Request.init(testing.allocator, "POST", "http://example.com/retry");
-    req = req.withBody(ReadCloser.init(initial_body));
-    req = req.withGetBody(Request.GetBody.init(&factory));
-    req.content_length = "retry me".len;
-
-    var rewound = try rewindRequest(&req);
-    defer rewound.body().?.close();
-    defer req.body().?.close();
-
-    try testing.expectEqual(@as(usize, 1), factory.calls);
-
-    var reader = rewound.body().?;
-    var buf: [16]u8 = undefined;
-    const n = try reader.read(&buf);
-    try testing.expectEqualStrings("retry me", buf[0..n]);
-}
-
-test "net/unit_tests/http/Transport/shouldRetryRequest_requires_reused_replayable_request" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const OwnedBody = struct {
-        payload: []const u8,
-        offset: usize = 0,
-
-        pub fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn close(self: *@This()) void {
-            testing.allocator.destroy(self);
-        }
-    };
-
-    const Factory = struct {
-        payload: []const u8,
-
-        pub fn getBody(self: *@This()) anyerror!ReadCloser {
-            const body = try testing.allocator.create(OwnedBody);
-            body.* = .{ .payload = self.payload };
-            return ReadCloser.init(body);
-        }
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    var get_req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    try testing.expect(transport.shouldRetryRequest(&get_req, true, error.ServerClosedIdle));
-    try testing.expect(!transport.shouldRetryRequest(&get_req, false, error.ServerClosedIdle));
-
-    const post_body = try testing.allocator.create(OwnedBody);
-    post_body.* = .{ .payload = "x" };
-    var post_req = try Request.init(testing.allocator, "POST", "http://example.com/");
-    post_req = post_req.withBody(ReadCloser.init(post_body));
-    post_req.content_length = 1;
-    defer post_req.body().?.close();
-    try testing.expect(!transport.shouldRetryRequest(&post_req, true, error.ServerClosedIdle));
-
-    var factory = Factory{ .payload = "x" };
-    const headers = [_]Header{
-        Header.init("Idempotency-Key", "abc"),
-    };
-    const replay_body = try testing.allocator.create(OwnedBody);
-    replay_body.* = .{ .payload = "x" };
-    var replay_req = try Request.init(testing.allocator, "POST", "http://example.com/");
-    replay_req = replay_req.withBody(ReadCloser.init(replay_body));
-    replay_req = replay_req.withGetBody(Request.GetBody.init(&factory));
-    replay_req.header = &headers;
-    replay_req.content_length = 1;
-    defer replay_req.body().?.close();
-    try testing.expect(transport.shouldRetryRequest(&replay_req, true, error.ServerClosedIdle));
-}
-
-test "net/unit_tests/http/Transport/RequestBodyState_waits_for_continue_signal_before_sending_body" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        allocator: std.mem.Allocator,
-        writes: std.ArrayList(u8),
-
-        fn init(allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
-            return .{
-                .allocator = allocator,
-                .writes = try std.ArrayList(u8).initCapacity(allocator, 0),
-            };
-        }
-
-        pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
-            return error.EndOfStream;
-        }
-
-        pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
-            self.writes.appendSlice(self.allocator, buf) catch return error.Unexpected;
-            return buf.len;
-        }
-
-        pub fn close(_: *@This()) void {}
-        pub fn deinit(self: *@This()) void {
-            self.writes.deinit(self.allocator);
-        }
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    const BodySource = struct {
-        payload: []const u8,
-        offset: usize = 0,
-
-        pub fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn close(_: *@This()) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-    var mock_conn = try MockConn.init(testing.allocator);
-    defer mock_conn.deinit();
-
-    var source = BodySource{ .payload = "hello" };
-    var req = try Request.init(testing.allocator, "POST", "http://example.com/continue");
-    req = req.withBody(ReadCloser.init(&source));
-    req.content_length = 5;
-
-    const writer = try HttpTransport.RequestBodyState.spawn(
-        testing.allocator,
-        &transport,
-        Conn.init(&mock_conn),
-        &req,
-        req.body().?,
-        false,
-        5,
-        true,
-        1000,
-    );
-    defer writer.destroy();
-
-    std.Thread.sleep(10 * std.time.ns_per_ms);
-    try testing.expectEqual(@as(usize, 0), mock_conn.writes.items.len);
-
-    writer.allowBodySend();
-    try testing.expect(writer.finish() == null);
-    try testing.expectEqualStrings("hello", mock_conn.writes.items);
-}
-
-test "net/unit_tests/http/Transport/RequestBodyState_sends_body_after_expect_continue_timeout" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        allocator: std.mem.Allocator,
-        writes: std.ArrayList(u8),
-
-        fn init(allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
-            return .{
-                .allocator = allocator,
-                .writes = try std.ArrayList(u8).initCapacity(allocator, 0),
-            };
-        }
-
-        pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
-            return error.EndOfStream;
-        }
-
-        pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
-            self.writes.appendSlice(self.allocator, buf) catch return error.Unexpected;
-            return buf.len;
-        }
-
-        pub fn close(_: *@This()) void {}
-        pub fn deinit(self: *@This()) void {
-            self.writes.deinit(self.allocator);
-        }
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    const BodySource = struct {
-        payload: []const u8,
-        offset: usize = 0,
-
-        pub fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn close(_: *@This()) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-    var mock_conn = try MockConn.init(testing.allocator);
-    defer mock_conn.deinit();
-
-    var source = BodySource{ .payload = "later" };
-    var req = try Request.init(testing.allocator, "POST", "http://example.com/continue-timeout");
-    req = req.withBody(ReadCloser.init(&source));
-    req.content_length = 5;
-
-    const writer = try HttpTransport.RequestBodyState.spawn(
-        testing.allocator,
-        &transport,
-        Conn.init(&mock_conn),
-        &req,
-        req.body().?,
-        false,
-        5,
-        true,
-        10,
-    );
-    defer writer.destroy();
-
-    try testing.expect(writer.finish() == null);
-    try testing.expectEqualStrings("later", mock_conn.writes.items);
-}
-
-test "net/unit_tests/http/Transport/readResponse_rejects_conflicting_content_length" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        response: []const u8,
-        offset: usize = 0,
-
-        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
-            const remaining = self.response[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
-            return buf.len;
-        }
-
-        pub fn close(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    var mock_conn = MockConn{
-        .response = "HTTP/1.1 200 OK\r\n" ++
-            "Content-Length: 1\r\n" ++
-            "Content-Length: 2\r\n" ++
-            "Connection: close\r\n\r\nx",
-    };
-    var conn: ?Conn = Conn.init(&mock_conn);
-
-    try testing.expectError(error.InvalidResponse, transport.readResponse(&conn, &req));
-    if (conn) |owned_conn| owned_conn.deinit();
-}
-
-test "net/unit_tests/http/Transport/readResponse_rejects_content_length_with_transfer_encoding" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        response: []const u8,
-        offset: usize = 0,
-
-        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
-            const remaining = self.response[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
-            return buf.len;
-        }
-
-        pub fn close(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{});
-    defer transport.deinit();
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    var mock_conn = MockConn{
-        .response = "HTTP/1.1 200 OK\r\n" ++
-            "Content-Length: 1\r\n" ++
-            "Transfer-Encoding: chunked\r\n" ++
-            "Connection: close\r\n\r\n" ++
-            "1\r\na\r\n0\r\n\r\n",
-    };
-    var conn: ?Conn = Conn.init(&mock_conn);
-
-    try testing.expectError(error.InvalidResponse, transport.readResponse(&conn, &req));
-    if (conn) |owned_conn| owned_conn.deinit();
-}
-
-test "net/unit_tests/http/Transport/chunked_body_rejects_oversized_trailers" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        response: []const u8,
-        offset: usize = 0,
-
-        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
-            const remaining = self.response[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
-            return buf.len;
-        }
-
-        pub fn close(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{ .max_header_bytes = 80 });
-    defer transport.deinit();
-
-    const trailer_fill = [_]u8{'a'} ** 96;
-    const response = try std.fmt.allocPrint(
-        testing.allocator,
-        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\na\r\nX-Long: {s}\r\n\r\n",
-        .{&trailer_fill},
-    );
-    defer testing.allocator.free(response);
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    var mock_conn = MockConn{ .response = response };
-    var conn: ?Conn = Conn.init(&mock_conn);
-
-    var resp = try transport.readResponse(&conn, &req);
-    defer resp.deinit();
-
-    const body = resp.body() orelse return error.TestUnexpectedResult;
-    var first: [1]u8 = undefined;
-    try testing.expectEqual(@as(usize, 1), try body.read(&first));
-    try testing.expectEqualStrings("a", &first);
-
-    var eof_buf: [1]u8 = undefined;
-    try testing.expectError(error.InvalidResponse, body.read(&eof_buf));
-}
-
-test "net/unit_tests/http/Transport/chunked_body_accepts_trailers_that_exactly_match_budget" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        response: []const u8,
-        offset: usize = 0,
-
-        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
-            const remaining = self.response[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
-            return buf.len;
-        }
-
-        pub fn close(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{ .max_header_bytes = 80 });
-    defer transport.deinit();
-
-    const trailer_fill = [_]u8{'b'} ** 70;
-    const response = try std.fmt.allocPrint(
-        testing.allocator,
-        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\na\r\n0\r\nX-Test: {s}\r\n\r\n",
-        .{&trailer_fill},
-    );
-    defer testing.allocator.free(response);
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    var mock_conn = MockConn{ .response = response };
-    var conn: ?Conn = Conn.init(&mock_conn);
-
-    var resp = try transport.readResponse(&conn, &req);
-    defer resp.deinit();
-
-    const body = resp.body() orelse return error.TestUnexpectedResult;
-    var buf: [1]u8 = undefined;
-    try testing.expectEqual(@as(usize, 1), try body.read(&buf));
-    try testing.expectEqualStrings("a", &buf);
-
-    try testing.expectEqual(@as(usize, 0), try body.read(&buf));
-}
-
-test "net/unit_tests/http/Transport/chunked_body_accepts_long_chunk_extension_within_header_budget" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        response: []const u8,
-        offset: usize = 0,
-
-        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
-            const remaining = self.response[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
-            return buf.len;
-        }
-
-        pub fn close(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{ .max_header_bytes = 512 });
-    defer transport.deinit();
-
-    const extension = [_]u8{'x'} ** 180;
-    const response = try std.fmt.allocPrint(
-        testing.allocator,
-        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1;{s}\r\na\r\n0\r\n\r\n",
-        .{&extension},
-    );
-    defer testing.allocator.free(response);
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    var mock_conn = MockConn{ .response = response };
-    var conn: ?Conn = Conn.init(&mock_conn);
-
-    var resp = try transport.readResponse(&conn, &req);
-    defer resp.deinit();
-
-    const body = resp.body() orelse return error.TestUnexpectedResult;
-    var buf: [1]u8 = undefined;
-    try testing.expectEqual(@as(usize, 1), try body.read(&buf));
-    try testing.expectEqualStrings("a", &buf);
-    try testing.expectEqual(@as(usize, 0), try body.read(&buf));
-}
-
-test "net/unit_tests/http/Transport/chunked_body_accepts_long_trailer_line_within_budget" {
-    const testing = std.testing;
-    const HttpTransport = Transport(std);
-
-    const MockConn = struct {
-        response: []const u8,
-        offset: usize = 0,
-
-        pub fn read(self: *@This(), buf: []u8) Conn.ReadError!usize {
-            const remaining = self.response[self.offset..];
-            if (remaining.len == 0) return 0;
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-
-        pub fn write(_: *@This(), buf: []const u8) Conn.WriteError!usize {
-            return buf.len;
-        }
-
-        pub fn close(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
-    };
-
-    var transport = try HttpTransport.init(testing.allocator, .{ .max_header_bytes = 1024 });
-    defer transport.deinit();
-
-    const trailer_fill = [_]u8{'t'} ** 700;
-    const response = try std.fmt.allocPrint(
-        testing.allocator,
-        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\na\r\n0\r\nX-Large: {s}\r\n\r\n",
-        .{&trailer_fill},
-    );
-    defer testing.allocator.free(response);
-
-    var req = try Request.init(testing.allocator, "GET", "http://example.com/");
-    var mock_conn = MockConn{ .response = response };
-    var conn: ?Conn = Conn.init(&mock_conn);
-
-    var resp = try transport.readResponse(&conn, &req);
-    defer resp.deinit();
-
-    const body = resp.body() orelse return error.TestUnexpectedResult;
-    var buf: [1]u8 = undefined;
-    try testing.expectEqual(@as(usize, 1), try body.read(&buf));
-    try testing.expectEqualStrings("a", &buf);
-    try testing.expectEqual(@as(usize, 0), try body.read(&buf));
+    }.run);
 }

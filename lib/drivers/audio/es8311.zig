@@ -22,6 +22,7 @@
 
 const io = @import("../io.zig");
 const es8311 = @This();
+const testing_api = @import("testing");
 
 /// ES8311 I2C address (7-bit, depends on AD0 pin)
 pub const Address = enum(u7) {
@@ -317,390 +318,420 @@ pub const Config = struct {
 /// ES8311 Audio Codec Driver using `drivers.io.I2c`.
 const Self = @This();
 
-        bus: io.I2c,
-        config: Config,
-        is_open: bool = false,
-        enabled: bool = false,
+bus: io.I2c,
+config: Config,
+is_open: bool = false,
+enabled: bool = false,
 
-        /// Initialize driver with I2C driver and configuration
-        pub fn init(driver: io.I2c, config: Config) Self {
-            return .{
-                .bus = driver,
-                .config = config,
-            };
-        }
+/// Initialize driver with I2C driver and configuration
+pub fn init(driver: io.I2c, config: Config) Self {
+    return .{
+        .bus = driver,
+        .config = config,
+    };
+}
 
-        /// Read a register value
-        pub fn readRegister(self: *Self, reg: Register) !u8 {
-            var buf: [1]u8 = undefined;
-            try self.bus.writeRead(self.config.address, &.{@intFromEnum(reg)}, &buf);
-            return buf[0];
-        }
+/// Read a register value
+pub fn readRegister(self: *Self, reg: Register) !u8 {
+    var buf: [1]u8 = undefined;
+    try self.bus.writeRead(self.config.address, &.{@intFromEnum(reg)}, &buf);
+    return buf[0];
+}
 
-        /// Write a register value
-        pub fn writeRegister(self: *Self, reg: Register, value: u8) !void {
-            try self.bus.write(self.config.address, &.{ @intFromEnum(reg), value });
-        }
+/// Write a register value
+pub fn writeRegister(self: *Self, reg: Register, value: u8) !void {
+    try self.bus.write(self.config.address, &.{ @intFromEnum(reg), value });
+}
 
-        /// Update specific bits in a register
-        pub fn updateRegister(self: *Self, reg: Register, mask: u8, value: u8) !void {
-            var regv = try self.readRegister(reg);
-            regv = (regv & ~mask) | (value & mask);
-            try self.writeRegister(reg, regv);
-        }
+/// Update specific bits in a register
+pub fn updateRegister(self: *Self, reg: Register, mask: u8, value: u8) !void {
+    var regv = try self.readRegister(reg);
+    regv = (regv & ~mask) | (value & mask);
+    try self.writeRegister(reg, regv);
+}
 
-        // ====================================================================
-        // High-level API
-        // ====================================================================
+// ====================================================================
+// High-level API
+// ====================================================================
 
-        /// Open and initialize the codec
-        pub fn open(self: *Self) !void {
-            try self.writeRegister(.gpio_44, Gpio44.I2C_FILTER);
-            try self.writeRegister(.gpio_44, Gpio44.I2C_FILTER);
+/// Open and initialize the codec
+pub fn open(self: *Self) !void {
+    try self.writeRegister(.gpio_44, Gpio44.I2C_FILTER);
+    try self.writeRegister(.gpio_44, Gpio44.I2C_FILTER);
 
-            try self.writeRegister(.clk_manager_01, ClkManager01.INIT_OFF);
-            try self.writeRegister(.clk_manager_02, 0x00);
-            try self.writeRegister(.clk_manager_03, 0x10);
-            try self.writeRegister(.adc_16, AdcDefaults.ADC_16_DEFAULT);
-            try self.writeRegister(.clk_manager_04, 0x10);
-            try self.writeRegister(.clk_manager_05, 0x00);
-            try self.writeRegister(.system_0b, SystemDefaults.SYS_0B_INIT);
-            try self.writeRegister(.system_0c, SystemDefaults.SYS_0C_INIT);
-            try self.writeRegister(.system_10, SystemDefaults.SYS_10_INIT);
-            try self.writeRegister(.system_11, SystemDefaults.SYS_11_INIT);
-            try self.writeRegister(.reset, ResetReg.CSM_ON);
+    try self.writeRegister(.clk_manager_01, ClkManager01.INIT_OFF);
+    try self.writeRegister(.clk_manager_02, 0x00);
+    try self.writeRegister(.clk_manager_03, 0x10);
+    try self.writeRegister(.adc_16, AdcDefaults.ADC_16_DEFAULT);
+    try self.writeRegister(.clk_manager_04, 0x10);
+    try self.writeRegister(.clk_manager_05, 0x00);
+    try self.writeRegister(.system_0b, SystemDefaults.SYS_0B_INIT);
+    try self.writeRegister(.system_0c, SystemDefaults.SYS_0C_INIT);
+    try self.writeRegister(.system_10, SystemDefaults.SYS_10_INIT);
+    try self.writeRegister(.system_11, SystemDefaults.SYS_11_INIT);
+    try self.writeRegister(.reset, ResetReg.CSM_ON);
 
-            var regv = try self.readRegister(.reset);
-            if (self.config.master_mode) {
-                regv |= ResetReg.MSC;
-            } else {
-                regv &= ResetReg.SLAVE_MODE;
-            }
-            try self.writeRegister(.reset, regv);
+    var regv = try self.readRegister(.reset);
+    if (self.config.master_mode) {
+        regv |= ResetReg.MSC;
+    } else {
+        regv &= ResetReg.SLAVE_MODE;
+    }
+    try self.writeRegister(.reset, regv);
 
-            regv = ClkManager01.MCLK_ON;
-            if (self.config.use_mclk) {
-                regv &= ClkManager01.MCLK_SEL_EXTERNAL;
-            } else {
-                regv |= ClkManager01.MCLK_SEL_INTERNAL;
-            }
-            if (self.config.invert_mclk) {
-                regv |= ClkManager01.MCLK_INV;
-            } else {
-                regv &= ~ClkManager01.MCLK_INV;
-            }
-            try self.writeRegister(.clk_manager_01, regv);
+    regv = ClkManager01.MCLK_ON;
+    if (self.config.use_mclk) {
+        regv &= ClkManager01.MCLK_SEL_EXTERNAL;
+    } else {
+        regv |= ClkManager01.MCLK_SEL_INTERNAL;
+    }
+    if (self.config.invert_mclk) {
+        regv |= ClkManager01.MCLK_INV;
+    } else {
+        regv &= ~ClkManager01.MCLK_INV;
+    }
+    try self.writeRegister(.clk_manager_01, regv);
 
-            regv = try self.readRegister(.clk_manager_06);
-            if (self.config.invert_sclk) {
-                regv |= ClkManager06.SCLK_INV;
-            } else {
-                regv &= ~ClkManager06.SCLK_INV;
-            }
-            try self.writeRegister(.clk_manager_06, regv);
+    regv = try self.readRegister(.clk_manager_06);
+    if (self.config.invert_sclk) {
+        regv |= ClkManager06.SCLK_INV;
+    } else {
+        regv &= ~ClkManager06.SCLK_INV;
+    }
+    try self.writeRegister(.clk_manager_06, regv);
 
-            try self.writeRegister(.system_13, SystemDefaults.SYS_13_INIT);
-            try self.writeRegister(.adc_1b, AdcDefaults.ADC_1B_INIT);
-            try self.writeRegister(.adc_1c, AdcDefaults.ADC_1C_INIT);
+    try self.writeRegister(.system_13, SystemDefaults.SYS_13_INIT);
+    try self.writeRegister(.adc_1b, AdcDefaults.ADC_1B_INIT);
+    try self.writeRegister(.adc_1c, AdcDefaults.ADC_1C_INIT);
 
-            if (!self.config.no_dac_ref) {
-                try self.writeRegister(.gpio_44, Gpio44.DAC_REF_ENABLED);
-            } else {
-                try self.writeRegister(.gpio_44, Gpio44.DAC_REF_DISABLED);
-            }
+    if (!self.config.no_dac_ref) {
+        try self.writeRegister(.gpio_44, Gpio44.DAC_REF_ENABLED);
+    } else {
+        try self.writeRegister(.gpio_44, Gpio44.DAC_REF_DISABLED);
+    }
 
-            self.is_open = true;
-        }
+    self.is_open = true;
+}
 
-        /// Close the codec
-        pub fn close(self: *Self) !void {
-            if (self.is_open) {
-                try self.standby();
-                self.is_open = false;
-            }
-        }
+/// Close the codec
+pub fn close(self: *Self) !void {
+    if (self.is_open) {
+        try self.standby();
+        self.is_open = false;
+    }
+}
 
-        /// Enable or disable the codec
-        pub fn enable(self: *Self, en: bool) !void {
-            if (!self.is_open) return error.NotOpen;
-            if (en == self.enabled) return;
+/// Enable or disable the codec
+pub fn enable(self: *Self, en: bool) !void {
+    if (!self.is_open) return error.NotOpen;
+    if (en == self.enabled) return;
 
-            if (en) {
-                try self.start();
-            } else {
-                try self.standby();
-            }
-            self.enabled = en;
-        }
+    if (en) {
+        try self.start();
+    } else {
+        try self.standby();
+    }
+    self.enabled = en;
+}
 
-        /// Configure sample rate
-        pub fn setSampleRate(self: *Self, sample_rate: u32) !void {
-            const mclk_freq = sample_rate * self.config.mclk_div;
-            const coeff = getClockCoeff(mclk_freq, sample_rate) orelse return error.UnsupportedSampleRate;
+/// Configure sample rate
+pub fn setSampleRate(self: *Self, sample_rate: u32) !void {
+    const mclk_freq = sample_rate * self.config.mclk_div;
+    const coeff = getClockCoeff(mclk_freq, sample_rate) orelse return error.UnsupportedSampleRate;
 
-            var regv = try self.readRegister(.clk_manager_02);
-            regv &= 0x07;
-            regv |= (coeff.pre_div - 1) << 5;
+    var regv = try self.readRegister(.clk_manager_02);
+    regv &= 0x07;
+    regv |= (coeff.pre_div - 1) << 5;
 
-            const pre_multi_bits: u8 = switch (coeff.pre_multi) {
-                1 => 0,
-                2 => 1,
-                4 => 2,
-                8 => 3,
-                else => 0,
-            };
+    const pre_multi_bits: u8 = switch (coeff.pre_multi) {
+        1 => 0,
+        2 => 1,
+        4 => 2,
+        8 => 3,
+        else => 0,
+    };
 
-            if (!self.config.use_mclk) {
-                regv |= 3 << 3;
-            } else {
-                regv |= pre_multi_bits << 3;
-            }
-            try self.writeRegister(.clk_manager_02, regv);
+    if (!self.config.use_mclk) {
+        regv |= 3 << 3;
+    } else {
+        regv |= pre_multi_bits << 3;
+    }
+    try self.writeRegister(.clk_manager_02, regv);
 
-            regv = 0x00;
-            regv |= (coeff.adc_div - 1) << 4;
-            regv |= (coeff.dac_div - 1);
-            try self.writeRegister(.clk_manager_05, regv);
+    regv = 0x00;
+    regv |= (coeff.adc_div - 1) << 4;
+    regv |= (coeff.dac_div - 1);
+    try self.writeRegister(.clk_manager_05, regv);
 
-            regv = try self.readRegister(.clk_manager_03);
-            regv &= 0x80;
-            regv |= coeff.fs_mode << 6;
-            regv |= coeff.adc_osr;
-            try self.writeRegister(.clk_manager_03, regv);
+    regv = try self.readRegister(.clk_manager_03);
+    regv &= 0x80;
+    regv |= coeff.fs_mode << 6;
+    regv |= coeff.adc_osr;
+    try self.writeRegister(.clk_manager_03, regv);
 
-            regv = try self.readRegister(.clk_manager_04);
-            regv &= 0x80;
-            regv |= coeff.dac_osr;
-            try self.writeRegister(.clk_manager_04, regv);
+    regv = try self.readRegister(.clk_manager_04);
+    regv &= 0x80;
+    regv |= coeff.dac_osr;
+    try self.writeRegister(.clk_manager_04, regv);
 
-            regv = try self.readRegister(.clk_manager_07);
-            regv &= 0xC0;
-            regv |= coeff.lrck_h;
-            try self.writeRegister(.clk_manager_07, regv);
-            try self.writeRegister(.clk_manager_08, coeff.lrck_l);
+    regv = try self.readRegister(.clk_manager_07);
+    regv &= 0xC0;
+    regv |= coeff.lrck_h;
+    try self.writeRegister(.clk_manager_07, regv);
+    try self.writeRegister(.clk_manager_08, coeff.lrck_l);
 
-            regv = try self.readRegister(.clk_manager_06);
-            regv &= 0xE0;
-            if (coeff.bclk_div < 19) {
-                regv |= coeff.bclk_div - 1;
-            } else {
-                regv |= coeff.bclk_div;
-            }
-            try self.writeRegister(.clk_manager_06, regv);
-        }
+    regv = try self.readRegister(.clk_manager_06);
+    regv &= 0xE0;
+    if (coeff.bclk_div < 19) {
+        regv |= coeff.bclk_div - 1;
+    } else {
+        regv |= coeff.bclk_div;
+    }
+    try self.writeRegister(.clk_manager_06, regv);
+}
 
-        /// Set bits per sample
-        pub fn setBitsPerSample(self: *Self, bits: BitsPerSample) !void {
-            var dac_iface = try self.readRegister(.sdp_in);
-            var adc_iface = try self.readRegister(.sdp_out);
+/// Set bits per sample
+pub fn setBitsPerSample(self: *Self, bits: BitsPerSample) !void {
+    var dac_iface = try self.readRegister(.sdp_in);
+    var adc_iface = try self.readRegister(.sdp_out);
 
-            dac_iface &= ~SdpReg.WL_MASK;
-            adc_iface &= ~SdpReg.WL_MASK;
+    dac_iface &= ~SdpReg.WL_MASK;
+    adc_iface &= ~SdpReg.WL_MASK;
 
-            const bits_val = @intFromEnum(bits);
-            dac_iface |= bits_val << SdpReg.WL_SHIFT;
-            adc_iface |= bits_val << SdpReg.WL_SHIFT;
+    const bits_val = @intFromEnum(bits);
+    dac_iface |= bits_val << SdpReg.WL_SHIFT;
+    adc_iface |= bits_val << SdpReg.WL_SHIFT;
 
-            try self.writeRegister(.sdp_in, dac_iface);
-            try self.writeRegister(.sdp_out, adc_iface);
-        }
+    try self.writeRegister(.sdp_in, dac_iface);
+    try self.writeRegister(.sdp_out, adc_iface);
+}
 
-        /// Set I2S format
-        pub fn setFormat(self: *Self, fmt: I2sFormat) !void {
-            var dac_iface = try self.readRegister(.sdp_in);
-            var adc_iface = try self.readRegister(.sdp_out);
+/// Set I2S format
+pub fn setFormat(self: *Self, fmt: I2sFormat) !void {
+    var dac_iface = try self.readRegister(.sdp_in);
+    var adc_iface = try self.readRegister(.sdp_out);
 
-            dac_iface &= ~SdpReg.FMT_MASK;
-            adc_iface &= ~SdpReg.FMT_MASK;
-            dac_iface |= @intFromEnum(fmt);
-            adc_iface |= @intFromEnum(fmt);
+    dac_iface &= ~SdpReg.FMT_MASK;
+    adc_iface &= ~SdpReg.FMT_MASK;
+    dac_iface |= @intFromEnum(fmt);
+    adc_iface |= @intFromEnum(fmt);
 
-            try self.writeRegister(.sdp_in, dac_iface);
-            try self.writeRegister(.sdp_out, adc_iface);
-        }
+    try self.writeRegister(.sdp_in, dac_iface);
+    try self.writeRegister(.sdp_out, adc_iface);
+}
 
-        /// Set microphone gain (0-42dB in 6dB steps)
-        pub fn setMicGain(self: *Self, gain: MicGain) !void {
-            try self.writeRegister(.adc_16, @intFromEnum(gain));
-        }
+/// Set microphone gain (0-42dB in 6dB steps)
+pub fn setMicGain(self: *Self, gain: MicGain) !void {
+    try self.writeRegister(.adc_16, @intFromEnum(gain));
+}
 
-        /// Set microphone gain from dB value
-        pub fn setMicGainDb(self: *Self, db: i8) !void {
-            try self.setMicGain(MicGain.fromDb(db));
-        }
+/// Set microphone gain from dB value
+pub fn setMicGainDb(self: *Self, db: i8) !void {
+    try self.setMicGain(MicGain.fromDb(db));
+}
 
-        /// Set DAC volume (0-255, where 0 = -95.5dB, 255 = +32dB)
-        pub fn setVolume(self: *Self, volume: u8) !void {
-            try self.writeRegister(.dac_32, volume);
-        }
+/// Set DAC volume (0-255, where 0 = -95.5dB, 255 = +32dB)
+pub fn setVolume(self: *Self, volume: u8) !void {
+    try self.writeRegister(.dac_32, volume);
+}
 
-        /// Get current DAC volume
-        pub fn getVolume(self: *Self) !u8 {
-            return self.readRegister(.dac_32);
-        }
+/// Get current DAC volume
+pub fn getVolume(self: *Self) !u8 {
+    return self.readRegister(.dac_32);
+}
 
-        /// Mute or unmute DAC output
-        pub fn setMute(self: *Self, mute: bool) !void {
-            var regv = try self.readRegister(.dac_31);
-            regv &= ~DacReg.MUTE_MASK;
-            if (mute) {
-                regv |= DacReg.MUTE;
-            }
-            try self.writeRegister(.dac_31, regv);
-        }
+/// Mute or unmute DAC output
+pub fn setMute(self: *Self, mute: bool) !void {
+    var regv = try self.readRegister(.dac_31);
+    regv &= ~DacReg.MUTE_MASK;
+    if (mute) {
+        regv |= DacReg.MUTE;
+    }
+    try self.writeRegister(.dac_31, regv);
+}
 
-        /// Read chip ID
-        pub fn readChipId(self: *Self) !u16 {
-            const id1 = try self.readRegister(.chip_id1);
-            const id2 = try self.readRegister(.chip_id2);
-            return (@as(u16, id1) << 8) | id2;
-        }
+/// Read chip ID
+pub fn readChipId(self: *Self) !u16 {
+    const id1 = try self.readRegister(.chip_id1);
+    const id2 = try self.readRegister(.chip_id2);
+    return (@as(u16, id1) << 8) | id2;
+}
 
-        /// Enable/disable DAC reference signal for AEC.
-        /// When enabled, ADC right channel contains DAC output for echo cancellation.
-        pub fn setDacReference(self: *Self, en: bool) !void {
-            const val: u8 = if (en) Gpio44.DAC_REF_ENABLED else Gpio44.DAC_REF_DISABLED;
-            try self.writeRegister(.gpio_44, val);
-        }
+/// Enable/disable DAC reference signal for AEC.
+/// When enabled, ADC right channel contains DAC output for echo cancellation.
+pub fn setDacReference(self: *Self, en: bool) !void {
+    const val: u8 = if (en) Gpio44.DAC_REF_ENABLED else Gpio44.DAC_REF_DISABLED;
+    try self.writeRegister(.gpio_44, val);
+}
 
-        /// Get current ADC volume
-        pub fn getAdcVolume(self: *Self) !u8 {
-            return self.readRegister(.adc_17);
-        }
+/// Get current ADC volume
+pub fn getAdcVolume(self: *Self) !u8 {
+    return self.readRegister(.adc_17);
+}
 
-        /// Set ADC volume (0-255)
-        pub fn setAdcVolume(self: *Self, volume: u8) !void {
-            try self.writeRegister(.adc_17, volume);
-        }
+/// Set ADC volume (0-255)
+pub fn setAdcVolume(self: *Self, volume: u8) !void {
+    try self.writeRegister(.adc_17, volume);
+}
 
-        // ====================================================================
-        // Internal functions
-        // ====================================================================
+// ====================================================================
+// Internal functions
+// ====================================================================
 
-        fn start(self: *Self) !void {
-            var regv: u8 = ResetReg.CSM_ON;
-            if (self.config.master_mode) {
-                regv |= ResetReg.MSC;
-            }
-            try self.writeRegister(.reset, regv);
+fn start(self: *Self) !void {
+    var regv: u8 = ResetReg.CSM_ON;
+    if (self.config.master_mode) {
+        regv |= ResetReg.MSC;
+    }
+    try self.writeRegister(.reset, regv);
 
-            regv = ClkManager01.MCLK_ON;
-            if (self.config.use_mclk) {
-                regv &= ClkManager01.MCLK_SEL_EXTERNAL;
-            } else {
-                regv |= ClkManager01.MCLK_SEL_INTERNAL;
-            }
-            if (self.config.invert_mclk) {
-                regv |= ClkManager01.MCLK_INV;
-            }
-            try self.writeRegister(.clk_manager_01, regv);
+    regv = ClkManager01.MCLK_ON;
+    if (self.config.use_mclk) {
+        regv &= ClkManager01.MCLK_SEL_EXTERNAL;
+    } else {
+        regv |= ClkManager01.MCLK_SEL_INTERNAL;
+    }
+    if (self.config.invert_mclk) {
+        regv |= ClkManager01.MCLK_INV;
+    }
+    try self.writeRegister(.clk_manager_01, regv);
 
-            var dac_iface = try self.readRegister(.sdp_in);
-            var adc_iface = try self.readRegister(.sdp_out);
-            dac_iface &= ~SdpReg.LRP;
+    var dac_iface = try self.readRegister(.sdp_in);
+    var adc_iface = try self.readRegister(.sdp_out);
+    dac_iface &= ~SdpReg.LRP;
+    adc_iface &= ~SdpReg.LRP;
+
+    switch (self.config.codec_mode) {
+        .adc_only => adc_iface &= ~SdpReg.LRP,
+        .dac_only => dac_iface &= ~SdpReg.LRP,
+        .both => {
             adc_iface &= ~SdpReg.LRP;
+            dac_iface &= ~SdpReg.LRP;
+        },
+    }
 
-            switch (self.config.codec_mode) {
-                .adc_only => adc_iface &= ~SdpReg.LRP,
-                .dac_only => dac_iface &= ~SdpReg.LRP,
-                .both => {
-                    adc_iface &= ~SdpReg.LRP;
-                    dac_iface &= ~SdpReg.LRP;
-                },
-            }
+    try self.writeRegister(.sdp_in, dac_iface);
+    try self.writeRegister(.sdp_out, adc_iface);
 
-            try self.writeRegister(.sdp_in, dac_iface);
-            try self.writeRegister(.sdp_out, adc_iface);
+    try self.writeRegister(.adc_17, AdcDefaults.ADC_17_STARTUP);
+    try self.writeRegister(.system_0e, SystemDefaults.SYS_0E_STARTUP);
 
-            try self.writeRegister(.adc_17, AdcDefaults.ADC_17_STARTUP);
-            try self.writeRegister(.system_0e, SystemDefaults.SYS_0E_STARTUP);
+    if (self.config.codec_mode == .dac_only or self.config.codec_mode == .both) {
+        try self.writeRegister(.system_12, SystemDefaults.SYS_12_DAC_EN);
+    }
 
-            if (self.config.codec_mode == .dac_only or self.config.codec_mode == .both) {
-                try self.writeRegister(.system_12, SystemDefaults.SYS_12_DAC_EN);
-            }
+    try self.writeRegister(.system_14, SystemDefaults.SYS_14_STARTUP);
 
-            try self.writeRegister(.system_14, SystemDefaults.SYS_14_STARTUP);
+    regv = try self.readRegister(.system_14);
+    if (self.config.digital_mic) {
+        regv |= SystemDefaults.DMIC_ENABLE;
+    } else {
+        regv &= ~SystemDefaults.DMIC_ENABLE;
+    }
+    try self.writeRegister(.system_14, regv);
 
-            regv = try self.readRegister(.system_14);
-            if (self.config.digital_mic) {
-                regv |= SystemDefaults.DMIC_ENABLE;
-            } else {
-                regv &= ~SystemDefaults.DMIC_ENABLE;
-            }
-            try self.writeRegister(.system_14, regv);
+    try self.writeRegister(.system_0d, SystemDefaults.SYS_0D_STARTUP);
+    try self.writeRegister(.adc_15, AdcDefaults.ADC_15_STARTUP);
+    try self.writeRegister(.dac_37, DacDefaults.DAC_37_STARTUP);
+    try self.writeRegister(.gp_45, 0x00);
+}
 
-            try self.writeRegister(.system_0d, SystemDefaults.SYS_0D_STARTUP);
-            try self.writeRegister(.adc_15, AdcDefaults.ADC_15_STARTUP);
-            try self.writeRegister(.dac_37, DacDefaults.DAC_37_STARTUP);
-            try self.writeRegister(.gp_45, 0x00);
+fn standby(self: *Self) !void {
+    try self.writeRegister(.dac_32, 0x00);
+    try self.writeRegister(.adc_17, 0x00);
+    try self.writeRegister(.system_0e, 0xFF);
+    try self.writeRegister(.system_12, 0x02);
+    try self.writeRegister(.system_14, 0x00);
+    try self.writeRegister(.system_0d, 0xFA);
+    try self.writeRegister(.adc_15, 0x00);
+    try self.writeRegister(.clk_manager_02, 0x10);
+    try self.writeRegister(.reset, ResetReg.SOFT_RESET_1);
+    try self.writeRegister(.reset, ResetReg.ALL_OFF);
+    try self.writeRegister(.clk_manager_01, ClkManager01.INIT_OFF);
+    try self.writeRegister(.clk_manager_01, ClkManager01.ALL_OFF);
+    try self.writeRegister(.gp_45, 0x00);
+    try self.writeRegister(.system_0d, 0xFC);
+    try self.writeRegister(.clk_manager_02, 0x00);
+}
+
+fn getClockCoeff(mclk: u32, rate: u32) ?ClockCoeff {
+    for (clock_coeffs) |coeff| {
+        if (coeff.mclk == mclk and coeff.rate == rate) {
+            return coeff;
         }
+    }
+    return null;
+}
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn setMicGainDbAndReadChipIdUseI2cWrapper() !void {
+            const FakeI2c = struct {
+                writes: [4][2]u8 = [_][2]u8{[_]u8{ 0, 0 }} ** 4,
+                write_count: usize = 0,
 
-        fn standby(self: *Self) !void {
-            try self.writeRegister(.dac_32, 0x00);
-            try self.writeRegister(.adc_17, 0x00);
-            try self.writeRegister(.system_0e, 0xFF);
-            try self.writeRegister(.system_12, 0x02);
-            try self.writeRegister(.system_14, 0x00);
-            try self.writeRegister(.system_0d, 0xFA);
-            try self.writeRegister(.adc_15, 0x00);
-            try self.writeRegister(.clk_manager_02, 0x10);
-            try self.writeRegister(.reset, ResetReg.SOFT_RESET_1);
-            try self.writeRegister(.reset, ResetReg.ALL_OFF);
-            try self.writeRegister(.clk_manager_01, ClkManager01.INIT_OFF);
-            try self.writeRegister(.clk_manager_01, ClkManager01.ALL_OFF);
-            try self.writeRegister(.gp_45, 0x00);
-            try self.writeRegister(.system_0d, 0xFC);
-            try self.writeRegister(.clk_manager_02, 0x00);
-        }
-
-        fn getClockCoeff(mclk: u32, rate: u32) ?ClockCoeff {
-            for (clock_coeffs) |coeff| {
-                if (coeff.mclk == mclk and coeff.rate == rate) {
-                    return coeff;
+                pub fn write(self: *@This(), _: io.I2c.Address, data: []const u8) io.I2c.Error!void {
+                    self.writes[self.write_count] = .{ data[0], data[1] };
+                    self.write_count += 1;
                 }
-            }
-            return null;
-        }
-test "drivers/unit_tests/audio/Es8311/setMicGainDb_and_readChipId_use_i2c_wrapper" {
-    const std = @import("std");
 
-    const FakeI2c = struct {
-        writes: [4][2]u8 = [_][2]u8{[_]u8{ 0, 0 }} ** 4,
-        write_count: usize = 0,
+                pub fn read(self: *@This(), _: io.I2c.Address, _: []u8) io.I2c.Error!void {
+                    _ = self;
+                    return error.Unexpected;
+                }
 
-        pub fn write(self: *@This(), _: io.I2c.Address, data: []const u8) io.I2c.Error!void {
-            self.writes[self.write_count] = .{ data[0], data[1] };
-            self.write_count += 1;
-        }
+                pub fn writeRead(self: *@This(), _: io.I2c.Address, tx: []const u8, rx: []u8) io.I2c.Error!void {
+                    _ = self;
+                    if (tx[0] == @intFromEnum(Register.chip_id1)) {
+                        rx[0] = 0x83;
+                        return;
+                    }
+                    if (tx[0] == @intFromEnum(Register.chip_id2)) {
+                        rx[0] = 0x11;
+                        return;
+                    }
+                    return error.Unexpected;
+                }
+            };
 
-        pub fn read(self: *@This(), _: io.I2c.Address, _: []u8) io.I2c.Error!void {
-            _ = self;
-            return error.Unexpected;
-        }
+            var fake = FakeI2c{};
+            var codec = es8311.init(io.I2c.init(&fake), .{
+                .address = @intFromEnum(Address.ad0_low),
+            });
 
-        pub fn writeRead(self: *@This(), _: io.I2c.Address, tx: []const u8, rx: []u8) io.I2c.Error!void {
-            _ = self;
-            if (tx[0] == @intFromEnum(Register.chip_id1)) {
-                rx[0] = 0x83;
-                return;
-            }
-            if (tx[0] == @intFromEnum(Register.chip_id2)) {
-                rx[0] = 0x11;
-                return;
-            }
-            return error.Unexpected;
+            try codec.setMicGainDb(24);
+            const chip_id = try codec.readChipId();
+
+            try lib.testing.expectEqual(@as(u16, 0x8311), chip_id);
+            try lib.testing.expectEqual(@as(usize, 1), fake.write_count);
+            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.adc_16), @intFromEnum(MicGain.@"24dB") }, fake.writes[0]);
         }
     };
 
-    var fake = FakeI2c{};
-    var codec = es8311.init(io.I2c.init(&fake), .{
-        .address = @intFromEnum(Address.ad0_low),
-    });
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    try codec.setMicGainDb(24);
-    const chip_id = try codec.readChipId();
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    try std.testing.expectEqual(@as(u16, 0x8311), chip_id);
-    try std.testing.expectEqual(@as(usize, 1), fake.write_count);
-    try std.testing.expectEqual([2]u8{ @intFromEnum(Register.adc_16), @intFromEnum(MicGain.@"24dB") }, fake.writes[0]);
+            TestCase.setMicGainDbAndReadChipIdUseI2cWrapper() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

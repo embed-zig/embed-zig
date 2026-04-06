@@ -1,8 +1,10 @@
+const testing_api = @import("testing");
+
 pub fn make(comptime lib: type, comptime stores_config: anytype) type {
     const StoresConfig = @TypeOf(stores_config);
     const info = @typeInfo(StoresConfig);
     if (info != .@"struct") {
-        @compileError("zux.Store.make expects config.stores to be a struct literal");
+        @compileError("zux.store.Builder.make expects configured stores to form a struct literal");
     }
 
     const fields_info = info.@"struct".fields;
@@ -11,7 +13,7 @@ pub fn make(comptime lib: type, comptime stores_config: anytype) type {
     inline for (fields_info, 0..) |field, i| {
         const StoreType = @field(stores_config, field.name);
         if (@TypeOf(StoreType) != type) {
-            @compileError("zux.Store.make expects config.stores." ++ field.name ++ " to be a type");
+            @compileError("zux.store.Builder.make expects configured store '" ++ field.name ++ "' to be a type");
         }
 
         fields[i] = .{
@@ -33,78 +35,115 @@ pub fn make(comptime lib: type, comptime stores_config: anytype) type {
     });
 }
 
-test "zux/unit_tests/store/Stores/builds_struct_from_store_types" {
-    const std = @import("std");
-    const TestLib = struct {
-        pub const builtin = std.builtin;
-    };
-    const Wifi = struct { value: u32 };
-    const Cellular = struct { enabled: bool };
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn builds_struct_from_store_types(testing: anytype, _: lib.mem.Allocator) !void {
+            const StoreLib = struct {
+                pub const builtin = lib.builtin;
+            };
+            const Wifi = struct { value: u32 };
+            const Cellular = struct { enabled: bool };
 
-    const Stores = make(TestLib, .{
-        .wifi = Wifi,
-        .cellular = Cellular,
-    });
+            const StoresTy = make(StoreLib, .{
+                .wifi = Wifi,
+                .cellular = Cellular,
+            });
 
-    const info = @typeInfo(Stores).@"struct";
-    try std.testing.expectEqual(@as(usize, 2), info.fields.len);
-    try std.testing.expect(std.mem.eql(u8, "wifi", info.fields[0].name));
-    try std.testing.expect(std.mem.eql(u8, "cellular", info.fields[1].name));
-    try std.testing.expect(info.fields[0].type == Wifi);
-    try std.testing.expect(info.fields[1].type == Cellular);
-}
+            const info = @typeInfo(StoresTy).@"struct";
+            try testing.expectEqual(@as(usize, 2), info.fields.len);
+            try testing.expectEqualStrings("wifi", info.fields[0].name);
+            try testing.expectEqualStrings("cellular", info.fields[1].name);
+            try testing.expect(info.fields[0].type == Wifi);
+            try testing.expect(info.fields[1].type == Cellular);
+        }
 
-test "zux/unit_tests/store/Stores/allows_instantiation" {
-    const std = @import("std");
-    const TestLib = struct {
-        pub const builtin = std.builtin;
-    };
-    const Wifi = struct { value: u32 };
-    const Cellular = struct { enabled: bool };
-    const Stores = make(TestLib, .{
-        .wifi = Wifi,
-        .cellular = Cellular,
-    });
+        fn allows_instantiation(testing: anytype, _: lib.mem.Allocator) !void {
+            const StoreLib = struct {
+                pub const builtin = lib.builtin;
+            };
+            const Wifi = struct { value: u32 };
+            const Cellular = struct { enabled: bool };
+            const StoresTy = make(StoreLib, .{
+                .wifi = Wifi,
+                .cellular = Cellular,
+            });
 
-    const stores: Stores = .{
-        .wifi = .{ .value = 7 },
-        .cellular = .{ .enabled = true },
-    };
+            const stores: StoresTy = .{
+                .wifi = .{ .value = 7 },
+                .cellular = .{ .enabled = true },
+            };
 
-    try std.testing.expectEqual(@as(u32, 7), stores.wifi.value);
-    try std.testing.expect(stores.cellular.enabled);
-}
+            try testing.expectEqual(@as(u32, 7), stores.wifi.value);
+            try testing.expect(stores.cellular.enabled);
+        }
 
-test "zux/unit_tests/store/Stores/supports_actual_usage" {
-    const std = @import("std");
-    const TestLib = struct {
-        pub const builtin = std.builtin;
-    };
-    const Wifi = struct {
-        value: u32,
+        fn supports_actual_usage(testing: anytype, _: lib.mem.Allocator) !void {
+            const StoreLib = struct {
+                pub const builtin = lib.builtin;
+            };
+            const Wifi = struct {
+                value: u32,
 
-        pub fn get(self: *@This()) u32 {
-            return self.value;
+                pub fn get(self: *@This()) u32 {
+                    return self.value;
+                }
+            };
+            const Cellular = struct {
+                enabled: bool,
+
+                pub fn get(self: *@This()) bool {
+                    return self.enabled;
+                }
+            };
+
+            const StoresTy = make(StoreLib, .{
+                .wifi = Wifi,
+                .cellular = Cellular,
+            });
+
+            var stores: StoresTy = .{
+                .wifi = .{ .value = 42 },
+                .cellular = .{ .enabled = true },
+            };
+
+            try testing.expectEqual(@as(u32, 42), stores.wifi.get());
+            try testing.expect(stores.cellular.get());
         }
     };
-    const Cellular = struct {
-        enabled: bool,
 
-        pub fn get(self: *@This()) bool {
-            return self.enabled;
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            const testing = lib.testing;
+
+            TestCase.builds_struct_from_store_types(testing, allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.allows_instantiation(testing, allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.supports_actual_usage(testing, allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    const Stores = make(TestLib, .{
-        .wifi = Wifi,
-        .cellular = Cellular,
-    });
-
-    var stores: Stores = .{
-        .wifi = .{ .value = 42 },
-        .cellular = .{ .enabled = true },
+    const Holder = struct {
+        var runner: Runner = .{};
     };
-
-    try std.testing.expectEqual(@as(u32, 42), stores.wifi.get());
-    try std.testing.expect(stores.cellular.get());
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

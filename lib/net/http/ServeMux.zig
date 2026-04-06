@@ -4,6 +4,7 @@ const Request = @import("Request.zig");
 const ResponseWriter = @import("ResponseWriter.zig").ResponseWriter;
 const handler_mod = @import("Handler.zig");
 const mux_common = @import("mux_common.zig");
+const testing_api = @import("testing");
 
 pub fn ServeMux(comptime lib: type) type {
     const Allocator = lib.mem.Allocator;
@@ -129,64 +130,65 @@ pub fn ServeMux(comptime lib: type) type {
     };
 }
 
-test "net/unit_tests/http/ServeMux/handle_rejects_duplicate_patterns" {
-    const std = @import("std");
-    const Mux = ServeMux(std);
-    const H = handler_mod.Handler(std);
-    const Writer = ResponseWriter(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const Mux = ServeMux(lib);
+            const H = handler_mod.Handler(lib);
+            const Writer = ResponseWriter(lib);
 
-    const Demo = struct {
-        pub fn serveHTTP(_: *@This(), _: *Writer, _: *Request) void {}
-    };
+            {
+                const Demo = struct {
+                    pub fn serveHTTP(_: *@This(), _: *Writer, _: *Request) void {}
+                };
 
-    var demo = Demo{};
-    var mux = Mux.init(std.testing.allocator);
-    defer mux.deinit();
+                var demo = Demo{};
+                var mux = Mux.init(allocator);
+                defer mux.deinit();
 
-    try mux.handle("/hello", H.init(&demo));
-    try std.testing.expectError(error.DuplicatePattern, mux.handle("/hello", H.init(&demo)));
-}
+                try mux.handle("/hello", H.init(&demo));
+                try testing.expectError(error.DuplicatePattern, mux.handle("/hello", H.init(&demo)));
+            }
 
-test "net/unit_tests/http/ServeMux/handler_prefers_longest_match" {
-    const std = @import("std");
-    const Mux = ServeMux(std);
-    const H = handler_mod.Handler(std);
-    const Writer = ResponseWriter(std);
+            {
+                const State = struct {
+                    value: []const u8 = "",
+                };
 
-    const State = struct {
-        value: []const u8 = "",
-    };
+                const RootHandler = struct {
+                    state: *State,
 
-    const RootHandler = struct {
-        state: *State,
+                    pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
+                        self.state.value = "root";
+                    }
+                };
 
-        pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
-            self.state.value = "root";
+                const ApiHandler = struct {
+                    state: *State,
+
+                    pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
+                        self.state.value = "api";
+                    }
+                };
+
+                var state = State{};
+                var root_handler = RootHandler{ .state = &state };
+                var api_handler = ApiHandler{ .state = &state };
+
+                var mux = Mux.init(allocator);
+                defer mux.deinit();
+                try mux.handle("/", H.init(&root_handler));
+                try mux.handle("/api/", H.init(&api_handler));
+
+                var req = try Request.init(allocator, "GET", "https://example.com/api/users");
+                defer req.deinit();
+                var writer = Writer.init(allocator, undefined, &req, false);
+                defer writer.deinit();
+
+                mux.serveHTTP(&writer, &req);
+                try testing.expectEqualStrings("api", state.value);
+            }
         }
-    };
-
-    const ApiHandler = struct {
-        state: *State,
-
-        pub fn serveHTTP(self: *@This(), _: *Writer, _: *Request) void {
-            self.state.value = "api";
-        }
-    };
-
-    var state = State{};
-    var root_handler = RootHandler{ .state = &state };
-    var api_handler = ApiHandler{ .state = &state };
-
-    var mux = Mux.init(std.testing.allocator);
-    defer mux.deinit();
-    try mux.handle("/", H.init(&root_handler));
-    try mux.handle("/api/", H.init(&api_handler));
-
-    var req = try Request.init(std.testing.allocator, "GET", "https://example.com/api/users");
-    defer req.deinit();
-    var writer = Writer.init(std.testing.allocator, undefined, &req, false);
-    defer writer.deinit();
-
-    mux.serveHTTP(&writer, &req);
-    try std.testing.expectEqualStrings("api", state.value);
+    }.run);
 }

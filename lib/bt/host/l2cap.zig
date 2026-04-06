@@ -14,6 +14,7 @@
 
 const std = @import("std");
 const acl = @import("hci/acl.zig");
+const testing_api = @import("testing");
 
 pub const HEADER_LEN: usize = 4;
 
@@ -194,82 +195,104 @@ pub fn fragmentIterator(buf: []u8, att_payload: []const u8, conn_handle: u16, ma
     };
 }
 
-test "bt/unit_tests/host/l2cap/header_parse_and_encode_roundtrip" {
-    var buf: [128]u8 = undefined;
-    const payload = "ATT data";
-    const encoded = encode(&buf, CID_ATT, payload);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            var buf: [128]u8 = undefined;
+            const payload = "ATT data";
+            const encoded = encode(&buf, CID_ATT, payload);
 
-    try std.testing.expectEqual(@as(usize, HEADER_LEN + payload.len), encoded.len);
+            try lib.testing.expectEqual(@as(usize, HEADER_LEN + payload.len), encoded.len);
 
-    const hdr = parseHeader(encoded) orelse return error.ParseFailed;
-    try std.testing.expectEqual(@as(u16, payload.len), hdr.length);
-    try std.testing.expectEqual(CID_ATT, hdr.cid);
-    try std.testing.expectEqualSlices(u8, payload, encoded[HEADER_LEN..]);
+            const hdr = parseHeader(encoded) orelse return error.ParseFailed;
+            try lib.testing.expectEqual(@as(u16, payload.len), hdr.length);
+            try lib.testing.expectEqual(CID_ATT, hdr.cid);
+            try lib.testing.expectEqualSlices(u8, payload, encoded[HEADER_LEN..]);
+
+            var reasm = Reassembler{};
+            var l2cap_buf: [64]u8 = undefined;
+            const att_data = "hello";
+            const l2cap_pkt = encode(&l2cap_buf, CID_ATT, att_data);
+
+            const sdu = reasm.feed(.{
+                .conn_handle = 0x0040,
+                .pb_flag = .first_auto_flush,
+                .bc_flag = .point_to_point,
+                .data_len = @truncate(l2cap_pkt.len),
+            }, l2cap_pkt) orelse return error.ReassemblyFailed;
+
+            try lib.testing.expectEqual(@as(u16, 0x0040), sdu.conn_handle);
+            try lib.testing.expectEqual(CID_ATT, sdu.cid);
+            try lib.testing.expectEqualSlices(u8, att_data, sdu.data);
+
+            reasm = .{};
+            const fragmented = "hello world, this is fragmented";
+            var fragmented_buf: [128]u8 = undefined;
+            lib.mem.writeInt(u16, fragmented_buf[0..2], fragmented.len, .little);
+            lib.mem.writeInt(u16, fragmented_buf[2..4], CID_ATT, .little);
+            @memcpy(fragmented_buf[4..][0..10], fragmented[0..10]);
+
+            const r1 = reasm.feed(.{
+                .conn_handle = 0x0040,
+                .pb_flag = .first_auto_flush,
+                .bc_flag = .point_to_point,
+                .data_len = 14,
+            }, fragmented_buf[0..14]);
+            try lib.testing.expectEqual(@as(?Sdu, null), r1);
+
+            const r2 = reasm.feed(.{
+                .conn_handle = 0x0040,
+                .pb_flag = .continuing,
+                .bc_flag = .point_to_point,
+                .data_len = @truncate(fragmented.len - 10),
+            }, fragmented[10..]) orelse return error.ReassemblyFailed;
+
+            try lib.testing.expectEqual(CID_ATT, r2.cid);
+            try lib.testing.expectEqualSlices(u8, fragmented, r2.data);
+
+            try lib.testing.expectEqual(@as(?Header, null), parseHeader(&.{ 0x00, 0x00 }));
+
+            var fragment_buf: [Reassembler.MAX_SDU_LEN + acl.MAX_PACKET_LEN]u8 = undefined;
+            const iter_payload = "abcdefghijklmnop";
+            var it = fragmentIterator(&fragment_buf, iter_payload, 0x0040, 6);
+
+            const first = it.next() orelse return error.MissingFirstFragment;
+            try lib.testing.expectEqual(acl.PbFlag.first_auto_flush, (acl.parsePacketHeader(first) orelse return error.BadHeader).pb_flag);
+
+            const second = it.next() orelse return error.MissingSecondFragment;
+            const second_payload = acl.getPayload(second) orelse return error.BadSecondPayload;
+            try lib.testing.expectEqualSlices(u8, iter_payload[2..8], second_payload);
+
+            const third = it.next() orelse return error.MissingThirdFragment;
+            const third_payload = acl.getPayload(third) orelse return error.BadThirdPayload;
+            try lib.testing.expectEqualSlices(u8, iter_payload[8..14], third_payload);
+        }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-test "bt/unit_tests/host/l2cap/reassembler_single_fragment" {
-    var reasm = Reassembler{};
-    var l2cap_buf: [64]u8 = undefined;
-    const att_data = "hello";
-    const l2cap_pkt = encode(&l2cap_buf, CID_ATT, att_data);
-
-    const sdu = reasm.feed(.{
-        .conn_handle = 0x0040,
-        .pb_flag = .first_auto_flush,
-        .bc_flag = .point_to_point,
-        .data_len = @truncate(l2cap_pkt.len),
-    }, l2cap_pkt) orelse return error.ReassemblyFailed;
-
-    try std.testing.expectEqual(@as(u16, 0x0040), sdu.conn_handle);
-    try std.testing.expectEqual(CID_ATT, sdu.cid);
-    try std.testing.expectEqualSlices(u8, att_data, sdu.data);
-}
-
-test "bt/unit_tests/host/l2cap/reassembler_two_fragments" {
-    var reasm = Reassembler{};
-
-    const att_data = "hello world, this is fragmented";
-    var l2cap_buf: [128]u8 = undefined;
-    std.mem.writeInt(u16, l2cap_buf[0..2], att_data.len, .little);
-    std.mem.writeInt(u16, l2cap_buf[2..4], CID_ATT, .little);
-    @memcpy(l2cap_buf[4..][0..10], att_data[0..10]);
-
-    const r1 = reasm.feed(.{
-        .conn_handle = 0x0040,
-        .pb_flag = .first_auto_flush,
-        .bc_flag = .point_to_point,
-        .data_len = 14,
-    }, l2cap_buf[0..14]);
-    try std.testing.expectEqual(@as(?Sdu, null), r1);
-
-    const r2 = reasm.feed(.{
-        .conn_handle = 0x0040,
-        .pb_flag = .continuing,
-        .bc_flag = .point_to_point,
-        .data_len = @truncate(att_data.len - 10),
-    }, att_data[10..]) orelse return error.ReassemblyFailed;
-
-    try std.testing.expectEqual(CID_ATT, r2.cid);
-    try std.testing.expectEqualSlices(u8, att_data, r2.data);
-}
-
-test "bt/unit_tests/host/l2cap/parseHeader_returns_null_for_short_input" {
-    try std.testing.expectEqual(@as(?Header, null), parseHeader(&.{ 0x00, 0x00 }));
-}
-
-test "bt/unit_tests/host/l2cap/fragment_iterator_advances_offset_across_continuations" {
-    var buf: [Reassembler.MAX_SDU_LEN + acl.MAX_PACKET_LEN]u8 = undefined;
-    const att_payload = "abcdefghijklmnop";
-    var it = fragmentIterator(&buf, att_payload, 0x0040, 6);
-
-    const first = it.next() orelse return error.MissingFirstFragment;
-    try std.testing.expectEqual(acl.PbFlag.first_auto_flush, (acl.parsePacketHeader(first) orelse return error.BadHeader).pb_flag);
-
-    const second = it.next() orelse return error.MissingSecondFragment;
-    const second_payload = acl.getPayload(second) orelse return error.BadSecondPayload;
-    try std.testing.expectEqualSlices(u8, att_payload[2..8], second_payload);
-
-    const third = it.next() orelse return error.MissingThirdFragment;
-    const third_payload = acl.getPayload(third) orelse return error.BadThirdPayload;
-    try std.testing.expectEqualSlices(u8, att_payload[8..14], third_payload);
-}

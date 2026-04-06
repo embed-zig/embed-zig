@@ -176,11 +176,12 @@ type checks are needed beyond the requested `T`.
 
 ## Testing
 
-The reusable test entrypoint is:
+The reusable unit-test entrypoint now lives under the shared `lib/test/`
+tree:
 
 ```zig
 const testing = @import("testing").make(lib);
-const context_runner = @import("integration/context.zig").make(lib);
+const context_runner = @import("test/context.zig").make(lib);
 
 var t = testing.init();
 defer t.deinit();

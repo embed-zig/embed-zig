@@ -5,6 +5,9 @@
 //! utilities as the HTTP stack expands.
 
 pub const MediaType = @import("mime/MediaType.zig");
+pub const test_runner = struct {
+    pub const unit = @import("mime/test_runner/unit.zig");
+};
 
 pub fn parse(input: []const u8, params_buf: []MediaType.Parameter) MediaType.ParseError!MediaType {
     return MediaType.parse(input, params_buf);
@@ -12,8 +15,4 @@ pub fn parse(input: []const u8, params_buf: []MediaType.Parameter) MediaType.Par
 
 pub fn format(media_type: MediaType, writer: anytype) !void {
     return media_type.format(writer);
-}
-
-test "mime/unit_tests" {
-    _ = @import("mime/MediaType.zig");
 }

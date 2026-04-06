@@ -1,3 +1,5 @@
+const testing_api = @import("testing");
+
 pub fn make(comptime lib: type) type {
     const common = @import("common.zig").make(lib);
     const Allocator = lib.mem.Allocator;
@@ -336,137 +338,96 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-test "net/unit_tests/tls/extensions/ExtensionBuilder_server_name_roundtrip" {
-    const std = @import("std");
-    const common = @import("common.zig").make(std);
-    const extensions = make(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const common = @import("common.zig").make(lib);
+            const extensions = make(lib);
 
-    var buf: [256]u8 = undefined;
-    var builder = extensions.ExtensionBuilder.init(&buf);
-    try builder.addServerName("test.example.com");
+            {
+                var buf: [256]u8 = undefined;
+                var builder = extensions.ExtensionBuilder.init(&buf);
+                try builder.addServerName("test.example.com");
 
-    const exts = try extensions.parseExtensions(builder.getData(), std.testing.allocator);
-    defer std.testing.allocator.free(exts);
+                const exts = try extensions.parseExtensions(builder.getData(), allocator);
+                defer allocator.free(exts);
 
-    const sni = extensions.findExtension(exts, .server_name) orelse return error.TestUnexpectedResult;
-    const hostname = try extensions.parseServerName(sni.data);
-    try std.testing.expect(hostname != null);
-    try std.testing.expectEqualStrings("test.example.com", hostname.?);
-    _ = common;
-}
+                const sni = extensions.findExtension(exts, .server_name) orelse return error.TestUnexpectedResult;
+                const hostname = try extensions.parseServerName(sni.data);
+                try testing.expect(hostname != null);
+                try testing.expectEqualStrings("test.example.com", hostname.?);
+            }
 
-test "net/unit_tests/tls/extensions/ExtensionBuilder_supported_versions_encodes_client_list" {
-    const std = @import("std");
-    const common = @import("common.zig").make(std);
-    const extensions = make(std);
+            {
+                var buf: [256]u8 = undefined;
+                var builder = extensions.ExtensionBuilder.init(&buf);
+                try builder.addSupportedVersions(&.{ .tls_1_3, .tls_1_2 });
 
-    var buf: [256]u8 = undefined;
-    var builder = extensions.ExtensionBuilder.init(&buf);
-    try builder.addSupportedVersions(&.{ .tls_1_3, .tls_1_2 });
+                const data = builder.getData();
+                try testing.expect(data.len >= 9);
+                try testing.expectEqual(@as(u16, @intFromEnum(common.ExtensionType.supported_versions)), lib.mem.readInt(u16, data[0..2], .big));
+                try testing.expectEqual(@as(u8, 4), data[4]);
+            }
 
-    const data = builder.getData();
-    try std.testing.expect(data.len >= 9);
-    try std.testing.expectEqual(@as(u16, @intFromEnum(common.ExtensionType.supported_versions)), std.mem.readInt(u16, data[0..2], .big));
-    try std.testing.expectEqual(@as(u8, 4), data[4]);
-}
+            {
+                var buf: [16]u8 = undefined;
+                var builder = extensions.ExtensionBuilder.init(&buf);
+                try builder.addSelectedVersion(.tls_1_3);
 
-test "net/unit_tests/tls/extensions/ExtensionBuilder_selected_version_roundtrip" {
-    const std = @import("std");
-    const extensions = make(std);
+                const exts = try extensions.parseExtensions(builder.getData(), allocator);
+                defer allocator.free(exts);
 
-    var buf: [16]u8 = undefined;
-    var builder = extensions.ExtensionBuilder.init(&buf);
-    try builder.addSelectedVersion(.tls_1_3);
+                const ext = extensions.findExtension(exts, .supported_versions) orelse return error.TestUnexpectedResult;
+                try testing.expectEqual(common.ProtocolVersion.tls_1_3, try extensions.parseSupportedVersion(ext.data));
+            }
 
-    const exts = try extensions.parseExtensions(builder.getData(), std.testing.allocator);
-    defer std.testing.allocator.free(exts);
+            {
+                var buf: [64]u8 = undefined;
+                var builder = extensions.ExtensionBuilder.init(&buf);
+                const key = [_]u8{0xAA} ** 32;
+                try builder.addKeyShareServer(.{
+                    .group = .x25519,
+                    .key_exchange = &key,
+                });
 
-    const ext = extensions.findExtension(exts, .supported_versions) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqual(@import("common.zig").make(std).ProtocolVersion.tls_1_3, try extensions.parseSupportedVersion(ext.data));
-}
+                const exts = try extensions.parseExtensions(builder.getData(), allocator);
+                defer allocator.free(exts);
 
-test "net/unit_tests/tls/extensions/ExtensionBuilder_key_share_server_roundtrip" {
-    const std = @import("std");
-    const extensions = make(std);
+                const ext = extensions.findExtension(exts, .key_share) orelse return error.TestUnexpectedResult;
+                const entry = try extensions.parseKeyShareServer(ext.data);
+                try testing.expectEqual(common.NamedGroup.x25519, entry.group);
+                try testing.expectEqualSlices(u8, &key, entry.key_exchange);
+            }
 
-    var buf: [64]u8 = undefined;
-    var builder = extensions.ExtensionBuilder.init(&buf);
-    const key = [_]u8{0xAA} ** 32;
-    try builder.addKeyShareServer(.{
-        .group = .x25519,
-        .key_exchange = &key,
-    });
+            {
+                var buf: [4]u8 = undefined;
+                var builder = extensions.ExtensionBuilder.init(&buf);
+                try testing.expectError(error.BufferTooSmall, builder.addServerName("example.com"));
+            }
 
-    const exts = try extensions.parseExtensions(builder.getData(), std.testing.allocator);
-    defer std.testing.allocator.free(exts);
+            try testing.expectError(error.InvalidExtension, extensions.parseExtensions(&.{ 0x00, 0x00, 0x00 }, allocator));
+            try testing.expectError(error.InvalidExtension, extensions.parseSupportedVersion(&.{0x03}));
+            try testing.expectError(error.InvalidExtension, extensions.parseSupportedVersion(&.{ 0x03, 0x04, 0x00 }));
+            try testing.expectError(error.InvalidExtension, extensions.parseKeyShareServer(&.{ 0x00, 0x1d, 0x00 }));
+            try testing.expectError(
+                error.InvalidExtension,
+                extensions.parseKeyShareServer(&.{ 0x00, 0x1d, 0x00, 0x02, 0xaa, 0xbb, 0xcc }),
+            );
 
-    const ext = extensions.findExtension(exts, .key_share) orelse return error.TestUnexpectedResult;
-    const entry = try extensions.parseKeyShareServer(ext.data);
-    try std.testing.expectEqual(@import("common.zig").make(std).NamedGroup.x25519, entry.group);
-    try std.testing.expectEqualSlices(u8, &key, entry.key_exchange);
-}
+            {
+                var buf: [256]u8 = undefined;
+                var builder = extensions.ExtensionBuilder.init(&buf);
+                try builder.addAlpn(&.{ "h2", "http/1.1" });
 
-test "net/unit_tests/tls/extensions/ExtensionBuilder_detects_small_buffers" {
-    const std = @import("std");
-    const extensions = make(std);
+                const exts = try extensions.parseExtensions(builder.getData(), allocator);
+                defer allocator.free(exts);
 
-    var buf: [4]u8 = undefined;
-    var builder = extensions.ExtensionBuilder.init(&buf);
-    try std.testing.expectError(error.BufferTooSmall, builder.addServerName("example.com"));
-}
+                const alpn = extensions.findExtension(exts, common.ExtensionType.application_layer_protocol_negotiation) orelse return error.TestUnexpectedResult;
+                try testing.expectEqualStrings("h2", (try extensions.findMatchingAlpn(alpn.data, &.{ "h2" })).?);
+            }
 
-test "net/unit_tests/tls/extensions/parseExtensions_rejects_truncated_payloads" {
-    const std = @import("std");
-    const extensions = make(std);
-    try std.testing.expectError(error.InvalidExtension, extensions.parseExtensions(&.{ 0x00, 0x00, 0x00 }, std.testing.allocator));
-}
-
-test "net/unit_tests/tls/extensions/parseSupportedVersion_rejects_short_payloads" {
-    const std = @import("std");
-    const extensions = make(std);
-    try std.testing.expectError(error.InvalidExtension, extensions.parseSupportedVersion(&.{0x03}));
-}
-
-test "net/unit_tests/tls/extensions/parseSupportedVersion_rejects_trailing_bytes" {
-    const std = @import("std");
-    const extensions = make(std);
-    try std.testing.expectError(error.InvalidExtension, extensions.parseSupportedVersion(&.{ 0x03, 0x04, 0x00 }));
-}
-
-test "net/unit_tests/tls/extensions/parseKeyShareServer_rejects_short_payloads" {
-    const std = @import("std");
-    const extensions = make(std);
-    try std.testing.expectError(error.InvalidExtension, extensions.parseKeyShareServer(&.{ 0x00, 0x1d, 0x00 }));
-}
-
-test "net/unit_tests/tls/extensions/parseKeyShareServer_rejects_trailing_bytes" {
-    const std = @import("std");
-    const extensions = make(std);
-    try std.testing.expectError(
-        error.InvalidExtension,
-        extensions.parseKeyShareServer(&.{ 0x00, 0x1d, 0x00, 0x02, 0xaa, 0xbb, 0xcc }),
-    );
-}
-
-test "net/unit_tests/tls/extensions/alpn_roundtrip_and_match" {
-    const std = @import("std");
-    const common = @import("common.zig").make(std);
-    const extensions = make(std);
-
-    var buf: [256]u8 = undefined;
-    var builder = extensions.ExtensionBuilder.init(&buf);
-    try builder.addAlpn(&.{ "h2", "http/1.1" });
-
-    const exts = try extensions.parseExtensions(builder.getData(), std.testing.allocator);
-    defer std.testing.allocator.free(exts);
-
-    const alpn = extensions.findExtension(exts, common.ExtensionType.application_layer_protocol_negotiation) orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualStrings("h2", (try extensions.findMatchingAlpn(alpn.data, &.{ "h2" })).?);
-}
-
-test "net/unit_tests/tls/extensions/parseSelectedAlpn_reads_single_protocol" {
-    const std = @import("std");
-    const extensions = make(std);
-
-    try std.testing.expectEqualStrings("h2", try extensions.parseSelectedAlpn(&.{ 0x00, 0x03, 0x02, 'h', '2' }));
+            try testing.expectEqualStrings("h2", try extensions.parseSelectedAlpn(&.{ 0x00, 0x03, 0x02, 'h', '2' }));
+        }
+    }.run);
 }

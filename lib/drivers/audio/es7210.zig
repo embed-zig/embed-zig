@@ -24,6 +24,7 @@
 
 const io = @import("../io.zig");
 const es7210 = @This();
+const testing_api = @import("testing");
 
 /// ES7210 I2C address (7-bit, depends on AD1/AD0 pins)
 pub const Address = enum(u7) {
@@ -322,398 +323,428 @@ pub const Config = struct {
 /// ES7210 4-Channel ADC Driver using `drivers.io.I2c`.
 const Self = @This();
 
-        /// Constants from parent module
-        pub const channel_count: u8 = 4;
-        pub const max_gain_db: i8 = 37;
+/// Constants from parent module
+pub const channel_count: u8 = 4;
+pub const max_gain_db: i8 = 37;
 
-        bus: io.I2c,
-        config: Config,
-        is_open: bool = false,
-        enabled: bool = false,
-        gain: Self.Gain = .@"30dB",
-        clock_off_reg: u8 = 0,
+bus: io.I2c,
+config: Config,
+is_open: bool = false,
+enabled: bool = false,
+gain: Self.Gain = .@"30dB",
+clock_off_reg: u8 = 0,
 
-        /// Initialize driver with I2C driver and configuration
-        pub fn init(driver: io.I2c, config: Config) Self {
-            return .{
-                .bus = driver,
-                .config = config,
-            };
+/// Initialize driver with I2C driver and configuration
+pub fn init(driver: io.I2c, config: Config) Self {
+    return .{
+        .bus = driver,
+        .config = config,
+    };
+}
+
+/// Read a register value
+pub fn readRegister(self: *Self, reg: Register) !u8 {
+    var buf: [1]u8 = undefined;
+    try self.bus.writeRead(self.config.address, &.{@intFromEnum(reg)}, &buf);
+    return buf[0];
+}
+
+/// Write a register value
+pub fn writeRegister(self: *Self, reg: Register, value: u8) !void {
+    try self.bus.write(self.config.address, &.{ @intFromEnum(reg), value });
+}
+
+/// Update specific bits in a register
+pub fn updateRegister(self: *Self, reg: Register, mask: u8, value: u8) !void {
+    var regv = try self.readRegister(reg);
+    regv = (regv & ~mask) | (value & mask);
+    try self.writeRegister(reg, regv);
+}
+
+// ====================================================================
+// High-level API
+// ====================================================================
+
+/// Open and initialize the ADC
+/// Note: Caller should add ~10ms delay after reset if needed
+pub fn open(self: *Self) !void {
+    // Reset
+    try self.writeRegister(.reset, 0xFF);
+    try self.writeRegister(.reset, ResetReg.SOFT_RESET);
+
+    // Clock setup - turn off all clocks during init
+    try self.writeRegister(.clock_off, ClockOff.ALL_OFF);
+    try self.writeRegister(.time_control0, TimeControl0.DEFAULT);
+    try self.writeRegister(.time_control1, TimeControl0.DEFAULT);
+
+    // HPF setup (matching C version exactly)
+    try self.writeRegister(.adc12_hpf2, HpfReg.MIC34_HPF1);
+    try self.writeRegister(.adc12_hpf1, HpfReg.MIC34_HPF2);
+    try self.writeRegister(.adc34_hpf2, HpfReg.MIC34_HPF2);
+    try self.writeRegister(.adc34_hpf1, HpfReg.MIC34_HPF1);
+
+    // Unmute all ADCs (critical! missing in original)
+    try self.writeRegister(.adc12_muterange, 0x00); // 0x15
+    try self.writeRegister(.adc34_muterange, 0x00); // 0x14
+
+    // Master/slave mode
+    if (self.config.master_mode) {
+        try self.updateRegister(.mode_config, 0x01, ModeConfig.MASTER);
+        // MCLK source
+        switch (self.config.mclk_src) {
+            .from_pad => try self.updateRegister(.master_clk, 0x80, 0x00),
+            .from_clock_doubler => try self.updateRegister(.master_clk, 0x80, 0x80),
         }
+    } else {
+        try self.updateRegister(.mode_config, 0x01, ModeConfig.SLAVE);
+    }
 
-        /// Read a register value
-        pub fn readRegister(self: *Self, reg: Register) !u8 {
-            var buf: [1]u8 = undefined;
-            try self.bus.writeRead(self.config.address, &.{@intFromEnum(reg)}, &buf);
-            return buf[0];
+    // Analog power and bias
+    try self.writeRegister(.analog, 0x43);
+    try self.writeRegister(.mic12_bias, 0x70); // 2.87V
+    try self.writeRegister(.mic34_bias, 0x70); // 2.87V
+    try self.writeRegister(.osr, 0x20);
+
+    // Clock divider with DLL
+    try self.writeRegister(.main_clk, 0xC1);
+
+    // Select microphones (also enables TDM mode if 3+ mics)
+    try self.selectMics(self.config.mic_select);
+
+    // Force SDP_IF1 = 0x60 (16-bit I2S format)
+    //   bit 7:5 = 011 (16-bit word length)
+    //   bit 4:2 = 000
+    //   bit 1:0 = 00 (I2S Philips format)
+    try self.writeRegister(.sdp_interface1, 0x60);
+
+    // Set default gain
+    try self.setGainAll(self.gain);
+
+    // Final analog power setting (same as ESP-ADF)
+    try self.writeRegister(.analog, 0x43);
+
+    // Start the chip by writing to reset register (critical!)
+    try self.writeRegister(.reset, 0x71);
+    try self.writeRegister(.reset, 0x41);
+
+    // Save clock off register value
+    self.clock_off_reg = try self.readRegister(.clock_off);
+
+    self.is_open = true;
+}
+
+/// Close the ADC
+pub fn close(self: *Self) !void {
+    if (self.is_open) {
+        try self.enable(false);
+        self.is_open = false;
+    }
+}
+
+/// Enable or disable the ADC
+pub fn enable(self: *Self, en: bool) !void {
+    if (!self.is_open) return error.NotOpen;
+    if (en == self.enabled) return;
+
+    if (en) {
+        try self.start();
+    } else {
+        try self.stop();
+    }
+    self.enabled = en;
+}
+
+/// Configure sample rate (only effective in master mode)
+pub fn setSampleRate(self: *Self, sample_rate: u32) !void {
+    if (!self.config.master_mode) return;
+
+    const mclk_freq = sample_rate * self.config.mclk_div;
+    const coeff = getClockCoeff(mclk_freq, sample_rate) orelse return error.UnsupportedSampleRate;
+
+    // Set ADC divider, doubler, and DLL
+    var regv = try self.readRegister(.main_clk);
+    regv &= 0x00;
+    regv |= coeff.adc_div;
+    regv |= coeff.doubler << 6;
+    regv |= coeff.dll << 7;
+    try self.writeRegister(.main_clk, regv);
+
+    // Set OSR
+    try self.writeRegister(.osr, coeff.osr);
+
+    // Set LRCK divider
+    try self.writeRegister(.lrck_div_h, coeff.lrck_h);
+    try self.writeRegister(.lrck_div_l, coeff.lrck_l);
+}
+
+/// Set bits per sample
+pub fn setBitsPerSample(self: *Self, bits: BitsPerSample) !void {
+    var adc_iface = try self.readRegister(.sdp_interface1);
+    adc_iface &= ~SdpInterface1.WL_MASK;
+    adc_iface |= @as(u8, @intFromEnum(bits)) << 5;
+    try self.writeRegister(.sdp_interface1, adc_iface);
+}
+
+/// Set I2S format
+pub fn setFormat(self: *Self, fmt: I2sFormat) !void {
+    var adc_iface = try self.readRegister(.sdp_interface1);
+    adc_iface &= ~SdpInterface1.FMT_MASK;
+    adc_iface |= @intFromEnum(fmt);
+    try self.writeRegister(.sdp_interface1, adc_iface);
+}
+
+/// Select which microphones to enable
+pub fn selectMics(self: *Self, mics: MicSelect) !void {
+    self.config.mic_select = mics;
+
+    // Disable all MIC gain first (clear PGA enable bit)
+    for (0..4) |i| {
+        const reg: Register = @enumFromInt(@intFromEnum(Register.mic1_gain) + i);
+        try self.updateRegister(reg, GainReg.PGA_ENABLE, 0x00);
+    }
+
+    // Power down all mics
+    try self.writeRegister(.mic12_power, MicPower.OFF);
+    try self.writeRegister(.mic34_power, MicPower.OFF);
+
+    // Enable selected mics
+    if (mics.mic1) {
+        try self.updateRegister(.clock_off, ClockOff.MIC12_CLK, 0x00);
+        try self.writeRegister(.mic12_power, MicPower.LOW_POWER);
+        try self.updateRegister(.mic1_gain, GainReg.PGA_ENABLE, GainReg.PGA_ENABLE);
+        try self.updateRegister(.mic1_gain, GainReg.GAIN_MASK, @intFromEnum(self.gain));
+    }
+    if (mics.mic2) {
+        try self.updateRegister(.clock_off, ClockOff.MIC12_CLK, 0x00);
+        try self.writeRegister(.mic12_power, MicPower.LOW_POWER);
+        try self.updateRegister(.mic2_gain, GainReg.PGA_ENABLE, GainReg.PGA_ENABLE);
+        try self.updateRegister(.mic2_gain, GainReg.GAIN_MASK, @intFromEnum(self.gain));
+    }
+    if (mics.mic3) {
+        try self.updateRegister(.clock_off, ClockOff.MIC34_CLK, 0x00);
+        try self.writeRegister(.mic34_power, MicPower.LOW_POWER);
+        try self.updateRegister(.mic3_gain, GainReg.PGA_ENABLE, GainReg.PGA_ENABLE);
+        try self.updateRegister(.mic3_gain, GainReg.GAIN_MASK, @intFromEnum(self.gain));
+    }
+    if (mics.mic4) {
+        try self.updateRegister(.clock_off, ClockOff.MIC34_CLK, 0x00);
+        try self.writeRegister(.mic34_power, MicPower.LOW_POWER);
+        try self.updateRegister(.mic4_gain, GainReg.PGA_ENABLE, GainReg.PGA_ENABLE);
+        try self.updateRegister(.mic4_gain, GainReg.GAIN_MASK, @intFromEnum(self.gain));
+    }
+
+    // Enable TDM mode if 3+ mics selected
+    if (mics.count() >= 3) {
+        try self.writeRegister(.sdp_interface2, SdpInterface2.TDM_EN);
+    } else {
+        try self.writeRegister(.sdp_interface2, SdpInterface2.TDM_DIS);
+    }
+}
+
+/// Set gain for all enabled microphones
+pub fn setGainAll(self: *Self, gain: Self.Gain) !void {
+    self.gain = gain;
+    const gain_val = @intFromEnum(gain);
+
+    if (self.config.mic_select.mic1) {
+        try self.updateRegister(.mic1_gain, GainReg.GAIN_MASK, gain_val);
+    }
+    if (self.config.mic_select.mic2) {
+        try self.updateRegister(.mic2_gain, GainReg.GAIN_MASK, gain_val);
+    }
+    if (self.config.mic_select.mic3) {
+        try self.updateRegister(.mic3_gain, GainReg.GAIN_MASK, gain_val);
+    }
+    if (self.config.mic_select.mic4) {
+        try self.updateRegister(.mic4_gain, GainReg.GAIN_MASK, gain_val);
+    }
+}
+
+/// Set gain for a specific microphone channel (0-3)
+pub fn setChannelGain(self: *Self, channel: u2, gain: Self.Gain) !void {
+    const reg: Register = @enumFromInt(@intFromEnum(Register.mic1_gain) + channel);
+    try self.updateRegister(reg, GainReg.GAIN_MASK, @intFromEnum(gain));
+}
+
+/// Mute or unmute all channels
+pub fn setMute(self: *Self, mute: bool) !void {
+    const val: u8 = if (mute) 0x03 else 0x00;
+    try self.updateRegister(.adc34_muterange, 0x03, val);
+    try self.updateRegister(.adc12_muterange, 0x03, val);
+}
+
+/// Check if TDM mode is active (3+ mics enabled)
+pub fn isTdmMode(self: *Self) bool {
+    return self.config.mic_select.count() >= 3;
+}
+
+/// Get current gain setting
+pub fn getGain(self: *Self) Self.Gain {
+    return self.gain;
+}
+
+/// Get gain for a specific microphone channel (0-3)
+pub fn getChannelGain(self: *Self, channel: u2) !Self.Gain {
+    const reg: Register = @enumFromInt(@intFromEnum(Register.mic1_gain) + channel);
+    const val = try self.readRegister(reg);
+    const gain_val: u4 = @truncate(val & GainReg.GAIN_MASK);
+    return @enumFromInt(gain_val);
+}
+
+/// Enable or disable TDM mode
+pub fn setTdmMode(self: *Self, en: bool) !void {
+    const val: u8 = if (en) SdpInterface2.TDM_EN else SdpInterface2.TDM_DIS;
+    try self.writeRegister(.sdp_interface2, val);
+}
+
+/// Perform soft reset
+pub fn softReset(self: *Self) !void {
+    try self.writeRegister(.reset, 0xFF);
+    try self.writeRegister(.reset, ResetReg.SOFT_RESET);
+}
+
+/// Set power mode (normal or low power)
+pub fn setPowerMode(self: *Self, low_power: bool) !void {
+    if (low_power) {
+        try self.writeRegister(.analog, AnalogReg.LOW_POWER);
+        try self.writeRegister(.mic12_bias, MicBias.LOW_POWER);
+        try self.writeRegister(.mic34_bias, MicBias.LOW_POWER);
+    } else {
+        try self.writeRegister(.analog, AnalogReg.POWER_ON);
+        try self.writeRegister(.mic12_bias, MicBias.NORMAL);
+        try self.writeRegister(.mic34_bias, MicBias.NORMAL);
+    }
+}
+
+/// Set mic bias voltage for MIC12 and MIC34
+pub fn setMicBias(self: *Self, bias12: u8, bias34: u8) !void {
+    try self.writeRegister(.mic12_bias, bias12);
+    try self.writeRegister(.mic34_bias, bias34);
+}
+
+/// Get current mic bias settings
+pub fn getMicBias(self: *Self) !struct { mic12: u8, mic34: u8 } {
+    return .{
+        .mic12 = try self.readRegister(.mic12_bias),
+        .mic34 = try self.readRegister(.mic34_bias),
+    };
+}
+
+/// Check if a specific mic channel is enabled
+pub fn isMicEnabled(self: *Self, channel: u2) bool {
+    return switch (channel) {
+        0 => self.config.mic_select.mic1,
+        1 => self.config.mic_select.mic2,
+        2 => self.config.mic_select.mic3,
+        3 => self.config.mic_select.mic4,
+    };
+}
+
+/// Get count of enabled microphones
+pub fn getEnabledMicCount(self: *Self) u8 {
+    return self.config.mic_select.count();
+}
+
+// ====================================================================
+// Internal functions
+// ====================================================================
+
+fn start(self: *Self) !void {
+    try self.writeRegister(.clock_off, self.clock_off_reg);
+    try self.writeRegister(.power_down, PowerDown.ALL_ON);
+    try self.writeRegister(.analog, 0x43);
+    try self.writeRegister(.mic1_power, 0x08);
+    try self.writeRegister(.mic2_power, 0x08);
+    try self.writeRegister(.mic3_power, 0x08);
+    try self.writeRegister(.mic4_power, 0x08);
+    try self.selectMics(self.config.mic_select);
+}
+
+fn stop(self: *Self) !void {
+    try self.writeRegister(.mic1_power, MicPower.OFF);
+    try self.writeRegister(.mic2_power, MicPower.OFF);
+    try self.writeRegister(.mic3_power, MicPower.OFF);
+    try self.writeRegister(.mic4_power, MicPower.OFF);
+    try self.writeRegister(.mic12_power, MicPower.OFF);
+    try self.writeRegister(.mic34_power, MicPower.OFF);
+    try self.writeRegister(.analog, AnalogReg.LOW_POWER);
+    try self.writeRegister(.clock_off, ClockOff.STOP_ALL);
+    try self.writeRegister(.power_down, PowerDown.ALL_OFF);
+}
+
+fn getClockCoeff(mclk: u32, lrck: u32) ?ClockCoeff {
+    for (clock_coeffs) |coeff| {
+        if (coeff.mclk == mclk and coeff.lrck == lrck) {
+            return coeff;
         }
+    }
+    return null;
+}
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn selectMicsEnablesTdmForThreeChannels() !void {
+            const FakeI2c = struct {
+                writes: [32][2]u8 = [_][2]u8{[_]u8{ 0, 0 }} ** 32,
+                write_count: usize = 0,
 
-        /// Write a register value
-        pub fn writeRegister(self: *Self, reg: Register, value: u8) !void {
-            try self.bus.write(self.config.address, &.{ @intFromEnum(reg), value });
-        }
-
-        /// Update specific bits in a register
-        pub fn updateRegister(self: *Self, reg: Register, mask: u8, value: u8) !void {
-            var regv = try self.readRegister(reg);
-            regv = (regv & ~mask) | (value & mask);
-            try self.writeRegister(reg, regv);
-        }
-
-        // ====================================================================
-        // High-level API
-        // ====================================================================
-
-        /// Open and initialize the ADC
-        /// Note: Caller should add ~10ms delay after reset if needed
-        pub fn open(self: *Self) !void {
-            // Reset
-            try self.writeRegister(.reset, 0xFF);
-            try self.writeRegister(.reset, ResetReg.SOFT_RESET);
-
-            // Clock setup - turn off all clocks during init
-            try self.writeRegister(.clock_off, ClockOff.ALL_OFF);
-            try self.writeRegister(.time_control0, TimeControl0.DEFAULT);
-            try self.writeRegister(.time_control1, TimeControl0.DEFAULT);
-
-            // HPF setup (matching C version exactly)
-            try self.writeRegister(.adc12_hpf2, HpfReg.MIC34_HPF1);
-            try self.writeRegister(.adc12_hpf1, HpfReg.MIC34_HPF2);
-            try self.writeRegister(.adc34_hpf2, HpfReg.MIC34_HPF2);
-            try self.writeRegister(.adc34_hpf1, HpfReg.MIC34_HPF1);
-
-            // Unmute all ADCs (critical! missing in original)
-            try self.writeRegister(.adc12_muterange, 0x00); // 0x15
-            try self.writeRegister(.adc34_muterange, 0x00); // 0x14
-
-            // Master/slave mode
-            if (self.config.master_mode) {
-                try self.updateRegister(.mode_config, 0x01, ModeConfig.MASTER);
-                // MCLK source
-                switch (self.config.mclk_src) {
-                    .from_pad => try self.updateRegister(.master_clk, 0x80, 0x00),
-                    .from_clock_doubler => try self.updateRegister(.master_clk, 0x80, 0x80),
+                pub fn write(self: *@This(), _: io.I2c.Address, data: []const u8) io.I2c.Error!void {
+                    self.writes[self.write_count] = .{ data[0], data[1] };
+                    self.write_count += 1;
                 }
-            } else {
-                try self.updateRegister(.mode_config, 0x01, ModeConfig.SLAVE);
-            }
 
-            // Analog power and bias
-            try self.writeRegister(.analog, 0x43);
-            try self.writeRegister(.mic12_bias, 0x70); // 2.87V
-            try self.writeRegister(.mic34_bias, 0x70); // 2.87V
-            try self.writeRegister(.osr, 0x20);
-
-            // Clock divider with DLL
-            try self.writeRegister(.main_clk, 0xC1);
-
-            // Select microphones (also enables TDM mode if 3+ mics)
-            try self.selectMics(self.config.mic_select);
-
-            // Force SDP_IF1 = 0x60 (16-bit I2S format)
-            //   bit 7:5 = 011 (16-bit word length)
-            //   bit 4:2 = 000
-            //   bit 1:0 = 00 (I2S Philips format)
-            try self.writeRegister(.sdp_interface1, 0x60);
-
-            // Set default gain
-            try self.setGainAll(self.gain);
-
-            // Final analog power setting (same as ESP-ADF)
-            try self.writeRegister(.analog, 0x43);
-
-            // Start the chip by writing to reset register (critical!)
-            try self.writeRegister(.reset, 0x71);
-            try self.writeRegister(.reset, 0x41);
-
-            // Save clock off register value
-            self.clock_off_reg = try self.readRegister(.clock_off);
-
-            self.is_open = true;
-        }
-
-        /// Close the ADC
-        pub fn close(self: *Self) !void {
-            if (self.is_open) {
-                try self.enable(false);
-                self.is_open = false;
-            }
-        }
-
-        /// Enable or disable the ADC
-        pub fn enable(self: *Self, en: bool) !void {
-            if (!self.is_open) return error.NotOpen;
-            if (en == self.enabled) return;
-
-            if (en) {
-                try self.start();
-            } else {
-                try self.stop();
-            }
-            self.enabled = en;
-        }
-
-        /// Configure sample rate (only effective in master mode)
-        pub fn setSampleRate(self: *Self, sample_rate: u32) !void {
-            if (!self.config.master_mode) return;
-
-            const mclk_freq = sample_rate * self.config.mclk_div;
-            const coeff = getClockCoeff(mclk_freq, sample_rate) orelse return error.UnsupportedSampleRate;
-
-            // Set ADC divider, doubler, and DLL
-            var regv = try self.readRegister(.main_clk);
-            regv &= 0x00;
-            regv |= coeff.adc_div;
-            regv |= coeff.doubler << 6;
-            regv |= coeff.dll << 7;
-            try self.writeRegister(.main_clk, regv);
-
-            // Set OSR
-            try self.writeRegister(.osr, coeff.osr);
-
-            // Set LRCK divider
-            try self.writeRegister(.lrck_div_h, coeff.lrck_h);
-            try self.writeRegister(.lrck_div_l, coeff.lrck_l);
-        }
-
-        /// Set bits per sample
-        pub fn setBitsPerSample(self: *Self, bits: BitsPerSample) !void {
-            var adc_iface = try self.readRegister(.sdp_interface1);
-            adc_iface &= ~SdpInterface1.WL_MASK;
-            adc_iface |= @as(u8, @intFromEnum(bits)) << 5;
-            try self.writeRegister(.sdp_interface1, adc_iface);
-        }
-
-        /// Set I2S format
-        pub fn setFormat(self: *Self, fmt: I2sFormat) !void {
-            var adc_iface = try self.readRegister(.sdp_interface1);
-            adc_iface &= ~SdpInterface1.FMT_MASK;
-            adc_iface |= @intFromEnum(fmt);
-            try self.writeRegister(.sdp_interface1, adc_iface);
-        }
-
-        /// Select which microphones to enable
-        pub fn selectMics(self: *Self, mics: MicSelect) !void {
-            self.config.mic_select = mics;
-
-            // Disable all MIC gain first (clear PGA enable bit)
-            for (0..4) |i| {
-                const reg: Register = @enumFromInt(@intFromEnum(Register.mic1_gain) + i);
-                try self.updateRegister(reg, GainReg.PGA_ENABLE, 0x00);
-            }
-
-            // Power down all mics
-            try self.writeRegister(.mic12_power, MicPower.OFF);
-            try self.writeRegister(.mic34_power, MicPower.OFF);
-
-            // Enable selected mics
-            if (mics.mic1) {
-                try self.updateRegister(.clock_off, ClockOff.MIC12_CLK, 0x00);
-                try self.writeRegister(.mic12_power, MicPower.LOW_POWER);
-                try self.updateRegister(.mic1_gain, GainReg.PGA_ENABLE, GainReg.PGA_ENABLE);
-                try self.updateRegister(.mic1_gain, GainReg.GAIN_MASK, @intFromEnum(self.gain));
-            }
-            if (mics.mic2) {
-                try self.updateRegister(.clock_off, ClockOff.MIC12_CLK, 0x00);
-                try self.writeRegister(.mic12_power, MicPower.LOW_POWER);
-                try self.updateRegister(.mic2_gain, GainReg.PGA_ENABLE, GainReg.PGA_ENABLE);
-                try self.updateRegister(.mic2_gain, GainReg.GAIN_MASK, @intFromEnum(self.gain));
-            }
-            if (mics.mic3) {
-                try self.updateRegister(.clock_off, ClockOff.MIC34_CLK, 0x00);
-                try self.writeRegister(.mic34_power, MicPower.LOW_POWER);
-                try self.updateRegister(.mic3_gain, GainReg.PGA_ENABLE, GainReg.PGA_ENABLE);
-                try self.updateRegister(.mic3_gain, GainReg.GAIN_MASK, @intFromEnum(self.gain));
-            }
-            if (mics.mic4) {
-                try self.updateRegister(.clock_off, ClockOff.MIC34_CLK, 0x00);
-                try self.writeRegister(.mic34_power, MicPower.LOW_POWER);
-                try self.updateRegister(.mic4_gain, GainReg.PGA_ENABLE, GainReg.PGA_ENABLE);
-                try self.updateRegister(.mic4_gain, GainReg.GAIN_MASK, @intFromEnum(self.gain));
-            }
-
-            // Enable TDM mode if 3+ mics selected
-            if (mics.count() >= 3) {
-                try self.writeRegister(.sdp_interface2, SdpInterface2.TDM_EN);
-            } else {
-                try self.writeRegister(.sdp_interface2, SdpInterface2.TDM_DIS);
-            }
-        }
-
-        /// Set gain for all enabled microphones
-        pub fn setGainAll(self: *Self, gain: Self.Gain) !void {
-            self.gain = gain;
-            const gain_val = @intFromEnum(gain);
-
-            if (self.config.mic_select.mic1) {
-                try self.updateRegister(.mic1_gain, GainReg.GAIN_MASK, gain_val);
-            }
-            if (self.config.mic_select.mic2) {
-                try self.updateRegister(.mic2_gain, GainReg.GAIN_MASK, gain_val);
-            }
-            if (self.config.mic_select.mic3) {
-                try self.updateRegister(.mic3_gain, GainReg.GAIN_MASK, gain_val);
-            }
-            if (self.config.mic_select.mic4) {
-                try self.updateRegister(.mic4_gain, GainReg.GAIN_MASK, gain_val);
-            }
-        }
-
-        /// Set gain for a specific microphone channel (0-3)
-        pub fn setChannelGain(self: *Self, channel: u2, gain: Self.Gain) !void {
-            const reg: Register = @enumFromInt(@intFromEnum(Register.mic1_gain) + channel);
-            try self.updateRegister(reg, GainReg.GAIN_MASK, @intFromEnum(gain));
-        }
-
-        /// Mute or unmute all channels
-        pub fn setMute(self: *Self, mute: bool) !void {
-            const val: u8 = if (mute) 0x03 else 0x00;
-            try self.updateRegister(.adc34_muterange, 0x03, val);
-            try self.updateRegister(.adc12_muterange, 0x03, val);
-        }
-
-        /// Check if TDM mode is active (3+ mics enabled)
-        pub fn isTdmMode(self: *Self) bool {
-            return self.config.mic_select.count() >= 3;
-        }
-
-        /// Get current gain setting
-        pub fn getGain(self: *Self) Self.Gain {
-            return self.gain;
-        }
-
-        /// Get gain for a specific microphone channel (0-3)
-        pub fn getChannelGain(self: *Self, channel: u2) !Self.Gain {
-            const reg: Register = @enumFromInt(@intFromEnum(Register.mic1_gain) + channel);
-            const val = try self.readRegister(reg);
-            const gain_val: u4 = @truncate(val & GainReg.GAIN_MASK);
-            return @enumFromInt(gain_val);
-        }
-
-        /// Enable or disable TDM mode
-        pub fn setTdmMode(self: *Self, en: bool) !void {
-            const val: u8 = if (en) SdpInterface2.TDM_EN else SdpInterface2.TDM_DIS;
-            try self.writeRegister(.sdp_interface2, val);
-        }
-
-        /// Perform soft reset
-        pub fn softReset(self: *Self) !void {
-            try self.writeRegister(.reset, 0xFF);
-            try self.writeRegister(.reset, ResetReg.SOFT_RESET);
-        }
-
-        /// Set power mode (normal or low power)
-        pub fn setPowerMode(self: *Self, low_power: bool) !void {
-            if (low_power) {
-                try self.writeRegister(.analog, AnalogReg.LOW_POWER);
-                try self.writeRegister(.mic12_bias, MicBias.LOW_POWER);
-                try self.writeRegister(.mic34_bias, MicBias.LOW_POWER);
-            } else {
-                try self.writeRegister(.analog, AnalogReg.POWER_ON);
-                try self.writeRegister(.mic12_bias, MicBias.NORMAL);
-                try self.writeRegister(.mic34_bias, MicBias.NORMAL);
-            }
-        }
-
-        /// Set mic bias voltage for MIC12 and MIC34
-        pub fn setMicBias(self: *Self, bias12: u8, bias34: u8) !void {
-            try self.writeRegister(.mic12_bias, bias12);
-            try self.writeRegister(.mic34_bias, bias34);
-        }
-
-        /// Get current mic bias settings
-        pub fn getMicBias(self: *Self) !struct { mic12: u8, mic34: u8 } {
-            return .{
-                .mic12 = try self.readRegister(.mic12_bias),
-                .mic34 = try self.readRegister(.mic34_bias),
-            };
-        }
-
-        /// Check if a specific mic channel is enabled
-        pub fn isMicEnabled(self: *Self, channel: u2) bool {
-            return switch (channel) {
-                0 => self.config.mic_select.mic1,
-                1 => self.config.mic_select.mic2,
-                2 => self.config.mic_select.mic3,
-                3 => self.config.mic_select.mic4,
-            };
-        }
-
-        /// Get count of enabled microphones
-        pub fn getEnabledMicCount(self: *Self) u8 {
-            return self.config.mic_select.count();
-        }
-
-        // ====================================================================
-        // Internal functions
-        // ====================================================================
-
-        fn start(self: *Self) !void {
-            try self.writeRegister(.clock_off, self.clock_off_reg);
-            try self.writeRegister(.power_down, PowerDown.ALL_ON);
-            try self.writeRegister(.analog, 0x43);
-            try self.writeRegister(.mic1_power, 0x08);
-            try self.writeRegister(.mic2_power, 0x08);
-            try self.writeRegister(.mic3_power, 0x08);
-            try self.writeRegister(.mic4_power, 0x08);
-            try self.selectMics(self.config.mic_select);
-        }
-
-        fn stop(self: *Self) !void {
-            try self.writeRegister(.mic1_power, MicPower.OFF);
-            try self.writeRegister(.mic2_power, MicPower.OFF);
-            try self.writeRegister(.mic3_power, MicPower.OFF);
-            try self.writeRegister(.mic4_power, MicPower.OFF);
-            try self.writeRegister(.mic12_power, MicPower.OFF);
-            try self.writeRegister(.mic34_power, MicPower.OFF);
-            try self.writeRegister(.analog, AnalogReg.LOW_POWER);
-            try self.writeRegister(.clock_off, ClockOff.STOP_ALL);
-            try self.writeRegister(.power_down, PowerDown.ALL_OFF);
-        }
-
-        fn getClockCoeff(mclk: u32, lrck: u32) ?ClockCoeff {
-            for (clock_coeffs) |coeff| {
-                if (coeff.mclk == mclk and coeff.lrck == lrck) {
-                    return coeff;
+                pub fn read(self: *@This(), _: io.I2c.Address, _: []u8) io.I2c.Error!void {
+                    _ = self;
+                    return error.Unexpected;
                 }
-            }
-            return null;
-        }
-test "drivers/unit_tests/audio/Es7210/selectMics_enables_tdm_for_three_channels" {
-    const std = @import("std");
 
-    const FakeI2c = struct {
-        writes: [32][2]u8 = [_][2]u8{[_]u8{ 0, 0 }} ** 32,
-        write_count: usize = 0,
+                pub fn writeRead(self: *@This(), _: io.I2c.Address, _: []const u8, rx: []u8) io.I2c.Error!void {
+                    _ = self;
+                    @memset(rx, 0);
+                }
+            };
 
-        pub fn write(self: *@This(), _: io.I2c.Address, data: []const u8) io.I2c.Error!void {
-            self.writes[self.write_count] = .{ data[0], data[1] };
-            self.write_count += 1;
-        }
+            var fake = FakeI2c{};
+            var adc = es7210.init(io.I2c.init(&fake), .{
+                .mic_select = .{ .mic1 = true, .mic2 = true, .mic3 = true },
+            });
 
-        pub fn read(self: *@This(), _: io.I2c.Address, _: []u8) io.I2c.Error!void {
-            _ = self;
-            return error.Unexpected;
-        }
+            try adc.selectMics(.{ .mic1 = true, .mic2 = true, .mic3 = true });
 
-        pub fn writeRead(self: *@This(), _: io.I2c.Address, _: []const u8, rx: []u8) io.I2c.Error!void {
-            _ = self;
-            @memset(rx, 0);
+            try lib.testing.expectEqual(@as(u8, 3), adc.getEnabledMicCount());
+            try lib.testing.expect(adc.isTdmMode());
+            try lib.testing.expect(fake.write_count > 0);
+            try lib.testing.expectEqual(
+                [2]u8{ @intFromEnum(Register.sdp_interface2), SdpInterface2.TDM_EN },
+                fake.writes[fake.write_count - 1],
+            );
         }
     };
 
-    var fake = FakeI2c{};
-    var adc = es7210.init(io.I2c.init(&fake), .{
-        .mic_select = .{ .mic1 = true, .mic2 = true, .mic3 = true },
-    });
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    try adc.selectMics(.{ .mic1 = true, .mic2 = true, .mic3 = true });
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    try std.testing.expectEqual(@as(u8, 3), adc.getEnabledMicCount());
-    try std.testing.expect(adc.isTdmMode());
-    try std.testing.expect(fake.write_count > 0);
-    try std.testing.expectEqual(
-        [2]u8{ @intFromEnum(Register.sdp_interface2), SdpInterface2.TDM_EN },
-        fake.writes[fake.write_count - 1],
-    );
+            TestCase.selectMicsEnablesTdmForThreeChannels() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

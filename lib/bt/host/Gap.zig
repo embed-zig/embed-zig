@@ -13,6 +13,7 @@ const std = @import("std");
 const commands = @import("hci/commands.zig");
 const events = @import("hci/events.zig");
 const Status = @import("hci/status.zig").Status;
+const testing_api = @import("testing");
 
 const Gap = @This();
 
@@ -354,132 +355,162 @@ pub const ConnConfig = struct {
     timeout: u16 = 0x00C8,
 };
 
-test "bt/unit_tests/host/gap/scan_generates_scan_params_plus_scan_enable_commands" {
-    var gap = Gap.init();
-    gap.startScanning(.{});
-    try std.testing.expectEqual(State.scanning, gap.state);
-    try std.testing.expect(gap.isScanning());
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            {
+                var gap = init();
+                gap.startScanning(.{});
+                try lib.testing.expectEqual(State.scanning, gap.state);
+                try lib.testing.expect(gap.isScanning());
 
-    const cmd1 = gap.nextCommand() orelse return error.NoCommand;
-    try std.testing.expectEqual(commands.INDICATOR, cmd1[0]);
-    try std.testing.expectEqual(commands.LE_SET_SCAN_PARAMS, std.mem.readInt(u16, cmd1[1..3], .little));
+                const cmd1 = gap.nextCommand() orelse return error.NoCommand;
+                try lib.testing.expectEqual(commands.INDICATOR, cmd1[0]);
+                try lib.testing.expectEqual(commands.LE_SET_SCAN_PARAMS, lib.mem.readInt(u16, cmd1[1..3], .little));
 
-    const cmd2 = gap.nextCommand() orelse return error.NoCommand;
-    try std.testing.expectEqual(commands.LE_SET_SCAN_ENABLE, std.mem.readInt(u16, cmd2[1..3], .little));
+                const cmd2 = gap.nextCommand() orelse return error.NoCommand;
+                try lib.testing.expectEqual(commands.LE_SET_SCAN_ENABLE, lib.mem.readInt(u16, cmd2[1..3], .little));
+                try lib.testing.expectEqual(@as(?[]const u8, null), gap.nextCommand());
+            }
 
-    try std.testing.expectEqual(@as(?[]const u8, null), gap.nextCommand());
-}
+            {
+                var gap = init();
+                gap.startScanning(.{});
+                _ = gap.nextCommand();
+                _ = gap.nextCommand();
 
-test "bt/unit_tests/host/gap/stopScanning_generates_scan_disable" {
-    var gap = Gap.init();
-    gap.startScanning(.{});
-    _ = gap.nextCommand();
-    _ = gap.nextCommand();
+                gap.stopScanning();
+                try lib.testing.expectEqual(State.idle, gap.state);
+                try lib.testing.expect(!gap.isScanning());
 
-    gap.stopScanning();
-    try std.testing.expectEqual(State.idle, gap.state);
-    try std.testing.expect(!gap.isScanning());
+                const cmd = gap.nextCommand() orelse return error.NoCommand;
+                try lib.testing.expectEqual(commands.LE_SET_SCAN_ENABLE, lib.mem.readInt(u16, cmd[1..3], .little));
+                try lib.testing.expectEqual(@as(u8, 0), cmd[4]);
+            }
 
-    const cmd = gap.nextCommand() orelse return error.NoCommand;
-    try std.testing.expectEqual(commands.LE_SET_SCAN_ENABLE, std.mem.readInt(u16, cmd[1..3], .little));
-    try std.testing.expectEqual(@as(u8, 0), cmd[4]);
-}
+            {
+                var gap = init();
+                gap.startAdvertising(.{ .adv_data = &[_]u8{ 0x02, 0x01, 0x06 } });
+                try lib.testing.expectEqual(State.advertising, gap.state);
+                try lib.testing.expect(gap.isAdvertising());
 
-test "bt/unit_tests/host/gap/advertise_generates_params_plus_data_plus_enable" {
-    var gap = Gap.init();
-    gap.startAdvertising(.{ .adv_data = &[_]u8{ 0x02, 0x01, 0x06 } });
-    try std.testing.expectEqual(State.advertising, gap.state);
-    try std.testing.expect(gap.isAdvertising());
+                const cmd1 = gap.nextCommand() orelse return error.NoCommand;
+                try lib.testing.expectEqual(commands.LE_SET_ADV_PARAMS, lib.mem.readInt(u16, cmd1[1..3], .little));
 
-    const cmd1 = gap.nextCommand() orelse return error.NoCommand;
-    try std.testing.expectEqual(commands.LE_SET_ADV_PARAMS, std.mem.readInt(u16, cmd1[1..3], .little));
+                const cmd2 = gap.nextCommand() orelse return error.NoCommand;
+                try lib.testing.expectEqual(commands.LE_SET_ADV_DATA, lib.mem.readInt(u16, cmd2[1..3], .little));
 
-    const cmd2 = gap.nextCommand() orelse return error.NoCommand;
-    try std.testing.expectEqual(commands.LE_SET_ADV_DATA, std.mem.readInt(u16, cmd2[1..3], .little));
+                const cmd3 = gap.nextCommand() orelse return error.NoCommand;
+                try lib.testing.expectEqual(commands.LE_SET_ADV_ENABLE, lib.mem.readInt(u16, cmd3[1..3], .little));
+            }
 
-    const cmd3 = gap.nextCommand() orelse return error.NoCommand;
-    try std.testing.expectEqual(commands.LE_SET_ADV_ENABLE, std.mem.readInt(u16, cmd3[1..3], .little));
-}
+            {
+                var gap = init();
+                gap.connect(.{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF }, .public, .{});
+                try lib.testing.expectEqual(State.connecting, gap.state);
+                try lib.testing.expect(gap.isConnectingCentral());
 
-test "bt/unit_tests/host/gap/connect_generates_le_create_connection" {
-    var gap = Gap.init();
-    gap.connect(.{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF }, .public, .{});
-    try std.testing.expectEqual(State.connecting, gap.state);
-    try std.testing.expect(gap.isConnectingCentral());
+                const cmd = gap.nextCommand() orelse return error.NoCommand;
+                try lib.testing.expectEqual(commands.LE_CREATE_CONNECTION, lib.mem.readInt(u16, cmd[1..3], .little));
+            }
 
-    const cmd = gap.nextCommand() orelse return error.NoCommand;
-    try std.testing.expectEqual(commands.LE_CREATE_CONNECTION, std.mem.readInt(u16, cmd[1..3], .little));
-}
+            {
+                var gap = init();
+                gap.central_connecting = true;
+                gap.handleEvent(.{ .le_connection_complete = .{
+                    .status = .success,
+                    .conn_handle = 0x0040,
+                    .role = 0x00,
+                    .peer_addr_type = 0x00,
+                    .peer_addr = .{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF },
+                    .conn_interval = 0x0018,
+                    .conn_latency = 0,
+                    .supervision_timeout = 0x00C8,
+                } });
+                try lib.testing.expectEqual(State.connected, gap.state);
+                const link = gap.getLink(.central) orelse return error.NoLink;
+                try lib.testing.expectEqual(@as(u16, 0x0040), link.conn_handle);
+            }
 
-test "bt/unit_tests/host/gap/handleEvent_le_connection_complete_transitions_to_connected" {
-    var gap = Gap.init();
-    gap.central_connecting = true;
-    gap.updateState();
-    gap.handleEvent(.{ .le_connection_complete = .{
-        .status = .success,
-        .conn_handle = 0x0040,
-        .role = 0x00,
-        .peer_addr_type = 0x00,
-        .peer_addr = .{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF },
-        .conn_interval = 0x0018,
-        .conn_latency = 0,
-        .supervision_timeout = 0x00C8,
-    } });
-    try std.testing.expectEqual(State.connected, gap.state);
-    const link = gap.getLink(.central) orelse return error.NoLink;
-    try std.testing.expectEqual(@as(u16, 0x0040), link.conn_handle);
-}
+            {
+                var gap = init();
+                gap.central_link = .{
+                    .role = .central,
+                    .conn_handle = 0x0040,
+                    .peer_addr = .{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF },
+                    .peer_addr_type = 0x00,
+                    .conn_interval = 0x0018,
+                    .conn_latency = 0,
+                    .conn_timeout = 0x00C8,
+                };
+                gap.handleEvent(.{ .disconnection_complete = .{
+                    .status = .success,
+                    .conn_handle = 0x0040,
+                    .reason = .remote_user_terminated,
+                } });
+                try lib.testing.expectEqual(State.idle, gap.state);
+            }
 
-test "bt/unit_tests/host/gap/handleEvent_disconnection_complete_transitions_to_idle" {
-    var gap = Gap.init();
-    gap.central_link = .{
-        .role = .central,
-        .conn_handle = 0x0040,
-        .peer_addr = .{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF },
-        .peer_addr_type = 0x00,
-        .conn_interval = 0x0018,
-        .conn_latency = 0,
-        .conn_timeout = 0x00C8,
+            {
+                var gap = init();
+                gap.startScanning(.{});
+                _ = gap.nextCommand();
+                _ = gap.nextCommand();
+                gap.startAdvertising(.{ .adv_data = &[_]u8{ 0x02, 0x01, 0x06 } });
+                try lib.testing.expect(gap.isScanning());
+                try lib.testing.expect(gap.isAdvertising());
+                try lib.testing.expectEqual(State.advertising, gap.state);
+            }
+
+            {
+                var gap = init();
+                gap.handleEvent(.{ .command_complete = .{
+                    .num_cmd_packets = 1,
+                    .opcode = commands.READ_BD_ADDR,
+                    .status = .success,
+                    .return_params = &[6]u8{ 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 },
+                } });
+                try lib.testing.expect(gap.addr_known);
+                try lib.testing.expectEqual(@as(u8, 0x11), gap.bd_addr[0]);
+                try lib.testing.expectEqual(@as(u8, 0x66), gap.bd_addr[5]);
+            }
+
+            {
+                var gap = init();
+                gap.startScanning(.{});
+                gap.resetController();
+
+                const cmd = gap.nextCommand() orelse return error.NoCommand;
+                try lib.testing.expectEqual(commands.RESET, lib.mem.readInt(u16, cmd[1..3], .little));
+                try lib.testing.expectEqual(@as(?[]const u8, null), gap.nextCommand());
+            }
+        }
     };
-    gap.updateState();
-    gap.handleEvent(.{ .disconnection_complete = .{
-        .status = .success,
-        .conn_handle = 0x0040,
-        .reason = .remote_user_terminated,
-    } });
-    try std.testing.expectEqual(State.idle, gap.state);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-test "bt/unit_tests/host/gap/scan_and_advertise_can_coexist" {
-    var gap = Gap.init();
-    gap.startScanning(.{});
-    _ = gap.nextCommand();
-    _ = gap.nextCommand();
-    gap.startAdvertising(.{ .adv_data = &[_]u8{ 0x02, 0x01, 0x06 } });
-    try std.testing.expect(gap.isScanning());
-    try std.testing.expect(gap.isAdvertising());
-    try std.testing.expectEqual(State.advertising, gap.state);
-}
-
-test "bt/unit_tests/host/gap/handleEvent_command_complete_READ_BD_ADDR_stores_address" {
-    var gap = Gap.init();
-    gap.handleEvent(.{ .command_complete = .{
-        .num_cmd_packets = 1,
-        .opcode = commands.READ_BD_ADDR,
-        .status = .success,
-        .return_params = &[6]u8{ 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 },
-    } });
-    try std.testing.expect(gap.addr_known);
-    try std.testing.expectEqual(@as(u8, 0x11), gap.bd_addr[0]);
-    try std.testing.expectEqual(@as(u8, 0x66), gap.bd_addr[5]);
-}
-
-test "bt/unit_tests/host/gap/resetController_discards_stale_queued_commands" {
-    var gap = Gap.init();
-    gap.startScanning(.{});
-    gap.resetController();
-
-    const cmd = gap.nextCommand() orelse return error.NoCommand;
-    try std.testing.expectEqual(commands.RESET, std.mem.readInt(u16, cmd[1..3], .little));
-    try std.testing.expectEqual(@as(?[]const u8, null), gap.nextCommand());
-}

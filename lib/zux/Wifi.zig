@@ -1,5 +1,6 @@
 const Context = @import("event/Context.zig");
 const event = @import("event.zig");
+const testing_api = @import("testing");
 
 const EventReceiver = event.EventReceiver;
 const Wifi = @This();
@@ -186,101 +187,132 @@ fn eventReceiverEmitUpdate(ctx: *const anyopaque, update: Update) void {
     receiver.emit(value);
 }
 
-test "zux/Wifi/unit_tests/set_and_emit_sta_reports_through_event_receiver" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn setAndEmitStaReportsThroughEventReceiver(testing: anytype) !void {
+            const Sink = struct {
+                scan_count: usize = 0,
+                connected_count: usize = 0,
+                disconnected_count: usize = 0,
+                last_source_id: u32 = 0,
+                last_ssid_len: usize = 0,
+                last_reason: u16 = 0,
 
-    const Sink = struct {
-        scan_count: usize = 0,
-        connected_count: usize = 0,
-        disconnected_count: usize = 0,
-        last_source_id: u32 = 0,
-        last_ssid_len: usize = 0,
-        last_reason: u16 = 0,
+                fn emitFn(ctx: *anyopaque, value: event.Event) void {
+                    const self: *@This() = @ptrCast(@alignCast(ctx));
+                    switch (value) {
+                        .wifi_sta_scan_result => |report| {
+                            self.scan_count += 1;
+                            self.last_source_id = report.source_id;
+                            self.last_ssid_len = report.ssid().len;
+                        },
+                        .wifi_sta_connected => |report| {
+                            self.connected_count += 1;
+                            self.last_source_id = report.source_id;
+                            self.last_ssid_len = report.ssid().len;
+                        },
+                        .wifi_sta_disconnected => |report| {
+                            self.disconnected_count += 1;
+                            self.last_source_id = report.source_id;
+                            self.last_reason = report.reason;
+                        },
+                        else => {},
+                    }
+                }
+            };
 
-        fn emitFn(ctx: *anyopaque, value: event.Event) void {
-            const self: *@This() = @ptrCast(@alignCast(ctx));
-            switch (value) {
-                .wifi_sta_scan_result => |report| {
-                    self.scan_count += 1;
-                    self.last_source_id = report.source_id;
-                    self.last_ssid_len = report.ssid().len;
-                },
-                .wifi_sta_connected => |report| {
-                    self.connected_count += 1;
-                    self.last_source_id = report.source_id;
-                    self.last_ssid_len = report.ssid().len;
-                },
-                .wifi_sta_disconnected => |report| {
-                    self.disconnected_count += 1;
-                    self.last_source_id = report.source_id;
-                    self.last_reason = report.reason;
-                },
-                else => {},
-            }
+            const Impl = struct {
+                receiver_ctx: ?*const anyopaque = null,
+                emit_fn: ?CallbackFn = null,
+
+                pub fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: CallbackFn) void {
+                    self.receiver_ctx = ctx;
+                    self.emit_fn = emit_fn;
+                }
+
+                pub fn clearEventCallback(self: *@This()) void {
+                    self.receiver_ctx = null;
+                    self.emit_fn = null;
+                }
+
+                pub fn emit(self: *@This()) !void {
+                    const receiver_ctx = self.receiver_ctx orelse return error.MissingReceiver;
+                    const emit_fn = self.emit_fn orelse return error.MissingHook;
+
+                    emit_fn(receiver_ctx, .{
+                        .sta_scan_result = .{
+                            .source_id = 31,
+                            .ssid = "wifi-lab",
+                            .bssid = .{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
+                            .channel = 6,
+                            .rssi = -47,
+                            .security = .wpa2,
+                        },
+                    });
+                    emit_fn(receiver_ctx, .{
+                        .sta_connected = .{
+                            .source_id = 31,
+                            .ssid = "wifi-lab",
+                            .bssid = .{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
+                            .channel = 6,
+                        },
+                    });
+                    emit_fn(receiver_ctx, .{
+                        .sta_disconnected = .{
+                            .source_id = 31,
+                            .reason = 7,
+                        },
+                    });
+                }
+            };
+
+            var sink = Sink{};
+            const receiver = EventReceiver.init(@ptrCast(&sink), Sink.emitFn);
+
+            var impl = Impl{};
+            const wifi = Wifi.init(Impl, &impl);
+            wifi.setEventReceiver(&receiver);
+            try impl.emit();
+
+            try testing.expectEqual(@as(usize, 1), sink.scan_count);
+            try testing.expectEqual(@as(usize, 1), sink.connected_count);
+            try testing.expectEqual(@as(usize, 1), sink.disconnected_count);
+            try testing.expectEqual(@as(u32, 31), sink.last_source_id);
+            try testing.expectEqual(@as(usize, 8), sink.last_ssid_len);
+            try testing.expectEqual(@as(u16, 7), sink.last_reason);
+
+            wifi.clearEventReceiver();
+            try testing.expect(impl.receiver_ctx == null);
+            try testing.expect(impl.emit_fn == null);
         }
     };
 
-    const Impl = struct {
-        receiver_ctx: ?*const anyopaque = null,
-        emit_fn: ?CallbackFn = null,
-
-        pub fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: CallbackFn) void {
-            self.receiver_ctx = ctx;
-            self.emit_fn = emit_fn;
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
         }
 
-        pub fn clearEventCallback(self: *@This()) void {
-            self.receiver_ctx = null;
-            self.emit_fn = null;
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
+
+            TestCase.setAndEmitStaReportsThroughEventReceiver(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
         }
 
-        pub fn emit(self: *@This()) !void {
-            const receiver_ctx = self.receiver_ctx orelse return error.MissingReceiver;
-            const emit_fn = self.emit_fn orelse return error.MissingHook;
-
-            emit_fn(receiver_ctx, .{
-                .sta_scan_result = .{
-                    .source_id = 31,
-                    .ssid = "wifi-lab",
-                    .bssid = .{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
-                    .channel = 6,
-                    .rssi = -47,
-                    .security = .wpa2,
-                },
-            });
-            emit_fn(receiver_ctx, .{
-                .sta_connected = .{
-                    .source_id = 31,
-                    .ssid = "wifi-lab",
-                    .bssid = .{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
-                    .channel = 6,
-                },
-            });
-            emit_fn(receiver_ctx, .{
-                .sta_disconnected = .{
-                    .source_id = 31,
-                    .reason = 7,
-                },
-            });
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    var sink = Sink{};
-    const receiver = EventReceiver.init(@ptrCast(&sink), Sink.emitFn);
-
-    var impl = Impl{};
-    const wifi = Wifi.init(Impl, &impl);
-    wifi.setEventReceiver(&receiver);
-    try impl.emit();
-
-    try std.testing.expectEqual(@as(usize, 1), sink.scan_count);
-    try std.testing.expectEqual(@as(usize, 1), sink.connected_count);
-    try std.testing.expectEqual(@as(usize, 1), sink.disconnected_count);
-    try std.testing.expectEqual(@as(u32, 31), sink.last_source_id);
-    try std.testing.expectEqual(@as(usize, 8), sink.last_ssid_len);
-    try std.testing.expectEqual(@as(u16, 7), sink.last_reason);
-
-    wifi.clearEventReceiver();
-    try std.testing.expect(impl.receiver_ctx == null);
-    try std.testing.expect(impl.emit_fn == null);
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

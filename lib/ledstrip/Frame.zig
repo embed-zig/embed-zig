@@ -1,6 +1,7 @@
 //! ledstrip.Frame — fixed-size in-memory pixel frame helpers.
 
 const Color = @import("Color.zig");
+const testing_api = @import("testing");
 
 pub fn make(comptime n: usize) type {
     return struct {
@@ -68,94 +69,127 @@ pub fn make(comptime n: usize) type {
     };
 }
 
-test "ledstrip/unit_tests/Frame_solid_fills_all_pixels" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn solidFillsAllPixels() !void {
+            const F = make(4);
+            const frame = F.solid(Color.red);
+            for (frame.pixels) |pixel| {
+                try lib.testing.expectEqual(Color.red, pixel);
+            }
+        }
 
-    const F = make(4);
-    const frame = F.solid(Color.red);
-    for (frame.pixels) |pixel| {
-        try std.testing.expectEqual(Color.red, pixel);
-    }
-}
+        fn gradientPreservesEndpoints() !void {
+            const F = make(8);
+            const frame = F.gradient(Color.red, Color.blue);
+            try lib.testing.expectEqual(Color.red, frame.pixels[0]);
+            try lib.testing.expectEqual(Color.blue, frame.pixels[7]);
+        }
 
-test "ledstrip/unit_tests/Frame_gradient_preserves_endpoints" {
-    const std = @import("std");
+        fn rotateShiftsPixelsLeft() !void {
+            const F = make(4);
+            const frame = F{
+                .pixels = .{ Color.red, Color.green, Color.blue, Color.white },
+            };
+            const rotated = frame.rotate();
+            try lib.testing.expectEqual(Color.green, rotated.pixels[0]);
+            try lib.testing.expectEqual(Color.blue, rotated.pixels[1]);
+            try lib.testing.expectEqual(Color.white, rotated.pixels[2]);
+            try lib.testing.expectEqual(Color.red, rotated.pixels[3]);
+        }
 
-    const F = make(8);
-    const frame = F.gradient(Color.red, Color.blue);
-    try std.testing.expectEqual(Color.red, frame.pixels[0]);
-    try std.testing.expectEqual(Color.blue, frame.pixels[7]);
-}
+        fn flipReversesPixels() !void {
+            const F = make(3);
+            const frame = F{
+                .pixels = .{ Color.red, Color.green, Color.blue },
+            };
+            const flipped = frame.flip();
+            try lib.testing.expectEqual(Color.blue, flipped.pixels[0]);
+            try lib.testing.expectEqual(Color.green, flipped.pixels[1]);
+            try lib.testing.expectEqual(Color.red, flipped.pixels[2]);
+        }
 
-test "ledstrip/unit_tests/Frame_rotate_shifts_pixels_left" {
-    const std = @import("std");
+        fn withBrightnessScalesEntireFrame() !void {
+            const F = make(1);
+            const frame = F.solid(Color.white).withBrightness(128);
+            try lib.testing.expectEqual(Color.rgb(128, 128, 128), frame.pixels[0]);
+        }
 
-    const F = make(4);
-    const frame = F{
-        .pixels = .{
-            Color.red,
-            Color.green,
-            Color.blue,
-            Color.white,
-        },
+        fn eqlComparesPixels() !void {
+            const F = make(2);
+            const a = F.solid(Color.red);
+            const b = F.solid(Color.red);
+            const c = F.solid(Color.green);
+
+            try lib.testing.expect(a.eql(b));
+            try lib.testing.expect(!a.eql(c));
+        }
+
+        fn handlesZeroAndOnePixelSizes() !void {
+            const F0 = make(0);
+            const F1 = make(1);
+            const empty = F0{};
+
+            try lib.testing.expect(F0.solid(Color.red).eql(empty));
+            try lib.testing.expect(F0.gradient(Color.red, Color.blue).eql(empty));
+            try lib.testing.expect(empty.rotate().eql(empty));
+            try lib.testing.expect(empty.flip().eql(empty));
+
+            const single = F1.gradient(Color.green, Color.blue);
+            try lib.testing.expectEqual(Color.green, single.pixels[0]);
+            try lib.testing.expect(single.rotate().eql(single));
+        }
     };
-    const rotated = frame.rotate();
-    try std.testing.expectEqual(Color.green, rotated.pixels[0]);
-    try std.testing.expectEqual(Color.blue, rotated.pixels[1]);
-    try std.testing.expectEqual(Color.white, rotated.pixels[2]);
-    try std.testing.expectEqual(Color.red, rotated.pixels[3]);
-}
 
-test "ledstrip/unit_tests/Frame_flip_reverses_pixels" {
-    const std = @import("std");
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    const F = make(3);
-    const frame = F{
-        .pixels = .{
-            Color.red,
-            Color.green,
-            Color.blue,
-        },
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.solidFillsAllPixels() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.gradientPreservesEndpoints() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.rotateShiftsPixelsLeft() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.flipReversesPixels() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.withBrightnessScalesEntireFrame() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.eqlComparesPixels() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.handlesZeroAndOnePixelSizes() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
     };
-    const flipped = frame.flip();
-    try std.testing.expectEqual(Color.blue, flipped.pixels[0]);
-    try std.testing.expectEqual(Color.green, flipped.pixels[1]);
-    try std.testing.expectEqual(Color.red, flipped.pixels[2]);
-}
 
-test "ledstrip/unit_tests/Frame_withBrightness_scales_entire_frame" {
-    const std = @import("std");
-
-    const F = make(1);
-    const frame = F.solid(Color.white).withBrightness(128);
-    try std.testing.expectEqual(Color.rgb(128, 128, 128), frame.pixels[0]);
-}
-
-test "ledstrip/unit_tests/Frame_eql_compares_pixels" {
-    const std = @import("std");
-
-    const F = make(2);
-    const a = F.solid(Color.red);
-    const b = F.solid(Color.red);
-    const c = F.solid(Color.green);
-
-    try std.testing.expect(a.eql(b));
-    try std.testing.expect(!a.eql(c));
-}
-
-test "ledstrip/unit_tests/Frame_handles_zero_and_one_pixel_sizes" {
-    const std = @import("std");
-
-    const F0 = make(0);
-    const F1 = make(1);
-    const empty = F0{};
-
-    try std.testing.expect(F0.solid(Color.red).eql(empty));
-    try std.testing.expect(F0.gradient(Color.red, Color.blue).eql(empty));
-    try std.testing.expect(empty.rotate().eql(empty));
-    try std.testing.expect(empty.flip().eql(empty));
-
-    const single = F1.gradient(Color.green, Color.blue);
-    try std.testing.expectEqual(Color.green, single.pixels[0]);
-    try std.testing.expect(single.rotate().eql(single));
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

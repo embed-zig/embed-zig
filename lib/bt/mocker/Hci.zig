@@ -20,6 +20,7 @@ const hci_status = @import("../host/hci/status.zig").Status;
 const l2cap = @import("../host/l2cap.zig");
 const att = @import("../host/att.zig");
 const gatt_client = @import("../host/gatt/client.zig");
+const testing_api = @import("testing");
 
 pub fn Hci(comptime lib: type) type {
     return struct {
@@ -1743,119 +1744,149 @@ pub fn Hci(comptime lib: type) type {
     };
 }
 
-test "bt/unit_tests/mocker/Hci_asHci_supports_central_and_peripheral_flows" {
-    const Mock = Hci(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const Mock = Hci(lib);
 
-    const CentralState = struct {
-        saw_adv: bool = false,
-        connected: bool = false,
-        disconnected: bool = false,
+            {
+                const CentralState = struct {
+                    saw_adv: bool = false,
+                    connected: bool = false,
+                    disconnected: bool = false,
 
-        fn onAdv(ctx: ?*anyopaque, _: []const u8) void {
-            const self: *@This() = @ptrCast(@alignCast(ctx.?));
-            self.saw_adv = true;
-        }
+                    fn onAdv(ctx: ?*anyopaque, _: []const u8) void {
+                        const self: *@This() = @ptrCast(@alignCast(ctx.?));
+                        self.saw_adv = true;
+                    }
+                    fn onConnected(ctx: ?*anyopaque, _: BtHci.Link) void {
+                        const self: *@This() = @ptrCast(@alignCast(ctx.?));
+                        self.connected = true;
+                    }
+                    fn onDisconnected(ctx: ?*anyopaque, _: u16, _: u8) void {
+                        const self: *@This() = @ptrCast(@alignCast(ctx.?));
+                        self.disconnected = true;
+                    }
+                };
 
-        fn onConnected(ctx: ?*anyopaque, _: BtHci.Link) void {
-            const self: *@This() = @ptrCast(@alignCast(ctx.?));
-            self.connected = true;
-        }
+                const PeripheralState = struct {
+                    connected: bool = false,
 
-        fn onDisconnected(ctx: ?*anyopaque, _: u16, _: u8) void {
-            const self: *@This() = @ptrCast(@alignCast(ctx.?));
-            self.disconnected = true;
+                    fn onConnected(ctx: ?*anyopaque, _: BtHci.Link) void {
+                        const self: *@This() = @ptrCast(@alignCast(ctx.?));
+                        self.connected = true;
+                    }
+                };
+
+                var mock = try Mock.init(lib.testing.allocator, .{});
+                defer mock.deinit();
+
+                const hci = mock.asHci();
+
+                var central_state = CentralState{};
+                hci.setCentralListener(.{
+                    .ctx = &central_state,
+                    .on_adv_report = CentralState.onAdv,
+                    .on_connected = CentralState.onConnected,
+                    .on_disconnected = CentralState.onDisconnected,
+                });
+
+                try hci.retain();
+                defer hci.release();
+
+                try hci.startScanning(.{});
+                try lib.testing.expect(central_state.saw_adv);
+
+                try hci.connect(mock.getPeerAddr(), .public, .{});
+                try lib.testing.expect(central_state.connected);
+                try lib.testing.expect(hci.getLink(.central) != null);
+
+                hci.disconnect(mock.config.conn_handle, 0x13);
+                try lib.testing.expect(central_state.disconnected);
+                try lib.testing.expect(hci.getLink(.central) == null);
+
+                var peripheral_state = PeripheralState{};
+                hci.setPeripheralListener(.{
+                    .ctx = &peripheral_state,
+                    .on_connected = PeripheralState.onConnected,
+                });
+
+                try hci.startAdvertising(.{
+                    .connectable = true,
+                });
+                try mock.connectAsCentral();
+                try lib.testing.expect(peripheral_state.connected);
+                try lib.testing.expect(hci.getLink(.peripheral) != null);
+            }
+
+            {
+                var central = try Mock.init(lib.testing.allocator, .{});
+                defer central.deinit();
+
+                var peripheral = try Mock.init(lib.testing.allocator, .{
+                    .controller_addr = .{ 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 },
+                    .peer_addr = .{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
+                });
+                defer peripheral.deinit();
+
+                try peripheral.asHci().startAdvertising(.{ .connectable = true });
+                try central.establishPeerLink(&peripheral);
+
+                var params: [3]u8 = undefined;
+                lib.mem.writeInt(u16, params[0..2], central.config.conn_handle, .little);
+                params[2] = @intFromEnum(hci_status.remote_user_terminated);
+
+                var cmd_buf: [hci_commands.MAX_CMD_LEN]u8 = undefined;
+                _ = try central.write(hci_commands.encode(&cmd_buf, hci_commands.DISCONNECT, &params));
+
+                try lib.testing.expect(central.asHci().getLink(.central) == null);
+                try lib.testing.expect(peripheral.asHci().getLink(.peripheral) == null);
+
+                var evt_buf: [80]u8 = undefined;
+                const evt_len = try peripheral.read(&evt_buf);
+                const event = hci_events.decode(evt_buf[0..evt_len]) orelse return error.NoEvent;
+                switch (event) {
+                    .disconnection_complete => {},
+                    else => return error.ExpectedDisconnectionComplete,
+                }
+            }
+
+            {
+                var mock = try Mock.init(lib.testing.allocator, .{
+                    .recv_timeout_ms = null,
+                });
+                defer mock.deinit();
+
+                var buf: [8]u8 = undefined;
+                try lib.testing.expectError(error.Timeout, mock.read(&buf));
+            }
         }
     };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    const PeripheralState = struct {
-        connected: bool = false,
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-        fn onConnected(ctx: ?*anyopaque, _: BtHci.Link) void {
-            const self: *@This() = @ptrCast(@alignCast(ctx.?));
-            self.connected = true;
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
-
-    var mock = try Mock.init(std.testing.allocator, .{});
-    defer mock.deinit();
-
-    const hci = mock.asHci();
-
-    var central_state = CentralState{};
-    hci.setCentralListener(.{
-        .ctx = &central_state,
-        .on_adv_report = CentralState.onAdv,
-        .on_connected = CentralState.onConnected,
-        .on_disconnected = CentralState.onDisconnected,
-    });
-
-    try hci.retain();
-    defer hci.release();
-
-    try hci.startScanning(.{});
-    try std.testing.expect(central_state.saw_adv);
-
-    try hci.connect(mock.getPeerAddr(), .public, .{});
-    try std.testing.expect(central_state.connected);
-    try std.testing.expect(hci.getLink(.central) != null);
-
-    hci.disconnect(mock.config.conn_handle, 0x13);
-    try std.testing.expect(central_state.disconnected);
-    try std.testing.expect(hci.getLink(.central) == null);
-
-    var peripheral_state = PeripheralState{};
-    hci.setPeripheralListener(.{
-        .ctx = &peripheral_state,
-        .on_connected = PeripheralState.onConnected,
-    });
-
-    try hci.startAdvertising(.{
-        .connectable = true,
-    });
-    try mock.connectAsCentral();
-    try std.testing.expect(peripheral_state.connected);
-    try std.testing.expect(hci.getLink(.peripheral) != null);
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-test "bt/unit_tests/mocker/Hci_disconnect_command_clears_peer_link" {
-    const Mock = Hci(std);
-
-    var central = try Mock.init(std.testing.allocator, .{});
-    defer central.deinit();
-
-    var peripheral = try Mock.init(std.testing.allocator, .{
-        .controller_addr = .{ 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 },
-        .peer_addr = .{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
-    });
-    defer peripheral.deinit();
-
-    try peripheral.asHci().startAdvertising(.{ .connectable = true });
-    try central.establishPeerLink(&peripheral);
-
-    var params: [3]u8 = undefined;
-    std.mem.writeInt(u16, params[0..2], central.config.conn_handle, .little);
-    params[2] = @intFromEnum(hci_status.remote_user_terminated);
-
-    var cmd_buf: [hci_commands.MAX_CMD_LEN]u8 = undefined;
-    _ = try central.write(hci_commands.encode(&cmd_buf, hci_commands.DISCONNECT, &params));
-
-    try std.testing.expect(central.getLinkHci(.central) == null);
-    try std.testing.expect(peripheral.getLinkHci(.peripheral) == null);
-
-    var evt_buf: [80]u8 = undefined;
-    const evt_len = try peripheral.read(&evt_buf);
-    const event = hci_events.decode(evt_buf[0..evt_len]);
-    try std.testing.expect(event == .disconnection_complete);
-}
-
-test "bt/unit_tests/mocker/Hci_read_without_explicit_timeout_still_times_out" {
-    const Mock = Hci(std);
-
-    var mock = try Mock.init(std.testing.allocator, .{
-        .recv_timeout_ms = null,
-    });
-    defer mock.deinit();
-
-    var buf: [8]u8 = undefined;
-    try std.testing.expectError(error.Timeout, mock.read(&buf));
-}

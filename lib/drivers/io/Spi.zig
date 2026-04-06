@@ -4,6 +4,7 @@
 //! `lib/drivers`: write-only transactions and full-duplex transfers.
 
 const Spi = @This();
+const testing_api = @import("testing");
 
 ptr: *anyopaque,
 vtable: *const VTable,
@@ -59,69 +60,101 @@ pub fn init(pointer: anytype) Spi {
     };
 }
 
-test "drivers/unit_tests/io/Spi/dispatches_write_and_transfer" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn dispatchesWriteAndTransfer() !void {
+            const Fake = struct {
+                last_write: [8]u8 = [_]u8{0} ** 8,
+                last_write_len: usize = 0,
 
-    const Fake = struct {
-        last_write: [8]u8 = [_]u8{0} ** 8,
-        last_write_len: usize = 0,
+                last_transfer_tx: [8]u8 = [_]u8{0} ** 8,
+                last_transfer_len: usize = 0,
+                transfer_fill: [4]u8 = .{ 0x21, 0x43, 0x65, 0x87 },
 
-        last_transfer_tx: [8]u8 = [_]u8{0} ** 8,
-        last_transfer_len: usize = 0,
-        transfer_fill: [4]u8 = .{ 0x21, 0x43, 0x65, 0x87 },
+                fn write(self: *@This(), data: []const u8) Error!void {
+                    self.last_write_len = data.len;
+                    @memcpy(self.last_write[0..data.len], data);
+                }
 
-        fn write(self: *@This(), data: []const u8) Error!void {
-            self.last_write_len = data.len;
-            @memcpy(self.last_write[0..data.len], data);
+                fn transfer(self: *@This(), tx: []const u8, rx: []u8) Error!void {
+                    self.last_transfer_len = tx.len;
+                    @memcpy(self.last_transfer_tx[0..tx.len], tx);
+                    @memcpy(rx, self.transfer_fill[0..rx.len]);
+                }
+            };
+
+            var fake = Fake{};
+            const spi = Spi.init(&fake);
+
+            try spi.write(&.{ 0xAA, 0xBB, 0xCC });
+            try lib.testing.expectEqual(@as(usize, 3), fake.last_write_len);
+            try lib.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC }, fake.last_write[0..3]);
+
+            var rx: [3]u8 = undefined;
+            try spi.transfer(&.{ 0x10, 0x20, 0x30 }, &rx);
+            try lib.testing.expectEqual(@as(usize, 3), fake.last_transfer_len);
+            try lib.testing.expectEqualSlices(u8, &.{ 0x10, 0x20, 0x30 }, fake.last_transfer_tx[0..3]);
+            try lib.testing.expectEqualSlices(u8, &.{ 0x21, 0x43, 0x65 }, &rx);
         }
 
-        fn transfer(self: *@This(), tx: []const u8, rx: []u8) Error!void {
-            self.last_transfer_len = tx.len;
-            @memcpy(self.last_transfer_tx[0..tx.len], tx);
-            @memcpy(rx, self.transfer_fill[0..rx.len]);
+        fn propagatesErrorsAndRejectsMismatchedTransferLengths() !void {
+            const Fake = struct {
+                fail_write: bool = false,
+                fail_transfer: bool = false,
+
+                fn write(self: *@This(), _: []const u8) Error!void {
+                    if (self.fail_write) return error.Timeout;
+                }
+
+                fn transfer(self: *@This(), _: []const u8, _: []u8) Error!void {
+                    if (self.fail_transfer) return error.BusError;
+                }
+            };
+
+            var fake = Fake{ .fail_write = true };
+            const spi = Spi.init(&fake);
+            try lib.testing.expectError(error.Timeout, spi.write(&.{0x00}));
+
+            fake.fail_write = false;
+            fake.fail_transfer = true;
+            var rx: [1]u8 = undefined;
+            try lib.testing.expectError(error.BusError, spi.transfer(&.{0x00}, &rx));
+
+            fake.fail_transfer = false;
+            var rx2: [2]u8 = undefined;
+            try lib.testing.expectError(error.Unexpected, spi.transfer(&.{0x00}, &rx2));
         }
     };
 
-    var fake = Fake{};
-    const spi = Spi.init(&fake);
-
-    try spi.write(&.{ 0xAA, 0xBB, 0xCC });
-    try std.testing.expectEqual(@as(usize, 3), fake.last_write_len);
-    try std.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC }, fake.last_write[0..3]);
-
-    var rx: [3]u8 = undefined;
-    try spi.transfer(&.{ 0x10, 0x20, 0x30 }, &rx);
-    try std.testing.expectEqual(@as(usize, 3), fake.last_transfer_len);
-    try std.testing.expectEqualSlices(u8, &.{ 0x10, 0x20, 0x30 }, fake.last_transfer_tx[0..3]);
-    try std.testing.expectEqualSlices(u8, &.{ 0x21, 0x43, 0x65 }, &rx);
-}
-
-test "drivers/unit_tests/io/Spi/propagates_errors_and_rejects_mismatched_transfer_lengths" {
-    const std = @import("std");
-
-    const Fake = struct {
-        fail_write: bool = false,
-        fail_transfer: bool = false,
-
-        fn write(self: *@This(), _: []const u8) Error!void {
-            if (self.fail_write) return error.Timeout;
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
         }
 
-        fn transfer(self: *@This(), _: []const u8, _: []u8) Error!void {
-            if (self.fail_transfer) return error.BusError;
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.dispatchesWriteAndTransfer() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.propagatesErrorsAndRejectsMismatchedTransferLengths() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    var fake = Fake{ .fail_write = true };
-    const spi = Spi.init(&fake);
-    try std.testing.expectError(error.Timeout, spi.write(&.{0x00}));
-
-    fake.fail_write = false;
-    fake.fail_transfer = true;
-    var rx: [1]u8 = undefined;
-    try std.testing.expectError(error.BusError, spi.transfer(&.{0x00}, &rx));
-
-    fake.fail_transfer = false;
-    var rx2: [2]u8 = undefined;
-    try std.testing.expectError(error.Unexpected, spi.transfer(&.{0x00}, &rx2));
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

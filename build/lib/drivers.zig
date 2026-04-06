@@ -15,6 +15,8 @@ pub fn create(
 
 pub fn link(b: *std.Build) void {
     const embed = b.modules.get("embed") orelse @panic("drivers requires embed");
+    const testing = b.modules.get("testing") orelse @panic("drivers requires testing");
     const mod = b.modules.get("drivers") orelse @panic("drivers module missing");
     mod.addImport("embed", embed);
+    mod.addImport("testing", testing);
 }

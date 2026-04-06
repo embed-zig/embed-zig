@@ -6,6 +6,8 @@
 //! Higher-level request/handler abstractions should be built on top of
 //! this low-level interface rather than encoded directly in the VTable.
 
+const testing_api = @import("testing");
+
 const Peripheral = @This();
 
 ptr: *anyopaque,
@@ -420,30 +422,62 @@ pub fn make(pointer: anytype) Peripheral {
     };
 }
 
-test "bt/unit_tests/Peripheral_wrap_allows_missing_subscription_hook" {
-    const Impl = struct {
-        pub fn start(_: *@This()) StartError!void {}
-        pub fn stop(_: *@This()) void {}
-        pub fn startAdvertising(_: *@This(), _: AdvConfig) AdvError!void {}
-        pub fn stopAdvertising(_: *@This()) void {}
-        pub fn setConfig(_: *@This(), _: GattConfig) void {}
-        pub fn setRequestHandler(_: *@This(), _: ?*anyopaque, _: RequestHandlerFn) void {}
-        pub fn notify(_: *@This(), _: u16, _: u16, _: []const u8) GattError!void {}
-        pub fn indicate(_: *@This(), _: u16, _: u16, _: []const u8) GattError!void {}
-        pub fn disconnect(_: *@This(), _: u16) void {}
-        pub fn getState(_: *@This()) State {
-            return .idle;
-        }
-        pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Event) void) void {}
-        pub fn getAddr(_: *@This()) ?BdAddr {
-            return null;
-        }
-        pub fn deinit(_: *@This()) void {}
-    };
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const Impl = struct {
+                pub fn start(_: *@This()) StartError!void {}
+                pub fn stop(_: *@This()) void {}
+                pub fn startAdvertising(_: *@This(), _: AdvConfig) AdvError!void {}
+                pub fn stopAdvertising(_: *@This()) void {}
+                pub fn setConfig(_: *@This(), _: GattConfig) void {}
+                pub fn setRequestHandler(_: *@This(), _: ?*anyopaque, _: RequestHandlerFn) void {}
+                pub fn notify(_: *@This(), _: u16, _: u16, _: []const u8) GattError!void {}
+                pub fn indicate(_: *@This(), _: u16, _: u16, _: []const u8) GattError!void {}
+                pub fn disconnect(_: *@This(), _: u16) void {}
+                pub fn getState(_: *@This()) State {
+                    return .idle;
+                }
+                pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Event) void) void {}
+                pub fn getAddr(_: *@This()) ?BdAddr {
+                    return null;
+                }
+                pub fn deinit(_: *@This()) void {}
+            };
 
-    var impl = Impl{};
-    const peripheral = make(&impl);
-    peripheral.addSubscriptionHook(null, struct {
-        fn onHook(_: ?*anyopaque, _: SubscriptionInfo) void {}
-    }.onHook);
+            var impl = Impl{};
+            const peripheral = make(&impl);
+            peripheral.addSubscriptionHook(null, struct {
+                fn onHook(_: ?*anyopaque, _: SubscriptionInfo) void {}
+            }.onHook);
+            try lib.testing.expect(true);
+        }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
+

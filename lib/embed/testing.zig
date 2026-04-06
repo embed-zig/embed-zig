@@ -22,12 +22,3 @@ pub fn make(comptime Impl: type) type {
     };
 }
 
-test "embed/unit_tests/testing/make_exposes_impl_symbols" {
-    const std = @import("std");
-    const testing = make(std.testing);
-
-    try testing.expect(true);
-    const bytes = try testing.allocator.dupe(u8, "test");
-    defer testing.allocator.free(bytes);
-    try testing.expectEqual(@as(usize, 4), bytes.len);
-}

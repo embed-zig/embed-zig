@@ -10,6 +10,8 @@
 //!   // Comptime:
 //!   const endpoint = comptime url.parse("https://api.example.com:443/v1") catch unreachable;
 
+const testing_api = @import("testing");
+
 pub const Url = struct {
     raw: []const u8,
     scheme: []const u8,
@@ -200,137 +202,110 @@ fn eql(a: []const u8, b: []const u8) bool {
     return true;
 }
 
-test "net/unit_tests/url/parse_full" {
-    const std = @import("std");
-    const expectStr = std.testing.expectEqualStrings;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    const u = try parse("https://user:pass@example.com:8080/path?q=1#frag");
-    try expectStr("https", u.scheme);
-    try expectStr("user", u.username);
-    try expectStr("pass", u.password);
-    try expectStr("example.com", u.host);
-    try expectStr("8080", u.port);
-    try expectStr("/path", u.path);
-    try expectStr("q=1", u.raw_query);
-    try expectStr("frag", u.fragment);
-    try std.testing.expectEqual(@as(u16, 8080), u.portAsNumber().?);
-}
+            {
+                const u = try parse("https://user:pass@example.com:8080/path?q=1#frag");
+                try testing.expectEqualStrings("https", u.scheme);
+                try testing.expectEqualStrings("user", u.username);
+                try testing.expectEqualStrings("pass", u.password);
+                try testing.expectEqualStrings("example.com", u.host);
+                try testing.expectEqualStrings("8080", u.port);
+                try testing.expectEqualStrings("/path", u.path);
+                try testing.expectEqualStrings("q=1", u.raw_query);
+                try testing.expectEqualStrings("frag", u.fragment);
+                try testing.expectEqual(@as(u16, 8080), u.portAsNumber().?);
+            }
 
-test "net/unit_tests/url/parse_minimal" {
-    const std = @import("std");
-    const expectStr = std.testing.expectEqualStrings;
+            {
+                const u = try parse("http://example.com");
+                try testing.expectEqualStrings("http", u.scheme);
+                try testing.expectEqualStrings("example.com", u.host);
+                try testing.expectEqualStrings("", u.port);
+                try testing.expectEqualStrings("", u.path);
+                try testing.expectEqualStrings("", u.raw_query);
+                try testing.expectEqualStrings("", u.fragment);
+                try testing.expectEqual(@as(?u16, null), u.portAsNumber());
+            }
 
-    const u = try parse("http://example.com");
-    try expectStr("http", u.scheme);
-    try expectStr("example.com", u.host);
-    try expectStr("", u.port);
-    try expectStr("", u.path);
-    try expectStr("", u.raw_query);
-    try expectStr("", u.fragment);
-    try std.testing.expectEqual(@as(?u16, null), u.portAsNumber());
-}
+            {
+                const u = try parse("http://[::1]:8080/path");
+                try testing.expectEqualStrings("http", u.scheme);
+                try testing.expectEqualStrings("::1", u.host);
+                try testing.expectEqualStrings("8080", u.port);
+                try testing.expectEqualStrings("/path", u.path);
+            }
 
-test "net/unit_tests/url/parse_ipv6" {
-    const std = @import("std");
-    const expectStr = std.testing.expectEqualStrings;
+            {
+                const u = try parse("https://example.com/path");
+                try testing.expectEqualStrings("https", u.scheme);
+                try testing.expectEqualStrings("example.com", u.host);
+                try testing.expectEqualStrings("", u.port);
+                try testing.expectEqualStrings("/path", u.path);
+            }
 
-    const u = try parse("http://[::1]:8080/path");
-    try expectStr("http", u.scheme);
-    try expectStr("::1", u.host);
-    try expectStr("8080", u.port);
-    try expectStr("/path", u.path);
-}
+            {
+                const u = try parse("https://example.com?q=1");
+                try testing.expectEqualStrings("example.com", u.host);
+                try testing.expectEqualStrings("", u.path);
+                try testing.expectEqualStrings("q=1", u.raw_query);
+                try testing.expectEqualStrings("", u.fragment);
+            }
 
-test "net/unit_tests/url/parse_no_port" {
-    const std = @import("std");
-    const expectStr = std.testing.expectEqualStrings;
+            {
+                const u = try parse("https://example.com#frag");
+                try testing.expectEqualStrings("example.com", u.host);
+                try testing.expectEqualStrings("", u.path);
+                try testing.expectEqualStrings("", u.raw_query);
+                try testing.expectEqualStrings("frag", u.fragment);
+            }
 
-    const u = try parse("https://example.com/path");
-    try expectStr("https", u.scheme);
-    try expectStr("example.com", u.host);
-    try expectStr("", u.port);
-    try expectStr("/path", u.path);
-}
+            {
+                const u = try parse("https://user@example.com");
+                try testing.expectEqualStrings("user", u.username);
+                try testing.expectEqualStrings("", u.password);
+                try testing.expectEqualStrings("example.com", u.host);
+            }
 
-test "net/unit_tests/url/parse_query_only" {
-    const std = @import("std");
-    const expectStr = std.testing.expectEqualStrings;
+            {
+                const u = try parse("https://example.com?key=val");
+                try testing.expectEqualStrings("example.com", u.host);
+                try testing.expectEqualStrings("", u.path);
+                try testing.expectEqualStrings("key=val", u.raw_query);
+            }
 
-    const u = try parse("https://example.com?q=1");
-    try expectStr("example.com", u.host);
-    try expectStr("", u.path);
-    try expectStr("q=1", u.raw_query);
-    try expectStr("", u.fragment);
-}
+            {
+                const u = comptime parse("https://api.example.com:443/v1/users?limit=10#top") catch unreachable;
+                try testing.expectEqualStrings("https", u.scheme);
+                try testing.expectEqualStrings("api.example.com", u.host);
+                try testing.expectEqualStrings("443", u.port);
+                try testing.expectEqualStrings("/v1/users", u.path);
+                try testing.expectEqualStrings("limit=10", u.raw_query);
+                try testing.expectEqualStrings("top", u.fragment);
 
-test "net/unit_tests/url/parse_fragment_only" {
-    const std = @import("std");
-    const expectStr = std.testing.expectEqualStrings;
+                comptime {
+                    if (u.portAsNumber().? != 443) unreachable;
+                }
+            }
 
-    const u = try parse("https://example.com#frag");
-    try expectStr("example.com", u.host);
-    try expectStr("", u.path);
-    try expectStr("", u.raw_query);
-    try expectStr("frag", u.fragment);
-}
+            try testing.expectError(error.EmptyInput, parse(""));
+            try testing.expectError(error.MissingScheme, parse("example.com"));
+            try testing.expectError(error.MissingScheme, parse("/path/only"));
+            try testing.expectError(error.InvalidPort, parse("http://[::1"));
+            try testing.expectError(error.InvalidPort, parse("http://example.com:99999"));
+            try testing.expectError(error.InvalidPort, parse("http://example.com:"));
+            try testing.expectError(error.InvalidPort, parse("http://[::1]garbage"));
+            try testing.expectError(error.InvalidPort, parse("http://2001:db8::1/path"));
 
-test "net/unit_tests/url/parse_userinfo_no_password" {
-    const std = @import("std");
-    const expectStr = std.testing.expectEqualStrings;
+            try testing.expectError(error.InvalidPort, parse("http://example.com:99999"));
 
-    const u = try parse("https://user@example.com");
-    try expectStr("user", u.username);
-    try expectStr("", u.password);
-    try expectStr("example.com", u.host);
-}
+            const max_port = try parse("http://example.com:65535");
+            try testing.expectEqual(@as(u16, 65535), max_port.portAsNumber().?);
 
-test "net/unit_tests/url/parse_empty_path_with_query" {
-    const std = @import("std");
-    const expectStr = std.testing.expectEqualStrings;
-
-    const u = try parse("https://example.com?key=val");
-    try expectStr("example.com", u.host);
-    try expectStr("", u.path);
-    try expectStr("key=val", u.raw_query);
-}
-
-test "net/unit_tests/url/parse_comptime" {
-    const std = @import("std");
-    const expectStr = std.testing.expectEqualStrings;
-
-    const u = comptime parse("https://api.example.com:443/v1/users?limit=10#top") catch unreachable;
-    try expectStr("https", u.scheme);
-    try expectStr("api.example.com", u.host);
-    try expectStr("443", u.port);
-    try expectStr("/v1/users", u.path);
-    try expectStr("limit=10", u.raw_query);
-    try expectStr("top", u.fragment);
-
-    comptime {
-        if (u.portAsNumber().? != 443) unreachable;
-    }
-}
-
-test "net/unit_tests/url/parse_errors" {
-    const std = @import("std");
-
-    try std.testing.expectError(error.EmptyInput, parse(""));
-    try std.testing.expectError(error.MissingScheme, parse("example.com"));
-    try std.testing.expectError(error.MissingScheme, parse("/path/only"));
-    try std.testing.expectError(error.InvalidPort, parse("http://[::1"));
-    try std.testing.expectError(error.InvalidPort, parse("http://example.com:99999"));
-    try std.testing.expectError(error.InvalidPort, parse("http://example.com:"));
-    try std.testing.expectError(error.InvalidPort, parse("http://[::1]garbage"));
-    try std.testing.expectError(error.InvalidPort, parse("http://2001:db8::1/path"));
-}
-
-test "net/unit_tests/url/portAsNumber_overflow" {
-    const std = @import("std");
-
-    try std.testing.expectError(error.InvalidPort, parse("http://example.com:99999"));
-
-    const max_port = try parse("http://example.com:65535");
-    try std.testing.expectEqual(@as(u16, 65535), max_port.portAsNumber().?);
-
-    try std.testing.expectError(error.InvalidPort, parse("http://example.com:65536"));
+            try testing.expectError(error.InvalidPort, parse("http://example.com:65536"));
+        }
+    }.run);
 }

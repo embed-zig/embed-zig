@@ -1,33 +1,315 @@
 const builtin = @import("std").builtin;
+const testing_api = @import("testing");
 const BranchNode = @import("BranchNode.zig");
 const Emitter = @import("Emitter.zig");
 const Message = @import("Message.zig");
 const Node = @import("Node.zig");
 
-pub fn make(comptime spec: anytype) type {
-    return struct {
-        pub const Spec = spec;
-        pub const Config = makeConfig(spec);
+const EnumLiteral = @Type(.enum_literal);
+const route_count = @typeInfo(Message.Kind).@"enum".fields.len;
+const ValidationError = error{
+    EmptyBuilder,
+    UnterminatedSwitch,
+    EmptySequence,
+    InvalidNodeSpan,
+    UnexpectedCaseMarker,
+    UnexpectedSwitchTerminator,
+    SwitchBodyEmpty,
+    SwitchExpectedCase,
+    DuplicateCase,
+    EmptyCase,
+    NoCasesInSwitch,
+    ParsePastEnd,
+    UnexpectedEndSwitchInCase,
+};
 
-        pub fn build(config: *Config) Node {
-            var next_branch_index: usize = 0;
-            return buildSpec(spec, config, &next_branch_index, null);
+pub const default_max_ops: usize = 512;
+
+pub const BuilderOptions = struct {
+    max_ops: usize = default_max_ops,
+};
+
+pub fn Builder(comptime options: BuilderOptions) type {
+    const max_ops = options.max_ops;
+    comptime {
+        if (max_ops == 0) {
+            @compileError("zux.pipeline.NodeBuilder.Builder max_ops must be > 0");
+        }
+    }
+    return struct {
+        const Self = @This();
+
+        const Op = union(enum) {
+            node: EnumLiteral,
+            begin_switch: void,
+            route: Message.Kind,
+            end_switch: void,
+        };
+
+        const SwitchFrame = struct {
+            seen_case: bool = false,
+            case_has_item: bool = false,
+        };
+
+        ops: [max_ops]Op = undefined,
+        len: usize = 0,
+
+        tags: [max_ops]EnumLiteral = undefined,
+        tag_len: usize = 0,
+        switch_count: usize = 0,
+
+        frames: [max_ops]SwitchFrame = undefined,
+        frame_len: usize = 0,
+
+        pub fn init() Self {
+            return .{};
+        }
+
+        pub fn node(self: *Self, comptime tag: EnumLiteral) void {
+            self.ensureCanAppendItem("node");
+            self.append(.{ .node = tag });
+            self.markCurrentCaseHasItem();
+            self.appendUniqueTag(tag);
+        }
+
+        pub fn beginSwitch(self: *Self) void {
+            self.ensureCanAppendItem("beginSwitch");
+            self.append(.{ .begin_switch = {} });
+            self.markCurrentCaseHasItem();
+            self.switch_count += 1;
+            self.pushSwitchFrame();
+        }
+
+        pub fn case(self: *Self, comptime kind: Message.Kind) void {
+            const frame = self.requireOpenSwitch("case");
+            if (frame.seen_case and !frame.case_has_item) {
+                @compileError("zux.pipeline.NodeBuilder.Builder.case cannot follow an empty case body");
+            }
+            frame.seen_case = true;
+            frame.case_has_item = false;
+            self.append(.{ .route = kind });
+        }
+
+        pub fn endSwitch(self: *Self) void {
+            const frame = self.requireOpenSwitch("endSwitch");
+            if (!frame.seen_case) {
+                @compileError("zux.pipeline.NodeBuilder.Builder.endSwitch requires at least one case");
+            }
+            if (!frame.case_has_item) {
+                @compileError("zux.pipeline.NodeBuilder.Builder.endSwitch cannot close an empty case body");
+            }
+            self.append(.{ .end_switch = {} });
+            self.frame_len -= 1;
+        }
+
+        pub fn make(comptime self: Self) type {
+            self.validate() catch |err| @compileError(validationErrorMessage(err));
+
+            const GeneratedConfig = makeConfig(self);
+
+            return struct {
+                pub const BuiltConfig = GeneratedConfig;
+                pub const Config = BuiltConfig;
+
+                pub fn build(config: *BuiltConfig) Node {
+                    var next_branch_index: usize = 0;
+                    return buildSeqRange(self, 0, self.len, config, &next_branch_index, null);
+                }
+            };
+        }
+
+        fn validate(comptime self: Self) ValidationError!void {
+            try validateBuilder(self);
+        }
+
+        fn append(self: *Self, op: Op) void {
+            if (self.len >= max_ops) {
+                @compileError("zux.pipeline.NodeBuilder.Builder exceeded max_ops");
+            }
+            self.ops[self.len] = op;
+            self.len += 1;
+        }
+
+        fn appendUniqueTag(self: *Self, comptime tag: EnumLiteral) void {
+            inline for (0..self.tag_len) |i| {
+                if (self.tags[i] == tag) return;
+            }
+            self.tags[self.tag_len] = tag;
+            self.tag_len += 1;
+        }
+
+        fn markCurrentCaseHasItem(self: *Self) void {
+            if (self.frame_len == 0) return;
+            self.frames[self.frame_len - 1].case_has_item = true;
+        }
+
+        fn pushSwitchFrame(self: *Self) void {
+            if (self.frame_len >= max_ops) {
+                @compileError("zux.pipeline.NodeBuilder.Builder exceeded max nested switches");
+            }
+            self.frames[self.frame_len] = .{};
+            self.frame_len += 1;
+        }
+
+        fn currentFrame(self: *Self) ?*SwitchFrame {
+            if (self.frame_len == 0) return null;
+            return &self.frames[self.frame_len - 1];
+        }
+
+        fn requireOpenSwitch(self: *Self, comptime action: []const u8) *SwitchFrame {
+            return self.currentFrame() orelse @compileError(
+                "zux.pipeline.NodeBuilder.Builder." ++ action ++ " requires an open switch",
+            );
+        }
+
+        fn ensureCanAppendItem(self: *Self, comptime action: []const u8) void {
+            if (self.currentFrame()) |frame| {
+                if (!frame.seen_case) {
+                    @compileError(
+                        "zux.pipeline.NodeBuilder.Builder." ++ action ++ " requires calling case(...) first",
+                    );
+                }
+            }
         }
     };
 }
 
-fn makeConfig(comptime spec: anytype) type {
-    const tag_count = uniqueTagCount(spec);
-    const switch_count = countSwitches(spec);
+fn validationErrorMessage(err: ValidationError) []const u8 {
+    return switch (err) {
+        error.EmptyBuilder => "zux.pipeline.NodeBuilder.Builder.make requires at least one node or switch",
+        error.UnterminatedSwitch => "zux.pipeline.NodeBuilder.Builder.make found an unterminated switch",
+        error.EmptySequence => "zux.pipeline.NodeBuilder encountered an empty sequence",
+        error.InvalidNodeSpan => "zux.pipeline.NodeBuilder node item had an invalid span",
+        error.UnexpectedCaseMarker => "zux.pipeline.NodeBuilder encountered an unexpected case marker",
+        error.UnexpectedSwitchTerminator => "zux.pipeline.NodeBuilder encountered an unexpected switch terminator",
+        error.SwitchBodyEmpty => "zux.pipeline.NodeBuilder switch body cannot be empty",
+        error.SwitchExpectedCase => "zux.pipeline.NodeBuilder switch expected case(...) markers",
+        error.DuplicateCase => "zux.pipeline.NodeBuilder switch cannot define the same case twice",
+        error.EmptyCase => "zux.pipeline.NodeBuilder switch case cannot be empty",
+        error.NoCasesInSwitch => "zux.pipeline.NodeBuilder switch requires at least one case",
+        error.ParsePastEnd => "zux.pipeline.NodeBuilder tried to parse beyond the end of the op stream",
+        error.UnexpectedEndSwitchInCase => "zux.pipeline.NodeBuilder saw an unexpected endSwitch() inside a case body",
+    };
+}
 
-    comptime var tags: [tag_count]@Type(.enum_literal) = undefined;
-    comptime var len: usize = 0;
-    collectTagRefs(spec, &tags, &len);
+fn validateBuilder(comptime builder: anytype) ValidationError!void {
+    if (builder.len == 0) return error.EmptyBuilder;
+    if (builder.frame_len != 0) return error.UnterminatedSwitch;
+    try validateSeqRange(builder, 0, builder.len);
+}
 
-    const total_field_count = tag_count + @as(usize, if (switch_count > 0) 1 else 0);
+fn validateSeqRange(comptime builder: anytype, comptime start: usize, comptime end: usize) ValidationError!void {
+    if (start >= end) return error.EmptySequence;
+
+    const item_end = comptime try validatedNextItemEnd(builder, start, end);
+    if (item_end == end) {
+        return validateItemRange(builder, start, item_end);
+    }
+
+    try validateSeqRange(builder, item_end, end);
+    try validateItemRange(builder, start, item_end);
+}
+
+fn validateItemRange(comptime builder: anytype, comptime start: usize, comptime end: usize) ValidationError!void {
+    switch (builder.ops[start]) {
+        .node => {
+            if (end != start + 1) return error.InvalidNodeSpan;
+        },
+        .begin_switch => try validateSwitchRange(builder, start, end),
+        .route => return error.UnexpectedCaseMarker,
+        .end_switch => return error.UnexpectedSwitchTerminator,
+    }
+}
+
+fn validateSwitchRange(comptime builder: anytype, comptime start: usize, comptime end: usize) ValidationError!void {
+    if (end <= start + 2) return error.SwitchBodyEmpty;
+
+    comptime var seen_routes: [route_count]bool = [_]bool{false} ** route_count;
+    comptime var i = start + 1;
+    comptime var case_count: usize = 0;
+
+    inline while (i < end - 1) {
+        const kind = switch (builder.ops[i]) {
+            .route => |route_kind| route_kind,
+            else => return error.SwitchExpectedCase,
+        };
+
+        const kind_index = @intFromEnum(kind);
+        if (seen_routes[kind_index]) return error.DuplicateCase;
+        seen_routes[kind_index] = true;
+
+        const body_start = i + 1;
+        const body_end = comptime try validatedNextCaseStartOrSwitchEnd(builder, body_start, end - 1);
+        if (body_start >= body_end) return error.EmptyCase;
+
+        try validateSeqRange(builder, body_start, body_end);
+        case_count += 1;
+        i = body_end;
+    }
+
+    if (case_count == 0) return error.NoCasesInSwitch;
+}
+
+fn validatedNextItemEnd(comptime builder: anytype, comptime start: usize, comptime limit: usize) ValidationError!usize {
+    if (start >= limit) return error.ParsePastEnd;
+
+    return switch (builder.ops[start]) {
+        .node => start + 1,
+        .begin_switch => validatedFindMatchingSwitchEnd(builder, start, limit),
+        .route => error.UnexpectedCaseMarker,
+        .end_switch => error.UnexpectedSwitchTerminator,
+    };
+}
+
+fn validatedFindMatchingSwitchEnd(comptime builder: anytype, comptime start: usize, comptime limit: usize) ValidationError!usize {
+    comptime var depth: usize = 1;
+    comptime var i = start + 1;
+
+    inline while (i < limit) : (i += 1) {
+        switch (builder.ops[i]) {
+            .begin_switch => depth += 1,
+            .end_switch => {
+                depth -= 1;
+                if (depth == 0) return i + 1;
+            },
+            else => {},
+        }
+    }
+
+    return error.UnterminatedSwitch;
+}
+
+fn validatedNextCaseStartOrSwitchEnd(
+    comptime builder: anytype,
+    comptime start: usize,
+    comptime switch_end_index: usize,
+) ValidationError!usize {
+    comptime var nested_depth: usize = 0;
+    comptime var i = start;
+
+    inline while (i < switch_end_index) : (i += 1) {
+        switch (builder.ops[i]) {
+            .begin_switch => nested_depth += 1,
+            .end_switch => {
+                if (nested_depth == 0) return error.UnexpectedEndSwitchInCase;
+                nested_depth -= 1;
+            },
+            .route => {
+                if (nested_depth == 0) return i;
+            },
+            else => {},
+        }
+    }
+
+    return switch_end_index;
+}
+
+fn makeConfig(comptime builder: anytype) type {
+    const total_field_count = builder.tag_len + @as(usize, if (builder.switch_count > 0) 1 else 0);
     var fields: [total_field_count]builtin.Type.StructField = undefined;
 
-    inline for (tags, 0..) |tag, i| {
+    inline for (0..builder.tag_len) |i| {
+        const tag = builder.tags[i];
         fields[i] = .{
             .name = @tagName(tag),
             .type = Node,
@@ -37,10 +319,10 @@ fn makeConfig(comptime spec: anytype) type {
         };
     }
 
-    if (switch_count > 0) {
-        const BranchStorage = [switch_count]BranchNode;
+    if (builder.switch_count > 0) {
+        const BranchStorage = [builder.switch_count]BranchNode;
         const default_branch_storage: BranchStorage = undefined;
-        fields[tag_count] = .{
+        fields[builder.tag_len] = .{
             .name = "__branches",
             .type = BranchStorage,
             .default_value_ptr = @ptrCast(&default_branch_storage),
@@ -59,32 +341,53 @@ fn makeConfig(comptime spec: anytype) type {
     });
 }
 
-fn buildSpec(
-    comptime spec: anytype,
+fn buildSeqRange(
+    comptime builder: anytype,
+    comptime start: usize,
+    comptime end: usize,
     config: anytype,
     next_branch_index: *usize,
     downstream: ?Emitter,
 ) Node {
-    return switch (@typeInfo(@TypeOf(spec))) {
-        .@"enum_literal" => buildTag(spec, config, downstream),
-        .pointer => |info| blk: {
-            if (info.size != .one) {
-                @compileError("zux.pipeline.NodeBuilder.make expects single-item comptime pointers");
+    comptime {
+        if (start >= end) {
+            @compileError("zux.pipeline.NodeBuilder encountered an empty sequence");
+        }
+    }
+
+    const item_end = comptime nextItemEnd(builder, start, end);
+    if (item_end == end) {
+        return buildItemRange(builder, start, item_end, config, next_branch_index, downstream);
+    }
+
+    const next_root = buildSeqRange(builder, item_end, end, config, next_branch_index, downstream);
+    return buildItemRange(builder, start, item_end, config, next_branch_index, next_root.in);
+}
+
+fn buildItemRange(
+    comptime builder: anytype,
+    comptime start: usize,
+    comptime end: usize,
+    config: anytype,
+    next_branch_index: *usize,
+    downstream: ?Emitter,
+) Node {
+    return switch (builder.ops[start]) {
+        .node => |tag| blk: {
+            comptime {
+                if (end != start + 1) {
+                    @compileError("zux.pipeline.NodeBuilder node item had an invalid span");
+                }
             }
-            break :blk buildSpec(spec.*, config, next_branch_index, downstream);
+            break :blk buildTag(tag, config, downstream);
         },
-        .array => buildSeq(spec, spec.len, config, next_branch_index, downstream),
-        .@"struct" => |info| blk: {
-            if (info.is_tuple) {
-                break :blk buildSeq(spec, info.fields.len, config, next_branch_index, downstream);
-            }
-            break :blk buildSwitch(spec, info.fields, config, next_branch_index, downstream);
-        },
-        else => @compileError("zux.pipeline.NodeBuilder.make expects tag literals, tuples, arrays, or switch structs"),
+        .begin_switch => buildSwitchRange(builder, start, end, config, next_branch_index, downstream),
+        .route => @compileError("zux.pipeline.NodeBuilder encountered an unexpected case marker"),
+        .end_switch => @compileError("zux.pipeline.NodeBuilder encountered an unexpected switch terminator"),
     };
 }
 
-fn buildTag(comptime tag: @Type(.enum_literal), config: anytype, downstream: ?Emitter) Node {
+fn buildTag(comptime tag: EnumLiteral, config: anytype, downstream: ?Emitter) Node {
     var node = @field(config.*, @tagName(tag));
     if (downstream) |out| {
         node.bindOutput(out);
@@ -92,44 +395,61 @@ fn buildTag(comptime tag: @Type(.enum_literal), config: anytype, downstream: ?Em
     return node;
 }
 
-fn buildSeq(
-    comptime spec: anytype,
-    comptime len: usize,
+fn buildSwitchRange(
+    comptime builder: anytype,
+    comptime start: usize,
+    comptime end: usize,
     config: anytype,
     next_branch_index: *usize,
     downstream: ?Emitter,
 ) Node {
-    if (len == 0) {
-        @compileError("zux.pipeline.NodeBuilder.make does not support empty seq specs");
+    comptime {
+        if (end <= start + 2) {
+            @compileError("zux.pipeline.NodeBuilder switch body cannot be empty");
+        }
     }
 
-    var next_root: ?Node = null;
-    comptime var i = len;
-    inline while (i > 0) {
-        i -= 1;
-        const out = if (next_root) |root| root.in else downstream;
-        next_root = buildSpec(spec[i], config, next_branch_index, out);
-    }
-
-    return next_root.?;
-}
-
-fn buildSwitch(
-    comptime switch_spec: anytype,
-    comptime fields: []const builtin.Type.StructField,
-    config: anytype,
-    next_branch_index: *usize,
-    downstream: ?Emitter,
-) Node {
     var routes = BranchNode.emptyRoutes();
-    inline for (fields) |field| {
-        const kind = @field(Message.Kind, field.name);
-        routes[@intFromEnum(kind)] = buildSpec(
-            @field(switch_spec, field.name),
+    comptime var seen_routes: [route_count]bool = [_]bool{false} ** route_count;
+    comptime var i = start + 1;
+    comptime var case_count: usize = 0;
+
+    inline while (i < end - 1) {
+        const kind = switch (builder.ops[i]) {
+            .route => |route_kind| route_kind,
+            else => @compileError("zux.pipeline.NodeBuilder switch expected case(...) markers"),
+        };
+
+        const kind_index = @intFromEnum(kind);
+        if (seen_routes[kind_index]) {
+            @compileError("zux.pipeline.NodeBuilder switch cannot define the same case twice");
+        }
+        seen_routes[kind_index] = true;
+
+        const body_start = i + 1;
+        const body_end = comptime nextCaseStartOrSwitchEnd(builder, body_start, end - 1);
+        comptime {
+            if (body_start >= body_end) {
+                @compileError("zux.pipeline.NodeBuilder switch case cannot be empty");
+            }
+        }
+
+        routes[kind_index] = buildSeqRange(
+            builder,
+            body_start,
+            body_end,
             config,
             next_branch_index,
             downstream,
         );
+        case_count += 1;
+        i = body_end;
+    }
+
+    comptime {
+        if (case_count == 0) {
+            @compileError("zux.pipeline.NodeBuilder switch requires at least one case");
+        }
     }
 
     const branch = &config.__branches[next_branch_index.*];
@@ -137,231 +457,346 @@ fn buildSwitch(
     return branch.init(routes);
 }
 
-fn uniqueTagCount(comptime spec: anytype) usize {
-    const max_tag_count = countTagRefs(spec);
-    comptime var tags: [max_tag_count]@Type(.enum_literal) = undefined;
-    comptime var len: usize = 0;
-    collectTagRefs(spec, &tags, &len);
-    return len;
-}
-
-fn countTagRefs(comptime spec: anytype) usize {
-    return switch (@typeInfo(@TypeOf(spec))) {
-        .@"enum_literal" => 1,
-        .pointer => |info| blk: {
-            if (info.size != .one) {
-                @compileError("zux.pipeline.NodeBuilder.make expects single-item comptime pointers");
-            }
-            break :blk countTagRefs(spec.*);
-        },
-        .array => blk: {
-            comptime var count: usize = 0;
-            inline for (spec) |item| {
-                count += countTagRefs(item);
-            }
-            break :blk count;
-        },
-        .@"struct" => |info| blk: {
-            comptime var count: usize = 0;
-            if (info.is_tuple) {
-                inline for (spec) |item| {
-                    count += countTagRefs(item);
-                }
-            } else {
-                inline for (info.fields) |field| {
-                    count += countTagRefs(@field(spec, field.name));
-                }
-            }
-            break :blk count;
-        },
-        else => @compileError("zux.pipeline.NodeBuilder.make expects tag literals, tuples, arrays, or switch structs"),
-    };
-}
-
-fn countSwitches(comptime spec: anytype) usize {
-    return switch (@typeInfo(@TypeOf(spec))) {
-        .@"enum_literal" => 0,
-        .pointer => |info| blk: {
-            if (info.size != .one) {
-                @compileError("zux.pipeline.NodeBuilder.make expects single-item comptime pointers");
-            }
-            break :blk countSwitches(spec.*);
-        },
-        .array => blk: {
-            comptime var count: usize = 0;
-            inline for (spec) |item| {
-                count += countSwitches(item);
-            }
-            break :blk count;
-        },
-        .@"struct" => |info| blk: {
-            comptime var count: usize = if (info.is_tuple) 0 else 1;
-            if (info.is_tuple) {
-                inline for (spec) |item| {
-                    count += countSwitches(item);
-                }
-            } else {
-                inline for (info.fields) |field| {
-                    count += countSwitches(@field(spec, field.name));
-                }
-            }
-            break :blk count;
-        },
-        else => @compileError("zux.pipeline.NodeBuilder.make expects tag literals, tuples, arrays, or switch structs"),
-    };
-}
-
-fn collectTagRefs(comptime spec: anytype, comptime tags: anytype, comptime len: *usize) void {
-    switch (@typeInfo(@TypeOf(spec))) {
-        .@"enum_literal" => appendUniqueTag(spec, tags, len),
-        .pointer => |info| {
-            if (info.size != .one) {
-                @compileError("zux.pipeline.NodeBuilder.make expects single-item comptime pointers");
-            }
-            collectTagRefs(spec.*, tags, len);
-        },
-        .array => {
-            inline for (spec) |item| {
-                collectTagRefs(item, tags, len);
-            }
-        },
-        .@"struct" => |info| {
-            if (info.is_tuple) {
-                inline for (spec) |item| {
-                    collectTagRefs(item, tags, len);
-                }
-            } else {
-                inline for (info.fields) |field| {
-                    collectTagRefs(@field(spec, field.name), tags, len);
-                }
-            }
-        },
-        else => @compileError("zux.pipeline.NodeBuilder.make expects tag literals, tuples, arrays, or switch structs"),
-    }
-}
-
-fn appendUniqueTag(
-    comptime tag: @Type(.enum_literal),
-    comptime tags: anytype,
-    comptime len: *usize,
-) void {
-    inline for (0..len.*) |i| {
-        if (tags.*[i] == tag) return;
+fn nextItemEnd(comptime builder: anytype, comptime start: usize, comptime limit: usize) usize {
+    comptime {
+        if (start >= limit) {
+            @compileError("zux.pipeline.NodeBuilder tried to parse beyond the end of the op stream");
+        }
     }
 
-    tags.*[len.*] = tag;
-    len.* += 1;
+    return switch (builder.ops[start]) {
+        .node => start + 1,
+        .begin_switch => findMatchingSwitchEnd(builder, start, limit),
+        .route => @compileError("zux.pipeline.NodeBuilder sequence cannot start with case(...)"),
+        .end_switch => @compileError("zux.pipeline.NodeBuilder sequence cannot start with endSwitch()"),
+    };
 }
 
-test "zux/pipeline/NodeBuilder/unit_tests/build_returns_root_node" {
-    const std = @import("std");
+fn findMatchingSwitchEnd(comptime builder: anytype, comptime start: usize, comptime limit: usize) usize {
+    comptime var depth: usize = 1;
+    comptime var i = start + 1;
 
-    const Builder = make(&.{
-        .a,
-        .{
-            .button_gesture = .{ .b, .c },
-            .raw_single_button = .{ .d },
-        },
-        .e,
-    });
+    inline while (i < limit) : (i += 1) {
+        switch (builder.ops[i]) {
+            .begin_switch => depth += 1,
+            .end_switch => {
+                depth -= 1;
+                if (depth == 0) return i + 1;
+            },
+            else => {},
+        }
+    }
 
-    const Forward = struct {
-        out: ?Emitter = null,
-        called: usize = 0,
-        delta_ns: i128,
+    @compileError("zux.pipeline.NodeBuilder found an unterminated switch while parsing");
+}
 
-        pub fn bindOutput(self: *@This(), out: Emitter) void {
-            self.out = out;
+fn nextCaseStartOrSwitchEnd(comptime builder: anytype, comptime start: usize, comptime switch_end_index: usize) usize {
+    comptime var nested_depth: usize = 0;
+    comptime var i = start;
+
+    inline while (i < switch_end_index) : (i += 1) {
+        switch (builder.ops[i]) {
+            .begin_switch => nested_depth += 1,
+            .end_switch => {
+                if (nested_depth == 0) {
+                    @compileError("zux.pipeline.NodeBuilder saw an unexpected endSwitch() inside a case body");
+                }
+                nested_depth -= 1;
+            },
+            .route => {
+                if (nested_depth == 0) return i;
+            },
+            else => {},
+        }
+    }
+
+    return switch_end_index;
+}
+
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn buildReturnsRootNode(testing: anytype) !void {
+            const Built = comptime blk: {
+                var builder = Builder(.{ .max_ops = 16 }).init();
+                builder.node(.a);
+                builder.beginSwitch();
+                builder.case(.button_gesture);
+                builder.node(.b);
+                builder.node(.c);
+                builder.case(.raw_single_button);
+                builder.node(.d);
+                builder.endSwitch();
+                builder.node(.e);
+                break :blk builder.make();
+            };
+
+            const Forward = struct {
+                out: ?Emitter = null,
+                called: usize = 0,
+                delta_ns: i128,
+
+                pub fn bindOutput(self: *@This(), out: Emitter) void {
+                    self.out = out;
+                }
+
+                pub fn process(self: *@This(), message: Message) !usize {
+                    self.called += 1;
+                    var next = message;
+                    next.timestamp_ns += self.delta_ns;
+                    if (self.out) |out| {
+                        try out.emit(next);
+                    }
+                    return 1;
+                }
+            };
+
+            const Collector = struct {
+                count: usize = 0,
+                last_timestamp_ns: i128 = 0,
+
+                pub fn emit(self: *@This(), message: Message) !void {
+                    self.count += 1;
+                    self.last_timestamp_ns = message.timestamp_ns;
+                }
+            };
+
+            var a_impl = Forward{ .delta_ns = 1 };
+            var b_impl = Forward{ .delta_ns = 2 };
+            var c_impl = Forward{ .delta_ns = 4 };
+            var d_impl = Forward{ .delta_ns = 8 };
+            var e_impl = Forward{ .delta_ns = 16 };
+            var collector = Collector{};
+
+            var config: Built.Config = .{
+                .a = Node.init(Forward, &a_impl),
+                .b = Node.init(Forward, &b_impl),
+                .c = Node.init(Forward, &c_impl),
+                .d = Node.init(Forward, &d_impl),
+                .e = Node.init(Forward, &e_impl),
+            };
+
+            var root = Built.build(&config);
+            config.e.bindOutput(Emitter.init(&collector));
+
+            const emitted_button = try root.process(.{
+                .origin = .source,
+                .timestamp_ns = 10,
+                .body = .{
+                    .button_gesture = .{
+                        .source_id = 1,
+                        .gesture = .{ .click = 1 },
+                    },
+                },
+            });
+            try testing.expectEqual(@as(usize, 1), emitted_button);
+            try testing.expectEqual(@as(usize, 1), a_impl.called);
+            try testing.expectEqual(@as(usize, 1), b_impl.called);
+            try testing.expectEqual(@as(usize, 1), c_impl.called);
+            try testing.expectEqual(@as(usize, 0), d_impl.called);
+            try testing.expectEqual(@as(usize, 1), e_impl.called);
+            try testing.expectEqual(@as(i128, 33), collector.last_timestamp_ns);
+
+            const emitted_raw = try root.process(.{
+                .origin = .source,
+                .timestamp_ns = 15,
+                .body = .{
+                    .raw_single_button = .{
+                        .source_id = 1,
+                        .pressed = true,
+                    },
+                },
+            });
+            try testing.expectEqual(@as(usize, 1), emitted_raw);
+            try testing.expectEqual(@as(usize, 2), a_impl.called);
+            try testing.expectEqual(@as(usize, 1), b_impl.called);
+            try testing.expectEqual(@as(usize, 1), c_impl.called);
+            try testing.expectEqual(@as(usize, 1), d_impl.called);
+            try testing.expectEqual(@as(usize, 2), e_impl.called);
+            try testing.expectEqual(@as(i128, 40), collector.last_timestamp_ns);
+
+            const emitted_tick = try root.process(.{
+                .origin = .timer,
+                .timestamp_ns = 20,
+                .body = .{
+                    .tick = .{},
+                },
+            });
+            try testing.expectEqual(@as(usize, 1), emitted_tick);
+            try testing.expectEqual(@as(usize, 3), a_impl.called);
+            try testing.expectEqual(@as(usize, 2), b_impl.called);
+            try testing.expectEqual(@as(usize, 2), c_impl.called);
+            try testing.expectEqual(@as(usize, 2), d_impl.called);
+            try testing.expectEqual(@as(usize, 4), e_impl.called);
+            try testing.expectEqual(@as(i128, 43), collector.last_timestamp_ns);
+            try testing.expectEqual(@as(usize, 4), collector.count);
         }
 
-        pub fn process(self: *@This(), message: Message) !usize {
-            self.called += 1;
-            var next = message;
-            next.timestamp_ns += self.delta_ns;
-            if (self.out) |out| {
-                try out.emit(next);
+        fn validateRejectsEmptyBuilder(testing: anytype) !void {
+            const result = comptime blk: {
+                const builder = Builder(.{}).init();
+                break :blk builder.validate();
+            };
+
+            try testing.expectError(error.EmptyBuilder, result);
+        }
+
+        fn validateRejectsUnterminatedSwitch(testing: anytype) !void {
+            const result = comptime blk: {
+                var builder = Builder(.{}).init();
+                builder.beginSwitch();
+                builder.case(.button_gesture);
+                builder.node(.a);
+                break :blk builder.validate();
+            };
+
+            try testing.expectError(error.UnterminatedSwitch, result);
+        }
+
+        fn validateRejectsDuplicateCase(testing: anytype) !void {
+            const result = comptime blk: {
+                var builder = Builder(.{}).init();
+                builder.beginSwitch();
+                builder.case(.button_gesture);
+                builder.node(.a);
+                builder.case(.button_gesture);
+                builder.node(.b);
+                builder.endSwitch();
+                break :blk builder.validate();
+            };
+
+            try testing.expectError(error.DuplicateCase, result);
+        }
+
+        fn buildHandlesNestedSwitches(testing: anytype) !void {
+            const Built = comptime blk: {
+                var builder = Builder(.{}).init();
+                builder.node(.a);
+                builder.beginSwitch();
+                builder.case(.button_gesture);
+                builder.beginSwitch();
+                builder.case(.button_gesture);
+                builder.node(.b);
+                builder.endSwitch();
+                builder.case(.raw_single_button);
+                builder.node(.d);
+                builder.endSwitch();
+                builder.node(.e);
+                break :blk builder.make();
+            };
+
+            const Trace = struct {
+                ids: [8]u8 = undefined,
+                len: usize = 0,
+
+                pub fn reset(self: *@This()) void {
+                    self.len = 0;
+                }
+
+                pub fn append(self: *@This(), id: u8) void {
+                    self.ids[self.len] = id;
+                    self.len += 1;
+                }
+            };
+
+            const Forward = struct {
+                out: ?Emitter = null,
+                id: u8,
+                trace: *Trace,
+
+                pub fn bindOutput(self: *@This(), out: Emitter) void {
+                    self.out = out;
+                }
+
+                pub fn process(self: *@This(), message: Message) !usize {
+                    self.trace.append(self.id);
+                    if (self.out) |out| {
+                        try out.emit(message);
+                    }
+                    return 1;
+                }
+            };
+
+            var trace = Trace{};
+            var a_impl = Forward{ .id = 1, .trace = &trace };
+            var b_impl = Forward{ .id = 2, .trace = &trace };
+            var d_impl = Forward{ .id = 4, .trace = &trace };
+            var e_impl = Forward{ .id = 5, .trace = &trace };
+
+            var config: Built.Config = .{
+                .a = Node.init(Forward, &a_impl),
+                .b = Node.init(Forward, &b_impl),
+                .d = Node.init(Forward, &d_impl),
+                .e = Node.init(Forward, &e_impl),
+            };
+
+            var root = Built.build(&config);
+
+            trace.reset();
+            _ = try root.process(.{
+                .origin = .source,
+                .body = .{
+                    .button_gesture = .{
+                        .source_id = 1,
+                        .gesture = .{ .click = 1 },
+                    },
+                },
+            });
+            try testing.expectEqual(@as(usize, 3), trace.len);
+            try testing.expectEqual(@as(u8, 1), trace.ids[0]);
+            try testing.expectEqual(@as(u8, 2), trace.ids[1]);
+            try testing.expectEqual(@as(u8, 5), trace.ids[2]);
+
+            trace.reset();
+            _ = try root.process(.{
+                .origin = .source,
+                .body = .{
+                    .raw_single_button = .{
+                        .source_id = 1,
+                        .pressed = true,
+                    },
+                },
+            });
+            try testing.expectEqual(@as(usize, 3), trace.len);
+            try testing.expectEqual(@as(u8, 1), trace.ids[0]);
+            try testing.expectEqual(@as(u8, 4), trace.ids[1]);
+            try testing.expectEqual(@as(u8, 5), trace.ids[2]);
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
+
+            inline for (.{
+                TestCase.buildReturnsRootNode,
+                TestCase.validateRejectsEmptyBuilder,
+                TestCase.validateRejectsUnterminatedSwitch,
+                TestCase.validateRejectsDuplicateCase,
+                TestCase.buildHandlesNestedSwitches,
+            }) |case| {
+                case(testing) catch |err| {
+                    t.logFatal(@errorName(err));
+                    return false;
+                };
             }
-            return 1;
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    const Collector = struct {
-        count: usize = 0,
-        last_timestamp_ns: i128 = 0,
-
-        pub fn emit(self: *@This(), message: Message) !void {
-            self.count += 1;
-            self.last_timestamp_ns = message.timestamp_ns;
-        }
+    const Holder = struct {
+        var runner: Runner = .{};
     };
-
-    var a_impl = Forward{ .delta_ns = 1 };
-    var b_impl = Forward{ .delta_ns = 2 };
-    var c_impl = Forward{ .delta_ns = 4 };
-    var d_impl = Forward{ .delta_ns = 8 };
-    var e_impl = Forward{ .delta_ns = 16 };
-    var collector = Collector{};
-
-    var config: Builder.Config = .{
-        .a = Node.init(Forward, &a_impl),
-        .b = Node.init(Forward, &b_impl),
-        .c = Node.init(Forward, &c_impl),
-        .d = Node.init(Forward, &d_impl),
-        .e = Node.init(Forward, &e_impl),
-    };
-
-    var root = Builder.build(&config);
-    config.e.bindOutput(Emitter.init(&collector));
-
-    const emitted_button = try root.process(.{
-        .origin = .source,
-        .timestamp_ns = 10,
-        .body = .{
-            .button_gesture = .{
-                .source_id = 1,
-                .gesture = .{ .click = 1 },
-            },
-        },
-    });
-    try std.testing.expectEqual(@as(usize, 1), emitted_button);
-    try std.testing.expectEqual(@as(usize, 1), a_impl.called);
-    try std.testing.expectEqual(@as(usize, 1), b_impl.called);
-    try std.testing.expectEqual(@as(usize, 1), c_impl.called);
-    try std.testing.expectEqual(@as(usize, 0), d_impl.called);
-    try std.testing.expectEqual(@as(usize, 1), e_impl.called);
-    try std.testing.expectEqual(@as(i128, 33), collector.last_timestamp_ns);
-
-    const emitted_raw = try root.process(.{
-        .origin = .source,
-        .timestamp_ns = 15,
-        .body = .{
-            .raw_single_button = .{
-                .source_id = 1,
-                .pressed = true,
-            },
-        },
-    });
-    try std.testing.expectEqual(@as(usize, 1), emitted_raw);
-    try std.testing.expectEqual(@as(usize, 2), a_impl.called);
-    try std.testing.expectEqual(@as(usize, 1), b_impl.called);
-    try std.testing.expectEqual(@as(usize, 1), c_impl.called);
-    try std.testing.expectEqual(@as(usize, 1), d_impl.called);
-    try std.testing.expectEqual(@as(usize, 2), e_impl.called);
-    try std.testing.expectEqual(@as(i128, 40), collector.last_timestamp_ns);
-
-    const emitted_tick = try root.process(.{
-        .origin = .timer,
-        .timestamp_ns = 20,
-        .body = .{
-            .tick = .{},
-        },
-    });
-    try std.testing.expectEqual(@as(usize, 1), emitted_tick);
-    try std.testing.expectEqual(@as(usize, 3), a_impl.called);
-    try std.testing.expectEqual(@as(usize, 2), b_impl.called);
-    try std.testing.expectEqual(@as(usize, 2), c_impl.called);
-    try std.testing.expectEqual(@as(usize, 2), d_impl.called);
-    try std.testing.expectEqual(@as(usize, 4), e_impl.called);
-    try std.testing.expectEqual(@as(i128, 43), collector.last_timestamp_ns);
-    try std.testing.expectEqual(@as(usize, 4), collector.count);
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

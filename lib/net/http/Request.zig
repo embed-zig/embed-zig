@@ -9,6 +9,7 @@ const url_mod = @import("../url.zig");
 const Context = @import("context").Context;
 const ReadCloser = @import("ReadCloser.zig");
 const Header = @import("Header.zig");
+const testing_api = @import("testing");
 
 const Request = @This();
 
@@ -152,188 +153,201 @@ pub fn addHeaders(self: *Request, headers: []const Header) std.mem.Allocator.Err
     if (old_owned) |owned| self.allocator.free(owned);
 }
 
-test "net/unit_tests/http/Request/init_parses_url_and_defaults_empty_method_to_GET" {
-    const req = try Request.init(std.testing.allocator, "", "https://example.com/api?q=1");
-    try std.testing.expectEqualStrings("GET", req.effectiveMethod());
-    try std.testing.expectEqualStrings("https", req.url.scheme);
-    try std.testing.expectEqualStrings("example.com", req.url.host);
-    try std.testing.expectEqualStrings("/api", req.url.path);
-    try std.testing.expectEqualStrings("q=1", req.url.raw_query);
-    try std.testing.expectEqualStrings("HTTP/1.1", req.proto);
-    try std.testing.expectEqual(@as(u8, 1), req.proto_major);
-    try std.testing.expectEqual(@as(u8, 1), req.proto_minor);
-    try std.testing.expectEqual(@as(usize, 0), req.transfer_encoding.len);
-    try std.testing.expectEqual(@as(usize, 0), req.trailer.len);
-    try std.testing.expect(req.get_body == null);
-    try std.testing.expectEqualStrings("", req.request_uri);
-    try std.testing.expect(req.body() == null);
-    try std.testing.expect(req.context() == null);
-}
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-test "net/unit_tests/http/Request/effectiveHost_prefers_explicit_Host_override" {
-    var req = try Request.init(std.testing.allocator, "POST", "https://example.com/upload");
-    req.host = "api.example.com";
-
-    try std.testing.expectEqualStrings("api.example.com", req.effectiveHost());
-}
-
-test "net/unit_tests/http/Request/withContext_replaces_request_context" {
-    const req = try Request.init(std.testing.allocator, "GET", "https://example.com");
-
-    const gen = struct {
-        const FakeRoot = struct {
-            allocator: std.mem.Allocator = std.testing.allocator,
-            tree: Context.TreeLink = .{},
-            tree_rw: std.Thread.RwLock = .{},
-        };
-
-        fn errFn(_: *anyopaque) ?anyerror {
-            return null;
-        }
-        fn deadlineFn(_: *anyopaque) ?i128 {
-            return 5000;
-        }
-        fn valueFn(_: *anyopaque, _: *const anyopaque) ?*const anyopaque {
-            return null;
-        }
-        fn waitFn(_: *anyopaque, _: ?i64) ?anyerror {
-            return null;
-        }
-        fn cancelFn(_: *anyopaque) void {}
-        fn cancelWithCauseFn(_: *anyopaque, _: anyerror) void {}
-        fn propagateCancelWithCauseFn(_: *anyopaque, _: anyerror) void {}
-        fn deinitFn(_: *anyopaque) void {}
-        fn treeFn(ptr: *anyopaque) *Context.TreeLink {
-            const self: *FakeRoot = @ptrCast(@alignCast(ptr));
-            return &self.tree;
-        }
-        fn treeLockFn(ptr: *anyopaque) *anyopaque {
-            const self: *FakeRoot = @ptrCast(@alignCast(ptr));
-            return @ptrCast(&self.tree_rw);
-        }
-        fn reparentFn(_: *anyopaque, _: ?Context) void {}
-        fn lockSharedFn(ptr: *anyopaque) void {
-            const self: *FakeRoot = @ptrCast(@alignCast(ptr));
-            self.tree_rw.lockShared();
-        }
-        fn unlockSharedFn(ptr: *anyopaque) void {
-            const self: *FakeRoot = @ptrCast(@alignCast(ptr));
-            self.tree_rw.unlockShared();
-        }
-        fn lockFn(ptr: *anyopaque) void {
-            const self: *FakeRoot = @ptrCast(@alignCast(ptr));
-            self.tree_rw.lock();
-        }
-        fn unlockFn(ptr: *anyopaque) void {
-            const self: *FakeRoot = @ptrCast(@alignCast(ptr));
-            self.tree_rw.unlock();
-        }
-    };
-
-    const fake_vtable: Context.VTable = .{
-        .errFn = gen.errFn,
-        .deadlineFn = gen.deadlineFn,
-        .valueFn = gen.valueFn,
-        .waitFn = gen.waitFn,
-        .cancelFn = gen.cancelFn,
-        .cancelWithCauseFn = gen.cancelWithCauseFn,
-        .propagateCancelWithCauseFn = gen.propagateCancelWithCauseFn,
-        .deinitFn = gen.deinitFn,
-        .treeFn = gen.treeFn,
-        .treeLockFn = gen.treeLockFn,
-        .reparentFn = gen.reparentFn,
-        .lockSharedFn = gen.lockSharedFn,
-        .unlockSharedFn = gen.unlockSharedFn,
-        .lockFn = gen.lockFn,
-        .unlockFn = gen.unlockFn,
-    };
-    var sentinel: gen.FakeRoot = .{};
-    const fake_ctx = Context.init(&sentinel, &fake_vtable, std.testing.allocator);
-
-    const req_with_ctx = req.withContext(fake_ctx);
-
-    try std.testing.expect(req.context() == null);
-    try std.testing.expect(req_with_ctx.context() != null);
-    try std.testing.expectEqual(@as(?i128, 5000), req_with_ctx.context().?.deadline());
-}
-
-test "net/unit_tests/http/Request/withTrailers_replaces_request_trailers" {
-    const trailers = [_]Header{
-        Header.init("X-Trace", "1"),
-    };
-
-    const req = try Request.init(std.testing.allocator, "POST", "http://example.com/upload");
-    const req_with_trailers = req.withTrailers(&trailers);
-
-    try std.testing.expectEqual(@as(usize, 0), req.trailer.len);
-    try std.testing.expectEqual(@as(usize, 1), req_with_trailers.trailer.len);
-    try std.testing.expectEqualStrings("X-Trace", req_with_trailers.trailer[0].name);
-}
-
-test "net/unit_tests/http/Request/addHeader_appends_a_single_header" {
-    var req = try Request.init(std.testing.allocator, "GET", "https://example.com");
-    defer req.deinit();
-
-    try req.addHeader(Header.accept, "application/dns-message");
-
-    try std.testing.expectEqual(@as(usize, 1), req.header.len);
-    try std.testing.expectEqualStrings(Header.accept, req.header[0].name);
-    try std.testing.expectEqualStrings("application/dns-message", req.header[0].value);
-}
-
-test "net/unit_tests/http/Request/addHeaders_preserves_existing_headers" {
-    var req = try Request.init(std.testing.allocator, "POST", "https://example.com");
-    defer req.deinit();
-
-    try req.addHeader("X-First", "1");
-    try req.addHeaders(&.{
-        Header.init("X-Second", "2"),
-        Header.init("X-Third", "3"),
-    });
-
-    try std.testing.expectEqual(@as(usize, 3), req.header.len);
-    try std.testing.expectEqualStrings("X-First", req.header[0].name);
-    try std.testing.expectEqualStrings("X-Second", req.header[1].name);
-    try std.testing.expectEqualStrings("X-Third", req.header[2].name);
-}
-
-test "net/unit_tests/http/Request/withGetBody_stores_request_body_factory" {
-    const Factory = struct {
-        payload: []const u8,
-
-        const Body = struct {
-            payload: []const u8,
-            offset: usize = 0,
-
-            pub fn read(self: *@This(), buf: []u8) anyerror!usize {
-                const remaining = self.payload[self.offset..];
-                const n = @min(buf.len, remaining.len);
-                @memcpy(buf[0..n], remaining[0..n]);
-                self.offset += n;
-                return n;
+            {
+                const req = try Request.init(allocator, "", "https://example.com/api?q=1");
+                try testing.expectEqualStrings("GET", req.effectiveMethod());
+                try testing.expectEqualStrings("https", req.url.scheme);
+                try testing.expectEqualStrings("example.com", req.url.host);
+                try testing.expectEqualStrings("/api", req.url.path);
+                try testing.expectEqualStrings("q=1", req.url.raw_query);
+                try testing.expectEqualStrings("HTTP/1.1", req.proto);
+                try testing.expectEqual(@as(u8, 1), req.proto_major);
+                try testing.expectEqual(@as(u8, 1), req.proto_minor);
+                try testing.expectEqual(@as(usize, 0), req.transfer_encoding.len);
+                try testing.expectEqual(@as(usize, 0), req.trailer.len);
+                try testing.expect(req.get_body == null);
+                try testing.expectEqualStrings("", req.request_uri);
+                try testing.expect(req.body() == null);
+                try testing.expect(req.context() == null);
             }
 
-            pub fn close(self: *@This()) void {
-                std.testing.allocator.destroy(self);
+            {
+                var req = try Request.init(allocator, "POST", "https://example.com/upload");
+                req.host = "api.example.com";
+                try testing.expectEqualStrings("api.example.com", req.effectiveHost());
             }
-        };
 
-        pub fn getBody(self: *@This()) anyerror!ReadCloser {
-            const fresh_body = try std.testing.allocator.create(Body);
-            fresh_body.* = .{ .payload = self.payload };
-            return ReadCloser.init(fresh_body);
+            {
+                const req = try Request.init(allocator, "GET", "https://example.com");
+
+                const gen = struct {
+                    const FakeRoot = struct {
+                        allocator: lib.mem.Allocator,
+                        tree: Context.TreeLink = .{},
+                        tree_rw: lib.Thread.RwLock = .{},
+                    };
+
+                    fn errFn(_: *anyopaque) ?anyerror {
+                        return null;
+                    }
+                    fn deadlineFn(_: *anyopaque) ?i128 {
+                        return 5000;
+                    }
+                    fn valueFn(_: *anyopaque, _: *const anyopaque) ?*const anyopaque {
+                        return null;
+                    }
+                    fn waitFn(_: *anyopaque, _: ?i64) ?anyerror {
+                        return null;
+                    }
+                    fn cancelFn(_: *anyopaque) void {}
+                    fn cancelWithCauseFn(_: *anyopaque, _: anyerror) void {}
+                    fn propagateCancelWithCauseFn(_: *anyopaque, _: anyerror) void {}
+                    fn deinitFn(_: *anyopaque) void {}
+                    fn treeFn(ptr: *anyopaque) *Context.TreeLink {
+                        const self: *FakeRoot = @ptrCast(@alignCast(ptr));
+                        return &self.tree;
+                    }
+                    fn treeLockFn(ptr: *anyopaque) *anyopaque {
+                        const self: *FakeRoot = @ptrCast(@alignCast(ptr));
+                        return @ptrCast(&self.tree_rw);
+                    }
+                    fn reparentFn(_: *anyopaque, _: ?Context) void {}
+                    fn lockSharedFn(ptr: *anyopaque) void {
+                        const self: *FakeRoot = @ptrCast(@alignCast(ptr));
+                        self.tree_rw.lockShared();
+                    }
+                    fn unlockSharedFn(ptr: *anyopaque) void {
+                        const self: *FakeRoot = @ptrCast(@alignCast(ptr));
+                        self.tree_rw.unlockShared();
+                    }
+                    fn lockFn(ptr: *anyopaque) void {
+                        const self: *FakeRoot = @ptrCast(@alignCast(ptr));
+                        self.tree_rw.lock();
+                    }
+                    fn unlockFn(ptr: *anyopaque) void {
+                        const self: *FakeRoot = @ptrCast(@alignCast(ptr));
+                        self.tree_rw.unlock();
+                    }
+                };
+
+                const fake_vtable: Context.VTable = .{
+                    .errFn = gen.errFn,
+                    .deadlineFn = gen.deadlineFn,
+                    .valueFn = gen.valueFn,
+                    .waitFn = gen.waitFn,
+                    .cancelFn = gen.cancelFn,
+                    .cancelWithCauseFn = gen.cancelWithCauseFn,
+                    .propagateCancelWithCauseFn = gen.propagateCancelWithCauseFn,
+                    .deinitFn = gen.deinitFn,
+                    .treeFn = gen.treeFn,
+                    .treeLockFn = gen.treeLockFn,
+                    .reparentFn = gen.reparentFn,
+                    .lockSharedFn = gen.lockSharedFn,
+                    .unlockSharedFn = gen.unlockSharedFn,
+                    .lockFn = gen.lockFn,
+                    .unlockFn = gen.unlockFn,
+                };
+                var sentinel: gen.FakeRoot = .{ .allocator = allocator };
+                const fake_ctx = Context.init(&sentinel, &fake_vtable, allocator);
+
+                const req_with_ctx = req.withContext(fake_ctx);
+                try testing.expect(req.context() == null);
+                try testing.expect(req_with_ctx.context() != null);
+                try testing.expectEqual(@as(?i128, 5000), req_with_ctx.context().?.deadline());
+            }
+
+            {
+                const trailers = [_]Header{
+                    Header.init("X-Trace", "1"),
+                };
+
+                const req = try Request.init(allocator, "POST", "http://example.com/upload");
+                const req_with_trailers = req.withTrailers(&trailers);
+
+                try testing.expectEqual(@as(usize, 0), req.trailer.len);
+                try testing.expectEqual(@as(usize, 1), req_with_trailers.trailer.len);
+                try testing.expectEqualStrings("X-Trace", req_with_trailers.trailer[0].name);
+            }
+
+            {
+                var req = try Request.init(allocator, "GET", "https://example.com");
+                defer req.deinit();
+
+                try req.addHeader(Header.accept, "application/dns-message");
+                try testing.expectEqual(@as(usize, 1), req.header.len);
+                try testing.expectEqualStrings(Header.accept, req.header[0].name);
+                try testing.expectEqualStrings("application/dns-message", req.header[0].value);
+            }
+
+            {
+                var req = try Request.init(allocator, "POST", "https://example.com");
+                defer req.deinit();
+
+                try req.addHeader("X-First", "1");
+                try req.addHeaders(&.{
+                    Header.init("X-Second", "2"),
+                    Header.init("X-Third", "3"),
+                });
+
+                try testing.expectEqual(@as(usize, 3), req.header.len);
+                try testing.expectEqualStrings("X-First", req.header[0].name);
+                try testing.expectEqualStrings("X-Second", req.header[1].name);
+                try testing.expectEqualStrings("X-Third", req.header[2].name);
+            }
+
+            {
+                const Factory = struct {
+                    allocator: lib.mem.Allocator,
+                    payload: []const u8,
+
+                    const Body = struct {
+                        allocator: lib.mem.Allocator,
+                        payload: []const u8,
+                        offset: usize = 0,
+
+                        pub fn read(self: *@This(), buf: []u8) anyerror!usize {
+                            const remaining = self.payload[self.offset..];
+                            const n = @min(buf.len, remaining.len);
+                            @memcpy(buf[0..n], remaining[0..n]);
+                            self.offset += n;
+                            return n;
+                        }
+
+                        pub fn close(self: *@This()) void {
+                            self.allocator.destroy(self);
+                        }
+                    };
+
+                    pub fn getBody(self: *@This()) anyerror!ReadCloser {
+                        const fresh_body = try self.allocator.create(Body);
+                        fresh_body.* = .{
+                            .allocator = self.allocator,
+                            .payload = self.payload,
+                        };
+                        return ReadCloser.init(fresh_body);
+                    }
+                };
+
+                var factory = Factory{
+                    .allocator = allocator,
+                    .payload = "abc",
+                };
+                const req = try Request.init(allocator, "POST", "http://example.com/upload");
+                const req_with_get_body = req.withGetBody(GetBody.init(&factory));
+
+                try testing.expect(req.get_body == null);
+                try testing.expect(req_with_get_body.get_body != null);
+                var reader = try req_with_get_body.get_body.?.getBody();
+                defer reader.close();
+                var buf: [4]u8 = undefined;
+                try testing.expectEqual(@as(usize, 3), try reader.read(buf[0..3]));
+                try testing.expectEqualStrings("abc", buf[0..3]);
+            }
         }
-    };
-
-    var factory = Factory{ .payload = "abc" };
-    const req = try Request.init(std.testing.allocator, "POST", "http://example.com/upload");
-    const req_with_get_body = req.withGetBody(GetBody.init(&factory));
-
-    try std.testing.expect(req.get_body == null);
-    try std.testing.expect(req_with_get_body.get_body != null);
-    var reader = try req_with_get_body.get_body.?.getBody();
-    defer reader.close();
-    var buf: [4]u8 = undefined;
-    try std.testing.expectEqual(@as(usize, 3), try reader.read(buf[0..3]));
-    try std.testing.expectEqualStrings("abc", buf[0..3]);
+    }.run);
 }

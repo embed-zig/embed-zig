@@ -39,5 +39,6 @@ example, HTTP header rules belong in `net/http` even when they use MIME types.
 
 ## Tests
 
-`mime/unit_tests` lives next to `mime/MediaType.zig` and is imported from the
-root package file.
+`mime` keeps unit coverage next to `mime/MediaType.zig` through a file-local
+`TestRunner`, then aggregates it via `mime.test_runner.unit` for the shared
+test entrypoints.

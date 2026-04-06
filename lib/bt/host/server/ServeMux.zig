@@ -9,8 +9,10 @@
 const embed = @import("embed");
 const bt = @import("../../../bt.zig");
 const att = @import("../att.zig");
+const sync = @import("sync");
 const xfer = @import("../xfer.zig");
 const Chunk = xfer.Chunk;
+const testing_api = @import("testing");
 
 pub const Request = struct {
     conn_handle: u16,
@@ -374,109 +376,128 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
     };
 }
 
-test "bt/unit_tests/host/server/ServeMux/onRequest_without_session_returns_att_error" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const DummySubscription = struct {
+                pub fn connHandle(_: *const @This()) u16 {
+                    return 0;
+                }
+                pub fn serviceUuid(_: *const @This()) u16 {
+                    return 0;
+                }
+                pub fn charUuid(_: *const @This()) u16 {
+                    return 0;
+                }
+                pub fn attMtu(_: *const @This()) u16 {
+                    return 23;
+                }
+                pub fn canNotify(_: *const @This()) bool {
+                    return true;
+                }
+                pub fn notify(_: *const @This(), _: []const u8) !void {}
+                pub fn indicate(_: *const @This(), _: []const u8) !void {}
+                pub fn deinit(_: *const @This()) void {}
+            };
 
-    const DummySubscription = struct {
-        pub fn connHandle(_: *@This()) u16 {
-            return 0;
+            const Dummy = struct {
+                fn Channel(comptime T: type) type {
+                    return struct {
+                        pub fn init(_: lib.mem.Allocator, _: usize) !@This() {
+                            return .{};
+                        }
+                        pub fn deinit(_: *@This()) void {}
+                        pub fn close(_: *@This()) void {}
+                        pub fn recvTimeout(_: *@This(), _: u32) !sync.channel.RecvResult(T) {
+                            return error.Unexpected;
+                        }
+                        pub fn recv(_: *@This()) !sync.channel.RecvResult(T) {
+                            return error.Unexpected;
+                        }
+                        pub fn send(_: *@This(), _: T) !sync.channel.SendResult() {
+                            return .{ .ok = true };
+                        }
+                    };
+                }
+            };
+
+            const FakeServer = struct {
+                pub const Subscription = DummySubscription;
+                pub const Handler = struct {
+                    onRequest: ?*const fn (?*anyopaque, *const bt.Peripheral.Request, *bt.Peripheral.ResponseWriter) void = null,
+                    onSubscription: ?*const fn (?*anyopaque, Subscription) void = null,
+                };
+                const ChannelFactoryImpl = sync.Channel(Dummy.Channel);
+
+                pub fn ChannelFactory(comptime T: type) type {
+                    return ChannelFactoryImpl(T);
+                }
+            };
+
+            const WriterState = struct {
+                ok_count: usize = 0,
+                err_code: ?u8 = null,
+
+                fn writeFn(_: *anyopaque, _: []const u8) void {}
+                fn okFn(ctx: *anyopaque) void {
+                    const self: *@This() = @ptrCast(@alignCast(ctx));
+                    self.ok_count += 1;
+                }
+                fn errFn(ctx: *anyopaque, code: u8) void {
+                    const self: *@This() = @ptrCast(@alignCast(ctx));
+                    self.err_code = code;
+                }
+            };
+
+            const Impl = make(lib, FakeServer);
+            var mux = try Impl.init(lib.testing.allocator);
+            defer mux.deinit();
+
+            var writer_state = WriterState{};
+            var rw = bt.Peripheral.ResponseWriter{
+                ._impl = &writer_state,
+                ._write_fn = WriterState.writeFn,
+                ._ok_fn = WriterState.okFn,
+                ._err_fn = WriterState.errFn,
+            };
+            const req = bt.Peripheral.Request{
+                .op = .write,
+                .conn_handle = 1,
+                .service_uuid = 0x180D,
+                .char_uuid = 0x2A58,
+                .data = &Chunk.read_start_magic,
+            };
+
+            mux.handler().onRequest.?(&mux, &req, &rw);
+
+            try lib.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
+            try lib.testing.expectEqual(@as(?u8, @intFromEnum(att.ErrorCode.request_not_supported)), writer_state.err_code);
+        }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
         }
 
-        pub fn serviceUuid(_: *@This()) u16 {
-            return 0;
-        }
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-        pub fn charUuid(_: *@This()) u16 {
-            return 0;
-        }
-
-        pub fn attMtu(_: *@This()) u16 {
-            return 23;
-        }
-
-        pub fn canNotify(_: *@This()) bool {
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
             return true;
         }
 
-        pub fn notify(_: *@This(), _: []const u8) !void {}
-
-        pub fn indicate(_: *@This(), _: []const u8) !void {}
-
-        pub fn deinit(_: *@This()) void {}
-    };
-
-    const Dummy = struct {
-        fn Channel(comptime T: type) type {
-            return struct {
-                pub fn make(_: std.mem.Allocator, _: usize) !@This() {
-                    return .{};
-                }
-
-                pub fn deinit(_: *@This()) void {}
-                pub fn close(_: *@This()) void {}
-                pub fn recvTimeout(_: *@This(), _: u32) !struct { ok: bool, value: T } {
-                    return error.Unexpected;
-                }
-                pub fn recv(_: *@This()) !struct { ok: bool, value: T } {
-                    return error.Unexpected;
-                }
-                pub fn send(_: *@This(), _: T) !struct { ok: bool } {
-                    return .{ .ok = true };
-                }
-            };
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
-
-    const FakeServer = struct {
-        pub const Subscription = DummySubscription;
-        pub const Handler = struct {
-            onRequest: ?*const fn (?*anyopaque, *const bt.Peripheral.Request, *bt.Peripheral.ResponseWriter) void = null,
-            onSubscription: ?*const fn (?*anyopaque, Subscription) void = null,
-        };
-
-        pub fn ChannelFactory(comptime T: type) type {
-            return Dummy.Channel(T);
-        }
+    const Holder = struct {
+        var runner: Runner = .{};
     };
-
-    const WriterState = struct {
-        ok_count: usize = 0,
-        err_code: ?u8 = null,
-
-        fn writeFn(_: *anyopaque, _: []const u8) void {}
-
-        fn okFn(ctx: *anyopaque) void {
-            const self: *@This() = @ptrCast(@alignCast(ctx));
-            self.ok_count += 1;
-        }
-
-        fn errFn(ctx: *anyopaque, code: u8) void {
-            const self: *@This() = @ptrCast(@alignCast(ctx));
-            self.err_code = code;
-        }
-    };
-
-    const Impl = make(std, FakeServer);
-    var mux = try Impl.init(std.testing.allocator);
-    defer mux.deinit();
-
-    var writer_state = WriterState{};
-    var rw = bt.Peripheral.ResponseWriter{
-        ._impl = &writer_state,
-        ._write_fn = WriterState.writeFn,
-        ._ok_fn = WriterState.okFn,
-        ._err_fn = WriterState.errFn,
-    };
-    const req = bt.Peripheral.Request{
-        .op = .write,
-        .conn_handle = 1,
-        .service_uuid = 0x180D,
-        .char_uuid = 0x2A58,
-        .data = &Chunk.read_start_magic,
-    };
-
-    mux.handler().onRequest.?(&mux, &req, &rw);
-
-    try std.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
-    try std.testing.expectEqual(@as(?u8, @intFromEnum(att.ErrorCode.request_not_supported)), writer_state.err_code);
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

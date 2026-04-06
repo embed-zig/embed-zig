@@ -23,6 +23,7 @@ const netip = @import("netip.zig");
 const tls_mod = @import("tls.zig");
 const context_mod = @import("context");
 const sync = @import("sync");
+const testing_api = @import("testing");
 
 pub fn Resolver(comptime lib: type) type {
     const posix = lib.posix;
@@ -1158,59 +1159,56 @@ fn buildResolverTestAResponse(comptime R: type, req: []const u8, flags: u16, qdc
     return pos;
 }
 
-test "net/unit_tests/resolver/parse_response_rejects_packets_without_qr" {
-    const testing = std.testing;
-    const R = Resolver(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const R = Resolver(lib);
 
-    var req_buf: [512]u8 = undefined;
-    const req_len = try R.buildQuery(&req_buf, "example.com", R.QTYPE_A, 0x1234);
+            {
+                var req_buf: [512]u8 = undefined;
+                const req_len = try R.buildQuery(&req_buf, "example.com", R.QTYPE_A, 0x1234);
 
-    var resp_buf: [512]u8 = undefined;
-    const resp_len = try buildResolverTestAResponse(R, req_buf[0..req_len], 0x0180, 1, &resp_buf);
+                var resp_buf: [512]u8 = undefined;
+                const resp_len = try buildResolverTestAResponse(R, req_buf[0..req_len], 0x0180, 1, &resp_buf);
 
-    var addrs: [1]netip.Addr = undefined;
-    try testing.expectError(error.InvalidResponse, R.parseResponse(resp_buf[0..resp_len], R.QTYPE_A, &addrs));
-}
+                var addrs: [1]netip.Addr = undefined;
+                try testing.expectError(error.InvalidResponse, R.parseResponse(resp_buf[0..resp_len], R.QTYPE_A, &addrs));
+            }
 
-test "net/unit_tests/resolver/parse_response_rejects_truncated_udp_packets" {
-    const testing = std.testing;
-    const R = Resolver(std);
+            {
+                var req_buf: [512]u8 = undefined;
+                const req_len = try R.buildQuery(&req_buf, "example.com", R.QTYPE_A, 0x1234);
 
-    var req_buf: [512]u8 = undefined;
-    const req_len = try R.buildQuery(&req_buf, "example.com", R.QTYPE_A, 0x1234);
+                var resp_buf: [512]u8 = undefined;
+                const resp_len = try buildResolverTestAResponse(R, req_buf[0..req_len], 0x8380, 1, &resp_buf);
 
-    var resp_buf: [512]u8 = undefined;
-    const resp_len = try buildResolverTestAResponse(R, req_buf[0..req_len], 0x8380, 1, &resp_buf);
+                var addrs: [1]netip.Addr = undefined;
+                try testing.expectError(error.InvalidResponse, R.parseResponse(resp_buf[0..resp_len], R.QTYPE_A, &addrs));
+            }
 
-    var addrs: [1]netip.Addr = undefined;
-    try testing.expectError(error.InvalidResponse, R.parseResponse(resp_buf[0..resp_len], R.QTYPE_A, &addrs));
-}
+            {
+                var req_buf: [512]u8 = undefined;
+                const req_len = try R.buildQuery(&req_buf, "example.com", R.QTYPE_A, 0x1234);
 
-test "net/unit_tests/resolver/parse_response_rejects_unexpected_question_count" {
-    const testing = std.testing;
-    const R = Resolver(std);
+                var resp_buf: [512]u8 = undefined;
+                const resp_len = try buildResolverTestAResponse(R, req_buf[0..req_len], 0x8180, 0, &resp_buf);
 
-    var req_buf: [512]u8 = undefined;
-    const req_len = try R.buildQuery(&req_buf, "example.com", R.QTYPE_A, 0x1234);
+                var addrs: [1]netip.Addr = undefined;
+                try testing.expectError(error.InvalidResponse, R.parseResponse(resp_buf[0..resp_len], R.QTYPE_A, &addrs));
+            }
 
-    var resp_buf: [512]u8 = undefined;
-    const resp_len = try buildResolverTestAResponse(R, req_buf[0..req_len], 0x8180, 0, &resp_buf);
+            {
+                var req_buf: [512]u8 = undefined;
+                const req_len = try R.buildQuery(&req_buf, "example.com", R.QTYPE_A, 0x1234);
 
-    var addrs: [1]netip.Addr = undefined;
-    try testing.expectError(error.InvalidResponse, R.parseResponse(resp_buf[0..resp_len], R.QTYPE_A, &addrs));
-}
+                var resp_buf: [512]u8 = undefined;
+                const resp_len = try buildResolverTestAResponse(R, req_buf[0..req_len], 0x8180, 1, &resp_buf);
+                resp_buf[12] = 0x40;
 
-test "net/unit_tests/resolver/parse_response_rejects_invalid_name_label_length" {
-    const testing = std.testing;
-    const R = Resolver(std);
-
-    var req_buf: [512]u8 = undefined;
-    const req_len = try R.buildQuery(&req_buf, "example.com", R.QTYPE_A, 0x1234);
-
-    var resp_buf: [512]u8 = undefined;
-    const resp_len = try buildResolverTestAResponse(R, req_buf[0..req_len], 0x8180, 1, &resp_buf);
-    resp_buf[12] = 0x40;
-
-    var addrs: [1]netip.Addr = undefined;
-    try testing.expectError(error.InvalidResponse, R.parseResponse(resp_buf[0..resp_len], R.QTYPE_A, &addrs));
+                var addrs: [1]netip.Addr = undefined;
+                try testing.expectError(error.InvalidResponse, R.parseResponse(resp_buf[0..resp_len], R.QTYPE_A, &addrs));
+            }
+        }
+    }.run);
 }

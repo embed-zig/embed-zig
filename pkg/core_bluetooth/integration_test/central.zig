@@ -17,6 +17,6 @@ test "core_bluetooth/integration_tests/central" {
     var t = testing.T.new(std, .core_bluetooth_central);
     defer t.deinit();
 
-    t.run("central", bt.test_runner.central.make(std, &host));
+    t.run("central", bt.test_runner.integration.central.makeWithHost(std, &host));
     if (!t.wait()) return error.TestFailed;
 }

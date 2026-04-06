@@ -1,5 +1,6 @@
 const std = @import("std");
 const Stack = @This();
+const testing_api = @import("testing");
 
 ptr: *anyopaque,
 vtable: *const VTable,
@@ -135,152 +136,157 @@ pub fn init(pointer: *anyopaque, vtable: *const VTable) Stack {
     };
 }
 
-test "net/unit_tests/stack/Stack/init_forwards_interface_operations" {
-    const S = Stack;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const S = Stack;
 
-    const Impl = struct {
-        default_iface: ?S.Iface = null,
-        add_prefix_called: bool = false,
-        del_prefix_called: bool = false,
-        deinit_called: bool = false,
+            const Impl = struct {
+                default_iface: ?S.Iface = null,
+                add_prefix_called: bool = false,
+                del_prefix_called: bool = false,
+                deinit_called: bool = false,
 
-        fn makeInfo(id: u32, name: []const u8, kind: S.IfaceKind, backend: S.IfaceBackend, mtu: usize) S.IfaceInfo {
-            var info: S.IfaceInfo = .{
-                .iface = .{ .id = id },
-                .kind = kind,
-                .backend = backend,
-                .mtu = mtu,
+                fn makeInfo(id: u32, name: []const u8, kind: S.IfaceKind, backend: S.IfaceBackend, mtu: usize) S.IfaceInfo {
+                    var info: S.IfaceInfo = .{
+                        .iface = .{ .id = id },
+                        .kind = kind,
+                        .backend = backend,
+                        .mtu = mtu,
+                    };
+                    std.mem.copyForwards(u8, info.name[0..name.len], name);
+                    info.name_len = @intCast(name.len);
+                    return info;
+                }
+
+                pub fn listIfaces(_: *@This(), out: []S.IfaceInfo) S.ListIfacesError!usize {
+                    if (out.len == 0) return 0;
+                    out[0] = makeInfo(7, "utun0", .ip, .utun, 1380);
+                    return 1;
+                }
+
+                pub fn getIfaceInfo(_: *@This(), iface: S.Iface) S.GetIfaceInfoError!S.IfaceInfo {
+                    if (iface.id != 7) return error.InvalidIface;
+                    return makeInfo(7, "utun0", .ip, .utun, 1380);
+                }
+
+                pub fn defaultIface(self: *@This()) S.DefaultIfaceError!?S.Iface {
+                    return self.default_iface;
+                }
+
+                pub fn setDefaultIface(self: *@This(), iface: S.Iface) S.SetDefaultIfaceError!void {
+                    if (iface.id != 7) return error.InvalidIface;
+                    self.default_iface = iface;
+                }
+
+                pub fn addAddr(self: *@This(), iface: S.Iface, prefix: S.Prefix) S.AddrError!void {
+                    if (iface.id != 7) return error.InvalidIface;
+                    switch (prefix) {
+                        .ipv4 => |p| if (p.len > 32) return error.InvalidPrefixLen,
+                        .ipv6 => |p| if (p.len > 128) return error.InvalidPrefixLen,
+                    }
+                    self.add_prefix_called = true;
+                }
+
+                pub fn delAddr(self: *@This(), iface: S.Iface, prefix: S.Prefix) S.AddrError!void {
+                    if (iface.id != 7) return error.InvalidIface;
+                    switch (prefix) {
+                        .ipv4 => |p| if (p.len > 32) return error.InvalidPrefixLen,
+                        .ipv6 => |p| if (p.len > 128) return error.InvalidPrefixLen,
+                    }
+                    self.del_prefix_called = true;
+                }
+
+                pub fn poll(_: *@This(), timeout_ms: ?u32) S.PollError!void {
+                    _ = timeout_ms;
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    self.deinit_called = true;
+                }
             };
-            std.mem.copyForwards(u8, info.name[0..name.len], name);
-            info.name_len = @intCast(name.len);
-            return info;
+
+            const TestVTable = S.VTable{
+                .listIfaces = struct {
+                    fn f(ptr: *anyopaque, out: []S.IfaceInfo) S.ListIfacesError!usize {
+                        const self: *Impl = @ptrCast(@alignCast(ptr));
+                        return self.listIfaces(out);
+                    }
+                }.f,
+                .getIfaceInfo = struct {
+                    fn f(ptr: *anyopaque, iface: S.Iface) S.GetIfaceInfoError!S.IfaceInfo {
+                        const self: *Impl = @ptrCast(@alignCast(ptr));
+                        return self.getIfaceInfo(iface);
+                    }
+                }.f,
+                .defaultIface = struct {
+                    fn f(ptr: *anyopaque) S.DefaultIfaceError!?S.Iface {
+                        const self: *Impl = @ptrCast(@alignCast(ptr));
+                        return self.defaultIface();
+                    }
+                }.f,
+                .setDefaultIface = struct {
+                    fn f(ptr: *anyopaque, iface: S.Iface) S.SetDefaultIfaceError!void {
+                        const self: *Impl = @ptrCast(@alignCast(ptr));
+                        return self.setDefaultIface(iface);
+                    }
+                }.f,
+                .addAddr = struct {
+                    fn f(ptr: *anyopaque, iface: S.Iface, prefix: S.Prefix) S.AddrError!void {
+                        const self: *Impl = @ptrCast(@alignCast(ptr));
+                        return self.addAddr(iface, prefix);
+                    }
+                }.f,
+                .delAddr = struct {
+                    fn f(ptr: *anyopaque, iface: S.Iface, prefix: S.Prefix) S.AddrError!void {
+                        const self: *Impl = @ptrCast(@alignCast(ptr));
+                        return self.delAddr(iface, prefix);
+                    }
+                }.f,
+                .poll = struct {
+                    fn f(ptr: *anyopaque, timeout_ms: ?u32) S.PollError!void {
+                        const self: *Impl = @ptrCast(@alignCast(ptr));
+                        return self.poll(timeout_ms);
+                    }
+                }.f,
+                .deinit = struct {
+                    fn f(ptr: *anyopaque) void {
+                        const self: *Impl = @ptrCast(@alignCast(ptr));
+                        self.deinit();
+                    }
+                }.f,
+            };
+
+            var impl = Impl{};
+            const stack = S.init(@ptrCast(&impl), &TestVTable);
+
+            var infos: [1]S.IfaceInfo = undefined;
+            const n = try stack.listIfaces(&infos);
+            try testing.expectEqual(@as(usize, 1), n);
+            try testing.expectEqualStrings("utun0", infos[0].getName());
+            try testing.expectEqual(S.IfaceKind.ip, infos[0].kind);
+            try testing.expectEqual(S.IfaceBackend.utun, infos[0].backend);
+
+            const iface = try stack.defaultIface();
+            try testing.expectEqual(@as(?S.Iface, null), iface);
+
+            try stack.setDefaultIface(.{ .id = 7 });
+            const default_iface = (try stack.defaultIface()).?;
+            try testing.expectEqual(@as(u32, 7), default_iface.id);
+
+            const info = try stack.getIfaceInfo(.{ .id = 7 });
+            try testing.expectEqual(@as(usize, 1380), info.mtu);
+
+            try stack.addAddr(.{ .id = 7 }, S.Prefix.initIp4(.{ 10, 0, 0, 1 }, 24));
+            try testing.expect(impl.add_prefix_called);
+
+            try stack.delAddr(.{ .id = 7 }, S.Prefix.initIp4(.{ 10, 0, 0, 1 }, 24));
+            try testing.expect(impl.del_prefix_called);
+
+            try stack.poll(0);
+            stack.deinit();
+            try testing.expect(impl.deinit_called);
         }
-
-        pub fn listIfaces(_: *@This(), out: []S.IfaceInfo) S.ListIfacesError!usize {
-            if (out.len == 0) return 0;
-            out[0] = makeInfo(7, "utun0", .ip, .utun, 1380);
-            return 1;
-        }
-
-        pub fn getIfaceInfo(_: *@This(), iface: S.Iface) S.GetIfaceInfoError!S.IfaceInfo {
-            if (iface.id != 7) return error.InvalidIface;
-            return makeInfo(7, "utun0", .ip, .utun, 1380);
-        }
-
-        pub fn defaultIface(self: *@This()) S.DefaultIfaceError!?S.Iface {
-            return self.default_iface;
-        }
-
-        pub fn setDefaultIface(self: *@This(), iface: S.Iface) S.SetDefaultIfaceError!void {
-            if (iface.id != 7) return error.InvalidIface;
-            self.default_iface = iface;
-        }
-
-        pub fn addAddr(self: *@This(), iface: S.Iface, prefix: S.Prefix) S.AddrError!void {
-            if (iface.id != 7) return error.InvalidIface;
-            switch (prefix) {
-                .ipv4 => |p| if (p.len > 32) return error.InvalidPrefixLen,
-                .ipv6 => |p| if (p.len > 128) return error.InvalidPrefixLen,
-            }
-            self.add_prefix_called = true;
-        }
-
-        pub fn delAddr(self: *@This(), iface: S.Iface, prefix: S.Prefix) S.AddrError!void {
-            if (iface.id != 7) return error.InvalidIface;
-            switch (prefix) {
-                .ipv4 => |p| if (p.len > 32) return error.InvalidPrefixLen,
-                .ipv6 => |p| if (p.len > 128) return error.InvalidPrefixLen,
-            }
-            self.del_prefix_called = true;
-        }
-
-        pub fn poll(_: *@This(), timeout_ms: ?u32) S.PollError!void {
-            _ = timeout_ms;
-        }
-
-        pub fn deinit(self: *@This()) void {
-            self.deinit_called = true;
-        }
-    };
-
-    const TestVTable = S.VTable{
-        .listIfaces = struct {
-            fn f(ptr: *anyopaque, out: []S.IfaceInfo) S.ListIfacesError!usize {
-                const self: *Impl = @ptrCast(@alignCast(ptr));
-                return self.listIfaces(out);
-            }
-        }.f,
-        .getIfaceInfo = struct {
-            fn f(ptr: *anyopaque, iface: S.Iface) S.GetIfaceInfoError!S.IfaceInfo {
-                const self: *Impl = @ptrCast(@alignCast(ptr));
-                return self.getIfaceInfo(iface);
-            }
-        }.f,
-        .defaultIface = struct {
-            fn f(ptr: *anyopaque) S.DefaultIfaceError!?S.Iface {
-                const self: *Impl = @ptrCast(@alignCast(ptr));
-                return self.defaultIface();
-            }
-        }.f,
-        .setDefaultIface = struct {
-            fn f(ptr: *anyopaque, iface: S.Iface) S.SetDefaultIfaceError!void {
-                const self: *Impl = @ptrCast(@alignCast(ptr));
-                return self.setDefaultIface(iface);
-            }
-        }.f,
-        .addAddr = struct {
-            fn f(ptr: *anyopaque, iface: S.Iface, prefix: S.Prefix) S.AddrError!void {
-                const self: *Impl = @ptrCast(@alignCast(ptr));
-                return self.addAddr(iface, prefix);
-            }
-        }.f,
-        .delAddr = struct {
-            fn f(ptr: *anyopaque, iface: S.Iface, prefix: S.Prefix) S.AddrError!void {
-                const self: *Impl = @ptrCast(@alignCast(ptr));
-                return self.delAddr(iface, prefix);
-            }
-        }.f,
-        .poll = struct {
-            fn f(ptr: *anyopaque, timeout_ms: ?u32) S.PollError!void {
-                const self: *Impl = @ptrCast(@alignCast(ptr));
-                return self.poll(timeout_ms);
-            }
-        }.f,
-        .deinit = struct {
-            fn f(ptr: *anyopaque) void {
-                const self: *Impl = @ptrCast(@alignCast(ptr));
-                self.deinit();
-            }
-        }.f,
-    };
-
-    var impl = Impl{};
-    const stack = S.init(@ptrCast(&impl), &TestVTable);
-
-    var infos: [1]S.IfaceInfo = undefined;
-    const n = try stack.listIfaces(&infos);
-    try std.testing.expectEqual(@as(usize, 1), n);
-    try std.testing.expectEqualStrings("utun0", infos[0].getName());
-    try std.testing.expectEqual(S.IfaceKind.ip, infos[0].kind);
-    try std.testing.expectEqual(S.IfaceBackend.utun, infos[0].backend);
-
-    const iface = try stack.defaultIface();
-    try std.testing.expectEqual(@as(?S.Iface, null), iface);
-
-    try stack.setDefaultIface(.{ .id = 7 });
-    const default_iface = (try stack.defaultIface()).?;
-    try std.testing.expectEqual(@as(u32, 7), default_iface.id);
-
-    const info = try stack.getIfaceInfo(.{ .id = 7 });
-    try std.testing.expectEqual(@as(usize, 1380), info.mtu);
-
-    try stack.addAddr(.{ .id = 7 }, S.Prefix.initIp4(.{ 10, 0, 0, 1 }, 24));
-    try std.testing.expect(impl.add_prefix_called);
-
-    try stack.delAddr(.{ .id = 7 }, S.Prefix.initIp4(.{ 10, 0, 0, 1 }, 24));
-    try std.testing.expect(impl.del_prefix_called);
-
-    try stack.poll(0);
-    stack.deinit();
-    try std.testing.expect(impl.deinit_called);
+    }.run);
 }

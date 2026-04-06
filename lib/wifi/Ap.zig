@@ -1,6 +1,7 @@
 //! Ap — type-erased low-level Wi-Fi access point interface.
 
 const types = @import("types.zig");
+const testing_api = @import("testing");
 
 const Ap = @This();
 
@@ -178,25 +179,55 @@ pub fn make(pointer: anytype) Ap {
     };
 }
 
-test "wifi/unit_tests/Ap_make_allows_missing_optional_introspection" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn makeAllowsMissingOptionalIntrospection() !void {
+            const Impl = struct {
+                pub fn start(_: *@This(), _: Config) StartError!void {}
+                pub fn stop(_: *@This()) void {}
+                pub fn disconnectClient(_: *@This(), _: MacAddr) void {}
+                pub fn getState(_: *@This()) State {
+                    return .idle;
+                }
+                pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Event) void) void {}
+                pub fn deinit(_: *@This()) void {}
+            };
 
-    const Impl = struct {
-        pub fn start(_: *@This(), _: Config) StartError!void {}
-        pub fn stop(_: *@This()) void {}
-        pub fn disconnectClient(_: *@This(), _: MacAddr) void {}
-        pub fn getState(_: *@This()) State {
-            return .idle;
+            var impl = Impl{};
+            const ap = make(&impl);
+
+            ap.removeEventHook(null, struct {
+                fn onEvent(_: ?*anyopaque, _: Event) void {}
+            }.onEvent);
+            try lib.testing.expect(ap.getMacAddr() == null);
         }
-        pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Event) void) void {}
-        pub fn deinit(_: *@This()) void {}
     };
 
-    var impl = Impl{};
-    const ap = make(&impl);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    ap.removeEventHook(null, struct {
-        fn onEvent(_: ?*anyopaque, _: Event) void {}
-    }.onEvent);
-    try std.testing.expect(ap.getMacAddr() == null);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.makeAllowsMissingOptionalIntrospection() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

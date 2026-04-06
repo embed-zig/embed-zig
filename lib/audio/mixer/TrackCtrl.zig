@@ -1,6 +1,7 @@
 //! audio.mixer.TrackCtrl — track control VTable surface.
 
 const root = @This();
+const testing_api = @import("testing");
 
 ptr: *anyopaque,
 vtable: *const VTable,
@@ -242,72 +243,103 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
     };
 }
 
-test "audio/unit_tests/TrackCtrl_make_surface" {
-    const std = @import("std");
-
-    const State = struct {
-        current_gain: f32 = 1.0,
-        current_label: []const u8 = "made",
-        bytes: usize = 11,
-    };
-
-    const MakeImpl = struct {
-        pub const Config = struct {
-            allocator: std.mem.Allocator,
-            state: *State,
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        const State = struct {
+            current_gain: f32 = 1.0,
+            current_label: []const u8 = "made",
+            bytes: usize = 11,
         };
 
-        state: *State,
-
-        pub fn init(config: Config) !@This() {
-            return .{
-                .state = config.state,
+        const MakeImpl = struct {
+            pub const Config = struct {
+                allocator: lib.mem.Allocator,
+                state: *State,
             };
-        }
 
-        pub fn setGain(self: *@This(), value: f32) void {
-            self.state.current_gain = value;
-        }
+            state: *State,
 
-        pub fn gain(self: *@This()) f32 {
-            return self.state.current_gain;
-        }
+            pub fn init(config: Config) !@This() {
+                return .{
+                    .state = config.state,
+                };
+            }
 
-        pub fn label(self: *@This()) []const u8 {
-            return self.state.current_label;
-        }
+            pub fn setGain(self: *@This(), value: f32) void {
+                self.state.current_gain = value;
+            }
 
-        pub fn readBytes(self: *@This()) usize {
-            return self.state.bytes;
-        }
+            pub fn gain(self: *@This()) f32 {
+                return self.state.current_gain;
+            }
 
-        pub fn closeWrite(_: *@This()) void {}
-        pub fn closeWithError(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
+            pub fn label(self: *@This()) []const u8 {
+                return self.state.current_label;
+            }
+
+            pub fn readBytes(self: *@This()) usize {
+                return self.state.bytes;
+            }
+
+            pub fn closeWrite(_: *@This()) void {}
+            pub fn closeWithError(_: *@This()) void {}
+            pub fn deinit(_: *@This()) void {}
+        };
+
+        fn trackCtrlMakeSurface(testing: anytype) !void {
+            comptime {
+                _ = root.setGain;
+                _ = root.gain;
+                _ = root.label;
+                _ = root.readBytes;
+                _ = root.closeWrite;
+                _ = root.close;
+                _ = root.closeWithError;
+                _ = root.deinit;
+                _ = root.make;
+                _ = make(lib, MakeImpl).init;
+            }
+
+            const TrackCtrlType = make(lib, MakeImpl);
+            var state = State{};
+            const made = try TrackCtrlType.init(.{
+                .allocator = lib.testing.allocator,
+                .state = &state,
+            });
+            defer made.deinit();
+            made.setGain(0.5);
+            try testing.expectEqual(@as(f32, 0.5), made.gain());
+            try testing.expectEqualStrings("made", made.label());
+            try testing.expectEqual(@as(usize, 11), made.readBytes());
+        }
     };
 
-    comptime {
-        _ = root.setGain;
-        _ = root.gain;
-        _ = root.label;
-        _ = root.readBytes;
-        _ = root.closeWrite;
-        _ = root.close;
-        _ = root.closeWithError;
-        _ = root.deinit;
-        _ = root.make;
-        _ = make(std, MakeImpl).init;
-    }
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    const TrackCtrlType = make(std, MakeImpl);
-    var state = State{};
-    const made = try TrackCtrlType.init(.{
-        .allocator = std.testing.allocator,
-        .state = &state,
-    });
-    defer made.deinit();
-    made.setGain(0.5);
-    try std.testing.expectEqual(@as(f32, 0.5), made.gain());
-    try std.testing.expectEqualStrings("made", made.label());
-    try std.testing.expectEqual(@as(usize, 11), made.readBytes());
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
+
+            TestCase.trackCtrlMakeSurface(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

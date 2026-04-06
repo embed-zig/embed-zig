@@ -2,6 +2,8 @@
 //!
 //! Pure constants — no state, no I/O.
 
+const testing_api = @import("testing");
+
 pub const Status = enum(u8) {
     success = 0x00,
     unknown_command = 0x01,
@@ -80,10 +82,41 @@ pub const Status = enum(u8) {
     }
 };
 
-test "bt/unit_tests/host/hci/status/basics" {
-    const s = Status.success;
-    try @import("std").testing.expect(s.isSuccess());
-    try @import("std").testing.expect(!Status.connection_timeout.isSuccess());
-    try @import("std").testing.expectEqual(Status.remote_user_terminated, Status.fromByte(0x13));
-    try @import("std").testing.expectEqual(@as(u8, 0x08), @intFromEnum(Status.connection_timeout));
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const s = Status.success;
+            try lib.testing.expect(s.isSuccess());
+            try lib.testing.expect(!Status.connection_timeout.isSuccess());
+            try lib.testing.expectEqual(Status.remote_user_terminated, Status.fromByte(0x13));
+            try lib.testing.expectEqual(@as(u8, 0x08), @intFromEnum(Status.connection_timeout));
+        }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
+

@@ -1,4 +1,5 @@
 const Addr = @import("Addr.zig");
+const testing_api = @import("testing");
 
 const AddrPort = @This();
 
@@ -39,21 +40,21 @@ pub fn isValid(self: AddrPort) bool {
     return self.addr_.isValid();
 }
 
-test "net/unit_tests/netip/addrport/init" {
-    const testing = @import("std").testing;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    const ap = AddrPort.from4(.{ 127, 0, 0, 1 }, 8080);
-    try testing.expect(ap.isValid());
-    try testing.expectEqual(@as(u16, 8080), ap.port());
-    try testing.expectEqualSlices(u8, &.{ 127, 0, 0, 1 }, &ap.addr().as4().?);
-}
+            const ap = AddrPort.from4(.{ 127, 0, 0, 1 }, 8080);
+            try testing.expect(ap.isValid());
+            try testing.expectEqual(@as(u16, 8080), ap.port());
+            try testing.expectEqualSlices(u8, &.{ 127, 0, 0, 1 }, &ap.addr().as4().?);
 
-test "net/unit_tests/netip/addrport/withPort" {
-    const testing = @import("std").testing;
-
-    const base = AddrPort.init(try Addr.parse("::1"), 80);
-    const next = base.withPort(443);
-    try testing.expectEqual(@as(u16, 80), base.port());
-    try testing.expectEqual(@as(u16, 443), next.port());
-    try testing.expect(next.addr().is6());
+            const base = AddrPort.init(try Addr.parse("::1"), 80);
+            const next = base.withPort(443);
+            try testing.expectEqual(@as(u16, 80), base.port());
+            try testing.expectEqual(@as(u16, 443), next.port());
+            try testing.expect(next.addr().is6());
+        }
+    }.run);
 }

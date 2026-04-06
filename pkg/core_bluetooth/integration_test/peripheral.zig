@@ -18,7 +18,7 @@ test "core_bluetooth/integration_tests/peripheral" {
     defer t.deinit();
 
     t.timeout(5 * std.time.ns_per_s);
-    t.run("peripheral", bt.test_runner.peripheral.make(std, &host));
+    t.run("peripheral", bt.test_runner.integration.peripheral.makeWithHost(std, &host));
     if (!t.wait()) return error.TestFailed;
 }
 

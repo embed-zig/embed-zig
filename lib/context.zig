@@ -194,5 +194,3 @@ pub fn make(comptime lib: type) type {
         }
     };
 }
-
-test "context/unit_tests" {}

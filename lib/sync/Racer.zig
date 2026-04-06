@@ -1,4 +1,5 @@
 const context_mod = @import("context");
+const testing_api = @import("testing");
 
 pub fn Racer(comptime lib: type, comptime T: type) type {
     const Allocator = lib.mem.Allocator;
@@ -222,64 +223,83 @@ pub fn Racer(comptime lib: type, comptime T: type) type {
     };
 }
 
-test "sync/unit_tests/Racer/zero_task_paths" {
-    const std = @import("std");
-    const embed = @import("embed");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const TestLib = struct {
+                pub const mem = lib.mem;
+                pub const atomic = lib.atomic;
+                pub const debug = lib.debug;
+                pub const time = lib.time;
+                pub const Thread = struct {
+                    pub const Mutex = lib.Thread.Mutex;
+                    pub const Condition = lib.Thread.Condition;
+                    pub const SpawnConfig = struct {
+                        allocator: ?lib.mem.Allocator = null,
+                    };
+                    pub const SpawnError = error{};
 
-    const TestLib = struct {
-        pub const mem = embed.mem;
-        pub const atomic = embed.atomic;
-        pub const debug = struct {
-            pub const assert = std.debug.assert;
-        };
-        pub const time = struct {
-            pub const ns_per_ms = std.time.ns_per_ms;
+                    pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) SpawnError!@This() {
+                        _ = config;
+                        @call(.auto, f, args);
+                        return .{};
+                    }
 
-            pub fn nanoTimestamp() i128 {
-                return std.time.nanoTimestamp();
-            }
-        };
-        pub const Thread = struct {
-            pub const Mutex = std.Thread.Mutex;
-            pub const Condition = std.Thread.Condition;
-            pub const SpawnConfig = struct {
-                allocator: ?embed.mem.Allocator = null,
+                    pub fn detach(self: @This()) void {
+                        _ = self;
+                    }
+                };
             };
-            pub const SpawnError = error{};
 
-            pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) SpawnError!@This() {
-                _ = config;
-                @call(.auto, f, args);
-                return .{};
+            const R = Racer(TestLib, u32);
+
+            var racer = try R.init(lib.testing.allocator);
+            defer racer.deinit();
+
+            switch (racer.race()) {
+                .winner => return error.UnexpectedWinner,
+                .exhausted => {},
             }
 
-            pub fn detach(self: @This()) void {
-                _ = self;
+            try lib.testing.expect(!racer.done());
+            try lib.testing.expectEqual(@as(?u32, null), racer.value());
+
+            racer.cancel();
+            try lib.testing.expect(racer.done());
+
+            switch (racer.race()) {
+                .winner => return error.UnexpectedWinner,
+                .exhausted => {},
             }
-        };
+
+            racer.wait();
+            racer.wait();
+        }
     };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    const R = Racer(TestLib, u32);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    var racer = try R.init(std.testing.allocator);
-    defer racer.deinit();
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    switch (racer.race()) {
-        .winner => return error.UnexpectedWinner,
-        .exhausted => {},
-    }
-
-    try std.testing.expect(!racer.done());
-    try std.testing.expectEqual(@as(?u32, null), racer.value());
-
-    racer.cancel();
-    try std.testing.expect(racer.done());
-
-    switch (racer.race()) {
-        .winner => return error.UnexpectedWinner,
-        .exhausted => {},
-    }
-
-    racer.wait();
-    racer.wait();
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

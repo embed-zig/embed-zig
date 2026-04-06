@@ -4,6 +4,7 @@
 //! combines `read` and `close` for HTTP request/response bodies.
 
 const ReadCloser = @This();
+const testing_api = @import("testing");
 
 ptr: *anyopaque,
 vtable: *const VTable,
@@ -54,34 +55,38 @@ pub fn init(pointer: anytype) ReadCloser {
     };
 }
 
-test "net/unit_tests/http/ReadCloser/init_dispatches_read_and_close" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    const MockBody = struct {
-        payload: []const u8 = "hello",
-        offset: usize = 0,
-        closed: bool = false,
+            const MockBody = struct {
+                payload: []const u8 = "hello",
+                offset: usize = 0,
+                closed: bool = false,
 
-        pub fn read(self: *@This(), buf: []u8) ReadError!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
+                pub fn read(self: *@This(), buf: []u8) ReadError!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+
+                pub fn close(self: *@This()) void {
+                    self.closed = true;
+                }
+            };
+
+            var mock = MockBody{};
+            const rc = ReadCloser.init(&mock);
+
+            var buf: [8]u8 = undefined;
+            const n = try rc.read(&buf);
+            try testing.expectEqualStrings("hello", buf[0..n]);
+
+            rc.close();
+            try testing.expect(mock.closed);
         }
-
-        pub fn close(self: *@This()) void {
-            self.closed = true;
-        }
-    };
-
-    var mock = MockBody{};
-    const rc = ReadCloser.init(&mock);
-
-    var buf: [8]u8 = undefined;
-    const n = try rc.read(&buf);
-    try std.testing.expectEqualStrings("hello", buf[0..n]);
-
-    rc.close();
-    try std.testing.expect(mock.closed);
+    }.run);
 }

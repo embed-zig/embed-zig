@@ -12,6 +12,8 @@
 //! Higher-level concepts such as Conn / Char / Subscription / Handler
 //! should be built on top of `Central` / `Peripheral`, not directly on Hci.
 
+const testing_api = @import("testing");
+
 const Hci = @This();
 
 ptr: *anyopaque,
@@ -343,132 +345,143 @@ pub fn make(pointer: anytype) Hci {
     };
 }
 
-test "bt/unit_tests/Hci/wrap_delegates_to_concrete_implementation" {
-    const testing = @import("std").testing;
-    const Impl = struct {
-        retained: bool = false,
-        scanning: bool = false,
-        advertising: bool = false,
-        connecting: bool = false,
-        addr: BdAddr = .{ 1, 2, 3, 4, 5, 6 },
-        central_listener: CentralListener = .{},
-        peripheral_listener: PeripheralListener = .{},
-        link: ?Link = null,
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const Impl = struct {
+                retained: bool = false,
+                scanning: bool = false,
+                advertising: bool = false,
+                connecting: bool = false,
+                addr: BdAddr = .{ 1, 2, 3, 4, 5, 6 },
+                central_listener: CentralListener = .{},
+                peripheral_listener: PeripheralListener = .{},
+                link: ?Link = null,
 
-        fn retain(self: *@This()) Error!void {
-            self.retained = true;
-        }
-
-        fn release(_: *@This()) void {}
-
-        fn setCentralListener(self: *@This(), listener: CentralListener) void {
-            self.central_listener = listener;
-        }
-
-        fn setPeripheralListener(self: *@This(), listener: PeripheralListener) void {
-            self.peripheral_listener = listener;
-        }
-
-        fn startScanning(self: *@This(), _: ScanConfig) Error!void {
-            self.scanning = true;
-        }
-
-        fn stopScanning(self: *@This()) void {
-            self.scanning = false;
-        }
-
-        fn startAdvertising(self: *@This(), _: AdvConfig) Error!void {
-            self.advertising = true;
-        }
-
-        fn stopAdvertising(self: *@This()) void {
-            self.advertising = false;
-        }
-
-        fn connect(self: *@This(), addr: BdAddr, addr_type: AddrType, config: ConnConfig) Error!void {
-            self.connecting = false;
-            self.link = .{
-                .role = .central,
-                .conn_handle = 0x0040,
-                .peer_addr = addr,
-                .peer_addr_type = addr_type,
-                .interval = config.interval_min,
-                .latency = config.latency,
-                .timeout = config.timeout,
+                pub fn retain(self: *@This()) Error!void {
+                    self.retained = true;
+                }
+                pub fn release(_: *@This()) void {}
+                pub fn setCentralListener(self: *@This(), listener: CentralListener) void {
+                    self.central_listener = listener;
+                }
+                pub fn setPeripheralListener(self: *@This(), listener: PeripheralListener) void {
+                    self.peripheral_listener = listener;
+                }
+                pub fn startScanning(self: *@This(), _: ScanConfig) Error!void {
+                    self.scanning = true;
+                }
+                pub fn stopScanning(self: *@This()) void {
+                    self.scanning = false;
+                }
+                pub fn startAdvertising(self: *@This(), _: AdvConfig) Error!void {
+                    self.advertising = true;
+                }
+                pub fn stopAdvertising(self: *@This()) void {
+                    self.advertising = false;
+                }
+                pub fn connect(self: *@This(), addr: BdAddr, addr_type: AddrType, config: ConnConfig) Error!void {
+                    self.connecting = false;
+                    self.link = .{
+                        .role = .central,
+                        .conn_handle = 0x0040,
+                        .peer_addr = addr,
+                        .peer_addr_type = addr_type,
+                        .interval = config.interval_min,
+                        .latency = config.latency,
+                        .timeout = config.timeout,
+                    };
+                }
+                pub fn cancelConnect(self: *@This()) void {
+                    self.connecting = false;
+                }
+                pub fn disconnect(self: *@This(), _: u16, _: u8) void {
+                    self.link = null;
+                }
+                pub fn sendAcl(_: *@This(), _: u16, _: []const u8) Error!void {}
+                pub fn sendAttRequest(_: *@This(), _: u16, _: []const u8, out: []u8) Error!usize {
+                    if (out.len < 2) return error.Unexpected;
+                    out[0] = 0xAA;
+                    out[1] = 0x55;
+                    return 2;
+                }
+                pub fn getAddr(self: *@This()) ?BdAddr {
+                    return self.addr;
+                }
+                pub fn getLink(self: *@This(), _: Role) ?Link {
+                    return self.link;
+                }
+                pub fn getLinkByHandle(self: *@This(), conn_handle: u16) ?Link {
+                    if (self.link) |link| {
+                        if (link.conn_handle == conn_handle) return link;
+                    }
+                    return null;
+                }
+                pub fn isScanning(self: *@This()) bool {
+                    return self.scanning;
+                }
+                pub fn isAdvertising(self: *@This()) bool {
+                    return self.advertising;
+                }
+                pub fn isConnectingCentral(self: *@This()) bool {
+                    return self.connecting;
+                }
+                pub fn deinit(_: *@This()) void {}
             };
+
+            var impl = Impl{};
+            const hci = make(&impl);
+
+            try hci.retain();
+            try lib.testing.expect(impl.retained);
+
+            hci.setCentralListener(.{});
+            hci.setPeripheralListener(.{});
+
+            try hci.startScanning(.{});
+            try lib.testing.expect(hci.isScanning());
+            hci.stopScanning();
+
+            try hci.startAdvertising(.{});
+            try lib.testing.expect(hci.isAdvertising());
+            hci.stopAdvertising();
+
+            try hci.connect(.{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF }, .public, .{});
+            const link = hci.getLink(.central) orelse return error.NoLink;
+            try lib.testing.expectEqual(@as(u16, 0x0040), link.conn_handle);
+            try lib.testing.expectEqual(@as(?BdAddr, .{ 1, 2, 3, 4, 5, 6 }), hci.getAddr());
+
+            var resp: [8]u8 = undefined;
+            const n = try hci.sendAttRequest(0x0040, &.{0x01}, &resp);
+            try lib.testing.expectEqual(@as(usize, 2), n);
+            try lib.testing.expectEqual(@as(u8, 0xAA), resp[0]);
         }
-
-        fn cancelConnect(self: *@This()) void {
-            self.connecting = false;
-        }
-
-        fn disconnect(self: *@This(), _: u16, _: u8) void {
-            self.link = null;
-        }
-
-        fn sendAcl(_: *@This(), _: u16, _: []const u8) Error!void {}
-
-        fn sendAttRequest(_: *@This(), _: u16, _: []const u8, out: []u8) Error!usize {
-            if (out.len < 2) return error.Unexpected;
-            out[0] = 0xAA;
-            out[1] = 0x55;
-            return 2;
-        }
-
-        fn getAddr(self: *@This()) ?BdAddr {
-            return self.addr;
-        }
-
-        fn getLink(self: *@This(), _: Role) ?Link {
-            return self.link;
-        }
-
-        fn getLinkByHandle(self: *@This(), conn_handle: u16) ?Link {
-            if (self.link) |link| {
-                if (link.conn_handle == conn_handle) return link;
-            }
-            return null;
-        }
-
-        fn isScanning(self: *@This()) bool {
-            return self.scanning;
-        }
-
-        fn isAdvertising(self: *@This()) bool {
-            return self.advertising;
-        }
-
-        fn isConnectingCentral(self: *@This()) bool {
-            return self.connecting;
-        }
-
-        fn deinit(_: *@This()) void {}
     };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var impl = Impl{};
-    const hci = make(&impl);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    try hci.retain();
-    try testing.expect(impl.retained);
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    hci.setCentralListener(.{});
-    hci.setPeripheralListener(.{});
-
-    try hci.startScanning(.{});
-    try testing.expect(hci.isScanning());
-    hci.stopScanning();
-
-    try hci.startAdvertising(.{});
-    try testing.expect(hci.isAdvertising());
-    hci.stopAdvertising();
-
-    try hci.connect(.{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF }, .public, .{});
-    const link = hci.getLink(.central) orelse return error.NoLink;
-    try testing.expectEqual(@as(u16, 0x0040), link.conn_handle);
-    try testing.expectEqual(@as(?BdAddr, .{ 1, 2, 3, 4, 5, 6 }), hci.getAddr());
-
-    var resp: [8]u8 = undefined;
-    const n = try hci.sendAttRequest(0x0040, &.{0x01}, &resp);
-    try testing.expectEqual(@as(usize, 2), n);
-    try testing.expectEqual(@as(u8, 0xAA), resp[0]);
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
+

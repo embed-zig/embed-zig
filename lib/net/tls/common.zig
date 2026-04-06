@@ -1,3 +1,5 @@
+const testing_api = @import("testing");
+
 pub fn make(comptime lib: type) type {
     const crypto = lib.crypto;
     const mem = lib.mem;
@@ -410,56 +412,51 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-test "net/unit_tests/tls/common/RecordHeader_parse_and_serialize_roundtrip" {
-    const std = @import("std");
-    const common = make(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = allocator;
+            const testing = lib.testing;
+            const common = make(lib);
 
-    const header = common.RecordHeader{
-        .content_type = .handshake,
-        .legacy_version = .tls_1_2,
-        .length = 512,
-    };
+            {
+                const header = common.RecordHeader{
+                    .content_type = .handshake,
+                    .legacy_version = .tls_1_2,
+                    .length = 512,
+                };
 
-    var buf: [common.RecordHeader.SIZE]u8 = undefined;
-    try header.serialize(&buf);
+                var buf: [common.RecordHeader.SIZE]u8 = undefined;
+                try header.serialize(&buf);
 
-    const decoded = try common.RecordHeader.parse(&buf);
-    try std.testing.expectEqual(header.content_type, decoded.content_type);
-    try std.testing.expectEqual(header.legacy_version, decoded.legacy_version);
-    try std.testing.expectEqual(header.length, decoded.length);
-}
+                const decoded = try common.RecordHeader.parse(&buf);
+                try testing.expectEqual(header.content_type, decoded.content_type);
+                try testing.expectEqual(header.legacy_version, decoded.legacy_version);
+                try testing.expectEqual(header.length, decoded.length);
+            }
 
-test "net/unit_tests/tls/common/HandshakeHeader_parse_and_serialize_roundtrip" {
-    const std = @import("std");
-    const common = make(std);
+            {
+                const header = common.HandshakeHeader{
+                    .msg_type = .certificate,
+                    .length = 0x010203,
+                };
 
-    const header = common.HandshakeHeader{
-        .msg_type = .certificate,
-        .length = 0x010203,
-    };
+                var buf: [common.HandshakeHeader.SIZE]u8 = undefined;
+                try header.serialize(&buf);
 
-    var buf: [common.HandshakeHeader.SIZE]u8 = undefined;
-    try header.serialize(&buf);
+                const decoded = try common.HandshakeHeader.parse(&buf);
+                try testing.expectEqual(header.msg_type, decoded.msg_type);
+                try testing.expectEqual(header.length, decoded.length);
+            }
 
-    const decoded = try common.HandshakeHeader.parse(&buf);
-    try std.testing.expectEqual(header.msg_type, decoded.msg_type);
-    try std.testing.expectEqual(header.length, decoded.length);
-}
+            try testing.expect(common.CipherSuite.TLS_AES_128_GCM_SHA256.isTls13());
+            try testing.expectEqual(@as(u8, 16), common.CipherSuite.TLS_AES_128_GCM_SHA256.keyLength());
+            try testing.expectEqual(@as(u8, 12), common.CipherSuite.TLS_AES_128_GCM_SHA256.ivLength());
+            try testing.expectEqual(@as(u8, 16), common.CipherSuite.TLS_AES_128_GCM_SHA256.tagLength());
 
-test "net/unit_tests/tls/common/CipherSuite_helpers_expose_expected_metadata" {
-    const std = @import("std");
-    const common = make(std);
+            try testing.expect(!common.CipherSuite.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256.isTls13());
 
-    try std.testing.expect(common.CipherSuite.TLS_AES_128_GCM_SHA256.isTls13());
-    try std.testing.expectEqual(@as(u8, 16), common.CipherSuite.TLS_AES_128_GCM_SHA256.keyLength());
-    try std.testing.expectEqual(@as(u8, 12), common.CipherSuite.TLS_AES_128_GCM_SHA256.ivLength());
-    try std.testing.expectEqual(@as(u8, 16), common.CipherSuite.TLS_AES_128_GCM_SHA256.tagLength());
-
-    try std.testing.expect(!common.CipherSuite.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256.isTls13());
-}
-
-test "net/unit_tests/tls/common/ProtocolVersion_name_is_stable" {
-    const std = @import("std");
-    const common = make(std);
-    try std.testing.expectEqualStrings("TLS 1.3", common.ProtocolVersion.tls_1_3.name());
+            try testing.expectEqualStrings("TLS 1.3", common.ProtocolVersion.tls_1_3.name());
+        }
+    }.run);
 }

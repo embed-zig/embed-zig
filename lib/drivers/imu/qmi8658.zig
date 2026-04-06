@@ -25,6 +25,7 @@
 
 const io = @import("../io.zig");
 const qmi8658 = @This();
+const testing_api = @import("testing");
 const degrees_per_radian: f32 = 57.29577951308232;
 const pi: f32 = 3.141592653589793;
 const half_pi: f32 = pi / 2.0;
@@ -247,241 +248,275 @@ pub const Config = struct {
 /// QMI8658 6-Axis IMU Driver using `drivers.io.I2c` and `drivers.io.Delay`.
 const Self = @This();
 
-    pub const capabilities = struct {
-        pub const has_gyro = true;
-        pub const has_temp = true;
-        pub const axis_count = 6;
+pub const capabilities = struct {
+    pub const has_gyro = true;
+    pub const has_temp = true;
+    pub const axis_count = 6;
+};
+
+i2c: io.I2c,
+delay: io.Delay,
+config: Config,
+is_open: bool = false,
+
+pub fn init(i2c: io.I2c, delay: io.Delay, config: Config) Self {
+    return .{
+        .i2c = i2c,
+        .delay = delay,
+        .config = config,
     };
-
-    i2c: io.I2c,
-    delay: io.Delay,
-    config: Config,
-    is_open: bool = false,
-
-    pub fn init(i2c: io.I2c, delay: io.Delay, config: Config) Self {
-        return .{
-            .i2c = i2c,
-            .delay = delay,
-            .config = config,
-        };
-    }
-
-    pub fn readRegister(self: *Self, reg: Register) !u8 {
-        var buf: [1]u8 = undefined;
-        try self.i2c.writeRead(self.config.address, &.{@intFromEnum(reg)}, &buf);
-        return buf[0];
-    }
-
-    pub fn writeRegister(self: *Self, reg: Register, value: u8) !void {
-        try self.i2c.write(self.config.address, &.{ @intFromEnum(reg), value });
-    }
-
-    pub fn readRegisters(self: *Self, start_reg: Register, buf: []u8) !void {
-        try self.i2c.writeRead(self.config.address, &.{@intFromEnum(start_reg)}, buf);
-    }
-
-        // ====================================================================
-        // High-level API
-        // ====================================================================
-
-    pub fn open(self: *Self) !void {
-            const id = try self.readRegister(.who_am_i);
-            if (id != WHO_AM_I_VALUE) {
-                return error.InvalidChipId;
-            }
-
-            try self.writeRegister(.reset, 0xB0);
-
-            self.delay.sleepMs(10);
-
-            try self.writeRegister(.ctrl1, 0x40);
-            try self.writeRegister(.ctrl7, 0x03);
-
-            const ctrl2 = (@as(u8, @intFromEnum(self.config.accel_range)) << 4) |
-                @as(u8, @intFromEnum(self.config.accel_odr));
-            try self.writeRegister(.ctrl2, ctrl2);
-
-            const ctrl3 = (@as(u8, @intFromEnum(self.config.gyro_range)) << 4) |
-                @as(u8, @intFromEnum(self.config.gyro_odr));
-            try self.writeRegister(.ctrl3, ctrl3);
-
-            self.is_open = true;
-    }
-
-    pub fn close(self: *Self) !void {
-            if (self.is_open) {
-                try self.writeRegister(.ctrl7, 0x00);
-                self.is_open = false;
-            }
-    }
-
-    pub fn isDataReady(self: *Self) !bool {
-            const status = try self.readRegister(.status0);
-            return (status & 0x03) == 0x03;
-    }
-
-    pub fn readRaw(self: *Self) !qmi8658.RawData {
-            if (!self.is_open) return error.NotOpen;
-
-            var buf: [12]u8 = undefined;
-            try self.readRegisters(.ax_l, &buf);
-
-            return qmi8658.RawData{
-                .acc_x = @bitCast([2]u8{ buf[0], buf[1] }),
-                .acc_y = @bitCast([2]u8{ buf[2], buf[3] }),
-                .acc_z = @bitCast([2]u8{ buf[4], buf[5] }),
-                .gyr_x = @bitCast([2]u8{ buf[6], buf[7] }),
-                .gyr_y = @bitCast([2]u8{ buf[8], buf[9] }),
-                .gyr_z = @bitCast([2]u8{ buf[10], buf[11] }),
-            };
-    }
-
-    pub fn readScaled(self: *Self) !qmi8658.ScaledData {
-            const raw = try self.readRaw();
-            const acc_sens = self.config.accel_range.sensitivity();
-            const gyr_sens = self.config.gyro_range.sensitivity();
-
-            return qmi8658.ScaledData{
-                .acc_x = @as(f32, @floatFromInt(raw.acc_x)) / acc_sens,
-                .acc_y = @as(f32, @floatFromInt(raw.acc_y)) / acc_sens,
-                .acc_z = @as(f32, @floatFromInt(raw.acc_z)) / acc_sens,
-                .gyr_x = @as(f32, @floatFromInt(raw.gyr_x)) / gyr_sens,
-                .gyr_y = @as(f32, @floatFromInt(raw.gyr_y)) / gyr_sens,
-                .gyr_z = @as(f32, @floatFromInt(raw.gyr_z)) / gyr_sens,
-            };
-    }
-
-        /// Calculate approximate tilt angles from accelerometer data.
-        /// Only accurate when the device is stationary or moving slowly.
-    pub fn readAngles(self: *Self) !qmi8658.Angles {
-            const raw = try self.readRaw();
-            const ax: f32 = @floatFromInt(raw.acc_x);
-            const ay: f32 = @floatFromInt(raw.acc_y);
-            const az: f32 = @floatFromInt(raw.acc_z);
-
-            const roll = atan2Approx(ay, az) * degrees_per_radian;
-            const pitch = atan2Approx(-ax, @sqrt(ay * ay + az * az)) * degrees_per_radian;
-
-            return qmi8658.Angles{
-                .roll = roll,
-                .pitch = pitch,
-            };
-    }
-
-    pub fn readTemperature(self: *Self) !f32 {
-            if (!self.is_open) return error.NotOpen;
-
-            var buf: [2]u8 = undefined;
-            try self.readRegisters(.temp_l, &buf);
-            const raw: i16 = @bitCast([2]u8{ buf[0], buf[1] });
-
-            return @as(f32, @floatFromInt(raw)) / 256.0 + 25.0;
-    }
-
-    pub fn setAccelRange(self: *Self, range: qmi8658.AccelRange) !void {
-            self.config.accel_range = range;
-            if (self.is_open) {
-                const ctrl2 = (@as(u8, @intFromEnum(range)) << 4) |
-                    @as(u8, @intFromEnum(self.config.accel_odr));
-                try self.writeRegister(.ctrl2, ctrl2);
-            }
-    }
-
-    pub fn setGyroRange(self: *Self, range: qmi8658.GyroRange) !void {
-            self.config.gyro_range = range;
-            if (self.is_open) {
-                const ctrl3 = (@as(u8, @intFromEnum(range)) << 4) |
-                    @as(u8, @intFromEnum(self.config.gyro_odr));
-                try self.writeRegister(.ctrl3, ctrl3);
-            }
-    }
-
-    pub fn selfTest(self: *Self) !bool {
-        const id = try self.readRegister(.who_am_i);
-        return id == WHO_AM_I_VALUE;
-    }
-
-    pub fn getRevisionId(self: *Self) !u8 {
-        return self.readRegister(.revision_id);
-    }
-test "drivers/unit_tests/imu/Qmi8658/open_configures_chip_and_uses_delay" {
-    const std = @import("std");
-
-    const FakeI2c = struct {
-        writes: [8][2]u8 = [_][2]u8{[_]u8{ 0, 0 }} ** 8,
-        write_count: usize = 0,
-        last_addr: io.I2c.Address = 0,
-
-        pub fn write(self: *@This(), addr: io.I2c.Address, data: []const u8) io.I2c.Error!void {
-            self.last_addr = addr;
-            self.writes[self.write_count] = .{ data[0], data[1] };
-            self.write_count += 1;
-        }
-
-        pub fn read(self: *@This(), _: io.I2c.Address, _: []u8) io.I2c.Error!void {
-            _ = self;
-            return error.Unexpected;
-        }
-
-        pub fn writeRead(self: *@This(), addr: io.I2c.Address, tx: []const u8, rx: []u8) io.I2c.Error!void {
-            self.last_addr = addr;
-            if (tx.len == 1 and tx[0] == @intFromEnum(Register.who_am_i)) {
-                rx[0] = WHO_AM_I_VALUE;
-                return;
-            }
-            return error.Unexpected;
-        }
-    };
-
-    const FakeDelay = struct {
-        calls: usize = 0,
-        last_ms: u32 = 0,
-
-        pub fn sleepMs(self: *@This(), ms: u32) void {
-            self.calls += 1;
-            self.last_ms = ms;
-        }
-    };
-
-    var fake_i2c = FakeI2c{};
-    var fake_delay = FakeDelay{};
-    var imu = qmi8658.init(io.I2c.init(&fake_i2c), io.Delay.init(&fake_delay), .{
-        .address = @intFromEnum(Address.sa0_low),
-    });
-
-    try imu.open();
-
-    try std.testing.expect(imu.is_open);
-    try std.testing.expectEqual(@as(usize, 5), fake_i2c.write_count);
-    try std.testing.expectEqual(@as(io.I2c.Address, 0x6A), fake_i2c.last_addr);
-    try std.testing.expectEqual(@as(u32, 10), fake_delay.last_ms);
-    try std.testing.expectEqual(@as(usize, 1), fake_delay.calls);
-    try std.testing.expectEqual([2]u8{ @intFromEnum(Register.reset), 0xB0 }, fake_i2c.writes[0]);
-    try std.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl1), 0x40 }, fake_i2c.writes[1]);
-    try std.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl7), 0x03 }, fake_i2c.writes[2]);
-    try std.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl2), 0x15 }, fake_i2c.writes[3]);
-    try std.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl3), 0x55 }, fake_i2c.writes[4]);
 }
 
-test "drivers/unit_tests/imu/Qmi8658/atan2Approx_stays_close_to_std_math" {
-    const std = @import("std");
+pub fn readRegister(self: *Self, reg: Register) !u8 {
+    var buf: [1]u8 = undefined;
+    try self.i2c.writeRead(self.config.address, &.{@intFromEnum(reg)}, &buf);
+    return buf[0];
+}
 
-    var max_error_deg: f32 = 0.0;
-    var yi: i16 = -128;
-    while (yi <= 128) : (yi += 1) {
-        var xi: i16 = -128;
-        while (xi <= 128) : (xi += 1) {
-            if (xi == 0 and yi == 0) continue;
+pub fn writeRegister(self: *Self, reg: Register, value: u8) !void {
+    try self.i2c.write(self.config.address, &.{ @intFromEnum(reg), value });
+}
 
-            const y: f32 = @as(f32, @floatFromInt(yi)) / 8.0;
-            const x: f32 = @as(f32, @floatFromInt(xi)) / 8.0;
-            const approx = atan2Approx(y, x);
-            const exact = std.math.atan2(y, x);
-            const error_deg = absf(approx - exact) * degrees_per_radian;
+pub fn readRegisters(self: *Self, start_reg: Register, buf: []u8) !void {
+    try self.i2c.writeRead(self.config.address, &.{@intFromEnum(start_reg)}, buf);
+}
 
-            if (error_deg > max_error_deg) max_error_deg = error_deg;
-        }
+// ====================================================================
+// High-level API
+// ====================================================================
+
+pub fn open(self: *Self) !void {
+    const id = try self.readRegister(.who_am_i);
+    if (id != WHO_AM_I_VALUE) {
+        return error.InvalidChipId;
     }
 
-    try std.testing.expect(max_error_deg <= 0.1);
+    try self.writeRegister(.reset, 0xB0);
+
+    self.delay.sleepMs(10);
+
+    try self.writeRegister(.ctrl1, 0x40);
+    try self.writeRegister(.ctrl7, 0x03);
+
+    const ctrl2 = (@as(u8, @intFromEnum(self.config.accel_range)) << 4) |
+        @as(u8, @intFromEnum(self.config.accel_odr));
+    try self.writeRegister(.ctrl2, ctrl2);
+
+    const ctrl3 = (@as(u8, @intFromEnum(self.config.gyro_range)) << 4) |
+        @as(u8, @intFromEnum(self.config.gyro_odr));
+    try self.writeRegister(.ctrl3, ctrl3);
+
+    self.is_open = true;
+}
+
+pub fn close(self: *Self) !void {
+    if (self.is_open) {
+        try self.writeRegister(.ctrl7, 0x00);
+        self.is_open = false;
+    }
+}
+
+pub fn isDataReady(self: *Self) !bool {
+    const status = try self.readRegister(.status0);
+    return (status & 0x03) == 0x03;
+}
+
+pub fn readRaw(self: *Self) !qmi8658.RawData {
+    if (!self.is_open) return error.NotOpen;
+
+    var buf: [12]u8 = undefined;
+    try self.readRegisters(.ax_l, &buf);
+
+    return qmi8658.RawData{
+        .acc_x = @bitCast([2]u8{ buf[0], buf[1] }),
+        .acc_y = @bitCast([2]u8{ buf[2], buf[3] }),
+        .acc_z = @bitCast([2]u8{ buf[4], buf[5] }),
+        .gyr_x = @bitCast([2]u8{ buf[6], buf[7] }),
+        .gyr_y = @bitCast([2]u8{ buf[8], buf[9] }),
+        .gyr_z = @bitCast([2]u8{ buf[10], buf[11] }),
+    };
+}
+
+pub fn readScaled(self: *Self) !qmi8658.ScaledData {
+    const raw = try self.readRaw();
+    const acc_sens = self.config.accel_range.sensitivity();
+    const gyr_sens = self.config.gyro_range.sensitivity();
+
+    return qmi8658.ScaledData{
+        .acc_x = @as(f32, @floatFromInt(raw.acc_x)) / acc_sens,
+        .acc_y = @as(f32, @floatFromInt(raw.acc_y)) / acc_sens,
+        .acc_z = @as(f32, @floatFromInt(raw.acc_z)) / acc_sens,
+        .gyr_x = @as(f32, @floatFromInt(raw.gyr_x)) / gyr_sens,
+        .gyr_y = @as(f32, @floatFromInt(raw.gyr_y)) / gyr_sens,
+        .gyr_z = @as(f32, @floatFromInt(raw.gyr_z)) / gyr_sens,
+    };
+}
+
+/// Calculate approximate tilt angles from accelerometer data.
+/// Only accurate when the device is stationary or moving slowly.
+pub fn readAngles(self: *Self) !qmi8658.Angles {
+    const raw = try self.readRaw();
+    const ax: f32 = @floatFromInt(raw.acc_x);
+    const ay: f32 = @floatFromInt(raw.acc_y);
+    const az: f32 = @floatFromInt(raw.acc_z);
+
+    const roll = atan2Approx(ay, az) * degrees_per_radian;
+    const pitch = atan2Approx(-ax, @sqrt(ay * ay + az * az)) * degrees_per_radian;
+
+    return qmi8658.Angles{
+        .roll = roll,
+        .pitch = pitch,
+    };
+}
+
+pub fn readTemperature(self: *Self) !f32 {
+    if (!self.is_open) return error.NotOpen;
+
+    var buf: [2]u8 = undefined;
+    try self.readRegisters(.temp_l, &buf);
+    const raw: i16 = @bitCast([2]u8{ buf[0], buf[1] });
+
+    return @as(f32, @floatFromInt(raw)) / 256.0 + 25.0;
+}
+
+pub fn setAccelRange(self: *Self, range: qmi8658.AccelRange) !void {
+    self.config.accel_range = range;
+    if (self.is_open) {
+        const ctrl2 = (@as(u8, @intFromEnum(range)) << 4) |
+            @as(u8, @intFromEnum(self.config.accel_odr));
+        try self.writeRegister(.ctrl2, ctrl2);
+    }
+}
+
+pub fn setGyroRange(self: *Self, range: qmi8658.GyroRange) !void {
+    self.config.gyro_range = range;
+    if (self.is_open) {
+        const ctrl3 = (@as(u8, @intFromEnum(range)) << 4) |
+            @as(u8, @intFromEnum(self.config.gyro_odr));
+        try self.writeRegister(.ctrl3, ctrl3);
+    }
+}
+
+pub fn selfTest(self: *Self) !bool {
+    const id = try self.readRegister(.who_am_i);
+    return id == WHO_AM_I_VALUE;
+}
+
+pub fn getRevisionId(self: *Self) !u8 {
+    return self.readRegister(.revision_id);
+}
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn openConfiguresChipAndUsesDelay() !void {
+            const FakeI2c = struct {
+                writes: [8][2]u8 = [_][2]u8{[_]u8{ 0, 0 }} ** 8,
+                write_count: usize = 0,
+                last_addr: io.I2c.Address = 0,
+
+                pub fn write(self: *@This(), addr: io.I2c.Address, data: []const u8) io.I2c.Error!void {
+                    self.last_addr = addr;
+                    self.writes[self.write_count] = .{ data[0], data[1] };
+                    self.write_count += 1;
+                }
+
+                pub fn read(self: *@This(), _: io.I2c.Address, _: []u8) io.I2c.Error!void {
+                    _ = self;
+                    return error.Unexpected;
+                }
+
+                pub fn writeRead(self: *@This(), addr: io.I2c.Address, tx: []const u8, rx: []u8) io.I2c.Error!void {
+                    self.last_addr = addr;
+                    if (tx.len == 1 and tx[0] == @intFromEnum(Register.who_am_i)) {
+                        rx[0] = WHO_AM_I_VALUE;
+                        return;
+                    }
+                    return error.Unexpected;
+                }
+            };
+
+            const FakeDelay = struct {
+                calls: usize = 0,
+                last_ms: u32 = 0,
+
+                pub fn sleepMs(self: *@This(), ms: u32) void {
+                    self.calls += 1;
+                    self.last_ms = ms;
+                }
+            };
+
+            var fake_i2c = FakeI2c{};
+            var fake_delay = FakeDelay{};
+            var imu = qmi8658.init(io.I2c.init(&fake_i2c), io.Delay.init(&fake_delay), .{
+                .address = @intFromEnum(Address.sa0_low),
+            });
+
+            try imu.open();
+
+            try lib.testing.expect(imu.is_open);
+            try lib.testing.expectEqual(@as(usize, 5), fake_i2c.write_count);
+            try lib.testing.expectEqual(@as(io.I2c.Address, 0x6A), fake_i2c.last_addr);
+            try lib.testing.expectEqual(@as(u32, 10), fake_delay.last_ms);
+            try lib.testing.expectEqual(@as(usize, 1), fake_delay.calls);
+            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.reset), 0xB0 }, fake_i2c.writes[0]);
+            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl1), 0x40 }, fake_i2c.writes[1]);
+            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl7), 0x03 }, fake_i2c.writes[2]);
+            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl2), 0x15 }, fake_i2c.writes[3]);
+            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl3), 0x55 }, fake_i2c.writes[4]);
+        }
+
+        fn atan2ApproxStaysCloseToStdMath() !void {
+            const std = @import("std");
+
+            var max_error_deg: f32 = 0.0;
+            var yi: i16 = -128;
+            while (yi <= 128) : (yi += 1) {
+                var xi: i16 = -128;
+                while (xi <= 128) : (xi += 1) {
+                    if (xi == 0 and yi == 0) continue;
+
+                    const y: f32 = @as(f32, @floatFromInt(yi)) / 8.0;
+                    const x: f32 = @as(f32, @floatFromInt(xi)) / 8.0;
+                    const approx = atan2Approx(y, x);
+                    const exact = std.math.atan2(y, x);
+                    const error_deg = absf(approx - exact) * degrees_per_radian;
+
+                    if (error_deg > max_error_deg) max_error_deg = error_deg;
+                }
+            }
+
+            try lib.testing.expect(max_error_deg <= 0.1);
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.openConfiguresChipAndUsesDelay() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.atan2ApproxStaysCloseToStdMath() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

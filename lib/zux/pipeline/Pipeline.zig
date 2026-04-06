@@ -4,6 +4,7 @@ const Emitter = @import("Emitter.zig");
 const Message = @import("Message.zig");
 const Node = @import("Node.zig");
 const sync = @import("sync");
+const testing_api = @import("testing");
 
 pub fn Config(comptime lib: type) type {
     return struct {
@@ -63,7 +64,6 @@ pub fn make(comptime lib: type, comptime config: Config(lib)) type {
         mu: lib.Thread.Mutex = .{},
         pollers: PollerList = .empty,
         receivers: ReceiverList = .empty,
-
 
         stopping: BoolAtomic = BoolAtomic.init(false),
 
@@ -264,11 +264,11 @@ pub fn make(comptime lib: type, comptime config: Config(lib)) type {
     };
 }
 
-test "zux/pipeline/Pipeline/unit_tests/pollFrom_drives_root_and_stops_cleanly" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const embed_std = @import("embed_std");
     const sync_mod = @import("sync");
-    const TestLib = struct {
+
+    const HarnessLib = struct {
         pub const mem = embed_std.std.mem;
         pub const Thread = embed_std.std.Thread;
         pub const atomic = embed_std.std.atomic;
@@ -300,495 +300,355 @@ test "zux/pipeline/Pipeline/unit_tests/pollFrom_drives_root_and_stops_cleanly" {
                     pub fn recv(self: *@This()) !sync_mod.channel.RecvResult(T) {
                         return self.inner.recv();
                     }
+
+                    pub fn recvTimeout(self: *@This(), timeout_ms: u32) !sync_mod.channel.RecvResult(T) {
+                        return self.inner.recvTimeout(timeout_ms);
+                    }
                 };
             }
         }.factory;
     };
-    const TestPipeline = make(TestLib, .{});
-    const AtomicU32 = TestLib.atomic.Value(u32);
 
-    const RootImpl = struct {
-        seen_count: AtomicU32 = AtomicU32.init(0),
-        last_source_id: AtomicU32 = AtomicU32.init(0),
+    const TestCase = struct {
+        fn pollFromDrivesRootAndStopsCleanly(testing: anytype, allocator: lib.mem.Allocator) !void {
+            const TestPipeline = make(HarnessLib, .{});
+            const AtomicU32 = HarnessLib.atomic.Value(u32);
 
-        pub fn process(self: *@This(), message: Message) !usize {
-            switch (message.body) {
-                .raw_single_button => |button| {
-                    _ = self.seen_count.fetchAdd(1, .acq_rel);
-                    self.last_source_id.store(button.source_id, .release);
-                    return 1;
-                },
-                else => return 0,
-            }
-        }
-    };
+            const RootImpl = struct {
+                seen_count: AtomicU32 = AtomicU32.init(0),
+                last_source_id: AtomicU32 = AtomicU32.init(0),
 
-    const Source = struct {
-        mu: TestLib.Thread.Mutex = .{},
-        cv: TestLib.Thread.Condition = .{},
-        pending: ?Message.Event = null,
+                pub fn bindOutput(_: *@This(), _: Emitter) void {}
 
-        pub fn poll(self: *@This(), timeout_ns: ?u32) !Message.Event {
-            self.mu.lock();
-            defer self.mu.unlock();
-
-            while (self.pending == null) {
-                if (timeout_ns) |wait_ns| {
-                    self.cv.timedWait(&self.mu, wait_ns) catch |err| switch (err) {
-                        error.Timeout => return error.Timeout,
-                    };
-                } else {
-                    self.cv.wait(&self.mu);
+                pub fn process(self: *@This(), message: Message) !usize {
+                    switch (message.body) {
+                        .raw_single_button => |button| {
+                            _ = self.seen_count.fetchAdd(1, .acq_rel);
+                            self.last_source_id.store(button.source_id, .release);
+                            return 1;
+                        },
+                        else => return 0,
+                    }
                 }
-            }
+            };
 
-            const body = self.pending.?;
-            self.pending = null;
-            return body;
-        }
+            const Source = struct {
+                mu: HarnessLib.Thread.Mutex = .{},
+                cv: HarnessLib.Thread.Condition = .{},
+                pending: ?Message.Event = null,
 
-        pub fn push(self: *@This(), body: Message.Event) void {
-            self.mu.lock();
-            self.pending = body;
-            self.cv.signal();
-            self.mu.unlock();
-        }
-    };
+                pub fn poll(self: *@This(), timeout_ns: ?u32) !Message.Event {
+                    self.mu.lock();
+                    defer self.mu.unlock();
 
-    var root_impl = RootImpl{};
-    const root = Node.init(RootImpl, &root_impl);
-    var pipeline = try TestPipeline.init(std.testing.allocator);
-    defer pipeline.deinit();
-    pipeline.bindOutput(root.in);
-
-    try pipeline.start();
-
-    var source = Source{};
-    try pipeline.pollFrom(Source, &source);
-    source.push(.{
-        .raw_single_button = .{
-            .source_id = 7,
-            .pressed = true,
-        },
-    });
-
-    var attempts: usize = 0;
-    while (attempts < 200 and root_impl.seen_count.load(.acquire) == 0) : (attempts += 1) {
-        TestLib.Thread.sleep(TestLib.time.ns_per_ms);
-    }
-
-    try std.testing.expectEqual(@as(u32, 1), root_impl.seen_count.load(.acquire));
-    try std.testing.expectEqual(@as(u32, 7), root_impl.last_source_id.load(.acquire));
-
-    pipeline.stop();
-    pipeline.wait();
-}
-
-test "zux/pipeline/Pipeline/unit_tests/start_requires_bound_output" {
-    const std = @import("std");
-    const embed_std = @import("embed_std");
-    const sync_mod = @import("sync");
-    const TestLib = struct {
-        pub const mem = embed_std.std.mem;
-        pub const Thread = embed_std.std.Thread;
-        pub const atomic = embed_std.std.atomic;
-        pub const time = embed_std.std.time;
-        pub const debug = embed_std.std.debug;
-        pub const ArrayList = embed_std.std.ArrayList;
-        pub const Channel = struct {
-            fn factory(comptime T: type) type {
-                const Wrapped = embed_std.sync.Channel(T);
-                return struct {
-                    inner: Wrapped,
-
-                    pub fn init(allocator: embed_std.std.mem.Allocator, capacity: usize) !@This() {
-                        return .{ .inner = try Wrapped.make(allocator, capacity) };
+                    while (self.pending == null) {
+                        if (timeout_ns) |wait_ns| {
+                            self.cv.timedWait(&self.mu, wait_ns) catch |err| switch (err) {
+                                error.Timeout => return error.Timeout,
+                            };
+                        } else {
+                            self.cv.wait(&self.mu);
+                        }
                     }
 
-                    pub fn deinit(self: *@This()) void {
-                        self.inner.deinit();
-                    }
+                    const body = self.pending.?;
+                    self.pending = null;
+                    return body;
+                }
 
-                    pub fn close(self: *@This()) void {
-                        self.inner.close();
-                    }
+                pub fn push(self: *@This(), body: Message.Event) void {
+                    self.mu.lock();
+                    self.pending = body;
+                    self.cv.signal();
+                    self.mu.unlock();
+                }
+            };
 
-                    pub fn send(self: *@This(), value: T) !sync_mod.channel.SendResult() {
-                        return self.inner.send(value);
-                    }
+            var root_impl = RootImpl{};
+            const root = Node.init(RootImpl, &root_impl);
+            var pipeline = try TestPipeline.init(allocator);
+            defer pipeline.deinit();
+            pipeline.bindOutput(root.in);
 
-                    pub fn recv(self: *@This()) !sync_mod.channel.RecvResult(T) {
-                        return self.inner.recv();
-                    }
-                };
-            }
-        }.factory;
-    };
-    const TestPipeline = make(TestLib, .{});
+            try pipeline.start();
 
-    var pipeline = try TestPipeline.init(std.testing.allocator);
-    defer pipeline.deinit();
-
-    try std.testing.expectError(error.OutputNotBound, pipeline.start());
-}
-
-test "zux/pipeline/Pipeline/unit_tests/start_emits_tick_messages" {
-    const std = @import("std");
-    const embed_std = @import("embed_std");
-    const sync_mod = @import("sync");
-    const TestLib = struct {
-        pub const mem = embed_std.std.mem;
-        pub const Thread = embed_std.std.Thread;
-        pub const atomic = embed_std.std.atomic;
-        pub const time = embed_std.std.time;
-        pub const debug = embed_std.std.debug;
-        pub const ArrayList = embed_std.std.ArrayList;
-        pub const Channel = struct {
-            fn factory(comptime T: type) type {
-                const Wrapped = embed_std.sync.Channel(T);
-                return struct {
-                    inner: Wrapped,
-
-                    pub fn init(allocator: embed_std.std.mem.Allocator, capacity: usize) !@This() {
-                        return .{ .inner = try Wrapped.make(allocator, capacity) };
-                    }
-
-                    pub fn deinit(self: *@This()) void {
-                        self.inner.deinit();
-                    }
-
-                    pub fn close(self: *@This()) void {
-                        self.inner.close();
-                    }
-
-                    pub fn send(self: *@This(), value: T) !sync_mod.channel.SendResult() {
-                        return self.inner.send(value);
-                    }
-
-                    pub fn recv(self: *@This()) !sync_mod.channel.RecvResult(T) {
-                        return self.inner.recv();
-                    }
-                };
-            }
-        }.factory;
-    };
-    const TestPipeline = make(TestLib, .{
-        .tick_interval_ns = TestLib.time.ns_per_ms,
-    });
-    const AtomicU32 = TestLib.atomic.Value(u32);
-    const AtomicU8 = TestLib.atomic.Value(u8);
-
-    const RootImpl = struct {
-        tick_count: AtomicU32 = AtomicU32.init(0),
-        last_origin: AtomicU8 = AtomicU8.init(@intFromEnum(Message.Origin.source)),
-
-        pub fn process(self: *@This(), message: Message) !usize {
-            switch (message.body) {
-                .tick => {
-                    _ = self.tick_count.fetchAdd(1, .acq_rel);
-                    self.last_origin.store(@intFromEnum(message.origin), .release);
-                    return 1;
+            var source = Source{};
+            try pipeline.pollFrom(Source, &source);
+            source.push(.{
+                .raw_single_button = .{
+                    .source_id = 7,
+                    .pressed = true,
                 },
-                else => return 0,
+            });
+
+            var attempts: usize = 0;
+            while (attempts < 200 and root_impl.seen_count.load(.acquire) == 0) : (attempts += 1) {
+                HarnessLib.Thread.sleep(HarnessLib.time.ns_per_ms);
             }
+
+            try testing.expectEqual(@as(u32, 1), root_impl.seen_count.load(.acquire));
+            try testing.expectEqual(@as(u32, 7), root_impl.last_source_id.load(.acquire));
+
+            pipeline.stop();
+            pipeline.wait();
+        }
+
+        fn startRequiresBoundOutput(testing: anytype, allocator: lib.mem.Allocator) !void {
+            const TestPipeline = make(HarnessLib, .{});
+
+            var pipeline = try TestPipeline.init(allocator);
+            defer pipeline.deinit();
+
+            try testing.expectError(error.OutputNotBound, pipeline.start());
+        }
+
+        fn startEmitsTickMessages(testing: anytype, allocator: lib.mem.Allocator) !void {
+            const TestPipeline = make(HarnessLib, .{
+                .tick_interval_ns = HarnessLib.time.ns_per_ms,
+            });
+            const AtomicU32 = HarnessLib.atomic.Value(u32);
+            const AtomicU8 = HarnessLib.atomic.Value(u8);
+
+            const RootImpl = struct {
+                tick_count: AtomicU32 = AtomicU32.init(0),
+                last_origin: AtomicU8 = AtomicU8.init(@intFromEnum(Message.Origin.source)),
+
+                pub fn bindOutput(_: *@This(), _: Emitter) void {}
+
+                pub fn process(self: *@This(), message: Message) !usize {
+                    switch (message.body) {
+                        .tick => {
+                            _ = self.tick_count.fetchAdd(1, .acq_rel);
+                            self.last_origin.store(@intFromEnum(message.origin), .release);
+                            return 1;
+                        },
+                        else => return 0,
+                    }
+                }
+            };
+
+            var root_impl = RootImpl{};
+            const root = Node.init(RootImpl, &root_impl);
+            var pipeline = try TestPipeline.init(allocator);
+            defer pipeline.deinit();
+            pipeline.bindOutput(root.in);
+
+            try pipeline.start();
+
+            var attempts: usize = 0;
+            while (attempts < 50 and root_impl.tick_count.load(.acquire) == 0) : (attempts += 1) {
+                HarnessLib.Thread.sleep(HarnessLib.time.ns_per_ms);
+            }
+
+            try testing.expect(root_impl.tick_count.load(.acquire) > 0);
+            try testing.expectEqual(@intFromEnum(Message.Origin.manual), root_impl.last_origin.load(.acquire));
+
+            pipeline.stop();
+            pipeline.wait();
+        }
+
+        fn manualTickInjectsTickMessage(testing: anytype, allocator: lib.mem.Allocator) !void {
+            const TestPipeline = make(HarnessLib, .{
+                .tick_interval_ns = 100 * HarnessLib.time.ns_per_ms,
+            });
+            const AtomicU32 = HarnessLib.atomic.Value(u32);
+
+            const RootImpl = struct {
+                tick_count: AtomicU32 = AtomicU32.init(0),
+
+                pub fn bindOutput(_: *@This(), _: Emitter) void {}
+
+                pub fn process(self: *@This(), message: Message) !usize {
+                    switch (message.body) {
+                        .tick => {
+                            _ = self.tick_count.fetchAdd(1, .acq_rel);
+                            return 1;
+                        },
+                        else => return 0,
+                    }
+                }
+            };
+
+            var root_impl = RootImpl{};
+            const root = Node.init(RootImpl, &root_impl);
+            var pipeline = try TestPipeline.init(allocator);
+            defer pipeline.deinit();
+            pipeline.bindOutput(root.in);
+
+            try pipeline.start();
+            try pipeline.tick();
+
+            var attempts: usize = 0;
+            while (attempts < 50 and root_impl.tick_count.load(.acquire) == 0) : (attempts += 1) {
+                HarnessLib.Thread.sleep(HarnessLib.time.ns_per_ms);
+            }
+
+            try testing.expect(root_impl.tick_count.load(.acquire) > 0);
+
+            pipeline.stop();
+            pipeline.wait();
+        }
+
+        fn manualEmitWrapsBodyWithManualOrigin(testing: anytype, allocator: lib.mem.Allocator) !void {
+            const TestPipeline = make(HarnessLib, .{
+                .tick_interval_ns = 100 * HarnessLib.time.ns_per_ms,
+            });
+            const AtomicU8 = HarnessLib.atomic.Value(u8);
+            const AtomicU32 = HarnessLib.atomic.Value(u32);
+
+            const RootImpl = struct {
+                last_origin: AtomicU8 = AtomicU8.init(@intFromEnum(Message.Origin.source)),
+                last_source_id: AtomicU32 = AtomicU32.init(0),
+
+                pub fn bindOutput(_: *@This(), _: Emitter) void {}
+
+                pub fn process(self: *@This(), message: Message) !usize {
+                    switch (message.body) {
+                        .raw_single_button => |button| {
+                            self.last_origin.store(@intFromEnum(message.origin), .release);
+                            self.last_source_id.store(button.source_id, .release);
+                            return 1;
+                        },
+                        else => return 0,
+                    }
+                }
+            };
+
+            var root_impl = RootImpl{};
+            const root = Node.init(RootImpl, &root_impl);
+            var pipeline = try TestPipeline.init(allocator);
+            defer pipeline.deinit();
+            pipeline.bindOutput(root.in);
+
+            try pipeline.start();
+            try pipeline.emit(.{
+                .raw_single_button = .{
+                    .source_id = 23,
+                    .pressed = true,
+                },
+            });
+
+            var attempts: usize = 0;
+            while (attempts < 50 and root_impl.last_source_id.load(.acquire) == 0) : (attempts += 1) {
+                HarnessLib.Thread.sleep(HarnessLib.time.ns_per_ms);
+            }
+
+            try testing.expectEqual(@intFromEnum(Message.Origin.manual), root_impl.last_origin.load(.acquire));
+            try testing.expectEqual(@as(u32, 23), root_impl.last_source_id.load(.acquire));
+
+            pipeline.stop();
+            pipeline.wait();
+        }
+
+        fn hookOnForwardsCallbackBodiesAndUnsetsReceiverOnStop(testing: anytype, allocator: lib.mem.Allocator) !void {
+            const TestPipeline = make(HarnessLib, .{
+                .tick_interval_ns = 100 * HarnessLib.time.ns_per_ms,
+            });
+            const AtomicU8 = HarnessLib.atomic.Value(u8);
+            const AtomicU32 = HarnessLib.atomic.Value(u32);
+
+            const RootImpl = struct {
+                count: AtomicU32 = AtomicU32.init(0),
+                last_source_id: AtomicU32 = AtomicU32.init(0),
+                last_origin: AtomicU8 = AtomicU8.init(@intFromEnum(Message.Origin.manual)),
+
+                pub fn bindOutput(_: *@This(), _: Emitter) void {}
+
+                pub fn process(self: *@This(), message: Message) !usize {
+                    switch (message.body) {
+                        .raw_single_button => |button| {
+                            _ = self.count.fetchAdd(1, .acq_rel);
+                            self.last_source_id.store(button.source_id, .release);
+                            self.last_origin.store(@intFromEnum(message.origin), .release);
+                            return 1;
+                        },
+                        else => return 0,
+                    }
+                }
+            };
+
+            const Source = struct {
+                receiver: ?*const EventReceiver = null,
+
+                pub fn setEventReceiver(self: *@This(), receiver: *const EventReceiver) void {
+                    self.receiver = receiver;
+                }
+
+                pub fn clearEventReceiver(self: *@This()) void {
+                    self.receiver = null;
+                }
+
+                pub fn fire(self: *@This(), body: Message.Event) void {
+                    if (self.receiver) |receiver| receiver.emit(body);
+                }
+            };
+
+            var root_impl = RootImpl{};
+            const root = Node.init(RootImpl, &root_impl);
+            var pipeline = try TestPipeline.init(allocator);
+            defer pipeline.deinit();
+            pipeline.bindOutput(root.in);
+
+            var source = Source{};
+            try pipeline.hookOn(Source, &source);
+            try pipeline.start();
+
+            source.fire(.{
+                .raw_single_button = .{
+                    .source_id = 41,
+                    .pressed = true,
+                },
+            });
+
+            var attempts: usize = 0;
+            while (attempts < 50 and root_impl.count.load(.acquire) == 0) : (attempts += 1) {
+                HarnessLib.Thread.sleep(HarnessLib.time.ns_per_ms);
+            }
+
+            try testing.expectEqual(@as(u32, 1), root_impl.count.load(.acquire));
+            try testing.expectEqual(@as(u32, 41), root_impl.last_source_id.load(.acquire));
+            try testing.expectEqual(@intFromEnum(Message.Origin.source), root_impl.last_origin.load(.acquire));
+
+            pipeline.stop();
+            try testing.expect(source.receiver == null);
+            pipeline.wait();
         }
     };
 
-    var root_impl = RootImpl{};
-    const root = Node.init(RootImpl, &root_impl);
-    var pipeline = try TestPipeline.init(std.testing.allocator);
-    defer pipeline.deinit();
-    pipeline.bindOutput(root.in);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    try pipeline.start();
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            const testing = lib.testing;
 
-    var attempts: usize = 0;
-    while (attempts < 50 and root_impl.tick_count.load(.acquire) == 0) : (attempts += 1) {
-        TestLib.Thread.sleep(TestLib.time.ns_per_ms);
-    }
-
-    try std.testing.expect(root_impl.tick_count.load(.acquire) > 0);
-    try std.testing.expectEqual(@intFromEnum(Message.Origin.manual), root_impl.last_origin.load(.acquire));
-
-    pipeline.stop();
-    pipeline.wait();
-}
-
-test "zux/pipeline/Pipeline/unit_tests/manual_tick_injects_tick_message" {
-    const std = @import("std");
-    const embed_std = @import("embed_std");
-    const sync_mod = @import("sync");
-    const TestLib = struct {
-        pub const mem = embed_std.std.mem;
-        pub const Thread = embed_std.std.Thread;
-        pub const atomic = embed_std.std.atomic;
-        pub const time = embed_std.std.time;
-        pub const debug = embed_std.std.debug;
-        pub const ArrayList = embed_std.std.ArrayList;
-        pub const Channel = struct {
-            fn factory(comptime T: type) type {
-                const Wrapped = embed_std.sync.Channel(T);
-                return struct {
-                    inner: Wrapped,
-
-                    pub fn init(allocator: embed_std.std.mem.Allocator, capacity: usize) !@This() {
-                        return .{ .inner = try Wrapped.make(allocator, capacity) };
-                    }
-
-                    pub fn deinit(self: *@This()) void {
-                        self.inner.deinit();
-                    }
-
-                    pub fn close(self: *@This()) void {
-                        self.inner.close();
-                    }
-
-                    pub fn send(self: *@This(), value: T) !sync_mod.channel.SendResult() {
-                        return self.inner.send(value);
-                    }
-
-                    pub fn recv(self: *@This()) !sync_mod.channel.RecvResult(T) {
-                        return self.inner.recv();
-                    }
+            inline for (.{
+                TestCase.pollFromDrivesRootAndStopsCleanly,
+                TestCase.startRequiresBoundOutput,
+                TestCase.startEmitsTickMessages,
+                TestCase.manualTickInjectsTickMessage,
+                TestCase.manualEmitWrapsBodyWithManualOrigin,
+                TestCase.hookOnForwardsCallbackBodiesAndUnsetsReceiverOnStop,
+            }) |case| {
+                case(testing, allocator) catch |err| {
+                    t.logFatal(@errorName(err));
+                    return false;
                 };
             }
-        }.factory;
-    };
-    const TestPipeline = make(TestLib, .{
-        .tick_interval_ns = 100 * TestLib.time.ns_per_ms,
-    });
-    const AtomicU32 = TestLib.atomic.Value(u32);
+            return true;
+        }
 
-    const RootImpl = struct {
-        tick_count: AtomicU32 = AtomicU32.init(0),
-
-        pub fn process(self: *@This(), message: Message) !usize {
-            switch (message.body) {
-                .tick => {
-                    _ = self.tick_count.fetchAdd(1, .acq_rel);
-                    return 1;
-                },
-                else => return 0,
-            }
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    var root_impl = RootImpl{};
-    const root = Node.init(RootImpl, &root_impl);
-    var pipeline = try TestPipeline.init(std.testing.allocator);
-    defer pipeline.deinit();
-    pipeline.bindOutput(root.in);
-
-    try pipeline.start();
-    try pipeline.tick();
-
-    var attempts: usize = 0;
-    while (attempts < 50 and root_impl.tick_count.load(.acquire) == 0) : (attempts += 1) {
-        TestLib.Thread.sleep(TestLib.time.ns_per_ms);
-    }
-
-    try std.testing.expect(root_impl.tick_count.load(.acquire) > 0);
-
-    pipeline.stop();
-    pipeline.wait();
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
-
-test "zux/pipeline/Pipeline/unit_tests/manual_emit_wraps_body_with_manual_origin" {
-    const std = @import("std");
-    const embed_std = @import("embed_std");
-    const sync_mod = @import("sync");
-    const TestLib = struct {
-        pub const mem = embed_std.std.mem;
-        pub const Thread = embed_std.std.Thread;
-        pub const atomic = embed_std.std.atomic;
-        pub const time = embed_std.std.time;
-        pub const debug = embed_std.std.debug;
-        pub const ArrayList = embed_std.std.ArrayList;
-        pub const Channel = struct {
-            fn factory(comptime T: type) type {
-                const Wrapped = embed_std.sync.Channel(T);
-                return struct {
-                    inner: Wrapped,
-
-                    pub fn init(allocator: embed_std.std.mem.Allocator, capacity: usize) !@This() {
-                        return .{ .inner = try Wrapped.make(allocator, capacity) };
-                    }
-
-                    pub fn deinit(self: *@This()) void {
-                        self.inner.deinit();
-                    }
-
-                    pub fn close(self: *@This()) void {
-                        self.inner.close();
-                    }
-
-                    pub fn send(self: *@This(), value: T) !sync_mod.channel.SendResult() {
-                        return self.inner.send(value);
-                    }
-
-                    pub fn recv(self: *@This()) !sync_mod.channel.RecvResult(T) {
-                        return self.inner.recv();
-                    }
-                };
-            }
-        }.factory;
-    };
-    const TestPipeline = make(TestLib, .{
-        .tick_interval_ns = 100 * TestLib.time.ns_per_ms,
-    });
-    const AtomicU8 = TestLib.atomic.Value(u8);
-    const AtomicU32 = TestLib.atomic.Value(u32);
-
-    const RootImpl = struct {
-        last_origin: AtomicU8 = AtomicU8.init(@intFromEnum(Message.Origin.source)),
-        last_source_id: AtomicU32 = AtomicU32.init(0),
-
-        pub fn process(self: *@This(), message: Message) !usize {
-            switch (message.body) {
-                .raw_single_button => |button| {
-                    self.last_origin.store(@intFromEnum(message.origin), .release);
-                    self.last_source_id.store(button.source_id, .release);
-                    return 1;
-                },
-                else => return 0,
-            }
-        }
-    };
-
-    var root_impl = RootImpl{};
-    const root = Node.init(RootImpl, &root_impl);
-    var pipeline = try TestPipeline.init(std.testing.allocator);
-    defer pipeline.deinit();
-    pipeline.bindOutput(root.in);
-
-    try pipeline.start();
-    try pipeline.emit(.{
-        .raw_single_button = .{
-            .source_id = 23,
-            .pressed = true,
-        },
-    });
-
-    var attempts: usize = 0;
-    while (attempts < 50 and root_impl.last_source_id.load(.acquire) == 0) : (attempts += 1) {
-        TestLib.Thread.sleep(TestLib.time.ns_per_ms);
-    }
-
-    try std.testing.expectEqual(@intFromEnum(Message.Origin.manual), root_impl.last_origin.load(.acquire));
-    try std.testing.expectEqual(@as(u32, 23), root_impl.last_source_id.load(.acquire));
-
-    pipeline.stop();
-    pipeline.wait();
-}
-
-test "zux/pipeline/Pipeline/unit_tests/hookOn_forwards_callback_bodies_and_unsets_receiver_on_stop" {
-    const std = @import("std");
-    const embed_std = @import("embed_std");
-    const sync_mod = @import("sync");
-    const TestLib = struct {
-        pub const mem = embed_std.std.mem;
-        pub const Thread = embed_std.std.Thread;
-        pub const atomic = embed_std.std.atomic;
-        pub const time = embed_std.std.time;
-        pub const debug = embed_std.std.debug;
-        pub const ArrayList = embed_std.std.ArrayList;
-        pub const Channel = struct {
-            fn factory(comptime T: type) type {
-                const Wrapped = embed_std.sync.Channel(T);
-                return struct {
-                    inner: Wrapped,
-
-                    pub fn init(allocator: embed_std.std.mem.Allocator, capacity: usize) !@This() {
-                        return .{ .inner = try Wrapped.make(allocator, capacity) };
-                    }
-
-                    pub fn deinit(self: *@This()) void {
-                        self.inner.deinit();
-                    }
-
-                    pub fn close(self: *@This()) void {
-                        self.inner.close();
-                    }
-
-                    pub fn send(self: *@This(), value: T) !sync_mod.channel.SendResult() {
-                        return self.inner.send(value);
-                    }
-
-                    pub fn recv(self: *@This()) !sync_mod.channel.RecvResult(T) {
-                        return self.inner.recv();
-                    }
-                };
-            }
-        }.factory;
-    };
-    const TestPipeline = make(TestLib, .{
-        .tick_interval_ns = 100 * TestLib.time.ns_per_ms,
-    });
-    const AtomicU8 = TestLib.atomic.Value(u8);
-    const AtomicU32 = TestLib.atomic.Value(u32);
-
-    const RootImpl = struct {
-        count: AtomicU32 = AtomicU32.init(0),
-        last_source_id: AtomicU32 = AtomicU32.init(0),
-        last_origin: AtomicU8 = AtomicU8.init(@intFromEnum(Message.Origin.manual)),
-
-        pub fn process(self: *@This(), message: Message) !usize {
-            switch (message.body) {
-                .raw_single_button => |button| {
-                    _ = self.count.fetchAdd(1, .acq_rel);
-                    self.last_source_id.store(button.source_id, .release);
-                    self.last_origin.store(@intFromEnum(message.origin), .release);
-                    return 1;
-                },
-                else => return 0,
-            }
-        }
-    };
-
-    const Source = struct {
-        receiver: ?*const EventReceiver = null,
-
-        pub fn setEventReceiver(self: *@This(), receiver: *const EventReceiver) void {
-            self.receiver = receiver;
-        }
-
-        pub fn clearEventReceiver(self: *@This()) void {
-            self.receiver = null;
-        }
-
-        pub fn fire(self: *@This(), body: Message.Event) void {
-            if (self.receiver) |receiver| receiver.emit(body);
-        }
-    };
-
-    var root_impl = RootImpl{};
-    const root = Node.init(RootImpl, &root_impl);
-    var pipeline = try TestPipeline.init(std.testing.allocator);
-    defer pipeline.deinit();
-    pipeline.bindOutput(root.in);
-
-    var source = Source{};
-    try pipeline.hookOn(Source, &source);
-    try pipeline.start();
-
-    source.fire(.{
-        .raw_single_button = .{
-            .source_id = 41,
-            .pressed = true,
-        },
-    });
-
-    var attempts: usize = 0;
-    while (attempts < 50 and root_impl.count.load(.acquire) == 0) : (attempts += 1) {
-        TestLib.Thread.sleep(TestLib.time.ns_per_ms);
-    }
-
-    try std.testing.expectEqual(@as(u32, 1), root_impl.count.load(.acquire));
-    try std.testing.expectEqual(@as(u32, 41), root_impl.last_source_id.load(.acquire));
-    try std.testing.expectEqual(@intFromEnum(Message.Origin.source), root_impl.last_origin.load(.acquire));
-
-    pipeline.stop();
-    try std.testing.expect(source.receiver == null);
-    pipeline.wait();
-}
-

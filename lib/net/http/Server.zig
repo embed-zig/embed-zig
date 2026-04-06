@@ -11,6 +11,7 @@ const ResponseWriter = @import("ResponseWriter.zig").ResponseWriter;
 const handler_mod = @import("Handler.zig");
 const serve_mux_mod = @import("ServeMux.zig");
 const status = @import("status.zig");
+const testing_api = @import("testing");
 const url_mod = @import("../url.zig");
 
 pub fn Server(comptime lib: type) type {
@@ -661,21 +662,25 @@ fn writeBareResponse(comptime lib: type, conn: Conn, status_code: u16, close_con
     io.writeAll(@TypeOf(local), &local, head) catch {};
 }
 
-test "net/unit_tests/http/Server/handle_requires_owned_default_mux" {
-    const std = @import("std");
-    const S = Server(std);
-    const Handler = handler_mod.Handler(std);
-    const Writer = ResponseWriter(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const S = Server(lib);
+            const Handler = handler_mod.Handler(lib);
+            const Writer = ResponseWriter(lib);
 
-    const Demo = struct {
-        pub fn serveHTTP(_: *@This(), _: *Writer, _: *Request) void {}
-    };
+            const Demo = struct {
+                pub fn serveHTTP(_: *@This(), _: *Writer, _: *Request) void {}
+            };
 
-    var demo = Demo{};
-    var server = try S.init(std.testing.allocator, .{
-        .handler = Handler.init(&demo),
-    });
-    defer server.deinit();
+            var demo = Demo{};
+            var server = try S.init(allocator, .{
+                .handler = Handler.init(&demo),
+            });
+            defer server.deinit();
 
-    try std.testing.expectError(error.NoDefaultHandler, server.handle("/x", Handler.init(&demo)));
+            try testing.expectError(error.NoDefaultHandler, server.handle("/x", Handler.init(&demo)));
+        }
+    }.run);
 }

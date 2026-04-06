@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const Status = @import("status.zig").Status;
+const testing_api = @import("testing");
 
 pub const INDICATOR: u8 = 0x04;
 pub const HEADER_LEN: usize = 3; // indicator + event_code + param_len
@@ -236,125 +237,169 @@ fn decodeLeConnectionUpdateComplete(params: []const u8) Event {
     } };
 }
 
-// --- Tests ---
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            {
+                const raw = [_]u8{ 0x04, 0x0E, 0x04, 0x01, 0x03, 0x0C, 0x00 };
+                const evt = decode(&raw) orelse return error.DecodeFailed;
+                switch (evt) {
+                    .command_complete => |cc| {
+                        try lib.testing.expectEqual(@as(u8, 1), cc.num_cmd_packets);
+                        try lib.testing.expectEqual(@as(u16, 0x0C03), cc.opcode);
+                        try lib.testing.expect(cc.status.isSuccess());
+                    },
+                    else => return error.WrongEvent,
+                }
+            }
 
-test "bt/unit_tests/host/hci/events/decode_command_complete_reset" {
-    // Event: 04 0E 04 01 03 0C 00
-    const raw = [_]u8{ 0x04, 0x0E, 0x04, 0x01, 0x03, 0x0C, 0x00 };
-    const evt = decode(&raw) orelse return error.DecodeFailed;
-    switch (evt) {
-        .command_complete => |cc| {
-            try std.testing.expectEqual(@as(u8, 1), cc.num_cmd_packets);
-            try std.testing.expectEqual(@as(u16, 0x0C03), cc.opcode);
-            try std.testing.expect(cc.status.isSuccess());
-        },
-        else => return error.WrongEvent,
-    }
+            {
+                const raw = [_]u8{ 0x04, 0x0F, 0x04, 0x00, 0x01, 0x0D, 0x20 };
+                const evt = decode(&raw) orelse return error.DecodeFailed;
+                switch (evt) {
+                    .command_status => |cs| {
+                        try lib.testing.expect(cs.status.isSuccess());
+                        try lib.testing.expectEqual(@as(u16, 0x200D), cs.opcode);
+                    },
+                    else => return error.WrongEvent,
+                }
+            }
+
+            {
+                const raw = [_]u8{ 0x04, 0x05, 0x04, 0x00, 0x40, 0x00, 0x13 };
+                const evt = decode(&raw) orelse return error.DecodeFailed;
+                switch (evt) {
+                    .disconnection_complete => |dc| {
+                        try lib.testing.expect(dc.status.isSuccess());
+                        try lib.testing.expectEqual(@as(u16, 0x0040), dc.conn_handle);
+                        try lib.testing.expectEqual(Status.remote_user_terminated, dc.reason);
+                    },
+                    else => return error.WrongEvent,
+                }
+            }
+
+            {
+                const raw = [_]u8{ 0x04, 0x13, 0x05, 0x01, 0x40, 0x00, 0x02, 0x00 };
+                const evt = decode(&raw) orelse return error.DecodeFailed;
+                switch (evt) {
+                    .num_completed_packets => |ncp| {
+                        try lib.testing.expectEqual(@as(u8, 1), ncp.num_handles);
+                        try lib.testing.expectEqual(@as(?u16, 0x0040), ncp.getHandle(0));
+                        try lib.testing.expectEqual(@as(?u16, 2), ncp.getCount(0));
+                    },
+                    else => return error.WrongEvent,
+                }
+            }
+
+            {
+                var raw: [3 + 1 + 18]u8 = undefined;
+                raw[0] = 0x04;
+                raw[1] = 0x3E;
+                raw[2] = 19;
+                raw[3] = 0x01;
+                raw[4] = 0x00;
+                raw[5] = 0x40;
+                raw[6] = 0x00;
+                raw[7] = 0x01;
+                raw[8] = 0x00;
+                @memcpy(raw[9..15], &[6]u8{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF });
+                lib.mem.writeInt(u16, raw[15..17], 0x0018, .little);
+                lib.mem.writeInt(u16, raw[17..19], 0x0000, .little);
+                lib.mem.writeInt(u16, raw[19..21], 0x00C8, .little);
+
+                const evt = decode(&raw) orelse return error.DecodeFailed;
+                switch (evt) {
+                    .le_connection_complete => |lc| {
+                        try lib.testing.expect(lc.status.isSuccess());
+                        try lib.testing.expectEqual(@as(u16, 0x0040), lc.conn_handle);
+                        try lib.testing.expectEqual(@as(u8, 1), lc.role);
+                        try lib.testing.expectEqual(@as(u8, 0xAA), lc.peer_addr[0]);
+                    },
+                    else => return error.WrongEvent,
+                }
+            }
+
+            {
+                var raw: [3 + 1 + 30]u8 = undefined;
+                raw[0] = 0x04;
+                raw[1] = 0x3E;
+                raw[2] = 31;
+                raw[3] = 0x0A;
+                raw[4] = 0x00;
+                raw[5] = 0x40;
+                raw[6] = 0x00;
+                raw[7] = 0x01;
+                raw[8] = 0x00;
+                @memcpy(raw[9..15], &[6]u8{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF });
+                @memcpy(raw[15..21], &[6]u8{ 1, 2, 3, 4, 5, 6 });
+                @memcpy(raw[21..27], &[6]u8{ 7, 8, 9, 10, 11, 12 });
+                lib.mem.writeInt(u16, raw[27..29], 0x0018, .little);
+                lib.mem.writeInt(u16, raw[29..31], 0x0001, .little);
+                lib.mem.writeInt(u16, raw[31..33], 0x00C8, .little);
+                raw[33] = 0;
+
+                const evt = decode(&raw) orelse return error.DecodeFailed;
+                switch (evt) {
+                    .le_connection_complete => |lc| {
+                        try lib.testing.expect(lc.status.isSuccess());
+                        try lib.testing.expectEqual(@as(u16, 0x0040), lc.conn_handle);
+                        try lib.testing.expectEqual(@as(u8, 0xAA), lc.peer_addr[0]);
+                        try lib.testing.expectEqual(@as(u16, 0x0018), lc.conn_interval);
+                        try lib.testing.expectEqual(@as(u16, 0x0001), lc.conn_latency);
+                        try lib.testing.expectEqual(@as(u16, 0x00C8), lc.supervision_timeout);
+                    },
+                    else => return error.WrongEvent,
+                }
+            }
+
+            {
+                const raw = [_]u8{ 0x04, 0xFF, 0x02, 0x01, 0x02 };
+                const evt = decode(&raw) orelse return error.DecodeFailed;
+                switch (evt) {
+                    .unknown => |u| {
+                        try lib.testing.expectEqual(@as(u8, 0xFF), u.event_code);
+                        try lib.testing.expectEqual(@as(usize, 2), u.data.len);
+                    },
+                    else => return error.WrongEvent,
+                }
+            }
+
+            const no_indicator = decodeNoIndicator(&.{ 0x0E, 0x04, 0x01, 0x03, 0x0C, 0x00 }) orelse return error.DecodeFailed;
+            switch (no_indicator) {
+                .command_complete => |cc| try lib.testing.expectEqual(@as(u16, 0x0C03), cc.opcode),
+                else => return error.WrongEvent,
+            }
+
+            try lib.testing.expectEqual(@as(?Event, null), decode(&.{0x04}));
+            try lib.testing.expectEqual(@as(?Event, null), decode(&.{}));
+            try lib.testing.expectEqual(@as(?Event, null), decode(&.{ 0x02, 0x0E, 0x04, 0x01, 0x03, 0x0C, 0x00 }));
+        }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-test "bt/unit_tests/host/hci/events/decode_command_status" {
-    const raw = [_]u8{ 0x04, 0x0F, 0x04, 0x00, 0x01, 0x0D, 0x20 };
-    const evt = decode(&raw) orelse return error.DecodeFailed;
-    switch (evt) {
-        .command_status => |cs| {
-            try std.testing.expect(cs.status.isSuccess());
-            try std.testing.expectEqual(@as(u16, 0x200D), cs.opcode);
-        },
-        else => return error.WrongEvent,
-    }
-}
-
-test "bt/unit_tests/host/hci/events/decode_disconnection_complete" {
-    const raw = [_]u8{ 0x04, 0x05, 0x04, 0x00, 0x40, 0x00, 0x13 };
-    const evt = decode(&raw) orelse return error.DecodeFailed;
-    switch (evt) {
-        .disconnection_complete => |dc| {
-            try std.testing.expect(dc.status.isSuccess());
-            try std.testing.expectEqual(@as(u16, 0x0040), dc.conn_handle);
-            try std.testing.expectEqual(Status.remote_user_terminated, dc.reason);
-        },
-        else => return error.WrongEvent,
-    }
-}
-
-test "bt/unit_tests/host/hci/events/decode_le_connection_complete" {
-    var raw: [3 + 1 + 18]u8 = undefined;
-    raw[0] = 0x04; // indicator
-    raw[1] = 0x3E; // LE Meta
-    raw[2] = 19; // param_len
-    raw[3] = 0x01; // sub-event: connection complete
-    raw[4] = 0x00; // status: success
-    raw[5] = 0x40; // handle low
-    raw[6] = 0x00; // handle high
-    raw[7] = 0x01; // role: peripheral
-    raw[8] = 0x00; // peer addr type: public
-    @memcpy(raw[9..15], &[6]u8{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF });
-    std.mem.writeInt(u16, raw[15..17], 0x0018, .little); // interval
-    std.mem.writeInt(u16, raw[17..19], 0x0000, .little); // latency
-    std.mem.writeInt(u16, raw[19..21], 0x00C8, .little); // timeout
-
-    const evt = decode(&raw) orelse return error.DecodeFailed;
-    switch (evt) {
-        .le_connection_complete => |lc| {
-            try std.testing.expect(lc.status.isSuccess());
-            try std.testing.expectEqual(@as(u16, 0x0040), lc.conn_handle);
-            try std.testing.expectEqual(@as(u8, 1), lc.role);
-            try std.testing.expectEqual(@as(u8, 0xAA), lc.peer_addr[0]);
-        },
-        else => return error.WrongEvent,
-    }
-}
-
-test "bt/unit_tests/host/hci/events/decode_le_enhanced_connection_complete" {
-    var raw: [3 + 1 + 30]u8 = undefined;
-    raw[0] = 0x04;
-    raw[1] = 0x3E;
-    raw[2] = 31;
-    raw[3] = 0x0A;
-    raw[4] = 0x00;
-    raw[5] = 0x40;
-    raw[6] = 0x00;
-    raw[7] = 0x01;
-    raw[8] = 0x00;
-    @memcpy(raw[9..15], &[6]u8{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF });
-    @memcpy(raw[15..21], &[6]u8{ 1, 2, 3, 4, 5, 6 });
-    @memcpy(raw[21..27], &[6]u8{ 7, 8, 9, 10, 11, 12 });
-    std.mem.writeInt(u16, raw[27..29], 0x0018, .little);
-    std.mem.writeInt(u16, raw[29..31], 0x0001, .little);
-    std.mem.writeInt(u16, raw[31..33], 0x00C8, .little);
-    raw[33] = 0;
-
-    const evt = decode(&raw) orelse return error.DecodeFailed;
-    switch (evt) {
-        .le_connection_complete => |lc| {
-            try std.testing.expect(lc.status.isSuccess());
-            try std.testing.expectEqual(@as(u16, 0x0040), lc.conn_handle);
-            try std.testing.expectEqual(@as(u8, 0xAA), lc.peer_addr[0]);
-            try std.testing.expectEqual(@as(u16, 0x0018), lc.conn_interval);
-            try std.testing.expectEqual(@as(u16, 0x0001), lc.conn_latency);
-            try std.testing.expectEqual(@as(u16, 0x00C8), lc.supervision_timeout);
-        },
-        else => return error.WrongEvent,
-    }
-}
-
-test "bt/unit_tests/host/hci/events/decode_unknown_event" {
-    const raw = [_]u8{ 0x04, 0xFF, 0x02, 0x01, 0x02 };
-    const evt = decode(&raw) orelse return error.DecodeFailed;
-    switch (evt) {
-        .unknown => |u| {
-            try std.testing.expectEqual(@as(u8, 0xFF), u.event_code);
-            try std.testing.expectEqual(@as(usize, 2), u.data.len);
-        },
-        else => return error.WrongEvent,
-    }
-}
-
-test "bt/unit_tests/host/hci/events/decode_returns_null_for_short_packet" {
-    try std.testing.expectEqual(@as(?Event, null), decode(&.{0x04}));
-    try std.testing.expectEqual(@as(?Event, null), decode(&.{}));
-}
-
-test "bt/unit_tests/host/hci/events/decode_returns_null_for_non_event_indicator" {
-    try std.testing.expectEqual(@as(?Event, null), decode(&.{ 0x02, 0x0E, 0x04, 0x01, 0x03, 0x0C, 0x00 }));
-}

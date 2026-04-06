@@ -66,6 +66,7 @@ pub const YieldError = std_compat.YieldError;
 pub const CpuCountError = std_compat.CpuCountError;
 pub const SetNameError = std_compat.SetNameError;
 pub const GetNameError = std_compat.GetNameError;
+pub const Condition = condition_mod;
 
 /// Construct a sealed Thread namespace from a platform Impl.
 ///
@@ -169,79 +170,3 @@ pub fn make(comptime Impl: type, comptime Heap: type) type {
     };
 }
 
-test "embed/unit_tests/Thread/spawn_clamps_stack_size_to_page_size" {
-    const Heap = struct {
-        pub fn pageSize() usize {
-            return 4096;
-        }
-    };
-
-    const MutexImpl = struct {
-        pub fn lock(_: *@This()) void {}
-        pub fn unlock(_: *@This()) void {}
-        pub fn tryLock(_: *@This()) bool {
-            return true;
-        }
-    };
-
-    const ConditionImpl = struct {
-        pub fn wait(_: *@This(), _: *MutexImpl) void {}
-        pub fn timedWait(_: *@This(), _: *MutexImpl, _: u64) error{Timeout}!void {}
-        pub fn signal(_: *@This()) void {}
-        pub fn broadcast(_: *@This()) void {}
-    };
-
-    const RwLockImpl = struct {
-        pub fn lockShared(_: *@This()) void {}
-        pub fn unlockShared(_: *@This()) void {}
-        pub fn lock(_: *@This()) void {}
-        pub fn unlock(_: *@This()) void {}
-        pub fn tryLockShared(_: *@This()) bool {
-            return true;
-        }
-        pub fn tryLock(_: *@This()) bool {
-            return true;
-        }
-    };
-
-    const Impl = struct {
-        pub const default_stack_size: usize = 8192;
-        pub const Id = usize;
-        pub const max_name_len: usize = 8;
-        pub const Mutex = MutexImpl;
-        pub const Condition = ConditionImpl;
-        pub const RwLock = RwLockImpl;
-
-        pub var last_stack_size: usize = 0;
-
-        pub fn spawn(config: root.SpawnConfig, comptime f: anytype, args: anytype) root.SpawnError!@This() {
-            _ = f;
-            _ = args;
-            last_stack_size = config.stack_size;
-            return .{};
-        }
-
-        pub fn join(_: @This()) void {}
-        pub fn detach(_: @This()) void {}
-        pub fn yield() root.YieldError!void {}
-        pub fn sleep(_: u64) void {}
-        pub fn getCpuCount() root.CpuCountError!usize {
-            return 1;
-        }
-        pub fn getCurrentId() Id {
-            return 0;
-        }
-        pub fn setName(_: []const u8) root.SetNameError!void {}
-        pub fn getName(_: *[max_name_len:0]u8) root.GetNameError!?[]const u8 {
-            return null;
-        }
-    };
-
-    const Thread = make(Impl, Heap);
-
-    _ = try Thread.spawn(.{ .stack_size = 1 }, struct {
-        fn run() void {}
-    }.run, .{});
-
-    try @import("std").testing.expectEqual(@as(usize, 4096), Impl.last_stack_size);
-}

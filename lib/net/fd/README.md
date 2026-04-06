@@ -25,8 +25,8 @@ deadline semantics.
   - `lib/net/fd/Listener.zig`
   - `lib/net/fd/SockAddr.zig`
 - Direct fd runner coverage is in place through:
-  - `lib/net/test_runner/fd_stream.zig`
-  - `lib/net/test_runner/fd_packet.zig`
+  - `lib/net/test_runner/integration/fd_stream.zig`
+  - `lib/net/test_runner/integration/fd_packet.zig`
 - Non-blocking connect, `connectContext(...)`, deadline storage, timeout
   accounting, and non-blocking read/write wait loops are implemented.
 - Public `net` integration coverage was added after migration so the higher
@@ -162,7 +162,7 @@ deadline expiry are still collapsed into `error.TimedOut`, because
 `lib/net/Conn.zig` intentionally keeps a small shared error surface. Higher
 layers such as `http.Transport` preserve `Canceled` / `DeadlineExceeded`
 semantics by interpreting that timeout in request-context-aware code paths.
-That public fold is now covered in `lib/net/test_runner/tcp.zig`.
+That public fold is now covered in `lib/net/test_runner/integration/tcp.zig`.
 
 Packet I/O remains primarily deadline-driven today. Context-aware packet
 read/write should only be added when a concrete caller needs it and the
@@ -172,8 +172,8 @@ semantics are clear.
 
 Use two layers of coverage:
 
-- `lib/net/test_runner/fd_*` for direct fd semantics
-- `lib/net/test_runner/*` for public `net` API integration after migration
+- `lib/net/test_runner/integration/fd_*` for direct fd semantics
+- `lib/net/test_runner/integration/*` for public `net` API integration after migration
 
 Do not skip the fd-local layer. Behavior such as non-blocking connect,
 `SO.ERROR` verification, and deadline wait loops should remain testable without

@@ -4,6 +4,7 @@
 //! Response, and Transport. Higher-level helpers can be layered on top later.
 
 const std = @import("std");
+const testing_api = @import("testing");
 
 const Header = @This();
 
@@ -40,23 +41,23 @@ pub fn is(self: Header, expected_name: []const u8) bool {
     return std.ascii.eqlIgnoreCase(self.name, expected_name);
 }
 
-test "net/unit_tests/http/Header/stores_name_value_slices" {
-    const hdr = Header.init(Header.content_type, "text/plain");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    try std.testing.expectEqualStrings("Content-Type", hdr.name);
-    try std.testing.expectEqualStrings("text/plain", hdr.value);
-}
+            const hdr = Header.init(Header.content_type, "text/plain");
+            try testing.expectEqualStrings("Content-Type", hdr.name);
+            try testing.expectEqualStrings("text/plain", hdr.value);
 
-test "net/unit_tests/http/Header/names_expose_common_constants" {
-    try std.testing.expectEqualStrings("Host", Header.host);
-    try std.testing.expectEqualStrings("User-Agent", Header.user_agent);
-    try std.testing.expectEqualStrings("Content-Length", Header.content_length);
-    try std.testing.expectEqualStrings("Proxy-Authorization", Header.proxy_authorization);
-}
+            try testing.expectEqualStrings("Host", Header.host);
+            try testing.expectEqualStrings("User-Agent", Header.user_agent);
+            try testing.expectEqualStrings("Content-Length", Header.content_length);
+            try testing.expectEqualStrings("Proxy-Authorization", Header.proxy_authorization);
 
-test "net/unit_tests/http/Header/is_compares_names_case_insensitively" {
-    const hdr = Header.init("content-type", "text/plain");
-
-    try std.testing.expect(hdr.is(Header.content_type));
-    try std.testing.expect(!hdr.is(Header.authorization));
+            const lower = Header.init("content-type", "text/plain");
+            try testing.expect(lower.is(Header.content_type));
+            try testing.expect(!lower.is(Header.authorization));
+        }
+    }.run);
 }

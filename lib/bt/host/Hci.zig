@@ -14,6 +14,7 @@ const Status = @import("hci/status.zig").Status;
 const l2cap = @import("l2cap.zig");
 const att = @import("att.zig");
 const Gap = @import("Gap.zig");
+const testing_api = @import("testing");
 
 pub fn make(comptime lib: type) type {
     return struct {
@@ -738,52 +739,85 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-test "bt/unit_tests/host/Hci_unknown_disconnect_does_not_fire_role_callbacks" {
-    const Impl = make(@import("std"));
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            {
+                const Impl = make(lib);
 
-    const Counter = struct {
-        fn onDisconnected(ctx: ?*anyopaque, _: u16, _: u8) void {
-            const counter: *u32 = @ptrCast(@alignCast(ctx.?));
-            counter.* += 1;
+                const Counter = struct {
+                    fn onDisconnected(ctx: ?*anyopaque, _: u16, _: u8) void {
+                        const counter: *u32 = @ptrCast(@alignCast(ctx.?));
+                        counter.* += 1;
+                    }
+                };
+
+                var central_disconnects: u32 = 0;
+                var peripheral_disconnects: u32 = 0;
+                var hci = Impl.init(undefined, .{});
+                hci.central_callbacks = .{
+                    .ctx = &central_disconnects,
+                    .on_disconnected = Counter.onDisconnected,
+                };
+                hci.peripheral_callbacks = .{
+                    .ctx = &peripheral_disconnects,
+                    .on_disconnected = Counter.onDisconnected,
+                };
+
+                hci.handleHciEvent(&.{ 0x04, 0x05, 0x04, 0x00, 0x40, 0x00, 0x13 });
+
+                try lib.testing.expectEqual(@as(u32, 0), central_disconnects);
+                try lib.testing.expectEqual(@as(u32, 0), peripheral_disconnects);
+            }
+
+            {
+                const Impl = make(lib);
+
+                const Counter = struct {
+                    fn onConnected(ctx: ?*anyopaque, _: Api.Link) void {
+                        const counter: *u32 = @ptrCast(@alignCast(ctx.?));
+                        counter.* += 1;
+                    }
+                };
+
+                var connected_count: u32 = 0;
+                var hci = Impl.init(undefined, .{});
+                hci.central_callbacks = .{
+                    .ctx = &connected_count,
+                    .on_connected = Counter.onConnected,
+                };
+
+                hci.handleHciEvent(&.{ 0x04, 0x3E, 0x13, 0x01, 0x08, 0x40, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x18, 0x00, 0x00, 0x00, 0xC8, 0x00 });
+
+                try lib.testing.expectEqual(@as(u32, 0), connected_count);
+            }
         }
     };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var central_disconnects: u32 = 0;
-    var peripheral_disconnects: u32 = 0;
-    var hci = Impl.init(undefined, .{});
-    hci.central_callbacks = .{
-        .ctx = &central_disconnects,
-        .on_disconnected = Counter.onDisconnected,
-    };
-    hci.peripheral_callbacks = .{
-        .ctx = &peripheral_disconnects,
-        .on_disconnected = Counter.onDisconnected,
-    };
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    hci.handleHciEvent(&.{ 0x04, 0x05, 0x04, 0x00, 0x40, 0x00, 0x13 });
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    try @import("std").testing.expectEqual(@as(u32, 0), central_disconnects);
-    try @import("std").testing.expectEqual(@as(u32, 0), peripheral_disconnects);
-}
-
-test "bt/unit_tests/host/Hci_failed_connection_complete_does_not_fire_connected_callback" {
-    const Impl = make(@import("std"));
-
-    const Counter = struct {
-        fn onConnected(ctx: ?*anyopaque, _: Api.Link) void {
-            const counter: *u32 = @ptrCast(@alignCast(ctx.?));
-            counter.* += 1;
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
-
-    var connected_count: u32 = 0;
-    var hci = Impl.init(undefined, .{});
-    hci.central_callbacks = .{
-        .ctx = &connected_count,
-        .on_connected = Counter.onConnected,
+    const Holder = struct {
+        var runner: Runner = .{};
     };
-
-    hci.handleHciEvent(&.{ 0x04, 0x3E, 0x13, 0x01, 0x08, 0x40, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x18, 0x00, 0x00, 0x00, 0xC8, 0x00 });
-
-    try @import("std").testing.expectEqual(@as(u32, 0), connected_count);
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
+

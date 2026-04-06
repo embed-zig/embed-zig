@@ -6,11 +6,10 @@ pub const Transport = @import("bt/Transport.zig");
 pub const Hci = @import("bt/Hci.zig");
 pub const Mocker = @import("bt/Mocker.zig").Mocker;
 pub const test_runner = struct {
-    pub const central = @import("bt/test_runner/central.zig");
-    pub const peripheral = @import("bt/test_runner/peripheral.zig");
+    pub const unit = @import("bt/test_runner/unit.zig");
+    pub const integration = @import("bt/test_runner/integration.zig");
     pub const pair = @import("bt/test_runner/pair.zig");
     pub const pair_xfer = @import("bt/test_runner/pair_xfer.zig");
-    pub const xfer = @import("bt/test_runner/xfer.zig");
 };
 
 const Server = @import("bt/host/Server.zig");
@@ -30,20 +29,4 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
         pub const Server = bt.Server.make(lib, Channel);
         pub const Client = bt.Client.make(lib);
     };
-}
-
-test "bt/unit_tests" {
-    _ = @import("bt/host/hci/status.zig");
-    _ = @import("bt/host/hci/commands.zig");
-    _ = @import("bt/host/hci/events.zig");
-    _ = @import("bt/host/hci/acl.zig");
-    _ = @import("bt/host/l2cap.zig");
-    _ = @import("bt/host/att.zig");
-    _ = @import("bt/host/Gap.zig");
-    _ = @import("bt/host/gatt/server.zig");
-    _ = @import("bt/host/gatt/client.zig");
-    _ = @import("bt/host/Central.zig");
-    _ = @import("bt/host/Peripheral.zig");
-    _ = @import("bt/host/Server.zig");
-    _ = @import("bt/Host.zig");
 }

@@ -5,6 +5,7 @@
 //! It does not own the underlying bus and does not provide downcast hooks.
 
 const I2c = @This();
+const testing_api = @import("testing");
 
 ptr: *anyopaque,
 vtable: *const VTable,
@@ -74,96 +75,128 @@ pub fn init(pointer: anytype) I2c {
     };
 }
 
-test "drivers/unit_tests/io/I2c/dispatches_write_read_and_writeRead" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn dispatchesWriteReadAndWriteRead() !void {
+            const Fake = struct {
+                last_write_addr: Address = 0,
+                last_write_len: usize = 0,
+                last_write: [8]u8 = [_]u8{0} ** 8,
 
-    const Fake = struct {
-        last_write_addr: Address = 0,
-        last_write_len: usize = 0,
-        last_write: [8]u8 = [_]u8{0} ** 8,
+                last_read_addr: Address = 0,
+                last_read_len: usize = 0,
+                read_fill: [4]u8 = .{ 0x11, 0x22, 0x33, 0x44 },
 
-        last_read_addr: Address = 0,
-        last_read_len: usize = 0,
-        read_fill: [4]u8 = .{ 0x11, 0x22, 0x33, 0x44 },
+                last_write_read_addr: Address = 0,
+                last_write_read_tx_len: usize = 0,
+                last_write_read_tx: [8]u8 = [_]u8{0} ** 8,
+                write_read_fill: [4]u8 = .{ 0xAA, 0xBB, 0xCC, 0xDD },
 
-        last_write_read_addr: Address = 0,
-        last_write_read_tx_len: usize = 0,
-        last_write_read_tx: [8]u8 = [_]u8{0} ** 8,
-        write_read_fill: [4]u8 = .{ 0xAA, 0xBB, 0xCC, 0xDD },
+                fn write(self: *@This(), addr: Address, data: []const u8) Error!void {
+                    self.last_write_addr = addr;
+                    self.last_write_len = data.len;
+                    @memcpy(self.last_write[0..data.len], data);
+                }
 
-        fn write(self: *@This(), addr: Address, data: []const u8) Error!void {
-            self.last_write_addr = addr;
-            self.last_write_len = data.len;
-            @memcpy(self.last_write[0..data.len], data);
+                fn read(self: *@This(), addr: Address, buf: []u8) Error!void {
+                    self.last_read_addr = addr;
+                    self.last_read_len = buf.len;
+                    @memcpy(buf, self.read_fill[0..buf.len]);
+                }
+
+                fn writeRead(self: *@This(), addr: Address, tx: []const u8, rx: []u8) Error!void {
+                    self.last_write_read_addr = addr;
+                    self.last_write_read_tx_len = tx.len;
+                    @memcpy(self.last_write_read_tx[0..tx.len], tx);
+                    @memcpy(rx, self.write_read_fill[0..rx.len]);
+                }
+            };
+
+            var fake = Fake{};
+            const bus = I2c.init(&fake);
+
+            try bus.write(0x1A, &.{ 0x01, 0x02, 0x03 });
+            try lib.testing.expectEqual(@as(Address, 0x1A), fake.last_write_addr);
+            try lib.testing.expectEqual(@as(usize, 3), fake.last_write_len);
+            try lib.testing.expectEqualSlices(u8, &.{ 0x01, 0x02, 0x03 }, fake.last_write[0..3]);
+
+            var read_buf: [2]u8 = undefined;
+            try bus.read(0x2B, &read_buf);
+            try lib.testing.expectEqual(@as(Address, 0x2B), fake.last_read_addr);
+            try lib.testing.expectEqual(@as(usize, 2), fake.last_read_len);
+            try lib.testing.expectEqualSlices(u8, &.{ 0x11, 0x22 }, &read_buf);
+
+            var rx: [3]u8 = undefined;
+            try bus.writeRead(0x3C, &.{ 0x09, 0x0A }, &rx);
+            try lib.testing.expectEqual(@as(Address, 0x3C), fake.last_write_read_addr);
+            try lib.testing.expectEqual(@as(usize, 2), fake.last_write_read_tx_len);
+            try lib.testing.expectEqualSlices(u8, &.{ 0x09, 0x0A }, fake.last_write_read_tx[0..2]);
+            try lib.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC }, &rx);
         }
 
-        fn read(self: *@This(), addr: Address, buf: []u8) Error!void {
-            self.last_read_addr = addr;
-            self.last_read_len = buf.len;
-            @memcpy(buf, self.read_fill[0..buf.len]);
-        }
+        fn propagatesBackendErrors() !void {
+            const Fake = struct {
+                fail_write: bool = false,
+                fail_read: bool = false,
+                fail_write_read: bool = false,
 
-        fn writeRead(self: *@This(), addr: Address, tx: []const u8, rx: []u8) Error!void {
-            self.last_write_read_addr = addr;
-            self.last_write_read_tx_len = tx.len;
-            @memcpy(self.last_write_read_tx[0..tx.len], tx);
-            @memcpy(rx, self.write_read_fill[0..rx.len]);
+                fn write(self: *@This(), _: Address, _: []const u8) Error!void {
+                    if (self.fail_write) return error.Timeout;
+                }
+
+                fn read(self: *@This(), _: Address, _: []u8) Error!void {
+                    if (self.fail_read) return error.BusError;
+                }
+
+                fn writeRead(self: *@This(), _: Address, _: []const u8, _: []u8) Error!void {
+                    if (self.fail_write_read) return error.Nack;
+                }
+            };
+
+            var fake = Fake{ .fail_write = true };
+            const bus = I2c.init(&fake);
+            try lib.testing.expectError(error.Timeout, bus.write(0x10, &.{0x00}));
+
+            fake.fail_write = false;
+            fake.fail_read = true;
+            var buf: [1]u8 = undefined;
+            try lib.testing.expectError(error.BusError, bus.read(0x10, &buf));
+
+            fake.fail_read = false;
+            fake.fail_write_read = true;
+            try lib.testing.expectError(error.Nack, bus.writeRead(0x10, &.{0x00}, &buf));
         }
     };
 
-    var fake = Fake{};
-    const bus = I2c.init(&fake);
-
-    try bus.write(0x1A, &.{ 0x01, 0x02, 0x03 });
-    try std.testing.expectEqual(@as(Address, 0x1A), fake.last_write_addr);
-    try std.testing.expectEqual(@as(usize, 3), fake.last_write_len);
-    try std.testing.expectEqualSlices(u8, &.{ 0x01, 0x02, 0x03 }, fake.last_write[0..3]);
-
-    var read_buf: [2]u8 = undefined;
-    try bus.read(0x2B, &read_buf);
-    try std.testing.expectEqual(@as(Address, 0x2B), fake.last_read_addr);
-    try std.testing.expectEqual(@as(usize, 2), fake.last_read_len);
-    try std.testing.expectEqualSlices(u8, &.{ 0x11, 0x22 }, &read_buf);
-
-    var rx: [3]u8 = undefined;
-    try bus.writeRead(0x3C, &.{ 0x09, 0x0A }, &rx);
-    try std.testing.expectEqual(@as(Address, 0x3C), fake.last_write_read_addr);
-    try std.testing.expectEqual(@as(usize, 2), fake.last_write_read_tx_len);
-    try std.testing.expectEqualSlices(u8, &.{ 0x09, 0x0A }, fake.last_write_read_tx[0..2]);
-    try std.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC }, &rx);
-}
-
-test "drivers/unit_tests/io/I2c/propagates_backend_errors" {
-    const std = @import("std");
-
-    const Fake = struct {
-        fail_write: bool = false,
-        fail_read: bool = false,
-        fail_write_read: bool = false,
-
-        fn write(self: *@This(), _: Address, _: []const u8) Error!void {
-            if (self.fail_write) return error.Timeout;
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
         }
 
-        fn read(self: *@This(), _: Address, _: []u8) Error!void {
-            if (self.fail_read) return error.BusError;
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.dispatchesWriteReadAndWriteRead() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.propagatesBackendErrors() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
         }
 
-        fn writeRead(self: *@This(), _: Address, _: []const u8, _: []u8) Error!void {
-            if (self.fail_write_read) return error.Nack;
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    var fake = Fake{ .fail_write = true };
-    const bus = I2c.init(&fake);
-    try std.testing.expectError(error.Timeout, bus.write(0x10, &.{0x00}));
-
-    fake.fail_write = false;
-    fake.fail_read = true;
-    var buf: [1]u8 = undefined;
-    try std.testing.expectError(error.BusError, bus.read(0x10, &buf));
-
-    fake.fail_read = false;
-    fake.fail_write_read = true;
-    try std.testing.expectError(error.Nack, bus.writeRead(0x10, &.{0x00}, &buf));
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

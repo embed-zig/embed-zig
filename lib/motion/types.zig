@@ -1,4 +1,5 @@
 const types = @This();
+const testing_api = @import("testing");
 
 pub const AccelData = struct {
     x: f32,
@@ -51,21 +52,57 @@ pub const Thresholds = struct {
     };
 };
 
-test "motion/types/unit_tests/accel_magnitude" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn testAccelMagnitude() !void {
+            const std = @import("std");
 
-    const unit: AccelData = .{ .x = 0, .y = 0, .z = 1.0 };
-    try std.testing.expectEqual(@as(f32, 1.0), unit.magnitude());
+            const unit: AccelData = .{ .x = 0, .y = 0, .z = 1.0 };
+            try std.testing.expectEqual(@as(f32, 1.0), unit.magnitude());
 
-    const diagonal: AccelData = .{ .x = 1.0, .y = 1.0, .z = 1.0 };
-    try std.testing.expectApproxEqAbs(@as(f32, 1.7320508), diagonal.magnitude(), 0.0001);
-}
+            const diagonal: AccelData = .{ .x = 1.0, .y = 1.0, .z = 1.0 };
+            try std.testing.expectApproxEqAbs(@as(f32, 1.7320508), diagonal.magnitude(), 0.0001);
+        }
 
-test "motion/types/unit_tests/threshold_presets" {
-    const std = @import("std");
+        fn testThresholdPresets() !void {
+            const std = @import("std");
 
-    try std.testing.expect(Thresholds.sensitive.shake_threshold_g < Thresholds.default.shake_threshold_g);
-    try std.testing.expect(Thresholds.insensitive.shake_threshold_g > Thresholds.default.shake_threshold_g);
-    try std.testing.expect(Thresholds.sensitive.tilt_threshold_deg < Thresholds.default.tilt_threshold_deg);
-    try std.testing.expect(Thresholds.insensitive.tilt_threshold_deg > Thresholds.default.tilt_threshold_deg);
+            try std.testing.expect(Thresholds.sensitive.shake_threshold_g < Thresholds.default.shake_threshold_g);
+            try std.testing.expect(Thresholds.insensitive.shake_threshold_g > Thresholds.default.shake_threshold_g);
+            try std.testing.expect(Thresholds.sensitive.tilt_threshold_deg < Thresholds.default.tilt_threshold_deg);
+            try std.testing.expect(Thresholds.insensitive.tilt_threshold_deg > Thresholds.default.tilt_threshold_deg);
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.testAccelMagnitude() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testThresholdPresets() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

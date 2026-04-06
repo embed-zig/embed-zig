@@ -3,6 +3,7 @@
 const root = @This();
 
 const TrackStateMod = @import("mixer/TrackState.zig");
+const testing_api = @import("testing");
 
 pub const Track = @import("mixer/Track.zig");
 pub const Format = Track.Format;
@@ -370,187 +371,225 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-test "audio/unit_tests/Mixer_exposes_surface" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const MixerType = make(lib);
 
-    comptime {
-        _ = root.Format;
-        _ = root.Track;
-        _ = root.TrackCtrl;
-        _ = root.TrackHandle;
-        _ = root.VTable;
-        _ = root.deinit;
-        _ = root.createTrack;
-        _ = root.read;
-        _ = root.closeWrite;
-        _ = root.close;
-        _ = root.closeWithError;
-        _ = root.make;
-        _ = make(std).init;
-        _ = Track.write;
-        _ = Track.deinit;
-        _ = Track.make;
-        _ = TrackCtrl.setGain;
-        _ = TrackCtrl.gain;
-        _ = TrackCtrl.label;
-        _ = TrackCtrl.readBytes;
-        _ = TrackCtrl.closeWrite;
-        _ = TrackCtrl.close;
-        _ = TrackCtrl.closeWithError;
-        _ = TrackCtrl.deinit;
-        _ = TrackCtrl.make;
-    }
-}
+    const TestCase = struct {
+        fn exposesSurface() void {
+            comptime {
+                _ = root.Format;
+                _ = root.Track;
+                _ = root.TrackCtrl;
+                _ = root.TrackHandle;
+                _ = root.VTable;
+                _ = root.deinit;
+                _ = root.createTrack;
+                _ = root.read;
+                _ = root.closeWrite;
+                _ = root.close;
+                _ = root.closeWithError;
+                _ = root.make;
+                _ = make(lib).init;
+                _ = Track.write;
+                _ = Track.deinit;
+                _ = Track.make;
+                _ = TrackCtrl.setGain;
+                _ = TrackCtrl.gain;
+                _ = TrackCtrl.label;
+                _ = TrackCtrl.readBytes;
+                _ = TrackCtrl.closeWrite;
+                _ = TrackCtrl.close;
+                _ = TrackCtrl.closeWithError;
+                _ = TrackCtrl.deinit;
+                _ = TrackCtrl.make;
+            }
+        }
 
-test "audio/unit_tests/Mixer_default_backend_happy_path" {
-    const std = @import("std");
+        fn defaultBackendHappyPath(testing: anytype) !void {
+            const mixer = try MixerType.init(.{
+                .allocator = lib.testing.allocator,
+                .output = .{ .rate = 16000, .channels = .mono },
+            });
+            defer mixer.deinit();
 
-    const MixerType = make(std);
-    const mixer = try MixerType.init(.{
-        .allocator = std.testing.allocator,
-        .output = .{ .rate = 16000, .channels = .mono },
-    });
-    defer mixer.deinit();
+            const handle = try mixer.createTrack(.{ .label = "song" });
+            defer handle.track.deinit();
+            defer handle.ctrl.deinit();
 
-    const handle = try mixer.createTrack(.{ .label = "song" });
-    defer handle.track.deinit();
-    defer handle.ctrl.deinit();
+            try handle.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 10, 20, 30 });
 
-    try handle.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 10, 20, 30 });
+            var out: [4]i16 = undefined;
+            const n = mixer.read(&out) orelse unreachable;
+            try testing.expectEqual(@as(usize, 3), n);
+            try testing.expectEqualSlices(i16, &.{ 10, 20, 30 }, out[0..3]);
+            try testing.expectEqual(@as(usize, 6), handle.ctrl.readBytes());
+        }
 
-    var out: [4]i16 = undefined;
-    const n = mixer.read(&out) orelse unreachable;
-    try std.testing.expectEqual(@as(usize, 3), n);
-    try std.testing.expectEqualSlices(i16, &.{ 10, 20, 30 }, out[0..3]);
-    try std.testing.expectEqual(@as(usize, 6), handle.ctrl.readBytes());
-}
+        fn defaultBackendMixesGain(testing: anytype) !void {
+            const mixer = try MixerType.init(.{
+                .allocator = lib.testing.allocator,
+                .output = .{ .rate = 16000, .channels = .mono },
+            });
+            defer mixer.deinit();
 
-test "audio/unit_tests/Mixer_default_backend_mixes_gain" {
-    const std = @import("std");
+            const a = try mixer.createTrack(.{ .label = "a" });
+            defer a.track.deinit();
+            defer a.ctrl.deinit();
+            const b = try mixer.createTrack(.{ .label = "b" });
+            defer b.track.deinit();
+            defer b.ctrl.deinit();
 
-    const MixerType = make(std);
-    const mixer = try MixerType.init(.{
-        .allocator = std.testing.allocator,
-        .output = .{ .rate = 16000, .channels = .mono },
-    });
-    defer mixer.deinit();
+            b.ctrl.setGain(0.5);
+            try a.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 100, 200 });
+            try b.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 100, 200 });
 
-    const a = try mixer.createTrack(.{ .label = "a" });
-    defer a.track.deinit();
-    defer a.ctrl.deinit();
-    const b = try mixer.createTrack(.{ .label = "b" });
-    defer b.track.deinit();
-    defer b.ctrl.deinit();
+            var out: [4]i16 = undefined;
+            const n = mixer.read(&out) orelse unreachable;
+            try testing.expectEqual(@as(usize, 2), n);
+            try testing.expectEqualSlices(i16, &.{ 150, 300 }, out[0..2]);
+        }
 
-    b.ctrl.setGain(0.5);
-    try a.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 100, 200 });
-    try b.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 100, 200 });
+        fn defaultBackendDrainsAfterCloseWrite(testing: anytype) !void {
+            const mixer = try MixerType.init(.{
+                .allocator = lib.testing.allocator,
+                .output = .{ .rate = 8000, .channels = .mono },
+            });
+            defer mixer.deinit();
 
-    var out: [4]i16 = undefined;
-    const n = mixer.read(&out) orelse unreachable;
-    try std.testing.expectEqual(@as(usize, 2), n);
-    try std.testing.expectEqualSlices(i16, &.{ 150, 300 }, out[0..2]);
-}
+            const handle = try mixer.createTrack(.{});
+            defer handle.track.deinit();
+            defer handle.ctrl.deinit();
 
-test "audio/unit_tests/Mixer_default_backend_drains_after_close_write" {
-    const std = @import("std");
+            try handle.track.write(.{ .rate = 8000, .channels = .mono }, &.{ 7, 8 });
+            mixer.closeWrite();
 
-    const MixerType = make(std);
-    const mixer = try MixerType.init(.{
-        .allocator = std.testing.allocator,
-        .output = .{ .rate = 8000, .channels = .mono },
-    });
-    defer mixer.deinit();
+            var out: [4]i16 = undefined;
+            try testing.expectEqual(@as(?usize, 2), mixer.read(&out));
+            try testing.expectEqual(@as(?usize, null), mixer.read(&out));
+        }
 
-    const handle = try mixer.createTrack(.{});
-    defer handle.track.deinit();
-    defer handle.ctrl.deinit();
+        fn defaultBackendRejectsCreateAfterMixerCloseWrite(testing: anytype) !void {
+            const mixer = try MixerType.init(.{
+                .allocator = lib.testing.allocator,
+                .output = .{ .rate = 8000, .channels = .mono },
+            });
+            defer mixer.deinit();
 
-    try handle.track.write(.{ .rate = 8000, .channels = .mono }, &.{ 7, 8 });
-    mixer.closeWrite();
+            mixer.closeWrite();
+            try testing.expectError(error.Closed, mixer.createTrack(.{}));
+        }
 
-    var out: [4]i16 = undefined;
-    try std.testing.expectEqual(@as(?usize, 2), mixer.read(&out));
-    try std.testing.expectEqual(@as(?usize, null), mixer.read(&out));
-}
+        fn defaultBackendCloseIsTerminalWithoutErrorPath(testing: anytype) !void {
+            const mixer = try MixerType.init(.{
+                .allocator = lib.testing.allocator,
+                .output = .{ .rate = 8000, .channels = .mono },
+            });
+            defer mixer.deinit();
 
-test "audio/unit_tests/Mixer_default_backend_rejects_create_after_mixer_close_write" {
-    const std = @import("std");
+            const handle = try mixer.createTrack(.{});
+            defer handle.track.deinit();
+            defer handle.ctrl.deinit();
 
-    const MixerType = make(std);
-    const mixer = try MixerType.init(.{
-        .allocator = std.testing.allocator,
-        .output = .{ .rate = 8000, .channels = .mono },
-    });
-    defer mixer.deinit();
+            try handle.track.write(.{ .rate = 8000, .channels = .mono }, &.{ 1, 2 });
+            mixer.close();
 
-    mixer.closeWrite();
-    try std.testing.expectError(error.Closed, mixer.createTrack(.{}));
-}
+            var out: [4]i16 = undefined;
+            try testing.expectEqual(@as(?usize, null), mixer.read(&out));
+            try testing.expectError(error.Closed, mixer.createTrack(.{}));
+        }
 
-test "audio/unit_tests/Mixer_default_backend_close_is_terminal_without_error_path" {
-    const std = @import("std");
+        fn defaultBackendLastHandleDropClosesTrackAndPreservesBufferedAudio(testing: anytype) !void {
+            const mixer = try MixerType.init(.{
+                .allocator = lib.testing.allocator,
+                .output = .{ .rate = 8000, .channels = .mono },
+            });
+            defer mixer.deinit();
 
-    const MixerType = make(std);
-    const mixer = try MixerType.init(.{
-        .allocator = std.testing.allocator,
-        .output = .{ .rate = 8000, .channels = .mono },
-    });
-    defer mixer.deinit();
+            var handle = try mixer.createTrack(.{});
+            try handle.track.write(.{ .rate = 8000, .channels = .mono }, &.{ 4, 5 });
+            handle.track.deinit();
+            handle.ctrl.deinit();
 
-    const handle = try mixer.createTrack(.{});
-    defer handle.track.deinit();
-    defer handle.ctrl.deinit();
+            var out: [4]i16 = undefined;
+            try testing.expectEqual(@as(?usize, 2), mixer.read(&out));
+            try testing.expectEqualSlices(i16, &.{ 4, 5 }, out[0..2]);
+            try testing.expectEqual(@as(?usize, 0), mixer.read(&out));
+        }
 
-    try handle.track.write(.{ .rate = 8000, .channels = .mono }, &.{ 1, 2 });
-    mixer.close();
+        fn defaultBackendOverflowingSilenceTailFallsBackToCloseWrite(testing: anytype) !void {
+            const max_u32 = lib.math.maxInt(u32);
+            const mixer = try MixerType.init(.{
+                .allocator = lib.testing.allocator,
+                .output = .{ .rate = max_u32, .channels = .stereo },
+            });
+            defer mixer.deinit();
 
-    var out: [4]i16 = undefined;
-    try std.testing.expectEqual(@as(?usize, null), mixer.read(&out));
-    try std.testing.expectError(error.Closed, mixer.createTrack(.{}));
-}
+            const handle = try mixer.createTrack(.{});
+            defer handle.track.deinit();
+            defer handle.ctrl.deinit();
 
-test "audio/unit_tests/Mixer_default_backend_last_handle_drop_closes_track_and_preserves_buffered_audio" {
-    const std = @import("std");
+            try handle.track.write(.{ .rate = max_u32, .channels = .stereo }, &.{ 1, 2 });
+            handle.ctrl.closeWriteWithSilence(max_u32);
 
-    const MixerType = make(std);
-    const mixer = try MixerType.init(.{
-        .allocator = std.testing.allocator,
-        .output = .{ .rate = 8000, .channels = .mono },
-    });
-    defer mixer.deinit();
+            var out: [8]i16 = undefined;
+            const n = mixer.read(&out) orelse unreachable;
+            try testing.expectEqual(@as(usize, 2), n);
+            try testing.expectEqualSlices(i16, &.{ 1, 2 }, out[0..2]);
+            try testing.expectEqual(@as(?usize, 0), mixer.read(&out));
+        }
+    };
 
-    var handle = try mixer.createTrack(.{});
-    try handle.track.write(.{ .rate = 8000, .channels = .mono }, &.{ 4, 5 });
-    handle.track.deinit();
-    handle.ctrl.deinit();
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var out: [4]i16 = undefined;
-    try std.testing.expectEqual(@as(?usize, 2), mixer.read(&out));
-    try std.testing.expectEqualSlices(i16, &.{ 4, 5 }, out[0..2]);
-    try std.testing.expectEqual(@as(?usize, 0), mixer.read(&out));
-}
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
 
-test "audio/unit_tests/Mixer_default_backend_overflowing_silence_tail_falls_back_to_close_write" {
-    const std = @import("std");
+            TestCase.exposesSurface();
+            TestCase.defaultBackendHappyPath(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.defaultBackendMixesGain(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.defaultBackendDrainsAfterCloseWrite(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.defaultBackendRejectsCreateAfterMixerCloseWrite(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.defaultBackendCloseIsTerminalWithoutErrorPath(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.defaultBackendLastHandleDropClosesTrackAndPreservesBufferedAudio(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.defaultBackendOverflowingSilenceTailFallsBackToCloseWrite(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    const MixerType = make(std);
-    const mixer = try MixerType.init(.{
-        .allocator = std.testing.allocator,
-        .output = .{ .rate = std.math.maxInt(u32), .channels = .stereo },
-    });
-    defer mixer.deinit();
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
 
-    const handle = try mixer.createTrack(.{});
-    defer handle.track.deinit();
-    defer handle.ctrl.deinit();
-
-    try handle.track.write(.{ .rate = std.math.maxInt(u32), .channels = .stereo }, &.{ 1, 2 });
-    handle.ctrl.closeWriteWithSilence(std.math.maxInt(u32));
-
-    var out: [8]i16 = undefined;
-    const n = mixer.read(&out) orelse unreachable;
-    try std.testing.expectEqual(@as(usize, 2), n);
-    try std.testing.expectEqualSlices(i16, &.{ 1, 2 }, out[0..2]);
-    try std.testing.expectEqual(@as(?usize, 0), mixer.read(&out));
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

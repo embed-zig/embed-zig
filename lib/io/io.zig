@@ -4,7 +4,8 @@
 //! `read` method. Runtime subsystem-specific contracts should continue to live
 //! with the subsystem itself.
 
-const std = @import("std");
+const embed = @import("embed");
+const testing_api = @import("testing");
 const read_chunk_len = 1024;
 
 pub fn readFull(comptime Reader: type, reader: *Reader, buf: []u8) !void {
@@ -31,8 +32,8 @@ pub fn writeAll(comptime Writer: type, writer: *Writer, buf: []const u8) !void {
 
 /// Reads until EOF, where EOF may be signaled by either a zero-length read or
 /// `error.EndOfStream`.
-pub fn readAll(comptime Reader: type, reader: *Reader, allocator: std.mem.Allocator) ![]u8 {
-    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
+pub fn readAll(comptime Reader: type, reader: *Reader, allocator: embed.mem.Allocator) ![]u8 {
+    var bytes = try embed.ArrayList(u8).initCapacity(allocator, 0);
     errdefer bytes.deinit(allocator);
 
     const buf = try allocator.alloc(u8, read_chunk_len);
@@ -107,377 +108,484 @@ pub fn PrefixReader(comptime Reader: type) type {
     };
 }
 
-test "io/unit_tests/io/readAll_reads_until_eof" {
-    const Reader = struct {
-        payload: []const u8 = "hello",
-        offset: usize = 0,
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn readAllReadsUntilEof(allocator: lib.mem.Allocator) !void {
+            const Reader = struct {
+                payload: []const u8 = "hello",
+                offset: usize = 0,
 
-        fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+
+            var reader = Reader{};
+            const bytes = try readAll(Reader, &reader, allocator);
+            defer allocator.free(bytes);
+
+            try lib.testing.expectEqualStrings("hello", bytes);
+        }
+
+        fn readAllAcceptsEndOfStreamAsEof(allocator: lib.mem.Allocator) !void {
+            const Reader = struct {
+                payload: []const u8 = "hello",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    if (self.offset >= self.payload.len) return error.EndOfStream;
+
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(2, @min(buf.len, remaining.len));
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+
+            var reader = Reader{};
+            const bytes = try readAll(Reader, &reader, allocator);
+            defer allocator.free(bytes);
+
+            try lib.testing.expectEqualStrings("hello", bytes);
+        }
+
+        fn readAllReturnsEmptySliceWhenReaderImmediatelyEnds(allocator: lib.mem.Allocator) !void {
+            const Reader = struct {
+                fn read(_: *@This(), _: []u8) anyerror!usize {
+                    return error.EndOfStream;
+                }
+            };
+
+            var reader = Reader{};
+            const bytes = try readAll(Reader, &reader, allocator);
+            defer allocator.free(bytes);
+
+            try lib.testing.expectEqual(@as(usize, 0), bytes.len);
+        }
+
+        fn readAllReturnsEmptySliceOnZeroLengthRead(allocator: lib.mem.Allocator) !void {
+            const Reader = struct {
+                fn read(_: *@This(), _: []u8) anyerror!usize {
+                    return 0;
+                }
+            };
+
+            var reader = Reader{};
+            const bytes = try readAll(Reader, &reader, allocator);
+            defer allocator.free(bytes);
+
+            try lib.testing.expectEqual(@as(usize, 0), bytes.len);
+        }
+
+        fn readAllPropagatesNonEofError(allocator: lib.mem.Allocator) !void {
+            const Reader = struct {
+                called: bool = false,
+
+                fn read(self: *@This(), _: []u8) anyerror!usize {
+                    if (!self.called) {
+                        self.called = true;
+                        return error.ConnectionReset;
+                    }
+                    unreachable;
+                }
+            };
+
+            var reader = Reader{};
+            try lib.testing.expectError(error.ConnectionReset, readAll(Reader, &reader, allocator));
+        }
+
+        fn readFullFillsDestinationBuffer() !void {
+            const Reader = struct {
+                payload: []const u8 = "hello",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+
+            var reader = Reader{};
+            var buf: [5]u8 = undefined;
+            try readFull(Reader, &reader, &buf);
+
+            try lib.testing.expectEqualStrings("hello", &buf);
+        }
+
+        fn writeAllWritesFullPayload() !void {
+            const Writer = struct {
+                out: []u8,
+                pos: usize = 0,
+
+                fn write(self: *@This(), buf: []const u8) !usize {
+                    const n = @min(2, buf.len);
+                    @memcpy(self.out[self.pos..][0..n], buf[0..n]);
+                    self.pos += n;
+                    return n;
+                }
+            };
+
+            var storage: [5]u8 = undefined;
+            var writer = Writer{ .out = &storage };
+            try writeAll(Writer, &writer, "hello");
+            try lib.testing.expectEqualStrings("hello", &storage);
+        }
+
+        fn readFullReturnsEndOfStreamOnShortRead() !void {
+            const Reader = struct {
+                payload: []const u8 = "hi",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+
+            var reader = Reader{};
+            var buf: [5]u8 = undefined;
+
+            try lib.testing.expectError(error.EndOfStream, readFull(Reader, &reader, &buf));
+        }
+
+        fn readFullPropagatesEndOfStreamError() !void {
+            const Reader = struct {
+                payload: []const u8 = "hi",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    if (self.offset >= self.payload.len) return error.EndOfStream;
+
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+
+            var reader = Reader{};
+            var buf: [5]u8 = undefined;
+
+            try lib.testing.expectError(error.EndOfStream, readFull(Reader, &reader, &buf));
+        }
+
+        fn readFullWithEmptyBufferIsNoop() !void {
+            const Reader = struct {
+                called: bool = false,
+
+                fn read(self: *@This(), _: []u8) anyerror!usize {
+                    self.called = true;
+                    return 0;
+                }
+            };
+
+            var reader = Reader{};
+            var buf: [0]u8 = .{};
+            try readFull(Reader, &reader, &buf);
+            try lib.testing.expect(!reader.called);
+        }
+
+        fn prefixReaderConsumesPrefixBeforeReader() !void {
+            const Reader = struct {
+                payload: []const u8 = "world",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+
+            var reader = PrefixReader(Reader).init(Reader{}, "hello ");
+            var buf: [16]u8 = undefined;
+            const n = try reader.read(&buf);
+
+            try lib.testing.expectEqualStrings("hello ", buf[0..n]);
+
+            const m = try reader.read(buf[n..]);
+            try lib.testing.expectEqualStrings("hello world", buf[0 .. n + m]);
+        }
+
+        fn prefixReaderReadByteCrossesPrefixAndReaderBoundary() !void {
+            const Reader = struct {
+                payload: []const u8 = "cd",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+
+            var reader = PrefixReader(Reader).init(Reader{}, "ab");
+            try lib.testing.expectEqual('a', try reader.readByte());
+            try lib.testing.expectEqual('b', try reader.readByte());
+            try lib.testing.expectEqual('c', try reader.readByte());
+            try lib.testing.expectEqual('d', try reader.readByte());
+            try lib.testing.expectError(error.EndOfStream, reader.readByte());
+        }
+
+        fn prefixReaderReadLineReadsCrlfTerminatedLines() !void {
+            const Reader = struct {
+                payload: []const u8 = "tail\r\n",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+
+            var reader = PrefixReader(Reader).init(Reader{}, "line\r\n");
+            var line_buf: [16]u8 = undefined;
+
+            const line = try reader.readLine(&line_buf);
+            try lib.testing.expectEqualStrings("line", line);
+
+            const tail = try reader.readLine(&line_buf);
+            try lib.testing.expectEqualStrings("tail", tail);
+        }
+
+        fn prefixReaderReadLineReturnsEndOfStreamWithoutTrailingCrlf() !void {
+            const Reader = struct {
+                payload: []const u8 = "tail",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+
+            var reader = PrefixReader(Reader).init(Reader{}, "");
+            var line_buf: [16]u8 = undefined;
+            try lib.testing.expectError(error.EndOfStream, reader.readLine(&line_buf));
+        }
+
+        fn prefixReaderReadLineReturnsBufferTooSmallForLongLine() !void {
+            const Reader = struct {
+                payload: []const u8 = "abcd\r\n",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+
+            var reader = PrefixReader(Reader).init(Reader{}, "");
+            var line_buf: [4]u8 = undefined;
+            try lib.testing.expectError(error.BufferTooSmall, reader.readLine(&line_buf));
+        }
+
+        fn prefixReaderExpectCrlfAcceptsAndRejectsLineEndings() !void {
+            const Reader = struct {
+                payload: []const u8 = "\r\nx\n",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+
+            var reader = PrefixReader(Reader).init(Reader{}, "");
+            try reader.expectCrlf();
+            try lib.testing.expectError(error.InvalidResponse, reader.expectCrlf());
+        }
+
+        fn prefixReaderExpectCrlfCrossesPrefixAndReaderBoundary() !void {
+            const Reader = struct {
+                payload: []const u8 = "\n",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(buf.len, remaining.len);
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+
+            var reader = PrefixReader(Reader).init(Reader{}, "\r");
+            try reader.expectCrlf();
+        }
+
+        fn writeAllReturnsUnexpectedOnZeroWrite() !void {
+            const Writer = struct {
+                fn write(_: *@This(), _: []const u8) !usize {
+                    return 0;
+                }
+            };
+
+            var writer = Writer{};
+            try lib.testing.expectError(error.Unexpected, writeAll(Writer, &writer, "hello"));
+        }
+
+        fn writeAllPropagatesWriteError() !void {
+            const Writer = struct {
+                calls: usize = 0,
+
+                fn write(self: *@This(), buf: []const u8) !usize {
+                    if (self.calls == 0) {
+                        self.calls += 1;
+                        return @min(@as(usize, 2), buf.len);
+                    }
+                    return error.BrokenPipe;
+                }
+            };
+
+            var writer = Writer{};
+            try lib.testing.expectError(error.BrokenPipe, writeAll(Writer, &writer, "hello"));
+        }
+
+        fn writeAllWithEmptyPayloadIsNoop() !void {
+            const Writer = struct {
+                called: bool = false,
+
+                fn write(self: *@This(), _: []const u8) !usize {
+                    self.called = true;
+                    return 0;
+                }
+            };
+
+            var writer = Writer{};
+            try writeAll(Writer, &writer, "");
+            try lib.testing.expect(!writer.called);
         }
     };
 
-    var reader = Reader{};
-    const bytes = try readAll(Reader, &reader, std.testing.allocator);
-    defer std.testing.allocator.free(bytes);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    try std.testing.expectEqualStrings("hello", bytes);
-}
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
 
-test "io/unit_tests/io/readAll_accepts_EndOfStream_as_eof" {
-    const Reader = struct {
-        payload: []const u8 = "hello",
-        offset: usize = 0,
+            TestCase.readAllReadsUntilEof(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.readAllAcceptsEndOfStreamAsEof(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.readAllReturnsEmptySliceWhenReaderImmediatelyEnds(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.readAllReturnsEmptySliceOnZeroLengthRead(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.readAllPropagatesNonEofError(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.readFullFillsDestinationBuffer() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.writeAllWritesFullPayload() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.readFullReturnsEndOfStreamOnShortRead() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.readFullPropagatesEndOfStreamError() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.readFullWithEmptyBufferIsNoop() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.prefixReaderConsumesPrefixBeforeReader() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.prefixReaderReadByteCrossesPrefixAndReaderBoundary() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.prefixReaderReadLineReadsCrlfTerminatedLines() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.prefixReaderReadLineReturnsEndOfStreamWithoutTrailingCrlf() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.prefixReaderReadLineReturnsBufferTooSmallForLongLine() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.prefixReaderExpectCrlfAcceptsAndRejectsLineEndings() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.prefixReaderExpectCrlfCrossesPrefixAndReaderBoundary() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.writeAllReturnsUnexpectedOnZeroWrite() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.writeAllPropagatesWriteError() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.writeAllWithEmptyPayloadIsNoop() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-        fn read(self: *@This(), buf: []u8) anyerror!usize {
-            if (self.offset >= self.payload.len) return error.EndOfStream;
-
-            const remaining = self.payload[self.offset..];
-            const n = @min(2, @min(buf.len, remaining.len));
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    var reader = Reader{};
-    const bytes = try readAll(Reader, &reader, std.testing.allocator);
-    defer std.testing.allocator.free(bytes);
-
-    try std.testing.expectEqualStrings("hello", bytes);
-}
-
-test "io/unit_tests/io/readAll_returns_empty_slice_when_reader_immediately_ends" {
-    const Reader = struct {
-        fn read(_: *@This(), _: []u8) anyerror!usize {
-            return error.EndOfStream;
-        }
+    const Holder = struct {
+        var runner: Runner = .{};
     };
-
-    var reader = Reader{};
-    const bytes = try readAll(Reader, &reader, std.testing.allocator);
-    defer std.testing.allocator.free(bytes);
-
-    try std.testing.expectEqual(@as(usize, 0), bytes.len);
-}
-
-test "io/unit_tests/io/readAll_returns_empty_slice_on_zero_length_read" {
-    const Reader = struct {
-        fn read(_: *@This(), _: []u8) anyerror!usize {
-            return 0;
-        }
-    };
-
-    var reader = Reader{};
-    const bytes = try readAll(Reader, &reader, std.testing.allocator);
-    defer std.testing.allocator.free(bytes);
-
-    try std.testing.expectEqual(@as(usize, 0), bytes.len);
-}
-
-test "io/unit_tests/io/readAll_propagates_non_eof_error" {
-    const Reader = struct {
-        called: bool = false,
-
-        fn read(self: *@This(), _: []u8) anyerror!usize {
-            if (!self.called) {
-                self.called = true;
-                return error.ConnectionReset;
-            }
-            unreachable;
-        }
-    };
-
-    var reader = Reader{};
-    try std.testing.expectError(error.ConnectionReset, readAll(Reader, &reader, std.testing.allocator));
-}
-
-test "io/unit_tests/io/readFull_fills_destination_buffer" {
-    const Reader = struct {
-        payload: []const u8 = "hello",
-        offset: usize = 0,
-
-        fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-    };
-
-    var reader = Reader{};
-    var buf: [5]u8 = undefined;
-    try readFull(Reader, &reader, &buf);
-
-    try std.testing.expectEqualStrings("hello", &buf);
-}
-
-test "io/unit_tests/io/writeAll_writes_full_payload" {
-    const Writer = struct {
-        out: []u8,
-        pos: usize = 0,
-
-        fn write(self: *@This(), buf: []const u8) !usize {
-            const n = @min(2, buf.len);
-            @memcpy(self.out[self.pos..][0..n], buf[0..n]);
-            self.pos += n;
-            return n;
-        }
-    };
-
-    var storage: [5]u8 = undefined;
-    var writer = Writer{ .out = &storage };
-    try writeAll(Writer, &writer, "hello");
-    try std.testing.expectEqualStrings("hello", &storage);
-}
-
-test "io/unit_tests/io/readFull_returns_EndOfStream_on_short_read" {
-    const Reader = struct {
-        payload: []const u8 = "hi",
-        offset: usize = 0,
-
-        fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-    };
-
-    var reader = Reader{};
-    var buf: [5]u8 = undefined;
-
-    try std.testing.expectError(error.EndOfStream, readFull(Reader, &reader, &buf));
-}
-
-test "io/unit_tests/io/readFull_propagates_EndOfStream_error" {
-    const Reader = struct {
-        payload: []const u8 = "hi",
-        offset: usize = 0,
-
-        fn read(self: *@This(), buf: []u8) anyerror!usize {
-            if (self.offset >= self.payload.len) return error.EndOfStream;
-
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-    };
-
-    var reader = Reader{};
-    var buf: [5]u8 = undefined;
-
-    try std.testing.expectError(error.EndOfStream, readFull(Reader, &reader, &buf));
-}
-
-test "io/unit_tests/io/readFull_with_empty_buffer_is_noop" {
-    const Reader = struct {
-        called: bool = false,
-
-        fn read(self: *@This(), _: []u8) anyerror!usize {
-            self.called = true;
-            return 0;
-        }
-    };
-
-    var reader = Reader{};
-    var buf: [0]u8 = .{};
-    try readFull(Reader, &reader, &buf);
-    try std.testing.expect(!reader.called);
-}
-
-test "io/unit_tests/io/PrefixReader_consumes_prefix_before_reader" {
-    const Reader = struct {
-        payload: []const u8 = "world",
-        offset: usize = 0,
-
-        fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-    };
-
-    var reader = PrefixReader(Reader).init(Reader{}, "hello ");
-    var buf: [16]u8 = undefined;
-    const n = try reader.read(&buf);
-
-    try std.testing.expectEqualStrings("hello ", buf[0..n]);
-
-    const m = try reader.read(buf[n..]);
-    try std.testing.expectEqualStrings("hello world", buf[0 .. n + m]);
-}
-
-test "io/unit_tests/io/PrefixReader_readByte_crosses_prefix_and_reader_boundary" {
-    const Reader = struct {
-        payload: []const u8 = "cd",
-        offset: usize = 0,
-
-        fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-    };
-
-    var reader = PrefixReader(Reader).init(Reader{}, "ab");
-    try std.testing.expectEqual('a', try reader.readByte());
-    try std.testing.expectEqual('b', try reader.readByte());
-    try std.testing.expectEqual('c', try reader.readByte());
-    try std.testing.expectEqual('d', try reader.readByte());
-    try std.testing.expectError(error.EndOfStream, reader.readByte());
-}
-
-test "io/unit_tests/io/PrefixReader_readLine_reads_crlf_terminated_lines" {
-    const Reader = struct {
-        payload: []const u8 = "tail\r\n",
-        offset: usize = 0,
-
-        fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-    };
-
-    var reader = PrefixReader(Reader).init(Reader{}, "line\r\n");
-    var line_buf: [16]u8 = undefined;
-
-    const line = try reader.readLine(&line_buf);
-    try std.testing.expectEqualStrings("line", line);
-
-    const tail = try reader.readLine(&line_buf);
-    try std.testing.expectEqualStrings("tail", tail);
-}
-
-test "io/unit_tests/io/PrefixReader_readLine_returns_EndOfStream_without_trailing_crlf" {
-    const Reader = struct {
-        payload: []const u8 = "tail",
-        offset: usize = 0,
-
-        fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-    };
-
-    var reader = PrefixReader(Reader).init(Reader{}, "");
-    var line_buf: [16]u8 = undefined;
-    try std.testing.expectError(error.EndOfStream, reader.readLine(&line_buf));
-}
-
-test "io/unit_tests/io/PrefixReader_readLine_returns_BufferTooSmall_for_long_line" {
-    const Reader = struct {
-        payload: []const u8 = "abcd\r\n",
-        offset: usize = 0,
-
-        fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-    };
-
-    var reader = PrefixReader(Reader).init(Reader{}, "");
-    var line_buf: [4]u8 = undefined;
-    try std.testing.expectError(error.BufferTooSmall, reader.readLine(&line_buf));
-}
-
-test "io/unit_tests/io/PrefixReader_expectCrlf_accepts_and_rejects_line_endings" {
-    const Reader = struct {
-        payload: []const u8 = "\r\nx\n",
-        offset: usize = 0,
-
-        fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-    };
-
-    var reader = PrefixReader(Reader).init(Reader{}, "");
-    try reader.expectCrlf();
-    try std.testing.expectError(error.InvalidResponse, reader.expectCrlf());
-}
-
-test "io/unit_tests/io/PrefixReader_expectCrlf_crosses_prefix_and_reader_boundary" {
-    const Reader = struct {
-        payload: []const u8 = "\n",
-        offset: usize = 0,
-
-        fn read(self: *@This(), buf: []u8) anyerror!usize {
-            const remaining = self.payload[self.offset..];
-            const n = @min(buf.len, remaining.len);
-            @memcpy(buf[0..n], remaining[0..n]);
-            self.offset += n;
-            return n;
-        }
-    };
-
-    var reader = PrefixReader(Reader).init(Reader{}, "\r");
-    try reader.expectCrlf();
-}
-
-test "io/unit_tests/io/writeAll_returns_Unexpected_on_zero_write" {
-    const Writer = struct {
-        fn write(_: *@This(), _: []const u8) !usize {
-            return 0;
-        }
-    };
-
-    var writer = Writer{};
-    try std.testing.expectError(error.Unexpected, writeAll(Writer, &writer, "hello"));
-}
-
-test "io/unit_tests/io/writeAll_propagates_write_error" {
-    const Writer = struct {
-        calls: usize = 0,
-
-        fn write(self: *@This(), buf: []const u8) !usize {
-            if (self.calls == 0) {
-                self.calls += 1;
-                return @min(@as(usize, 2), buf.len);
-            }
-            return error.BrokenPipe;
-        }
-    };
-
-    var writer = Writer{};
-    try std.testing.expectError(error.BrokenPipe, writeAll(Writer, &writer, "hello"));
-}
-
-test "io/unit_tests/io/writeAll_with_empty_payload_is_noop" {
-    const Writer = struct {
-        called: bool = false,
-
-        fn write(self: *@This(), _: []const u8) !usize {
-            self.called = true;
-            return 0;
-        }
-    };
-
-    var writer = Writer{};
-    try writeAll(Writer, &writer, "");
-    try std.testing.expect(!writer.called);
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

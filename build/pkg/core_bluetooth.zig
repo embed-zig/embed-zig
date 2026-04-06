@@ -25,3 +25,5 @@ pub fn link(b: *std.Build) void {
     mod.linkFramework("Foundation", .{});
     mod.linkSystemLibrary("objc", .{});
 }
+
+pub fn linkTest(_: *std.Build, _: *std.Build.Step.Compile) void {}

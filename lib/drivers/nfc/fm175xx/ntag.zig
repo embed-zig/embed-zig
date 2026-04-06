@@ -1,4 +1,5 @@
 const TypeA = @import("../io/TypeA.zig");
+const testing_api = @import("testing");
 
 pub fn read(type_a: TypeA, addr: u8, out: []u8) TypeA.Error!void {
     if ((addr % 16) != 0) return error.InvalidArgument;
@@ -41,67 +42,98 @@ fn readOnce(type_a: TypeA, page: u8, out: []u8) TypeA.Error!void {
     @memcpy(out, &rx);
 }
 
-test "drivers/unit_tests/nfc/fm175xx/ntag/read_all_reads_capacity_derived_length" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn readAllReadsCapacityDerivedLength() !void {
+            const Fake = struct {
+                step: usize = 0,
 
-    const Fake = struct {
-        step: usize = 0,
+                pub fn transceive(self: *@This(), exchange: TypeA.Exchange, rx: []u8) TypeA.Error!usize {
+                    defer self.step += 1;
 
-        fn transceive(self: *@This(), exchange: TypeA.Exchange, rx: []u8) TypeA.Error!usize {
-            defer self.step += 1;
+                    switch (self.step) {
+                        0 => {
+                            if (exchange.tx.len != 2 or exchange.tx[0] != 0x30 or exchange.tx[1] != 0x00) return error.Unexpected;
+                            if (!exchange.tx_crc or !exchange.rx_crc) return error.Unexpected;
+                            var i: usize = 0;
+                            while (i < 16) : (i += 1) rx[i] = @intCast(i);
+                            rx[14] = 4;
+                            return 16 * 8;
+                        },
+                        1 => {
+                            if (exchange.tx.len != 2 or exchange.tx[0] != 0x30 or exchange.tx[1] != 0x04) return error.Unexpected;
+                            var i: usize = 0;
+                            while (i < 16) : (i += 1) rx[i] = @intCast(0xA0 + i);
+                            return 16 * 8;
+                        },
+                        2 => {
+                            if (exchange.tx.len != 2 or exchange.tx[0] != 0x30 or exchange.tx[1] != 0x08) return error.Unexpected;
+                            var i: usize = 0;
+                            while (i < 16) : (i += 1) rx[i] = @intCast(0xB0 + i);
+                            return 16 * 8;
+                        },
+                        else => return error.Unexpected,
+                    }
+                }
+            };
 
-            switch (self.step) {
-                0 => {
-                    try std.testing.expectEqualSlices(u8, &.{ 0x30, 0x00 }, exchange.tx);
-                    try std.testing.expect(exchange.tx_crc);
-                    try std.testing.expect(exchange.rx_crc);
+            var fake = Fake{};
+            var buf: [64]u8 = undefined;
+            const len = try readAll(TypeA.init(&fake), &buf);
+
+            try lib.testing.expectEqual(@as(usize, 48), len);
+            try lib.testing.expectEqual(@as(u8, 0x04), buf[14]);
+            try lib.testing.expectEqual(@as(u8, 0xA0), buf[16]);
+            try lib.testing.expectEqual(@as(u8, 0xAF), buf[31]);
+            try lib.testing.expectEqual(@as(u8, 0xB0), buf[32]);
+            try lib.testing.expectEqual(@as(u8, 0xBF), buf[47]);
+        }
+
+        fn readAllRejectsSmallOutputBuffer() !void {
+            const Fake = struct {
+                pub fn transceive(_: *@This(), _: TypeA.Exchange, rx: []u8) TypeA.Error!usize {
                     var i: usize = 0;
-                    while (i < 16) : (i += 1) rx[i] = @intCast(i);
-                    rx[14] = 4;
+                    while (i < 16) : (i += 1) rx[i] = 0;
+                    rx[14] = 8;
                     return 16 * 8;
-                },
-                1 => {
-                    try std.testing.expectEqualSlices(u8, &.{ 0x30, 0x04 }, exchange.tx);
-                    var i: usize = 0;
-                    while (i < 16) : (i += 1) rx[i] = @intCast(0xA0 + i);
-                    return 16 * 8;
-                },
-                2 => {
-                    try std.testing.expectEqualSlices(u8, &.{ 0x30, 0x08 }, exchange.tx);
-                    var i: usize = 0;
-                    while (i < 16) : (i += 1) rx[i] = @intCast(0xB0 + i);
-                    return 16 * 8;
-                },
-                else => return error.Unexpected,
-            }
+                }
+            };
+
+            var fake = Fake{};
+            var buf: [32]u8 = undefined;
+            try lib.testing.expectError(error.InvalidArgument, readAll(TypeA.init(&fake), &buf));
         }
     };
 
-    var fake = Fake{};
-    var buf: [64]u8 = undefined;
-    const len = try readAll(TypeA.init(&fake), &buf);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    try std.testing.expectEqual(@as(usize, 48), len);
-    try std.testing.expectEqual(@as(u8, 0x04), buf[14]);
-    try std.testing.expectEqual(@as(u8, 0xA0), buf[16]);
-    try std.testing.expectEqual(@as(u8, 0xBF), buf[31]);
-    try std.testing.expectEqual(@as(u8, 0xB0), buf[32]);
-    try std.testing.expectEqual(@as(u8, 0xBF), buf[47]);
-}
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-test "drivers/unit_tests/nfc/fm175xx/ntag/read_all_rejects_small_output_buffer" {
-    const std = @import("std");
+            TestCase.readAllReadsCapacityDerivedLength() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.readAllRejectsSmallOutputBuffer() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    const Fake = struct {
-        fn transceive(_: *@This(), _: TypeA.Exchange, rx: []u8) TypeA.Error!usize {
-            var i: usize = 0;
-            while (i < 16) : (i += 1) rx[i] = 0;
-            rx[14] = 8;
-            return 16 * 8;
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    var fake = Fake{};
-    var buf: [32]u8 = undefined;
-    try std.testing.expectError(error.InvalidArgument, readAll(TypeA.init(&fake), &buf));
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

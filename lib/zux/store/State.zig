@@ -1,3 +1,4 @@
+const testing_api = @import("testing");
 const Subscriber = @import("Subscriber.zig");
 
 pub fn make(comptime lib: type, comptime state_config: anytype, comptime HandlerFn: type) type {
@@ -5,7 +6,7 @@ pub fn make(comptime lib: type, comptime state_config: anytype, comptime Handler
     const Config = @TypeOf(state_config);
     const info = @typeInfo(Config);
     if (info != .@"struct") {
-        @compileError("zux.Store.make expects config.state nodes to be struct literals");
+        @compileError("zux.store.Builder.make expects configured state nodes to be struct literals");
     }
 
     const ArrayList = lib.ArrayList(HandlerFn);
@@ -101,7 +102,7 @@ pub fn handlePath(
     allocator: anytype,
     state: anytype,
     handler: anytype,
-) error{OutOfMemory, InvalidPath}!void {
+) error{ OutOfMemory, InvalidPath }!void {
     try handleStatePath(path, allocator, state, handler);
 }
 
@@ -210,7 +211,7 @@ fn bindStateStores(comptime Stores: type, comptime node_config: anytype, stores:
     const NodeConfig = @TypeOf(node_config);
     const info = @typeInfo(NodeConfig);
     if (info != .@"struct") {
-        @compileError("zux.Store.make expects config.state nodes to be struct literals");
+        @compileError("zux.store.Builder.make expects configured state nodes to be struct literals");
     }
 
     if (@hasField(NodeConfig, "stores")) {
@@ -236,62 +237,62 @@ fn bindStoreLabels(comptime Stores: type, comptime labels: anytype, stores: *Sto
                             inline for (labels.*) |raw_label| {
                                 const label = comptime labelText(raw_label);
                                 if (!@hasField(Stores, label)) {
-                                    @compileError("zux.Store.make unknown store label '" ++ label ++ "'");
+                                    @compileError("zux.store.Builder.make unknown store label '" ++ label ++ "'");
                                 }
                                 try @field(stores.*, label).subscribe(&state.subscriber);
                             }
                         },
                         .@"struct" => |struct_info| {
                             if (!struct_info.is_tuple) {
-                                @compileError("zux.Store.make expects state.stores to be an array, tuple, or pointer-to-array/tuple of labels");
+                                @compileError("zux.store.Builder.make expects state store labels to be an array, tuple, or pointer-to-array/tuple of labels");
                             }
                             inline for (struct_info.fields) |field| {
                                 const label = comptime labelText(@field(labels.*, field.name));
                                 if (!@hasField(Stores, label)) {
-                                    @compileError("zux.Store.make unknown store label '" ++ label ++ "'");
+                                    @compileError("zux.store.Builder.make unknown store label '" ++ label ++ "'");
                                 }
                                 try @field(stores.*, label).subscribe(&state.subscriber);
                             }
                         },
                         else => {
-                            @compileError("zux.Store.make expects state.stores to be an array, tuple, or pointer-to-array/tuple of labels");
-                        }
+                            @compileError("zux.store.Builder.make expects state store labels to be an array, tuple, or pointer-to-array/tuple of labels");
+                        },
                     }
                 },
                 .slice => {
                     inline for (labels) |raw_label| {
                         const label = comptime labelText(raw_label);
                         if (!@hasField(Stores, label)) {
-                            @compileError("zux.Store.make unknown store label '" ++ label ++ "'");
+                            @compileError("zux.store.Builder.make unknown store label '" ++ label ++ "'");
                         }
                         try @field(stores.*, label).subscribe(&state.subscriber);
                     }
                 },
-                else => @compileError("zux.Store.make expects state.stores to be an array, tuple, or pointer-to-array/tuple of labels"),
+                else => @compileError("zux.store.Builder.make expects state store labels to be an array, tuple, or pointer-to-array/tuple of labels"),
             }
         },
         .array => {
             inline for (labels) |raw_label| {
                 const label = comptime labelText(raw_label);
                 if (!@hasField(Stores, label)) {
-                    @compileError("zux.Store.make unknown store label '" ++ label ++ "'");
+                    @compileError("zux.store.Builder.make unknown store label '" ++ label ++ "'");
                 }
                 try @field(stores.*, label).subscribe(&state.subscriber);
             }
         },
         .@"struct" => |struct_info| {
             if (!struct_info.is_tuple) {
-                @compileError("zux.Store.make expects state.stores to be an array, tuple, or pointer-to-array/tuple of labels");
+                @compileError("zux.store.Builder.make expects state store labels to be an array, tuple, or pointer-to-array/tuple of labels");
             }
             inline for (struct_info.fields) |field| {
                 const label = comptime labelText(@field(labels, field.name));
                 if (!@hasField(Stores, label)) {
-                    @compileError("zux.Store.make unknown store label '" ++ label ++ "'");
+                    @compileError("zux.store.Builder.make unknown store label '" ++ label ++ "'");
                 }
                 try @field(stores.*, label).subscribe(&state.subscriber);
             }
         },
-        else => @compileError("zux.Store.make expects state.stores to be an array, tuple, or pointer-to-array/tuple of labels"),
+        else => @compileError("zux.store.Builder.make expects state store labels to be an array, tuple, or pointer-to-array/tuple of labels"),
     }
 }
 
@@ -299,7 +300,7 @@ fn unbindStateStores(comptime Stores: type, comptime node_config: anytype, store
     const NodeConfig = @TypeOf(node_config);
     const info = @typeInfo(NodeConfig);
     if (info != .@"struct") {
-        @compileError("zux.Store.make expects config.state nodes to be struct literals");
+        @compileError("zux.store.Builder.make expects configured state nodes to be struct literals");
     }
 
     if (@hasField(NodeConfig, "stores")) {
@@ -325,78 +326,78 @@ fn unbindStoreLabels(comptime Stores: type, comptime labels: anytype, stores: *S
                             inline for (labels.*) |raw_label| {
                                 const label = comptime labelText(raw_label);
                                 if (!@hasField(Stores, label)) {
-                                    @compileError("zux.Store.make unknown store label '" ++ label ++ "'");
+                                    @compileError("zux.store.Builder.make unknown store label '" ++ label ++ "'");
                                 }
                                 _ = @field(stores.*, label).unsubscribe(&state.subscriber);
                             }
                         },
                         .@"struct" => |struct_info| {
                             if (!struct_info.is_tuple) {
-                                @compileError("zux.Store.make expects state.stores to be an array, tuple, or pointer-to-array/tuple of labels");
+                                @compileError("zux.store.Builder.make expects state store labels to be an array, tuple, or pointer-to-array/tuple of labels");
                             }
                             inline for (struct_info.fields) |field| {
                                 const label = comptime labelText(@field(labels.*, field.name));
                                 if (!@hasField(Stores, label)) {
-                                    @compileError("zux.Store.make unknown store label '" ++ label ++ "'");
+                                    @compileError("zux.store.Builder.make unknown store label '" ++ label ++ "'");
                                 }
                                 _ = @field(stores.*, label).unsubscribe(&state.subscriber);
                             }
                         },
                         else => {
-                            @compileError("zux.Store.make expects state.stores to be an array, tuple, or pointer-to-array/tuple of labels");
-                        }
+                            @compileError("zux.store.Builder.make expects state store labels to be an array, tuple, or pointer-to-array/tuple of labels");
+                        },
                     }
                 },
                 .slice => {
                     inline for (labels) |raw_label| {
                         const label = comptime labelText(raw_label);
                         if (!@hasField(Stores, label)) {
-                            @compileError("zux.Store.make unknown store label '" ++ label ++ "'");
+                            @compileError("zux.store.Builder.make unknown store label '" ++ label ++ "'");
                         }
                         _ = @field(stores.*, label).unsubscribe(&state.subscriber);
                     }
                 },
-                else => @compileError("zux.Store.make expects state.stores to be an array, tuple, or pointer-to-array/tuple of labels"),
+                else => @compileError("zux.store.Builder.make expects state store labels to be an array, tuple, or pointer-to-array/tuple of labels"),
             }
         },
         .array => {
             inline for (labels) |raw_label| {
                 const label = comptime labelText(raw_label);
                 if (!@hasField(Stores, label)) {
-                    @compileError("zux.Store.make unknown store label '" ++ label ++ "'");
+                    @compileError("zux.store.Builder.make unknown store label '" ++ label ++ "'");
                 }
                 _ = @field(stores.*, label).unsubscribe(&state.subscriber);
             }
         },
         .@"struct" => |struct_info| {
             if (!struct_info.is_tuple) {
-                @compileError("zux.Store.make expects state.stores to be an array, tuple, or pointer-to-array/tuple of labels");
+                @compileError("zux.store.Builder.make expects state store labels to be an array, tuple, or pointer-to-array/tuple of labels");
             }
             inline for (struct_info.fields) |field| {
                 const label = comptime labelText(@field(labels, field.name));
                 if (!@hasField(Stores, label)) {
-                    @compileError("zux.Store.make unknown store label '" ++ label ++ "'");
+                    @compileError("zux.store.Builder.make unknown store label '" ++ label ++ "'");
                 }
                 _ = @field(stores.*, label).unsubscribe(&state.subscriber);
             }
         },
-        else => @compileError("zux.Store.make expects state.stores to be an array, tuple, or pointer-to-array/tuple of labels"),
+        else => @compileError("zux.store.Builder.make expects state store labels to be an array, tuple, or pointer-to-array/tuple of labels"),
     }
 }
 
 fn labelText(comptime raw_label: anytype) []const u8 {
     return switch (@typeInfo(@TypeOf(raw_label))) {
-        .@"enum_literal" => @tagName(raw_label),
+        .enum_literal => @tagName(raw_label),
         .pointer => |ptr| switch (ptr.size) {
             .slice => raw_label,
             .one => switch (@typeInfo(ptr.child)) {
                 .array => raw_label[0..],
-                else => @compileError("zux.Store.make store labels must be enum literals or string literals"),
+                else => @compileError("zux.store.Builder.make store labels must be enum literals or string literals"),
             },
-            else => @compileError("zux.Store.make store labels must be enum literals or string literals"),
+            else => @compileError("zux.store.Builder.make store labels must be enum literals or string literals"),
         },
         .array => raw_label[0..],
-        else => @compileError("zux.Store.make store labels must be enum literals or string literals"),
+        else => @compileError("zux.store.Builder.make store labels must be enum literals or string literals"),
     };
 }
 
@@ -405,7 +406,7 @@ fn handleStatePath(
     allocator: anytype,
     state: anytype,
     handler: anytype,
-) error{OutOfMemory, InvalidPath}!void {
+) error{ OutOfMemory, InvalidPath }!void {
     const normalized = comptime trimPath(path);
     if (normalized.len == 0) {
         if (state.ticking) {
@@ -479,46 +480,71 @@ fn splitPathHead(comptime path: []const u8) struct {
     };
 }
 
-test "zux/unit_tests/store/State/builds_tree_shape" {
-    const std = @import("std");
-    const HandlerFn = *const fn (stores: *struct {}) void;
-    const TestLib = struct {
-        pub const builtin = std.builtin;
-        pub const atomic = struct {
-            pub fn Value(comptime U: type) type {
-                return std.atomic.Value(U);
-            }
-        };
-        pub fn ArrayList(comptime Elem: type) type {
-            return std.ArrayList(Elem);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn builds_tree_shape(testing: anytype, _: lib.mem.Allocator) !void {
+            const HandlerFn = *const fn (stores: *struct {}) void;
+            const StoreLib = struct {
+                pub const builtin = lib.builtin;
+                pub const atomic = lib.atomic;
+                pub const ArrayList = lib.ArrayList;
+            };
+
+            const StateTy = make(StoreLib, .{
+                .ui = .{
+                    .stores = &.{ .wifi, .cellular },
+                    .home = .{
+                        .stores = &.{.wifi},
+                    },
+                },
+                .device = .{
+                    .stores = &.{.wifi},
+                },
+            }, HandlerFn);
+
+            try testing.expect(@hasField(StateTy, "dirty"));
+            try testing.expect(@hasField(StateTy, "handlers"));
+            try testing.expect(@hasField(StateTy, "subscriber_impl"));
+            try testing.expect(@hasField(StateTy, "subscriber"));
+            try testing.expect(@hasField(StateTy, "ui"));
+            try testing.expect(@hasField(StateTy, "device"));
+            try testing.expect(!@hasField(StateTy, "stores"));
+
+            const Ui = @FieldType(StateTy, "ui");
+            try testing.expect(@hasField(Ui, "dirty"));
+            try testing.expect(@hasField(Ui, "handlers"));
+            try testing.expect(@hasField(Ui, "subscriber_impl"));
+            try testing.expect(@hasField(Ui, "subscriber"));
+            try testing.expect(@hasField(Ui, "home"));
+            try testing.expect(!@hasField(Ui, "stores"));
         }
     };
 
-    const State = make(TestLib, .{
-        .ui = .{
-            .stores = &.{ .wifi, .cellular },
-            .home = .{
-                .stores = &.{.wifi},
-            },
-        },
-        .device = .{
-            .stores = &.{.wifi},
-        },
-    }, HandlerFn);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    try std.testing.expect(@hasField(State, "dirty"));
-    try std.testing.expect(@hasField(State, "handlers"));
-    try std.testing.expect(@hasField(State, "subscriber_impl"));
-    try std.testing.expect(@hasField(State, "subscriber"));
-    try std.testing.expect(@hasField(State, "ui"));
-    try std.testing.expect(@hasField(State, "device"));
-    try std.testing.expect(!@hasField(State, "stores"));
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            const testing = lib.testing;
 
-    const Ui = @FieldType(State, "ui");
-    try std.testing.expect(@hasField(Ui, "dirty"));
-    try std.testing.expect(@hasField(Ui, "handlers"));
-    try std.testing.expect(@hasField(Ui, "subscriber_impl"));
-    try std.testing.expect(@hasField(Ui, "subscriber"));
-    try std.testing.expect(@hasField(Ui, "home"));
-    try std.testing.expect(!@hasField(Ui, "stores"));
+            TestCase.builds_tree_shape(testing, allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

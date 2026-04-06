@@ -18,11 +18,19 @@ pub fn link(b: *std.Build) void {
     const motion = b.modules.get("motion") orelse @panic("zux requires motion");
     const net = b.modules.get("net") orelse @panic("zux requires net");
     const sync = b.modules.get("sync") orelse @panic("zux requires sync");
+    const bt = b.modules.get("bt") orelse @panic("zux requires bt");
+    const ledstrip = b.modules.get("ledstrip") orelse @panic("zux requires ledstrip");
+    const embed_std = b.modules.get("embed_std") orelse @panic("zux requires embed_std");
+    const testing = b.modules.get("testing") orelse @panic("zux requires testing");
     const mod = b.modules.get("zux") orelse @panic("zux module missing");
     mod.addImport("embed", embed);
     mod.addImport("motion", motion);
     mod.addImport("net", net);
     mod.addImport("sync", sync);
+    mod.addImport("bt", bt);
+    mod.addImport("ledstrip", ledstrip);
+    mod.addImport("embed_std", embed_std);
+    mod.addImport("testing", testing);
 }
 
 pub fn linkTest(b: *std.Build, compile: *std.Build.Step.Compile) void {

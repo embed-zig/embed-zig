@@ -2,6 +2,7 @@
 
 const root = @This();
 pub const Format = @import("Format.zig");
+const testing_api = @import("testing");
 
 pub const Config = struct {
     label: []const u8 = "",
@@ -94,49 +95,80 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
     };
 }
 
-test "audio/unit_tests/Track_make_surface" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        const MakeImpl = struct {
+            pub const Config = struct {
+                allocator: lib.mem.Allocator,
+                writes: *usize,
+            };
 
-    const MakeImpl = struct {
-        pub const Config = struct {
-            allocator: std.mem.Allocator,
             writes: *usize,
+
+            pub fn init(config: @This().Config) !@This() {
+                return .{
+                    .writes = config.writes,
+                };
+            }
+
+            pub fn write(self: *@This(), format: Format, samples: []const i16) WriteError!void {
+                _ = format;
+                self.writes.* += samples.len;
+            }
+
+            pub fn deinit(self: *@This()) void {
+                _ = self;
+            }
         };
 
-        writes: *usize,
+        fn trackMakeSurface(testing: anytype) !void {
+            comptime {
+                _ = root.Format;
+                _ = root.Config;
+                _ = root.write;
+                _ = root.deinit;
+                _ = root.make;
+                _ = make(lib, MakeImpl).init;
+            }
 
-        pub fn init(config: @This().Config) !@This() {
-            return .{
-                .writes = config.writes,
-            };
-        }
-
-        pub fn write(self: *@This(), format: Format, samples: []const i16) WriteError!void {
-            _ = format;
-            self.writes.* += samples.len;
-        }
-
-        pub fn deinit(self: *@This()) void {
-            _ = self;
+            const TrackType = make(lib, MakeImpl);
+            var writes: usize = 0;
+            const made = try TrackType.init(.{
+                .allocator = lib.testing.allocator,
+                .writes = &writes,
+            });
+            defer made.deinit();
+            try made.write(.{ .rate = 16000 }, &.{ 1, 2 });
+            try testing.expectEqual(@as(usize, 2), writes);
         }
     };
 
-    comptime {
-        _ = root.Format;
-        _ = root.Config;
-        _ = root.write;
-        _ = root.deinit;
-        _ = root.make;
-        _ = make(std, MakeImpl).init;
-    }
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    const TrackType = make(std, MakeImpl);
-    var writes: usize = 0;
-    const made = try TrackType.init(.{
-        .allocator = std.testing.allocator,
-        .writes = &writes,
-    });
-    defer made.deinit();
-    try made.write(.{ .rate = 16000 }, &.{ 1, 2 });
-    try std.testing.expectEqual(@as(usize, 2), writes);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
+
+            TestCase.trackMakeSurface(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

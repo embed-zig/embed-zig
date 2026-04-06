@@ -3,7 +3,7 @@
 const embed_mod = @import("embed");
 const context_mod = @import("context");
 const Context = context_mod.Context;
-const TestRunner = @import("TestRunner.zig");
+const TestRunnerHandle = @import("TestRunner.zig");
 const Self = @This();
 
 const open_marker = ">>>";
@@ -34,7 +34,7 @@ pub const VTable = struct {
     logErrorFn: *const fn (*anyopaque, []const u8) void,
     logFatalFn: *const fn (*Self, []const u8) void,
     timeoutFn: *const fn (*Self, i64) void,
-    runFn: *const fn (*Self, []const u8, TestRunner) void,
+    runFn: *const fn (*Self, []const u8, TestRunnerHandle) void,
     waitFn: *const fn (*Self) bool,
 };
 
@@ -126,7 +126,7 @@ pub fn timeout(self: *Self, ns: i64) void {
 ///
 /// Callers must not start additional children after `wait()` has been called on
 /// the same `T`.
-pub fn run(self: *Self, child_name: []const u8, task: TestRunner) void {
+pub fn run(self: *Self, child_name: []const u8, task: TestRunnerHandle) void {
     self.vtable.runFn(self, child_name, task);
 }
 
@@ -175,18 +175,6 @@ fn structuredLabelPadding(label: []const u8) []const u8 {
     return padding_spaces[0..pad_len];
 }
 
-test "testing/unit_tests/format_memory_usage" {
-    const std = @import("std");
-
-    var buf: [32]u8 = undefined;
-
-    try std.testing.expectEqualStrings("0 B", formatMemoryUsage(&buf, 0));
-    try std.testing.expectEqualStrings("1023 B", formatMemoryUsage(&buf, 1023));
-    try std.testing.expectEqualStrings("1.000 KiB", formatMemoryUsage(&buf, 1024));
-    try std.testing.expectEqualStrings("1.500 KiB", formatMemoryUsage(&buf, 1536));
-    try std.testing.expectEqualStrings("15.640 MiB", formatMemoryUsage(&buf, 16399707));
-}
-
 pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
     const ContextApi = context_mod.make(lib);
     const TestingAllocator = @import("TestingAllocator.zig");
@@ -214,7 +202,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
         const ImplSelf = @This();
         const PendingRun = struct {
             child: Self,
-            runner: TestRunner,
+            runner: TestRunnerHandle,
             testing_allocator: TestingAllocator,
             ok: bool = false,
             worker: lib.Thread,
@@ -609,7 +597,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
             return ok;
         }
 
-        fn runFn(self: *Self, child_name: []const u8, runner: TestRunner) void {
+        fn runFn(self: *Self, child_name: []const u8, runner: TestRunnerHandle) void {
             const self_state = fromPtr(self.ptr);
             if (self_state.fatal()) {
                 runner.deinit(self_state.allocator);
@@ -723,2028 +711,2086 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
     return Impl.createRoot() catch @panic("testing.T.make failed");
 }
 
-test "testing/unit_tests/context_cancel_logs" {
-    const std = @import("std");
-    const embed = @import("embed");
+pub fn TestRunner(comptime lib: type) TestRunnerHandle {
+    const TestCase = struct {
+        fn testFormatMemoryUsage() !void {
+            const std = @import("std");
 
-    const Support = struct {
-        var entries: std.ArrayListUnmanaged([]u8) = .{};
-        var mutex: std.Thread.Mutex = .{};
-        var now_ns = std.atomic.Value(u64).init(0);
-        var stage = std.atomic.Value(u32).init(0);
+            var buf: [32]u8 = undefined;
 
-        fn reset() void {
-            mutex.lock();
-            defer mutex.unlock();
-            for (entries.items) |entry| {
-                std.testing.allocator.free(entry);
-            }
-            entries.deinit(std.testing.allocator);
-            entries = .{};
-            now_ns.store(0, .release);
-            stage.store(0, .release);
+            try std.testing.expectEqualStrings("0 B", formatMemoryUsage(&buf, 0));
+            try std.testing.expectEqualStrings("1023 B", formatMemoryUsage(&buf, 1023));
+            try std.testing.expectEqualStrings("1.000 KiB", formatMemoryUsage(&buf, 1024));
+            try std.testing.expectEqualStrings("1.500 KiB", formatMemoryUsage(&buf, 1536));
+            try std.testing.expectEqualStrings("15.640 MiB", formatMemoryUsage(&buf, 16399707));
         }
+        fn testContextCancelLogs() !void {
+            const std = @import("std");
+            const embed = @import("embed");
 
-        fn append(comptime format: []const u8, args: anytype) void {
-            const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
-            mutex.lock();
-            defer mutex.unlock();
-            entries.append(std.testing.allocator, message) catch @panic("OOM");
-        }
+            const Support = struct {
+                var entries: std.ArrayListUnmanaged([]u8) = .{};
+                var mutex: std.Thread.Mutex = .{};
+                var now_ns = std.atomic.Value(u64).init(0);
+                var stage = std.atomic.Value(u32).init(0);
 
-        fn advance(ns: u64) void {
-            _ = now_ns.fetchAdd(ns, .acq_rel);
-        }
-
-        fn timestampNs() u64 {
-            return now_ns.load(.acquire);
-        }
-
-        fn setStage(value: u32) void {
-            stage.store(value, .release);
-        }
-
-        fn waitForStage(target: u32) void {
-            while (stage.load(.acquire) < target) {}
-        }
-
-        fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
-            mutex.lock();
-            defer mutex.unlock();
-
-            var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
-            errdefer bytes.deinit(allocator);
-
-            for (entries.items, 0..) |entry, idx| {
-                try bytes.appendSlice(allocator, entry);
-                if (idx + 1 != entries.items.len) {
-                    try bytes.append(allocator, '\n');
-                }
-            }
-            return bytes.toOwnedSlice(allocator);
-        }
-    };
-
-    const CapturingLog = struct {
-        pub fn scoped(comptime scope: @Type(.enum_literal)) type {
-            _ = scope;
-            return struct {
-                pub fn info(comptime format: []const u8, args: anytype) void {
-                    Support.append(format, args);
+                fn reset() void {
+                    mutex.lock();
+                    defer mutex.unlock();
+                    for (entries.items) |entry| {
+                        std.testing.allocator.free(entry);
+                    }
+                    entries.deinit(std.testing.allocator);
+                    entries = .{};
+                    now_ns.store(0, .release);
+                    stage.store(0, .release);
                 }
 
-                pub fn err(comptime format: []const u8, args: anytype) void {
-                    Support.append(format, args);
+                fn append(comptime format: []const u8, args: anytype) void {
+                    const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
+                    mutex.lock();
+                    defer mutex.unlock();
+                    entries.append(std.testing.allocator, message) catch @panic("OOM");
+                }
+
+                fn advance(ns: u64) void {
+                    _ = now_ns.fetchAdd(ns, .acq_rel);
+                }
+
+                fn timestampNs() u64 {
+                    return now_ns.load(.acquire);
+                }
+
+                fn setStage(value: u32) void {
+                    stage.store(value, .release);
+                }
+
+                fn waitForStage(target: u32) void {
+                    while (stage.load(.acquire) < target) {}
+                }
+
+                fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
+                    mutex.lock();
+                    defer mutex.unlock();
+
+                    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
+                    errdefer bytes.deinit(allocator);
+
+                    for (entries.items, 0..) |entry, idx| {
+                        try bytes.appendSlice(allocator, entry);
+                        if (idx + 1 != entries.items.len) {
+                            try bytes.append(allocator, '\n');
+                        }
+                    }
+                    return bytes.toOwnedSlice(allocator);
                 }
             };
-        }
-    };
 
-    const TestThread = struct {
-        pub const SpawnConfig = std.Thread.SpawnConfig;
-        pub const Mutex = std.Thread.Mutex;
-        pub const RwLock = std.Thread.RwLock;
-        const ThreadSelf = @This();
-        pub const Condition = struct {
-            inner: std.Thread.Condition = .{},
+            const CapturingLog = struct {
+                pub fn scoped(comptime scope: @Type(.enum_literal)) type {
+                    _ = scope;
+                    return struct {
+                        pub fn info(comptime format: []const u8, args: anytype) void {
+                            Support.append(format, args);
+                        }
 
-            pub fn wait(self: *Condition, mutex: *Mutex) void {
-                self.inner.wait(mutex);
-            }
-
-            pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
-                self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
-            }
-
-            pub fn signal(self: *Condition) void {
-                self.inner.signal();
-            }
-
-            pub fn broadcast(self: *Condition) void {
-                self.inner.broadcast();
-            }
-        };
-
-        inner: std.Thread,
-
-        pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
-            return .{
-                .inner = try std.Thread.spawn(config, f, args),
+                        pub fn err(comptime format: []const u8, args: anytype) void {
+                            Support.append(format, args);
+                        }
+                    };
+                }
             };
-        }
 
-        pub fn join(self: ThreadSelf) void {
-            self.inner.join();
-        }
+            const TestThread = struct {
+                pub const SpawnConfig = std.Thread.SpawnConfig;
+                pub const Mutex = std.Thread.Mutex;
+                pub const RwLock = std.Thread.RwLock;
+                const ThreadSelf = @This();
+                pub const Condition = struct {
+                    inner: std.Thread.Condition = .{},
 
-        pub fn detach(self: ThreadSelf) void {
-            self.inner.detach();
-        }
+                    pub fn wait(self: *Condition, mutex: *Mutex) void {
+                        self.inner.wait(mutex);
+                    }
 
-        pub fn sleep(ns: u64) void {
-            Support.advance(ns);
-        }
-    };
+                    pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
+                        self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
+                    }
 
-    const TestLib = struct {
-        pub const mem = embed.mem;
-        pub const fmt = embed.fmt;
-        pub const Thread = TestThread;
-        pub const log = CapturingLog;
-        pub fn ArrayList(comptime T: type) type {
-            return std.ArrayList(T);
-        }
-        pub const testing = struct {
-            pub const allocator = std.testing.allocator;
-        };
-        pub const time = struct {
-            pub const ns_per_ms = std.time.ns_per_ms;
+                    pub fn signal(self: *Condition) void {
+                        self.inner.signal();
+                    }
 
-            pub fn nanoTimestamp() i128 {
-                return Support.timestampNs();
-            }
+                    pub fn broadcast(self: *Condition) void {
+                        self.inner.broadcast();
+                    }
+                };
 
-            pub fn milliTimestamp() i64 {
-                return @intCast(@divFloor(Support.timestampNs(), std.time.ns_per_ms));
-            }
-        };
-    };
+                inner: std.Thread,
 
-    const TaskRunner = struct {
-        fn make(comptime run_fn: anytype, memory_limit: ?usize) TestRunner {
-            const Runner = struct {
-                memory_limit: ?usize,
+                pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
+                    return .{
+                        .inner = try std.Thread.spawn(config, f, args),
+                    };
+                }
 
-                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
-                    _ = self;
+                pub fn join(self: ThreadSelf) void {
+                    self.inner.join();
+                }
+
+                pub fn detach(self: ThreadSelf) void {
+                    self.inner.detach();
+                }
+
+                pub fn sleep(ns: u64) void {
+                    Support.advance(ns);
+                }
+            };
+
+            const TestLib = struct {
+                pub const mem = embed.mem;
+                pub const fmt = embed.fmt;
+                pub const Thread = TestThread;
+                pub const log = CapturingLog;
+                pub fn ArrayList(comptime T: type) type {
+                    return std.ArrayList(T);
+                }
+                pub const testing = struct {
+                    pub const allocator = std.testing.allocator;
+                };
+                pub const time = struct {
+                    pub const ns_per_ms = std.time.ns_per_ms;
+
+                    pub fn nanoTimestamp() i128 {
+                        return Support.timestampNs();
+                    }
+
+                    pub fn milliTimestamp() i64 {
+                        return @intCast(@divFloor(Support.timestampNs(), std.time.ns_per_ms));
+                    }
+                };
+            };
+
+            const TaskRunner = struct {
+                fn make(comptime run_fn: anytype, memory_limit: ?usize) TestRunnerHandle {
+                    const Runner = struct {
+                        memory_limit: ?usize,
+
+                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                            _ = self;
+                            _ = allocator;
+                        }
+
+                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                            _ = self;
+                            var arg_byte: u8 = 0;
+                            return run_fn(t, allocator, @ptrCast(&arg_byte));
+                        }
+
+                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                            _ = allocator;
+                            std.testing.allocator.destroy(self);
+                        }
+                    };
+
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
+                    runner.* = .{ .memory_limit = memory_limit };
+                    return TestRunnerHandle.make(Runner).new(runner);
+                }
+            };
+
+            const ChildTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
+                    _ = args;
+                    TestLib.Thread.sleep(40 * TestLib.time.ns_per_ms);
+                    t.logFatal("child fatal");
+                    const cause = t.context().err() orelse return false;
+                    return cause == error.TestFailed;
                 }
+            };
 
-                pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
-                    _ = self;
-                    var arg_byte: u8 = 0;
-                    return run_fn(t, allocator, @ptrCast(&arg_byte));
-                }
-
-                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            const NestedTimeoutTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
-                    std.testing.allocator.destroy(self);
+                    _ = args;
+                    t.run("leaf", TaskRunner.make(struct {
+                        fn runLeaf(leaf: *Self, alloc: embed_mod.mem.Allocator, leaf_args: *anyopaque) bool {
+                            _ = alloc;
+                            _ = leaf_args;
+                            TestLib.Thread.sleep(300 * TestLib.time.ns_per_ms);
+                            leaf.context().cancelWithCause(error.TestTimeout);
+                            leaf.logError("leaf timeout");
+                            const cause = leaf.context().err() orelse return false;
+                            return cause == error.TestTimeout;
+                        }
+                    }.runLeaf, null));
+                    return t.wait();
                 }
             };
 
-            const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
-            runner.* = .{ .memory_limit = memory_limit };
-            return TestRunner.make(Runner).new(runner);
-        }
-    };
-
-    const ChildTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            TestLib.Thread.sleep(40 * TestLib.time.ns_per_ms);
-            t.logFatal("child fatal");
-            const cause = t.context().err() orelse return false;
-            return cause == error.TestFailed;
-        }
-    };
-
-    const NestedTimeoutTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            t.run("leaf", TaskRunner.make(struct {
-                fn runLeaf(leaf: *Self, alloc: embed_mod.mem.Allocator, leaf_args: *anyopaque) bool {
-                    _ = alloc;
-                    _ = leaf_args;
-                    TestLib.Thread.sleep(300 * TestLib.time.ns_per_ms);
-                    leaf.context().cancelWithCause(error.TestTimeout);
-                    leaf.logError("leaf timeout");
-                    const cause = leaf.context().err() orelse return false;
-                    return cause == error.TestTimeout;
-                }
-            }.runLeaf, null));
-            return t.wait();
-        }
-    };
-
-    const ParallelFastTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = t;
-            _ = allocator;
-            _ = args;
-            Support.advance(100 * TestLib.time.ns_per_ms);
-            Support.setStage(1);
-            Support.waitForStage(2);
-            Support.advance(200 * TestLib.time.ns_per_ms);
-            return true;
-        }
-    };
-
-    const ParallelSlowTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            Support.waitForStage(1);
-            Support.advance(300 * TestLib.time.ns_per_ms);
-            t.logError("slow timeout");
-            Support.setStage(2);
-            return false;
-        }
-    };
-
-    const ComplexLeafOkTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = t;
-            _ = allocator;
-            _ = args;
-            TestLib.Thread.sleep(50 * TestLib.time.ns_per_ms);
-            return true;
-        }
-    };
-
-    const ComplexLeafErrTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            TestLib.Thread.sleep(20 * TestLib.time.ns_per_ms);
-            t.logError("leaf err");
-            return false;
-        }
-    };
-
-    const ComplexFastTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = t;
-            _ = allocator;
-            _ = args;
-            Support.advance(30 * TestLib.time.ns_per_ms);
-            Support.setStage(1);
-            Support.waitForStage(2);
-            Support.advance(80 * TestLib.time.ns_per_ms);
-            return true;
-        }
-    };
-
-    const ComplexSlowTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            Support.waitForStage(1);
-            Support.advance(60 * TestLib.time.ns_per_ms);
-            t.logError("slow timeout");
-            Support.setStage(2);
-            return false;
-        }
-    };
-
-    const ComplexDeepFatalTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            TestLib.Thread.sleep(40 * TestLib.time.ns_per_ms);
-            t.logFatal("deep fatal");
-            const cause = t.context().err() orelse return false;
-            return cause == error.TestFailed;
-        }
-    };
-
-    const ComplexNestedTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            t.run("deep", TaskRunner.make(ComplexDeepFatalTask.run, null));
-            return t.wait();
-        }
-    };
-
-    const ComplexSuiteTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            t.run("leaf_ok", TaskRunner.make(ComplexLeafOkTask.run, null));
-            t.run("leaf_err", TaskRunner.make(ComplexLeafErrTask.run, null));
-
-            t.run("nested", TaskRunner.make(ComplexNestedTask.run, null));
-
-            t.parallel();
-            t.run("fast", TaskRunner.make(ComplexFastTask.run, null));
-            Support.waitForStage(1);
-            t.run("slow", TaskRunner.make(ComplexSlowTask.run, null));
-            return t.wait();
-        }
-    };
-
-    const Helper = struct {
-        fn makeRunner(comptime run_fn: anytype, memory_limit: ?usize) TestRunner {
-            const Runner = struct {
-                memory_limit: ?usize,
-
-                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
-                    _ = self;
-                    _ = allocator;
-                }
-
-                pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
-                    _ = self;
-                    var arg_byte: u8 = 0;
-                    return run_fn(t, allocator, @ptrCast(&arg_byte));
-                }
-
-                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
-                    _ = allocator;
-                    std.testing.allocator.destroy(self);
-                }
-            };
-
-            const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
-            runner.* = .{ .memory_limit = memory_limit };
-            return TestRunner.make(Runner).new(runner);
-        }
-
-        fn appendNormalizedLine(bytes: *std.ArrayList(u8), line: []const u8) !void {
-            var plain_line = std.ArrayList(u8).empty;
-            defer plain_line.deinit(std.testing.allocator);
-
-            var i: usize = 0;
-            while (i < line.len) {
-                if (line[i] == 0x1b and i + 1 < line.len and line[i + 1] == '[') {
-                    i += 2;
-                    while (i < line.len and line[i] != 'm') : (i += 1) {}
-                    if (i < line.len) i += 1;
-                    continue;
-                }
-                try plain_line.append(std.testing.allocator, line[i]);
-                i += 1;
-            }
-
-            const plain = plain_line.items;
-            var compact_line = std.ArrayList(u8).empty;
-            defer compact_line.deinit(std.testing.allocator);
-            const normalized_plain = blk: {
-                if (std.mem.startsWith(u8, plain, ">>> ") or
-                    std.mem.startsWith(u8, plain, "<<< ") or
-                    std.mem.startsWith(u8, plain, "!!! "))
-                {
-                    const prefix = plain[0..4];
-                    const rest = plain[4..];
-                    const split_idx = std.mem.indexOfScalar(u8, rest, ' ') orelse break :blk plain;
-                    const label = rest[0..split_idx];
-                    const suffix = std.mem.trimLeft(u8, rest[split_idx..], " ");
-                    try compact_line.appendSlice(std.testing.allocator, prefix);
-                    try compact_line.appendSlice(std.testing.allocator, label);
-                    try compact_line.append(std.testing.allocator, ' ');
-                    try compact_line.appendSlice(std.testing.allocator, suffix);
-                    break :blk compact_line.items;
-                }
-                break :blk plain;
-            };
-            const event_idx = std.mem.indexOf(u8, normalized_plain, " done at ") orelse
-                std.mem.indexOf(u8, normalized_plain, " failed at ");
-            if (event_idx) |idx| {
-                const prefix = std.mem.trimRight(u8, normalized_plain[0..idx], " ");
-                const suffix = normalized_plain[idx + 1 ..];
-                if (std.mem.indexOf(u8, suffix, "ms, ")) |ms_idx| {
-                    try bytes.appendSlice(std.testing.allocator, prefix);
-                    try bytes.append(std.testing.allocator, ' ');
-                    try bytes.appendSlice(std.testing.allocator, suffix[0 .. ms_idx + 4]);
-                    try bytes.appendSlice(std.testing.allocator, "<mem>");
-                    return;
-                }
-                try bytes.appendSlice(std.testing.allocator, prefix);
-                try bytes.append(std.testing.allocator, ' ');
-                try bytes.appendSlice(std.testing.allocator, suffix);
-                return;
-            }
-            try bytes.appendSlice(std.testing.allocator, normalized_plain);
-        }
-
-        fn normalizedLog() ![]u8 {
-            const actual_log = try Support.joinedLog(std.testing.allocator);
-            defer std.testing.allocator.free(actual_log);
-
-            var normalized = std.ArrayList(u8).empty;
-            errdefer normalized.deinit(std.testing.allocator);
-
-            var lines = std.mem.splitScalar(u8, actual_log, '\n');
-            var first = true;
-            while (lines.next()) |line| {
-                if (!first) try normalized.append(std.testing.allocator, '\n');
-                try appendNormalizedLine(&normalized, line);
-                first = false;
-            }
-            return normalized.toOwnedSlice(std.testing.allocator);
-        }
-
-        fn expectLog(expected_log: []const u8) !void {
-            const actual_log = try normalizedLog();
-            defer std.testing.allocator.free(actual_log);
-            try std.testing.expectEqualStrings(expected_log, actual_log);
-        }
-
-        fn expectOneOfLogs(expected_a: []const u8, expected_b: []const u8) !void {
-            const actual_log = try normalizedLog();
-            defer std.testing.allocator.free(actual_log);
-            if (std.mem.eql(u8, expected_a, actual_log)) return;
-            if (std.mem.eql(u8, expected_b, actual_log)) return;
-            try std.testing.expectEqualStrings(expected_a, actual_log);
-        }
-    };
-
-    Support.reset();
-    defer Support.reset();
-
-    {
-        var root = new(TestLib, .test_run);
-        TestLib.Thread.sleep(220 * TestLib.time.ns_per_ms);
-
-        root.run("child", TaskRunner.make(ChildTask.run, null));
-        try std.testing.expect(!root.wait());
-        root.deinit();
-
-        const expected_log =
-            \\>>> /child start at 0.2s
-            \\!!! /child child fatal
-            \\!!! /child failed at 0.2s, 40ms, <mem>
-            \\!!! summary failed at 0.2s, 260ms, <mem>
-        ;
-
-        try Helper.expectLog(expected_log);
-    }
-
-    Support.reset();
-
-    {
-        var root = new(TestLib, .test_run);
-        TestLib.Thread.sleep(100 * TestLib.time.ns_per_ms);
-
-        root.run("parent", TaskRunner.make(NestedTimeoutTask.run, null));
-        try std.testing.expect(!root.wait());
-        root.deinit();
-
-        const expected_log =
-            \\>>> /parent start at 0.1s
-            \\>>> /parent/leaf start at 0.1s
-            \\!!! /parent/leaf leaf timeout
-            \\!!! /parent/leaf failed at 0.4s, 300ms, <mem>
-            \\!!! /parent failed at 0.4s, 300ms, <mem>
-            \\!!! summary failed at 0.4s, 400ms, <mem>
-        ;
-
-        try Helper.expectLog(expected_log);
-    }
-
-    Support.reset();
-
-    {
-        var root = new(TestLib, .test_run);
-        root.parallel();
-
-        root.run("fast", TaskRunner.make(ParallelFastTask.run, null));
-        Support.waitForStage(1);
-        root.run("slow", TaskRunner.make(ParallelSlowTask.run, null));
-
-        try std.testing.expect(!root.wait());
-        root.deinit();
-
-        const expected_log_a =
-            \\>>> /fast start at 0.0s
-            \\>>> /slow start at 0.1s
-            \\!!! /slow slow timeout
-            \\<<< /fast done at 0.6s, 600ms, <mem>
-            \\!!! /slow failed at 0.4s, 300ms, <mem>
-            \\!!! summary failed at 0.4s, 400ms, <mem>
-        ;
-        const expected_log_b =
-            \\>>> /fast start at 0.0s
-            \\>>> /slow start at 0.1s
-            \\!!! /slow slow timeout
-            \\<<< /fast done at 0.6s, 600ms, <mem>
-            \\!!! /slow failed at 0.6s, 500ms, <mem>
-            \\!!! summary failed at 0.6s, 600ms, <mem>
-        ;
-
-        try Helper.expectOneOfLogs(expected_log_a, expected_log_b);
-    }
-
-    Support.reset();
-
-    {
-        var root = new(TestLib, .test_run);
-        TestLib.Thread.sleep(100 * TestLib.time.ns_per_ms);
-
-        root.run("suite", TaskRunner.make(ComplexSuiteTask.run, null));
-        try std.testing.expect(!root.wait());
-        root.deinit();
-
-        const expected_log =
-            \\>>> /suite start at 0.1s
-            \\>>> /suite/leaf_ok start at 0.1s
-            \\<<< /suite/leaf_ok done at 0.1s, 50ms, <mem>
-            \\>>> /suite/leaf_err start at 0.1s
-            \\!!! /suite/leaf_err leaf err
-            \\!!! /suite/leaf_err failed at 0.1s, 20ms, <mem>
-            \\>>> /suite/nested start at 0.1s
-            \\>>> /suite/nested/deep start at 0.1s
-            \\!!! /suite/nested/deep deep fatal
-            \\!!! /suite/nested/deep failed at 0.2s, 40ms, <mem>
-            \\!!! /suite/nested failed at 0.2s, 40ms, <mem>
-            \\>>> /suite/fast start at 0.2s
-            \\>>> /suite/slow start at 0.2s
-            \\!!! /suite/slow slow timeout
-            \\<<< /suite/fast done at 0.3s, 170ms, <mem>
-            \\!!! /suite/slow failed at 0.3s, 60ms, <mem>
-            \\!!! /suite failed at 0.1s, 70ms, <mem>
-            \\!!! summary failed at 0.1s, 170ms, <mem>
-        ;
-
-        try Helper.expectLog(expected_log);
-    }
-}
-
-test "testing/unit_tests/timeout" {
-    const std = @import("std");
-    const embed = @import("embed");
-
-    const Support = struct {
-        var entries: std.ArrayListUnmanaged([]u8) = .{};
-        var mutex: std.Thread.Mutex = .{};
-        var now_ns = std.atomic.Value(u64).init(0);
-        var stage = std.atomic.Value(u32).init(0);
-
-        fn reset() void {
-            mutex.lock();
-            defer mutex.unlock();
-            for (entries.items) |entry| {
-                std.testing.allocator.free(entry);
-            }
-            entries.deinit(std.testing.allocator);
-            entries = .{};
-            now_ns.store(0, .release);
-            stage.store(0, .release);
-        }
-
-        fn append(comptime format: []const u8, args: anytype) void {
-            const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
-            mutex.lock();
-            defer mutex.unlock();
-            entries.append(std.testing.allocator, message) catch @panic("OOM");
-        }
-
-        fn advance(ns: u64) void {
-            _ = now_ns.fetchAdd(ns, .acq_rel);
-        }
-
-        fn timestampNs() u64 {
-            return now_ns.load(.acquire);
-        }
-
-        fn setStage(value: u32) void {
-            stage.store(value, .release);
-        }
-
-        fn waitForStage(target: u32) void {
-            while (stage.load(.acquire) < target) std.Thread.yield() catch {};
-        }
-
-        fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
-            mutex.lock();
-            defer mutex.unlock();
-
-            var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
-            errdefer bytes.deinit(allocator);
-
-            for (entries.items, 0..) |entry, idx| {
-                try bytes.appendSlice(allocator, entry);
-                if (idx + 1 != entries.items.len) {
-                    try bytes.append(allocator, '\n');
-                }
-            }
-            return bytes.toOwnedSlice(allocator);
-        }
-    };
-
-    const CapturingLog = struct {
-        pub fn scoped(comptime scope: @Type(.enum_literal)) type {
-            _ = scope;
-            return struct {
-                pub fn info(comptime format: []const u8, args: anytype) void {
-                    Support.append(format, args);
-                }
-
-                pub fn err(comptime format: []const u8, args: anytype) void {
-                    Support.append(format, args);
-                }
-            };
-        }
-    };
-
-    const TestThread = struct {
-        pub const SpawnConfig = std.Thread.SpawnConfig;
-        pub const Mutex = std.Thread.Mutex;
-        pub const RwLock = std.Thread.RwLock;
-        const ThreadSelf = @This();
-        pub const Condition = struct {
-            inner: std.Thread.Condition = .{},
-
-            pub fn wait(self: *Condition, mutex: *Mutex) void {
-                self.inner.wait(mutex);
-            }
-
-            pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
-                self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
-            }
-
-            pub fn signal(self: *Condition) void {
-                self.inner.signal();
-            }
-
-            pub fn broadcast(self: *Condition) void {
-                self.inner.broadcast();
-            }
-        };
-
-        inner: std.Thread,
-
-        pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
-            return .{
-                .inner = try std.Thread.spawn(config, f, args),
-            };
-        }
-
-        pub fn join(self: ThreadSelf) void {
-            self.inner.join();
-        }
-
-        pub fn detach(self: ThreadSelf) void {
-            self.inner.detach();
-        }
-
-        pub fn sleep(ns: u64) void {
-            Support.advance(ns);
-            std.Thread.sleep(ns);
-        }
-    };
-
-    const TestLib = struct {
-        pub const mem = embed.mem;
-        pub const fmt = embed.fmt;
-        pub const Thread = TestThread;
-        pub const log = CapturingLog;
-        pub fn ArrayList(comptime Elem: type) type {
-            return std.ArrayList(Elem);
-        }
-        pub const testing = struct {
-            pub const allocator = std.testing.allocator;
-        };
-        pub const time = struct {
-            pub const ns_per_ms = std.time.ns_per_ms;
-
-            pub fn nanoTimestamp() i128 {
-                return Support.timestampNs();
-            }
-
-            pub fn milliTimestamp() i64 {
-                return @intCast(@divFloor(Support.timestampNs(), std.time.ns_per_ms));
-            }
-        };
-    };
-
-    const TaskRunner = struct {
-        fn make(comptime run_fn: anytype, memory_limit: ?usize) TestRunner {
-            const Runner = struct {
-                memory_limit: ?usize,
-
-                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
-                    _ = self;
-                    _ = allocator;
-                }
-
-                pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
-                    _ = self;
-                    var arg_byte: u8 = 0;
-                    return run_fn(t, allocator, @ptrCast(&arg_byte));
-                }
-
-                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
-                    _ = allocator;
-                    std.testing.allocator.destroy(self);
-                }
-            };
-
-            const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
-            runner.* = .{ .memory_limit = memory_limit };
-            return TestRunner.make(Runner).new(runner);
-        }
-    };
-
-    const suite_timeout_ns: i64 = 150 * TestLib.time.ns_per_ms;
-    const nested_timeout_ns: i64 = 40 * TestLib.time.ns_per_ms;
-    const branch_timeout_ns: i64 = 30 * TestLib.time.ns_per_ms;
-
-    const ImmediateTimeoutTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            const deadline = t.context().deadline() orelse {
-                t.logError("immediate missing deadline");
-                return false;
-            };
-            if (deadline != 0) {
-                t.logError("immediate deadline mismatch");
-                return false;
-            }
-            const cause = t.context().err() orelse {
-                t.logError("immediate missing err");
-                return false;
-            };
-            if (cause != error.DeadlineExceeded) {
-                t.logError("immediate wrong err");
-                return false;
-            }
-            t.logError("immediate timeout");
-            return false;
-        }
-    };
-
-    const NestedLeafFastTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            const deadline = t.context().deadline() orelse {
-                t.logError("fast leaf missing deadline");
-                return false;
-            };
-            if (deadline != @as(i128, nested_timeout_ns)) {
-                t.logError("fast leaf deadline mismatch");
-                return false;
-            }
-            TestLib.Thread.sleep(10 * TestLib.time.ns_per_ms);
-            if (t.context().err() != null) {
-                t.logError("fast leaf should stay active");
-                return false;
-            }
-            return true;
-        }
-    };
-
-    const NestedLeafSlowTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            const deadline = t.context().deadline() orelse {
-                t.logError("leaf timeout missing deadline");
-                return false;
-            };
-            if (deadline != @as(i128, nested_timeout_ns)) {
-                t.logError("leaf timeout deadline mismatch");
-                return false;
-            }
-            TestLib.Thread.sleep(70 * TestLib.time.ns_per_ms);
-            const cause = t.context().err() orelse {
-                t.logError("leaf timeout missing err");
-                return false;
-            };
-            if (cause != error.DeadlineExceeded) {
-                t.logError("leaf timeout wrong err");
-                return false;
-            }
-            t.logError("leaf timeout");
-            return false;
-        }
-    };
-
-    const NestedTimeoutTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            const inherited = t.context().deadline() orelse {
-                t.logError("nested missing inherited deadline");
-                return false;
-            };
-            if (inherited != @as(i128, suite_timeout_ns)) {
-                t.logError("nested inherited deadline mismatch");
-                return false;
-            }
-            t.timeout(nested_timeout_ns);
-            const first_deadline = t.context().deadline() orelse {
-                t.logError("nested timeout missing deadline");
-                return false;
-            };
-            if (first_deadline != @as(i128, nested_timeout_ns)) {
-                t.logError("nested timeout deadline mismatch");
-                return false;
-            }
-            t.timeout(90 * TestLib.time.ns_per_ms);
-            const second_deadline = t.context().deadline() orelse {
-                t.logError("nested second timeout missing deadline");
-                return false;
-            };
-            if (second_deadline != @as(i128, nested_timeout_ns)) {
-                t.logError("nested second timeout override");
-                return false;
-            }
-            t.run("leaf_fast", TaskRunner.make(NestedLeafFastTask.run, null));
-            t.run("leaf_slow", TaskRunner.make(NestedLeafSlowTask.run, null));
-            return t.wait();
-        }
-    };
-
-    const ParallelFastTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            const deadline = t.context().deadline() orelse {
-                t.logError("parallel fast missing deadline");
-                return false;
-            };
-            if (deadline != @as(i128, suite_timeout_ns)) {
-                t.logError("parallel fast deadline mismatch");
-                return false;
-            }
-            TestLib.Thread.sleep(10 * TestLib.time.ns_per_ms);
-            if (t.context().err() != null) {
-                t.logError("parallel fast should stay active");
-                return false;
-            }
-            Support.setStage(1);
-            return true;
-        }
-    };
-
-    const ParallelSlowTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            Support.waitForStage(1);
-            const deadline = t.context().deadline() orelse {
-                t.logError("parallel slow missing deadline");
-                return false;
-            };
-            if (deadline != @as(i128, suite_timeout_ns)) {
-                t.logError("parallel slow deadline mismatch");
-                return false;
-            }
-            TestLib.Thread.sleep(70 * TestLib.time.ns_per_ms);
-            const cause = t.context().err() orelse {
-                t.logError("parallel timeout missing err");
-                return false;
-            };
-            if (cause != error.DeadlineExceeded) {
-                t.logError("parallel timeout wrong err");
-                return false;
-            }
-            t.logError("parallel timeout");
-            return false;
-        }
-    };
-
-    const ComplexTimeoutSuiteTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            const inherited = t.context().deadline() orelse {
-                t.logError("suite missing inherited deadline");
-                return false;
-            };
-            if (inherited != @as(i128, suite_timeout_ns)) {
-                t.logError("suite inherited deadline mismatch");
-                return false;
-            }
-            t.run("nested", TaskRunner.make(NestedTimeoutTask.run, null));
-            t.parallel();
-            t.run("fast", TaskRunner.make(ParallelFastTask.run, null));
-            Support.waitForStage(1);
-            t.run("slow", TaskRunner.make(ParallelSlowTask.run, null));
-            return t.wait();
-        }
-    };
-
-    const ScopedTimedLeafTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            const deadline = t.context().deadline() orelse {
-                t.logError("branch timeout missing deadline");
-                return false;
-            };
-            if (deadline != @as(i128, branch_timeout_ns)) {
-                t.logError("branch timeout deadline mismatch");
-                return false;
-            }
-            TestLib.Thread.sleep(50 * TestLib.time.ns_per_ms);
-            const cause = t.context().err() orelse {
-                t.logError("branch timeout missing err");
-                return false;
-            };
-            if (cause != error.DeadlineExceeded) {
-                t.logError("branch timeout wrong err");
-                return false;
-            }
-            t.logError("branch timeout");
-            return false;
-        }
-    };
-
-    const ScopedTimedBranchTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            if (t.context().deadline() != null) {
-                t.logError("timed branch should start without deadline");
-                return false;
-            }
-            t.timeout(branch_timeout_ns);
-            const deadline = t.context().deadline() orelse {
-                t.logError("timed branch missing deadline");
-                return false;
-            };
-            if (deadline != @as(i128, branch_timeout_ns)) {
-                t.logError("timed branch deadline mismatch");
-                return false;
-            }
-            t.run("timed_leaf", TaskRunner.make(ScopedTimedLeafTask.run, null));
-            return t.wait();
-        }
-    };
-
-    const ScopedPlainBranchTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            if (t.context().deadline() != null) {
-                t.logError("plain branch inherited timeout");
-                return false;
-            }
-            TestLib.Thread.sleep(10 * TestLib.time.ns_per_ms);
-            if (t.context().err() != null) {
-                t.logError("plain branch canceled");
-                return false;
-            }
-            return true;
-        }
-    };
-
-    const ScopedTimeoutSuiteTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = allocator;
-            _ = args;
-            t.run("timed_branch", TaskRunner.make(ScopedTimedBranchTask.run, null));
-            t.run("plain_branch", TaskRunner.make(ScopedPlainBranchTask.run, null));
-            return t.wait();
-        }
-    };
-
-    const Helper = struct {
-        fn makeRunner(comptime run_fn: anytype, memory_limit: ?usize) TestRunner {
-            const Runner = struct {
-                memory_limit: ?usize,
-
-                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
-                    _ = self;
-                    _ = allocator;
-                }
-
-                pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
-                    _ = self;
-                    var arg_byte: u8 = 0;
-                    return run_fn(t, allocator, @ptrCast(&arg_byte));
-                }
-
-                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
-                    _ = allocator;
-                    std.testing.allocator.destroy(self);
-                }
-            };
-
-            const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
-            runner.* = .{ .memory_limit = memory_limit };
-            return TestRunner.make(Runner).new(runner);
-        }
-
-        fn appendNormalizedLine(bytes: *std.ArrayList(u8), line: []const u8) !void {
-            var plain_line = std.ArrayList(u8).empty;
-            defer plain_line.deinit(std.testing.allocator);
-
-            var i: usize = 0;
-            while (i < line.len) {
-                if (line[i] == 0x1b and i + 1 < line.len and line[i + 1] == '[') {
-                    i += 2;
-                    while (i < line.len and line[i] != 'm') : (i += 1) {}
-                    if (i < line.len) i += 1;
-                    continue;
-                }
-                try plain_line.append(std.testing.allocator, line[i]);
-                i += 1;
-            }
-
-            const plain = plain_line.items;
-            var compact_line = std.ArrayList(u8).empty;
-            defer compact_line.deinit(std.testing.allocator);
-            const normalized_plain = blk: {
-                if (std.mem.startsWith(u8, plain, ">>> ") or
-                    std.mem.startsWith(u8, plain, "<<< ") or
-                    std.mem.startsWith(u8, plain, "!!! "))
-                {
-                    const prefix = plain[0..4];
-                    const rest = plain[4..];
-                    const split_idx = std.mem.indexOfScalar(u8, rest, ' ') orelse break :blk plain;
-                    const label = rest[0..split_idx];
-                    const suffix = std.mem.trimLeft(u8, rest[split_idx..], " ");
-                    try compact_line.appendSlice(std.testing.allocator, prefix);
-                    try compact_line.appendSlice(std.testing.allocator, label);
-                    try compact_line.append(std.testing.allocator, ' ');
-                    try compact_line.appendSlice(std.testing.allocator, suffix);
-                    break :blk compact_line.items;
-                }
-                break :blk plain;
-            };
-            const event_idx = std.mem.indexOf(u8, normalized_plain, " done at ") orelse
-                std.mem.indexOf(u8, normalized_plain, " failed at ");
-            if (event_idx) |idx| {
-                const prefix = std.mem.trimRight(u8, normalized_plain[0..idx], " ");
-                const suffix = normalized_plain[idx + 1 ..];
-                if (std.mem.indexOf(u8, suffix, "ms, ")) |ms_idx| {
-                    try bytes.appendSlice(std.testing.allocator, prefix);
-                    try bytes.append(std.testing.allocator, ' ');
-                    try bytes.appendSlice(std.testing.allocator, suffix[0 .. ms_idx + 4]);
-                    try bytes.appendSlice(std.testing.allocator, "<mem>");
-                    return;
-                }
-                try bytes.appendSlice(std.testing.allocator, prefix);
-                try bytes.append(std.testing.allocator, ' ');
-                try bytes.appendSlice(std.testing.allocator, suffix);
-                return;
-            }
-            try bytes.appendSlice(std.testing.allocator, normalized_plain);
-        }
-
-        fn normalizedLog() ![]u8 {
-            const actual_log = try Support.joinedLog(std.testing.allocator);
-            defer std.testing.allocator.free(actual_log);
-
-            var normalized = std.ArrayList(u8).empty;
-            errdefer normalized.deinit(std.testing.allocator);
-
-            var lines = std.mem.splitScalar(u8, actual_log, '\n');
-            var first = true;
-            while (lines.next()) |line| {
-                if (!first) try normalized.append(std.testing.allocator, '\n');
-                try appendNormalizedLine(&normalized, line);
-                first = false;
-            }
-            return normalized.toOwnedSlice(std.testing.allocator);
-        }
-
-        fn expectLog(expected_log: []const u8) !void {
-            const actual_log = try normalizedLog();
-            defer std.testing.allocator.free(actual_log);
-            try std.testing.expectEqualStrings(expected_log, actual_log);
-        }
-    };
-
-    Support.reset();
-    defer Support.reset();
-
-    {
-        var root = new(TestLib, .test_run);
-        root.timeout(0);
-        root.run("immediate", TaskRunner.make(ImmediateTimeoutTask.run, null));
-        try std.testing.expect(!root.wait());
-        root.deinit();
-
-        const expected_log =
-            \\>>> /immediate start at 0.0s
-            \\!!! /immediate immediate timeout
-            \\!!! /immediate failed at 0.0s, 0ms, <mem>
-            \\!!! summary failed at 0.0s, 0ms, <mem>
-        ;
-
-        try Helper.expectLog(expected_log);
-    }
-
-    Support.reset();
-
-    {
-        var root = new(TestLib, .test_run);
-        root.timeout(suite_timeout_ns);
-        root.timeout(300 * TestLib.time.ns_per_ms);
-        root.run("suite", TaskRunner.make(ComplexTimeoutSuiteTask.run, null));
-        try std.testing.expect(!root.wait());
-        root.deinit();
-
-        const expected_log =
-            \\>>> /suite start at 0.0s
-            \\>>> /suite/nested start at 0.0s
-            \\>>> /suite/nested/leaf_fast start at 0.0s
-            \\<<< /suite/nested/leaf_fast done at 0.0s, 10ms, <mem>
-            \\>>> /suite/nested/leaf_slow start at 0.0s
-            \\!!! /suite/nested/leaf_slow leaf timeout
-            \\!!! /suite/nested/leaf_slow failed at 0.0s, 70ms, <mem>
-            \\!!! /suite/nested failed at 0.0s, 80ms, <mem>
-            \\>>> /suite/fast start at 0.0s
-            \\>>> /suite/slow start at 0.0s
-            \\<<< /suite/fast done at 0.0s, 10ms, <mem>
-            \\!!! /suite/slow parallel timeout
-            \\!!! /suite/slow failed at 0.1s, 70ms, <mem>
-            \\!!! /suite failed at 0.0s, 80ms, <mem>
-            \\!!! summary failed at 0.0s, 80ms, <mem>
-        ;
-
-        try Helper.expectLog(expected_log);
-    }
-
-    Support.reset();
-
-    {
-        var root = new(TestLib, .test_run);
-        root.run("scoped", TaskRunner.make(ScopedTimeoutSuiteTask.run, null));
-        try std.testing.expect(!root.wait());
-        root.deinit();
-
-        const expected_log =
-            \\>>> /scoped start at 0.0s
-            \\>>> /scoped/timed_branch start at 0.0s
-            \\>>> /scoped/timed_branch/timed_leaf start at 0.0s
-            \\!!! /scoped/timed_branch/timed_leaf branch timeout
-            \\!!! /scoped/timed_branch/timed_leaf failed at 0.0s, 50ms, <mem>
-            \\!!! /scoped/timed_branch failed at 0.0s, 50ms, <mem>
-            \\>>> /scoped/plain_branch start at 0.0s
-            \\<<< /scoped/plain_branch done at 0.0s, 10ms, <mem>
-            \\!!! /scoped failed at 0.0s, 50ms, <mem>
-            \\!!! summary failed at 0.0s, 50ms, <mem>
-        ;
-
-        try Helper.expectLog(expected_log);
-    }
-}
-
-test "testing/unit_tests/memory_limit" {
-    const std = @import("std");
-    const embed = @import("embed");
-
-    const Support = struct {
-        var entries: std.ArrayListUnmanaged([]u8) = .{};
-        var mutex: std.Thread.Mutex = .{};
-        var now_ns = std.atomic.Value(u64).init(0);
-
-        fn reset() void {
-            mutex.lock();
-            defer mutex.unlock();
-            for (entries.items) |entry| {
-                std.testing.allocator.free(entry);
-            }
-            entries.deinit(std.testing.allocator);
-            entries = .{};
-            now_ns.store(0, .release);
-        }
-
-        fn append(comptime format: []const u8, args: anytype) void {
-            const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
-            mutex.lock();
-            defer mutex.unlock();
-            entries.append(std.testing.allocator, message) catch @panic("OOM");
-        }
-
-        fn timestampNs() u64 {
-            return now_ns.load(.acquire);
-        }
-
-        fn advance(ns: u64) void {
-            _ = now_ns.fetchAdd(ns, .acq_rel);
-        }
-
-        fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
-            mutex.lock();
-            defer mutex.unlock();
-
-            var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
-            errdefer bytes.deinit(allocator);
-
-            for (entries.items, 0..) |entry, idx| {
-                try bytes.appendSlice(allocator, entry);
-                if (idx + 1 != entries.items.len) {
-                    try bytes.append(allocator, '\n');
-                }
-            }
-            return bytes.toOwnedSlice(allocator);
-        }
-    };
-
-    const CapturingLog = struct {
-        pub fn scoped(comptime scope: @Type(.enum_literal)) type {
-            _ = scope;
-            return struct {
-                pub fn info(comptime format: []const u8, args: anytype) void {
-                    Support.append(format, args);
-                }
-
-                pub fn err(comptime format: []const u8, args: anytype) void {
-                    Support.append(format, args);
-                }
-            };
-        }
-    };
-
-    const TestThread = struct {
-        pub const SpawnConfig = std.Thread.SpawnConfig;
-        pub const Mutex = std.Thread.Mutex;
-        pub const RwLock = std.Thread.RwLock;
-        const ThreadSelf = @This();
-        pub const Condition = struct {
-            inner: std.Thread.Condition = .{},
-
-            pub fn wait(self: *Condition, mutex: *Mutex) void {
-                self.inner.wait(mutex);
-            }
-
-            pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
-                self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
-            }
-
-            pub fn signal(self: *Condition) void {
-                self.inner.signal();
-            }
-
-            pub fn broadcast(self: *Condition) void {
-                self.inner.broadcast();
-            }
-        };
-
-        inner: std.Thread,
-
-        pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
-            return .{
-                .inner = try std.Thread.spawn(config, f, args),
-            };
-        }
-
-        pub fn join(self: ThreadSelf) void {
-            self.inner.join();
-        }
-
-        pub fn detach(self: ThreadSelf) void {
-            self.inner.detach();
-        }
-
-        pub fn sleep(ns: u64) void {
-            Support.advance(ns);
-        }
-    };
-
-    const TestLib = struct {
-        pub const mem = embed.mem;
-        pub const fmt = embed.fmt;
-        pub const Thread = TestThread;
-        pub const log = CapturingLog;
-        pub fn ArrayList(comptime Elem: type) type {
-            return std.ArrayList(Elem);
-        }
-        pub const testing = struct {
-            pub const allocator = std.testing.allocator;
-        };
-        pub const time = struct {
-            pub const ns_per_ms = std.time.ns_per_ms;
-
-            pub fn nanoTimestamp() i128 {
-                return Support.timestampNs();
-            }
-
-            pub fn milliTimestamp() i64 {
-                return @intCast(@divFloor(Support.timestampNs(), std.time.ns_per_ms));
-            }
-        };
-    };
-
-    const TaskRunner = struct {
-        fn make(comptime run_fn: anytype, memory_limit: ?usize) TestRunner {
-            const Runner = struct {
-                memory_limit: ?usize,
-
-                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
-                    _ = self;
-                    _ = allocator;
-                }
-
-                pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
-                    _ = self;
-                    var arg_byte: u8 = 0;
-                    return run_fn(t, allocator, @ptrCast(&arg_byte));
-                }
-
-                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
-                    _ = allocator;
-                    std.testing.allocator.destroy(self);
-                }
-            };
-
-            const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
-            runner.* = .{ .memory_limit = memory_limit };
-            return TestRunner.make(Runner).new(runner);
-        }
-    };
-
-    const MemoryLimitFailTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = args;
-            const bytes = allocator.alloc(u8, 64) catch {
-                t.logError("memory limit hit");
-                return false;
-            };
-            defer allocator.free(bytes);
-            return true;
-        }
-    };
-
-    const MemoryLimitOkTask = struct {
-        fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
-            _ = t;
-            _ = args;
-            const bytes = allocator.alloc(u8, 16) catch return false;
-            defer allocator.free(bytes);
-            @memset(bytes, 0xAB);
-            return true;
-        }
-    };
-
-    const Helper = struct {
-        fn makeRunner(comptime run_fn: anytype, memory_limit: ?usize) TestRunner {
-            const Runner = struct {
-                memory_limit: ?usize,
-
-                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
-                    _ = self;
-                    _ = allocator;
-                }
-
-                pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
-                    _ = self;
-                    var arg_byte: u8 = 0;
-                    return run_fn(t, allocator, @ptrCast(&arg_byte));
-                }
-
-                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
-                    _ = allocator;
-                    std.testing.allocator.destroy(self);
-                }
-            };
-
-            const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
-            runner.* = .{ .memory_limit = memory_limit };
-            return TestRunner.make(Runner).new(runner);
-        }
-
-        fn appendNormalizedLine(bytes: *std.ArrayList(u8), line: []const u8) !void {
-            var plain_line = std.ArrayList(u8).empty;
-            defer plain_line.deinit(std.testing.allocator);
-
-            var i: usize = 0;
-            while (i < line.len) {
-                if (line[i] == 0x1b and i + 1 < line.len and line[i + 1] == '[') {
-                    i += 2;
-                    while (i < line.len and line[i] != 'm') : (i += 1) {}
-                    if (i < line.len) i += 1;
-                    continue;
-                }
-                try plain_line.append(std.testing.allocator, line[i]);
-                i += 1;
-            }
-
-            const plain = plain_line.items;
-            var compact_line = std.ArrayList(u8).empty;
-            defer compact_line.deinit(std.testing.allocator);
-            const normalized_plain = blk: {
-                if (std.mem.startsWith(u8, plain, ">>> ") or
-                    std.mem.startsWith(u8, plain, "<<< ") or
-                    std.mem.startsWith(u8, plain, "!!! "))
-                {
-                    const prefix = plain[0..4];
-                    const rest = plain[4..];
-                    const split_idx = std.mem.indexOfScalar(u8, rest, ' ') orelse break :blk plain;
-                    const label = rest[0..split_idx];
-                    const suffix = std.mem.trimLeft(u8, rest[split_idx..], " ");
-                    try compact_line.appendSlice(std.testing.allocator, prefix);
-                    try compact_line.appendSlice(std.testing.allocator, label);
-                    try compact_line.append(std.testing.allocator, ' ');
-                    try compact_line.appendSlice(std.testing.allocator, suffix);
-                    break :blk compact_line.items;
-                }
-                break :blk plain;
-            };
-            const event_idx = std.mem.indexOf(u8, normalized_plain, " done at ") orelse
-                std.mem.indexOf(u8, normalized_plain, " failed at ");
-            if (event_idx) |idx| {
-                const prefix = std.mem.trimRight(u8, normalized_plain[0..idx], " ");
-                const suffix = normalized_plain[idx + 1 ..];
-                if (std.mem.indexOf(u8, suffix, "ms, ")) |ms_idx| {
-                    try bytes.appendSlice(std.testing.allocator, prefix);
-                    try bytes.append(std.testing.allocator, ' ');
-                    try bytes.appendSlice(std.testing.allocator, suffix[0 .. ms_idx + 4]);
-                    try bytes.appendSlice(std.testing.allocator, "<mem>");
-                    return;
-                }
-                try bytes.appendSlice(std.testing.allocator, prefix);
-                try bytes.append(std.testing.allocator, ' ');
-                try bytes.appendSlice(std.testing.allocator, suffix);
-                return;
-            }
-            try bytes.appendSlice(std.testing.allocator, normalized_plain);
-        }
-
-        fn normalizedLog() ![]u8 {
-            const actual_log = try Support.joinedLog(std.testing.allocator);
-            defer std.testing.allocator.free(actual_log);
-
-            var normalized = std.ArrayList(u8).empty;
-            errdefer normalized.deinit(std.testing.allocator);
-
-            var lines = std.mem.splitScalar(u8, actual_log, '\n');
-            var first = true;
-            while (lines.next()) |line| {
-                if (!first) try normalized.append(std.testing.allocator, '\n');
-                try appendNormalizedLine(&normalized, line);
-                first = false;
-            }
-            return normalized.toOwnedSlice(std.testing.allocator);
-        }
-
-        fn expectLog(expected_log: []const u8) !void {
-            const actual_log = try normalizedLog();
-            defer std.testing.allocator.free(actual_log);
-            try std.testing.expectEqualStrings(expected_log, actual_log);
-        }
-    };
-
-    Support.reset();
-    defer Support.reset();
-
-    {
-        var root = new(TestLib, .test_run);
-        root.run("limited", TaskRunner.make(MemoryLimitFailTask.run, 32));
-        try std.testing.expect(!root.wait());
-        root.deinit();
-
-        const expected_log =
-            \\>>> /limited start at 0.0s
-            \\!!! /limited memory limit hit
-            \\!!! /limited failed at 0.0s, 0ms, <mem>
-            \\!!! summary failed at 0.0s, 0ms, <mem>
-        ;
-        try Helper.expectLog(expected_log);
-    }
-
-    Support.reset();
-
-    {
-        var root = new(TestLib, .test_run);
-        root.run("within_limit", TaskRunner.make(MemoryLimitOkTask.run, 32));
-        try std.testing.expect(root.wait());
-        root.deinit();
-
-        const expected_log =
-            \\>>> /within_limit start at 0.0s
-            \\<<< /within_limit done at 0.0s, 0ms, <mem>
-            \\<<< summary done at 0.0s, 0ms, <mem>
-        ;
-
-        try Helper.expectLog(expected_log);
-    }
-}
-
-test "testing/unit_tests/peak_memory_uses_tree_peak" {
-    const std = @import("std");
-    const embed = @import("embed");
-
-    const Support = struct {
-        var entries: std.ArrayListUnmanaged([]u8) = .{};
-        var mutex: std.Thread.Mutex = .{};
-
-        fn reset() void {
-            mutex.lock();
-            defer mutex.unlock();
-            for (entries.items) |entry| {
-                std.testing.allocator.free(entry);
-            }
-            entries.deinit(std.testing.allocator);
-            entries = .{};
-        }
-
-        fn append(comptime format: []const u8, args: anytype) void {
-            const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
-            mutex.lock();
-            defer mutex.unlock();
-            entries.append(std.testing.allocator, message) catch @panic("OOM");
-        }
-
-        fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
-            mutex.lock();
-            defer mutex.unlock();
-
-            var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
-            errdefer bytes.deinit(allocator);
-
-            for (entries.items, 0..) |entry, idx| {
-                try bytes.appendSlice(allocator, entry);
-                if (idx + 1 != entries.items.len) {
-                    try bytes.append(allocator, '\n');
-                }
-            }
-            return bytes.toOwnedSlice(allocator);
-        }
-    };
-
-    const CapturingLog = struct {
-        pub fn scoped(comptime scope: @Type(.enum_literal)) type {
-            _ = scope;
-            return struct {
-                pub fn info(comptime format: []const u8, args: anytype) void {
-                    Support.append(format, args);
-                }
-
-                pub fn err(comptime format: []const u8, args: anytype) void {
-                    Support.append(format, args);
-                }
-            };
-        }
-    };
-
-    const TestThread = struct {
-        pub const SpawnConfig = std.Thread.SpawnConfig;
-        pub const Mutex = std.Thread.Mutex;
-        pub const RwLock = std.Thread.RwLock;
-        const ThreadSelf = @This();
-
-        pub const Condition = struct {
-            inner: std.Thread.Condition = .{},
-
-            pub fn wait(self: *Condition, mutex: *Mutex) void {
-                self.inner.wait(mutex);
-            }
-
-            pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
-                self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
-            }
-
-            pub fn signal(self: *Condition) void {
-                self.inner.signal();
-            }
-
-            pub fn broadcast(self: *Condition) void {
-                self.inner.broadcast();
-            }
-        };
-
-        pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
-            _ = config;
-            @call(.auto, f, args);
-            return .{};
-        }
-
-        pub fn join(self: ThreadSelf) void {
-            _ = self;
-        }
-
-        pub fn detach(self: ThreadSelf) void {
-            _ = self;
-        }
-
-        pub fn sleep(ns: u64) void {
-            _ = ns;
-        }
-    };
-
-    const TestLib = struct {
-        pub const mem = embed.mem;
-        pub const fmt = embed.fmt;
-        pub const Thread = TestThread;
-        pub const log = CapturingLog;
-
-        pub fn ArrayList(comptime Elem: type) type {
-            return std.ArrayList(Elem);
-        }
-
-        pub const testing = struct {
-            pub const allocator = std.testing.allocator;
-        };
-
-        pub const time = struct {
-            pub const ns_per_ms = std.time.ns_per_ms;
-
-            pub fn nanoTimestamp() i128 {
-                return 0;
-            }
-
-            pub fn milliTimestamp() i64 {
-                return 0;
-            }
-        };
-    };
-
-    const TaskRunner = struct {
-        fn make(comptime run_fn: anytype) TestRunner {
-            const Runner = struct {
-                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
-                    _ = self;
-                    _ = allocator;
-                }
-
-                pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
-                    _ = self;
-                    return run_fn(t, allocator);
-                }
-
-                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
-                    _ = allocator;
-                    std.testing.allocator.destroy(self);
-                }
-            };
-
-            const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
-            runner.* = .{};
-            return TestRunner.make(Runner).new(runner);
-        }
-    };
-
-    const LeafTask = struct {
-        fn run(t: *Self, allocator: embed.mem.Allocator) bool {
-            _ = t;
-            const bytes = allocator.alloc(u8, 384) catch return false;
-            defer allocator.free(bytes);
-            return true;
-        }
-    };
-
-    const SuiteTask = struct {
-        fn run(t: *Self, allocator: embed.mem.Allocator) bool {
-            _ = allocator;
-            t.run("child_a", TaskRunner.make(LeafTask.run));
-            t.run("child_b", TaskRunner.make(LeafTask.run));
-            return t.wait();
-        }
-    };
-
-    const Helper = struct {
-        fn plainLog() ![]u8 {
-            const actual_log = try Support.joinedLog(std.testing.allocator);
-            defer std.testing.allocator.free(actual_log);
-
-            var plain = std.ArrayList(u8).empty;
-            errdefer plain.deinit(std.testing.allocator);
-
-            var i: usize = 0;
-            while (i < actual_log.len) {
-                if (actual_log[i] == 0x1b and i + 1 < actual_log.len and actual_log[i + 1] == '[') {
-                    i += 2;
-                    while (i < actual_log.len and actual_log[i] != 'm') : (i += 1) {}
-                    if (i < actual_log.len) i += 1;
-                    continue;
-                }
-                try plain.append(std.testing.allocator, actual_log[i]);
-                i += 1;
-            }
-            return plain.toOwnedSlice(std.testing.allocator);
-        }
-
-        fn parseMemoryUsage(text: []const u8) !usize {
-            const space_idx = std.mem.lastIndexOfScalar(u8, text, ' ') orelse return error.BadMemoryText;
-            const number_text = text[0..space_idx];
-            const unit_text = text[space_idx + 1 ..];
-            const scale: usize = if (std.mem.eql(u8, unit_text, "B"))
-                1
-            else if (std.mem.eql(u8, unit_text, "KiB"))
-                1024
-            else if (std.mem.eql(u8, unit_text, "MiB"))
-                1024 * 1024
-            else
-                return error.BadMemoryUnit;
-
-            if (scale == 1) return std.fmt.parseInt(usize, number_text, 10);
-
-            const dot_idx = std.mem.indexOfScalar(u8, number_text, '.') orelse return error.BadMemoryNumber;
-            const whole = try std.fmt.parseInt(usize, number_text[0..dot_idx], 10);
-            const frac_text = number_text[dot_idx + 1 ..];
-            const frac = try std.fmt.parseInt(usize, frac_text, 10);
-            return whole * scale + (frac * scale) / 1000;
-        }
-
-        fn peakForLabel(log: []const u8, label: []const u8) !usize {
-            var lines = std.mem.splitScalar(u8, log, '\n');
-            while (lines.next()) |line| {
-                if (!std.mem.startsWith(u8, line, "<<< ")) continue;
-                const rest = line[4..];
-                if (!std.mem.startsWith(u8, rest, label)) continue;
-                if (std.mem.indexOf(u8, rest[label.len..], "done at ") == null) continue;
-                const mem_idx = std.mem.lastIndexOf(u8, line, ", ") orelse return error.BadPeakLine;
-                return parseMemoryUsage(line[mem_idx + 2 ..]);
-            }
-            return error.MissingPeakLine;
-        }
-    };
-
-    Support.reset();
-    defer Support.reset();
-
-    var root = new(TestLib, .test_run);
-    root.run("suite", TaskRunner.make(SuiteTask.run));
-    try std.testing.expect(root.wait());
-    root.deinit();
-
-    const log = try Helper.plainLog();
-    defer std.testing.allocator.free(log);
-
-    const suite_peak = try Helper.peakForLabel(log, "/suite");
-    const child_a_peak = try Helper.peakForLabel(log, "/suite/child_a");
-    const child_b_peak = try Helper.peakForLabel(log, "/suite/child_b");
-
-    try std.testing.expect(suite_peak + 64 < child_a_peak + child_b_peak);
-}
-
-test "testing/unit_tests/subtest_start_failure_cleanup" {
-    const std = @import("std");
-    const embed = @import("embed");
-
-    const FailNthAllocator = struct {
-        backing: embed.mem.Allocator,
-        alloc_index: usize = 0,
-        fail_at_alloc_index: ?usize = null,
-
-        fn allocator(self: *@This()) embed.mem.Allocator {
-            return .{
-                .ptr = self,
-                .vtable = &vtable,
-            };
-        }
-
-        fn alloc(ptr: *anyopaque, len: usize, alignment: embed.mem.Alignment, ret_addr: usize) ?[*]u8 {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            defer self.alloc_index += 1;
-            if (self.fail_at_alloc_index) |fail_at| {
-                if (self.alloc_index == fail_at) return null;
-            }
-            return self.backing.rawAlloc(len, alignment, ret_addr);
-        }
-
-        fn resize(ptr: *anyopaque, memory: []u8, alignment: embed.mem.Alignment, new_len: usize, ret_addr: usize) bool {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            return self.backing.rawResize(memory, alignment, new_len, ret_addr);
-        }
-
-        fn remap(ptr: *anyopaque, memory: []u8, alignment: embed.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            return self.backing.rawRemap(memory, alignment, new_len, ret_addr);
-        }
-
-        fn free(ptr: *anyopaque, memory: []u8, alignment: embed.mem.Alignment, ret_addr: usize) void {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            self.backing.rawFree(memory, alignment, ret_addr);
-        }
-
-        const vtable: embed.mem.Allocator.VTable = .{
-            .alloc = alloc,
-            .resize = resize,
-            .remap = remap,
-            .free = free,
-        };
-    };
-
-    const Support = struct {
-        var entries: std.ArrayListUnmanaged([]u8) = .{};
-        var mutex: std.Thread.Mutex = .{};
-        var now_ns = std.atomic.Value(u64).init(0);
-        var fail_spawn = false;
-        var runner_run_hits: usize = 0;
-        var runner_deinit_hits: usize = 0;
-
-        fn reset() void {
-            mutex.lock();
-            defer mutex.unlock();
-            for (entries.items) |entry| {
-                std.testing.allocator.free(entry);
-            }
-            entries.deinit(std.testing.allocator);
-            entries = .{};
-            now_ns.store(0, .release);
-            fail_spawn = false;
-            runner_run_hits = 0;
-            runner_deinit_hits = 0;
-        }
-
-        fn append(comptime format: []const u8, args: anytype) void {
-            const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
-            mutex.lock();
-            defer mutex.unlock();
-            entries.append(std.testing.allocator, message) catch @panic("OOM");
-        }
-
-        fn timestampNs() u64 {
-            return now_ns.load(.acquire);
-        }
-
-        fn advance(ns: u64) void {
-            _ = now_ns.fetchAdd(ns, .acq_rel);
-        }
-
-        fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
-            mutex.lock();
-            defer mutex.unlock();
-
-            var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
-            errdefer bytes.deinit(allocator);
-
-            for (entries.items, 0..) |entry, idx| {
-                try bytes.appendSlice(allocator, entry);
-                if (idx + 1 != entries.items.len) {
-                    try bytes.append(allocator, '\n');
-                }
-            }
-            return bytes.toOwnedSlice(allocator);
-        }
-    };
-
-    const CapturingLog = struct {
-        pub fn scoped(comptime scope: @Type(.enum_literal)) type {
-            _ = scope;
-            return struct {
-                pub fn info(comptime format: []const u8, args: anytype) void {
-                    Support.append(format, args);
-                }
-
-                pub fn err(comptime format: []const u8, args: anytype) void {
-                    Support.append(format, args);
-                }
-            };
-        }
-    };
-
-    const TestThread = struct {
-        pub const SpawnConfig = std.Thread.SpawnConfig;
-        pub const Mutex = std.Thread.Mutex;
-        pub const RwLock = std.Thread.RwLock;
-        const ThreadSelf = @This();
-
-        pub const Condition = struct {
-            inner: std.Thread.Condition = .{},
-
-            pub fn wait(self: *Condition, mutex: *Mutex) void {
-                self.inner.wait(mutex);
-            }
-
-            pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
-                self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
-            }
-
-            pub fn signal(self: *Condition) void {
-                self.inner.signal();
-            }
-
-            pub fn broadcast(self: *Condition) void {
-                self.inner.broadcast();
-            }
-        };
-
-        pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) error{ThreadQuotaExceeded}!ThreadSelf {
-            _ = config;
-            if (Support.fail_spawn) return error.ThreadQuotaExceeded;
-            @call(.auto, f, args);
-            return .{};
-        }
-
-        pub fn join(self: ThreadSelf) void {
-            _ = self;
-        }
-
-        pub fn detach(self: ThreadSelf) void {
-            _ = self;
-        }
-
-        pub fn sleep(ns: u64) void {
-            Support.advance(ns);
-        }
-    };
-
-    const TestLib = struct {
-        pub const mem = embed.mem;
-        pub const fmt = embed.fmt;
-        pub const Thread = TestThread;
-        pub const log = CapturingLog;
-
-        pub fn ArrayList(comptime Elem: type) type {
-            return std.ArrayList(Elem);
-        }
-
-        pub const testing = struct {
-            pub var allocator: embed.mem.Allocator = undefined;
-        };
-
-        pub const time = struct {
-            pub const ns_per_ms = std.time.ns_per_ms;
-
-            pub fn nanoTimestamp() i128 {
-                return Support.timestampNs();
-            }
-
-            pub fn milliTimestamp() i64 {
-                return @intCast(@divFloor(Support.timestampNs(), std.time.ns_per_ms));
-            }
-        };
-    };
-
-    const Helper = struct {
-        fn makeTrackedRunner() TestRunner {
-            const Runner = struct {
-                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
-                    _ = self;
-                    _ = allocator;
-                }
-
-                pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
-                    _ = self;
+            const ParallelFastTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = t;
                     _ = allocator;
-                    Support.runner_run_hits += 1;
+                    _ = args;
+                    Support.advance(100 * TestLib.time.ns_per_ms);
+                    Support.setStage(1);
+                    Support.waitForStage(2);
+                    Support.advance(200 * TestLib.time.ns_per_ms);
                     return true;
-                }
-
-                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
-                    _ = allocator;
-                    Support.runner_deinit_hits += 1;
-                    std.testing.allocator.destroy(self);
                 }
             };
 
-            const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
-            runner.* = .{};
-            return TestRunner.make(Runner).new(runner);
-        }
-
-        fn normalizedLogContains(needle: []const u8) !bool {
-            const actual_log = try Support.joinedLog(std.testing.allocator);
-            defer std.testing.allocator.free(actual_log);
-
-            var plain = std.ArrayList(u8).empty;
-            defer plain.deinit(std.testing.allocator);
-
-            var i: usize = 0;
-            while (i < actual_log.len) {
-                if (actual_log[i] == 0x1b and i + 1 < actual_log.len and actual_log[i + 1] == '[') {
-                    i += 2;
-                    while (i < actual_log.len and actual_log[i] != 'm') : (i += 1) {}
-                    if (i < actual_log.len) i += 1;
-                    continue;
+            const ParallelSlowTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    Support.waitForStage(1);
+                    Support.advance(300 * TestLib.time.ns_per_ms);
+                    t.logError("slow timeout");
+                    Support.setStage(2);
+                    return false;
                 }
-                try plain.append(std.testing.allocator, actual_log[i]);
-                i += 1;
+            };
+
+            const ComplexLeafOkTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = t;
+                    _ = allocator;
+                    _ = args;
+                    TestLib.Thread.sleep(50 * TestLib.time.ns_per_ms);
+                    return true;
+                }
+            };
+
+            const ComplexLeafErrTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    TestLib.Thread.sleep(20 * TestLib.time.ns_per_ms);
+                    t.logError("leaf err");
+                    return false;
+                }
+            };
+
+            const ComplexFastTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = t;
+                    _ = allocator;
+                    _ = args;
+                    Support.advance(30 * TestLib.time.ns_per_ms);
+                    Support.setStage(1);
+                    Support.waitForStage(2);
+                    Support.advance(80 * TestLib.time.ns_per_ms);
+                    return true;
+                }
+            };
+
+            const ComplexSlowTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    Support.waitForStage(1);
+                    Support.advance(60 * TestLib.time.ns_per_ms);
+                    t.logError("slow timeout");
+                    Support.setStage(2);
+                    return false;
+                }
+            };
+
+            const ComplexDeepFatalTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    TestLib.Thread.sleep(40 * TestLib.time.ns_per_ms);
+                    t.logFatal("deep fatal");
+                    const cause = t.context().err() orelse return false;
+                    return cause == error.TestFailed;
+                }
+            };
+
+            const ComplexNestedTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    t.run("deep", TaskRunner.make(ComplexDeepFatalTask.run, null));
+                    return t.wait();
+                }
+            };
+
+            const ComplexSuiteTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    t.run("leaf_ok", TaskRunner.make(ComplexLeafOkTask.run, null));
+                    t.run("leaf_err", TaskRunner.make(ComplexLeafErrTask.run, null));
+
+                    t.run("nested", TaskRunner.make(ComplexNestedTask.run, null));
+
+                    t.parallel();
+                    t.run("fast", TaskRunner.make(ComplexFastTask.run, null));
+                    Support.waitForStage(1);
+                    t.run("slow", TaskRunner.make(ComplexSlowTask.run, null));
+                    return t.wait();
+                }
+            };
+
+            const Helper = struct {
+                fn makeRunner(comptime run_fn: anytype, memory_limit: ?usize) TestRunnerHandle {
+                    const Runner = struct {
+                        memory_limit: ?usize,
+
+                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                            _ = self;
+                            _ = allocator;
+                        }
+
+                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                            _ = self;
+                            var arg_byte: u8 = 0;
+                            return run_fn(t, allocator, @ptrCast(&arg_byte));
+                        }
+
+                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                            _ = allocator;
+                            std.testing.allocator.destroy(self);
+                        }
+                    };
+
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
+                    runner.* = .{ .memory_limit = memory_limit };
+                    return TestRunnerHandle.make(Runner).new(runner);
+                }
+
+                fn appendNormalizedLine(bytes: *std.ArrayList(u8), line: []const u8) !void {
+                    var plain_line = std.ArrayList(u8).empty;
+                    defer plain_line.deinit(std.testing.allocator);
+
+                    var i: usize = 0;
+                    while (i < line.len) {
+                        if (line[i] == 0x1b and i + 1 < line.len and line[i + 1] == '[') {
+                            i += 2;
+                            while (i < line.len and line[i] != 'm') : (i += 1) {}
+                            if (i < line.len) i += 1;
+                            continue;
+                        }
+                        try plain_line.append(std.testing.allocator, line[i]);
+                        i += 1;
+                    }
+
+                    const plain = plain_line.items;
+                    var compact_line = std.ArrayList(u8).empty;
+                    defer compact_line.deinit(std.testing.allocator);
+                    const normalized_plain = blk: {
+                        if (std.mem.startsWith(u8, plain, ">>> ") or
+                            std.mem.startsWith(u8, plain, "<<< ") or
+                            std.mem.startsWith(u8, plain, "!!! "))
+                        {
+                            const prefix = plain[0..4];
+                            const rest = plain[4..];
+                            const split_idx = std.mem.indexOfScalar(u8, rest, ' ') orelse break :blk plain;
+                            const label = rest[0..split_idx];
+                            const suffix = std.mem.trimLeft(u8, rest[split_idx..], " ");
+                            try compact_line.appendSlice(std.testing.allocator, prefix);
+                            try compact_line.appendSlice(std.testing.allocator, label);
+                            try compact_line.append(std.testing.allocator, ' ');
+                            try compact_line.appendSlice(std.testing.allocator, suffix);
+                            break :blk compact_line.items;
+                        }
+                        break :blk plain;
+                    };
+                    const event_idx = std.mem.indexOf(u8, normalized_plain, " done at ") orelse
+                        std.mem.indexOf(u8, normalized_plain, " failed at ");
+                    if (event_idx) |idx| {
+                        const prefix = std.mem.trimRight(u8, normalized_plain[0..idx], " ");
+                        const suffix = normalized_plain[idx + 1 ..];
+                        if (std.mem.indexOf(u8, suffix, "ms, ")) |ms_idx| {
+                            try bytes.appendSlice(std.testing.allocator, prefix);
+                            try bytes.append(std.testing.allocator, ' ');
+                            try bytes.appendSlice(std.testing.allocator, suffix[0 .. ms_idx + 4]);
+                            try bytes.appendSlice(std.testing.allocator, "<mem>");
+                            return;
+                        }
+                        try bytes.appendSlice(std.testing.allocator, prefix);
+                        try bytes.append(std.testing.allocator, ' ');
+                        try bytes.appendSlice(std.testing.allocator, suffix);
+                        return;
+                    }
+                    try bytes.appendSlice(std.testing.allocator, normalized_plain);
+                }
+
+                fn normalizedLog() ![]u8 {
+                    const actual_log = try Support.joinedLog(std.testing.allocator);
+                    defer std.testing.allocator.free(actual_log);
+
+                    var normalized = std.ArrayList(u8).empty;
+                    errdefer normalized.deinit(std.testing.allocator);
+
+                    var lines = std.mem.splitScalar(u8, actual_log, '\n');
+                    var first = true;
+                    while (lines.next()) |line| {
+                        if (!first) try normalized.append(std.testing.allocator, '\n');
+                        try appendNormalizedLine(&normalized, line);
+                        first = false;
+                    }
+                    return normalized.toOwnedSlice(std.testing.allocator);
+                }
+
+                fn expectLog(expected_log: []const u8) !void {
+                    const actual_log = try normalizedLog();
+                    defer std.testing.allocator.free(actual_log);
+                    try std.testing.expectEqualStrings(expected_log, actual_log);
+                }
+
+                fn expectOneOfLogs(expected_a: []const u8, expected_b: []const u8) !void {
+                    const actual_log = try normalizedLog();
+                    defer std.testing.allocator.free(actual_log);
+                    if (std.mem.eql(u8, expected_a, actual_log)) return;
+                    if (std.mem.eql(u8, expected_b, actual_log)) return;
+                    try std.testing.expectEqualStrings(expected_a, actual_log);
+                }
+            };
+
+            Support.reset();
+            defer Support.reset();
+
+            {
+                var root = new(TestLib, .test_run);
+                TestLib.Thread.sleep(220 * TestLib.time.ns_per_ms);
+
+                root.run("child", TaskRunner.make(ChildTask.run, null));
+                try std.testing.expect(!root.wait());
+                root.deinit();
+
+                const expected_log =
+                    \\>>> /child start at 0.2s
+                    \\!!! /child child fatal
+                    \\!!! /child failed at 0.2s, 40ms, <mem>
+                    \\!!! summary failed at 0.2s, 260ms, <mem>
+                ;
+
+                try Helper.expectLog(expected_log);
             }
 
-            return std.mem.indexOf(u8, plain.items, needle) != null;
+            Support.reset();
+
+            {
+                var root = new(TestLib, .test_run);
+                TestLib.Thread.sleep(100 * TestLib.time.ns_per_ms);
+
+                root.run("parent", TaskRunner.make(NestedTimeoutTask.run, null));
+                try std.testing.expect(!root.wait());
+                root.deinit();
+
+                const expected_log =
+                    \\>>> /parent start at 0.1s
+                    \\>>> /parent/leaf start at 0.1s
+                    \\!!! /parent/leaf leaf timeout
+                    \\!!! /parent/leaf failed at 0.4s, 300ms, <mem>
+                    \\!!! /parent failed at 0.4s, 300ms, <mem>
+                    \\!!! summary failed at 0.4s, 400ms, <mem>
+                ;
+
+                try Helper.expectLog(expected_log);
+            }
+
+            Support.reset();
+
+            {
+                var root = new(TestLib, .test_run);
+                root.parallel();
+
+                root.run("fast", TaskRunner.make(ParallelFastTask.run, null));
+                Support.waitForStage(1);
+                root.run("slow", TaskRunner.make(ParallelSlowTask.run, null));
+
+                try std.testing.expect(!root.wait());
+                root.deinit();
+
+                const expected_log_a =
+                    \\>>> /fast start at 0.0s
+                    \\>>> /slow start at 0.1s
+                    \\!!! /slow slow timeout
+                    \\<<< /fast done at 0.6s, 600ms, <mem>
+                    \\!!! /slow failed at 0.4s, 300ms, <mem>
+                    \\!!! summary failed at 0.4s, 400ms, <mem>
+                ;
+                const expected_log_b =
+                    \\>>> /fast start at 0.0s
+                    \\>>> /slow start at 0.1s
+                    \\!!! /slow slow timeout
+                    \\<<< /fast done at 0.6s, 600ms, <mem>
+                    \\!!! /slow failed at 0.6s, 500ms, <mem>
+                    \\!!! summary failed at 0.6s, 600ms, <mem>
+                ;
+
+                try Helper.expectOneOfLogs(expected_log_a, expected_log_b);
+            }
+
+            Support.reset();
+
+            {
+                var root = new(TestLib, .test_run);
+                TestLib.Thread.sleep(100 * TestLib.time.ns_per_ms);
+
+                root.run("suite", TaskRunner.make(ComplexSuiteTask.run, null));
+                try std.testing.expect(!root.wait());
+                root.deinit();
+
+                const expected_log =
+                    \\>>> /suite start at 0.1s
+                    \\>>> /suite/leaf_ok start at 0.1s
+                    \\<<< /suite/leaf_ok done at 0.1s, 50ms, <mem>
+                    \\>>> /suite/leaf_err start at 0.1s
+                    \\!!! /suite/leaf_err leaf err
+                    \\!!! /suite/leaf_err failed at 0.1s, 20ms, <mem>
+                    \\>>> /suite/nested start at 0.1s
+                    \\>>> /suite/nested/deep start at 0.1s
+                    \\!!! /suite/nested/deep deep fatal
+                    \\!!! /suite/nested/deep failed at 0.2s, 40ms, <mem>
+                    \\!!! /suite/nested failed at 0.2s, 40ms, <mem>
+                    \\>>> /suite/fast start at 0.2s
+                    \\>>> /suite/slow start at 0.2s
+                    \\!!! /suite/slow slow timeout
+                    \\<<< /suite/fast done at 0.3s, 170ms, <mem>
+                    \\!!! /suite/slow failed at 0.3s, 60ms, <mem>
+                    \\!!! /suite failed at 0.1s, 70ms, <mem>
+                    \\!!! summary failed at 0.1s, 170ms, <mem>
+                ;
+
+                try Helper.expectLog(expected_log);
+            }
+        }
+        fn testTimeout() !void {
+            const std = @import("std");
+            const embed = @import("embed");
+
+            const Support = struct {
+                var entries: std.ArrayListUnmanaged([]u8) = .{};
+                var mutex: std.Thread.Mutex = .{};
+                var now_ns = std.atomic.Value(u64).init(0);
+                var stage = std.atomic.Value(u32).init(0);
+
+                fn reset() void {
+                    mutex.lock();
+                    defer mutex.unlock();
+                    for (entries.items) |entry| {
+                        std.testing.allocator.free(entry);
+                    }
+                    entries.deinit(std.testing.allocator);
+                    entries = .{};
+                    now_ns.store(0, .release);
+                    stage.store(0, .release);
+                }
+
+                fn append(comptime format: []const u8, args: anytype) void {
+                    const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
+                    mutex.lock();
+                    defer mutex.unlock();
+                    entries.append(std.testing.allocator, message) catch @panic("OOM");
+                }
+
+                fn advance(ns: u64) void {
+                    _ = now_ns.fetchAdd(ns, .acq_rel);
+                }
+
+                fn timestampNs() u64 {
+                    return now_ns.load(.acquire);
+                }
+
+                fn setStage(value: u32) void {
+                    stage.store(value, .release);
+                }
+
+                fn waitForStage(target: u32) void {
+                    while (stage.load(.acquire) < target) std.Thread.yield() catch {};
+                }
+
+                fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
+                    mutex.lock();
+                    defer mutex.unlock();
+
+                    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
+                    errdefer bytes.deinit(allocator);
+
+                    for (entries.items, 0..) |entry, idx| {
+                        try bytes.appendSlice(allocator, entry);
+                        if (idx + 1 != entries.items.len) {
+                            try bytes.append(allocator, '\n');
+                        }
+                    }
+                    return bytes.toOwnedSlice(allocator);
+                }
+            };
+
+            const CapturingLog = struct {
+                pub fn scoped(comptime scope: @Type(.enum_literal)) type {
+                    _ = scope;
+                    return struct {
+                        pub fn info(comptime format: []const u8, args: anytype) void {
+                            Support.append(format, args);
+                        }
+
+                        pub fn err(comptime format: []const u8, args: anytype) void {
+                            Support.append(format, args);
+                        }
+                    };
+                }
+            };
+
+            const TestThread = struct {
+                pub const SpawnConfig = std.Thread.SpawnConfig;
+                pub const Mutex = std.Thread.Mutex;
+                pub const RwLock = std.Thread.RwLock;
+                const ThreadSelf = @This();
+                pub const Condition = struct {
+                    inner: std.Thread.Condition = .{},
+
+                    pub fn wait(self: *Condition, mutex: *Mutex) void {
+                        self.inner.wait(mutex);
+                    }
+
+                    pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
+                        self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
+                    }
+
+                    pub fn signal(self: *Condition) void {
+                        self.inner.signal();
+                    }
+
+                    pub fn broadcast(self: *Condition) void {
+                        self.inner.broadcast();
+                    }
+                };
+
+                inner: std.Thread,
+
+                pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
+                    return .{
+                        .inner = try std.Thread.spawn(config, f, args),
+                    };
+                }
+
+                pub fn join(self: ThreadSelf) void {
+                    self.inner.join();
+                }
+
+                pub fn detach(self: ThreadSelf) void {
+                    self.inner.detach();
+                }
+
+                pub fn sleep(ns: u64) void {
+                    Support.advance(ns);
+                    std.Thread.sleep(ns);
+                }
+            };
+
+            const TestLib = struct {
+                pub const mem = embed.mem;
+                pub const fmt = embed.fmt;
+                pub const Thread = TestThread;
+                pub const log = CapturingLog;
+                pub fn ArrayList(comptime Elem: type) type {
+                    return std.ArrayList(Elem);
+                }
+                pub const testing = struct {
+                    pub const allocator = std.testing.allocator;
+                };
+                pub const time = struct {
+                    pub const ns_per_ms = std.time.ns_per_ms;
+
+                    pub fn nanoTimestamp() i128 {
+                        return Support.timestampNs();
+                    }
+
+                    pub fn milliTimestamp() i64 {
+                        return @intCast(@divFloor(Support.timestampNs(), std.time.ns_per_ms));
+                    }
+                };
+            };
+
+            const TaskRunner = struct {
+                fn make(comptime run_fn: anytype, memory_limit: ?usize) TestRunnerHandle {
+                    const Runner = struct {
+                        memory_limit: ?usize,
+
+                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                            _ = self;
+                            _ = allocator;
+                        }
+
+                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                            _ = self;
+                            var arg_byte: u8 = 0;
+                            return run_fn(t, allocator, @ptrCast(&arg_byte));
+                        }
+
+                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                            _ = allocator;
+                            std.testing.allocator.destroy(self);
+                        }
+                    };
+
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
+                    runner.* = .{ .memory_limit = memory_limit };
+                    return TestRunnerHandle.make(Runner).new(runner);
+                }
+            };
+
+            const suite_timeout_ns: i64 = 150 * TestLib.time.ns_per_ms;
+            const nested_timeout_ns: i64 = 40 * TestLib.time.ns_per_ms;
+            const branch_timeout_ns: i64 = 30 * TestLib.time.ns_per_ms;
+
+            const ImmediateTimeoutTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    const deadline = t.context().deadline() orelse {
+                        t.logError("immediate missing deadline");
+                        return false;
+                    };
+                    if (deadline != 0) {
+                        t.logError("immediate deadline mismatch");
+                        return false;
+                    }
+                    const cause = t.context().err() orelse {
+                        t.logError("immediate missing err");
+                        return false;
+                    };
+                    if (cause != error.DeadlineExceeded) {
+                        t.logError("immediate wrong err");
+                        return false;
+                    }
+                    t.logError("immediate timeout");
+                    return false;
+                }
+            };
+
+            const NestedLeafFastTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    const deadline = t.context().deadline() orelse {
+                        t.logError("fast leaf missing deadline");
+                        return false;
+                    };
+                    if (deadline != @as(i128, nested_timeout_ns)) {
+                        t.logError("fast leaf deadline mismatch");
+                        return false;
+                    }
+                    TestLib.Thread.sleep(10 * TestLib.time.ns_per_ms);
+                    if (t.context().err() != null) {
+                        t.logError("fast leaf should stay active");
+                        return false;
+                    }
+                    return true;
+                }
+            };
+
+            const NestedLeafSlowTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    const deadline = t.context().deadline() orelse {
+                        t.logError("leaf timeout missing deadline");
+                        return false;
+                    };
+                    if (deadline != @as(i128, nested_timeout_ns)) {
+                        t.logError("leaf timeout deadline mismatch");
+                        return false;
+                    }
+                    TestLib.Thread.sleep(70 * TestLib.time.ns_per_ms);
+                    const cause = t.context().err() orelse {
+                        t.logError("leaf timeout missing err");
+                        return false;
+                    };
+                    if (cause != error.DeadlineExceeded) {
+                        t.logError("leaf timeout wrong err");
+                        return false;
+                    }
+                    t.logError("leaf timeout");
+                    return false;
+                }
+            };
+
+            const NestedTimeoutTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    const inherited = t.context().deadline() orelse {
+                        t.logError("nested missing inherited deadline");
+                        return false;
+                    };
+                    if (inherited != @as(i128, suite_timeout_ns)) {
+                        t.logError("nested inherited deadline mismatch");
+                        return false;
+                    }
+                    t.timeout(nested_timeout_ns);
+                    const first_deadline = t.context().deadline() orelse {
+                        t.logError("nested timeout missing deadline");
+                        return false;
+                    };
+                    if (first_deadline != @as(i128, nested_timeout_ns)) {
+                        t.logError("nested timeout deadline mismatch");
+                        return false;
+                    }
+                    t.timeout(90 * TestLib.time.ns_per_ms);
+                    const second_deadline = t.context().deadline() orelse {
+                        t.logError("nested second timeout missing deadline");
+                        return false;
+                    };
+                    if (second_deadline != @as(i128, nested_timeout_ns)) {
+                        t.logError("nested second timeout override");
+                        return false;
+                    }
+                    t.run("leaf_fast", TaskRunner.make(NestedLeafFastTask.run, null));
+                    t.run("leaf_slow", TaskRunner.make(NestedLeafSlowTask.run, null));
+                    return t.wait();
+                }
+            };
+
+            const ParallelFastTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    const deadline = t.context().deadline() orelse {
+                        t.logError("parallel fast missing deadline");
+                        return false;
+                    };
+                    if (deadline != @as(i128, suite_timeout_ns)) {
+                        t.logError("parallel fast deadline mismatch");
+                        return false;
+                    }
+                    TestLib.Thread.sleep(10 * TestLib.time.ns_per_ms);
+                    if (t.context().err() != null) {
+                        t.logError("parallel fast should stay active");
+                        return false;
+                    }
+                    Support.setStage(1);
+                    return true;
+                }
+            };
+
+            const ParallelSlowTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    Support.waitForStage(1);
+                    const deadline = t.context().deadline() orelse {
+                        t.logError("parallel slow missing deadline");
+                        return false;
+                    };
+                    if (deadline != @as(i128, suite_timeout_ns)) {
+                        t.logError("parallel slow deadline mismatch");
+                        return false;
+                    }
+                    TestLib.Thread.sleep(70 * TestLib.time.ns_per_ms);
+                    const cause = t.context().err() orelse {
+                        t.logError("parallel timeout missing err");
+                        return false;
+                    };
+                    if (cause != error.DeadlineExceeded) {
+                        t.logError("parallel timeout wrong err");
+                        return false;
+                    }
+                    t.logError("parallel timeout");
+                    return false;
+                }
+            };
+
+            const ComplexTimeoutSuiteTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    const inherited = t.context().deadline() orelse {
+                        t.logError("suite missing inherited deadline");
+                        return false;
+                    };
+                    if (inherited != @as(i128, suite_timeout_ns)) {
+                        t.logError("suite inherited deadline mismatch");
+                        return false;
+                    }
+                    t.run("nested", TaskRunner.make(NestedTimeoutTask.run, null));
+                    t.parallel();
+                    t.run("fast", TaskRunner.make(ParallelFastTask.run, null));
+                    Support.waitForStage(1);
+                    t.run("slow", TaskRunner.make(ParallelSlowTask.run, null));
+                    return t.wait();
+                }
+            };
+
+            const ScopedTimedLeafTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    const deadline = t.context().deadline() orelse {
+                        t.logError("branch timeout missing deadline");
+                        return false;
+                    };
+                    if (deadline != @as(i128, branch_timeout_ns)) {
+                        t.logError("branch timeout deadline mismatch");
+                        return false;
+                    }
+                    TestLib.Thread.sleep(50 * TestLib.time.ns_per_ms);
+                    const cause = t.context().err() orelse {
+                        t.logError("branch timeout missing err");
+                        return false;
+                    };
+                    if (cause != error.DeadlineExceeded) {
+                        t.logError("branch timeout wrong err");
+                        return false;
+                    }
+                    t.logError("branch timeout");
+                    return false;
+                }
+            };
+
+            const ScopedTimedBranchTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    if (t.context().deadline() != null) {
+                        t.logError("timed branch should start without deadline");
+                        return false;
+                    }
+                    t.timeout(branch_timeout_ns);
+                    const deadline = t.context().deadline() orelse {
+                        t.logError("timed branch missing deadline");
+                        return false;
+                    };
+                    if (deadline != @as(i128, branch_timeout_ns)) {
+                        t.logError("timed branch deadline mismatch");
+                        return false;
+                    }
+                    t.run("timed_leaf", TaskRunner.make(ScopedTimedLeafTask.run, null));
+                    return t.wait();
+                }
+            };
+
+            const ScopedPlainBranchTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    if (t.context().deadline() != null) {
+                        t.logError("plain branch inherited timeout");
+                        return false;
+                    }
+                    TestLib.Thread.sleep(10 * TestLib.time.ns_per_ms);
+                    if (t.context().err() != null) {
+                        t.logError("plain branch canceled");
+                        return false;
+                    }
+                    return true;
+                }
+            };
+
+            const ScopedTimeoutSuiteTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = allocator;
+                    _ = args;
+                    t.run("timed_branch", TaskRunner.make(ScopedTimedBranchTask.run, null));
+                    t.run("plain_branch", TaskRunner.make(ScopedPlainBranchTask.run, null));
+                    return t.wait();
+                }
+            };
+
+            const Helper = struct {
+                fn makeRunner(comptime run_fn: anytype, memory_limit: ?usize) TestRunnerHandle {
+                    const Runner = struct {
+                        memory_limit: ?usize,
+
+                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                            _ = self;
+                            _ = allocator;
+                        }
+
+                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                            _ = self;
+                            var arg_byte: u8 = 0;
+                            return run_fn(t, allocator, @ptrCast(&arg_byte));
+                        }
+
+                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                            _ = allocator;
+                            std.testing.allocator.destroy(self);
+                        }
+                    };
+
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
+                    runner.* = .{ .memory_limit = memory_limit };
+                    return TestRunnerHandle.make(Runner).new(runner);
+                }
+
+                fn appendNormalizedLine(bytes: *std.ArrayList(u8), line: []const u8) !void {
+                    var plain_line = std.ArrayList(u8).empty;
+                    defer plain_line.deinit(std.testing.allocator);
+
+                    var i: usize = 0;
+                    while (i < line.len) {
+                        if (line[i] == 0x1b and i + 1 < line.len and line[i + 1] == '[') {
+                            i += 2;
+                            while (i < line.len and line[i] != 'm') : (i += 1) {}
+                            if (i < line.len) i += 1;
+                            continue;
+                        }
+                        try plain_line.append(std.testing.allocator, line[i]);
+                        i += 1;
+                    }
+
+                    const plain = plain_line.items;
+                    var compact_line = std.ArrayList(u8).empty;
+                    defer compact_line.deinit(std.testing.allocator);
+                    const normalized_plain = blk: {
+                        if (std.mem.startsWith(u8, plain, ">>> ") or
+                            std.mem.startsWith(u8, plain, "<<< ") or
+                            std.mem.startsWith(u8, plain, "!!! "))
+                        {
+                            const prefix = plain[0..4];
+                            const rest = plain[4..];
+                            const split_idx = std.mem.indexOfScalar(u8, rest, ' ') orelse break :blk plain;
+                            const label = rest[0..split_idx];
+                            const suffix = std.mem.trimLeft(u8, rest[split_idx..], " ");
+                            try compact_line.appendSlice(std.testing.allocator, prefix);
+                            try compact_line.appendSlice(std.testing.allocator, label);
+                            try compact_line.append(std.testing.allocator, ' ');
+                            try compact_line.appendSlice(std.testing.allocator, suffix);
+                            break :blk compact_line.items;
+                        }
+                        break :blk plain;
+                    };
+                    const event_idx = std.mem.indexOf(u8, normalized_plain, " done at ") orelse
+                        std.mem.indexOf(u8, normalized_plain, " failed at ");
+                    if (event_idx) |idx| {
+                        const prefix = std.mem.trimRight(u8, normalized_plain[0..idx], " ");
+                        const suffix = normalized_plain[idx + 1 ..];
+                        if (std.mem.indexOf(u8, suffix, "ms, ")) |ms_idx| {
+                            try bytes.appendSlice(std.testing.allocator, prefix);
+                            try bytes.append(std.testing.allocator, ' ');
+                            try bytes.appendSlice(std.testing.allocator, suffix[0 .. ms_idx + 4]);
+                            try bytes.appendSlice(std.testing.allocator, "<mem>");
+                            return;
+                        }
+                        try bytes.appendSlice(std.testing.allocator, prefix);
+                        try bytes.append(std.testing.allocator, ' ');
+                        try bytes.appendSlice(std.testing.allocator, suffix);
+                        return;
+                    }
+                    try bytes.appendSlice(std.testing.allocator, normalized_plain);
+                }
+
+                fn normalizedLog() ![]u8 {
+                    const actual_log = try Support.joinedLog(std.testing.allocator);
+                    defer std.testing.allocator.free(actual_log);
+
+                    var normalized = std.ArrayList(u8).empty;
+                    errdefer normalized.deinit(std.testing.allocator);
+
+                    var lines = std.mem.splitScalar(u8, actual_log, '\n');
+                    var first = true;
+                    while (lines.next()) |line| {
+                        if (!first) try normalized.append(std.testing.allocator, '\n');
+                        try appendNormalizedLine(&normalized, line);
+                        first = false;
+                    }
+                    return normalized.toOwnedSlice(std.testing.allocator);
+                }
+
+                fn expectLog(expected_log: []const u8) !void {
+                    const actual_log = try normalizedLog();
+                    defer std.testing.allocator.free(actual_log);
+                    try std.testing.expectEqualStrings(expected_log, actual_log);
+                }
+            };
+
+            Support.reset();
+            defer Support.reset();
+
+            {
+                var root = new(TestLib, .test_run);
+                root.timeout(0);
+                root.run("immediate", TaskRunner.make(ImmediateTimeoutTask.run, null));
+                try std.testing.expect(!root.wait());
+                root.deinit();
+
+                const expected_log =
+                    \\>>> /immediate start at 0.0s
+                    \\!!! /immediate immediate timeout
+                    \\!!! /immediate failed at 0.0s, 0ms, <mem>
+                    \\!!! summary failed at 0.0s, 0ms, <mem>
+                ;
+
+                try Helper.expectLog(expected_log);
+            }
+
+            Support.reset();
+
+            {
+                var root = new(TestLib, .test_run);
+                root.timeout(suite_timeout_ns);
+                root.timeout(300 * TestLib.time.ns_per_ms);
+                root.run("suite", TaskRunner.make(ComplexTimeoutSuiteTask.run, null));
+                try std.testing.expect(!root.wait());
+                root.deinit();
+
+                const expected_log =
+                    \\>>> /suite start at 0.0s
+                    \\>>> /suite/nested start at 0.0s
+                    \\>>> /suite/nested/leaf_fast start at 0.0s
+                    \\<<< /suite/nested/leaf_fast done at 0.0s, 10ms, <mem>
+                    \\>>> /suite/nested/leaf_slow start at 0.0s
+                    \\!!! /suite/nested/leaf_slow leaf timeout
+                    \\!!! /suite/nested/leaf_slow failed at 0.0s, 70ms, <mem>
+                    \\!!! /suite/nested failed at 0.0s, 80ms, <mem>
+                    \\>>> /suite/fast start at 0.0s
+                    \\>>> /suite/slow start at 0.0s
+                    \\<<< /suite/fast done at 0.0s, 10ms, <mem>
+                    \\!!! /suite/slow parallel timeout
+                    \\!!! /suite/slow failed at 0.1s, 70ms, <mem>
+                    \\!!! /suite failed at 0.0s, 80ms, <mem>
+                    \\!!! summary failed at 0.0s, 80ms, <mem>
+                ;
+
+                try Helper.expectLog(expected_log);
+            }
+
+            Support.reset();
+
+            {
+                var root = new(TestLib, .test_run);
+                root.run("scoped", TaskRunner.make(ScopedTimeoutSuiteTask.run, null));
+                try std.testing.expect(!root.wait());
+                root.deinit();
+
+                const expected_log =
+                    \\>>> /scoped start at 0.0s
+                    \\>>> /scoped/timed_branch start at 0.0s
+                    \\>>> /scoped/timed_branch/timed_leaf start at 0.0s
+                    \\!!! /scoped/timed_branch/timed_leaf branch timeout
+                    \\!!! /scoped/timed_branch/timed_leaf failed at 0.0s, 50ms, <mem>
+                    \\!!! /scoped/timed_branch failed at 0.0s, 50ms, <mem>
+                    \\>>> /scoped/plain_branch start at 0.0s
+                    \\<<< /scoped/plain_branch done at 0.0s, 10ms, <mem>
+                    \\!!! /scoped failed at 0.0s, 50ms, <mem>
+                    \\!!! summary failed at 0.0s, 50ms, <mem>
+                ;
+
+                try Helper.expectLog(expected_log);
+            }
+        }
+        fn testMemoryLimit() !void {
+            const std = @import("std");
+            const embed = @import("embed");
+
+            const Support = struct {
+                var entries: std.ArrayListUnmanaged([]u8) = .{};
+                var mutex: std.Thread.Mutex = .{};
+                var now_ns = std.atomic.Value(u64).init(0);
+
+                fn reset() void {
+                    mutex.lock();
+                    defer mutex.unlock();
+                    for (entries.items) |entry| {
+                        std.testing.allocator.free(entry);
+                    }
+                    entries.deinit(std.testing.allocator);
+                    entries = .{};
+                    now_ns.store(0, .release);
+                }
+
+                fn append(comptime format: []const u8, args: anytype) void {
+                    const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
+                    mutex.lock();
+                    defer mutex.unlock();
+                    entries.append(std.testing.allocator, message) catch @panic("OOM");
+                }
+
+                fn timestampNs() u64 {
+                    return now_ns.load(.acquire);
+                }
+
+                fn advance(ns: u64) void {
+                    _ = now_ns.fetchAdd(ns, .acq_rel);
+                }
+
+                fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
+                    mutex.lock();
+                    defer mutex.unlock();
+
+                    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
+                    errdefer bytes.deinit(allocator);
+
+                    for (entries.items, 0..) |entry, idx| {
+                        try bytes.appendSlice(allocator, entry);
+                        if (idx + 1 != entries.items.len) {
+                            try bytes.append(allocator, '\n');
+                        }
+                    }
+                    return bytes.toOwnedSlice(allocator);
+                }
+            };
+
+            const CapturingLog = struct {
+                pub fn scoped(comptime scope: @Type(.enum_literal)) type {
+                    _ = scope;
+                    return struct {
+                        pub fn info(comptime format: []const u8, args: anytype) void {
+                            Support.append(format, args);
+                        }
+
+                        pub fn err(comptime format: []const u8, args: anytype) void {
+                            Support.append(format, args);
+                        }
+                    };
+                }
+            };
+
+            const TestThread = struct {
+                pub const SpawnConfig = std.Thread.SpawnConfig;
+                pub const Mutex = std.Thread.Mutex;
+                pub const RwLock = std.Thread.RwLock;
+                const ThreadSelf = @This();
+                pub const Condition = struct {
+                    inner: std.Thread.Condition = .{},
+
+                    pub fn wait(self: *Condition, mutex: *Mutex) void {
+                        self.inner.wait(mutex);
+                    }
+
+                    pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
+                        self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
+                    }
+
+                    pub fn signal(self: *Condition) void {
+                        self.inner.signal();
+                    }
+
+                    pub fn broadcast(self: *Condition) void {
+                        self.inner.broadcast();
+                    }
+                };
+
+                inner: std.Thread,
+
+                pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
+                    return .{
+                        .inner = try std.Thread.spawn(config, f, args),
+                    };
+                }
+
+                pub fn join(self: ThreadSelf) void {
+                    self.inner.join();
+                }
+
+                pub fn detach(self: ThreadSelf) void {
+                    self.inner.detach();
+                }
+
+                pub fn sleep(ns: u64) void {
+                    Support.advance(ns);
+                }
+            };
+
+            const TestLib = struct {
+                pub const mem = embed.mem;
+                pub const fmt = embed.fmt;
+                pub const Thread = TestThread;
+                pub const log = CapturingLog;
+                pub fn ArrayList(comptime Elem: type) type {
+                    return std.ArrayList(Elem);
+                }
+                pub const testing = struct {
+                    pub const allocator = std.testing.allocator;
+                };
+                pub const time = struct {
+                    pub const ns_per_ms = std.time.ns_per_ms;
+
+                    pub fn nanoTimestamp() i128 {
+                        return Support.timestampNs();
+                    }
+
+                    pub fn milliTimestamp() i64 {
+                        return @intCast(@divFloor(Support.timestampNs(), std.time.ns_per_ms));
+                    }
+                };
+            };
+
+            const TaskRunner = struct {
+                fn make(comptime run_fn: anytype, memory_limit: ?usize) TestRunnerHandle {
+                    const Runner = struct {
+                        memory_limit: ?usize,
+
+                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                            _ = self;
+                            _ = allocator;
+                        }
+
+                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                            _ = self;
+                            var arg_byte: u8 = 0;
+                            return run_fn(t, allocator, @ptrCast(&arg_byte));
+                        }
+
+                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                            _ = allocator;
+                            std.testing.allocator.destroy(self);
+                        }
+                    };
+
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
+                    runner.* = .{ .memory_limit = memory_limit };
+                    return TestRunnerHandle.make(Runner).new(runner);
+                }
+            };
+
+            const MemoryLimitFailTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = args;
+                    const bytes = allocator.alloc(u8, 64) catch {
+                        t.logError("memory limit hit");
+                        return false;
+                    };
+                    defer allocator.free(bytes);
+                    return true;
+                }
+            };
+
+            const MemoryLimitOkTask = struct {
+                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                    _ = t;
+                    _ = args;
+                    const bytes = allocator.alloc(u8, 16) catch return false;
+                    defer allocator.free(bytes);
+                    @memset(bytes, 0xAB);
+                    return true;
+                }
+            };
+
+            const Helper = struct {
+                fn makeRunner(comptime run_fn: anytype, memory_limit: ?usize) TestRunnerHandle {
+                    const Runner = struct {
+                        memory_limit: ?usize,
+
+                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                            _ = self;
+                            _ = allocator;
+                        }
+
+                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                            _ = self;
+                            var arg_byte: u8 = 0;
+                            return run_fn(t, allocator, @ptrCast(&arg_byte));
+                        }
+
+                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                            _ = allocator;
+                            std.testing.allocator.destroy(self);
+                        }
+                    };
+
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
+                    runner.* = .{ .memory_limit = memory_limit };
+                    return TestRunnerHandle.make(Runner).new(runner);
+                }
+
+                fn appendNormalizedLine(bytes: *std.ArrayList(u8), line: []const u8) !void {
+                    var plain_line = std.ArrayList(u8).empty;
+                    defer plain_line.deinit(std.testing.allocator);
+
+                    var i: usize = 0;
+                    while (i < line.len) {
+                        if (line[i] == 0x1b and i + 1 < line.len and line[i + 1] == '[') {
+                            i += 2;
+                            while (i < line.len and line[i] != 'm') : (i += 1) {}
+                            if (i < line.len) i += 1;
+                            continue;
+                        }
+                        try plain_line.append(std.testing.allocator, line[i]);
+                        i += 1;
+                    }
+
+                    const plain = plain_line.items;
+                    var compact_line = std.ArrayList(u8).empty;
+                    defer compact_line.deinit(std.testing.allocator);
+                    const normalized_plain = blk: {
+                        if (std.mem.startsWith(u8, plain, ">>> ") or
+                            std.mem.startsWith(u8, plain, "<<< ") or
+                            std.mem.startsWith(u8, plain, "!!! "))
+                        {
+                            const prefix = plain[0..4];
+                            const rest = plain[4..];
+                            const split_idx = std.mem.indexOfScalar(u8, rest, ' ') orelse break :blk plain;
+                            const label = rest[0..split_idx];
+                            const suffix = std.mem.trimLeft(u8, rest[split_idx..], " ");
+                            try compact_line.appendSlice(std.testing.allocator, prefix);
+                            try compact_line.appendSlice(std.testing.allocator, label);
+                            try compact_line.append(std.testing.allocator, ' ');
+                            try compact_line.appendSlice(std.testing.allocator, suffix);
+                            break :blk compact_line.items;
+                        }
+                        break :blk plain;
+                    };
+                    const event_idx = std.mem.indexOf(u8, normalized_plain, " done at ") orelse
+                        std.mem.indexOf(u8, normalized_plain, " failed at ");
+                    if (event_idx) |idx| {
+                        const prefix = std.mem.trimRight(u8, normalized_plain[0..idx], " ");
+                        const suffix = normalized_plain[idx + 1 ..];
+                        if (std.mem.indexOf(u8, suffix, "ms, ")) |ms_idx| {
+                            try bytes.appendSlice(std.testing.allocator, prefix);
+                            try bytes.append(std.testing.allocator, ' ');
+                            try bytes.appendSlice(std.testing.allocator, suffix[0 .. ms_idx + 4]);
+                            try bytes.appendSlice(std.testing.allocator, "<mem>");
+                            return;
+                        }
+                        try bytes.appendSlice(std.testing.allocator, prefix);
+                        try bytes.append(std.testing.allocator, ' ');
+                        try bytes.appendSlice(std.testing.allocator, suffix);
+                        return;
+                    }
+                    try bytes.appendSlice(std.testing.allocator, normalized_plain);
+                }
+
+                fn normalizedLog() ![]u8 {
+                    const actual_log = try Support.joinedLog(std.testing.allocator);
+                    defer std.testing.allocator.free(actual_log);
+
+                    var normalized = std.ArrayList(u8).empty;
+                    errdefer normalized.deinit(std.testing.allocator);
+
+                    var lines = std.mem.splitScalar(u8, actual_log, '\n');
+                    var first = true;
+                    while (lines.next()) |line| {
+                        if (!first) try normalized.append(std.testing.allocator, '\n');
+                        try appendNormalizedLine(&normalized, line);
+                        first = false;
+                    }
+                    return normalized.toOwnedSlice(std.testing.allocator);
+                }
+
+                fn expectLog(expected_log: []const u8) !void {
+                    const actual_log = try normalizedLog();
+                    defer std.testing.allocator.free(actual_log);
+                    try std.testing.expectEqualStrings(expected_log, actual_log);
+                }
+            };
+
+            Support.reset();
+            defer Support.reset();
+
+            {
+                var root = new(TestLib, .test_run);
+                root.run("limited", TaskRunner.make(MemoryLimitFailTask.run, 32));
+                try std.testing.expect(!root.wait());
+                root.deinit();
+
+                const expected_log =
+                    \\>>> /limited start at 0.0s
+                    \\!!! /limited memory limit hit
+                    \\!!! /limited failed at 0.0s, 0ms, <mem>
+                    \\!!! summary failed at 0.0s, 0ms, <mem>
+                ;
+                try Helper.expectLog(expected_log);
+            }
+
+            Support.reset();
+
+            {
+                var root = new(TestLib, .test_run);
+                root.run("within_limit", TaskRunner.make(MemoryLimitOkTask.run, 32));
+                try std.testing.expect(root.wait());
+                root.deinit();
+
+                const expected_log =
+                    \\>>> /within_limit start at 0.0s
+                    \\<<< /within_limit done at 0.0s, 0ms, <mem>
+                    \\<<< summary done at 0.0s, 0ms, <mem>
+                ;
+
+                try Helper.expectLog(expected_log);
+            }
+        }
+        fn testPeakMemoryUsesTreePeak() !void {
+            const std = @import("std");
+            const embed = @import("embed");
+
+            const Support = struct {
+                var entries: std.ArrayListUnmanaged([]u8) = .{};
+                var mutex: std.Thread.Mutex = .{};
+
+                fn reset() void {
+                    mutex.lock();
+                    defer mutex.unlock();
+                    for (entries.items) |entry| {
+                        std.testing.allocator.free(entry);
+                    }
+                    entries.deinit(std.testing.allocator);
+                    entries = .{};
+                }
+
+                fn append(comptime format: []const u8, args: anytype) void {
+                    const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
+                    mutex.lock();
+                    defer mutex.unlock();
+                    entries.append(std.testing.allocator, message) catch @panic("OOM");
+                }
+
+                fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
+                    mutex.lock();
+                    defer mutex.unlock();
+
+                    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
+                    errdefer bytes.deinit(allocator);
+
+                    for (entries.items, 0..) |entry, idx| {
+                        try bytes.appendSlice(allocator, entry);
+                        if (idx + 1 != entries.items.len) {
+                            try bytes.append(allocator, '\n');
+                        }
+                    }
+                    return bytes.toOwnedSlice(allocator);
+                }
+            };
+
+            const CapturingLog = struct {
+                pub fn scoped(comptime scope: @Type(.enum_literal)) type {
+                    _ = scope;
+                    return struct {
+                        pub fn info(comptime format: []const u8, args: anytype) void {
+                            Support.append(format, args);
+                        }
+
+                        pub fn err(comptime format: []const u8, args: anytype) void {
+                            Support.append(format, args);
+                        }
+                    };
+                }
+            };
+
+            const TestThread = struct {
+                pub const SpawnConfig = std.Thread.SpawnConfig;
+                pub const Mutex = std.Thread.Mutex;
+                pub const RwLock = std.Thread.RwLock;
+                const ThreadSelf = @This();
+
+                pub const Condition = struct {
+                    inner: std.Thread.Condition = .{},
+
+                    pub fn wait(self: *Condition, mutex: *Mutex) void {
+                        self.inner.wait(mutex);
+                    }
+
+                    pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
+                        self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
+                    }
+
+                    pub fn signal(self: *Condition) void {
+                        self.inner.signal();
+                    }
+
+                    pub fn broadcast(self: *Condition) void {
+                        self.inner.broadcast();
+                    }
+                };
+
+                pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
+                    _ = config;
+                    @call(.auto, f, args);
+                    return .{};
+                }
+
+                pub fn join(self: ThreadSelf) void {
+                    _ = self;
+                }
+
+                pub fn detach(self: ThreadSelf) void {
+                    _ = self;
+                }
+
+                pub fn sleep(ns: u64) void {
+                    _ = ns;
+                }
+            };
+
+            const TestLib = struct {
+                pub const mem = embed.mem;
+                pub const fmt = embed.fmt;
+                pub const Thread = TestThread;
+                pub const log = CapturingLog;
+
+                pub fn ArrayList(comptime Elem: type) type {
+                    return std.ArrayList(Elem);
+                }
+
+                pub const testing = struct {
+                    pub const allocator = std.testing.allocator;
+                };
+
+                pub const time = struct {
+                    pub const ns_per_ms = std.time.ns_per_ms;
+
+                    pub fn nanoTimestamp() i128 {
+                        return 0;
+                    }
+
+                    pub fn milliTimestamp() i64 {
+                        return 0;
+                    }
+                };
+            };
+
+            const TaskRunner = struct {
+                fn make(comptime run_fn: anytype) TestRunnerHandle {
+                    const Runner = struct {
+                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                            _ = self;
+                            _ = allocator;
+                        }
+
+                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                            _ = self;
+                            return run_fn(t, allocator);
+                        }
+
+                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                            _ = allocator;
+                            std.testing.allocator.destroy(self);
+                        }
+                    };
+
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
+                    runner.* = .{};
+                    return TestRunnerHandle.make(Runner).new(runner);
+                }
+            };
+
+            const LeafTask = struct {
+                fn run(t: *Self, allocator: embed.mem.Allocator) bool {
+                    _ = t;
+                    const bytes = allocator.alloc(u8, 384) catch return false;
+                    defer allocator.free(bytes);
+                    return true;
+                }
+            };
+
+            const SuiteTask = struct {
+                fn run(t: *Self, allocator: embed.mem.Allocator) bool {
+                    _ = allocator;
+                    t.run("child_a", TaskRunner.make(LeafTask.run));
+                    t.run("child_b", TaskRunner.make(LeafTask.run));
+                    return t.wait();
+                }
+            };
+
+            const Helper = struct {
+                fn plainLog() ![]u8 {
+                    const actual_log = try Support.joinedLog(std.testing.allocator);
+                    defer std.testing.allocator.free(actual_log);
+
+                    var plain = std.ArrayList(u8).empty;
+                    errdefer plain.deinit(std.testing.allocator);
+
+                    var i: usize = 0;
+                    while (i < actual_log.len) {
+                        if (actual_log[i] == 0x1b and i + 1 < actual_log.len and actual_log[i + 1] == '[') {
+                            i += 2;
+                            while (i < actual_log.len and actual_log[i] != 'm') : (i += 1) {}
+                            if (i < actual_log.len) i += 1;
+                            continue;
+                        }
+                        try plain.append(std.testing.allocator, actual_log[i]);
+                        i += 1;
+                    }
+                    return plain.toOwnedSlice(std.testing.allocator);
+                }
+
+                fn parseMemoryUsage(text: []const u8) !usize {
+                    const space_idx = std.mem.lastIndexOfScalar(u8, text, ' ') orelse return error.BadMemoryText;
+                    const number_text = text[0..space_idx];
+                    const unit_text = text[space_idx + 1 ..];
+                    const scale: usize = if (std.mem.eql(u8, unit_text, "B"))
+                        1
+                    else if (std.mem.eql(u8, unit_text, "KiB"))
+                        1024
+                    else if (std.mem.eql(u8, unit_text, "MiB"))
+                        1024 * 1024
+                    else
+                        return error.BadMemoryUnit;
+
+                    if (scale == 1) return std.fmt.parseInt(usize, number_text, 10);
+
+                    const dot_idx = std.mem.indexOfScalar(u8, number_text, '.') orelse return error.BadMemoryNumber;
+                    const whole = try std.fmt.parseInt(usize, number_text[0..dot_idx], 10);
+                    const frac_text = number_text[dot_idx + 1 ..];
+                    const frac = try std.fmt.parseInt(usize, frac_text, 10);
+                    return whole * scale + (frac * scale) / 1000;
+                }
+
+                fn peakForLabel(log: []const u8, label: []const u8) !usize {
+                    var lines = std.mem.splitScalar(u8, log, '\n');
+                    while (lines.next()) |line| {
+                        if (!std.mem.startsWith(u8, line, "<<< ")) continue;
+                        const rest = line[4..];
+                        if (!std.mem.startsWith(u8, rest, label)) continue;
+                        if (std.mem.indexOf(u8, rest[label.len..], "done at ") == null) continue;
+                        const mem_idx = std.mem.lastIndexOf(u8, line, ", ") orelse return error.BadPeakLine;
+                        return parseMemoryUsage(line[mem_idx + 2 ..]);
+                    }
+                    return error.MissingPeakLine;
+                }
+            };
+
+            Support.reset();
+            defer Support.reset();
+
+            var root = new(TestLib, .test_run);
+            root.run("suite", TaskRunner.make(SuiteTask.run));
+            try std.testing.expect(root.wait());
+            root.deinit();
+
+            const log = try Helper.plainLog();
+            defer std.testing.allocator.free(log);
+
+            const suite_peak = try Helper.peakForLabel(log, "/suite");
+            const child_a_peak = try Helper.peakForLabel(log, "/suite/child_a");
+            const child_b_peak = try Helper.peakForLabel(log, "/suite/child_b");
+
+            try std.testing.expect(suite_peak + 64 < child_a_peak + child_b_peak);
+        }
+        fn testSubtestStartFailureCleanup() !void {
+            const std = @import("std");
+            const embed = @import("embed");
+
+            const FailNthAllocator = struct {
+                backing: embed.mem.Allocator,
+                alloc_index: usize = 0,
+                fail_at_alloc_index: ?usize = null,
+
+                fn allocator(self: *@This()) embed.mem.Allocator {
+                    return .{
+                        .ptr = self,
+                        .vtable = &vtable,
+                    };
+                }
+
+                fn alloc(ptr: *anyopaque, len: usize, alignment: embed.mem.Alignment, ret_addr: usize) ?[*]u8 {
+                    const self: *@This() = @ptrCast(@alignCast(ptr));
+                    defer self.alloc_index += 1;
+                    if (self.fail_at_alloc_index) |fail_at| {
+                        if (self.alloc_index == fail_at) return null;
+                    }
+                    return self.backing.rawAlloc(len, alignment, ret_addr);
+                }
+
+                fn resize(ptr: *anyopaque, memory: []u8, alignment: embed.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+                    const self: *@This() = @ptrCast(@alignCast(ptr));
+                    return self.backing.rawResize(memory, alignment, new_len, ret_addr);
+                }
+
+                fn remap(ptr: *anyopaque, memory: []u8, alignment: embed.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+                    const self: *@This() = @ptrCast(@alignCast(ptr));
+                    return self.backing.rawRemap(memory, alignment, new_len, ret_addr);
+                }
+
+                fn free(ptr: *anyopaque, memory: []u8, alignment: embed.mem.Alignment, ret_addr: usize) void {
+                    const self: *@This() = @ptrCast(@alignCast(ptr));
+                    self.backing.rawFree(memory, alignment, ret_addr);
+                }
+
+                const vtable: embed.mem.Allocator.VTable = .{
+                    .alloc = alloc,
+                    .resize = resize,
+                    .remap = remap,
+                    .free = free,
+                };
+            };
+
+            const Support = struct {
+                var entries: std.ArrayListUnmanaged([]u8) = .{};
+                var mutex: std.Thread.Mutex = .{};
+                var now_ns = std.atomic.Value(u64).init(0);
+                var fail_spawn = false;
+                var runner_run_hits: usize = 0;
+                var runner_deinit_hits: usize = 0;
+
+                fn reset() void {
+                    mutex.lock();
+                    defer mutex.unlock();
+                    for (entries.items) |entry| {
+                        std.testing.allocator.free(entry);
+                    }
+                    entries.deinit(std.testing.allocator);
+                    entries = .{};
+                    now_ns.store(0, .release);
+                    fail_spawn = false;
+                    runner_run_hits = 0;
+                    runner_deinit_hits = 0;
+                }
+
+                fn append(comptime format: []const u8, args: anytype) void {
+                    const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
+                    mutex.lock();
+                    defer mutex.unlock();
+                    entries.append(std.testing.allocator, message) catch @panic("OOM");
+                }
+
+                fn timestampNs() u64 {
+                    return now_ns.load(.acquire);
+                }
+
+                fn advance(ns: u64) void {
+                    _ = now_ns.fetchAdd(ns, .acq_rel);
+                }
+
+                fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
+                    mutex.lock();
+                    defer mutex.unlock();
+
+                    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
+                    errdefer bytes.deinit(allocator);
+
+                    for (entries.items, 0..) |entry, idx| {
+                        try bytes.appendSlice(allocator, entry);
+                        if (idx + 1 != entries.items.len) {
+                            try bytes.append(allocator, '\n');
+                        }
+                    }
+                    return bytes.toOwnedSlice(allocator);
+                }
+            };
+
+            const CapturingLog = struct {
+                pub fn scoped(comptime scope: @Type(.enum_literal)) type {
+                    _ = scope;
+                    return struct {
+                        pub fn info(comptime format: []const u8, args: anytype) void {
+                            Support.append(format, args);
+                        }
+
+                        pub fn err(comptime format: []const u8, args: anytype) void {
+                            Support.append(format, args);
+                        }
+                    };
+                }
+            };
+
+            const TestThread = struct {
+                pub const SpawnConfig = std.Thread.SpawnConfig;
+                pub const Mutex = std.Thread.Mutex;
+                pub const RwLock = std.Thread.RwLock;
+                const ThreadSelf = @This();
+
+                pub const Condition = struct {
+                    inner: std.Thread.Condition = .{},
+
+                    pub fn wait(self: *Condition, mutex: *Mutex) void {
+                        self.inner.wait(mutex);
+                    }
+
+                    pub fn timedWait(self: *Condition, mutex: *Mutex, timeout_ns: u64) error{Timeout}!void {
+                        self.inner.timedWait(mutex, timeout_ns) catch return error.Timeout;
+                    }
+
+                    pub fn signal(self: *Condition) void {
+                        self.inner.signal();
+                    }
+
+                    pub fn broadcast(self: *Condition) void {
+                        self.inner.broadcast();
+                    }
+                };
+
+                pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) error{ThreadQuotaExceeded}!ThreadSelf {
+                    _ = config;
+                    if (Support.fail_spawn) return error.ThreadQuotaExceeded;
+                    @call(.auto, f, args);
+                    return .{};
+                }
+
+                pub fn join(self: ThreadSelf) void {
+                    _ = self;
+                }
+
+                pub fn detach(self: ThreadSelf) void {
+                    _ = self;
+                }
+
+                pub fn sleep(ns: u64) void {
+                    Support.advance(ns);
+                }
+            };
+
+            const TestLib = struct {
+                pub const mem = embed.mem;
+                pub const fmt = embed.fmt;
+                pub const Thread = TestThread;
+                pub const log = CapturingLog;
+
+                pub fn ArrayList(comptime Elem: type) type {
+                    return std.ArrayList(Elem);
+                }
+
+                pub const testing = struct {
+                    pub var allocator: embed.mem.Allocator = undefined;
+                };
+
+                pub const time = struct {
+                    pub const ns_per_ms = std.time.ns_per_ms;
+
+                    pub fn nanoTimestamp() i128 {
+                        return Support.timestampNs();
+                    }
+
+                    pub fn milliTimestamp() i64 {
+                        return @intCast(@divFloor(Support.timestampNs(), std.time.ns_per_ms));
+                    }
+                };
+            };
+
+            const Helper = struct {
+                fn makeTrackedRunner() TestRunnerHandle {
+                    const Runner = struct {
+                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                            _ = self;
+                            _ = allocator;
+                        }
+
+                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                            _ = self;
+                            _ = t;
+                            _ = allocator;
+                            Support.runner_run_hits += 1;
+                            return true;
+                        }
+
+                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                            _ = allocator;
+                            Support.runner_deinit_hits += 1;
+                            std.testing.allocator.destroy(self);
+                        }
+                    };
+
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
+                    runner.* = .{};
+                    return TestRunnerHandle.make(Runner).new(runner);
+                }
+
+                fn normalizedLogContains(needle: []const u8) !bool {
+                    const actual_log = try Support.joinedLog(std.testing.allocator);
+                    defer std.testing.allocator.free(actual_log);
+
+                    var plain = std.ArrayList(u8).empty;
+                    defer plain.deinit(std.testing.allocator);
+
+                    var i: usize = 0;
+                    while (i < actual_log.len) {
+                        if (actual_log[i] == 0x1b and i + 1 < actual_log.len and actual_log[i + 1] == '[') {
+                            i += 2;
+                            while (i < actual_log.len and actual_log[i] != 'm') : (i += 1) {}
+                            if (i < actual_log.len) i += 1;
+                            continue;
+                        }
+                        try plain.append(std.testing.allocator, actual_log[i]);
+                        i += 1;
+                    }
+
+                    return std.mem.indexOf(u8, plain.items, needle) != null;
+                }
+            };
+
+            Support.reset();
+            defer Support.reset();
+
+            {
+                var found_pending_alloc_failure = false;
+
+                for (0..32) |fail_offset| {
+                    Support.reset();
+
+                    var allocator_state = FailNthAllocator{
+                        .backing = std.testing.allocator,
+                    };
+                    TestLib.testing.allocator = allocator_state.allocator();
+
+                    var root = new(TestLib, .test_run);
+                    allocator_state.fail_at_alloc_index = allocator_state.alloc_index + fail_offset;
+
+                    root.run("child", Helper.makeTrackedRunner());
+                    const ok = root.wait();
+                    root.deinit();
+
+                    if (try Helper.normalizedLogContains("subtest state alloc failed")) {
+                        try std.testing.expect(!ok);
+                        try std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
+                        try std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
+                        found_pending_alloc_failure = true;
+                        break;
+                    }
+                }
+
+                try std.testing.expect(found_pending_alloc_failure);
+            }
+
+            Support.reset();
+            Support.fail_spawn = true;
+            TestLib.testing.allocator = std.testing.allocator;
+
+            {
+                var root = new(TestLib, .test_run);
+                root.run("child", Helper.makeTrackedRunner());
+                try std.testing.expect(!root.wait());
+                root.deinit();
+            }
+
+            try std.testing.expect(try Helper.normalizedLogContains("subtest spawn failed"));
+            try std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
+            try std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
+        }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *Self, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.testFormatMemoryUsage() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testContextCancelLogs() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testTimeout() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testMemoryLimit() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testPeakMemoryUsesTreePeak() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testSubtestStartFailureCleanup() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    Support.reset();
-    defer Support.reset();
-
-    {
-        var found_pending_alloc_failure = false;
-
-        for (0..32) |fail_offset| {
-            Support.reset();
-
-            var allocator_state = FailNthAllocator{
-                .backing = std.testing.allocator,
-            };
-            TestLib.testing.allocator = allocator_state.allocator();
-
-            var root = new(TestLib, .test_run);
-            allocator_state.fail_at_alloc_index = allocator_state.alloc_index + fail_offset;
-
-            root.run("child", Helper.makeTrackedRunner());
-            const ok = root.wait();
-            root.deinit();
-
-            if (try Helper.normalizedLogContains("subtest state alloc failed")) {
-                try std.testing.expect(!ok);
-                try std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
-                try std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
-                found_pending_alloc_failure = true;
-                break;
-            }
-        }
-
-        try std.testing.expect(found_pending_alloc_failure);
-    }
-
-    Support.reset();
-    Support.fail_spawn = true;
-    TestLib.testing.allocator = std.testing.allocator;
-
-    {
-        var root = new(TestLib, .test_run);
-        root.run("child", Helper.makeTrackedRunner());
-        try std.testing.expect(!root.wait());
-        root.deinit();
-    }
-
-    try std.testing.expect(try Helper.normalizedLogContains("subtest spawn failed"));
-    try std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
-    try std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return TestRunnerHandle.make(Runner).new(&Holder.runner);
 }

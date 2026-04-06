@@ -14,6 +14,7 @@ pub fn create(
 }
 
 pub fn link(b: *std.Build) void {
+    const testing = b.modules.get("testing") orelse @panic("motion requires testing");
     const mod = b.modules.get("motion") orelse @panic("motion module missing");
-    _ = mod;
+    mod.addImport("testing", testing);
 }

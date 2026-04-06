@@ -1,3 +1,5 @@
+const testing_api = @import("testing");
+
 pub fn make(comptime lib: type) type {
     const common = @import("common.zig").make(lib);
     const crypto = lib.crypto;
@@ -367,94 +369,64 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-test "net/unit_tests/tls/kdf/Kdf_hkdfExpandLabel_sha256_basic" {
-    const std = @import("std");
-    const K = make(std);
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(lib, struct {
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = allocator;
+            const testing = lib.testing;
+            const K = make(lib);
 
-    const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x01} ** K.HkdfSha256.prk_length;
-    const result = K.hkdfExpandLabelSha256(secret, "key", "", 16);
-    try std.testing.expectEqual(@as(usize, 16), result.len);
-}
+            {
+                const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x01} ** K.HkdfSha256.prk_length;
+                const result = K.hkdfExpandLabelSha256(secret, "key", "", 16);
+                try testing.expectEqual(@as(usize, 16), result.len);
+            }
 
-test "net/unit_tests/tls/kdf/Kdf_hkdfExpandLabel_is_deterministic" {
-    const std = @import("std");
-    const K = make(std);
+            {
+                const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x05} ** K.HkdfSha256.prk_length;
+                const r1 = K.hkdfExpandLabelSha256(secret, "key", "", 16);
+                const r2 = K.hkdfExpandLabelSha256(secret, "key", "", 16);
+                try testing.expectEqualSlices(u8, &r1, &r2);
+            }
 
-    const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x05} ** K.HkdfSha256.prk_length;
-    const r1 = K.hkdfExpandLabelSha256(secret, "key", "", 16);
-    const r2 = K.hkdfExpandLabelSha256(secret, "key", "", 16);
-    try std.testing.expectEqualSlices(u8, &r1, &r2);
-}
+            {
+                const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x11} ** K.HkdfSha256.prk_length;
+                const transcript: [K.Sha256.digest_length]u8 = [_]u8{0x22} ** K.Sha256.digest_length;
 
-test "net/unit_tests/tls/kdf/Kdf_deriveSecret_changes_with_label" {
-    const std = @import("std");
-    const K = make(std);
+                const c_hs = K.deriveSecretSha256(secret, "c hs traffic", &transcript);
+                const s_hs = K.deriveSecretSha256(secret, "s hs traffic", &transcript);
+                try testing.expect(!lib.mem.eql(u8, &c_hs, &s_hs));
+            }
 
-    const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x11} ** K.HkdfSha256.prk_length;
-    const transcript: [K.Sha256.digest_length]u8 = [_]u8{0x22} ** K.Sha256.digest_length;
+            {
+                const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x33} ** K.HkdfSha256.prk_length;
+                const transcript: [K.Sha256.digest_length]u8 = [_]u8{0x44} ** K.Sha256.digest_length;
 
-    const c_hs = K.deriveSecretSha256(secret, "c hs traffic", &transcript);
-    const s_hs = K.deriveSecretSha256(secret, "s hs traffic", &transcript);
-    try std.testing.expect(!std.mem.eql(u8, &c_hs, &s_hs));
-}
+                const v1 = K.finishedVerifyDataSha256(secret, &transcript);
+                const v2 = K.finishedVerifyDataSha256(secret, &transcript);
+                try testing.expectEqualSlices(u8, &v1, &v2);
+            }
 
-test "net/unit_tests/tls/kdf/Kdf_finishedVerifyData_is_deterministic" {
-    const std = @import("std");
-    const K = make(std);
+            {
+                var out: [48]u8 = undefined;
+                K.tls12PrfSha256(&out, "pre-master-secret", "master secret", "seed");
+                try testing.expect(!lib.mem.allEqual(u8, &out, 0));
+            }
 
-    const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x33} ** K.HkdfSha256.prk_length;
-    const transcript: [K.Sha256.digest_length]u8 = [_]u8{0x44} ** K.Sha256.digest_length;
+            {
+                var tx = K.TranscriptHash(K.Sha256).init();
+                tx.update("hel");
+                const peeked = tx.peek();
+                tx.update("lo");
+                const finaled = tx.final();
 
-    const v1 = K.finishedVerifyDataSha256(secret, &transcript);
-    const v2 = K.finishedVerifyDataSha256(secret, &transcript);
-    try std.testing.expectEqualSlices(u8, &v1, &v2);
-}
+                var expected: [K.Sha256.digest_length]u8 = undefined;
+                K.Sha256.hash("hello", &expected, .{});
 
-test "net/unit_tests/tls/kdf/Kdf_tls12Prf_produces_non_zero_output" {
-    const std = @import("std");
-    const K = make(std);
+                try testing.expect(!lib.mem.eql(u8, &peeked, &expected));
+                try testing.expectEqualSlices(u8, &expected, &finaled);
+            }
 
-    var out: [48]u8 = undefined;
-    K.tls12PrfSha256(&out, "pre-master-secret", "master secret", "seed");
-
-    try std.testing.expect(!std.mem.allEqual(u8, &out, 0));
-}
-
-test "net/unit_tests/tls/kdf/Kdf_transcript_hash_peek_does_not_consume_state" {
-    const std = @import("std");
-    const K = make(std);
-
-    var tx = K.TranscriptHash(K.Sha256).init();
-    tx.update("hel");
-    const peeked = tx.peek();
-    tx.update("lo");
-    const finaled = tx.final();
-
-    var expected: [K.Sha256.digest_length]u8 = undefined;
-    K.Sha256.hash("hello", &expected, .{});
-
-    try std.testing.expect(!std.mem.eql(u8, &peeked, &expected));
-    try std.testing.expectEqualSlices(u8, &expected, &finaled);
-}
-
-test "net/unit_tests/tls/kdf/Kdf_sha384_finished_verify_data_matches_std_tls_helpers" {
-    const std = @import("std");
-    const K = make(std);
-    const HmacSha384 = std.crypto.auth.hmac.sha2.HmacSha384;
-    const HkdfSha384 = std.crypto.kdf.hkdf.Hkdf(HmacSha384);
-
-    const secret: [K.HkdfSha384.prk_length]u8 = [_]u8{0x5a} ** K.HkdfSha384.prk_length;
-    const transcript: [K.Sha384.digest_length]u8 = [_]u8{0x33} ** K.Sha384.digest_length;
-
-    const ours = K.finishedVerifyDataSha384(secret, &transcript);
-    const finished_key = std.crypto.tls.hkdfExpandLabel(
-        HkdfSha384,
-        secret,
-        "finished",
-        "",
-        HmacSha384.key_length,
-    );
-    const expected = std.crypto.tls.hmac(HmacSha384, &transcript, finished_key);
-
-    try std.testing.expectEqualSlices(u8, &expected, &ours);
+        }
+    }.run);
 }

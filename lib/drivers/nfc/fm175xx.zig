@@ -10,6 +10,7 @@ const TypeA = @import("io/TypeA.zig");
 const regs = @import("fm175xx/regs.zig");
 const type_a = @import("fm175xx/type_a.zig");
 const ntag = @import("fm175xx/ntag.zig");
+const testing_api = @import("testing");
 
 pub const Error = error{
     Timeout,
@@ -512,313 +513,353 @@ fn finishCommand(self: *Fm175xx, maybe_err: ?TypeA.Error, out_bits: usize) TypeA
     return out_bits;
 }
 
-test "drivers/unit_tests/nfc/Fm175xx/open_and_type_a_configure_over_i2c" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn openAndTypeAConfigureOverI2c() !void {
+            const FakeI2c = struct {
+                regs_map: [256]u8 = [_]u8{0} ** 256,
+                writes: [32][2]u8 = undefined,
+                write_count: usize = 0,
 
-    const FakeI2c = struct {
-        regs_map: [256]u8 = [_]u8{0} ** 256,
-        writes: [32][2]u8 = undefined,
-        write_count: usize = 0,
+                pub fn write(self: *@This(), _: drivers_io.I2c.Address, data: []const u8) drivers_io.I2c.Error!void {
+                    if (data.len >= 2) {
+                        self.regs_map[data[0]] = data[1];
+                        self.writes[self.write_count] = .{ data[0], data[1] };
+                        self.write_count += 1;
+                    }
+                }
 
-        pub fn write(self: *@This(), _: drivers_io.I2c.Address, data: []const u8) drivers_io.I2c.Error!void {
-            if (data.len >= 2) {
-                self.regs_map[data[0]] = data[1];
-                self.writes[self.write_count] = .{ data[0], data[1] };
-                self.write_count += 1;
-            }
+                pub fn read(self: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
+                    _ = self;
+                    @memset(buf, 0);
+                }
+
+                pub fn writeRead(self: *@This(), _: drivers_io.I2c.Address, tx: []const u8, rx: []u8) drivers_io.I2c.Error!void {
+                    if (tx.len == 0) return error.Unexpected;
+                    rx[0] = self.regs_map[tx[0]];
+                }
+            };
+
+            const FakeDelay = struct {
+                last_sleep_ms: u32 = 0,
+                pub fn sleepMs(self: *@This(), ms: u32) void {
+                    self.last_sleep_ms = ms;
+                }
+            };
+
+            const FakePower = struct {
+                enabled: usize = 0,
+                disabled: usize = 0,
+                pub fn enable(self: *@This()) void {
+                    self.enabled += 1;
+                }
+                pub fn disable(self: *@This()) void {
+                    self.disabled += 1;
+                }
+            };
+
+            var i2c = FakeI2c{};
+            i2c.regs_map[regs.control] = 0x00;
+            var delay = FakeDelay{};
+            var power = FakePower{};
+
+            var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{
+                .address = 0x28,
+                .power = Power.init(&power),
+            });
+
+            try reader.open();
+            try reader.setIsoType(.a);
+
+            try lib.testing.expectEqual(@as(usize, 1), power.enabled);
+            try lib.testing.expectEqual(@as(u32, 100), delay.last_sleep_ms);
+            try lib.testing.expectEqual(@as(u8, 0x00), i2c.regs_map[regs.tx_mode]);
+            try lib.testing.expectEqual(@as(u8, 0x00), i2c.regs_map[regs.rx_mode]);
+            try lib.testing.expectEqual(@as(u8, 0xF8), i2c.regs_map[regs.gsn]);
+            try lib.testing.expectEqual(@as(u8, 0x3F), i2c.regs_map[regs.gwgsp]);
+            try lib.testing.expectEqual(@as(u8, 0x68), i2c.regs_map[regs.rfcfg]);
+            try lib.testing.expectEqual(@as(u8, 0x74), i2c.regs_map[regs.rx_thres]);
         }
 
-        pub fn read(self: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
+        fn setRfValidatesReadback() !void {
+            const FakeI2c = struct {
+                regs_map: [256]u8 = [_]u8{0} ** 256,
+
+                pub fn write(self: *@This(), _: drivers_io.I2c.Address, data: []const u8) drivers_io.I2c.Error!void {
+                    if (data.len < 2) return;
+                    if ((data[0] == regs.fifo_level) and (data[1] == 0x80)) {
+                        self.regs_map[data[0]] = 0;
+                        return;
+                    }
+                    self.regs_map[data[0]] = data[1];
+                }
+
+                pub fn read(self: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
+                    _ = self;
+                    @memset(buf, 0);
+                }
+
+                pub fn writeRead(self: *@This(), _: drivers_io.I2c.Address, tx: []const u8, rx: []u8) drivers_io.I2c.Error!void {
+                    if (tx[0] == regs.com_irq) {
+                        rx[0] = 0;
+                        return;
+                    }
+                    rx[0] = self.regs_map[tx[0]];
+                }
+            };
+
+            const FakeDelay = struct {
+                last_sleep_ms: u32 = 0,
+                pub fn sleepMs(self: *@This(), ms: u32) void {
+                    self.last_sleep_ms = ms;
+                }
+            };
+
+            var i2c = FakeI2c{};
+            i2c.regs_map[regs.tx_ctrl] = 0x80;
+            var delay = FakeDelay{};
+            var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{});
+
+            try reader.setRf(.path2);
+            try lib.testing.expectEqual(@as(u8, 0x82), i2c.regs_map[regs.tx_ctrl]);
+            try lib.testing.expectEqual(@as(u32, 5), delay.last_sleep_ms);
+
+            try lib.testing.expectError(error.UnsupportedOperation, reader.setIsoType(.b));
+        }
+
+        fn spiBackendFormatsRegisterAccess() !void {
+            const FakeSpi = struct {
+                last_tx_len: usize = 0,
+                last_tx: [8]u8 = [_]u8{0} ** 8,
+                call_index: usize = 0,
+
+                pub fn write(self: *@This(), data: []const u8) drivers_io.Spi.Error!void {
+                    self.last_tx_len = data.len;
+                    @memcpy(self.last_tx[0..data.len], data);
+                }
+
+                pub fn transfer(self: *@This(), tx: []const u8, rx: []u8) drivers_io.Spi.Error!void {
+                    self.last_tx_len = tx.len;
+                    @memcpy(self.last_tx[0..tx.len], tx);
+                    @memset(rx, 0);
+
+                    switch (self.call_index) {
+                        0 => rx[1] = 0x80,
+                        2 => rx[1] = 0x81,
+                        else => {},
+                    }
+                    self.call_index += 1;
+                }
+            };
+
+            const FakeDelay = struct {
+                pub fn sleepMs(_: *@This(), _: u32) void {}
+            };
+
+            var spi = FakeSpi{};
+            var delay = FakeDelay{};
+            var reader = Fm175xx.initSpi(drivers_io.Spi.init(&spi), drivers_io.Delay.init(&delay), .{});
+
+            try reader.setRf(.path1);
+
+            try lib.testing.expectEqual(@as(usize, 2), spi.last_tx_len);
+            try lib.testing.expectEqualSlices(u8, &.{ (regs.tx_ctrl << 1) | 0x80, 0x00 }, spi.last_tx[0..2]);
+        }
+
+        fn transceiveReadsFifoAndReportsPartialBits() !void {
+            const FakeI2c = struct {
+                regs_map: [256]u8 = [_]u8{0} ** 256,
+                com_irq_reads: usize = 0,
+                fifo_level_reads: usize = 0,
+                control_reads: usize = 0,
+
+                pub fn write(self: *@This(), _: drivers_io.I2c.Address, data: []const u8) drivers_io.I2c.Error!void {
+                    if (data.len < 2) return;
+                    if ((data[0] == regs.fifo_level) and (data[1] == 0x80)) {
+                        self.regs_map[data[0]] = 0;
+                        return;
+                    }
+                    self.regs_map[data[0]] = data[1];
+                }
+
+                pub fn read(_: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
+                    @memset(buf, 0);
+                }
+
+                pub fn writeRead(self: *@This(), _: drivers_io.I2c.Address, tx: []const u8, rx: []u8) drivers_io.I2c.Error!void {
+                    const addr = tx[0];
+                    if (addr == regs.com_irq) {
+                        rx[0] = if (self.com_irq_reads == 0) 0x04 else 0x20;
+                        self.com_irq_reads += 1;
+                        return;
+                    }
+                    if (addr == regs.fifo_level) {
+                        rx[0] = if (self.fifo_level_reads < 2) 0 else 2;
+                        self.fifo_level_reads += 1;
+                        return;
+                    }
+                    if (addr == regs.control) {
+                        rx[0] = if (self.control_reads == 0) 0x03 else self.regs_map[addr];
+                        self.control_reads += 1;
+                        return;
+                    }
+                    if (addr == regs.fifo_data) {
+                        rx[0] = 0xAB;
+                        if (rx.len > 1) rx[1] = 0xCD;
+                        return;
+                    }
+                    rx[0] = self.regs_map[addr];
+                }
+            };
+
+            const FakeDelay = struct {
+                sleep_calls: usize = 0,
+                pub fn sleepMs(self: *@This(), _: u32) void {
+                    self.sleep_calls += 1;
+                }
+            };
+
+            var i2c = FakeI2c{};
+            var delay = FakeDelay{};
+            var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{});
+
+            var rx: [2]u8 = undefined;
+            const bits = try reader.transceive(.{
+                .tx = &.{0x26},
+                .tx_bits = 7,
+                .timeout_ms = 1,
+            }, &rx);
+
+            try lib.testing.expectEqual(@as(usize, 11), bits);
+            try lib.testing.expectEqualSlices(u8, &.{ 0xAB, 0xCD }, &rx);
+            try lib.testing.expect(delay.sleep_calls >= 1);
+        }
+
+        fn transceiveUsesSoftwareTimeoutGuard() !void {
+            const FakeI2c = struct {
+                regs_map: [256]u8 = [_]u8{0} ** 256,
+
+                pub fn write(self: *@This(), _: drivers_io.I2c.Address, data: []const u8) drivers_io.I2c.Error!void {
+                    if (data.len < 2) return;
+                    if ((data[0] == regs.fifo_level) and (data[1] == 0x80)) {
+                        self.regs_map[data[0]] = 0;
+                        return;
+                    }
+                    self.regs_map[data[0]] = data[1];
+                }
+
+                pub fn read(_: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
+                    @memset(buf, 0);
+                }
+
+                pub fn writeRead(self: *@This(), _: drivers_io.I2c.Address, tx: []const u8, rx: []u8) drivers_io.I2c.Error!void {
+                    if (tx[0] == regs.com_irq) {
+                        rx[0] = 0;
+                        return;
+                    }
+                    rx[0] = self.regs_map[tx[0]];
+                }
+            };
+
+            const FakeDelay = struct {
+                sleep_calls: usize = 0,
+                pub fn sleepMs(self: *@This(), _: u32) void {
+                    self.sleep_calls += 1;
+                }
+            };
+
+            var i2c = FakeI2c{};
+            var delay = FakeDelay{};
+            var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{});
+
+            var rx: [1]u8 = undefined;
+            try lib.testing.expectError(error.Timeout, reader.transceive(.{
+                .tx = &.{0x26},
+                .tx_bits = 7,
+                .timeout_ms = 2,
+            }, &rx));
+            try lib.testing.expect(delay.sleep_calls >= 1);
+        }
+
+        fn transceiveRejectsInvalidExchangeInputs() !void {
+            const FakeI2c = struct {
+                pub fn write(_: *@This(), _: drivers_io.I2c.Address, _: []const u8) drivers_io.I2c.Error!void {}
+                pub fn read(_: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
+                    @memset(buf, 0);
+                }
+                pub fn writeRead(_: *@This(), _: drivers_io.I2c.Address, _: []const u8, rx: []u8) drivers_io.I2c.Error!void {
+                    @memset(rx, 0);
+                }
+            };
+
+            const FakeDelay = struct {
+                pub fn sleepMs(_: *@This(), _: u32) void {}
+            };
+
+            var i2c = FakeI2c{};
+            var delay = FakeDelay{};
+            var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{});
+            var rx: [1]u8 = undefined;
+
+            try lib.testing.expectError(error.InvalidArgument, reader.transceive(.{
+                .tx = &.{0x26},
+                .tx_bits = 7,
+                .timeout_ms = 0,
+            }, &rx));
+
+            try lib.testing.expectError(error.InvalidArgument, reader.transceive(.{
+                .tx = &.{0x26},
+                .tx_bits = 7,
+                .timeout_ms = TypeA.max_timeout_ms + 1,
+            }, &rx));
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
-            @memset(buf, 0);
+            _ = allocator;
         }
 
-        pub fn writeRead(self: *@This(), _: drivers_io.I2c.Address, tx: []const u8, rx: []u8) drivers_io.I2c.Error!void {
-            if (tx.len == 0) return error.Unexpected;
-            rx[0] = self.regs_map[tx[0]];
-        }
-    };
-
-    const FakeDelay = struct {
-        last_sleep_ms: u32 = 0,
-        pub fn sleepMs(self: *@This(), ms: u32) void {
-            self.last_sleep_ms = ms;
-        }
-    };
-
-    const FakePower = struct {
-        enabled: usize = 0,
-        disabled: usize = 0,
-        pub fn enable(self: *@This()) void {
-            self.enabled += 1;
-        }
-        pub fn disable(self: *@This()) void {
-            self.disabled += 1;
-        }
-    };
-
-    var i2c = FakeI2c{};
-    i2c.regs_map[regs.control] = 0x00;
-    var delay = FakeDelay{};
-    var power = FakePower{};
-
-    var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{
-        .address = 0x28,
-        .power = Power.init(&power),
-    });
-
-    try reader.open();
-    try reader.setIsoType(.a);
-
-    try std.testing.expectEqual(@as(usize, 1), power.enabled);
-    try std.testing.expectEqual(@as(u32, 100), delay.last_sleep_ms);
-    try std.testing.expectEqual(@as(u8, 0x00), i2c.regs_map[regs.tx_mode]);
-    try std.testing.expectEqual(@as(u8, 0x00), i2c.regs_map[regs.rx_mode]);
-    try std.testing.expectEqual(@as(u8, 0xF8), i2c.regs_map[regs.gsn]);
-    try std.testing.expectEqual(@as(u8, 0x3F), i2c.regs_map[regs.gwgsp]);
-    try std.testing.expectEqual(@as(u8, 0x68), i2c.regs_map[regs.rfcfg]);
-    try std.testing.expectEqual(@as(u8, 0x74), i2c.regs_map[regs.rx_thres]);
-}
-
-test "drivers/unit_tests/nfc/Fm175xx/set_rf_validates_readback" {
-    const std = @import("std");
-
-    const FakeI2c = struct {
-        regs_map: [256]u8 = [_]u8{0} ** 256,
-
-        pub fn write(self: *@This(), _: drivers_io.I2c.Address, data: []const u8) drivers_io.I2c.Error!void {
-            if (data.len < 2) return;
-            if ((data[0] == regs.fifo_level) and (data[1] == 0x80)) {
-                self.regs_map[data[0]] = 0;
-                return;
-            }
-            self.regs_map[data[0]] = data[1];
-        }
-
-        pub fn read(self: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
-            @memset(buf, 0);
+            _ = allocator;
+
+            TestCase.openAndTypeAConfigureOverI2c() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.setRfValidatesReadback() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.spiBackendFormatsRegisterAccess() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.transceiveReadsFifoAndReportsPartialBits() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.transceiveUsesSoftwareTimeoutGuard() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.transceiveRejectsInvalidExchangeInputs() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
         }
 
-        pub fn writeRead(self: *@This(), _: drivers_io.I2c.Address, tx: []const u8, rx: []u8) drivers_io.I2c.Error!void {
-            if (tx[0] == regs.com_irq) {
-                rx[0] = 0;
-                return;
-            }
-            rx[0] = self.regs_map[tx[0]];
-        }
-    };
-
-    const FakeDelay = struct {
-        last_sleep_ms: u32 = 0,
-        pub fn sleepMs(self: *@This(), ms: u32) void {
-            self.last_sleep_ms = ms;
-        }
-    };
-
-    var i2c = FakeI2c{};
-    i2c.regs_map[regs.tx_ctrl] = 0x80;
-    var delay = FakeDelay{};
-    var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{});
-
-    try reader.setRf(.path2);
-    try std.testing.expectEqual(@as(u8, 0x82), i2c.regs_map[regs.tx_ctrl]);
-    try std.testing.expectEqual(@as(u32, 5), delay.last_sleep_ms);
-
-    try std.testing.expectError(error.UnsupportedOperation, reader.setIsoType(.b));
-}
-
-test "drivers/unit_tests/nfc/Fm175xx/spi_backend_formats_register_access" {
-    const std = @import("std");
-
-    const FakeSpi = struct {
-        last_tx_len: usize = 0,
-        last_tx: [8]u8 = [_]u8{0} ** 8,
-        call_index: usize = 0,
-
-        pub fn write(self: *@This(), data: []const u8) drivers_io.Spi.Error!void {
-            self.last_tx_len = data.len;
-            @memcpy(self.last_tx[0..data.len], data);
-        }
-
-        pub fn transfer(self: *@This(), tx: []const u8, rx: []u8) drivers_io.Spi.Error!void {
-            self.last_tx_len = tx.len;
-            @memcpy(self.last_tx[0..tx.len], tx);
-            @memset(rx, 0);
-
-            switch (self.call_index) {
-                0 => rx[1] = 0x80,
-                2 => rx[1] = 0x81,
-                else => {},
-            }
-            self.call_index += 1;
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    const FakeDelay = struct {
-        pub fn sleepMs(_: *@This(), _: u32) void {}
+    const Holder = struct {
+        var runner: Runner = .{};
     };
-
-    var spi = FakeSpi{};
-    var delay = FakeDelay{};
-    var reader = Fm175xx.initSpi(drivers_io.Spi.init(&spi), drivers_io.Delay.init(&delay), .{});
-
-    try reader.setRf(.path1);
-
-    try std.testing.expectEqual(@as(usize, 2), spi.last_tx_len);
-    try std.testing.expectEqualSlices(u8, &.{ (regs.tx_ctrl << 1) | 0x80, 0x00 }, spi.last_tx[0..2]);
-}
-
-test "drivers/unit_tests/nfc/Fm175xx/transceive_reads_fifo_and_reports_partial_bits" {
-    const std = @import("std");
-
-    const FakeI2c = struct {
-        regs_map: [256]u8 = [_]u8{0} ** 256,
-        com_irq_reads: usize = 0,
-        fifo_level_reads: usize = 0,
-        control_reads: usize = 0,
-
-        pub fn write(self: *@This(), _: drivers_io.I2c.Address, data: []const u8) drivers_io.I2c.Error!void {
-            if (data.len < 2) return;
-            if ((data[0] == regs.fifo_level) and (data[1] == 0x80)) {
-                self.regs_map[data[0]] = 0;
-                return;
-            }
-            self.regs_map[data[0]] = data[1];
-        }
-
-        pub fn read(_: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
-            @memset(buf, 0);
-        }
-
-        pub fn writeRead(self: *@This(), _: drivers_io.I2c.Address, tx: []const u8, rx: []u8) drivers_io.I2c.Error!void {
-            const addr = tx[0];
-            if (addr == regs.com_irq) {
-                rx[0] = if (self.com_irq_reads == 0) 0x04 else 0x20;
-                self.com_irq_reads += 1;
-                return;
-            }
-            if (addr == regs.fifo_level) {
-                rx[0] = if (self.fifo_level_reads < 2) 0 else 2;
-                self.fifo_level_reads += 1;
-                return;
-            }
-            if (addr == regs.control) {
-                rx[0] = if (self.control_reads == 0) 0x03 else self.regs_map[addr];
-                self.control_reads += 1;
-                return;
-            }
-            if (addr == regs.fifo_data) {
-                rx[0] = 0xAB;
-                if (rx.len > 1) rx[1] = 0xCD;
-                return;
-            }
-            rx[0] = self.regs_map[addr];
-        }
-    };
-
-    const FakeDelay = struct {
-        sleep_calls: usize = 0,
-        pub fn sleepMs(self: *@This(), _: u32) void {
-            self.sleep_calls += 1;
-        }
-    };
-
-    var i2c = FakeI2c{};
-    var delay = FakeDelay{};
-    var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{});
-
-    var rx: [2]u8 = undefined;
-    const bits = try reader.transceive(.{
-        .tx = &.{0x26},
-        .tx_bits = 7,
-        .timeout_ms = 1,
-    }, &rx);
-
-    try std.testing.expectEqual(@as(usize, 11), bits);
-    try std.testing.expectEqualSlices(u8, &.{ 0xAB, 0xCD }, &rx);
-    try std.testing.expect(delay.sleep_calls >= 1);
-}
-
-test "drivers/unit_tests/nfc/Fm175xx/transceive_uses_software_timeout_guard" {
-    const std = @import("std");
-
-    const FakeI2c = struct {
-        regs_map: [256]u8 = [_]u8{0} ** 256,
-
-        pub fn write(self: *@This(), _: drivers_io.I2c.Address, data: []const u8) drivers_io.I2c.Error!void {
-            if (data.len < 2) return;
-            if ((data[0] == regs.fifo_level) and (data[1] == 0x80)) {
-                self.regs_map[data[0]] = 0;
-                return;
-            }
-            self.regs_map[data[0]] = data[1];
-        }
-
-        pub fn read(_: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
-            @memset(buf, 0);
-        }
-
-        pub fn writeRead(self: *@This(), _: drivers_io.I2c.Address, tx: []const u8, rx: []u8) drivers_io.I2c.Error!void {
-            if (tx[0] == regs.com_irq) {
-                rx[0] = 0;
-                return;
-            }
-            rx[0] = self.regs_map[tx[0]];
-        }
-    };
-
-    const FakeDelay = struct {
-        sleep_calls: usize = 0,
-        pub fn sleepMs(self: *@This(), _: u32) void {
-            self.sleep_calls += 1;
-        }
-    };
-
-    var i2c = FakeI2c{};
-    var delay = FakeDelay{};
-    var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{});
-
-    var rx: [1]u8 = undefined;
-    try std.testing.expectError(error.Timeout, reader.transceive(.{
-        .tx = &.{0x26},
-        .tx_bits = 7,
-        .timeout_ms = 2,
-    }, &rx));
-    try std.testing.expect(delay.sleep_calls >= 1);
-}
-
-test "drivers/unit_tests/nfc/Fm175xx/transceive_rejects_invalid_exchange_inputs" {
-    const std = @import("std");
-
-    const FakeI2c = struct {
-        pub fn write(_: *@This(), _: drivers_io.I2c.Address, _: []const u8) drivers_io.I2c.Error!void {}
-        pub fn read(_: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
-            @memset(buf, 0);
-        }
-        pub fn writeRead(_: *@This(), _: drivers_io.I2c.Address, _: []const u8, rx: []u8) drivers_io.I2c.Error!void {
-            @memset(rx, 0);
-        }
-    };
-
-    const FakeDelay = struct {
-        pub fn sleepMs(_: *@This(), _: u32) void {}
-    };
-
-    var i2c = FakeI2c{};
-    var delay = FakeDelay{};
-    var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{});
-    var rx: [1]u8 = undefined;
-
-    try std.testing.expectError(error.InvalidArgument, reader.transceive(.{
-        .tx = &.{0x26},
-        .tx_bits = 7,
-        .timeout_ms = 0,
-    }, &rx));
-
-    try std.testing.expectError(error.InvalidArgument, reader.transceive(.{
-        .tx = &.{0x26},
-        .tx_bits = 7,
-        .timeout_ms = TypeA.max_timeout_ms + 1,
-    }, &rx));
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

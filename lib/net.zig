@@ -97,51 +97,6 @@ pub fn make(comptime lib: type) type {
 }
 
 pub const test_runner = struct {
-    pub const fd_stream = @import("net/test_runner/fd_stream.zig");
-    pub const fd_packet = @import("net/test_runner/fd_packet.zig");
-    pub const tcp = @import("net/test_runner/tcp.zig");
-    pub const udp = @import("net/test_runner/udp.zig");
-    pub const tls = @import("net/test_runner/tls.zig");
-    pub const tls_std_compat = @import("net/test_runner/tls_std_compat.zig");
-    pub const tls_dial = @import("net/test_runner/tls_dial.zig");
-    pub const resolver = @import("net/test_runner/resolver.zig");
-    pub const resolver_dns = @import("net/test_runner/resolver_dns.zig");
-    pub const ntp = @import("net/test_runner/ntp.zig");
-    pub const http_client = @import("net/test_runner/http_client.zig");
-    pub const http_server = @import("net/test_runner/http_server.zig");
-    pub const http_transport = @import("net/test_runner/http_transport_local.zig");
-    pub const http_transport_layer01 = @import("net/test_runner/http_transport_layer01.zig");
-    pub const https_transport = @import("net/test_runner/https_transport.zig");
+    pub const unit = @import("net/test_runner/unit.zig");
+    pub const integration = @import("net/test_runner/integration.zig");
 };
-
-test "net/unit_tests" {
-    _ = @import("net/fd.zig");
-    _ = @import("net/test_runner/fd_packet.zig");
-    _ = @import("net/Dialer.zig");
-    _ = @import("net/TcpConn.zig");
-    _ = @import("net/stack/Stack.zig");
-    _ = @import("net/http/Header.zig");
-    _ = @import("net/http/ReadCloser.zig");
-    _ = @import("net/http/Request.zig");
-    _ = @import("net/http/Response.zig");
-    _ = @import("net/http/status.zig");
-    _ = @import("net/http/Handler.zig");
-    _ = @import("net/http/ResponseWriter.zig");
-    _ = @import("net/http/ServeMux.zig");
-    _ = @import("net/http/StaticServeMux.zig");
-    _ = @import("net/http/Server.zig");
-    _ = @import("net/http/Client.zig");
-    _ = @import("net/http/Transport.zig");
-    _ = @import("net/ntp/wire.zig");
-    _ = @import("net/tls/common.zig");
-    _ = @import("net/tls/alert.zig");
-    _ = @import("net/tls/extensions.zig");
-    _ = @import("net/tls/kdf.zig");
-    _ = @import("net/tls/record.zig");
-    _ = @import("net/tls/client_handshake.zig");
-    _ = @import("net/tls/server_handshake.zig");
-    _ = @import("net/tls/Conn.zig");
-    _ = @import("net/TcpListener.zig");
-    _ = @import("net/UdpConn.zig");
-    _ = @import("net/url.zig");
-}

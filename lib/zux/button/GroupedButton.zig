@@ -1,5 +1,6 @@
 const Context = @import("../event/Context.zig");
 const event = @import("../event.zig");
+const testing_api = @import("testing");
 
 const GroupedButton = @This();
 
@@ -63,52 +64,85 @@ pub fn init(comptime T: type, impl: *T, source_id: u32) GroupedButton {
     };
 }
 
-test "zux/button/GroupedButton/unit_tests/init_and_poll" {
-    const std = @import("std");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn initAndPoll(testing: anytype) !void {
+            const Impl = struct {
+                called: bool = false,
 
-    const Impl = struct {
-        called: bool = false,
+                pub fn pressedButtonId(self: *@This()) !?u32 {
+                    self.called = true;
+                    return 3;
+                }
+            };
 
-        pub fn pressedButtonId(self: *@This()) !?u32 {
-            self.called = true;
-            return 3;
+            var impl = Impl{};
+            const button = GroupedButton.init(Impl, &impl, 7);
+            const polled = try button.poll();
+            switch (polled) {
+                .raw_grouped_button => |group| {
+                    try testing.expectEqual(@as(u32, 7), group.source_id);
+                    try testing.expectEqual(@as(?u32, 3), group.button_id);
+                    try testing.expect(group.pressed);
+                    try testing.expect(group.ctx == null);
+                },
+                else => try testing.expect(false),
+            }
+            try testing.expect(impl.called);
+        }
+
+        fn nullButtonIdMeansNotPressed(testing: anytype) !void {
+            const Impl = struct {
+                pub fn pressedButtonId(_: *@This()) !?u32 {
+                    return null;
+                }
+            };
+
+            var impl = Impl{};
+            const button = GroupedButton.init(Impl, &impl, 7);
+            const polled = try button.poll();
+            switch (polled) {
+                .raw_grouped_button => |group| {
+                    try testing.expectEqual(@as(u32, 7), group.source_id);
+                    try testing.expect(group.button_id == null);
+                    try testing.expect(!group.pressed);
+                    try testing.expect(group.ctx == null);
+                },
+                else => try testing.expect(false),
+            }
         }
     };
 
-    var impl = Impl{};
-    const button = GroupedButton.init(Impl, &impl, 7);
-    const polled = try button.poll();
-    switch (polled) {
-        .raw_grouped_button => |group| {
-            try std.testing.expectEqual(@as(u32, 7), group.source_id);
-            try std.testing.expectEqual(@as(?u32, 3), group.button_id);
-            try std.testing.expect(group.pressed);
-            try std.testing.expect(group.ctx == null);
-        },
-        else => try std.testing.expect(false),
-    }
-    try std.testing.expect(impl.called);
-}
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-test "zux/button/GroupedButton/unit_tests/null_button_id_means_not_pressed" {
-    const std = @import("std");
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+            const testing = lib.testing;
 
-    const Impl = struct {
-        pub fn pressedButtonId(_: *@This()) !?u32 {
-            return null;
+            TestCase.initAndPoll(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.nullButtonIdMeansNotPressed(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    var impl = Impl{};
-    const button = GroupedButton.init(Impl, &impl, 7);
-    const polled = try button.poll();
-    switch (polled) {
-        .raw_grouped_button => |group| {
-            try std.testing.expectEqual(@as(u32, 7), group.source_id);
-            try std.testing.expect(group.button_id == null);
-            try std.testing.expect(!group.pressed);
-            try std.testing.expect(group.ctx == null);
-        },
-        else => try std.testing.expect(false),
-    }
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
