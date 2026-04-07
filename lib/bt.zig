@@ -16,6 +16,11 @@ pub const test_runner = struct {
 const Server = @import("bt/host/Server.zig");
 const Client = @import("bt/host/Client.zig");
 
+pub const server = struct {
+    pub const ServeMux = @import("bt/host/server/ServeMux.zig");
+    pub const Receiver = @import("bt/host/server/Receiver.zig");
+};
+
 const bt = @This();
 
 pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
@@ -29,6 +34,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
         pub const HciHostTransport = bt.Host.makeHciTransport(lib, Channel);
         pub const Server = bt.Server.make(lib, Channel);
         pub const Client = bt.Client.make(lib);
+        pub const ServeMux = bt.server.ServeMux.make(lib, self.Server);
+        pub const Receiver = bt.server.Receiver.make(lib, self.Server);
     };
 }
 

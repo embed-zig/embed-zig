@@ -200,26 +200,38 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
                 defer self.release(self.mux.allocator);
                 defer self.finishTx();
 
-                var tx = Transport{ .session = self };
-                const data = xfer.recv(lib, self.mux.allocator, &tx, .{
-                    .att_mtu = self.subscription.attMtu(),
-                    .timeout_ms = 5_000,
-                }) catch return;
-                defer self.mux.allocator.free(data);
+                while (true) {
+                    self.mutex.lock();
+                    const closed = self.closed;
+                    self.mutex.unlock();
+                    if (closed) break;
 
-                self.mux.mutex.lock();
-                const maybe_handler = self.mux.receive_handler;
-                const handler_ctx = self.mux.handler_ctx;
-                self.mux.mutex.unlock();
-                const receive_handler = maybe_handler orelse return;
+                    var tx = Transport{ .session = self };
+                    const data = xfer.recv(lib, self.mux.allocator, &tx, .{
+                        .att_mtu = self.subscription.attMtu(),
+                        .timeout_ms = 1_000,
+                    }) catch |err| {
+                        if (err == error.Timeout) continue;
+                        break;
+                    };
 
-                var receive_req = Request{
-                    .conn_handle = self.conn_handle,
-                    .service_uuid = self.subscription.serviceUuid(),
-                    .char_uuid = self.subscription.charUuid(),
-                    .data = data,
-                };
-                receive_handler(handler_ctx, &receive_req);
+                    self.mux.mutex.lock();
+                    const maybe_handler = self.mux.receive_handler;
+                    const handler_ctx = self.mux.handler_ctx;
+                    self.mux.mutex.unlock();
+
+                    if (maybe_handler) |receive_handler| {
+                        var receive_req = Request{
+                            .conn_handle = self.conn_handle,
+                            .service_uuid = self.subscription.serviceUuid(),
+                            .char_uuid = self.subscription.charUuid(),
+                            .data = data,
+                        };
+                        receive_handler(handler_ctx, &receive_req);
+                    }
+
+                    self.mux.allocator.free(data);
+                }
             }
         };
 

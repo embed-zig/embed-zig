@@ -3,3 +3,4 @@ openteam/
 zig-out/
 AGENTS.md
 !/AGENTS.md
+pkg/core_bluetooth/.DS_Store

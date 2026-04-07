@@ -265,15 +265,24 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
                 defer release(self);
                 defer self.finishTx();
 
-                var transport = Transport{ .session = self };
                 SessionSend.active_session = self;
                 defer SessionSend.active_session = null;
-                xfer.send(lib, self.mux.allocator, &transport, SessionSend.dataFn, .{
-                    .att_mtu = self.subscription.attMtu(),
-                    .send_redundancy = 1,
-                }) catch {
-                    return;
-                };
+
+                while (true) {
+                    self.mutex.lock();
+                    const closed = self.closed;
+                    self.mutex.unlock();
+                    if (closed) break;
+
+                    var transport = Transport{ .session = self };
+                    xfer.send(lib, self.mux.allocator, &transport, SessionSend.dataFn, .{
+                        .att_mtu = self.subscription.attMtu(),
+                        .send_redundancy = 1,
+                    }) catch |err| {
+                        if (err == error.Timeout) continue;
+                        break;
+                    };
+                }
             }
 
             fn dupData(self: *Session, data: []const u8) ![]u8 {

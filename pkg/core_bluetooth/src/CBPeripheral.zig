@@ -33,6 +33,7 @@ chars: std.ArrayListUnmanaged(CharEntry) = .{},
 
 hooks: std.ArrayListUnmanaged(EventHook) = .{},
 sub_hooks: std.ArrayListUnmanaged(SubscriptionHook) = .{},
+subscribed_count: usize = 0,
 
 const OpError = enum { invalid_config, already_advertising, unexpected };
 
@@ -653,14 +654,19 @@ fn pmDidSubscribe(delegate: objc.Id, _: objc.SEL, _: objc.Id, central: objc.Id, 
     const mtu: u16 = @intCast(@min(max_update_len + 3, 517));
     std.debug.print("[CB] subscribe svc=0x{X:0>4} char=0x{X:0>4} central.maxUpdateLen={d} mtu={d}\n", .{ svc_uuid, char_uuid, max_update_len, mtu });
 
-    self.fireEvent(.{ .connected = .{
-        .conn_handle = 0,
-        .peer_addr = .{0} ** 6,
-        .peer_addr_type = .random,
-        .interval = 0,
-        .latency = 0,
-        .timeout = 0,
-    } });
+    const first = self.subscribed_count == 0;
+    self.subscribed_count += 1;
+
+    if (first) {
+        self.fireEvent(.{ .connected = .{
+            .conn_handle = 0,
+            .peer_addr = .{0} ** 6,
+            .peer_addr_type = .random,
+            .interval = 0,
+            .latency = 0,
+            .timeout = 0,
+        } });
+    }
 
     self.fireEvent(.{ .mtu_changed = .{
         .conn_handle = 0,
@@ -690,7 +696,12 @@ fn pmDidUnsubscribe(delegate: objc.Id, _: objc.SEL, _: objc.Id, _: objc.Id, char
         .cccd_value = 0x0000,
     });
 
-    self.fireEvent(.{ .disconnected = 0 });
+    if (self.subscribed_count > 0) {
+        self.subscribed_count -= 1;
+    }
+    if (self.subscribed_count == 0) {
+        self.fireEvent(.{ .disconnected = 0 });
+    }
 }
 
 fn pmIsReadyToUpdate(delegate: objc.Id, _: objc.SEL, _: objc.Id) callconv(.c) void {
