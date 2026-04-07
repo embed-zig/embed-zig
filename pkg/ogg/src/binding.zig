@@ -2,6 +2,11 @@ const c = @cImport({
     @cInclude("config.h");
     @cInclude("ogg/ogg.h");
 });
+const root = @import("root");
+const testing_api = if (@hasDecl(root, "testing")) root.testing else struct {
+    pub const TestRunner = void;
+    pub const T = void;
+};
 
 pub const SyncState = c.ogg_sync_state;
 pub const StreamState = c.ogg_stream_state;
@@ -35,16 +40,47 @@ pub const ogg_page_serialno = c.ogg_page_serialno;
 pub const ogg_page_pageno = c.ogg_page_pageno;
 pub const ogg_page_packets = c.ogg_page_packets;
 
-test "ogg/unit_tests/binding/exports_core_ogg_symbols" {
-    const std = @import("std");
-    const testing = std.testing;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn testExportsCoreOggSymbols() !void {
+            const testing = lib.testing;
 
-    try testing.expect(@sizeOf(SyncState) > 0);
-    try testing.expect(@sizeOf(StreamState) > 0);
-    try testing.expect(@sizeOf(Page) > 0);
-    try testing.expect(@sizeOf(Packet) > 0);
+            try testing.expect(@sizeOf(SyncState) > 0);
+            try testing.expect(@sizeOf(StreamState) > 0);
+            try testing.expect(@sizeOf(Page) > 0);
+            try testing.expect(@sizeOf(Packet) > 0);
 
-    _ = ogg_sync_init;
-    _ = ogg_stream_init;
-    _ = ogg_page_version;
+            _ = ogg_sync_init;
+            _ = ogg_stream_init;
+            _ = ogg_page_version;
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.testExportsCoreOggSymbols() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

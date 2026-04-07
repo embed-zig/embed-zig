@@ -79,8 +79,10 @@ pub fn link(b: *std.Build) void {
 }
 
 pub fn linkTest(b: *std.Build, compile: *std.Build.Step.Compile) void {
+    const audio = b.modules.get("audio") orelse @panic("ogg tests require audio");
     const embed_std = b.modules.get("embed_std") orelse @panic("ogg tests require embed_std");
     const testing = b.modules.get("testing") orelse @panic("ogg tests require testing");
+    compile.root_module.addImport("audio", audio);
     compile.root_module.addImport("embed_std", embed_std);
     compile.root_module.addImport("testing", testing);
 }

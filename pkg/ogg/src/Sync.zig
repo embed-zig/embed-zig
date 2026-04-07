@@ -1,6 +1,11 @@
 const binding = @import("binding.zig");
 const Page = @import("Page.zig");
 const PageOutResult = @import("types.zig").PageOutResult;
+const root = @import("root");
+const testing_api = if (@hasDecl(root, "testing")) root.testing else struct {
+    pub const TestRunner = void;
+    pub const T = void;
+};
 
 const Self = @This();
 
@@ -18,7 +23,11 @@ pub const WroteError = error{
 
 pub fn init() Self {
     var self = Self{ .state = undefined };
-    _ = binding.ogg_sync_init(&self.state);
+    // libogg documents ogg_sync_init() as always returning 0 after
+    // initializing the sync state to a known value.
+    if (binding.ogg_sync_init(&self.state) != 0) {
+        @panic("libogg ogg_sync_init invariant violated");
+    }
     return self;
 }
 
@@ -56,93 +65,153 @@ pub fn pageOut(self: *Self, page: *Page) PageOutResult {
     };
 }
 
-test "ogg/unit_tests/Sync/state_lifecycle" {
-    var sync = Self.init();
-    defer sync.deinit();
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn testStateLifecycle() !void {
+            var sync = Self.init();
+            defer sync.deinit();
 
-    sync.reset();
-}
+            sync.reset();
+        }
 
-test "ogg/unit_tests/Sync/buffer_allocation" {
-    const testing = @import("std").testing;
+        fn testBufferAllocation() !void {
+            const testing = lib.testing;
 
-    var sync = Self.init();
-    defer sync.deinit();
+            var sync = Self.init();
+            defer sync.deinit();
 
-    const buf = try sync.buffer(4096);
-    try testing.expectEqual(@as(usize, 4096), buf.len);
-}
+            const buf = try sync.buffer(4096);
+            try testing.expectEqual(@as(usize, 4096), buf.len);
+        }
 
-test "ogg/unit_tests/Sync/pageOut_returns_need_more_data_on_empty_state" {
-    const testing = @import("std").testing;
+        fn testPageOutReturnsNeedMoreDataOnEmptyState() !void {
+            const testing = lib.testing;
 
-    var sync = Self.init();
-    defer sync.deinit();
+            var sync = Self.init();
+            defer sync.deinit();
 
-    var page: Page = undefined;
-    const result = sync.pageOut(&page);
-    try testing.expectEqual(PageOutResult.need_more_data, result);
-}
+            var page: Page = undefined;
+            const result = sync.pageOut(&page);
+            try testing.expectEqual(PageOutResult.need_more_data, result);
+        }
 
-test "ogg/unit_tests/Sync/buffer_rejects_sizes_that_do_not_fit_c_long" {
-    const testing = @import("std").testing;
+        fn testBufferRejectsSizesThatDoNotFitCLong() !void {
+            const testing = lib.testing;
 
-    var sync = Self.init();
-    defer sync.deinit();
+            var sync = Self.init();
+            defer sync.deinit();
 
-    const too_large = @as(usize, @intCast(maxInt(c_long))) + 1;
-    try testing.expectError(error.SizeTooLarge, sync.buffer(too_large));
-}
+            const too_large = @as(usize, @intCast(maxInt(c_long))) + 1;
+            try testing.expectError(error.SizeTooLarge, sync.buffer(too_large));
+        }
 
-test "ogg/unit_tests/Sync/wrote_rejects_sizes_that_do_not_fit_c_long" {
-    const testing = @import("std").testing;
+        fn testWroteRejectsSizesThatDoNotFitCLong() !void {
+            const testing = lib.testing;
 
-    var sync = Self.init();
-    defer sync.deinit();
+            var sync = Self.init();
+            defer sync.deinit();
 
-    const too_large = @as(usize, @intCast(maxInt(c_long))) + 1;
-    try testing.expectError(error.SizeTooLarge, sync.wrote(too_large));
-}
+            const too_large = @as(usize, @intCast(maxInt(c_long))) + 1;
+            try testing.expectError(error.SizeTooLarge, sync.wrote(too_large));
+        }
 
-test "ogg/unit_tests/Sync/wrote_returns_error_when_bytes_exceed_buffer_capacity" {
-    const testing = @import("std").testing;
+        fn testWroteReturnsErrorWhenBytesExceedBufferCapacity() !void {
+            const testing = lib.testing;
 
-    var sync = Self.init();
-    defer sync.deinit();
+            var sync = Self.init();
+            defer sync.deinit();
 
-    try testing.expectError(error.SyncWroteFailed, sync.wrote(1));
-}
+            try testing.expectError(error.SyncWroteFailed, sync.wrote(1));
+        }
 
-test "ogg/unit_tests/Sync/buffer_propagates_null_pointer_failure" {
-    const testing = @import("std").testing;
+        fn testBufferPropagatesNullPointerFailure() !void {
+            const testing = lib.testing;
 
-    const FailingBinding = struct {
-        fn ogg_sync_buffer(_: *binding.SyncState, _: c_long) ?[*c]u8 {
-            return null;
+            const FailingBinding = struct {
+                fn ogg_sync_buffer(_: *binding.SyncState, _: c_long) ?[*c]u8 {
+                    return null;
+                }
+            };
+
+            var sync = Self.init();
+            defer sync.deinit();
+
+            try testing.expectError(
+                error.SyncBufferFailed,
+                bufferWith(&sync, 16, FailingBinding.ogg_sync_buffer),
+            );
+        }
+
+        fn testBufferThenWroteFormsMinimalHappyPath() !void {
+            const testing = lib.testing;
+
+            var sync = Self.init();
+            defer sync.deinit();
+
+            const buf = try sync.buffer(1);
+            buf[0] = 0;
+            try sync.wrote(1);
+
+            var page: Page = undefined;
+            try testing.expectEqual(PageOutResult.need_more_data, sync.pageOut(&page));
         }
     };
 
-    var sync = Self.init();
-    defer sync.deinit();
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    try testing.expectError(
-        error.SyncBufferFailed,
-        bufferWith(&sync, 16, FailingBinding.ogg_sync_buffer),
-    );
-}
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-test "ogg/unit_tests/Sync/buffer_then_wrote_forms_minimal_happy_path" {
-    const testing = @import("std").testing;
+            TestCase.testStateLifecycle() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testBufferAllocation() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testPageOutReturnsNeedMoreDataOnEmptyState() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testBufferRejectsSizesThatDoNotFitCLong() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testWroteRejectsSizesThatDoNotFitCLong() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testWroteReturnsErrorWhenBytesExceedBufferCapacity() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testBufferPropagatesNullPointerFailure() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testBufferThenWroteFormsMinimalHappyPath() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    var sync = Self.init();
-    defer sync.deinit();
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
 
-    const buf = try sync.buffer(1);
-    buf[0] = 0;
-    try sync.wrote(1);
-
-    var page: Page = undefined;
-    try testing.expectEqual(PageOutResult.need_more_data, sync.pageOut(&page));
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
 fn intCastCLong(value: usize) error{SizeTooLarge}!c_long {

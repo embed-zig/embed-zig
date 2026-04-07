@@ -31,6 +31,8 @@ The root package exports:
 
 - `ogg.Stream.init()` returns `Stream.InitError` when `libogg` cannot allocate
   or initialize stream state.
+- `ogg.Sync.init()` follows libogg's documented contract: `ogg_sync_init()`
+  always returns `0`, and the wrapper traps if that invariant is violated.
 - `ogg.Sync.buffer()` and `ogg.Sync.wrote()` return `BufferError` and
   `WroteError`; requests larger than `c_long` are rejected with
   `error.SizeTooLarge` before crossing into C.
@@ -49,13 +51,15 @@ The root package exports:
 `pkg/ogg` ships its default build configuration in `pkg/ogg/config.default.h`.
 That default keeps CRC verification enabled.
 
-Downstream can override the entire header via:
+When building this repo directly through the repository root `build.zig`,
+enable the package and override the entire header via:
 
 ```text
 -Dogg=true -Dogg_config_header=path/to/ogg_config.h
 ```
 
-In `b.dependency(...)`, pass the same file via
+In `b.dependency(...)`, the package is already selected by name; just pass the
+same file via
 `.ogg_config_header = b.path("...")`.
 
 `build/pkg/ogg.zig` always forwards the selected full header to upstream as
@@ -72,7 +76,12 @@ pkg/ogg/
   src/Page.zig
   src/Sync.zig
   src/Stream.zig
-  test_runner/ogg.zig
+  test_runner/unit.zig
+  test_runner/unit/ogg.zig
+  test_runner/integration.zig
+  test_runner/integration/common.zig
+  test_runner/integration/roundtrip.zig
+  test_runner/integration/compat.zig
 ```
 
 `binding.c` and `binding.zig` provide the C interop layer. The higher-level Zig
@@ -82,6 +91,10 @@ wrappers such as `Sync` and `Stream` sit on top of that binding layer.
 
 `pkg/ogg` includes:
 
-- unit tests for the binding and wrapper modules
+- source-file `TestRunner(comptime lib: type)` entrypoints covering the binding and wrapper modules
+- `test_runner/unit.zig` aggregating package unit coverage
+- `test_runner/integration.zig` aggregating package integration coverage
+- `test_runner/integration/roundtrip.zig` validating the C-backed package on its own
+- `test_runner/integration/compat.zig` comparing the C-backed package against `lib/audio/ogg`
 - `integration_tests/embed` running through `embed_std.std`
-- `integration_tests/std` running the same test runner through `std`
+- `integration_tests/std` running the same integration runner through `std`

@@ -1,6 +1,11 @@
 const binding = @import("binding.zig");
 const Page = @import("Page.zig");
 const PacketOutResult = @import("types.zig").PacketOutResult;
+const root = @import("root");
+const testing_api = if (@hasDecl(root, "testing")) root.testing else struct {
+    pub const TestRunner = void;
+    pub const T = void;
+};
 
 const Self = @This();
 
@@ -80,138 +85,194 @@ pub fn flush(self: *Self, page: *Page) bool {
     return binding.ogg_stream_flush(&self.state, @ptrCast(page)) != 0;
 }
 
-test "ogg/unit_tests/Stream/state_lifecycle" {
-    var stream = try Self.init(12345);
-    defer stream.deinit();
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn testStateLifecycle() !void {
+            var stream = try Self.init(12345);
+            defer stream.deinit();
 
-    stream.reset();
-    stream.resetSerial(67890);
-}
+            stream.reset();
+            stream.resetSerial(67890);
+        }
 
-test "ogg/unit_tests/Stream/packetOut_returns_need_more_data_on_empty_stream" {
-    const testing = @import("std").testing;
+        fn testPacketOutReturnsNeedMoreDataOnEmptyStream() !void {
+            const testing = lib.testing;
 
-    var stream = try Self.init(1);
-    defer stream.deinit();
+            var stream = try Self.init(1);
+            defer stream.deinit();
 
-    var packet: binding.Packet = undefined;
-    const result = stream.packetOut(&packet);
-    try testing.expectEqual(PacketOutResult.need_more_data, result);
-}
+            var packet: binding.Packet = undefined;
+            const result = stream.packetOut(&packet);
+            try testing.expectEqual(PacketOutResult.need_more_data, result);
+        }
 
-test "ogg/unit_tests/Stream/init_propagates_init_failure" {
-    const testing = @import("std").testing;
+        fn testInitPropagatesInitFailure() !void {
+            const testing = lib.testing;
 
-    const FailingBinding = struct {
-        fn ogg_stream_init(_: *binding.StreamState, _: i32) c_int {
-            return -1;
+            const FailingBinding = struct {
+                fn ogg_stream_init(_: *binding.StreamState, _: i32) c_int {
+                    return -1;
+                }
+            };
+
+            try testing.expectError(
+                InitError.StreamInitFailed,
+                initWith(FailingBinding.ogg_stream_init, 12345),
+            );
+        }
+
+        fn testPacketPeekReturnsNeedMoreDataOnEmptyStream() !void {
+            const testing = lib.testing;
+
+            var stream = try Self.init(1);
+            defer stream.deinit();
+
+            var packet: binding.Packet = undefined;
+            const result = stream.packetPeek(&packet);
+            try testing.expectEqual(PacketOutResult.need_more_data, result);
+        }
+
+        fn testPacketPeekDoesNotConsumePacket() !void {
+            const testing = lib.testing;
+
+            var writer = try Self.init(0x3456);
+            defer writer.deinit();
+
+            var reader = try Self.init(0x3456);
+            defer reader.deinit();
+
+            var payload = [_]u8{ 0x10, 0x20, 0x30 };
+            var packet = binding.Packet{
+                .packet = payload[0..].ptr,
+                .bytes = payload.len,
+                .b_o_s = 1,
+                .e_o_s = 1,
+                .granulepos = payload.len,
+                .packetno = 0,
+            };
+            try writer.packetIn(&packet);
+
+            var page: Page = undefined;
+            try testing.expect(writer.flush(&page));
+            try reader.pageIn(&page);
+
+            var peeked: binding.Packet = undefined;
+            try testing.expectEqual(PacketOutResult.packet_ready, reader.packetPeek(&peeked));
+            try testing.expectEqual(@as(c_long, payload.len), peeked.bytes);
+            try testing.expectEqualSlices(u8, payload[0..], @as([*]const u8, @ptrCast(peeked.packet))[0..payload.len]);
+
+            var out: binding.Packet = undefined;
+            try testing.expectEqual(PacketOutResult.packet_ready, reader.packetOut(&out));
+            try testing.expectEqual(@as(c_long, payload.len), out.bytes);
+            try testing.expectEqualSlices(u8, payload[0..], @as([*]const u8, @ptrCast(out.packet))[0..payload.len]);
+
+            var none_left: binding.Packet = undefined;
+            try testing.expectEqual(PacketOutResult.need_more_data, reader.packetOut(&none_left));
+        }
+
+        fn testPageInRejectsMismatchedSerialNumber() !void {
+            const testing = lib.testing;
+
+            var writer = try Self.init(1);
+            defer writer.deinit();
+
+            var reader = try Self.init(2);
+            defer reader.deinit();
+
+            var payload = [_]u8{ 0xAA };
+            var packet = binding.Packet{
+                .packet = payload[0..].ptr,
+                .bytes = payload.len,
+                .b_o_s = 1,
+                .e_o_s = 1,
+                .granulepos = 1,
+                .packetno = 0,
+            };
+            try writer.packetIn(&packet);
+
+            var page: Page = undefined;
+            try testing.expect(writer.flush(&page));
+            try testing.expectError(error.PageInFailed, reader.pageIn(&page));
+        }
+
+        fn testFlushExposesExpectedPageMetadata() !void {
+            const testing = lib.testing;
+
+            var stream = try Self.init(0x1234);
+            defer stream.deinit();
+
+            var payload = [_]u8{ 0xAB };
+            var packet = binding.Packet{
+                .packet = payload[0..].ptr,
+                .bytes = payload.len,
+                .b_o_s = 1,
+                .e_o_s = 1,
+                .granulepos = 1,
+                .packetno = 0,
+            };
+            try stream.packetIn(&packet);
+
+            var page: Page = undefined;
+            try testing.expect(stream.flush(&page));
+            try testing.expectEqual(@as(c_int, 0), page.version());
+            try testing.expect(page.bos());
+            try testing.expect(!page.continued());
+            try testing.expect(page.eos());
+            try testing.expectEqual(@as(c_int, 0x1234), page.serialNo());
+            try testing.expectEqual(@as(c_long, 0), page.pageNo());
+            try testing.expectEqual(@as(c_int, 1), page.packets());
         }
     };
 
-    try testing.expectError(
-        InitError.StreamInitFailed,
-        initWith(FailingBinding.ogg_stream_init, 12345),
-    );
-}
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-test "ogg/unit_tests/Stream/packetPeek_returns_need_more_data_on_empty_stream" {
-    const testing = @import("std").testing;
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    var stream = try Self.init(1);
-    defer stream.deinit();
+            TestCase.testStateLifecycle() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testPacketOutReturnsNeedMoreDataOnEmptyStream() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testInitPropagatesInitFailure() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testPacketPeekReturnsNeedMoreDataOnEmptyStream() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testPacketPeekDoesNotConsumePacket() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testPageInRejectsMismatchedSerialNumber() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testFlushExposesExpectedPageMetadata() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    var packet: binding.Packet = undefined;
-    const result = stream.packetPeek(&packet);
-    try testing.expectEqual(PacketOutResult.need_more_data, result);
-}
-
-test "ogg/unit_tests/Stream/packetPeek_does_not_consume_packet" {
-    const testing = @import("std").testing;
-
-    var writer = try Self.init(0x3456);
-    defer writer.deinit();
-
-    var reader = try Self.init(0x3456);
-    defer reader.deinit();
-
-    var payload = [_]u8{ 0x10, 0x20, 0x30 };
-    var packet = binding.Packet{
-        .packet = payload[0..].ptr,
-        .bytes = payload.len,
-        .b_o_s = 1,
-        .e_o_s = 1,
-        .granulepos = payload.len,
-        .packetno = 0,
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
     };
-    try writer.packetIn(&packet);
 
-    var page: Page = undefined;
-    try testing.expect(writer.flush(&page));
-    try reader.pageIn(&page);
-
-    var peeked: binding.Packet = undefined;
-    try testing.expectEqual(PacketOutResult.packet_ready, reader.packetPeek(&peeked));
-    try testing.expectEqual(@as(c_long, payload.len), peeked.bytes);
-    try testing.expectEqualSlices(u8, payload[0..], @as([*]const u8, @ptrCast(peeked.packet))[0..payload.len]);
-
-    var out: binding.Packet = undefined;
-    try testing.expectEqual(PacketOutResult.packet_ready, reader.packetOut(&out));
-    try testing.expectEqual(@as(c_long, payload.len), out.bytes);
-    try testing.expectEqualSlices(u8, payload[0..], @as([*]const u8, @ptrCast(out.packet))[0..payload.len]);
-
-    var none_left: binding.Packet = undefined;
-    try testing.expectEqual(PacketOutResult.need_more_data, reader.packetOut(&none_left));
-}
-
-test "ogg/unit_tests/Stream/pageIn_rejects_mismatched_serial_number" {
-    const testing = @import("std").testing;
-
-    var writer = try Self.init(1);
-    defer writer.deinit();
-
-    var reader = try Self.init(2);
-    defer reader.deinit();
-
-    var payload = [_]u8{ 0xAA };
-    var packet = binding.Packet{
-        .packet = payload[0..].ptr,
-        .bytes = payload.len,
-        .b_o_s = 1,
-        .e_o_s = 1,
-        .granulepos = 1,
-        .packetno = 0,
+    const Holder = struct {
+        var runner: Runner = .{};
     };
-    try writer.packetIn(&packet);
-
-    var page: Page = undefined;
-    try testing.expect(writer.flush(&page));
-    try testing.expectError(error.PageInFailed, reader.pageIn(&page));
-}
-
-test "ogg/unit_tests/Stream/flush_exposes_expected_page_metadata" {
-    const testing = @import("std").testing;
-
-    var stream = try Self.init(0x1234);
-    defer stream.deinit();
-
-    var payload = [_]u8{ 0xAB };
-    var packet = binding.Packet{
-        .packet = payload[0..].ptr,
-        .bytes = payload.len,
-        .b_o_s = 1,
-        .e_o_s = 1,
-        .granulepos = 1,
-        .packetno = 0,
-    };
-    try stream.packetIn(&packet);
-
-    var page: Page = undefined;
-    try testing.expect(stream.flush(&page));
-    try testing.expectEqual(@as(c_int, 0), page.version());
-    try testing.expect(page.bos());
-    try testing.expect(!page.continued());
-    try testing.expect(page.eos());
-    try testing.expectEqual(@as(c_int, 0x1234), page.serialNo());
-    try testing.expectEqual(@as(c_long, 0), page.pageNo());
-    try testing.expectEqual(@as(c_int, 1), page.packets());
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

@@ -24,36 +24,38 @@ pub const PacketOutResult = types.PacketOutResult;
 pub const Sync = @import("ogg/src/Sync.zig");
 pub const Stream = @import("ogg/src/Stream.zig");
 
-pub const test_runner = struct {
-    pub const ogg = @import("ogg/test_runner/ogg.zig");
-};
-
 test "ogg/unit_tests" {
-    _ = @import("ogg/src/binding.zig");
-    _ = @import("ogg/src/Page.zig");
-    _ = @import("ogg/src/types.zig");
-    _ = @import("ogg/src/Sync.zig");
-    _ = @import("ogg/src/Stream.zig");
+    const std = @import("std");
+    const testing = @import("testing");
+    const unit_runner = @import("ogg/test_runner/unit.zig");
+
+    var t = testing.T.new(std, .ogg_unit);
+    defer t.deinit();
+
+    t.run("unit", unit_runner.make(std));
+    if (!t.wait()) return error.TestFailed;
 }
 
 test "ogg/integration_tests/embed" {
     const lib = @import("embed_std").std;
     const testing = @import("testing");
+    const integration_runner = @import("ogg/test_runner/integration.zig");
 
     var t = testing.T.new(lib, .ogg_integration_embed);
     defer t.deinit();
 
-    t.run("ogg", test_runner.ogg.make(lib));
+    t.run("integration", integration_runner.make(lib));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "ogg/integration_tests/std" {
     const lib = @import("std");
     const testing = @import("testing");
+    const integration_runner = @import("ogg/test_runner/integration.zig");
 
     var t = testing.T.new(lib, .ogg_integration_std);
     defer t.deinit();
 
-    t.run("ogg", test_runner.ogg.make(lib));
+    t.run("integration", integration_runner.make(lib));
     if (!t.wait()) return error.TestFailed;
 }
