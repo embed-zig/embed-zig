@@ -2,9 +2,9 @@ const display_api = @import("display");
 const testing_mod = @import("testing");
 const TestingDisplay = @import("TestingDisplay.zig").TestingDisplay;
 const Fixture = @import("Fixture.zig").Fixture;
-const FullFrameComparer = @import("FullFrameComparer.zig").FullFrameComparer;
-const CaptureFrameComparer = @import("CaptureFrameComparer.zig").CaptureFrameComparer;
-const DeltaFrameComparer = @import("DeltaFrameComparer.zig").DeltaFrameComparer;
+const FullFrameComparer = @import("FullFrameComparer.zig");
+const CaptureFrameComparer = @import("CaptureFrameComparer.zig");
+const DeltaFrameComparer = @import("DeltaFrameComparer.zig");
 const suite = @import("../suite.zig");
 
 const Display = display_api.Display;
