@@ -1,4 +1,6 @@
 const binding = @import("../binding.zig");
+const embed = @import("embed");
+const testing_api = @import("testing");
 const Obj = @import("../object/Obj.zig");
 
 const Self = @This();
@@ -54,80 +56,116 @@ pub fn longMode(self: *const Self) LongMode {
     return binding.lv_label_get_long_mode(self.handle);
 }
 
-test "lvgl/unit_tests/widget/Label/composes_object_layer_and_stores_text" {
-    const std = @import("std");
-    const testing = std.testing;
-    const lvgl_testing = @import("../testing.zig");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var fixture = try lvgl_testing.Fixture.init();
-    defer fixture.deinit();
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    var screen = fixture.screen();
-    var label = Self.create(&screen) orelse return error.OutOfMemory;
-    var obj = label.asObj();
-    defer obj.delete();
+            const lvgl_testing = @import("../testing.zig");
+            const mem = lib.mem;
 
-    label.setText("hello");
+            const Cases = struct {
+                fn composesObjectLayerAndStoresText() !void {
+                    const testing = lib.testing;
+                    var fixture = try lvgl_testing.Fixture.init();
+                    defer fixture.deinit();
 
-    try testing.expectEqual(screen.raw(), obj.parent().?.raw());
-    try testing.expectEqualStrings("hello", std.mem.span(label.text()));
-}
+                    var screen = fixture.screen();
+                    var label = Self.create(&screen) orelse return error.OutOfMemory;
+                    var obj = label.asObj();
+                    defer obj.delete();
 
-test "lvgl/unit_tests/widget/Label/long_mode_roundtrips_through_wrapper" {
-    const testing = @import("std").testing;
-    const lvgl_testing = @import("../testing.zig");
+                    label.setText("hello");
 
-    var fixture = try lvgl_testing.Fixture.init();
-    defer fixture.deinit();
+                    try testing.expectEqual(screen.raw(), obj.parent().?.raw());
+                    try testing.expectEqualStrings("hello", mem.span(label.text()));
+                }
 
-    var screen = fixture.screen();
-    var label = Self.create(&screen) orelse return error.OutOfMemory;
-    var obj = label.asObj();
-    defer obj.delete();
+                fn longModeRoundtripsThroughWrapper() !void {
+                    const testing = lib.testing;
+                    var fixture = try lvgl_testing.Fixture.init();
+                    defer fixture.deinit();
 
-    label.setLongMode(long_mode_scroll);
+                    var screen = fixture.screen();
+                    var label = Self.create(&screen) orelse return error.OutOfMemory;
+                    var obj = label.asObj();
+                    defer obj.delete();
 
-    try testing.expectEqual(long_mode_scroll, label.longMode());
-}
+                    label.setLongMode(long_mode_scroll);
 
-test "lvgl/unit_tests/widget/Label/static_text_still_participates_in_object_api" {
-    const std = @import("std");
-    const testing = std.testing;
-    const lvgl_testing = @import("../testing.zig");
+                    try testing.expectEqual(long_mode_scroll, label.longMode());
+                }
 
-    var fixture = try lvgl_testing.Fixture.init();
-    defer fixture.deinit();
+                fn staticTextStillParticipatesInObjectApi() !void {
+                    const testing = lib.testing;
+                    var fixture = try lvgl_testing.Fixture.init();
+                    defer fixture.deinit();
 
-    var screen = fixture.screen();
-    var label = Self.create(&screen) orelse return error.OutOfMemory;
-    var obj = label.asObj();
-    defer obj.delete();
+                    var screen = fixture.screen();
+                    var label = Self.create(&screen) orelse return error.OutOfMemory;
+                    var obj = label.asObj();
+                    defer obj.delete();
 
-    label.setTextStatic("fixed");
+                    label.setTextStatic("fixed");
 
-    obj.setPos(14, 9);
-    obj.updateLayout();
+                    obj.setPos(14, 9);
+                    obj.updateLayout();
 
-    try testing.expectEqualStrings("fixed", std.mem.span(label.text()));
-    try testing.expectEqual(@as(i32, 14), obj.x());
-    try testing.expectEqual(@as(i32, 9), obj.y());
-}
+                    try testing.expectEqualStrings("fixed", mem.span(label.text()));
+                    try testing.expectEqual(@as(i32, 14), obj.x());
+                    try testing.expectEqual(@as(i32, 9), obj.y());
+                }
 
-test "lvgl/unit_tests/widget/Label/static_text_uses_borrowed_storage" {
-    const testing = @import("std").testing;
-    const lvgl_testing = @import("../testing.zig");
+                fn staticTextUsesBorrowedStorage() !void {
+                    const testing = lib.testing;
+                    var fixture = try lvgl_testing.Fixture.init();
+                    defer fixture.deinit();
 
-    var fixture = try lvgl_testing.Fixture.init();
-    defer fixture.deinit();
+                    var screen = fixture.screen();
+                    var label = Self.create(&screen) orelse return error.OutOfMemory;
+                    var obj = label.asObj();
+                    defer obj.delete();
 
-    var screen = fixture.screen();
-    var label = Self.create(&screen) orelse return error.OutOfMemory;
-    var obj = label.asObj();
-    defer obj.delete();
+                    var borrowed = [_:0]u8{ 'v', 'g', 'a', 0 };
+                    const borrowed_text = borrowed[0.. :0];
+                    label.setTextStatic(borrowed_text);
 
-    var borrowed = [_:0]u8{ 'v', 'g', 'a', 0 };
-    const borrowed_text = borrowed[0.. :0];
-    label.setTextStatic(borrowed_text);
+                    try testing.expectEqual(@intFromPtr(borrowed_text.ptr), @intFromPtr(label.text()));
+                }
+            };
 
-    try testing.expectEqual(@intFromPtr(borrowed_text.ptr), @intFromPtr(label.text()));
+            Cases.composesObjectLayerAndStoresText() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            Cases.longModeRoundtripsThroughWrapper() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            Cases.staticTextStillParticipatesInObjectApi() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            Cases.staticTextUsesBorrowedStorage() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
+        }
+    };
+
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{};
+    return testing_api.TestRunner.make(Runner).new(runner);
 }

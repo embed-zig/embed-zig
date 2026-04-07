@@ -1,4 +1,4 @@
-const std = @import("std");
+const testing_api = @import("testing");
 
 const c = @cImport({
     @cInclude("lvgl.h");
@@ -352,47 +352,76 @@ pub const lv_observer_get_target = c.lv_observer_get_target;
 pub const lv_observer_get_target_obj = c.lv_observer_get_target_obj;
 pub const lv_observer_get_user_data = c.lv_observer_get_user_data;
 
-test "lvgl/unit_tests/binding/exports_lvgl_base_symbols" {
-    const testing = std.testing;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn exports_lvgl_base_symbols(_: lib.mem.Allocator) !void {
+            try lib.testing.expect(@sizeOf(Color) > 0);
+            try lib.testing.expect(@sizeOf(Point) > 0);
+            try lib.testing.expect(@sizeOf(Area) > 0);
+            try lib.testing.expect(@sizeOf(Style) > 0);
+            try lib.testing.expect(@typeInfo(Anim) == .@"opaque");
+            try lib.testing.expect(@typeInfo(Subject) == .@"opaque");
 
-    try testing.expect(@sizeOf(Color) > 0);
-    try testing.expect(@sizeOf(Point) > 0);
-    try testing.expect(@sizeOf(Area) > 0);
-    try testing.expect(@sizeOf(Style) > 0);
-    try testing.expect(@typeInfo(Anim) == .@"opaque");
-    try testing.expect(@typeInfo(Subject) == .@"opaque");
+            try lib.testing.expect(LV_COLOR_DEPTH > 0);
+            try lib.testing.expect(LV_PART_ANY != 0);
+            try lib.testing.expect(LV_STATE_ANY != 0);
+            try lib.testing.expect(LV_OBJ_FLAG_CLICKABLE != 0);
 
-    try testing.expect(LV_COLOR_DEPTH > 0);
-    try testing.expect(LV_PART_ANY != 0);
-    try testing.expect(LV_STATE_ANY != 0);
-    try testing.expect(LV_OBJ_FLAG_CLICKABLE != 0);
+            _ = lv_color_make;
+            _ = lv_area_get_width;
+            _ = lv_style_init;
+            _ = lv_style_set_width;
+            _ = lv_display_create;
+            _ = lv_display_get_screen_active;
+            _ = lv_indev_create;
+            _ = lv_indev_set_read_cb;
+            _ = lv_indev_set_display;
+            _ = lv_tick_inc;
+            _ = lv_tick_get;
+            _ = lv_lock;
+            _ = lv_thread_init;
+            _ = lv_mutex_init;
+            _ = lv_thread_sync_init;
+            _ = lv_anim_set_exec_cb;
+            _ = lv_obj_create;
+            _ = lv_obj_get_child_count;
+            _ = lv_obj_add_event_cb;
+            _ = lv_label_create;
+            _ = lv_label_get_text;
+            _ = lv_button_create;
+            _ = lv_event_get_code;
+            _ = lv_event_get_target_obj;
+            _ = lv_anim_init;
+            _ = lv_subject_init_int;
+            _ = embed_lv_anim_create;
+            _ = embed_lv_subject_create;
+        }
+    };
 
-    _ = lv_color_make;
-    _ = lv_area_get_width;
-    _ = lv_style_init;
-    _ = lv_style_set_width;
-    _ = lv_display_create;
-    _ = lv_display_get_screen_active;
-    _ = lv_indev_create;
-    _ = lv_indev_set_read_cb;
-    _ = lv_indev_set_display;
-    _ = lv_tick_inc;
-    _ = lv_tick_get;
-    _ = lv_lock;
-    _ = lv_thread_init;
-    _ = lv_mutex_init;
-    _ = lv_thread_sync_init;
-    _ = lv_anim_set_exec_cb;
-    _ = lv_obj_create;
-    _ = lv_obj_get_child_count;
-    _ = lv_obj_add_event_cb;
-    _ = lv_label_create;
-    _ = lv_label_get_text;
-    _ = lv_button_create;
-    _ = lv_event_get_code;
-    _ = lv_event_get_target_obj;
-    _ = lv_anim_init;
-    _ = lv_subject_init_int;
-    _ = embed_lv_anim_create;
-    _ = embed_lv_subject_create;
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+
+            TestCase.exports_lvgl_base_symbols(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

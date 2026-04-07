@@ -564,15 +564,19 @@ pub fn create(
 }
 
 pub fn link(b: *std.Build) void {
+    const display = b.modules.get("display") orelse @panic("lvgl requires display");
     const lib = library orelse @panic("lvgl library missing");
     const mod = b.modules.get("lvgl") orelse @panic("lvgl module missing");
+    mod.addImport("display", display);
     mod.linkLibrary(lib);
 }
 
 pub fn linkTest(_: *std.Build, compile: *std.Build.Step.Compile) void {
     const embed = compile.step.owner.modules.get("embed") orelse @panic("lvgl tests require embed");
+    const display = compile.step.owner.modules.get("display") orelse @panic("lvgl tests require display");
     const testing = compile.step.owner.modules.get("testing") orelse @panic("lvgl tests require testing");
     compile.root_module.addImport("embed", embed);
+    compile.root_module.addImport("display", display);
     compile.root_module.addImport("testing", testing);
     if (!has_custom_config_header) {
         const osal = osal_library orelse createOsalLibrary(compile.step.owner);

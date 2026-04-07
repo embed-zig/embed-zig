@@ -1,7 +1,4 @@
-//! lvgl test runner — aggregate entry for the public LVGL smoke runners.
-//!
-//! Usage:
-//!   const runner = @import("lvgl").test_runner.lvgl.make(std);
+//! LVGL API smoke integration runner (`integration/lvgl/*` case runners).
 
 const embed = @import("embed");
 const testing = @import("testing");

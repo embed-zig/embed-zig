@@ -1,4 +1,4 @@
-const Display = @import("../Display.zig");
+const display_error = @import("Error.zig");
 const DrawArgs = @import("DrawArgs.zig");
 const Comparer = @import("Comparer.zig");
 
@@ -16,7 +16,7 @@ pub fn comparer(self: *@This()) Comparer {
     return Comparer.from(@This(), self);
 }
 
-pub fn check(self: *@This(), draw: DrawArgs) Display.Error!bool {
+pub fn check(self: *@This(), draw: DrawArgs) display_error.Error!bool {
     if (draw.x != 0 or draw.y != 0 or draw.w != self.width_px or draw.h != self.height_px) {
         return error.DrawAreaMismatch;
     }

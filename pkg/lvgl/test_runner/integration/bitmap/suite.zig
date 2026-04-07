@@ -1,22 +1,18 @@
-//! lvgl bitmap test runner — verifies rendered bitmap output.
-//!
-//! Usage:
-//!   var td = lvgl.test_runner.bitmap.TestingDisplay.init(...);
-//!   var display = td.display();
-//!   const runner = lvgl.test_runner.bitmap.make(std, &display);
+//! Bitmap suite runner — aggregated per-display bitmap cases (shared by integration).
 
 const embed = @import("embed");
+const display_api = @import("display");
 const testing = @import("testing");
 
-pub const Display = @import("Display.zig");
-pub const Color565 = Display.Color565;
-pub const rgb565 = Display.rgb565;
-pub const TestingDisplay = @import("display/TestingDisplay.zig");
-pub const Fixture = @import("display/Fixture.zig");
-pub const basic = @import("bitmap/basic.zig");
-pub const label = @import("bitmap/label.zig");
-pub const button = @import("bitmap/button.zig");
-pub const anim = @import("bitmap/anim.zig");
+pub const Display = display_api.Display;
+pub const Rgb = Display.Rgb;
+pub const rgb = Display.rgb;
+pub const TestingDisplay = @import("test_utils/TestingDisplay.zig");
+pub const Fixture = @import("test_utils/Fixture.zig");
+pub const basic = @import("basic.zig");
+pub const label = @import("label.zig");
+pub const button = @import("button.zig");
+pub const anim = @import("anim.zig");
 
 pub fn make(comptime lib: type, display: *Display) testing.TestRunner {
     const Runner = struct {

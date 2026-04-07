@@ -1,4 +1,4 @@
-const Display = @import("../Display.zig");
+const display_error = @import("Error.zig");
 const DrawArgs = @import("DrawArgs.zig");
 const Comparer = @import("Comparer.zig");
 
@@ -14,7 +14,7 @@ pub fn comparer(self: *@This()) Comparer {
     return Comparer.from(@This(), self);
 }
 
-pub fn check(self: *@This(), draw: DrawArgs) Display.Error!bool {
+pub fn check(self: *@This(), draw: DrawArgs) display_error.Error!bool {
     for (self.steps) |step| {
         const ok = try Comparer.check(&step, draw);
         if (!ok) return false;

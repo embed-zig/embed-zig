@@ -1,5 +1,5 @@
-const std = @import("std");
 const binding = @import("binding.zig");
+const testing_api = @import("testing");
 
 const Self = @This();
 
@@ -93,40 +93,70 @@ pub fn deleteAll() void {
     binding.lv_anim_delete_all();
 }
 
-test "lvgl/unit_tests/Anim/descriptor_configures_core_fields" {
-    const testing = std.testing;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const Impl = struct {
+        fn descriptor_configures_core_fields(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    var anim = try Self.init();
-    defer anim.deinit();
-    anim.setDuration(120);
-    anim.setDelay(8);
-    anim.setValues(3, 9);
-    anim.setReverseDuration(42);
-    anim.setReverseDelay(7);
-    anim.setRepeatCount(2);
-    anim.setRepeatDelay(5);
-    anim.setEarlyApply(true);
+            var anim = try Self.init();
+            defer anim.deinit();
+            anim.setDuration(120);
+            anim.setDelay(8);
+            anim.setValues(3, 9);
+            anim.setReverseDuration(42);
+            anim.setReverseDelay(7);
+            anim.setRepeatCount(2);
+            anim.setRepeatDelay(5);
+            anim.setEarlyApply(true);
 
-    try testing.expectEqual(@as(i32, 120), binding.embed_lv_anim_get_duration(anim.rawConstPtr()));
-    try testing.expectEqual(@as(i32, -8), binding.embed_lv_anim_get_act_time(anim.rawConstPtr()));
-    try testing.expectEqual(@as(i32, 3), binding.embed_lv_anim_get_start_value(anim.rawConstPtr()));
-    try testing.expectEqual(@as(i32, 9), binding.embed_lv_anim_get_end_value(anim.rawConstPtr()));
-    try testing.expectEqual(@as(u32, 42), binding.embed_lv_anim_get_reverse_duration(anim.rawConstPtr()));
-    try testing.expectEqual(@as(u32, 7), binding.embed_lv_anim_get_reverse_delay(anim.rawConstPtr()));
-    try testing.expectEqual(@as(u32, 2), binding.embed_lv_anim_get_repeat_count(anim.rawConstPtr()));
-    try testing.expectEqual(@as(u32, 5), binding.embed_lv_anim_get_repeat_delay(anim.rawConstPtr()));
-    try testing.expect(binding.embed_lv_anim_get_early_apply(anim.rawConstPtr()) == 1);
-}
+            try testing.expectEqual(@as(i32, 120), binding.embed_lv_anim_get_duration(anim.rawConstPtr()));
+            try testing.expectEqual(@as(i32, -8), binding.embed_lv_anim_get_act_time(anim.rawConstPtr()));
+            try testing.expectEqual(@as(i32, 3), binding.embed_lv_anim_get_start_value(anim.rawConstPtr()));
+            try testing.expectEqual(@as(i32, 9), binding.embed_lv_anim_get_end_value(anim.rawConstPtr()));
+            try testing.expectEqual(@as(u32, 42), binding.embed_lv_anim_get_reverse_duration(anim.rawConstPtr()));
+            try testing.expectEqual(@as(u32, 7), binding.embed_lv_anim_get_reverse_delay(anim.rawConstPtr()));
+            try testing.expectEqual(@as(u32, 2), binding.embed_lv_anim_get_repeat_count(anim.rawConstPtr()));
+            try testing.expectEqual(@as(u32, 5), binding.embed_lv_anim_get_repeat_delay(anim.rawConstPtr()));
+            try testing.expect(binding.embed_lv_anim_get_early_apply(anim.rawConstPtr()) == 1);
+        }
 
-test "lvgl/unit_tests/Anim/pause_state_toggles_through_lvgl_api" {
-    const testing = std.testing;
+        fn pause_state_toggles_through_lvgl_api(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    var anim = try Self.init();
-    defer anim.deinit();
+            var anim = try Self.init();
+            defer anim.deinit();
 
-    try testing.expect(!anim.isPaused());
-    anim.pause();
-    try testing.expect(anim.isPaused());
-    anim.resumeAnim();
-    try testing.expect(!anim.isPaused());
+            try testing.expect(!anim.isPaused());
+            anim.pause();
+            try testing.expect(anim.isPaused());
+            anim.resumeAnim();
+            try testing.expect(!anim.isPaused());
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            t.run("lvgl/unit_tests/Anim/descriptor_configures_core_fields", testing_api.TestRunner.fromFn(lib, Impl.descriptor_configures_core_fields));
+            t.run("lvgl/unit_tests/Anim/pause_state_toggles_through_lvgl_api", testing_api.TestRunner.fromFn(lib, Impl.pause_state_toggles_through_lvgl_api));
+            return t.wait();
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

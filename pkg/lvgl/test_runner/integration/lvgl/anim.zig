@@ -1,11 +1,11 @@
 //! lvgl animation test runner — tick, timer handler, and animation smoke tests.
 //!
 //! Usage:
-//!   const runner = @import("lvgl/test_runner/lvgl/anim.zig").make(std);
+//!   const runner = @import("lvgl/test_runner/integration/lvgl/anim.zig").make(std);
 
 const embed = @import("embed");
 const testing = @import("testing");
-const lvgl = @import("../../../lvgl.zig");
+const lvgl = @import("../../../../lvgl.zig");
 
 const Tick = lvgl.Tick;
 const Anim = lvgl.Anim;

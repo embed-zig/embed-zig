@@ -1,4 +1,4 @@
-const std = @import("std");
+const testing_api = @import("testing");
 const binding = @import("binding.zig");
 
 const Self = @This();
@@ -71,21 +71,50 @@ pub fn fromBinding(raw: binding.Area) Self {
     };
 }
 
-test "lvgl/unit_tests/Area/helpers_preserve_lvgl_semantics" {
-    const testing = std.testing;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn helpers_preserve_lvgl_semantics(_: lib.mem.Allocator) !void {
+            var area = Self.init(2, 4, 6, 9);
+            try lib.testing.expectEqual(@as(i32, 5), area.width());
+            try lib.testing.expectEqual(@as(i32, 6), area.height());
+            try lib.testing.expectEqual(@as(u32, 30), area.size());
 
-    var area = Self.init(2, 4, 6, 9);
-    try testing.expectEqual(@as(i32, 5), area.width());
-    try testing.expectEqual(@as(i32, 6), area.height());
-    try testing.expectEqual(@as(u32, 30), area.size());
+            area.setWidth(3);
+            try lib.testing.expectEqual(@as(i32, 3), area.width());
 
-    area.setWidth(3);
-    try testing.expectEqual(@as(i32, 3), area.width());
+            area.setHeight(2);
+            try lib.testing.expectEqual(@as(i32, 2), area.height());
 
-    area.setHeight(2);
-    try testing.expectEqual(@as(i32, 2), area.height());
+            area.move(10, -2);
+            try lib.testing.expectEqual(@as(i32, 12), area.x1);
+            try lib.testing.expectEqual(@as(i32, 2), area.y1);
+        }
+    };
 
-    area.move(10, -2);
-    try testing.expectEqual(@as(i32, 12), area.x1);
-    try testing.expectEqual(@as(i32, 2), area.y1);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+
+            TestCase.helpers_preserve_lvgl_semantics(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

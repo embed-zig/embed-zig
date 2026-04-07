@@ -1,5 +1,6 @@
-const std = @import("std");
 const binding = @import("../binding.zig");
+const embed = @import("embed");
+const testing_api = @import("testing");
 
 pub fn screenRaw(handle: *const binding.Obj) ?*binding.Obj {
     return binding.lv_obj_get_screen(handle);
@@ -17,23 +18,54 @@ pub fn childCount(handle: *const binding.Obj) u32 {
     return @intCast(binding.lv_obj_get_child_count(handle));
 }
 
-test "lvgl/unit_tests/object/Tree/raw_helpers_track_parent_and_child_ordering" {
-    const testing = std.testing;
-    const lvgl_testing = @import("../testing.zig");
-    const Obj = @import("Obj.zig");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var fixture = try lvgl_testing.Fixture.init();
-    defer fixture.deinit();
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    var screen = fixture.screen();
-    var parent = Obj.create(&screen) orelse return error.OutOfMemory;
-    defer parent.delete();
+            const lvgl_testing = @import("../testing.zig");
+            const Obj = @import("Obj.zig");
 
-    _ = Obj.create(&parent) orelse return error.OutOfMemory;
-    const second = Obj.create(&parent) orelse return error.OutOfMemory;
+            const Cases = struct {
+                fn rawHelpersTrackParentAndChildOrdering() !void {
+                    const testing = lib.testing;
+                    var fixture = try lvgl_testing.Fixture.init();
+                    defer fixture.deinit();
 
-    try testing.expectEqual(@as(u32, 2), childCount(parent.raw()));
-    try testing.expectEqual(parent.raw(), parentRaw(second.raw()).?);
-    try testing.expectEqual(second.raw(), childRaw(parent.raw(), -1).?);
-    try testing.expectEqual(screen.raw(), screenRaw(second.raw()).?);
+                    var screen = fixture.screen();
+                    var parent = Obj.create(&screen) orelse return error.OutOfMemory;
+                    defer parent.delete();
+
+                    _ = Obj.create(&parent) orelse return error.OutOfMemory;
+                    const second = Obj.create(&parent) orelse return error.OutOfMemory;
+
+                    try testing.expectEqual(@as(u32, 2), childCount(parent.raw()));
+                    try testing.expectEqual(parent.raw(), parentRaw(second.raw()).?);
+                    try testing.expectEqual(second.raw(), childRaw(parent.raw(), -1).?);
+                    try testing.expectEqual(screen.raw(), screenRaw(second.raw()).?);
+                }
+            };
+
+            Cases.rawHelpersTrackParentAndChildOrdering() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
+        }
+    };
+
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{};
+    return testing_api.TestRunner.make(Runner).new(runner);
 }

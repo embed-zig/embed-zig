@@ -1,5 +1,6 @@
-const std = @import("std");
 const binding = @import("../binding.zig");
+const embed = @import("embed");
+const testing_api = @import("testing");
 const Style = @import("../Style.zig");
 const Event = @import("../Event.zig");
 const Flags = @import("Flags.zig");
@@ -184,114 +185,150 @@ pub fn sendEvent(
     return binding.lv_obj_send_event(self.handle, event_code, param);
 }
 
-test "lvgl/unit_tests/object/Obj/geometry_setters_roundtrip_after_layout_update" {
-    const testing = std.testing;
-    const lvgl_testing = @import("../testing.zig");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var fixture = try lvgl_testing.Fixture.init();
-    defer fixture.deinit();
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    var root_screen = fixture.screen();
-    var obj = Self.create(&root_screen) orelse return error.OutOfMemory;
-    defer obj.delete();
+            const lvgl_testing = @import("../testing.zig");
 
-    obj.setPos(11, 22);
-    obj.setSize(33, 44);
-    obj.updateLayout();
+            const Cases = struct {
+                fn geometrySettersRoundtripAfterLayoutUpdate() !void {
+                    const testing = lib.testing;
+                    var fixture = try lvgl_testing.Fixture.init();
+                    defer fixture.deinit();
 
-    try testing.expectEqual(@as(i32, 11), obj.x());
-    try testing.expectEqual(@as(i32, 22), obj.y());
-    try testing.expectEqual(@as(i32, 33), obj.width());
-    try testing.expectEqual(@as(i32, 44), obj.height());
-}
+                    var root_screen = fixture.screen();
+                    var obj = Self.create(&root_screen) orelse return error.OutOfMemory;
+                    defer obj.delete();
 
-test "lvgl/unit_tests/object/Obj/flags_state_and_styles_update_through_object_api" {
-    const testing = std.testing;
-    const lvgl_testing = @import("../testing.zig");
+                    obj.setPos(11, 22);
+                    obj.setSize(33, 44);
+                    obj.updateLayout();
 
-    var fixture = try lvgl_testing.Fixture.init();
-    defer fixture.deinit();
+                    try testing.expectEqual(@as(i32, 11), obj.x());
+                    try testing.expectEqual(@as(i32, 22), obj.y());
+                    try testing.expectEqual(@as(i32, 33), obj.width());
+                    try testing.expectEqual(@as(i32, 44), obj.height());
+                }
 
-    var root_screen = fixture.screen();
-    var obj = Self.create(&root_screen) orelse return error.OutOfMemory;
-    defer obj.delete();
+                fn flagsStateAndStylesUpdateThroughObjectApi() !void {
+                    const testing = lib.testing;
+                    var fixture = try lvgl_testing.Fixture.init();
+                    defer fixture.deinit();
 
-    try testing.expect(!obj.hasFlag(Flags.hidden));
-    obj.addFlag(Flags.hidden);
-    try testing.expect(obj.hasFlag(Flags.hidden));
-    obj.removeFlag(Flags.hidden);
-    try testing.expect(!obj.hasFlag(Flags.hidden));
+                    var root_screen = fixture.screen();
+                    var obj = Self.create(&root_screen) orelse return error.OutOfMemory;
+                    defer obj.delete();
 
-    try testing.expect(!obj.hasState(State.pressed));
-    obj.addState(State.pressed);
-    try testing.expect(obj.hasState(State.pressed));
-    obj.removeState(State.pressed);
-    try testing.expect(!obj.hasState(State.pressed));
+                    try testing.expect(!obj.hasFlag(Flags.hidden));
+                    obj.addFlag(Flags.hidden);
+                    try testing.expect(obj.hasFlag(Flags.hidden));
+                    obj.removeFlag(Flags.hidden);
+                    try testing.expect(!obj.hasFlag(Flags.hidden));
 
-    var style = Style.init();
-    defer style.deinit();
-    style.setWidth(77);
+                    try testing.expect(!obj.hasState(State.pressed));
+                    obj.addState(State.pressed);
+                    try testing.expect(obj.hasState(State.pressed));
+                    obj.removeState(State.pressed);
+                    try testing.expect(!obj.hasState(State.pressed));
 
-    obj.setWidth(25);
-    obj.updateLayout();
-    try testing.expectEqual(@as(i32, 25), obj.width());
+                    var style = Style.init();
+                    defer style.deinit();
+                    style.setWidth(77);
 
-    obj.addStyle(&style, State.user_4);
-    obj.addState(State.user_4);
-    binding.lv_obj_refresh_style(obj.raw(), binding.LV_PART_MAIN, Style.width_prop);
-    try testing.expectEqual(
-        @as(i32, 77),
-        binding.lv_obj_get_style_prop(obj.raw(), binding.LV_PART_MAIN, Style.width_prop).num,
-    );
+                    obj.setWidth(25);
+                    obj.updateLayout();
+                    try testing.expectEqual(@as(i32, 25), obj.width());
 
-    obj.removeStyle(&style, State.user_4);
-    binding.lv_obj_refresh_style(obj.raw(), binding.LV_PART_MAIN, Style.width_prop);
-    try testing.expectEqual(
-        @as(i32, 25),
-        binding.lv_obj_get_style_prop(obj.raw(), binding.LV_PART_MAIN, Style.width_prop).num,
-    );
-}
+                    obj.addStyle(&style, State.user_4);
+                    obj.addState(State.user_4);
+                    binding.lv_obj_refresh_style(obj.raw(), binding.LV_PART_MAIN, Style.width_prop);
+                    try testing.expectEqual(
+                        @as(i32, 77),
+                        binding.lv_obj_get_style_prop(obj.raw(), binding.LV_PART_MAIN, Style.width_prop).num,
+                    );
 
-test "lvgl/unit_tests/object/Obj/raw_event_callback_receives_target_payload_and_user_data" {
-    const testing = std.testing;
-    const lvgl_testing = @import("../testing.zig");
+                    obj.removeStyle(&style, State.user_4);
+                    binding.lv_obj_refresh_style(obj.raw(), binding.LV_PART_MAIN, Style.width_prop);
+                    try testing.expectEqual(
+                        @as(i32, 25),
+                        binding.lv_obj_get_style_prop(obj.raw(), binding.LV_PART_MAIN, Style.width_prop).num,
+                    );
+                }
 
-    const CallbackCtx = struct {
-        calls: usize = 0,
-        target: ?*binding.Obj = null,
-        param: ?*anyopaque = null,
-        user_data: ?*anyopaque = null,
+                fn rawEventCallbackReceivesTargetPayloadAndUserData() !void {
+                    const testing = lib.testing;
 
-        fn callback(event: ?*binding.Event) callconv(.c) void {
-            const Context = @This();
-            const e = event orelse return;
-            const user_data = binding.lv_event_get_user_data(e) orelse return;
-            const ctx: *Context = @ptrCast(@alignCast(user_data));
-            ctx.calls += 1;
-            ctx.target = binding.lv_event_get_target_obj(e);
-            ctx.param = binding.lv_event_get_param(e);
-            ctx.user_data = user_data;
+                    const CallbackCtx = struct {
+                        calls: usize = 0,
+                        target: ?*binding.Obj = null,
+                        param: ?*anyopaque = null,
+                        user_data: ?*anyopaque = null,
+
+                        fn callback(event: ?*binding.Event) callconv(.c) void {
+                            const Context = @This();
+                            const e = event orelse return;
+                            const user_data = binding.lv_event_get_user_data(e) orelse return;
+                            const ctx: *Context = @ptrCast(@alignCast(user_data));
+                            ctx.calls += 1;
+                            ctx.target = binding.lv_event_get_target_obj(e);
+                            ctx.param = binding.lv_event_get_param(e);
+                            ctx.user_data = user_data;
+                        }
+                    };
+
+                    var fixture = try lvgl_testing.Fixture.init();
+                    defer fixture.deinit();
+
+                    var root_screen = fixture.screen();
+                    var obj = Self.create(&root_screen) orelse return error.OutOfMemory;
+                    defer obj.delete();
+
+                    var ctx = CallbackCtx{};
+                    var payload: u32 = 0xBEEF;
+                    const custom_event = Event.codeFromInt(Event.registerId());
+
+                    obj.addEventCallbackRaw(CallbackCtx.callback, custom_event, &ctx);
+                    try testing.expectEqual(@as(u32, 1), obj.eventCount());
+
+                    _ = obj.sendEvent(custom_event, &payload);
+
+                    try testing.expectEqual(@as(usize, 1), ctx.calls);
+                    try testing.expectEqual(obj.raw(), ctx.target.?);
+                    try testing.expectEqual(@as(?*anyopaque, @ptrCast(&payload)), ctx.param);
+                    try testing.expectEqual(@as(?*anyopaque, @ptrCast(&ctx)), ctx.user_data);
+                }
+            };
+
+            Cases.geometrySettersRoundtripAfterLayoutUpdate() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            Cases.flagsStateAndStylesUpdateThroughObjectApi() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            Cases.rawEventCallbackReceivesTargetPayloadAndUserData() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
         }
     };
 
-    var fixture = try lvgl_testing.Fixture.init();
-    defer fixture.deinit();
-
-    var root_screen = fixture.screen();
-    var obj = Self.create(&root_screen) orelse return error.OutOfMemory;
-    defer obj.delete();
-
-    var ctx = CallbackCtx{};
-    var payload: u32 = 0xBEEF;
-    const custom_event = Event.codeFromInt(Event.registerId());
-
-    obj.addEventCallbackRaw(CallbackCtx.callback, custom_event, &ctx);
-    try testing.expectEqual(@as(u32, 1), obj.eventCount());
-
-    _ = obj.sendEvent(custom_event, &payload);
-
-    try testing.expectEqual(@as(usize, 1), ctx.calls);
-    try testing.expectEqual(obj.raw(), ctx.target.?);
-    try testing.expectEqual(@as(?*anyopaque, @ptrCast(&payload)), ctx.param);
-    try testing.expectEqual(@as(?*anyopaque, @ptrCast(&ctx)), ctx.user_data);
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{};
+    return testing_api.TestRunner.make(Runner).new(runner);
 }

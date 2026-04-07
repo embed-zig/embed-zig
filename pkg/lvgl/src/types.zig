@@ -1,4 +1,4 @@
-const std = @import("std");
+const testing_api = @import("testing");
 const binding = @import("binding.zig");
 
 pub const Result = enum(c_int) {
@@ -74,15 +74,44 @@ pub const opa = struct {
     pub const pct100: Opa = 255;
 };
 
-test "lvgl/unit_tests/types/base_enums_match_imported_bindings" {
-    const testing = std.testing;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn base_enums_match_imported_bindings(_: lib.mem.Allocator) !void {
+            try lib.testing.expect(@intFromEnum(Result.invalid) == 0);
+            try lib.testing.expect(@intFromEnum(Result.ok) == 1);
+            try lib.testing.expect(@intFromEnum(StyleRes.not_found) == 0);
+            try lib.testing.expect(@intFromEnum(StyleRes.found) == 1);
 
-    try testing.expectEqual(@as(c_int, 0), @intFromEnum(Result.invalid));
-    try testing.expectEqual(@as(c_int, @intFromEnum(Result.ok)), @as(c_int, 1));
-    try testing.expectEqual(@as(c_int, @intFromEnum(StyleRes.not_found)), @as(c_int, 0));
-    try testing.expectEqual(@as(c_int, @intFromEnum(StyleRes.found)), @as(c_int, 1));
+            try lib.testing.expect(@intFromEnum(Align.center) == 9);
+            try lib.testing.expectEqual(@as(u8, 0x0F), Dir.all.toInt());
+            try lib.testing.expectEqual(@as(binding.Opa, 255), opa.cover);
+        }
+    };
 
-    try testing.expectEqual(@as(c_int, 9), @intFromEnum(Align.center));
-    try testing.expectEqual(@as(u8, 0x0F), Dir.all.toInt());
-    try testing.expectEqual(@as(binding.Opa, 255), opa.cover);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+
+            TestCase.base_enums_match_imported_bindings(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

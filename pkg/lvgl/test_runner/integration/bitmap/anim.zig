@@ -1,8 +1,9 @@
 const embed = @import("embed");
+const display_api = @import("display");
 const testing = @import("testing");
-const Display = @import("../Display.zig");
-const Fixture = @import("../display/Fixture.zig");
-const lvgl = @import("../../../lvgl.zig");
+const Display = display_api.Display;
+const Fixture = @import("test_utils/Fixture.zig");
+const lvgl = @import("../../../../lvgl.zig");
 
 const Tick = lvgl.Tick;
 const Anim = lvgl.Anim;

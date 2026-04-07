@@ -33,9 +33,8 @@ pub const widget = @import("lvgl/src/widget.zig");
 pub const Label = widget.Label;
 pub const Button = widget.Button;
 pub const test_runner = struct {
-    pub const Display = @import("lvgl/test_runner/Display.zig");
-    pub const lvgl = @import("lvgl/test_runner/lvgl.zig");
-    pub const bitmap = @import("lvgl/test_runner/bitmap.zig");
+    pub const unit = @import("lvgl/test_runner/unit.zig");
+    pub const integration = @import("lvgl/test_runner/integration.zig");
 };
 
 pub fn init() void {
@@ -51,57 +50,24 @@ pub fn isInitialized() bool {
 }
 
 test "lvgl/unit_tests" {
-    _ = @import("lvgl/src/binding.zig");
-    _ = @import("lvgl/src/types.zig");
-    _ = @import("lvgl/src/Color.zig");
-    _ = @import("lvgl/src/Point.zig");
-    _ = @import("lvgl/src/Area.zig");
-    _ = @import("lvgl/src/Style.zig");
-    _ = @import("lvgl/src/Display.zig");
-    _ = @import("lvgl/src/Indev.zig");
-    _ = @import("lvgl/src/Tick.zig");
-    _ = @import("lvgl/src/Event.zig");
-    _ = @import("lvgl/src/Anim.zig");
-    _ = @import("lvgl/src/Subject.zig");
-    _ = @import("lvgl/src/Observer.zig");
-    _ = @import("lvgl/src/object.zig");
-    _ = @import("lvgl/src/object/Obj.zig");
-    _ = @import("lvgl/src/object/Tree.zig");
-    _ = @import("lvgl/src/object/Flags.zig");
-    _ = @import("lvgl/src/object/State.zig");
-    _ = @import("lvgl/src/widget.zig");
-    _ = @import("lvgl/src/widget/Label.zig");
-    _ = @import("lvgl/src/widget/Button.zig");
-    _ = @import("lvgl/test_runner/Display.zig");
-    _ = @import("lvgl/test_runner/display/DrawArgs.zig");
-    _ = @import("lvgl/test_runner/display/Comparer.zig");
-    _ = @import("lvgl/test_runner/display/BitmapComparer.zig");
-    _ = @import("lvgl/test_runner/display/FullFrameComparer.zig");
-    _ = @import("lvgl/test_runner/display/CaptureFrameComparer.zig");
-    _ = @import("lvgl/test_runner/display/DeltaFrameComparer.zig");
-    _ = @import("lvgl/test_runner/display/PipeComparer.zig");
-    _ = @import("lvgl/test_runner/display/Fixture.zig");
-    _ = @import("lvgl/test_runner/display/TestingDisplay.zig");
-    _ = @import("lvgl/test_runner/bitmap/basic.zig");
-    _ = @import("lvgl/test_runner/bitmap/label.zig");
-    _ = @import("lvgl/test_runner/bitmap/button.zig");
-    _ = @import("lvgl/test_runner/bitmap/anim.zig");
-    _ = @import("lvgl/test_runner/bitmap.zig");
-    _ = @import("lvgl/integration_test/bitmap.zig");
-    _ = @import("lvgl/integration_test/lvgl.zig");
-    _ = @import("lvgl/test_runner/lvgl/common.zig");
-    _ = @import("lvgl/test_runner/lvgl/anim.zig");
-    _ = @import("lvgl/test_runner/lvgl/basic.zig");
-    _ = @import("lvgl/test_runner/lvgl/label.zig");
-    _ = @import("lvgl/test_runner/lvgl/button.zig");
-    _ = @import("lvgl/test_runner/lvgl/os.zig");
-    _ = @import("lvgl/test_runner/lvgl.zig");
+    const std = @import("std");
+    const testing_mod = @import("testing");
+
+    var t = testing_mod.T.new(std, .lvgl_unit);
+    defer t.deinit();
+
+    t.run("unit", test_runner.unit.make(std));
+    if (!t.wait()) return error.TestFailed;
 }
 
 test "lvgl/integration_tests" {
     const std = @import("std");
+    const testing_mod = @import("testing");
     std.testing.log_level = .info;
 
-    _ = @import("lvgl/integration_test/lvgl.zig");
-    _ = @import("lvgl/integration_test/bitmap.zig");
+    var t = testing_mod.T.new(std, .lvgl_integration);
+    defer t.deinit();
+
+    t.run("integration", test_runner.integration.make(std));
+    if (!t.wait()) return error.TestFailed;
 }

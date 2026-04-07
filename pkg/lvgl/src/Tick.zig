@@ -11,6 +11,7 @@
 //! platform’s alignment and LVGL’s expectations; still follow LVGL + your RTOS docs for ISR vs task.
 
 const binding = @import("binding.zig");
+const testing_api = @import("testing");
 
 pub const GetCb = binding.TickGetCb;
 pub const DelayCb = binding.DelayCb;
@@ -53,24 +54,54 @@ pub fn timerHandler() u32 {
     return binding.lv_timer_handler();
 }
 
-test "lvgl/unit_tests/Tick/inc_updates_elaps" {
-    const testing = @import("std").testing;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const Impl = struct {
+        fn inc_updates_elaps(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    binding.lv_init();
-    defer binding.lv_deinit();
+            binding.lv_init();
+            defer binding.lv_deinit();
 
-    const t0 = get();
-    inc(41);
-    try testing.expect(elaps(t0) >= 41);
-}
+            const t0 = get();
+            inc(41);
+            try testing.expect(elaps(t0) >= 41);
+        }
 
-test "lvgl/unit_tests/Tick/timer_handler_runs_after_tick" {
-    const testing = @import("std").testing;
+        fn timer_handler_runs_after_tick(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    binding.lv_init();
-    defer binding.lv_deinit();
+            binding.lv_init();
+            defer binding.lv_deinit();
 
-    inc(5);
-    const next = timerHandler();
-    try testing.expectEqual(no_timer_ready, next);
+            inc(5);
+            const next = timerHandler();
+            try testing.expectEqual(no_timer_ready, next);
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            t.run("lvgl/unit_tests/Tick/inc_updates_elaps", testing_api.TestRunner.fromFn(lib, Impl.inc_updates_elaps));
+            t.run("lvgl/unit_tests/Tick/timer_handler_runs_after_tick", testing_api.TestRunner.fromFn(lib, Impl.timer_handler_runs_after_tick));
+            return t.wait();
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

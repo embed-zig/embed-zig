@@ -1,11 +1,11 @@
 //! lvgl button test runner — button/widget tree smoke tests.
 //!
 //! Usage:
-//!   const runner = @import("lvgl/test_runner/lvgl/button.zig").make(std);
+//!   const runner = @import("lvgl/test_runner/integration/lvgl/button.zig").make(std);
 
 const embed = @import("embed");
 const testing = @import("testing");
-const lvgl = @import("../../../lvgl.zig");
+const lvgl = @import("../../../../lvgl.zig");
 const common = @import("common.zig");
 
 pub fn make(comptime lib: type) testing.TestRunner {

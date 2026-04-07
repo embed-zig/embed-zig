@@ -1,4 +1,4 @@
-const lvgl = @import("../../../lvgl.zig");
+const lvgl = @import("../../../../lvgl.zig");
 
 pub const Fixture = struct {
     display: lvgl.Display,

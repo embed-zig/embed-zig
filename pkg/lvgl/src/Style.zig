@@ -1,4 +1,4 @@
-const std = @import("std");
+const testing_api = @import("testing");
 const binding = @import("binding.zig");
 
 const Self = @This();
@@ -52,24 +52,53 @@ pub fn rawConstPtr(self: *const Self) *const binding.Style {
     return &self.raw;
 }
 
-test "lvgl/unit_tests/Style/lifecycle_starts_empty" {
-    const testing = std.testing;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn lifecycle_starts_empty(_: lib.mem.Allocator) !void {
+            binding.lv_init();
+            defer binding.lv_deinit();
 
-    binding.lv_init();
-    defer binding.lv_deinit();
+            var a = Self.init();
+            defer a.deinit();
+            try lib.testing.expect(a.isEmpty());
 
-    var a = Self.init();
-    defer a.deinit();
-    try testing.expect(a.isEmpty());
+            var b = Self.init();
+            defer b.deinit();
+            b.copyFrom(&a);
+            try lib.testing.expect(b.isEmpty());
 
-    var b = Self.init();
-    defer b.deinit();
-    b.copyFrom(&a);
-    try testing.expect(b.isEmpty());
+            b.setWidth(24);
+            try lib.testing.expect(!b.isEmpty());
 
-    b.setWidth(24);
-    try testing.expect(!b.isEmpty());
+            b.mergeFrom(&a);
+            try lib.testing.expect(!b.isEmpty());
+        }
+    };
 
-    b.mergeFrom(&a);
-    try testing.expect(!b.isEmpty());
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+
+            TestCase.lifecycle_starts_empty(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

@@ -2,7 +2,7 @@
 
 const embed = @import("embed");
 const testing = @import("testing");
-const lvgl = @import("../../../lvgl.zig");
+const lvgl = @import("../../../../lvgl.zig");
 
 const binding = lvgl.binding;
 

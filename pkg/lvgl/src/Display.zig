@@ -1,5 +1,6 @@
 const binding = @import("binding.zig");
 const Obj = @import("object/Obj.zig");
+const testing_api = @import("testing");
 
 const Self = @This();
 
@@ -105,40 +106,70 @@ pub fn dpi(self: *const Self) i32 {
     return binding.lv_display_get_dpi(self.handle);
 }
 
-test "lvgl/unit_tests/Display/raw_handle_roundtrip" {
-    const testing = @import("std").testing;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const Impl = struct {
+        fn raw_handle_roundtrip(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    const raw_handle: *binding.Display = @ptrFromInt(1);
-    const display = Self.fromRaw(raw_handle);
+            const raw_handle: *binding.Display = @ptrFromInt(1);
+            const display = Self.fromRaw(raw_handle);
 
-    try testing.expectEqual(raw_handle, display.raw());
+            try testing.expectEqual(raw_handle, display.raw());
 
-    _ = Self.activeScreen;
-}
+            _ = Self.activeScreen;
+        }
 
-test "lvgl/unit_tests/Display/runtime_properties_roundtrip_through_wrapper" {
-    const testing = @import("std").testing;
-    const lvgl_testing = @import("testing.zig");
+        fn runtime_properties_roundtrip_through_wrapper(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const lvgl_testing = @import("testing.zig");
 
-    var fixture = try lvgl_testing.Fixture.init();
-    defer fixture.deinit();
+            var fixture = try lvgl_testing.Fixture.init();
+            defer fixture.deinit();
 
-    var display = fixture.display;
-    display.setResolution(200, 100);
-    display.setPhysicalResolution(220, 140);
-    display.setOffset(7, 9);
-    const default_display = Self.getDefault() orelse return error.ExpectedDefaultDisplay;
-    try testing.expectEqual(display.raw(), default_display.raw());
-    try testing.expectEqual(@as(i32, 200), display.width());
-    try testing.expectEqual(@as(i32, 100), display.height());
-    try testing.expectEqual(@as(i32, 220), display.physicalWidth());
-    try testing.expectEqual(@as(i32, 140), display.physicalHeight());
-    try testing.expectEqual(@as(i32, 7), display.offsetX());
-    try testing.expectEqual(@as(i32, 9), display.offsetY());
+            var display = fixture.display;
+            display.setResolution(200, 100);
+            display.setPhysicalResolution(220, 140);
+            display.setOffset(7, 9);
+            const default_display = Self.getDefault() orelse return error.ExpectedDefaultDisplay;
+            try testing.expectEqual(display.raw(), default_display.raw());
+            try testing.expectEqual(@as(i32, 200), display.width());
+            try testing.expectEqual(@as(i32, 100), display.height());
+            try testing.expectEqual(@as(i32, 220), display.physicalWidth());
+            try testing.expectEqual(@as(i32, 140), display.physicalHeight());
+            try testing.expectEqual(@as(i32, 7), display.offsetX());
+            try testing.expectEqual(@as(i32, 9), display.offsetY());
 
-    display.setRotation(.deg180);
-    display.setDpi(123);
-    try testing.expectEqual(Rotation.deg180, display.rotation());
-    try testing.expectEqual(@as(i32, 123), display.dpi());
-    try testing.expectEqual(display.activeScreen().raw(), fixture.screen().raw());
+            display.setRotation(.deg180);
+            display.setDpi(123);
+            try testing.expectEqual(Rotation.deg180, display.rotation());
+            try testing.expectEqual(@as(i32, 123), display.dpi());
+            try testing.expectEqual(display.activeScreen().raw(), fixture.screen().raw());
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            t.run("lvgl/unit_tests/Display/raw_handle_roundtrip", testing_api.TestRunner.fromFn(lib, Impl.raw_handle_roundtrip));
+            t.run("lvgl/unit_tests/Display/runtime_properties_roundtrip_through_wrapper", testing_api.TestRunner.fromFn(lib, Impl.runtime_properties_roundtrip_through_wrapper));
+            return t.wait();
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

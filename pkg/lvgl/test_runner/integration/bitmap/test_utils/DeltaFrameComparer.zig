@@ -1,17 +1,18 @@
-const Display = @import("../Display.zig");
+const display_api = @import("display");
+const display_error = @import("Error.zig");
 const DrawArgs = @import("DrawArgs.zig");
 const Comparer = @import("Comparer.zig");
 
 width_px: u16,
 height_px: u16,
-baseline: []const Display.Color565,
+baseline: []const display_api.Display.Rgb,
 min_changed: usize,
 max_changed: usize,
 
 pub fn init(
     width_px: u16,
     height_px: u16,
-    baseline: []const Display.Color565,
+    baseline: []const display_api.Display.Rgb,
     min_changed: usize,
     max_changed: usize,
 ) @This() {
@@ -28,7 +29,7 @@ pub fn comparer(self: *@This()) Comparer {
     return Comparer.from(@This(), self);
 }
 
-pub fn check(self: *@This(), draw: DrawArgs) Display.Error!bool {
+pub fn check(self: *@This(), draw: DrawArgs) display_error.Error!bool {
     if (draw.x != 0 or draw.y != 0 or draw.w != self.width_px or draw.h != self.height_px) {
         return error.DrawAreaMismatch;
     }
@@ -36,7 +37,7 @@ pub fn check(self: *@This(), draw: DrawArgs) Display.Error!bool {
 
     var changed: usize = 0;
     for (draw.pixels, self.baseline) |actual, before| {
-        if (actual != before) changed += 1;
+        if (!actual.cmp(before)) changed += 1;
     }
     return changed >= self.min_changed and changed <= self.max_changed;
 }

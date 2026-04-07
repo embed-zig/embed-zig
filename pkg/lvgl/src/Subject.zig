@@ -1,4 +1,5 @@
 const binding = @import("binding.zig");
+const testing_api = @import("testing");
 
 const Self = @This();
 
@@ -84,64 +85,95 @@ pub fn previousString(self: *Self) ?[*:0]const u8 {
     return binding.lv_subject_get_previous_string(self.handle);
 }
 
-test "lvgl/unit_tests/Subject/integer_subject_tracks_current_and_previous_values" {
-    const testing = @import("std").testing;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const Impl = struct {
+        fn integer_subject_tracks_current_and_previous_values(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    var subject = try Self.initInt(12);
-    defer subject.deinit();
+            var subject = try Self.initInt(12);
+            defer subject.deinit();
 
-    try testing.expectEqual(@as(i32, 12), subject.getInt());
+            try testing.expectEqual(@as(i32, 12), subject.getInt());
 
-    subject.setInt(34);
+            subject.setInt(34);
 
-    try testing.expectEqual(@as(i32, 34), subject.getInt());
-    try testing.expectEqual(@as(i32, 12), subject.previousInt());
-}
+            try testing.expectEqual(@as(i32, 34), subject.getInt());
+            try testing.expectEqual(@as(i32, 12), subject.previousInt());
+        }
 
-test "lvgl/unit_tests/Subject/pointer_subject_tracks_previous_pointer_value" {
-    const testing = @import("std").testing;
+        fn pointer_subject_tracks_previous_pointer_value(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    var first: u8 = 1;
-    var second: u8 = 2;
-    var subject = try Self.initPointer(&first);
-    defer subject.deinit();
+            var first: u8 = 1;
+            var second: u8 = 2;
+            var subject = try Self.initPointer(&first);
+            defer subject.deinit();
 
-    try testing.expectEqual(@as(?*const anyopaque, @ptrCast(&first)), subject.getPointer());
-    try testing.expectEqual(@as(?*const anyopaque, @ptrCast(&first)), subject.previousPointer());
+            try testing.expectEqual(@as(?*const anyopaque, @ptrCast(&first)), subject.getPointer());
+            try testing.expectEqual(@as(?*const anyopaque, @ptrCast(&first)), subject.previousPointer());
 
-    subject.setPointer(&second);
+            subject.setPointer(&second);
 
-    try testing.expectEqual(@as(?*const anyopaque, @ptrCast(&second)), subject.getPointer());
-    try testing.expectEqual(@as(?*const anyopaque, @ptrCast(&first)), subject.previousPointer());
-}
+            try testing.expectEqual(@as(?*const anyopaque, @ptrCast(&second)), subject.getPointer());
+            try testing.expectEqual(@as(?*const anyopaque, @ptrCast(&first)), subject.previousPointer());
+        }
 
-test "lvgl/unit_tests/Subject/string_subject_copies_into_owned_buffers" {
-    const std = @import("std");
-    const testing = std.testing;
+        fn string_subject_copies_into_owned_buffers(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    var current_buffer = [_:0]u8{0} ** 16;
-    var previous_buffer = [_:0]u8{0} ** 16;
-    var subject = try Self.initString(current_buffer[0.. :0], previous_buffer[0.. :0], "hi");
-    defer subject.deinit();
+            var current_buffer = [_:0]u8{0} ** 16;
+            var previous_buffer = [_:0]u8{0} ** 16;
+            var subject = try Self.initString(current_buffer[0.. :0], previous_buffer[0.. :0], "hi");
+            defer subject.deinit();
 
-    subject.copyString("bye");
+            subject.copyString("bye");
 
-    try testing.expectEqualStrings("bye", std.mem.span(subject.getString()));
-    try testing.expectEqualStrings("hi", std.mem.span(subject.previousString().?));
-}
+            try testing.expectEqualStrings("bye", lib.mem.span(subject.getString()));
+            try testing.expectEqualStrings("hi", lib.mem.span(subject.previousString().?));
+        }
 
-test "lvgl/unit_tests/Subject/string_subject_uses_caller_provided_storage" {
-    const testing = @import("std").testing;
+        fn string_subject_uses_caller_provided_storage(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            const testing = lib.testing;
 
-    var current_buffer = [_:0]u8{0} ** 16;
-    var previous_buffer = [_:0]u8{0} ** 16;
-    const current = current_buffer[0.. :0];
-    const previous = previous_buffer[0.. :0];
-    var subject = try Self.initString(current, previous, "hi");
-    defer subject.deinit();
+            var current_buffer = [_:0]u8{0} ** 16;
+            var previous_buffer = [_:0]u8{0} ** 16;
+            const current = current_buffer[0.. :0];
+            const previous = previous_buffer[0.. :0];
+            var subject = try Self.initString(current, previous, "hi");
+            defer subject.deinit();
 
-    subject.copyString("bye");
+            subject.copyString("bye");
 
-    try testing.expectEqual(@intFromPtr(current.ptr), @intFromPtr(subject.getString()));
-    try testing.expectEqual(@intFromPtr(previous.ptr), @intFromPtr(subject.previousString().?));
+            try testing.expectEqual(@intFromPtr(current.ptr), @intFromPtr(subject.getString()));
+            try testing.expectEqual(@intFromPtr(previous.ptr), @intFromPtr(subject.previousString().?));
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            t.run("lvgl/unit_tests/Subject/integer_subject_tracks_current_and_previous_values", testing_api.TestRunner.fromFn(lib, Impl.integer_subject_tracks_current_and_previous_values));
+            t.run("lvgl/unit_tests/Subject/pointer_subject_tracks_previous_pointer_value", testing_api.TestRunner.fromFn(lib, Impl.pointer_subject_tracks_previous_pointer_value));
+            t.run("lvgl/unit_tests/Subject/string_subject_copies_into_owned_buffers", testing_api.TestRunner.fromFn(lib, Impl.string_subject_copies_into_owned_buffers));
+            t.run("lvgl/unit_tests/Subject/string_subject_uses_caller_provided_storage", testing_api.TestRunner.fromFn(lib, Impl.string_subject_uses_caller_provided_storage));
+            return t.wait();
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

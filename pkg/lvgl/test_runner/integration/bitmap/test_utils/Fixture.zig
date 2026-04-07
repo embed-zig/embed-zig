@@ -1,15 +1,17 @@
 const std = @import("std");
-const lvgl = @import("../../../lvgl.zig");
-const Display = @import("../Display.zig");
+const display_api = @import("display");
+const lvgl = @import("../../../../../lvgl.zig");
+
+const Display = display_api.Display;
 
 pub const width: u16 = 64;
 pub const height: u16 = 32;
-pub const Color565 = Display.Color565;
+pub const Color565 = u16;
 
 const Bridge = struct {
     output: *Display,
     flush_error: ?Display.Error = null,
-    scratch: [width * height]Color565 = undefined,
+    scratch: [width * height]Display.Rgb = undefined,
 };
 
 output: *Display,
@@ -90,7 +92,10 @@ fn flushCb(
     const pixels = std.mem.bytesAsSlice(Color565, bytes);
     const x: u16 = @intCast(draw_area.x1);
     const y: u16 = @intCast(draw_area.y1);
-    @memcpy(bridge.scratch[0..pixel_count], pixels);
+
+    for (pixels, 0..) |pixel, idx| {
+        bridge.scratch[idx] = Display.Rgb.from565(pixel);
+    }
 
     bridge.output.drawBitmap(x, y, w, h, bridge.scratch[0..pixel_count]) catch |err| {
         bridge.flush_error = err;

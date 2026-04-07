@@ -11,11 +11,7 @@ pub const Error = error{
     DisplayError,
 };
 
-pub const Rgb = struct {
-    r: u8,
-    g: u8,
-    b: u8,
-};
+pub const Rgb = @import("Rgb.zig");
 
 ptr: *anyopaque,
 vtable: *const VTable,
@@ -35,7 +31,7 @@ pub const VTable = struct {
 };
 
 pub fn rgb(r: u8, g: u8, b: u8) Rgb {
-    return .{ .r = r, .g = g, .b = b };
+    return Rgb.init(r, g, b);
 }
 
 pub fn deinit(self: root) void {

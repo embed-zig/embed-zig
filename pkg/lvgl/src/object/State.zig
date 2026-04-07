@@ -1,5 +1,6 @@
-const std = @import("std");
 const binding = @import("../binding.zig");
+const embed = @import("embed");
+const testing_api = @import("testing");
 
 pub const Value = u32;
 
@@ -18,10 +19,40 @@ pub fn toRaw(value: Value) binding.State {
     };
 }
 
-test "lvgl/unit_tests/object/State/constants_match_lvgl_defaults" {
-    const testing = std.testing;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    try testing.expectEqual(@as(Value, 0), default);
-    try testing.expect(pressed != 0);
-    try testing.expect(any > pressed);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            const Cases = struct {
+                fn constantsMatchLvglDefaults() !void {
+                    const testing = lib.testing;
+                    try testing.expectEqual(@as(Value, 0), default);
+                    try testing.expect(pressed != 0);
+                    try testing.expect(any > pressed);
+                }
+            };
+
+            Cases.constantsMatchLvglDefaults() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
+        }
+    };
+
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    runner.* = .{};
+    return testing_api.TestRunner.make(Runner).new(runner);
 }

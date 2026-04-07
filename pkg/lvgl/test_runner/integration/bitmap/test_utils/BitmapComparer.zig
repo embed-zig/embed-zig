@@ -1,11 +1,12 @@
 const std = @import("std");
-const Display = @import("../Display.zig");
+const display_api = @import("display");
+const display_error = @import("Error.zig");
 const DrawArgs = @import("DrawArgs.zig");
 const Comparer = @import("Comparer.zig");
 
-pixels: []Display.Color565,
+pixels: []display_api.Display.Rgb,
 
-pub fn initOwned(pixels_arg: []Display.Color565) @This() {
+pub fn initOwned(pixels_arg: []display_api.Display.Rgb) @This() {
     return .{ .pixels = pixels_arg };
 }
 
@@ -13,11 +14,11 @@ pub fn comparer(self: *@This()) Comparer {
     return Comparer.from(@This(), self);
 }
 
-pub fn check(self: *@This(), draw: DrawArgs) Display.Error!bool {
+pub fn check(self: *@This(), draw: DrawArgs) display_error.Error!bool {
     _ = draw.x;
     _ = draw.y;
     _ = draw.w;
     _ = draw.h;
     if (self.pixels.len != draw.pixels.len) return false;
-    return std.mem.eql(Display.Color565, self.pixels, draw.pixels);
+    return std.mem.eql(display_api.Display.Rgb, self.pixels, draw.pixels);
 }
