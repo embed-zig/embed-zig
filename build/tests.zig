@@ -109,6 +109,7 @@ pub fn create(
         .target = target,
         .optimize = optimize,
     });
+    b.modules.put("tests", test_mod) catch @panic("OOM");
 
     inline for (@typeInfo(Libraries).@"struct".decls) |decl| {
         const mod = b.modules.get(decl.name) orelse @panic("test dependency missing");
