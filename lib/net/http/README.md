@@ -39,7 +39,7 @@ const net = @import("net").make(embed);
 
 Current behavior:
 
-- owned default `Transport` or borrowed custom `RoundTripper`
+- stores a caller-supplied `RoundTripper`
 - `do(req: *Request) !Response`
 - `get(url)` and `head(url)` convenience helpers
 - bounded redirect following with a default limit of `10`

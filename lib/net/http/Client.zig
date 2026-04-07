@@ -1,8 +1,8 @@
 //! Client — high-level HTTP client facade above `RoundTripper`.
 //!
 //! The first landed layer keeps the surface intentionally narrow:
-//! allocator-explicit construction, owned-default-transport vs borrowed
-//! round-tripper, request execution via `do`, and deterministic teardown.
+//! allocator-explicit construction, round-tripper-backed dispatch,
+//! request execution via `do`, and deterministic teardown.
 
 const Header = @import("Header.zig");
 const ReadCloser = @import("ReadCloser.zig");
@@ -10,7 +10,6 @@ const Request = @import("Request.zig");
 const Response = @import("Response.zig");
 const RoundTripper = @import("RoundTripper.zig");
 const status = @import("status.zig");
-const transport_mod = @import("Transport.zig");
 const url_mod = @import("../url.zig");
 
 const testing_api = @import("testing");
@@ -24,19 +23,17 @@ const RedirectAction = enum {
 pub fn Client(comptime lib: type) type {
     const Allocator = lib.mem.Allocator;
     const Thread = lib.Thread;
-    const Transport = transport_mod.Transport(lib);
 
     return struct {
         allocator: Allocator,
         options: Options,
         shared: *SharedState,
-        transport_source: TransportSource,
+        round_tripper: RoundTripper,
 
         const Self = @This();
 
         pub const Options = struct {
-            round_tripper: ?RoundTripper = null,
-            transport: Transport.Options = .{},
+            round_tripper: RoundTripper,
             redirect_limit: usize = 10,
         };
 
@@ -46,11 +43,6 @@ pub fn Client(comptime lib: type) type {
             deiniting: bool = false,
             active_calls: usize = 0,
             active_requests: usize = 0,
-        };
-
-        const TransportSource = union(enum) {
-            owned: *Transport,
-            borrowed: RoundTripper,
         };
 
         const ResponseDeinitState = struct {
@@ -69,6 +61,10 @@ pub fn Client(comptime lib: type) type {
 
             fn cleanup(ptr: *anyopaque) void {
                 const self: *OwnedRequestState = @ptrCast(@alignCast(ptr));
+                if (self.request.body_reader) |body| {
+                    body.close();
+                    self.request.body_reader = null;
+                }
                 self.request.deinit();
                 self.allocator.free(self.raw_url);
                 self.allocator.destroy(self);
@@ -80,23 +76,12 @@ pub fn Client(comptime lib: type) type {
             errdefer allocator.destroy(shared);
             shared.* = .{};
 
-            var client: Self = .{
+            const client: Self = .{
                 .allocator = allocator,
                 .options = options,
                 .shared = shared,
-                .transport_source = undefined,
+                .round_tripper = options.round_tripper,
             };
-
-            if (options.round_tripper) |borrowed| {
-                client.transport_source = .{ .borrowed = borrowed };
-                return client;
-            }
-
-            const owned = try allocator.create(Transport);
-            errdefer allocator.destroy(owned);
-            owned.* = try Transport.init(allocator, options.transport);
-
-            client.transport_source = .{ .owned = owned };
             return client;
         }
 
@@ -108,23 +93,12 @@ pub fn Client(comptime lib: type) type {
             }
             self.shared.mutex.unlock();
 
-            switch (self.transport_source) {
-                .owned => |owned| {
-                    owned.deinit();
-                    self.allocator.destroy(owned);
-                },
-                .borrowed => {},
-            }
-
             self.allocator.destroy(self.shared);
             self.* = undefined;
         }
 
         pub fn closeIdleConnections(self: *Self) void {
-            switch (self.transport_source) {
-                .owned => |owned| owned.closeIdleConnections(),
-                .borrowed => {},
-            }
+            self.round_tripper.closeIdleConnections();
         }
 
         pub fn do(self: *Self, req: *Request) RoundTripper.RoundTripError!Response {
@@ -182,13 +156,6 @@ pub fn Client(comptime lib: type) type {
                 current_cleanup = next_cleanup;
                 followed_redirects += 1;
             }
-        }
-
-        fn currentRoundTripper(self: *Self) RoundTripper {
-            return switch (self.transport_source) {
-                .owned => |owned| owned.roundTripper(),
-                .borrowed => |borrowed| borrowed,
-            };
         }
 
         fn beginRequest(self: *Self) void {
@@ -273,8 +240,7 @@ pub fn Client(comptime lib: type) type {
         ) RoundTripper.RoundTripError!Response {
             self.beginRequest();
             errdefer self.finishRequest();
-
-            var resp = try self.currentRoundTripper().roundTrip(req);
+            var resp = try self.round_tripper.roundTrip(req);
             self.attachResponseTracking(
                 req.allocator,
                 &resp,
@@ -633,15 +599,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const HttpClient = Client(lib);
 
             {
-                var client = try HttpClient.init(allocator, .{});
-                defer client.deinit();
-                try testing.expect(client.transport_source == .owned);
-                client.closeIdleConnections();
-            }
-
-            {
                 const MockRoundTripper = struct {
                     cleaned: bool = false,
+                    close_idle_calls: usize = 0,
                     calls: usize = 0,
                     pub fn roundTrip(self: *@This(), req: *const Request) anyerror!Response {
                         _ = req;
@@ -656,12 +616,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         const cleaned: *bool = @ptrCast(@alignCast(ptr));
                         cleaned.* = true;
                     }
+                    pub fn closeIdleConnections(self: *@This()) void {
+                        self.close_idle_calls += 1;
+                    }
                 };
                 var mock = MockRoundTripper{};
                 var client = try HttpClient.init(allocator, .{
                     .round_tripper = RoundTripper.init(&mock),
                 });
                 defer client.deinit();
+                client.closeIdleConnections();
+                try testing.expectEqual(@as(usize, 1), mock.close_idle_calls);
                 var req = try Request.init(allocator, "GET", "http://example.com/");
                 defer req.deinit();
                 try testing.expectEqual(@as(usize, 0), client.shared.active_requests);
@@ -757,11 +722,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 };
                 const MockRoundTripper = struct {
                     calls: usize = 0,
+                    redirect_headers: [1]Header = .{Header.init(Header.location, "/preserve")},
                     pub fn roundTrip(self: *@This(), _: *const Request) anyerror!Response {
                         self.calls += 1;
                         return .{
                             .status_code = status.temporary_redirect,
-                            .header = &.{Header.init(Header.location, "/preserve")},
+                            .header = self.redirect_headers[0..],
                         };
                     }
                 };
@@ -784,11 +750,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             {
                 const MockRoundTripper = struct {
                     calls: usize = 0,
+                    redirect_headers: [1]Header = .{Header.init(Header.location, "/loop")},
                     pub fn roundTrip(self: *@This(), _: *const Request) anyerror!Response {
                         self.calls += 1;
                         return .{
                             .status_code = status.moved_permanently,
-                            .header = &.{Header.init(Header.location, "/loop")},
+                            .header = self.redirect_headers[0..],
                         };
                     }
                 };
@@ -814,6 +781,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     allocator: lib.mem.Allocator,
                     seen: lib.ArrayList(SeenRequest),
                     calls: usize = 0,
+                    redirect_headers: [1]Header = .{Header.init(Header.location, "/head-next")},
                     fn init(a: lib.mem.Allocator) @This() {
                         return .{ .allocator = a, .seen = .{} };
                     }
@@ -833,7 +801,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         return if (self.calls == 1)
                             .{
                                 .status_code = status.found,
-                                .header = &.{Header.init(Header.location, "/head-next")},
+                                .header = self.redirect_headers[0..],
                             }
                         else
                             .{ .status_code = status.ok };
@@ -1027,12 +995,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 };
                 const MockRoundTripper = struct {
                     calls: usize = 0,
+                    redirect_headers: [1]Header = .{Header.init(Header.location, "/next")},
                     pub fn roundTrip(self: *@This(), _: *const Request) anyerror!Response {
                         self.calls += 1;
                         return if (self.calls == 1)
                             .{
                                 .status_code = status.temporary_redirect,
-                                .header = &.{Header.init(Header.location, "/next")},
+                                .header = self.redirect_headers[0..],
                             }
                         else
                             .{ .status_code = status.ok };

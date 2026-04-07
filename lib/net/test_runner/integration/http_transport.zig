@@ -377,7 +377,11 @@ fn runImpl(
                 .body = "ok",
             }, struct {
                 fn run(port: u16) !void {
-                    var client = try Http.Client.init(testing.allocator, .{});
+                    var transport = try Http.Transport.init(testing.allocator, .{});
+                    defer transport.deinit();
+                    var client = try Http.Client.init(testing.allocator, .{
+                        .round_tripper = transport.roundTripper(),
+                    });
                     defer client.deinit();
 
                     const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-ok", .{port});
@@ -402,7 +406,11 @@ fn runImpl(
                 .body = "",
             }, struct {
                 fn run(port: u16) !void {
-                    var client = try Http.Client.init(testing.allocator, .{});
+                    var transport = try Http.Transport.init(testing.allocator, .{});
+                    defer transport.deinit();
+                    var client = try Http.Client.init(testing.allocator, .{
+                        .round_tripper = transport.roundTripper(),
+                    });
                     defer client.deinit();
 
                     const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-head", .{port});
@@ -425,7 +433,11 @@ fn runImpl(
                 .final_body = "redirected",
             }, struct {
                 fn run(port: u16) !void {
-                    var client = try Http.Client.init(testing.allocator, .{});
+                    var transport = try Http.Transport.init(testing.allocator, .{});
+                    defer transport.deinit();
+                    var client = try Http.Client.init(testing.allocator, .{
+                        .round_tripper = transport.roundTripper(),
+                    });
                     defer client.deinit();
 
                     const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-start", .{port});
@@ -453,7 +465,11 @@ fn runImpl(
                 .second_body = "two",
             }, struct {
                 fn run(port: u16) !void {
-                    var client = try Http.Client.init(testing.allocator, .{});
+                    var transport = try Http.Transport.init(testing.allocator, .{});
+                    defer transport.deinit();
+                    var client = try Http.Client.init(testing.allocator, .{
+                        .round_tripper = transport.roundTripper(),
+                    });
                     defer client.deinit();
 
                     const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-idle", .{port});
@@ -509,7 +525,11 @@ fn runImpl(
                         }
                     };
 
-                    var client = try Http.Client.init(testing.allocator, .{});
+                    var transport = try Http.Transport.init(testing.allocator, .{});
+                    defer transport.deinit();
+                    var client = try Http.Client.init(testing.allocator, .{
+                        .round_tripper = transport.roundTripper(),
+                    });
                     const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-deinit", .{port});
                     defer testing.allocator.free(url);
 

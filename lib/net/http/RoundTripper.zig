@@ -24,10 +24,16 @@ pub const RoundTripError = anyerror;
 
 pub const VTable = struct {
     roundTrip: *const fn (ptr: *anyopaque, req: *const Request) RoundTripError!Response,
+    closeIdleConnections: ?*const fn (ptr: *anyopaque) void = null,
 };
 
 pub fn roundTrip(self: RoundTripper, req: *const Request) RoundTripError!Response {
     return self.vtable.roundTrip(self.ptr, req);
+}
+
+pub fn closeIdleConnections(self: RoundTripper) void {
+    const close_fn = self.vtable.closeIdleConnections orelse return;
+    close_fn(self.ptr);
 }
 
 /// Wrap a pointer to any concrete round tripper into a RoundTripper.
@@ -48,8 +54,19 @@ pub fn init(pointer: anytype) RoundTripper {
             return self.roundTrip(req);
         }
 
+        const close_idle_connections_fn = if (@hasDecl(Impl, "closeIdleConnections"))
+            struct {
+                fn call(ptr: *anyopaque) void {
+                    const self: *Impl = @ptrCast(@alignCast(ptr));
+                    self.closeIdleConnections();
+                }
+            }.call
+        else
+            null;
+
         const vtable = VTable{
             .roundTrip = roundTripFn,
+            .closeIdleConnections = close_idle_connections_fn,
         };
     };
 

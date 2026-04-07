@@ -569,8 +569,8 @@ Today the package exposes:
 - `RoundTripper` contract
 - `Transport` as the default HTTP/1.1 client transport
 
-The current `Client` layer supports `do`, `get`, `head`, owned-default vs
-borrowed-transport setup, and bounded redirects. Server/router layers are not
+The current `Client` layer supports `do`, `get`, `head`, caller-supplied
+`RoundTripper` setup, and bounded redirects. Server/router layers are not
 landed yet.
 
 There is intentionally no package-global `DefaultTransport` or `DefaultClient`.
@@ -599,7 +599,12 @@ _ = n;
 **Client**:
 
 ```zig
-var client = try net.http.Client.init(allocator, .{});
+var transport = try net.http.Transport.init(allocator, .{});
+defer transport.deinit();
+
+var client = try net.http.Client.init(allocator, .{
+    .round_tripper = transport.roundTripper(),
+});
 defer client.deinit();
 
 var resp = try client.get("http://example.com/api");
@@ -624,6 +629,11 @@ const MyTransport = struct {
 
 var impl = MyTransport{};
 var round_tripper = net.http.RoundTripper.init(&impl);
+
+var client = try net.http.Client.init(allocator, .{
+    .round_tripper = round_tripper,
+});
+defer client.deinit();
 ```
 
 **RoundTripper** contract (for custom/mock transports):
