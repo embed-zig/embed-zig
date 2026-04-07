@@ -1,9 +1,5 @@
 const binding = @import("binding.zig");
-const root = @import("root");
-const testing_api = if (@hasDecl(root, "testing")) root.testing else struct {
-    pub const TestRunner = void;
-    pub const T = void;
-};
+const testing_api = @import("testing");
 
 const Self = @This();
 

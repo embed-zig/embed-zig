@@ -1,8 +1,4 @@
-const root = @import("root");
-const testing_api = if (@hasDecl(root, "testing")) root.testing else struct {
-    pub const TestRunner = void;
-    pub const T = void;
-};
+const testing_api = @import("testing");
 
 pub const PageOutResult = enum {
     page_ready,

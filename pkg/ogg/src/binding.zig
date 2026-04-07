@@ -2,11 +2,7 @@ const c = @cImport({
     @cInclude("config.h");
     @cInclude("ogg/ogg.h");
 });
-const root = @import("root");
-const testing_api = if (@hasDecl(root, "testing")) root.testing else struct {
-    pub const TestRunner = void;
-    pub const T = void;
-};
+const testing_api = @import("testing");
 
 pub const SyncState = c.ogg_sync_state;
 pub const StreamState = c.ogg_stream_state;
