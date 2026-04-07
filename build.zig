@@ -1,5 +1,5 @@
 const std = @import("std");
-const build_test = @import("build/test.zig");
+const build_tests = @import("build/tests.zig");
 
 const lib_embed = @import("build/lib/embed.zig");
 const lib_testing = @import("build/lib/testing.zig");
@@ -83,5 +83,5 @@ pub fn build(b: *std.Build) void {
         }
     }
 
-    build_test.create(b, target, optimize, Libraries, Packages);
+    build_tests.create(b, target, optimize, Libraries, Packages);
 }

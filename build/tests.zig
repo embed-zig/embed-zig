@@ -105,7 +105,7 @@ pub fn create(
     }
 
     const test_mod = b.createModule(.{
-        .root_source_file = b.path("lib/test.zig"),
+        .root_source_file = b.path("lib/tests.zig"),
         .target = target,
         .optimize = optimize,
     });

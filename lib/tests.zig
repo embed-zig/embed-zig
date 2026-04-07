@@ -1,7 +1,5 @@
 const std = @import("std");
 const embed_std = @import("embed_std");
-const embed_tests = @import("test/embed.zig");
-const context_tests = @import("test/context.zig");
 const testing = @import("testing");
 const bt = @import("bt");
 const sync = @import("sync");
@@ -16,6 +14,11 @@ const motion = @import("motion");
 const net = @import("net");
 const audio = @import("audio");
 const zux = @import("zux");
+
+pub const test_runner = struct {
+    pub const embed = @import("test/embed.zig");
+    pub const context = @import("test/context.zig");
+};
 
 test "testing/unit/std" {
     var t = testing.T.new(std, .std);
@@ -358,7 +361,7 @@ test "embed/unit/std" {
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
-    t.run("embed/unit/std", embed_tests.make(std));
+    t.run("embed/unit/std", test_runner.embed.make(std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -367,7 +370,7 @@ test "embed/unit/embed_std" {
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
 
-    t.run("embed/unit/embed_std", embed_tests.make(embed_std.std));
+    t.run("embed/unit/embed_std", test_runner.embed.make(embed_std.std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -376,7 +379,7 @@ test "context/unit/std" {
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
-    t.run("context/unit/std", context_tests.make(std));
+    t.run("context/unit/std", test_runner.context.make(std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -385,6 +388,6 @@ test "context/unit/embed_std" {
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
 
-    t.run("context/unit/embed_std", context_tests.make(embed_std.std));
+    t.run("context/unit/embed_std", test_runner.context.make(embed_std.std));
     if (!t.wait()) return error.TestFailed;
 }
