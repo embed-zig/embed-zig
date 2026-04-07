@@ -4,8 +4,6 @@ const lvgl = @import("../../../../../lvgl.zig");
 
 const Display = display_api.Display;
 
-pub const Fixture = @This();
-
 pub const width: u16 = 64;
 pub const height: u16 = 32;
 pub const Color565 = u16;

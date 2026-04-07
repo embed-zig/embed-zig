@@ -20,5 +20,8 @@ pub fn check(self: *@This(), draw: DrawArgs) display_error.Error!bool {
     _ = draw.w;
     _ = draw.h;
     if (self.pixels.len != draw.pixels.len) return false;
-    return std.mem.eql(display_api.Display.Rgb, self.pixels, draw.pixels);
+    for (self.pixels, draw.pixels) |expected, actual| {
+        if (!expected.cmp(actual)) return false;
+    }
+    return true;
 }

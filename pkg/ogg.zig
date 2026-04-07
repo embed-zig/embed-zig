@@ -23,6 +23,11 @@ pub const PageOutResult = types.PageOutResult;
 pub const PacketOutResult = types.PacketOutResult;
 pub const Sync = @import("ogg/src/Sync.zig");
 pub const Stream = @import("ogg/src/Stream.zig");
+pub const test_runner = struct {
+    pub const ogg = @import("ogg/test_runner/unit/ogg.zig");
+    pub const unit = @import("ogg/test_runner/unit.zig");
+    pub const integration = @import("ogg/test_runner/integration.zig");
+};
 
 test "ogg/unit_tests" {
     const std = @import("std");

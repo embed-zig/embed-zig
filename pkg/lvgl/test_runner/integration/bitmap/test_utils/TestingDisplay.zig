@@ -13,8 +13,6 @@ const Error = display_error.Error;
 const Rgb = display_api.Display.Rgb;
 const Self = @This();
 
-pub const TestingDisplay = Self;
-
 pub const DrawArgs = DrawArgsType;
 pub const Comparer = ComparerType;
 pub const BitmapComparer = BitmapComparerType;
@@ -213,7 +211,7 @@ fn testBitmap() [4]Rgb {
 }
 
 fn addDefaultTestCaseResult(
-    testing_display: *TestingDisplay,
+    testing_display: *Self,
     case_index: usize,
     comparer: ?Comparer,
 ) !void {
@@ -233,7 +231,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             const Cases = struct {
                 fn comparesExpectedDrawsInOrder(alloc: std.mem.Allocator) !void {
-                    var testing_display = TestingDisplay.init(alloc, 8, 4);
+                    var testing_display = Self.init(alloc, 8, 4);
                     defer testing_display.deinit();
 
                     const pixels = testBitmap();
@@ -249,7 +247,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 }
 
                 fn reportsDrawMismatches(alloc: std.mem.Allocator) !void {
-                    var testing_display = TestingDisplay.init(alloc, 8, 4);
+                    var testing_display = Self.init(alloc, 8, 4);
                     defer testing_display.deinit();
 
                     const actual = [_]Rgb{
@@ -270,7 +268,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 fn pipeComparerRunsComparersInOrderOnOneDraw(alloc: std.mem.Allocator) !void {
                     const PipeComparer = @import("PipeComparer.zig");
-                    var testing_display = TestingDisplay.init(alloc, 8, 4);
+                    var testing_display = Self.init(alloc, 8, 4);
                     defer testing_display.deinit();
 
                     var len_ok = LenIsFour{};
@@ -290,7 +288,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 }
 
                 fn supportsCustomBitmapComparer(alloc: std.mem.Allocator) !void {
-                    var testing_display = TestingDisplay.init(alloc, 8, 4);
+                    var testing_display = Self.init(alloc, 8, 4);
                     defer testing_display.deinit();
 
                     const pixels = testBitmap();
@@ -307,7 +305,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 }
 
                 fn consumesQueuedBitmapAnswersInOrder(alloc: std.mem.Allocator) !void {
-                    var testing_display = TestingDisplay.init(alloc, 8, 4);
+                    var testing_display = Self.init(alloc, 8, 4);
                     defer testing_display.deinit();
 
                     const first = [_]Rgb{
@@ -334,7 +332,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 }
 
                 fn customComparerCanRejectBitmapOutput(alloc: std.mem.Allocator) !void {
-                    var testing_display = TestingDisplay.init(alloc, 8, 4);
+                    var testing_display = Self.init(alloc, 8, 4);
                     defer testing_display.deinit();
 
                     const expected = testBitmap();

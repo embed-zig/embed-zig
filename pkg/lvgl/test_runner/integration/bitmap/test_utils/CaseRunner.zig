@@ -1,7 +1,7 @@
 const display_api = @import("display");
 const testing_mod = @import("testing");
-const TestingDisplay = @import("TestingDisplay.zig").TestingDisplay;
-const Fixture = @import("Fixture.zig").Fixture;
+const TestingDisplay = @import("TestingDisplay.zig");
+const Fixture = @import("Fixture.zig");
 
 const Display = display_api.Display;
 
