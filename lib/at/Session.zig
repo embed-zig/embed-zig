@@ -1,7 +1,7 @@
 //! Session — one AT **exchange** (command → lines until final result) over `Transport` + `LineReader`.
 //!
-//! Handles **timeouts**, optional **echo stripping**, and **non-terminal lines** (info / URC) via
-//! callback. For **prompts (`>`), raw PDU, length-prefixed binary**, use `writeRaw` / `readExact`
+//! Handles **timeouts**, **command-echo skipping** when a line matches the last sent **`cmd`**
+//! (ATE1-style), and **non-terminal lines** (info / URC) via callback. For **prompts (`>`), raw PDU, length-prefixed binary**, use `writeRaw` / `readExact`
 //! and `clearReader` / `flushRx` between line-mode phases (see `lib/at/README.md`).
 
 const Transport = @import("Transport.zig");
@@ -25,15 +25,28 @@ pub fn make(comptime lib: type, comptime line_cap: usize) type {
             transport_write_timeout_ms: u32 = 200,
             /// Wall-clock budget for the whole `exchange` (all lines until final).
             command_timeout_ms: u32 = 10_000,
+            /// If true, `exchange` appends **`\r\n`** after `cmd` before writing. **Outbound**
+            /// only (see `LineReader` for inbound line ends).
+            ///
+            /// ITU-T **V.250** defines the command-line terminator via **S3** (default **CR**).
+            /// **3GPP TS 27.007** builds on that framing; **CRLF** is not the only legal form,
+            /// but is widely used on UART/USB and matches many modem manuals — hence default `true`.
+            /// Set `false` when `cmd` already includes terminators or the DCE expects **CR only**
+            /// (per datasheet / `ATS3`).
             append_crlf: bool = true,
-            /// Drop lines equal to the last sent command body (after trim), for ATE1 echo.
-            strip_echo: bool = false,
         };
 
+        /// Result of `exchange` when the modem returns a **final** result line (after ASCII trim).
         pub const Final = enum {
+            /// Line **`OK`** (27.007-style success).
             ok,
+            /// Line **`ERROR`** — generic failure; no **`+CME` / `+CMS`** detail on that line.
             error_,
+            /// Line starts with **`+CME ERROR:`** — **C**ME = mobile **E**quipment / network-side
+            /// extended errors in **3GPP TS 27.007** (numeric or verbose text after the colon).
             cme_error,
+            /// Line starts with **`+CMS ERROR:`** — **SMS** service failures in **3GPP TS 27.005**
+            /// (send/read/delete SMS and related commands).
             cms_error,
         };
 
@@ -119,12 +132,15 @@ pub fn make(comptime lib: type, comptime line_cap: usize) type {
                 const line = try self.reader.readLine(self.transport, &line_buf, ex.line_read);
 
                 const body = trimAscii(line);
-                if (self.config.strip_echo and self.last_cmd_len > 0) {
-                    if (body.len == self.last_cmd_len and
-                        lib.mem.eql(u8, body, self.last_cmd[0..self.last_cmd_len]))
-                    {
-                        continue;
-                    }
+                // ATE1 (and similar) echoes the command line before the result. Skip that line so
+                // it does not count toward max_non_terminal_lines or fire on_info_line. Match is
+                // against the last exchange() cmd body only (trimmed ASCII); if echo formatting
+                // differs, use ATE0 or handle outside exchange.
+                if (self.last_cmd_len > 0 and
+                    body.len == self.last_cmd_len and
+                    lib.mem.eql(u8, body, self.last_cmd[0..self.last_cmd_len]))
+                {
+                    continue;
                 }
 
                 if (classifyFinal(lib, body)) |fin| return fin;
@@ -137,12 +153,12 @@ pub fn make(comptime lib: type, comptime line_cap: usize) type {
             }
         }
 
-        fn classifyFinal(mem_lib: type, line: []const u8) ?Final {
-            const t = trimAscii(line);
-            if (mem_lib.mem.eql(u8, t, "OK")) return .ok;
-            if (mem_lib.mem.eql(u8, t, "ERROR")) return .error_;
-            if (mem_lib.mem.startsWith(u8, t, "+CME ERROR:")) return .cme_error;
-            if (mem_lib.mem.startsWith(u8, t, "+CMS ERROR:")) return .cms_error;
+        /// `body` must already be ASCII-trimmed (same as `exchange` uses after `readLine`).
+        fn classifyFinal(mem_lib: type, body: []const u8) ?Final {
+            if (mem_lib.mem.eql(u8, body, "OK")) return .ok;
+            if (mem_lib.mem.eql(u8, body, "ERROR")) return .error_;
+            if (mem_lib.mem.startsWith(u8, body, "+CME ERROR:")) return .cme_error;
+            if (mem_lib.mem.startsWith(u8, body, "+CMS ERROR:")) return .cms_error;
             return null;
         }
 
@@ -260,7 +276,7 @@ test "at/unit_tests/Session/strip_echo" {
     var back = Impl{ .data = "AT+CSQ\r\n+CSQ: 1\r\nOK\r\n" };
     const transport = Transport.init(&back);
     const S = make(Lib, 64);
-    var session = S.init(transport, .{ .append_crlf = false, .strip_echo = true });
+    var session = S.init(transport, .{ .append_crlf = false });
 
     const fin = try session.exchange("AT+CSQ", .{});
     try testing.expectEqual(S.Final.ok, fin);

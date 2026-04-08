@@ -89,7 +89,7 @@ belongs in **`Session` / `Dte`** (command state machine, timeouts, mode switches
 
 | Situation | Where it is handled |
 |-----------|---------------------|
-| **Echo (ATE1)** | **Session**: `Config.strip_echo` drops lines matching the last sent command body (trimmed), or prefer **ATE0**. |
+| **Echo (ATE1)** | **Session**: `exchange` always skips a line that matches the last sent **cmd** body (ASCII trim), before counting non-terminal lines; prefer **ATE0** if echo shape does not match. |
 | **Prompts** (e.g. SMS **`>`** after `AT+CMGS`) | **Session**: detect prompt (by line or byte scan), then switch phase — do **not** treat payload as a normal “English” line. |
 | **PDU / body after prompt** | **Session**: use **`writeRaw`** / **`readExact`** (raw `Transport` I/O) for **fixed length**, until **0x1A**, or per modem spec — **bypass `LineReader`**; then **`clearReader`** / resume **`exchange`**. |
 | **Length-prefixed binary** (e.g. `+QHTTPREAD: <len>` then raw bytes) | **Caller**: one **`exchange`** or **`readLine`** to get the header line, parse `len`, then **`readExact`** for `len` bytes (not another `exchange`). |
@@ -129,8 +129,7 @@ the **`LineReader(cap)`** used inside (one line’s max body + terminator budget
   then reads lines until **`OK`**, **`ERROR`**, **`+CME ERROR:`**, or **`+CMS ERROR:`**
   (after ASCII trim). Other lines are **non-terminal**: optional **`on_info_line`**
   callback (URC / `+CSQ:` / …); **`max_non_terminal_lines`** prevents infinite loops.
-- **`Config.strip_echo`** — Skips lines equal to the last **`cmd`** body (trimmed),
-  for **ATE1**-style echo.
+- **Command echo** — **`exchange`** skips the first line equal to the last **`cmd`** body (after ASCII trim), so **ATE1** echo does not consume **`max_non_terminal_lines`** or **`on_info_line`**; if the modem’s echo differs from **`cmd`**, use **ATE0** or filter elsewhere.
 - **Timeouts** — **`command_timeout_ms`** bounds the whole exchange; **`transport_read_timeout_ms`**
   / **`transport_write_timeout_ms`** are applied per `Transport` read/write attempt
   (same pattern as `lib/bt/host/Hci.zig`). **Note:** each **`readLine`** sets the read
