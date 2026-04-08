@@ -1,9 +1,5 @@
 # embed-zig
 
-## Repository baseline
-
-- **`v2`** is the canonical integration branch for this repository. Branch new work from **`v2`**, rebase or merge onto **`v2`**, and open pull requests against **`v2`** unless maintainers agree on another target.
-
 ## Core Rules
 
 - `embed` directly exports a curated subset of `std` types and helpers that are intended to remain cross-platform.
