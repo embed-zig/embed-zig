@@ -203,7 +203,7 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
                 var tx = Transport{ .session = self };
                 const data = xfer.recv(lib, self.mux.allocator, &tx, .{
                     .att_mtu = self.subscription.attMtu(),
-                    .timeout_ms = 30_000,
+                    .timeout_ms = 5_000,
                 }) catch return;
                 defer self.mux.allocator.free(data);
 
