@@ -10,7 +10,7 @@ pub const test_runner = struct {
     pub const dte_loopback = @import("at/test_runner/dte_loopback.zig");
 };
 
-test "at/unit_tests/root_imports" {
+test "at/unit/root_imports" {
     const std = @import("std");
     _ = Transport;
     _ = LineReader(64);
@@ -31,7 +31,7 @@ test "at/unit_tests/root_imports" {
     _ = test_runner.dte_loopback.make(Lib, 64);
 }
 
-test "integration_tests/at/dte_loopback" {
+test "at/integration/dte_loopback" {
     const std = @import("std");
     const testing_mod = @import("testing");
 
@@ -42,7 +42,7 @@ test "integration_tests/at/dte_loopback" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "integration_tests/at/dte_serial_host" {
+test "at/integration/dte_serial_host" {
     const std = @import("std");
     const testing_mod = @import("testing");
     const dte_serial_host = @import("at/test_runner/dte_serial_host.zig");

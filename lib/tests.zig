@@ -6,6 +6,7 @@ const sync = @import("sync");
 const io = @import("io");
 const wifi = @import("wifi");
 const modem = @import("modem");
+const at = @import("at");
 const display = @import("display");
 const ledstrip = @import("ledstrip");
 const drivers = @import("drivers");

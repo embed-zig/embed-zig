@@ -201,12 +201,16 @@ On-embedded test binaries can reuse the same **Dte** surface with a board
 
 ### Integration-style tests (on the **`at`** module)
 
-To keep **`lib/at`** independent of **`lib/cellular`** and the shared **`integration/`**
-module graph, AT smoke runners use the **`integration_tests`** tag on **`lib/at.zig`**
-(`zig build test-at` runs them with the integration filter for that module):
+To keep **`lib/at`** independent of **`lib/cellular`**, AT smoke tests live on **`lib/at.zig`**
+with names under **`at/integration/…`** (aggregated via **`lib/tests.zig`**). Run:
 
-- **`integration_tests/at/dte_loopback`** — in-process **Dte** ↔ **Dce** (`test_runner/dte_loopback.zig`).
-- **`integration_tests/at/dte_serial_host`** — POSIX serial **DTE** vs **ESP32-S3 DCE firmware**
+- **`zig build test-integration-at`** — both integration cases below.
+- **`zig build test-unit-at`** — **`at/unit/…`** (root import smoke).
+
+Cases:
+
+- **`at/integration/dte_loopback`** — in-process **Dte** ↔ **Dce** (`test_runner/dte_loopback.zig`).
+- **`at/integration/dte_serial_host`** — POSIX serial **DTE** vs **ESP32-S3 DCE firmware**
   (`test_runner/dte_serial_host.zig`, **`std`**; not re-exported from `pub test_runner`).
 
 Host serial uses **`EMBED_AT_SERIAL`** / **`EMBED_AT_BAUD`**; unset path → skip (success).
@@ -219,7 +223,7 @@ Host serial uses **`EMBED_AT_SERIAL`** / **`EMBED_AT_BAUD`**; unset path → ski
 ## Build / module wiring
 
 - Module: `build/lib/at.zig`, root `lib/at.zig`, registered as `at` in `build.zig`.
-- Run unit tests: `zig build test-at` (or `zig build test-unit` for all libs).
+- Run **`zig build test-unit-at`** / **`zig build test-integration-at`** (or **`zig build test-unit`** / **`zig build test-integration`** for all libs).
 
 ### Production: UART or USB CDC
 
@@ -237,5 +241,5 @@ Host serial uses **`EMBED_AT_SERIAL`** / **`EMBED_AT_BAUD`**; unset path → ski
 3. **`Session`** — Implemented (`Session.make(lib, line_cap)`).
 4. **`Dte`** — Implemented (`Dte.make(lib, line_cap)`).
 5. **`Dce`** — Implemented (`handleLine`, `CommandEntry`, `respondCopy` helper).
-6. **`test_runner/dte_loopback.zig`** + **`dte_serial_host.zig`**; **`integration_tests`** hooks in **`lib/at.zig`** (see above).
+6. **`test_runner/dte_loopback.zig`** + **`dte_serial_host.zig`**; hooks in **`lib/at.zig`** under **`at/integration/…`** (see above).
 7. Keep this README in sync with the public import path as APIs land.
