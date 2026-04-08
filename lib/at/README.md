@@ -1,0 +1,206 @@
+# lib/at — AT-style command/response over byte streams
+
+Portable **AT-like text protocol** helpers for embed-zig: ordered byte stream
+in, line-oriented commands and responses out. Intended for device ↔ host
+communication over **UART** or any other backend that exposes **read/write**
+(and optional deadlines), e.g. USB CDC-ACM as a virtual serial port.
+
+This package is **not** tied to cellular modems or `lib/cellular`; those stay
+separate. Reuse patterns from `lib/bt/Transport.zig` (type-erased transport +
+deadlines). **`lib/at/Transport` adds `flushRx`** and is not identical to
+`bt/Transport`; see **flushRx vs reset** below.
+
+## Goals
+
+1. **Transport abstraction** — One VTable for `read` / `write`, **`flushRx`**,
+   **`reset`**, `deinit`, and read/write deadlines so the same protocol code runs
+   on UART, USB CDC, or test doubles. **`flushRx` and `reset` are different**
+   operations (see Implementation approach).
+2. **Framing & parsing** — Line splitting (`\r`/`\n`), trimming, optional echo
+   stripping; incremental parsers that work on fixed buffers (no heap in the
+   hot path unless an API explicitly takes an `Allocator`).
+3. **Session / command API** — Send a command, collect lines until a terminal
+   (`OK`, `ERROR`, …) with timeouts; extensible for project-specific URCs
+   (unsolicited lines).
+4. **embed alignment** — Runtime primitives via injected `embed` / `lib`
+   namespace where needed; avoid direct `std` in non-test library code per
+   `AGENTS.md`.
+
+## Non-goals (initially)
+
+- **CMUX / multiplexing** — Not part of this package; demux belongs under
+  `lib/cellular` (or similar). AT code assumes **one logical byte stream** per
+  `Transport` after any lower-layer mux.
+- PPP, or SIMCOM/Quectel profile parsers (remain under `lib/cellular` if
+  needed).
+- Defining a single global “standard AT command set” for all products; the
+  library should stay **generic** and let apps register commands or matchers.
+
+## Implementation path (planned source layout)
+
+| Path | Role |
+|------|------|
+| `lib/at.zig` | Root module: re-exports the stable public surface (and `test_runner` table). |
+| `build/lib/at.zig` | Build-system module definition (`at` module in `build.zig`). |
+| `lib/at/Transport.zig` | Type-erased byte transport: like `lib/bt/Transport.zig` plus required **`flushRx`** (discard RX buffer; `reset` remains for stronger teardown). |
+| `lib/at/LineReader.zig` (or `framing.zig`) | Fixed-buffer incremental framing aligned with **ITU-T V.250** (CR / default S3) and common **CRLF** on the wire (same CRLF idea as **HTTP/1.x** header lines). Trim / echo strip only as documented there. |
+| `lib/at/Session.zig` (or `engine.zig`) | Per-command timeouts, read until terminal line; URC dispatch hooks. |
+| `lib/at/Dte.zig` | **DTE** (terminal) side: composes `Transport` + `LineReader` + session API (`exchange`, `writeRaw`, …). Factory: `Dte(comptime lib: type, comptime line_buf_cap: usize)` with `comptime` checks on `lib.time` for deadlines. |
+| `lib/at/Dce.zig` | **DCE** (modem) side for **tests / simulation**: prefix table + `handleLine`; optional canned responses. Production firmware rarely needs this in `lib/at`; keep it thin. |
+| `lib/at/test_runner/dte_loopback.zig` | Smoke runner: in-process loopback `Transport` + `Dce` + `Dte`, no hardware. |
+| `lib/at/test_runner/dte_serial.zig` | Smoke runner: host **DTE** over a real serial path (e.g. Mac + device acting as **DCE** on USB-UART). Skips when env not set. |
+
+Exact file names may shift; **layering is fixed**:
+
+```text
+Transport → LineReader (framing) → Session → Dte
+                                    ↑
+                              Dce (tests / mock)
+```
+
+## Implementation approach
+
+### Layering
+
+1. **Transport** — Only bytes, deadlines, and lifecycle hooks; no AT syntax.
+   - **`flushRx`** — Discard **inbound** data still buffered in the driver /
+     hardware RX path; the link (UART/USB) usually **stays up**.
+   - **`reset`** — **Stronger** recovery: board-defined (e.g. modem hard reset,
+     controller re-init). May tear session state; **not** a synonym for
+     `flushRx`.
+2. **LineReader** — Produces complete lines using **V.250-style CR** and **CRLF /
+   LF** rules (see `LineReader.zig` doc); no `OK`/`ERROR` semantics.
+3. **Session** — One **exchange**: send a command line, then read lines until a
+   **final result** (`OK`, `ERROR`, `+CME ERROR:`, …). Intermediate lines are
+   **information responses**; **URCs** (unsolicited) are routed through an
+   optional handler or queue so they do not terminate the current exchange.
+   See **What belongs in Session (not LineReader)** below.
+4. **Dte** — Product-facing API on the host/MCU that talks to the modem. Holds
+   config (timeouts, CRLF, echo policy).
+5. **Dce** — Table-driven handlers: `CommandEntry { prefix, handler }` with
+   **longest-prefix** dispatch; used for **loopback tests** and modem mocks, not
+   for vendor AT profiles (those stay in app / `lib/cellular`).
+
+### What belongs in Session (not LineReader)
+
+`LineReader` only splits the byte stream on **CR / CRLF / LF** (see
+`LineReader.zig`). Anything where **line boundaries are not enough** for meaning
+belongs in **`Session` / `Dte`** (command state machine, timeouts, mode switches):
+
+| Situation | Where it is handled |
+|-----------|---------------------|
+| **Echo (ATE1)** | **Session**: match / drop lines that repeat the last sent command, or prefer **ATE0**. |
+| **Prompts** (e.g. SMS **`>`** after `AT+CMGS`) | **Session**: detect prompt (by line or byte scan), then switch phase — do **not** treat payload as a normal “English” line. |
+| **PDU / body after prompt** | **Session**: **`transport.read` / `write`** for a **fixed length**, until **0x1A**, or per modem spec — **bypass `LineReader`** for that segment; then resume line mode (`LineReader.clear()` if needed). |
+| **Length-prefixed binary** (e.g. `+QHTTPREAD: <len>` then raw bytes) | **Session**: **`readLine`** to parse the header line, then **read exactly `len` bytes** from `Transport`, not `readLine`. |
+| **File / bulk data** | Usually **socket or data plane** (TCP/TLS/HTTP AT), or **framed** transfer — not “read lines until EOF”. |
+| **CMUX / PPP** | **Below** Session: demux to a **single logical AT stream** first; `LineReader` + `Session` attach **only** to that stream. |
+
+### `LineReader` errors: `LineTooLong` vs `OutTooSmall`
+
+These are **not** fixed global byte counts; they depend on **your buffers**:
+
+- **`error.LineTooLong`** — The internal `LineReader(cap)` buffer has **`cap`
+  bytes** in `pending` **without** a **complete line** (no terminator yet).
+  So “too long” means: **one logical line (plus any split terminator) would need
+  more than `cap` bytes** before a CR/LF-style end. Raise `cap` at compile time,
+  or treat as protocol/peer error in Session.
+
+- **`error.OutTooSmall`** — The caller-supplied **`out` slice** passed to
+  `readLine` / `tryPopLineInto` is **shorter than** the **trimmed line body**
+  (after CR/LF removal and optional ASCII space trim). “Too small” means:
+  **`out.len < line_body_len`**. Use a larger `out` buffer or handle the error
+  in Session.
+
+**Retry / layering:** `LineReader` **does not** automatically retry on
+`OutTooSmall` — it returns the error and **leaves `pending` unchanged** (the
+complete line is still buffered). **`Session` / `Dte`** is the right place to
+retry with a **larger `out`** (e.g. call `tryPopLineInto` again), or to pick an
+`out` size up front that fits expected responses and avoid the error entirely.
+
+### `exchange` (naming / behavior)
+
+**Exchange** means one AT **transaction**: write the command (with optional
+`\r\n`), then read lines until a **terminal** line. Collecting informational
+lines should use **callbacks** or **fixed-capacity buffers** — not `std`
+containers in the default hot path (see `AGENTS.md`). Heap-backed collection is
+optional and belongs at the integration / app boundary if needed.
+
+### DTE / DCE terminology
+
+- **DTE** — Sends AT commands (typical MCU / host code).
+- **DCE** — Modem / module that responds. **Not** the same as Bluetooth “HCI
+  Host”; avoid overloading “host” here.
+
+### USB
+
+Any backend that exposes a **reliable ordered byte stream** with read/write
+(and optional deadlines) is valid — including **USB CDC-ACM**. Implement a
+`Transport` adapter for your USB stack; `lib/at` stays agnostic.
+
+### embed injection
+
+- Use `comptime lib: type` on factories (e.g. `Dte(lib, line_buf_cap)`), with
+  `comptime` validation of required `lib.time` symbols (`milliTimestamp` /
+  `nanoTimestamp`) for deadline math, consistent with `lib/bt/host/Hci.zig` and
+  `lib/cellular/modem/Modem.zig`.
+- Non-test library sources under `lib/at` should not import `std` directly.
+
+## Testing scheme
+
+### Unit tests
+
+- Live **next to** the implementation file (`test "…"` blocks in the same
+  `.zig`).
+- No network; no serial hardware. Cover `LineReader` edge cases, terminal
+  detection, echo stripping, and timeout behavior with **fake `Transport`**
+  implementations.
+
+### `test_runner/` (shared smoke runners)
+
+Follow `lib/wifi/test_runner` / `lib/testing.TestRunner`: `make(comptime lib:
+type)` (and optional `makeWithOptions`) returning `testing.TestRunner`, with
+`init` / `run` / `deinit`.
+
+| Runner | Purpose |
+|--------|---------|
+| `dte_loopback` | **Memory or ring-backed `Transport`** wiring **Dte** to an in-process **Dce** table. Runs in CI without hardware. |
+| `dte_serial` | **Host-only** (e.g. macOS): open serial path from env (**e.g. `EMBED_AT_SERIAL`**), run minimal `AT` / `ATI` **exchange** against a **real DCE** (modem on device). If env unset, **log skip** and **return success** so default CI does not fail. Optional **`EMBED_AT_BAUD`** (default e.g. 115200). |
+
+On-embedded test binaries can reuse the same **Dte** surface with a board
+`Transport` (UART to modem); the **serial** runner remains the usual choice for
+**Mac DTE ↔ device DCE** smoke.
+
+### Integration tests
+
+Per `AGENTS.md`:
+
+- Place entrypoints under the shared **`integration/`** tree (e.g.
+  `integration/at/dte_loopback.zig`, `integration/at/dte_serial.zig`).
+- Use `std` (or `embed_std`) where needed: opening `/dev/tty.*`, env vars,
+  comparing **embed** vs **std**-shaped `lib` if useful.
+- Root `test "at/integration_tests/…"` blocks import those files and call
+  `T.run(..., at.test_runner.… .make(lib))`.
+
+### What not to duplicate here
+
+- **CMUX** tests and modem **profile** parsers stay under `lib/cellular` (or
+  product trees).
+
+## Build / module wiring
+
+- Module: `build/lib/at.zig`, root `lib/at.zig`, registered as `at` in `build.zig`.
+- Run unit tests: `zig build test-at` (or `zig build test-unit` for all libs).
+
+## Next steps
+
+1. **`Transport`** — Implemented: same core surface as `lib/bt/Transport.zig`,
+   plus required **`flushRx`** (see layering below).
+2. **`LineReader`** — Implemented (`lib/at/LineReader.zig`); see `LineTooLong` /
+   `OutTooSmall` above.
+3. Add minimal `Session` + `Dte(lib, cap)`: `sendRaw` / `exchange` with
+   callback-based info lines, deadlines from `lib.time`.
+4. Add `Dce` + prefix **command table** for loopback tests.
+5. Add `test_runner/dte_loopback.zig` and `test_runner/dte_serial.zig`;
+   integration entrypoints under `integration/at/`.
+6. Keep this README in sync with the public import path as APIs land.
