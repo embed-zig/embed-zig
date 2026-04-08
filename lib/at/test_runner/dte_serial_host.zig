@@ -1,8 +1,7 @@
 //! **Host-only** DTE smoke over a **real serial device** (POSIX: macOS / Linux).
 //!
-//! Uses **`std`**; keep it **out of** `pub const test_runner` in `lib/at.zig` so normal `at` imports
-//! stay embed-only. Integration runs it via `test "integration_tests/at/dte_serial_host"` in
-//! `lib/at.zig` (`zig build test-at` with the **`integration_tests`** filter).
+//! Uses **`std`**-shaped `lib` (host). Invoked from **`test_runner/integration.zig`**, not re-exported
+//! from `lib/at.zig`'s `test_runner` namespace, so normal `at` imports stay embed-only.
 //!
 //! ## Topology
 //!
@@ -54,14 +53,15 @@ pub fn make(comptime lib: type, comptime opts: Options) testing_api.TestRunner {
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = self;
             _ = allocator;
-            lib.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
-    runner.* = .{};
-    return testing_api.TestRunner.make(Runner).new(runner);
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
 /// On Apple platforms, **`/dev/tty.*`** is the *call-in* device: `read()` can **block** waiting on

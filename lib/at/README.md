@@ -199,19 +199,21 @@ On-embedded test binaries can reuse the same **Dte** surface with a board
 `Transport` (UART to modem); the **serial** runner remains the usual choice for
 **Mac DTE ↔ device DCE** smoke.
 
-### Integration-style tests (on the **`at`** module)
+### Tests (same pattern as **`lib/bt`**)
 
-To keep **`lib/at`** independent of **`lib/cellular`**, AT smoke tests live on **`lib/at.zig`**
-with names under **`at/integration/…`** (aggregated via **`lib/tests.zig`**). Run:
+- **`lib/at.zig`** exports **`at.test_runner.unit`** and **`at.test_runner.integration`** (like **`bt.test_runner`**).
+- **`lib/tests.zig`** wires **`at/unit/std`**, **`at/unit/embed_std`**, **`at/integration/std`**, **`at/integration/embed_std`** through **`testing.T`** — mirror of **`bt/unit/…`** and **`bt/integration/…`**.
+- **`test_runner/unit.zig`** registers sub-runners (e.g. **`root_imports`**); **`test_runner/integration.zig`** runs **`dte_loopback`** then **`dte_serial_host`**.
 
-- **`zig build test-integration-at`** — both integration cases below.
-- **`zig build test-unit-at`** — **`at/unit/…`** (root import smoke).
+Run:
 
-Cases:
+- **`zig build test-unit-at`** — unit runner (import / loopback surface smoke).
+- **`zig build test-integration-at`** — loopback + serial host (serial skips if env unset).
 
-- **`at/integration/dte_loopback`** — in-process **Dte** ↔ **Dce** (`test_runner/dte_loopback.zig`).
-- **`at/integration/dte_serial_host`** — POSIX serial **DTE** vs **ESP32-S3 DCE firmware**
-  (`test_runner/dte_serial_host.zig`, **`std`**; not re-exported from `pub test_runner`).
+Cases (under integration runner):
+
+- **`dte_loopback`** — in-process **Dte** ↔ **Dce** (`test_runner/dte_loopback.zig`).
+- **`dte_serial_host`** — POSIX serial **DTE** vs **ESP32-S3 DCE firmware** (`test_runner/dte_serial_host.zig`; not re-exported from `pub test_runner`).
 
 Host serial uses **`EMBED_AT_SERIAL`** / **`EMBED_AT_BAUD`**; unset path → skip (success).
 
@@ -241,5 +243,5 @@ Host serial uses **`EMBED_AT_SERIAL`** / **`EMBED_AT_BAUD`**; unset path → ski
 3. **`Session`** — Implemented (`Session.make(lib, line_cap)`).
 4. **`Dte`** — Implemented (`Dte.make(lib, line_cap)`).
 5. **`Dce`** — Implemented (`handleLine`, `CommandEntry`, `respondCopy` helper).
-6. **`test_runner/dte_loopback.zig`** + **`dte_serial_host.zig`**; hooks in **`lib/at.zig`** under **`at/integration/…`** (see above).
+6. **`test_runner/integration.zig`** (**`dte_loopback`** + **`dte_serial_host`**); **`lib/tests.zig`** exposes **`at/integration/std`** and **`at/integration/embed_std`** (see above).
 7. Keep this README in sync with the public import path as APIs land.

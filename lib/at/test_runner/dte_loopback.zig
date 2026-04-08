@@ -1,7 +1,7 @@
 //! In-process **DTE ↔ DCE** smoke: memory loopback `Transport` + `Dce` prefix table + `Dte.exchange`.
 //!
 //! No hardware. For **host DTE + ESP32-S3 DCE firmware** over USB-UART, see
-//! [`dte_serial_host.zig`](dte_serial_host.zig) (POSIX; **`std`**; run via `integration_tests` on the **`at`** module).
+//! [`dte_serial_host.zig`](dte_serial_host.zig) (POSIX; wired from `test_runner/integration.zig`).
 
 const Dce = @import("../Dce.zig");
 const Dte = @import("../Dte.zig");
@@ -178,25 +178,13 @@ pub fn make(comptime lib: type, comptime line_cap: usize) testing_api.TestRunner
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = self;
             _ = allocator;
-            lib.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
-    runner.* = .{};
-    return testing_api.TestRunner.make(Runner).new(runner);
-}
-
-test "at/unit_tests/test_runner/dte_loopback_smoke" {
-    const std = @import("std");
-    const Lib = struct {
-        pub const mem = @import("embed").mem;
-        pub const time = struct {
-            pub fn milliTimestamp() i64 {
-                return std.time.milliTimestamp();
-            }
-        };
+    const Holder = struct {
+        var runner: Runner = .{};
     };
-    try runSurface(Lib, 128);
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

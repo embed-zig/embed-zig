@@ -289,6 +289,40 @@ test "modem/unit/embed_std" {
     if (!t.wait()) return error.TestFailed;
 }
 
+test "at/unit/std" {
+    var t = testing.T.new(std, .std);
+    defer t.deinit();
+
+    t.run("at/unit/std", at.test_runner.unit.make(std));
+    if (!t.wait()) return error.TestFailed;
+}
+
+test "at/unit/embed_std" {
+    var t = testing.T.new(embed_std.std, .embed);
+    defer t.deinit();
+
+    t.run("at/unit/embed_std", at.test_runner.unit.make(embed_std.std));
+    if (!t.wait()) return error.TestFailed;
+}
+
+test "at/integration/std" {
+    var t = testing.T.new(std, .std);
+    defer t.deinit();
+    t.timeout(30 * std.time.ns_per_s);
+
+    t.run("at/integration/std", at.test_runner.integration.make(std));
+    if (!t.wait()) return error.TestFailed;
+}
+
+test "at/integration/embed_std" {
+    var t = testing.T.new(embed_std.std, .embed);
+    defer t.deinit();
+    t.timeout(30 * embed_std.std.time.ns_per_s);
+
+    t.run("at/integration/embed_std", at.test_runner.integration.make(embed_std.std));
+    if (!t.wait()) return error.TestFailed;
+}
+
 test "display/unit/std" {
     var t = testing.T.new(std, .std);
     defer t.deinit();
