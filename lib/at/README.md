@@ -45,8 +45,8 @@ deadlines). **`lib/at/Transport` adds `flushRx`** and is not identical to
 | `lib/at/Transport.zig` | Type-erased byte transport: like `lib/bt/Transport.zig` plus required **`flushRx`** (discard RX buffer; `reset` remains for stronger teardown). |
 | `lib/at/LineReader.zig` (or `framing.zig`) | Fixed-buffer incremental framing aligned with **ITU-T V.250** (CR / default S3) and common **CRLF** on the wire (same CRLF idea as **HTTP/1.x** header lines). Trim / echo strip only as documented there. |
 | `lib/at/Session.zig` | **Implemented** — `Session.make(lib, line_cap)` (uses `lib.time.milliTimestamp` and `lib.mem.eql` / `startsWith` in the body). See **Session implementation scope** below. |
-| `lib/at/Dte.zig` | **DTE** (terminal) side: composes `Transport` + `LineReader` + session API (`exchange`, `writeRaw`, …). Factory: `Dte(comptime lib: type, comptime line_buf_cap: usize)` with `comptime` checks on `lib.time` for deadlines. |
-| `lib/at/Dce.zig` | **DCE** (modem) side for **tests / simulation**: prefix table + `handleLine`; optional canned responses. Production firmware rarely needs this in `lib/at`; keep it thin. |
+| `lib/at/Dte.zig` | **Implemented** — **`at.Dte.make(lib, line_cap)`**: product-facing wrapper over `Session` (`init`, `exchange`, `writeRaw`, `readExact`, `flushRx`, `clearReader`); **`comptime`** requires `lib.time.milliTimestamp`. |
+| `lib/at/Dce.zig` | **Implemented** — **`CommandEntry` + `handleLine`**: longest-prefix match on ASCII-trimmed command line, reply written to caller buffer; optional **`default_respond`**. No I/O; pair with a loopback `Transport` in tests. |
 | `lib/at/test_runner/dte_loopback.zig` | Smoke runner: in-process loopback `Transport` + `Dce` + `Dte`, no hardware. |
 | `lib/at/test_runner/dte_serial.zig` | Smoke runner: host **DTE** over a real serial path (e.g. Mac + device acting as **DCE** on USB-UART). Skips when env not set. |
 
@@ -77,8 +77,8 @@ Transport → LineReader (framing) → Session → Dte
    See **What belongs in Session (not LineReader)** below.
 4. **Dte** — Product-facing API on the host/MCU that talks to the modem. Holds
    config (timeouts, CRLF, echo policy).
-5. **Dce** — Table-driven handlers: `CommandEntry { prefix, handler }` with
-   **longest-prefix** dispatch; used for **loopback tests** and modem mocks, not
+5. **Dce** — Table-driven **`CommandEntry { prefix, respond }`** with
+   **longest-prefix** dispatch (`handleLine`); used for **loopback tests** and modem mocks, not
    for vendor AT profiles (those stay in app / `lib/cellular`).
 
 ### What belongs in Session (not LineReader)
@@ -199,16 +199,17 @@ On-embedded test binaries can reuse the same **Dte** surface with a board
 `Transport` (UART to modem); the **serial** runner remains the usual choice for
 **Mac DTE ↔ device DCE** smoke.
 
-### Integration tests
+### Integration-style tests (on the **`at`** module)
 
-Per `AGENTS.md`:
+To keep **`lib/at`** independent of **`lib/cellular`** and the shared **`integration/`**
+module graph, AT smoke runners use the **`integration_tests`** tag on **`lib/at.zig`**
+(`zig build test-at` runs them with the integration filter for that module):
 
-- Place entrypoints under the shared **`integration/`** tree (e.g.
-  `integration/at/dte_loopback.zig`, `integration/at/dte_serial.zig`).
-- Use `std` (or `embed_std`) where needed: opening `/dev/tty.*`, env vars,
-  comparing **embed** vs **std**-shaped `lib` if useful.
-- Root `test "at/integration_tests/…"` blocks import those files and call
-  `T.run(..., at.test_runner.… .make(lib))`.
+- **`integration_tests/at/dte_loopback`** — in-process **Dte** ↔ **Dce** (`test_runner/dte_loopback.zig`).
+- **`integration_tests/at/dte_serial_host`** — POSIX serial **DTE** vs **ESP32-S3 DCE firmware**
+  (`test_runner/dte_serial_host.zig`, **`std`**; not re-exported from `pub test_runner`).
+
+Host serial uses **`EMBED_AT_SERIAL`** / **`EMBED_AT_BAUD`**; unset path → skip (success).
 
 ### What not to duplicate here
 
@@ -220,15 +221,21 @@ Per `AGENTS.md`:
 - Module: `build/lib/at.zig`, root `lib/at.zig`, registered as `at` in `build.zig`.
 - Run unit tests: `zig build test-at` (or `zig build test-unit` for all libs).
 
+### Production: UART or USB CDC
+
+1. Implement **`at.Transport`** on your driver (**`read` / `write` / `flushRx` / `reset` / `deinit`**, plus read/write deadlines mapped to your RTOS / bare-metal timer).
+2. Build **`Dte`**: `const D = at.Dte.make(board_lib, line_cap); var dte = D.init(at.Transport.init(&impl), .{});` then call **`exchange`**, **`writeRaw`**, **`readExact`** as needed.
+3. **USB CDC-ACM** is still a **byte stream** after enumeration; only the **`Transport`** implementation changes, not **`Session`** / **`Dte`**.
+4. **`Dce`** is for **tests / loopback mocks** (feed it lines from a fake RX queue, append replies to a fake TX queue), not for talking to a real modem on the wire.
+
 ## Next steps
 
 1. **`Transport`** — Implemented: same core surface as `lib/bt/Transport.zig`,
    plus required **`flushRx`** (see layering below).
 2. **`LineReader`** — Implemented (`lib/at/LineReader.zig`); see `LineTooLong` /
    `OutTooSmall` above.
-3. **`Session`** — Implemented in `lib/at/Session.zig` (`Session.make(lib, line_cap)`).
-   Next: **`Dte(lib, cap)`** wrapping config and optional higher-level helpers.
-4. Add `Dce` + prefix **command table** for loopback tests.
-5. Add `test_runner/dte_loopback.zig` and `test_runner/dte_serial.zig`;
-   integration entrypoints under `integration/at/`.
-6. Keep this README in sync with the public import path as APIs land.
+3. **`Session`** — Implemented (`Session.make(lib, line_cap)`).
+4. **`Dte`** — Implemented (`Dte.make(lib, line_cap)`).
+5. **`Dce`** — Implemented (`handleLine`, `CommandEntry`, `respondCopy` helper).
+6. **`test_runner/dte_loopback.zig`** + **`dte_serial_host.zig`**; **`integration_tests`** hooks in **`lib/at.zig`** (see above).
+7. Keep this README in sync with the public import path as APIs land.
