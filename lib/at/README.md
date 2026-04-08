@@ -44,7 +44,7 @@ deadlines). **`lib/at/Transport` adds `flushRx`** and is not identical to
 | `build/lib/at.zig` | Build-system module definition (`at` module in `build.zig`). |
 | `lib/at/Transport.zig` | Type-erased byte transport: like `lib/bt/Transport.zig` plus required **`flushRx`** (discard RX buffer; `reset` remains for stronger teardown). |
 | `lib/at/LineReader.zig` (or `framing.zig`) | Fixed-buffer incremental framing aligned with **ITU-T V.250** (CR / default S3) and common **CRLF** on the wire (same CRLF idea as **HTTP/1.x** header lines). Trim / echo strip only as documented there. |
-| `lib/at/Session.zig` (or `engine.zig`) | Per-command timeouts, read until terminal line; URC dispatch hooks. |
+| `lib/at/Session.zig` | **Implemented** — `Session.make(lib, line_cap)` (needs `lib.time.milliTimestamp`, `lib.mem.eql`, `lib.mem.startsWith`). See **Session implementation scope** below. |
 | `lib/at/Dte.zig` | **DTE** (terminal) side: composes `Transport` + `LineReader` + session API (`exchange`, `writeRaw`, …). Factory: `Dte(comptime lib: type, comptime line_buf_cap: usize)` with `comptime` checks on `lib.time` for deadlines. |
 | `lib/at/Dce.zig` | **DCE** (modem) side for **tests / simulation**: prefix table + `handleLine`; optional canned responses. Production firmware rarely needs this in `lib/at`; keep it thin. |
 | `lib/at/test_runner/dte_loopback.zig` | Smoke runner: in-process loopback `Transport` + `Dce` + `Dte`, no hardware. |
@@ -89,10 +89,10 @@ belongs in **`Session` / `Dte`** (command state machine, timeouts, mode switches
 
 | Situation | Where it is handled |
 |-----------|---------------------|
-| **Echo (ATE1)** | **Session**: match / drop lines that repeat the last sent command, or prefer **ATE0**. |
+| **Echo (ATE1)** | **Session**: `Config.strip_echo` drops lines matching the last sent command body (trimmed), or prefer **ATE0**. |
 | **Prompts** (e.g. SMS **`>`** after `AT+CMGS`) | **Session**: detect prompt (by line or byte scan), then switch phase — do **not** treat payload as a normal “English” line. |
-| **PDU / body after prompt** | **Session**: **`transport.read` / `write`** for a **fixed length**, until **0x1A**, or per modem spec — **bypass `LineReader`** for that segment; then resume line mode (`LineReader.clear()` if needed). |
-| **Length-prefixed binary** (e.g. `+QHTTPREAD: <len>` then raw bytes) | **Session**: **`readLine`** to parse the header line, then **read exactly `len` bytes** from `Transport`, not `readLine`. |
+| **PDU / body after prompt** | **Session**: use **`writeRaw`** / **`readExact`** (raw `Transport` I/O) for **fixed length**, until **0x1A**, or per modem spec — **bypass `LineReader`**; then **`clearReader`** / resume **`exchange`**. |
+| **Length-prefixed binary** (e.g. `+QHTTPREAD: <len>` then raw bytes) | **Caller**: one **`exchange`** or **`readLine`** to get the header line, parse `len`, then **`readExact`** for `len` bytes (not another `exchange`). |
 | **File / bulk data** | Usually **socket or data plane** (TCP/TLS/HTTP AT), or **framed** transfer — not “read lines until EOF”. |
 | **CMUX / PPP** | **Below** Session: demux to a **single logical AT stream** first; `LineReader` + `Session` attach **only** to that stream. |
 
@@ -117,6 +117,35 @@ These are **not** fixed global byte counts; they depend on **your buffers**:
 complete line is still buffered). **`Session` / `Dte`** is the right place to
 retry with a **larger `out`** (e.g. call `tryPopLineInto` again), or to pick an
 `out` size up front that fits expected responses and avoid the error entirely.
+
+### Session implementation scope (`lib/at/Session.zig`)
+
+Use **`const S = at.Session.make(comptime_lib, line_cap);`** — `line_cap` must match
+the **`LineReader(cap)`** used inside (one line’s max body + terminator budget).
+
+**Included today**
+
+- **`exchange(cmd, options)`** — Sends `cmd` (optional `\r\n` via `Config.append_crlf`),
+  then reads lines until **`OK`**, **`ERROR`**, **`+CME ERROR:`**, or **`+CMS ERROR:`**
+  (after ASCII trim). Other lines are **non-terminal**: optional **`on_info_line`**
+  callback (URC / `+CSQ:` / …); **`max_non_terminal_lines`** prevents infinite loops.
+- **`Config.strip_echo`** — Skips lines equal to the last **`cmd`** body (trimmed),
+  for **ATE1**-style echo.
+- **Timeouts** — **`command_timeout_ms`** bounds the whole exchange; **`transport_read_timeout_ms`**
+  / **`transport_write_timeout_ms`** are applied per `Transport` read/write attempt
+  (same pattern as `lib/bt/host/Hci.zig`). **Note:** each **`readLine`** sets the read
+  deadline **once** at entry; if one line arrives slowly over many small reads, increase
+  **`transport_read_timeout_ms`** or split work at **`Dte`** (see `LineReader` doc).
+- **`writeRaw` / `readExact`** — For **binary segments** after a **`>`** prompt or similar;
+  **`readExact`** loops **`transport.read`** with a fresh deadline each time.
+- **`flushRx` / `clearReader`** — Align RX state when switching between line mode and raw mode.
+
+**Not implemented here (caller, `Dte`, or product code)**
+
+- **`AT+CMGS` / `>`** two-phase state machine (detect prompt, then PDU, then **0x1A**).
+- Parsing **`+CME ERROR: <n>`** numeric codes.
+- Automatic **`OutTooSmall` retry** with a larger line buffer (see **LineReader errors** above).
+- **CMUX / PPP** (stay below this `Transport`).
 
 ### `exchange` (naming / behavior)
 
@@ -198,8 +227,8 @@ Per `AGENTS.md`:
    plus required **`flushRx`** (see layering below).
 2. **`LineReader`** — Implemented (`lib/at/LineReader.zig`); see `LineTooLong` /
    `OutTooSmall` above.
-3. Add minimal `Session` + `Dte(lib, cap)`: `sendRaw` / `exchange` with
-   callback-based info lines, deadlines from `lib.time`.
+3. **`Session`** — Implemented in `lib/at/Session.zig` (`Session.make(lib, line_cap)`).
+   Next: **`Dte(lib, cap)`** wrapping config and optional higher-level helpers.
 4. Add `Dce` + prefix **command table** for loopback tests.
 5. Add `test_runner/dte_loopback.zig` and `test_runner/dte_serial.zig`;
    integration entrypoints under `integration/at/`.
