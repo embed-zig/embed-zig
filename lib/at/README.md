@@ -44,7 +44,7 @@ deadlines). **`lib/at/Transport` adds `flushRx`** and is not identical to
 | `build/lib/at.zig` | Build-system module definition (`at` module in `build.zig`). |
 | `lib/at/Transport.zig` | Type-erased byte transport: like `lib/bt/Transport.zig` plus required **`flushRx`** (discard RX buffer; `reset` remains for stronger teardown). |
 | `lib/at/LineReader.zig` (or `framing.zig`) | Fixed-buffer incremental framing aligned with **ITU-T V.250** (CR / default S3) and common **CRLF** on the wire (same CRLF idea as **HTTP/1.x** header lines). Trim / echo strip only as documented there. |
-| `lib/at/Session.zig` | **Implemented** — `Session.make(lib, line_cap)` (needs `lib.time.milliTimestamp`, `lib.mem.eql`, `lib.mem.startsWith`). See **Session implementation scope** below. |
+| `lib/at/Session.zig` | **Implemented** — `Session.make(lib, line_cap)` (uses `lib.time.milliTimestamp` and `lib.mem.eql` / `startsWith` in the body). See **Session implementation scope** below. |
 | `lib/at/Dte.zig` | **DTE** (terminal) side: composes `Transport` + `LineReader` + session API (`exchange`, `writeRaw`, …). Factory: `Dte(comptime lib: type, comptime line_buf_cap: usize)` with `comptime` checks on `lib.time` for deadlines. |
 | `lib/at/Dce.zig` | **DCE** (modem) side for **tests / simulation**: prefix table + `handleLine`; optional canned responses. Production firmware rarely needs this in `lib/at`; keep it thin. |
 | `lib/at/test_runner/dte_loopback.zig` | Smoke runner: in-process loopback `Transport` + `Dce` + `Dte`, no hardware. |

@@ -8,12 +8,6 @@ const Transport = @import("Transport.zig");
 const LineReaderMod = @import("LineReader.zig");
 
 pub fn make(comptime lib: type, comptime line_cap: usize) type {
-    comptime {
-        _ = lib.time.milliTimestamp;
-        _ = lib.mem.eql;
-        _ = lib.mem.startsWith;
-    }
-
     const LineReader = LineReaderMod.LineReader(line_cap);
 
     return struct {
