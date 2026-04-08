@@ -205,6 +205,7 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
                     .att_mtu = self.subscription.attMtu(),
                     .timeout_ms = 30_000,
                 }) catch return;
+                defer self.mux.allocator.free(data);
 
                 self.mux.mutex.lock();
                 const maybe_handler = self.mux.receive_handler;
@@ -220,8 +221,6 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
                     };
                     receive_handler(handler_ctx, &receive_req);
                 }
-
-                self.mux.allocator.free(data);
             }
         };
 
