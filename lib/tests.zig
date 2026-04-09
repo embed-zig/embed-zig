@@ -154,8 +154,6 @@ test "bt/unit/embed_std" {
 }
 
 test "bt/integration/std" {
-    std.testing.log_level = .info;
-
     var t = testing.T.new(std, .std);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
@@ -390,8 +388,6 @@ test "sync/integration/embed_std" {
 }
 
 test "embed/unit/std" {
-    std.testing.log_level = .info;
-
     var t = testing.T.new(std, .std);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
