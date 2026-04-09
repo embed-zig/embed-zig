@@ -119,7 +119,8 @@ fn runHostSerial(comptime lib: type, t: *testing_api.T) !void {
     var serial = Serial{ .fd = fd };
     const transport = Transport.init(&serial);
     const P = Peer.make(lib);
-    var peer = P.init(transport, .{
+    var peer = P.init(.{
+        .wire = transport,
         .transport_read_timeout_ms = transport_ms,
         .transport_write_timeout_ms = transport_ms,
         // Boot logs / several URC lines before `OK` need a generous wall budget.

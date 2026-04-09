@@ -1,17 +1,19 @@
 //! **Peer** — AT-style **framing** and **I/O** over [`Transport`](Transport.zig).
 //!
 //! **TX and RX are independent** (USB/UART full-duplex): **`writeRaw`** / **`exchange`** outbound
-//! writes do not block the RX path; **`readLine`** / **`wire.read`** / URC handling are separate
+//! writes do not block the RX path; **`readLine`** / **`config.wire.read`** / URC handling are separate
 //! incremental reads on the same byte stream. **URCs** (device → host, no reply) are just
 //! lines you get via **`readLine`** or non-terminal lines inside **`exchange`** (`on_info_line`).
-//! Chunked raw reads: set deadline on **`wire`** then **`wire.read`** (see **`Config.transport_read_timeout_ms`**).
+//! Chunked raw reads: set deadline on **`config.wire`** then **`read`** (see **`Config.transport_read_timeout_ms`**).
 //!
 //! **DTE:** **`exchange`** sends a command, then reads lines until **`OK`** / **`ERROR`** / …
 //! **DCE:** **`readLine`** then **`writeRaw`** your reply. Same type on both ends.
 //!
-//! Field **`wire`** is the [`Transport`](Transport.zig) handle (`transport` is a Zig keyword).
+//! The byte stream lives in **`Config.wire`** ([`Transport`](Transport.zig); `transport` is a keyword).
+//! Build with **`init`(`config`)** — use **`Config.with`(`ctx`)** so **`ctx`** may be a **`Transport`**
+//! or a backend pointer (**`Config.backend`** is then set for [`backendAs`]).
 //! For **fixed-length** raw reads (e.g. after parsing `+QHTTPREAD: <len>`), set deadlines on
-//! **`wire`** and loop **`wire.read`** yourself — **`Peer`** does not wrap **`readExact`**.
+//! **`peer.config.wire`** and loop **`read`** yourself — **`Peer`** does not wrap **`readExact`**.
 
 const LineReaderMod = @import("LineReader.zig");
 const Transport = @import("Transport.zig");
@@ -31,19 +33,20 @@ pub fn make(comptime lib: type) type {
     return struct {
         const Self = @This();
 
-        wire: Transport,
         reader: LineReader = LineReader.init(),
-        config: Config = .{},
+        config: Config,
 
         last_cmd_len: usize = 0,
         last_cmd: [max_line_len]u8 = undefined,
 
-        /// When set via [`initFromBackend`], the implementation pointer behind `wire.ptr`.
-        backend: ?*anyopaque = null,
-
         pub const ReadLineOptions = LineReader.ReadLineOptions;
 
         pub const Config = struct {
+            /// Type-erased stream for reads, writes, flush, deadlines.
+            wire: Transport,
+            /// When non-null, points at the concrete backend used to build **`wire`** (see [`Config.with`]).
+            /// Leave **`null`** if you only have a bare **`Transport`** and do not need [`backendAs`].
+            backend: ?*anyopaque = null,
             transport_read_timeout_ms: u32 = 100,
             transport_write_timeout_ms: u32 = 200,
             /// Wall-clock budget for the whole `exchange` (all lines until final).
@@ -53,6 +56,18 @@ pub fn make(comptime lib: type) type {
             /// (default **CR**); **27.007** often uses **CRLF** on UART/USB — default `true` matches
             /// many modems; set `false` if `cmd` already ends with terminators or the DCE expects CR only.
             append_crlf: bool = true,
+
+            /// Fill **`wire`** / **`backend`** from a [`Transport`] value or a backend **`Transport.init`** accepts.
+            pub fn with(ctx: anytype) Config {
+                const Ctx = @TypeOf(ctx);
+                if (Ctx == Transport) {
+                    return .{ .wire = ctx, .backend = null };
+                }
+                return .{
+                    .wire = Transport.init(ctx),
+                    .backend = @ptrCast(@alignCast(ctx)),
+                };
+            }
         };
 
         pub const Final = enum {
@@ -82,30 +97,24 @@ pub fn make(comptime lib: type) type {
             PendingOverflow,
         };
 
-        pub fn init(init_transport: Transport, config: Config) Self {
+        pub fn init(peer_config: Config) Self {
             return .{
-                .wire = init_transport,
-                .config = config,
-                .backend = null,
+                .reader = LineReader.init(),
+                .config = peer_config,
+                .last_cmd_len = 0,
+                .last_cmd = undefined,
             };
         }
 
-        pub fn initFromBackend(backend: anytype, config: Config) Self {
-            const init_transport = Transport.init(backend);
-            return initWithBackend(backend, init_transport, config);
-        }
-
         pub fn backendAs(self: *Self, comptime T: type) ?*T {
-            const p = self.backend orelse return null;
+            const p = self.config.backend orelse return null;
             return @ptrCast(@alignCast(p));
         }
 
+        /// Drop the line assembler only (e.g. after **`readLine`** `OutTooSmall`); does not touch the transport RX buffer.
+        /// For driver RX discard use **`self.config.wire.flushRx()`**; **`exchange`** clears the reader and flushes RX itself.
         pub fn clearReader(self: *Self) void {
             self.reader.clear();
-        }
-
-        pub fn flushRx(self: *Self) void {
-            self.wire.flushRx();
         }
 
         pub fn writeRaw(self: *Self, data: []const u8) Transport.WriteError!void {
@@ -116,8 +125,8 @@ pub fn make(comptime lib: type) type {
             var total: usize = 0;
             while (true) {
                 if (total >= out.len) return error.RawBufferFull;
-                self.wire.setReadDeadline(ioDeadlineNs(self.config.transport_read_timeout_ms));
-                const n = try self.wire.read(out[total..]);
+                self.config.wire.setReadDeadline(ioDeadlineNs(self.config.transport_read_timeout_ms));
+                const n = try self.config.wire.read(out[total..]);
                 if (n == 0) continue;
                 const chunk = out[total..][0..n];
                 if (lib.mem.indexOfScalar(u8, chunk, term)) |rel| {
@@ -132,15 +141,15 @@ pub fn make(comptime lib: type) type {
         }
 
         pub fn readLine(self: *Self, out: []u8, line_read: ReadLineOptions) ReadLineError![]const u8 {
-            self.wire.setReadDeadline(ioDeadlineNs(self.config.transport_read_timeout_ms));
-            return self.reader.readLine(self.wire, out, line_read);
+            self.config.wire.setReadDeadline(ioDeadlineNs(self.config.transport_read_timeout_ms));
+            return self.reader.readLine(self.config.wire, out, line_read);
         }
 
         /// Send `cmd`, then read lines until a **final** result. Clears the line assembler and
         /// **`flushRx`** first. Non-terminal lines (URC / info) invoke `on_info_line` if set.
         pub fn exchange(self: *Self, cmd: []const u8, ex: ExchangeOptions) ExchangeError!Final {
-            self.reader.clear();
-            self.wire.flushRx();
+            self.clearReader();
+            self.config.wire.flushRx();
 
             if (cmd.len > max_line_len) return error.CmdTooLong;
             @memcpy(self.last_cmd[0..cmd.len], cmd);
@@ -158,7 +167,7 @@ pub fn make(comptime lib: type) type {
                 @memcpy(send_buf[0..cmd.len], cmd);
                 break :blk send_buf[0..cmd.len];
             };
-            try self.transportWriteAll(to_send);
+            try self.writeRaw(to_send);
 
             const exchange_end_ns = lib.time.milliTimestamp() * 1_000_000 +
                 @as(i64, self.config.command_timeout_ms) * 1_000_000;
@@ -170,8 +179,8 @@ pub fn make(comptime lib: type) type {
                 if (lib.time.milliTimestamp() * 1_000_000 > exchange_end_ns) {
                     return error.Timeout;
                 }
-                self.wire.setReadDeadline(ioDeadlineNs(self.config.transport_read_timeout_ms));
-                const line = try self.reader.readLine(self.wire, &line_buf, ex.line_read);
+                self.config.wire.setReadDeadline(ioDeadlineNs(self.config.transport_read_timeout_ms));
+                const line = try self.reader.readLine(self.config.wire, &line_buf, ex.line_read);
 
                 const body = trimAscii(line);
                 if (self.last_cmd_len > 0 and
@@ -189,14 +198,6 @@ pub fn make(comptime lib: type) type {
                     cb(ex.info_ctx, line);
                 }
             }
-        }
-
-        fn initWithBackend(backend: anytype, init_transport: Transport, config: Config) Self {
-            return .{
-                .wire = init_transport,
-                .config = config,
-                .backend = @ptrCast(@alignCast(backend)),
-            };
         }
 
         fn classifyFinal(body: []const u8) ?Final {
@@ -222,8 +223,8 @@ pub fn make(comptime lib: type) type {
         fn transportWriteAll(self: *Self, buf: []const u8) Transport.WriteError!void {
             var off: usize = 0;
             while (off < buf.len) {
-                self.wire.setWriteDeadline(ioDeadlineNs(self.config.transport_write_timeout_ms));
-                const n = try self.wire.write(buf[off..]);
+                self.config.wire.setWriteDeadline(ioDeadlineNs(self.config.transport_write_timeout_ms));
+                const n = try self.config.wire.write(buf[off..]);
                 if (n == 0) return error.Unexpected;
                 off += n;
             }
@@ -271,7 +272,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var back = Impl{ .data = "AT+CSQ\r\n" };
             const transport = Transport.init(&back);
             const P = make(Lib);
-            var peer = P.init(transport, .{ .append_crlf = false });
+            var peer = P.init(.{ .wire = transport, .append_crlf = false });
             var buf: [64]u8 = undefined;
             const line = try peer.readLine(&buf, .{});
             try testing.expectEqualStrings("AT+CSQ", line);
@@ -307,7 +308,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var back = Impl{};
             const transport = Transport.init(&back);
             const P = make(Lib);
-            var peer = P.init(transport, .{ .append_crlf = false });
+            var peer = P.init(.{ .wire = transport, .append_crlf = false });
             const r = peer.exchange("AT", .{});
             try testing.expectError(error.Timeout, r);
         }
@@ -342,14 +343,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var back = Impl{};
             const transport = Transport.init(&back);
             const P = make(Lib);
-            var peer = P.init(transport, .{ .append_crlf = false });
+            var peer = P.init(.{ .wire = transport, .append_crlf = false });
             var too_long: [max_line_len + 1]u8 = undefined;
             @memset(&too_long, 'X');
             const r = peer.exchange(&too_long, .{});
             try testing.expectError(error.CmdTooLong, r);
         }
 
-        fn testInitFromBackendTransportAndBackendAs() !void {
+        fn testInitConfigWireMatchesBackendAs() !void {
             const std = @import("std");
             const testing = std.testing;
 
@@ -385,8 +386,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             var back = Impl{ .data = "OK\r\n" };
             const P = make(Lib);
-            var peer = P.initFromBackend(&back, .{ .append_crlf = false });
-            try testing.expectEqual(peer.wire.ptr, @as(*anyopaque, @ptrCast(&back)));
+            var peer = P.init(.{
+                .wire = Transport.init(&back),
+                .backend = @ptrCast(@alignCast(&back)),
+                .append_crlf = false,
+            });
+            try testing.expectEqual(peer.config.wire.ptr, @as(*anyopaque, @ptrCast(&back)));
             const impl = peer.backendAs(Impl).?;
             try testing.expectEqual(@as(u32, 0xbeef_cafe), impl.marker);
 
@@ -430,7 +435,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var back = Impl{ .data = "+CSQ: 99,99\r\nOK\r\n" };
             const transport = Transport.init(&back);
             const P = make(Lib);
-            var peer = P.init(transport, .{ .append_crlf = false });
+            var peer = P.init(.{ .wire = transport, .append_crlf = false });
 
             var infos: usize = 0;
             const Cb = struct {
@@ -484,7 +489,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var back = Impl{ .data = "AT+CSQ\r\n+CSQ: 1\r\nOK\r\n" };
             const transport = Transport.init(&back);
             const P = make(Lib);
-            var peer = P.init(transport, .{ .append_crlf = false });
+            var peer = P.init(.{ .wire = transport, .append_crlf = false });
 
             const fin = try peer.exchange("AT+CSQ", .{});
             try testing.expectEqual(P.Final.ok, fin);
@@ -526,7 +531,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var back = Impl{ .data = "hello\x1AOK\r\n" };
             const transport = Transport.init(&back);
             const P = make(Lib);
-            var peer = P.init(transport, .{});
+            var peer = P.init(.{ .wire = transport });
 
             var raw: [16]u8 = undefined;
             const pdu = try peer.readUntilByte(&raw, 0x1a);
@@ -552,7 +557,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 TestCase.testReadLineInbound,
                 TestCase.testExchangeFailsOnTransportReadTimeout,
                 TestCase.testExchangeCmdTooLong,
-                TestCase.testInitFromBackendTransportAndBackendAs,
+                TestCase.testInitConfigWireMatchesBackendAs,
                 TestCase.testExchangeOkAfterInfo,
                 TestCase.testStripEcho,
                 TestCase.testReadUntilByteInjectsTrailingLine,

@@ -44,7 +44,7 @@ deadlines). **`lib/at/Transport` adds `flushRx`** and is not identical to
 | `build/lib/at.zig` | Build-system module definition (`at` module in `build.zig`). |
 | `lib/at/Transport.zig` | Type-erased byte transport: like `lib/bt/Transport.zig` plus required **`flushRx`** (discard RX buffer; `reset` remains for stronger teardown). |
 | `lib/at/LineReader.zig` (or `framing.zig`) | Fixed-buffer incremental framing aligned with **ITU-T V.250** (CR / default S3) and common **CRLF** on the wire (same CRLF idea as **HTTP/1.x** header lines). Trim / echo strip only as documented there. |
-| `lib/at/Peer.zig` | **Implemented** — **`at.Peer.make(lib)`** ([`max_line_len`](Peer.zig) fixed cap): **`wire`** (`Transport`) + internal **`LineReader`**. **`exchange`** (DTE), **`readLine`** / **`writeRaw`** (DCE), **`readUntilByte`**. Other raw reads: **`peer.wire.read`** (+ deadline). **`comptime`** requires `lib.time.milliTimestamp`. |
+| `lib/at/Peer.zig` | **Implemented** — **`at.Peer.make(lib)`** ([`max_line_len`](Peer.zig) fixed cap): **[`Config.wire`](Peer.zig)** (`Transport`) + internal **`LineReader`**. **`exchange`** (DTE), **`readLine`** / **`writeRaw`** (DCE), **`readUntilByte`**. Other raw reads: **`peer.config.wire.read`** (+ deadline). **`comptime`** requires `lib.time.milliTimestamp`. |
 | `lib/at/test_runner/test_utils/dte_loopback.zig` | Smoke runner: in-process loopback `Transport` with canned **`AT` / `AT+CSQ`** replies + **`Peer`**, no hardware. |
 | `lib/at/test_runner/integration/dte_serial_host.zig` | Smoke runner: host **DTE** over a real serial path (e.g. Mac + device acting as **DCE** on USB-UART). Skips when env not set. |
 
@@ -66,12 +66,11 @@ Transport → Peer (LineReader inside)   (public: Transport + Peer)
      `flushRx`.
 2. **LineReader** — Produces complete lines using **V.250-style CR** and **CRLF /
    LF** rules (see `LineReader.zig` doc); no `OK`/`ERROR` semantics.
-3. **Peer** — Public type: **`wire`** ([`Transport`](Transport.zig)) + line reader + **`exchange`**
+3. **Peer** — Public type: **[`Config.wire`](Peer.zig)** ([`Transport`](Transport.zig)) + line reader + **`exchange`**
    / **`readLine`** / **`writeRaw`** / raw reads. **Full-duplex:** sending a command does not
    block receiving **URCs** on the other wire direction at the driver level; the **single RX stream**
    is still one ordered byte sequence (multiplex URC vs command response in your tasking model).
-   Use **`init`**(`transport`, config) or **`initFromBackend`**(`&impl`, config) for
-   **`peer.backendAs`(YourType)**. Each **`exchange`** runs **`clearReader`** + **`flushRx`**
+   Build with **`init`**(`config`) where **`config`** is **[`Peer.Config`](Peer.zig)** (includes **`wire`**, timeouts, **`append_crlf`**). Use **`Peer.Config.with`(`&impl`)** to set **`wire`** + **`backend`** for **`peer.backendAs`(YourType)**; with a bare **`Transport`**, use **`P.init(.{ .wire = t })`** and leave **`backend`** null. Each **`exchange`** runs **`clearReader`** + **`flushRx`**
    before sending; **`readLine`** does not.
 
 ### What belongs in Peer (not LineReader)
@@ -84,8 +83,8 @@ belongs in **`Peer`** or your app (command state machine, timeouts, mode switche
 |-----------|---------------------|
 | **Echo (ATE1)** | **`Peer.exchange`** skips a line that matches the last sent **cmd** body (ASCII trim), before counting non-terminal lines; prefer **ATE0** if echo shape does not match. |
 | **Prompts** (e.g. SMS **`>`** after `AT+CMGS`) | **Your loop**: detect prompt (by line or byte scan), then switch phase — do **not** treat payload as a normal “English” line. |
-| **PDU / body after prompt** | **Peer**: **`writeRaw`**, then **`readUntilByte(out, 0x1A)`** (Ctrl+Z) or a loop of **`peer.wire.read`** (with deadlines) if there is no single sentinel — **bypass line parsing until the segment ends**; trailing bytes after the sentinel are re-queued for **`readLine`**. |
-| **Length-prefixed binary** (e.g. `+QHTTPREAD: <len>` then raw bytes) | **Caller**: one **`exchange`** or **`readLine`** to get the header line, parse `len`, then loop **`peer.wire.read`** (set read deadline using **`transport_read_timeout_ms`**) until `len` bytes — not another **`exchange`**. |
+| **PDU / body after prompt** | **Peer**: **`writeRaw`**, then **`readUntilByte(out, 0x1A)`** (Ctrl+Z) or a loop of **`peer.config.wire.read`** (with deadlines) if there is no single sentinel — **bypass line parsing until the segment ends**; trailing bytes after the sentinel are re-queued for **`readLine`**. |
+| **Length-prefixed binary** (e.g. `+QHTTPREAD: <len>` then raw bytes) | **Caller**: one **`exchange`** or **`readLine`** to get the header line, parse `len`, then loop **`peer.config.wire.read`** (set read deadline using **`transport_read_timeout_ms`**) until `len` bytes — not another **`exchange`**. |
 | **File / bulk data** | Usually **socket or data plane** (TCP/TLS/HTTP AT), or **framed** transfer — not “read lines until EOF”. |
 | **CMUX / PPP** | **Below** `Peer`: demux to a **single logical AT stream** first; **`Peer`** attaches **only** to that stream. |
 
@@ -123,8 +122,8 @@ retry with a **larger `out`** (e.g. call `tryPopLineInto` again), or to pick an
   (URC / `+CSQ:` / … during that transaction); **`max_non_terminal_lines`** caps loops.
 - **Command echo** — **`exchange`** skips a line equal to the last **`cmd`** body (trimmed).
 - **Timeouts** — **`command_timeout_ms`** for **`exchange`**; per-read/write via **`transport_*_timeout_ms`**.
-- **`readLine`** / **`writeRaw`** / **`readUntilByte`** — See `Peer.zig` docs. Other binary: **`wire.read`** in a loop with deadlines.
-- **`flushRx`** / **`clearReader`** — On **`Peer`**; **`exchange`** runs both before sending. Otherwise **`peer.wire.flushRx()`** or **`peer.clearReader()`**.
+- **`readLine`** / **`writeRaw`** / **`readUntilByte`** — See `Peer.zig` docs. Other binary: **`peer.config.wire.read`** in a loop with deadlines.
+- **`clearReader`** — Clears the internal line assembler only; **`exchange`** calls it (and **`peer.config.wire.flushRx()`**) before sending. For manual RX discard or URC drain policy, call **`peer.config.wire.flushRx()`** yourself.
 
 **Not implemented (your app)**
 
@@ -217,7 +216,7 @@ Host serial uses **`EMBED_AT_SERIAL`** / **`EMBED_AT_BAUD`**; unset path → ski
 ### Production: UART or USB CDC
 
 1. Implement **`at.Transport`** on your driver (**`read` / `write` / `flushRx` / `reset` / `deinit`**, plus read/write deadlines mapped to your RTOS / bare-metal timer).
-2. Build **`Peer`**: `const P = at.Peer.make(board_lib); var peer = P.init(at.Transport.init(&impl), .{});` then call **`exchange`** (host), or **`readLine`** + **`writeRaw`** (responder), or **`readUntilByte`** / **`peer.wire.read`** loops + **`writeRaw`** for raw phases.
+2. Build **`Peer`**: `const P = at.Peer.make(board_lib); var peer = P.init(P.Config.with(&impl));` (or `P.init(.{ .wire = at.Transport.init(&impl) })` if you do not need **`backendAs`**) then call **`exchange`** (host), or **`readLine`** + **`writeRaw`** (responder), or **`readUntilByte`** / **`peer.config.wire.read`** loops + **`writeRaw`** for raw phases.
 3. **USB CDC-ACM** is still a **byte stream** after enumeration; only the **`Transport`** implementation changes, not **`Peer`** internals.
 
 ## Next steps

@@ -154,7 +154,7 @@ pub fn runSurface(comptime lib: type) !void {
     var lb = Loopback().init();
     const transport = Transport.init(&lb);
     const P = Peer.make(lib);
-    var peer = P.init(transport, .{});
+    var peer = P.init(.{ .wire = transport });
 
     const fin1 = try peer.exchange("AT", .{});
     if (fin1 != .ok) return error.LoopbackAtFailed;
