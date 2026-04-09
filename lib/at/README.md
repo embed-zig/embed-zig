@@ -47,8 +47,8 @@ deadlines). **`lib/at/Transport` adds `flushRx`** and is not identical to
 | `lib/at/Session.zig` | **Implemented** — `Session.make(lib, line_cap)` (uses `lib.time.milliTimestamp` and `lib.mem.eql` / `startsWith` in the body). See **Session implementation scope** below. |
 | `lib/at/Dte.zig` | **Implemented** — **`at.Dte.make(lib, line_cap)`**: product-facing wrapper over `Session` (`init`, `exchange`, `writeRaw`, `readExact`, `flushRx`, `clearReader`); **`comptime`** requires `lib.time.milliTimestamp`. |
 | `lib/at/Dce.zig` | **Implemented** — **`CommandEntry` + `handleLine`**: longest-prefix match on ASCII-trimmed command line, reply written to caller buffer; optional **`default_respond`**. No I/O; pair with a loopback `Transport` in tests. |
-| `lib/at/test_runner/dte_loopback.zig` | Smoke runner: in-process loopback `Transport` + `Dce` + `Dte`, no hardware. |
-| `lib/at/test_runner/dte_serial.zig` | Smoke runner: host **DTE** over a real serial path (e.g. Mac + device acting as **DCE** on USB-UART). Skips when env not set. |
+| `lib/at/test_runner/test_utils/dte_loopback.zig` | Smoke runner: in-process loopback `Transport` + `Dce` + `Dte`, no hardware. |
+| `lib/at/test_runner/integration/dte_serial_host.zig` | Smoke runner: host **DTE** over a real serial path (e.g. Mac + device acting as **DCE** on USB-UART). Skips when env not set. |
 
 Exact file names may shift; **layering is fixed**:
 
@@ -193,7 +193,7 @@ type)` (and optional `makeWithOptions`) returning `testing.TestRunner`, with
 | Runner | Purpose |
 |--------|---------|
 | `dte_loopback` | **Memory or ring-backed `Transport`** wiring **Dte** to an in-process **Dce** table. Runs in CI without hardware. |
-| `dte_serial` | **Host-only** (e.g. macOS): open serial path from env (**e.g. `EMBED_AT_SERIAL`**), run minimal `AT` / `ATI` **exchange** against a **real DCE** (modem on device). If env unset, **log skip** and **return success** so default CI does not fail. Optional **`EMBED_AT_BAUD`** (default e.g. 115200). |
+| `dte_serial_host` | **Host-only** (e.g. macOS): open serial path from env (**e.g. `EMBED_AT_SERIAL`**), run minimal `AT` / `ATI` **exchange** against a **real DCE** (modem on device). If env unset, **log skip** and **return success** so default CI does not fail. Optional **`EMBED_AT_BAUD`** (default e.g. 115200). |
 
 On-embedded test binaries can reuse the same **Dte** surface with a board
 `Transport` (UART to modem); the **serial** runner remains the usual choice for
@@ -212,8 +212,8 @@ Run:
 
 Cases (under integration runner):
 
-- **`dte_loopback`** — in-process **Dte** ↔ **Dce** (`test_runner/dte_loopback.zig`).
-- **`dte_serial_host`** — POSIX serial **DTE** vs **ESP32-S3 DCE firmware** (`test_runner/dte_serial_host.zig`; not re-exported from `pub test_runner`).
+- **`dte_loopback`** — in-process **Dte** ↔ **Dce** (`test_runner/test_utils/dte_loopback.zig`).
+- **`dte_serial_host`** — POSIX serial **DTE** vs **ESP32-S3 DCE firmware** (`test_runner/integration/dte_serial_host.zig`; not re-exported from `pub test_runner`).
 
 Host serial uses **`EMBED_AT_SERIAL`** / **`EMBED_AT_BAUD`**; unset path → skip (success).
 

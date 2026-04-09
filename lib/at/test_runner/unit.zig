@@ -5,7 +5,7 @@ pub const LineReader = @import("unit/LineReader.zig");
 pub const Session = @import("unit/Session.zig");
 pub const Dte = @import("unit/Dte.zig");
 pub const Dce = @import("unit/Dce.zig");
-pub const dte_loopback = @import("dte_loopback.zig");
+pub const dte_loopback = @import("test_utils/dte_loopback.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {

@@ -1,11 +1,11 @@
 //! In-process **DTE ↔ DCE** smoke: memory loopback `Transport` + `Dce` prefix table + `Dte.exchange`.
 //!
 //! No hardware. For **host DTE + ESP32-S3 DCE firmware** over USB-UART, see
-//! [`dte_serial_host.zig`](dte_serial_host.zig) (POSIX; wired from `test_runner/integration.zig`).
+//! [`integration/dte_serial_host.zig`](../integration/dte_serial_host.zig) (POSIX; wired from `test_runner/integration.zig`).
 
-const Dce = @import("../Dce.zig");
-const Dte = @import("../Dte.zig");
-const Transport = @import("../Transport.zig");
+const Dce = @import("../../Dce.zig");
+const Dte = @import("../../Dte.zig");
+const Transport = @import("../../Transport.zig");
 const testing_api = @import("testing");
 
 const buf_size = 2048;

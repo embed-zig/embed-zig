@@ -145,227 +145,284 @@ pub const ReadLineError = Transport.ReadError || error{
     OutTooSmall,
 };
 
-test "at/unit_tests/LineReader/crlf_single_chunk" {
-    const std = @import("std");
-    const testing = std.testing;
+const testing_api = @import("testing");
 
-    const Impl = struct {
-        data: []const u8,
-        pos: usize = 0,
-        pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
-            if (self.pos >= self.data.len) return 0;
-            const n = @min(buf.len, self.data.len - self.pos);
-            @memcpy(buf[0..n], self.data[self.pos..][0..n]);
-            self.pos += n;
-            return n;
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn testCrlfSingleChunk() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Impl = struct {
+                data: []const u8,
+                pos: usize = 0,
+                pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
+                    if (self.pos >= self.data.len) return 0;
+                    const n = @min(buf.len, self.data.len - self.pos);
+                    @memcpy(buf[0..n], self.data[self.pos..][0..n]);
+                    self.pos += n;
+                    return n;
+                }
+                pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
+                    return 0;
+                }
+                pub fn flushRx(_: *@This()) void {}
+                pub fn reset(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+            };
+
+            var back = Impl{ .data = "OK\r\n" };
+            const transport = Transport.init(&back);
+            var reader = LineReader(64).init();
+            var out: [16]u8 = undefined;
+            const line = try reader.readLine(transport, &out, .{});
+            try testing.expectEqualStrings("OK", line);
         }
-        pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
-            return 0;
+
+        fn testCrOnlyWhenNotFollowedByLf() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Impl = struct {
+                data: []const u8,
+                pos: usize = 0,
+                pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
+                    if (self.pos >= self.data.len) return 0;
+                    const n = @min(buf.len, self.data.len - self.pos);
+                    @memcpy(buf[0..n], self.data[self.pos..][0..n]);
+                    self.pos += n;
+                    return n;
+                }
+                pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
+                    return 0;
+                }
+                pub fn flushRx(_: *@This()) void {}
+                pub fn reset(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+            };
+
+            var back = Impl{ .data = "OK\r+" };
+            const transport = Transport.init(&back);
+            var reader = LineReader(64).init();
+            var out: [16]u8 = undefined;
+            const line = try reader.readLine(transport, &out, .{});
+            try testing.expectEqualStrings("OK", line);
+            try testing.expectEqual(@as(usize, 1), reader.pending_len);
+            try testing.expectEqual(@as(u8, '+'), reader.pending[0]);
         }
-        pub fn flushRx(_: *@This()) void {}
-        pub fn reset(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
-        pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+
+        fn testSplitCrLfAcrossReads() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Impl = struct {
+                chunks: []const []const u8,
+                idx: usize = 0,
+                pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
+                    if (self.idx >= self.chunks.len) return 0;
+                    const chunk = self.chunks[self.idx];
+                    self.idx += 1;
+                    const n = @min(buf.len, chunk.len);
+                    @memcpy(buf[0..n], chunk[0..n]);
+                    return n;
+                }
+                pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
+                    return 0;
+                }
+                pub fn flushRx(_: *@This()) void {}
+                pub fn reset(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+            };
+
+            var back = Impl{ .chunks = &.{ "AT\r", "\n+CSQ: 1\r\n" } };
+            const transport = Transport.init(&back);
+            var reader = LineReader(64).init();
+            var out: [32]u8 = undefined;
+            const l1 = try reader.readLine(transport, &out, .{});
+            try testing.expectEqualStrings("AT", l1);
+            const l2 = try reader.readLine(transport, &out, .{});
+            try testing.expectEqualStrings("+CSQ: 1", l2);
+        }
+
+        fn testLfOnlyLine() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Impl = struct {
+                data: []const u8,
+                pos: usize = 0,
+                pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
+                    if (self.pos >= self.data.len) return 0;
+                    const n = @min(buf.len, self.data.len - self.pos);
+                    @memcpy(buf[0..n], self.data[self.pos..][0..n]);
+                    self.pos += n;
+                    return n;
+                }
+                pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
+                    return 0;
+                }
+                pub fn flushRx(_: *@This()) void {}
+                pub fn reset(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+            };
+
+            var back = Impl{ .data = "hello\n" };
+            const transport = Transport.init(&back);
+            var reader = LineReader(64).init();
+            var out: [16]u8 = undefined;
+            const line = try reader.readLine(transport, &out, .{});
+            try testing.expectEqualStrings("hello", line);
+        }
+
+        fn testTrimSpacesAndClear() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Impl = struct {
+                data: []const u8,
+                pos: usize = 0,
+                pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
+                    if (self.pos >= self.data.len) return 0;
+                    const n = @min(buf.len, self.data.len - self.pos);
+                    @memcpy(buf[0..n], self.data[self.pos..][0..n]);
+                    self.pos += n;
+                    return n;
+                }
+                pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
+                    return 0;
+                }
+                pub fn flushRx(_: *@This()) void {}
+                pub fn reset(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+            };
+
+            var back = Impl{ .data = "  hi  \r\n" };
+            const transport = Transport.init(&back);
+            var reader = LineReader(64).init();
+            var out: [16]u8 = undefined;
+            const line = try reader.readLine(transport, &out, .{ .trim_spaces = true });
+            try testing.expectEqualStrings("hi", line);
+
+            reader.clear();
+            back = Impl{ .data = "x\n" };
+            const line2 = try reader.readLine(transport, &out, .{});
+            try testing.expectEqualStrings("x", line2);
+        }
+
+        fn testLineTooLong() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Impl = struct {
+                pub fn read(_: *@This(), buf: []u8) Transport.ReadError!usize {
+                    @memset(buf[0..1], 'a');
+                    return 1;
+                }
+                pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
+                    return 0;
+                }
+                pub fn flushRx(_: *@This()) void {}
+                pub fn reset(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+            };
+
+            var back = Impl{};
+            const transport = Transport.init(&back);
+            var reader = LineReader(8).init();
+            var out: [16]u8 = undefined;
+            try testing.expectError(error.LineTooLong, reader.readLine(transport, &out, .{}));
+        }
+
+        fn testOutTooSmall() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Impl = struct {
+                pub fn read(_: *@This(), _: []u8) Transport.ReadError!usize {
+                    return 0;
+                }
+                pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
+                    return 0;
+                }
+                pub fn flushRx(_: *@This()) void {}
+                pub fn reset(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+            };
+
+            var back = Impl{};
+            _ = Transport.init(&back);
+            var reader = LineReader(64).init();
+            reader.pending[0..5].* = "hello".*;
+            reader.pending[5] = '\n';
+            reader.pending_len = 6;
+            var out: [2]u8 = undefined;
+            try testing.expectError(error.OutTooSmall, reader.tryPopLineInto(&out, .{}));
+        }
     };
 
-    var back = Impl{ .data = "OK\r\n" };
-    const transport = Transport.init(&back);
-    var reader = LineReader(64).init();
-    var out: [16]u8 = undefined;
-    const line = try reader.readLine(transport, &out, .{});
-    try testing.expectEqualStrings("OK", line);
-}
-
-test "at/unit_tests/LineReader/cr_only_when_not_followed_by_lf" {
-    const std = @import("std");
-    const testing = std.testing;
-
-    const Impl = struct {
-        data: []const u8,
-        pos: usize = 0,
-        pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
-            if (self.pos >= self.data.len) return 0;
-            const n = @min(buf.len, self.data.len - self.pos);
-            @memcpy(buf[0..n], self.data[self.pos..][0..n]);
-            self.pos += n;
-            return n;
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
         }
-        pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
-            return 0;
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.testCrlfSingleChunk() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testCrOnlyWhenNotFollowedByLf() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testSplitCrLfAcrossReads() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testLfOnlyLine() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testTrimSpacesAndClear() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testLineTooLong() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testOutTooSmall() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
         }
-        pub fn flushRx(_: *@This()) void {}
-        pub fn reset(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
-        pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
     };
 
-    var back = Impl{ .data = "OK\r+" };
-    const transport = Transport.init(&back);
-    var reader = LineReader(64).init();
-    var out: [16]u8 = undefined;
-    const line = try reader.readLine(transport, &out, .{});
-    try testing.expectEqualStrings("OK", line);
-    // `+` has no terminator yet; remainder stays in `pending` (no infinite read).
-    try testing.expectEqual(@as(usize, 1), reader.pending_len);
-    try testing.expectEqual(@as(u8, '+'), reader.pending[0]);
-}
-
-test "at/unit_tests/LineReader/split_cr_lf_across_reads" {
-    const std = @import("std");
-    const testing = std.testing;
-
-    const Impl = struct {
-        chunks: []const []const u8,
-        idx: usize = 0,
-        pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
-            if (self.idx >= self.chunks.len) return 0;
-            const chunk = self.chunks[self.idx];
-            self.idx += 1;
-            const n = @min(buf.len, chunk.len);
-            @memcpy(buf[0..n], chunk[0..n]);
-            return n;
-        }
-        pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
-            return 0;
-        }
-        pub fn flushRx(_: *@This()) void {}
-        pub fn reset(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
-        pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+    const Holder = struct {
+        var runner: Runner = .{};
     };
-
-    var back = Impl{ .chunks = &.{ "AT\r", "\n+CSQ: 1\r\n" } };
-    const transport = Transport.init(&back);
-    var reader = LineReader(64).init();
-    var out: [32]u8 = undefined;
-    const l1 = try reader.readLine(transport, &out, .{});
-    try testing.expectEqualStrings("AT", l1);
-    const l2 = try reader.readLine(transport, &out, .{});
-    try testing.expectEqualStrings("+CSQ: 1", l2);
-}
-
-test "at/unit_tests/LineReader/lf_only_line" {
-    const std = @import("std");
-    const testing = std.testing;
-
-    const Impl = struct {
-        data: []const u8,
-        pos: usize = 0,
-        pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
-            if (self.pos >= self.data.len) return 0;
-            const n = @min(buf.len, self.data.len - self.pos);
-            @memcpy(buf[0..n], self.data[self.pos..][0..n]);
-            self.pos += n;
-            return n;
-        }
-        pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
-            return 0;
-        }
-        pub fn flushRx(_: *@This()) void {}
-        pub fn reset(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
-        pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
-    };
-
-    var back = Impl{ .data = "hello\n" };
-    const transport = Transport.init(&back);
-    var reader = LineReader(64).init();
-    var out: [16]u8 = undefined;
-    const line = try reader.readLine(transport, &out, .{});
-    try testing.expectEqualStrings("hello", line);
-}
-
-test "at/unit_tests/LineReader/trim_spaces_and_clear" {
-    const std = @import("std");
-    const testing = std.testing;
-
-    const Impl = struct {
-        data: []const u8,
-        pos: usize = 0,
-        pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
-            if (self.pos >= self.data.len) return 0;
-            const n = @min(buf.len, self.data.len - self.pos);
-            @memcpy(buf[0..n], self.data[self.pos..][0..n]);
-            self.pos += n;
-            return n;
-        }
-        pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
-            return 0;
-        }
-        pub fn flushRx(_: *@This()) void {}
-        pub fn reset(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
-        pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
-    };
-
-    var back = Impl{ .data = "  hi  \r\n" };
-    const transport = Transport.init(&back);
-    var reader = LineReader(64).init();
-    var out: [16]u8 = undefined;
-    const line = try reader.readLine(transport, &out, .{ .trim_spaces = true });
-    try testing.expectEqualStrings("hi", line);
-
-    reader.clear();
-    back = Impl{ .data = "x\n" };
-    const line2 = try reader.readLine(transport, &out, .{});
-    try testing.expectEqualStrings("x", line2);
-}
-
-test "at/unit_tests/LineReader/line_too_long" {
-    const std = @import("std");
-    const testing = std.testing;
-
-    const Impl = struct {
-        pub fn read(_: *@This(), buf: []u8) Transport.ReadError!usize {
-            @memset(buf[0..1], 'a');
-            return 1;
-        }
-        pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
-            return 0;
-        }
-        pub fn flushRx(_: *@This()) void {}
-        pub fn reset(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
-        pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
-    };
-
-    var back = Impl{};
-    const transport = Transport.init(&back);
-    var reader = LineReader(8).init();
-    var out: [16]u8 = undefined;
-    try testing.expectError(error.LineTooLong, reader.readLine(transport, &out, .{}));
-}
-
-test "at/unit_tests/LineReader/out_too_small" {
-    const std = @import("std");
-    const testing = std.testing;
-
-    const Impl = struct {
-        pub fn read(_: *@This(), _: []u8) Transport.ReadError!usize {
-            return 0;
-        }
-        pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
-            return 0;
-        }
-        pub fn flushRx(_: *@This()) void {}
-        pub fn reset(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
-        pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
-    };
-
-    var back = Impl{};
-    _ = Transport.init(&back);
-    var reader = LineReader(64).init();
-    reader.pending[0..5].* = "hello".*;
-    reader.pending[5] = '\n';
-    reader.pending_len = 6;
-    var out: [2]u8 = undefined;
-    try testing.expectError(error.OutTooSmall, reader.tryPopLineInto(&out, .{}));
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

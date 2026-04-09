@@ -23,8 +23,8 @@
 //! - **`EMBED_AT_AT_RETRIES`**: **`AT`** probe attempts after flush (default **4**), **400 ms** apart.
 //!   Raise both env vars if the board is slow to boot; lower retries for faster failure when no DCE.
 
-const Dte = @import("../Dte.zig");
-const Transport = @import("../Transport.zig");
+const Dte = @import("../../Dte.zig");
+const Transport = @import("../../Transport.zig");
 const testing_api = @import("testing");
 
 const std = @import("std");

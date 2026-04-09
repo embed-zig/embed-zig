@@ -186,141 +186,183 @@ pub fn make(comptime lib: type, comptime line_cap: usize) type {
     };
 }
 
-test "at/unit_tests/Session/exchange_ok_after_info" {
-    const std = @import("std");
-    const testing = std.testing;
+const testing_api = @import("testing");
 
-    const Lib = struct {
-        pub const mem = @import("embed").mem;
-        pub const time = struct {
-            pub fn milliTimestamp() i64 {
-                return std.time.milliTimestamp();
-            }
-        };
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn testExchangeOkAfterInfo() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Lib = struct {
+                pub const mem = @import("embed").mem;
+                pub const time = struct {
+                    pub fn milliTimestamp() i64 {
+                        return std.time.milliTimestamp();
+                    }
+                };
+            };
+
+            const Impl = struct {
+                data: []const u8,
+                pos: usize = 0,
+                pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
+                    if (self.pos >= self.data.len) return 0;
+                    const n = @min(buf.len, self.data.len - self.pos);
+                    @memcpy(buf[0..n], self.data[self.pos..][0..n]);
+                    self.pos += n;
+                    return n;
+                }
+                pub fn write(_: *@This(), buf: []const u8) Transport.WriteError!usize {
+                    return buf.len;
+                }
+                pub fn flushRx(_: *@This()) void {}
+                pub fn reset(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+            };
+
+            var back = Impl{ .data = "+CSQ: 99,99\r\nOK\r\n" };
+            const transport = Transport.init(&back);
+            const S = make(Lib, 64);
+            var session = S.init(transport, .{ .append_crlf = false });
+
+            var infos: usize = 0;
+            const Cb = struct {
+                fn on(ctx: ?*anyopaque, _: []const u8) void {
+                    const c: *usize = @ptrCast(@alignCast(ctx.?));
+                    c.* += 1;
+                }
+            };
+
+            const fin = try session.exchange("AT+CSQ", .{
+                .info_ctx = @ptrCast(&infos),
+                .on_info_line = Cb.on,
+            });
+            try testing.expectEqual(S.Final.ok, fin);
+            try testing.expectEqual(@as(usize, 1), infos);
+        }
+
+        fn testStripEcho() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Lib = struct {
+                pub const mem = @import("embed").mem;
+                pub const time = struct {
+                    pub fn milliTimestamp() i64 {
+                        return std.time.milliTimestamp();
+                    }
+                };
+            };
+
+            const Impl = struct {
+                data: []const u8,
+                pos: usize = 0,
+                pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
+                    if (self.pos >= self.data.len) return 0;
+                    const n = @min(buf.len, self.data.len - self.pos);
+                    @memcpy(buf[0..n], self.data[self.pos..][0..n]);
+                    self.pos += n;
+                    return n;
+                }
+                pub fn write(_: *@This(), buf: []const u8) Transport.WriteError!usize {
+                    return buf.len;
+                }
+                pub fn flushRx(_: *@This()) void {}
+                pub fn reset(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+            };
+
+            var back = Impl{ .data = "AT+CSQ\r\n+CSQ: 1\r\nOK\r\n" };
+            const transport = Transport.init(&back);
+            const S = make(Lib, 64);
+            var session = S.init(transport, .{ .append_crlf = false });
+
+            const fin = try session.exchange("AT+CSQ", .{});
+            try testing.expectEqual(S.Final.ok, fin);
+        }
+
+        fn testReadExact() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Lib = struct {
+                pub const mem = @import("embed").mem;
+                pub const time = struct {
+                    pub fn milliTimestamp() i64 {
+                        return std.time.milliTimestamp();
+                    }
+                };
+            };
+
+            const Impl = struct {
+                data: []const u8,
+                pos: usize = 0,
+                pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
+                    if (self.pos >= self.data.len) return 0;
+                    const n = @min(buf.len, self.data.len - self.pos);
+                    @memcpy(buf[0..n], self.data[self.pos..][0..n]);
+                    self.pos += n;
+                    return n;
+                }
+                pub fn write(_: *@This(), buf: []const u8) Transport.WriteError!usize {
+                    return buf.len;
+                }
+                pub fn flushRx(_: *@This()) void {}
+                pub fn reset(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+            };
+
+            var back = Impl{ .data = "\x01\x02\x03\x04" };
+            const transport = Transport.init(&back);
+            const S = make(Lib, 32);
+            var session = S.init(transport, .{});
+
+            var buf: [4]u8 = undefined;
+            try session.readExact(&buf);
+            try testing.expectEqual(@as(u8, 0x04), buf[3]);
+        }
     };
 
-    const Impl = struct {
-        data: []const u8,
-        pos: usize = 0,
-        pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
-            if (self.pos >= self.data.len) return 0;
-            const n = @min(buf.len, self.data.len - self.pos);
-            @memcpy(buf[0..n], self.data[self.pos..][0..n]);
-            self.pos += n;
-            return n;
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
         }
-        pub fn write(_: *@This(), buf: []const u8) Transport.WriteError!usize {
-            return buf.len;
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.testExchangeOkAfterInfo() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testStripEcho() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testReadExact() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
         }
-        pub fn flushRx(_: *@This()) void {}
-        pub fn reset(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
-        pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
-    };
 
-    var back = Impl{ .data = "+CSQ: 99,99\r\nOK\r\n" };
-    const transport = Transport.init(&back);
-    const S = make(Lib, 64);
-    var session = S.init(transport, .{ .append_crlf = false });
-
-    var infos: usize = 0;
-    const Cb = struct {
-        fn on(ctx: ?*anyopaque, _: []const u8) void {
-            const c: *usize = @ptrCast(@alignCast(ctx.?));
-            c.* += 1;
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    const fin = try session.exchange("AT+CSQ", .{
-        .info_ctx = @ptrCast(&infos),
-        .on_info_line = Cb.on,
-    });
-    try testing.expectEqual(S.Final.ok, fin);
-    try testing.expectEqual(@as(usize, 1), infos);
-}
-
-test "at/unit_tests/Session/strip_echo" {
-    const std = @import("std");
-    const testing = std.testing;
-
-    const Lib = struct {
-        pub const mem = @import("embed").mem;
-        pub const time = struct {
-            pub fn milliTimestamp() i64 {
-                return std.time.milliTimestamp();
-            }
-        };
+    const Holder = struct {
+        var runner: Runner = .{};
     };
-
-    const Impl = struct {
-        data: []const u8,
-        pos: usize = 0,
-        pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
-            if (self.pos >= self.data.len) return 0;
-            const n = @min(buf.len, self.data.len - self.pos);
-            @memcpy(buf[0..n], self.data[self.pos..][0..n]);
-            self.pos += n;
-            return n;
-        }
-        pub fn write(_: *@This(), buf: []const u8) Transport.WriteError!usize {
-            return buf.len;
-        }
-        pub fn flushRx(_: *@This()) void {}
-        pub fn reset(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
-        pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
-    };
-
-    var back = Impl{ .data = "AT+CSQ\r\n+CSQ: 1\r\nOK\r\n" };
-    const transport = Transport.init(&back);
-    const S = make(Lib, 64);
-    var session = S.init(transport, .{ .append_crlf = false });
-
-    const fin = try session.exchange("AT+CSQ", .{});
-    try testing.expectEqual(S.Final.ok, fin);
-}
-
-test "at/unit_tests/Session/readExact" {
-    const std = @import("std");
-    const testing = std.testing;
-
-    const Lib = struct {
-        pub const mem = @import("embed").mem;
-        pub const time = struct {
-            pub fn milliTimestamp() i64 {
-                return std.time.milliTimestamp();
-            }
-        };
-    };
-
-    const Impl = struct {
-        data: []const u8,
-        pos: usize = 0,
-        pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
-            if (self.pos >= self.data.len) return 0;
-            const n = @min(buf.len, self.data.len - self.pos);
-            @memcpy(buf[0..n], self.data[self.pos..][0..n]);
-            self.pos += n;
-            return n;
-        }
-        pub fn write(_: *@This(), buf: []const u8) Transport.WriteError!usize {
-            return buf.len;
-        }
-        pub fn flushRx(_: *@This()) void {}
-        pub fn reset(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
-        pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
-    };
-
-    var back = Impl{ .data = "\x01\x02\x03\x04" };
-    const transport = Transport.init(&back);
-    const S = make(Lib, 32);
-    var session = S.init(transport, .{});
-
-    var buf: [4]u8 = undefined;
-    try session.readExact(&buf);
-    try testing.expectEqual(@as(u8, 0x04), buf[3]);
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

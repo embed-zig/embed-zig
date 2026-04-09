@@ -53,44 +53,78 @@ pub fn make(comptime lib: type, comptime line_cap: usize) type {
     };
 }
 
-test "at/unit_tests/Dte/delegates_exchange" {
-    const std = @import("std");
-    const testing = std.testing;
+const testing_api = @import("testing");
 
-    const Lib = struct {
-        pub const mem = @import("embed").mem;
-        pub const time = struct {
-            pub fn milliTimestamp() i64 {
-                return std.time.milliTimestamp();
-            }
-        };
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn testDelegatesExchange() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Lib = struct {
+                pub const mem = @import("embed").mem;
+                pub const time = struct {
+                    pub fn milliTimestamp() i64 {
+                        return std.time.milliTimestamp();
+                    }
+                };
+            };
+
+            const Impl = struct {
+                data: []const u8,
+                pos: usize = 0,
+                pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
+                    if (self.pos >= self.data.len) return 0;
+                    const n = @min(buf.len, self.data.len - self.pos);
+                    @memcpy(buf[0..n], self.data[self.pos..][0..n]);
+                    self.pos += n;
+                    return n;
+                }
+                pub fn write(_: *@This(), buf: []const u8) Transport.WriteError!usize {
+                    return buf.len;
+                }
+                pub fn flushRx(_: *@This()) void {}
+                pub fn reset(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+            };
+
+            var back = Impl{ .data = "OK\r\n" };
+            const transport = Transport.init(&back);
+            const D = make(Lib, 64);
+            var dte = D.init(transport, .{ .append_crlf = false });
+
+            const fin = try dte.exchange("AT", .{});
+            try testing.expectEqual(D.Final.ok, fin);
+        }
     };
 
-    const Impl = struct {
-        data: []const u8,
-        pos: usize = 0,
-        pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
-            if (self.pos >= self.data.len) return 0;
-            const n = @min(buf.len, self.data.len - self.pos);
-            @memcpy(buf[0..n], self.data[self.pos..][0..n]);
-            self.pos += n;
-            return n;
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
         }
-        pub fn write(_: *@This(), buf: []const u8) Transport.WriteError!usize {
-            return buf.len;
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.testDelegatesExchange() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
         }
-        pub fn flushRx(_: *@This()) void {}
-        pub fn reset(_: *@This()) void {}
-        pub fn deinit(_: *@This()) void {}
-        pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
-        pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
     };
 
-    var back = Impl{ .data = "OK\r\n" };
-    const transport = Transport.init(&back);
-    const D = make(Lib, 64);
-    var dte = D.init(transport, .{ .append_crlf = false });
-
-    const fin = try dte.exchange("AT", .{});
-    try testing.expectEqual(D.Final.ok, fin);
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

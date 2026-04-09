@@ -1,7 +1,7 @@
 const testing_api = @import("testing");
 
-pub const dte_loopback = @import("dte_loopback.zig");
-pub const dte_serial_host = @import("dte_serial_host.zig");
+pub const dte_loopback = @import("test_utils/dte_loopback.zig");
+pub const dte_serial_host = @import("integration/dte_serial_host.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {

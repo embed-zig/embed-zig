@@ -121,84 +121,118 @@ pub fn init(pointer: anytype) root {
     };
 }
 
-test "at/unit_tests/Transport/init_forwards_read_write_flushRx_deadlines_reset_deinit" {
-    const std = @import("std");
-    const testing = std.testing;
+const testing_api = @import("testing");
 
-    const Impl = struct {
-        read_deadline: ?i64 = null,
-        write_deadline: ?i64 = null,
-        out: []const u8 = "OK\r\n",
-        out_pos: usize = 0,
-        written: [16]u8 = undefined,
-        written_len: usize = 0,
-        flush_rx_hits: u32 = 0,
-        reset_hits: u32 = 0,
-        deinit_hits: u32 = 0,
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn testInitForwards() !void {
+            const std = @import("std");
+            const testing = std.testing;
 
-        fn write(self: *@This(), buf: []const u8) WriteError!usize {
-            if (self.written_len + buf.len > self.written.len) return error.Unexpected;
-            @memcpy(self.written[self.written_len..][0..buf.len], buf);
-            self.written_len += buf.len;
-            return buf.len;
-        }
+            const Impl = struct {
+                read_deadline: ?i64 = null,
+                write_deadline: ?i64 = null,
+                out: []const u8 = "OK\r\n",
+                out_pos: usize = 0,
+                written: [16]u8 = undefined,
+                written_len: usize = 0,
+                flush_rx_hits: u32 = 0,
+                reset_hits: u32 = 0,
+                deinit_hits: u32 = 0,
 
-        fn read(self: *@This(), buf: []u8) ReadError!usize {
-            if (self.out_pos >= self.out.len) return 0;
-            const n = @min(buf.len, self.out.len - self.out_pos);
-            @memcpy(buf[0..n], self.out[self.out_pos..][0..n]);
-            self.out_pos += n;
-            return n;
-        }
+                fn write(self: *@This(), buf: []const u8) WriteError!usize {
+                    if (self.written_len + buf.len > self.written.len) return error.Unexpected;
+                    @memcpy(self.written[self.written_len..][0..buf.len], buf);
+                    self.written_len += buf.len;
+                    return buf.len;
+                }
 
-        fn flushRx(self: *@This()) void {
-            self.flush_rx_hits += 1;
-            self.out_pos = self.out.len;
-        }
+                fn read(self: *@This(), buf: []u8) ReadError!usize {
+                    if (self.out_pos >= self.out.len) return 0;
+                    const n = @min(buf.len, self.out.len - self.out_pos);
+                    @memcpy(buf[0..n], self.out[self.out_pos..][0..n]);
+                    self.out_pos += n;
+                    return n;
+                }
 
-        fn reset(self: *@This()) void {
-            self.reset_hits += 1;
-        }
+                fn flushRx(self: *@This()) void {
+                    self.flush_rx_hits += 1;
+                    self.out_pos = self.out.len;
+                }
 
-        fn deinit(self: *@This()) void {
-            self.deinit_hits += 1;
-        }
+                fn reset(self: *@This()) void {
+                    self.reset_hits += 1;
+                }
 
-        fn setReadDeadline(self: *@This(), deadline_ns: ?i64) void {
-            self.read_deadline = deadline_ns;
-        }
+                fn deinit(self: *@This()) void {
+                    self.deinit_hits += 1;
+                }
 
-        fn setWriteDeadline(self: *@This(), deadline_ns: ?i64) void {
-            self.write_deadline = deadline_ns;
+                fn setReadDeadline(self: *@This(), deadline_ns: ?i64) void {
+                    self.read_deadline = deadline_ns;
+                }
+
+                fn setWriteDeadline(self: *@This(), deadline_ns: ?i64) void {
+                    self.write_deadline = deadline_ns;
+                }
+            };
+
+            var impl = Impl{};
+            const transport = init(&impl);
+
+            transport.setReadDeadline(1_000_000);
+            try testing.expectEqual(@as(?i64, 1_000_000), impl.read_deadline);
+            transport.setWriteDeadline(null);
+            try testing.expectEqual(@as(?i64, null), impl.write_deadline);
+
+            const w = try transport.write("AT\r\n");
+            try testing.expectEqual(@as(usize, 4), w);
+            try testing.expectEqualStrings("AT\r\n", impl.written[0..impl.written_len]);
+
+            var rbuf: [8]u8 = undefined;
+            const r = try transport.read(&rbuf);
+            try testing.expectEqual(@as(usize, 4), r);
+            try testing.expectEqualStrings("OK\r\n", rbuf[0..r]);
+
+            impl.out_pos = 0;
+            _ = try transport.read(&rbuf);
+            transport.flushRx();
+            try testing.expectEqual(@as(u32, 1), impl.flush_rx_hits);
+            try testing.expect(impl.out_pos >= impl.out.len);
+
+            transport.reset();
+            try testing.expectEqual(@as(u32, 1), impl.reset_hits);
+
+            transport.deinit();
+            try testing.expectEqual(@as(u32, 1), impl.deinit_hits);
         }
     };
 
-    var impl = Impl{};
-    const transport = init(&impl);
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    transport.setReadDeadline(1_000_000);
-    try testing.expectEqual(@as(?i64, 1_000_000), impl.read_deadline);
-    transport.setWriteDeadline(null);
-    try testing.expectEqual(@as(?i64, null), impl.write_deadline);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    const w = try transport.write("AT\r\n");
-    try testing.expectEqual(@as(usize, 4), w);
-    try testing.expectEqualStrings("AT\r\n", impl.written[0..impl.written_len]);
+            TestCase.testInitForwards() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-    var rbuf: [8]u8 = undefined;
-    const r = try transport.read(&rbuf);
-    try testing.expectEqual(@as(usize, 4), r);
-    try testing.expectEqualStrings("OK\r\n", rbuf[0..r]);
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
 
-    impl.out_pos = 0;
-    _ = try transport.read(&rbuf);
-    transport.flushRx();
-    try testing.expectEqual(@as(u32, 1), impl.flush_rx_hits);
-    try testing.expect(impl.out_pos >= impl.out.len);
-
-    transport.reset();
-    try testing.expectEqual(@as(u32, 1), impl.reset_hits);
-
-    transport.deinit();
-    try testing.expectEqual(@as(u32, 1), impl.deinit_hits);
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

@@ -80,75 +80,116 @@ pub fn respondCopy(_: ?*anyopaque, _: []const u8, o: []u8, comptime text: []cons
     return text.len;
 }
 
-test "at/unit_tests/Dce/longest_prefix" {
-    const std = @import("std");
-    const testing = std.testing;
+const testing_api = @import("testing");
 
-    const Handlers = struct {
-        fn at(_: ?*anyopaque, _: []const u8, o: []u8) error{OutTooSmall}!usize {
-            return respondCopy(null, "", o, "OK\r\n");
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn testLongestPrefix() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Handlers = struct {
+                fn at(_: ?*anyopaque, _: []const u8, o: []u8) error{OutTooSmall}!usize {
+                    return respondCopy(null, "", o, "OK\r\n");
+                }
+                fn csq(_: ?*anyopaque, _: []const u8, o: []u8) error{OutTooSmall}!usize {
+                    const msg = "+CSQ: 1,1\r\nOK\r\n";
+                    if (o.len < msg.len) return error.OutTooSmall;
+                    @memcpy(o[0..msg.len], msg);
+                    return msg.len;
+                }
+            };
+
+            const table = [_]CommandEntry{
+                .{ .prefix = "AT", .ctx = null, .respond = Handlers.at },
+                .{ .prefix = "AT+CSQ", .ctx = null, .respond = Handlers.csq },
+            };
+
+            var buf: [64]u8 = undefined;
+            const n = try handleLine(&table, "AT+CSQ", &buf, .{});
+            try testing.expectEqualStrings("+CSQ: 1,1\r\nOK\r\n", buf[0..n]);
+
+            const n2 = try handleLine(&table, "AT", &buf, .{});
+            try testing.expectEqualStrings("OK\r\n", buf[0..n2]);
         }
-        fn csq(_: ?*anyopaque, _: []const u8, o: []u8) error{OutTooSmall}!usize {
-            const msg = "+CSQ: 1,1\r\nOK\r\n";
-            if (o.len < msg.len) return error.OutTooSmall;
-            @memcpy(o[0..msg.len], msg);
-            return msg.len;
+
+        fn testNoMatchDefault() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Def = struct {
+                fn f(_: ?*anyopaque, _: []const u8, o: []u8) error{OutTooSmall}!usize {
+                    return respondCopy(null, "", o, "ERROR\r\n");
+                }
+            };
+
+            const table = [_]CommandEntry{
+                .{ .prefix = "AT+CSQ", .ctx = null, .respond = struct {
+                    fn r(_: ?*anyopaque, _: []const u8, o: []u8) error{OutTooSmall}!usize {
+                        return respondCopy(null, "", o, "OK\r\n");
+                    }
+                }.r },
+            };
+
+            var buf: [32]u8 = undefined;
+            try testing.expectError(error.NoMatchingPrefix, handleLine(&table, "AT+UNKNOWN", &buf, .{}));
+
+            const n = try handleLine(&table, "AT+UNKNOWN", &buf, .{
+                .default_respond = Def.f,
+            });
+            try testing.expectEqualStrings("ERROR\r\n", buf[0..n]);
+        }
+
+        fn testOutTooSmall() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const table = [_]CommandEntry{
+                .{ .prefix = "AT", .ctx = null, .respond = struct {
+                    fn r(_: ?*anyopaque, _: []const u8, o: []u8) error{OutTooSmall}!usize {
+                        return respondCopy(null, "", o, "OK\r\n");
+                    }
+                }.r },
+            };
+
+            var buf: [2]u8 = undefined;
+            try testing.expectError(error.OutTooSmall, handleLine(&table, "AT", &buf, .{}));
         }
     };
 
-    const table = [_]CommandEntry{
-        .{ .prefix = "AT", .ctx = null, .respond = Handlers.at },
-        .{ .prefix = "AT+CSQ", .ctx = null, .respond = Handlers.csq },
-    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var buf: [64]u8 = undefined;
-    const n = try handleLine(&table, "AT+CSQ", &buf, .{});
-    try testing.expectEqualStrings("+CSQ: 1,1\r\nOK\r\n", buf[0..n]);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    const n2 = try handleLine(&table, "AT", &buf, .{});
-    try testing.expectEqualStrings("OK\r\n", buf[0..n2]);
-}
+            TestCase.testLongestPrefix() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testNoMatchDefault() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testOutTooSmall() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
 
-test "at/unit_tests/Dce/no_match_default" {
-    const std = @import("std");
-    const testing = std.testing;
-
-    const Def = struct {
-        fn f(_: ?*anyopaque, _: []const u8, o: []u8) error{OutTooSmall}!usize {
-            return respondCopy(null, "", o, "ERROR\r\n");
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
         }
     };
 
-    // Only `AT+CSQ` is implemented; `AT+UNKNOWN` must not match prefix `AT+CSQ`.
-    const table = [_]CommandEntry{
-        .{ .prefix = "AT+CSQ", .ctx = null, .respond = struct {
-            fn r(_: ?*anyopaque, _: []const u8, o: []u8) error{OutTooSmall}!usize {
-                return respondCopy(null, "", o, "OK\r\n");
-            }
-        }.r },
+    const Holder = struct {
+        var runner: Runner = .{};
     };
-
-    var buf: [32]u8 = undefined;
-    try testing.expectError(error.NoMatchingPrefix, handleLine(&table, "AT+UNKNOWN", &buf, .{}));
-
-    const n = try handleLine(&table, "AT+UNKNOWN", &buf, .{
-        .default_respond = Def.f,
-    });
-    try testing.expectEqualStrings("ERROR\r\n", buf[0..n]);
-}
-
-test "at/unit_tests/Dce/out_too_small" {
-    const std = @import("std");
-    const testing = std.testing;
-
-    const table = [_]CommandEntry{
-        .{ .prefix = "AT", .ctx = null, .respond = struct {
-            fn r(_: ?*anyopaque, _: []const u8, o: []u8) error{OutTooSmall}!usize {
-                return respondCopy(null, "", o, "OK\r\n");
-            }
-        }.r },
-    };
-
-    var buf: [2]u8 = undefined;
-    try testing.expectError(error.OutTooSmall, handleLine(&table, "AT", &buf, .{}));
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
