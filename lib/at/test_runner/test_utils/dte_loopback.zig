@@ -1,10 +1,9 @@
-//! In-process **DTE ↔ DCE** smoke: memory loopback `Transport` + `Dce` prefix table + `Dte.exchange`.
+//! In-process loopback smoke: memory `Transport` with canned modem replies + `Peer.exchange`.
 //!
-//! No hardware. For **host DTE + ESP32-S3 DCE firmware** over USB-UART, see
+//! No hardware. For **host + device firmware** over USB-UART, see
 //! [`integration/dte_serial_host.zig`](../integration/dte_serial_host.zig) (POSIX; wired from `test_runner/integration.zig`).
 
-const Dce = @import("../../Dce.zig");
-const Dte = @import("../../Dte.zig");
+const Peer = @import("../../Peer.zig");
 const Transport = @import("../../Transport.zig");
 const testing_api = @import("testing");
 
@@ -19,16 +18,11 @@ pub fn Loopback() type {
         down: [buf_size]u8 = undefined,
         down_len: usize = 0,
         down_read: usize = 0,
-        entries: []const Dce.CommandEntry,
-        dce_opt: Dce.HandleLineOptions,
         read_deadline_ns: ?i64 = null,
         write_deadline_ns: ?i64 = null,
 
-        pub fn init(entries: []const Dce.CommandEntry, dce_opt: Dce.HandleLineOptions) Self {
-            return .{
-                .entries = entries,
-                .dce_opt = dce_opt,
-            };
+        pub fn init() Self {
+            return .{};
         }
 
         pub fn write(self: *Self, data: []const u8) Transport.WriteError!usize {
@@ -86,9 +80,8 @@ pub fn Loopback() type {
                 if (body.len == 0) continue;
 
                 var chunk: [512]u8 = undefined;
-                const n = Dce.handleLine(self.entries, body, &chunk, self.dce_opt) catch |err| switch (err) {
-                    error.OutTooSmall => return error.Unexpected,
-                    error.NoMatchingPrefix => return error.Unexpected,
+                const n = demoRespond(body, &chunk) catch |err| switch (err) {
+                    error.OutTooSmall, error.NoMatch => return error.Unexpected,
                 };
                 if (self.down_len + n > self.down.len) return error.Unexpected;
                 @memcpy(self.down[self.down_len..][0..n], chunk[0..n]);
@@ -118,6 +111,15 @@ fn trimAscii(slice: []const u8) []const u8 {
     return slice[s..e];
 }
 
+fn startsWith(haystack: []const u8, prefix: []const u8) bool {
+    if (haystack.len < prefix.len) return false;
+    var i: usize = 0;
+    while (i < prefix.len) : (i += 1) {
+        if (haystack[i] != prefix[i]) return false;
+    }
+    return true;
+}
+
 fn shiftLeft(buf: []u8, len: *usize, n: usize) void {
     if (n >= len.*) {
         len.* = 0;
@@ -129,37 +131,39 @@ fn shiftLeft(buf: []u8, len: *usize, n: usize) void {
     len.* = rest;
 }
 
-const Demo = struct {
-    fn atOk(_: ?*anyopaque, _: []const u8, o: []u8) error{OutTooSmall}!usize {
-        return Dce.respondCopy(null, "", o, "OK\r\n");
+/// Canned replies for **`AT`** / **`AT+…`** lines (longer prefixes first).
+fn demoRespond(line: []const u8, out: []u8) error{ OutTooSmall, NoMatch }!usize {
+    const t = trimAscii(line);
+    if (startsWith(t, "AT+CSQ")) {
+        const msg = "+CSQ: 99,99\r\nOK\r\n";
+        if (out.len < msg.len) return error.OutTooSmall;
+        @memcpy(out[0..msg.len], msg);
+        return msg.len;
     }
-    fn csq(_: ?*anyopaque, _: []const u8, o: []u8) error{OutTooSmall}!usize {
-        return Dce.respondCopy(null, "", o, "+CSQ: 99,99\r\nOK\r\n");
+    if (startsWith(t, "AT")) {
+        const msg = "OK\r\n";
+        if (out.len < msg.len) return error.OutTooSmall;
+        @memcpy(out[0..msg.len], msg);
+        return msg.len;
     }
-};
-
-fn demoTable() []const Dce.CommandEntry {
-    return &.{
-        .{ .prefix = "AT+CSQ", .ctx = null, .respond = Demo.csq },
-        .{ .prefix = "AT", .ctx = null, .respond = Demo.atOk },
-    };
+    return error.NoMatch;
 }
 
-/// Runs the canned **Dce** table over a loopback `Transport` (two `exchange` calls).
-pub fn runSurface(comptime lib: type, comptime line_cap: usize) !void {
-    var lb = Loopback().init(demoTable(), .{});
+/// Runs the loopback `Transport` with two `Peer.exchange` calls (`AT`, then `AT+CSQ`).
+pub fn runSurface(comptime lib: type) !void {
+    var lb = Loopback().init();
     const transport = Transport.init(&lb);
-    const D = Dte.make(lib, line_cap);
-    var dte = D.init(transport, .{});
+    const P = Peer.make(lib);
+    var peer = P.init(transport, .{});
 
-    const fin1 = try dte.exchange("AT", .{});
+    const fin1 = try peer.exchange("AT", .{});
     if (fin1 != .ok) return error.LoopbackAtFailed;
 
-    const fin2 = try dte.exchange("AT+CSQ", .{});
+    const fin2 = try peer.exchange("AT+CSQ", .{});
     if (fin2 != .ok) return error.LoopbackCsqFailed;
 }
 
-pub fn make(comptime lib: type, comptime line_cap: usize) testing_api.TestRunner {
+pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
@@ -169,7 +173,7 @@ pub fn make(comptime lib: type, comptime line_cap: usize) testing_api.TestRunner
         pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            runSurface(lib, line_cap) catch |err| {
+            runSurface(lib) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

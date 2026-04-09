@@ -15,7 +15,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
 
             t.parallel();
-            t.run("dte_loopback", dte_loopback.make(lib, 256));
+            t.run("dte_loopback", dte_loopback.make(lib));
             t.run("dte_serial_host", dte_serial_host.make(lib, .{}));
             return t.wait();
         }

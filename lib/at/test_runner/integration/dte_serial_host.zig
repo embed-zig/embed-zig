@@ -7,10 +7,10 @@
 //!
 //! | Side | Role | What runs |
 //! |------|------|-----------|
-//! | **This test (PC)** | **DTE** | `Dte` + POSIX `read`/`write` on `EMBED_AT_SERIAL` |
+//! | **This test (PC)** | **DTE** | `Peer` + POSIX `read`/`write` on `EMBED_AT_SERIAL` |
 //! | **ESP32-S3 (firmware)** | **DCE** | Your UART/USB-CDC **AT command loop** |
 //!
-//! On-wire DCE is **not** `Dce.zig` (that is in-process mock; see `dte_loopback.zig`).
+//! On-wire modem is firmware on the device; in-process loopback smoke is `dte_loopback.zig`.
 //!
 //! ## Environment
 //!
@@ -23,18 +23,17 @@
 //! - **`EMBED_AT_AT_RETRIES`**: **`AT`** probe attempts after flush (default **4**), **400 ms** apart.
 //!   Raise both env vars if the board is slow to boot; lower retries for faster failure when no DCE.
 
-const Dte = @import("../../Dte.zig");
+const Peer = @import("../../Peer.zig");
 const Transport = @import("../../Transport.zig");
 const testing_api = @import("testing");
 
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub const Options = struct {
-    line_cap: usize = 256,
-};
+pub const Options = struct {};
 
 pub fn make(comptime lib: type, comptime opts: Options) testing_api.TestRunner {
+    _ = opts;
     const Runner = struct {
         pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
@@ -44,7 +43,7 @@ pub fn make(comptime lib: type, comptime opts: Options) testing_api.TestRunner {
         pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            runHostSerial(lib, opts.line_cap, t) catch |err| {
+            runHostSerial(lib, t) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -77,7 +76,7 @@ fn darwinCuInsteadOfTty(path_z: [:0]const u8, path_buf: *[std.fs.max_path_bytes:
     return rewritten;
 }
 
-fn runHostSerial(comptime lib: type, comptime line_cap: usize, t: *testing_api.T) !void {
+fn runHostSerial(comptime lib: type, t: *testing_api.T) !void {
     if (builtin.os.tag == .windows) {
         t.logInfo("skip: dte_serial_host is POSIX-only (macOS/Linux; or use loopback runner)");
         return;
@@ -119,20 +118,18 @@ fn runHostSerial(comptime lib: type, comptime line_cap: usize, t: *testing_api.T
 
     var serial = Serial{ .fd = fd };
     const transport = Transport.init(&serial);
-    const D = Dte.make(lib, line_cap);
-    var dte = D.init(transport, .{
+    const P = Peer.make(lib);
+    var peer = P.init(transport, .{
         .transport_read_timeout_ms = transport_ms,
         .transport_write_timeout_ms = transport_ms,
         // Boot logs / several URC lines before `OK` need a generous wall budget.
         .command_timeout_ms = 30_000,
     });
 
-    var fin_at: D.Final = undefined;
+    var fin_at: P.Final = undefined;
     var at_failures: u32 = 0;
     while (true) {
-        dte.flushRx();
-        dte.clearReader();
-        fin_at = dte.exchange("AT", .{}) catch |err| switch (err) {
+        fin_at = peer.exchange("AT", .{}) catch |err| switch (err) {
             error.Timeout => {
                 at_failures += 1;
                 if (at_failures >= at_retries) {
@@ -149,7 +146,7 @@ fn runHostSerial(comptime lib: type, comptime line_cap: usize, t: *testing_api.T
     }
     if (fin_at != .ok) return error.SerialAtNotOk;
 
-    const fin_csq = dte.exchange("AT+CSQ", .{}) catch |err| switch (err) {
+    const fin_csq = peer.exchange("AT+CSQ", .{}) catch |err| switch (err) {
         error.Timeout => {
             t.logInfo("AT+CSQ timed out (optional); AT probe succeeded");
             return;
