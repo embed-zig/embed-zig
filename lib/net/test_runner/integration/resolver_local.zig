@@ -753,7 +753,7 @@ fn Suite(comptime lib: type) type {
 
             const SlowServer = struct {
                 listener: net_mod.Listener,
-                accepted: BoolAtomic = BoolAtomic.init(false),
+                request_received: BoolAtomic = BoolAtomic.init(false),
                 release: BoolAtomic = BoolAtomic.init(false),
             };
 
@@ -770,7 +770,12 @@ fn Suite(comptime lib: type) type {
                     var conn = server.listener.accept() catch return;
                     defer conn.deinit();
 
-                    server.accepted.store(true, .release);
+                    var req_buf: [512]u8 = undefined;
+                    _ = readTcpDnsMessage(conn, &req_buf) catch return;
+
+                    // Only unblock the fast winner once the slow TCP worker has
+                    // definitely issued its DNS query and is waiting on cleanup.
+                    server.request_received.store(true, .release);
                     while (!server.release.load(.acquire)) {
                         lib.Thread.sleep(lib.time.ns_per_ms);
                     }
@@ -788,12 +793,12 @@ fn Suite(comptime lib: type) type {
             const fast_impl = try fast_pc.as(Net.UdpConn);
             const fast_port = try fast_impl.boundPort();
             var fast_thread = try lib.Thread.spawn(threadSpawn(worker_stack), struct {
-                fn run(pc: PacketConn, accepted: *BoolAtomic, ip: [4]u8) void {
+                fn run(pc: PacketConn, request_received: *BoolAtomic, ip: [4]u8) void {
                     var req_buf: [512]u8 = undefined;
                     const req = pc.readFrom(&req_buf) catch return;
 
                     var waited_ms: u32 = 0;
-                    while (!accepted.load(.acquire) and waited_ms < 200) : (waited_ms += 1) {
+                    while (!request_received.load(.acquire) and waited_ms < 200) : (waited_ms += 1) {
                         lib.Thread.sleep(lib.time.ns_per_ms);
                     }
 
@@ -801,7 +806,7 @@ fn Suite(comptime lib: type) type {
                     const resp_len = buildAResponse(R, req_buf[0..req.bytes_read], ip, &resp_buf) catch return;
                     _ = pc.writeTo(resp_buf[0..resp_len], @ptrCast(&req.addr), req.addr_len) catch {};
                 }
-            }.run, .{ fast_pc, &slow_server.accepted, [4]u8{ 10, 20, 30, 40 } });
+            }.run, .{ fast_pc, &slow_server.request_received, [4]u8{ 10, 20, 30, 40 } });
             errdefer fast_thread.join();
             errdefer fast_pc.close();
 
@@ -822,7 +827,7 @@ fn Suite(comptime lib: type) type {
             const ip = addrs[0].as4().?;
             try expectEqual([4]u8{ 10, 20, 30, 40 }, ip);
 
-            try waitForTrue(lib, &slow_server.accepted, 200);
+            try waitForTrue(lib, &slow_server.request_received, 200);
 
             var wait_done = BoolAtomic.init(false);
             var wait_thread = try lib.Thread.spawn(threadSpawn(worker_stack), struct {
