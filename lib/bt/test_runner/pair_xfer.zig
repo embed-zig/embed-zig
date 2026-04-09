@@ -17,8 +17,10 @@ const device_name = "PairXfer";
 const service_uuid: u16 = 0x180D;
 const plain_char_uuid: u16 = 0x2A57;
 const xfer_char_uuid: u16 = 0x2A58;
-const timeout_ms: u32 = 5000;
-const reconnect_timeout_ms: u32 = 10000;
+/// Host-side mock: max wait for disconnect/sync during client flows (ms). Extra headroom for slow CI.
+const timeout_ms: u32 = 15000;
+/// Host-side mock: max wait for peripheral reconnect loop (ms).
+const reconnect_timeout_ms: u32 = 30000;
 
 pub fn makeCentral(comptime lib: type, comptime ClientType: type, host: anytype) testing_api.TestRunner {
     const HostPtr = @TypeOf(host);

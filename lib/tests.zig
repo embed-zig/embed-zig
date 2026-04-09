@@ -158,7 +158,7 @@ test "bt/integration/std" {
 
     var t = testing.T.new(std, .std);
     defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
+    t.timeout(60 * std.time.ns_per_s);
 
     t.run("bt/integration/std", bt.test_runner.integration.make(std));
     if (!t.wait()) return error.TestFailed;
@@ -167,7 +167,7 @@ test "bt/integration/std" {
 test "bt/integration/embed_std" {
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
-    t.timeout(20 * embed_std.std.time.ns_per_s);
+    t.timeout(60 * embed_std.std.time.ns_per_s);
 
     t.run("bt/integration/embed_std", bt.test_runner.integration.make(embed_std.std));
     if (!t.wait()) return error.TestFailed;

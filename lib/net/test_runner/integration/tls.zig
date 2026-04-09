@@ -58,8 +58,10 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
         pub const expectError = lib.testing.expectError;
     };
     testing.allocator = alloc;
+    // TLS server/client threads run deep crypto stacks (SHA-2, ECDHE, …). The default
+    // 64KiB stack is too small on some hosts and can fault inside sha2.round (see CI).
     const test_spawn_config: Thread.SpawnConfig = .{
-        .stack_size = 64 * 1024,
+        .stack_size = 1024 * 1024,
     };
 
     const Runner = struct {
