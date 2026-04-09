@@ -753,7 +753,7 @@ fn Suite(comptime lib: type) type {
 
             const SlowServer = struct {
                 listener: net_mod.Listener,
-                request_received: BoolAtomic = BoolAtomic.init(false),
+                client_hello_received: BoolAtomic = BoolAtomic.init(false),
                 release: BoolAtomic = BoolAtomic.init(false),
             };
 
@@ -770,12 +770,15 @@ fn Suite(comptime lib: type) type {
                     var conn = server.listener.accept() catch return;
                     defer conn.deinit();
 
-                    var req_buf: [512]u8 = undefined;
-                    _ = readTcpDnsMessage(conn, &req_buf) catch return;
+                    var client_hello_buf: [512]u8 = undefined;
+                    const n = conn.read(&client_hello_buf) catch return;
+                    if (n == 0) return;
 
-                    // Only unblock the fast winner once the slow TCP worker has
-                    // definitely issued its DNS query and is waiting on cleanup.
-                    server.request_received.store(true, .release);
+                    // Once the client hello has been read, the resolver's slow
+                    // worker is blocked in the TLS handshake waiting for a
+                    // server flight. Holding this connection open pins cleanup
+                    // to the worker itself instead of relying on DNS read timing.
+                    server.client_hello_received.store(true, .release);
                     while (!server.release.load(.acquire)) {
                         lib.Thread.sleep(lib.time.ns_per_ms);
                     }
@@ -793,29 +796,35 @@ fn Suite(comptime lib: type) type {
             const fast_impl = try fast_pc.as(Net.UdpConn);
             const fast_port = try fast_impl.boundPort();
             var fast_thread = try lib.Thread.spawn(threadSpawn(worker_stack), struct {
-                fn run(pc: PacketConn, request_received: *BoolAtomic, ip: [4]u8) void {
+                fn run(pc: PacketConn, client_hello_received: *BoolAtomic, ip: [4]u8) void {
                     var req_buf: [512]u8 = undefined;
                     const req = pc.readFrom(&req_buf) catch return;
 
                     var waited_ms: u32 = 0;
-                    while (!request_received.load(.acquire) and waited_ms < 200) : (waited_ms += 1) {
+                    while (!client_hello_received.load(.acquire) and waited_ms < 200) : (waited_ms += 1) {
                         lib.Thread.sleep(lib.time.ns_per_ms);
                     }
-                    // Give the slow TCP worker time to move from query write into
-                    // its blocking read before the fast UDP answer wins the race.
-                    lib.Thread.sleep(50 * lib.time.ns_per_ms);
 
                     var resp_buf: [512]u8 = undefined;
                     const resp_len = buildAResponse(R, req_buf[0..req.bytes_read], ip, &resp_buf) catch return;
                     _ = pc.writeTo(resp_buf[0..resp_len], @ptrCast(&req.addr), req.addr_len) catch {};
                 }
-            }.run, .{ fast_pc, &slow_server.request_received, [4]u8{ 10, 20, 30, 40 } });
+            }.run, .{ fast_pc, &slow_server.client_hello_received, [4]u8{ 10, 20, 30, 40 } });
             errdefer fast_thread.join();
             errdefer fast_pc.close();
 
             var resolver = try initResolver(allocator, worker_stack, .{
                 .servers = &.{
-                    .{ .addr = addr4(slow_port), .protocol = .tcp },
+                    .{
+                        .addr = addr4(slow_port),
+                        .protocol = .tls,
+                        .tls_config = .{
+                            .server_name = "wait.test",
+                            .insecure_skip_verify = true,
+                            .min_version = .tls_1_3,
+                            .max_version = .tls_1_3,
+                        },
+                    },
                     .{ .addr = addr4(fast_port), .protocol = .udp },
                 },
                 .mode = .ipv4_only,
@@ -830,7 +839,7 @@ fn Suite(comptime lib: type) type {
             const ip = addrs[0].as4().?;
             try expectEqual([4]u8{ 10, 20, 30, 40 }, ip);
 
-            try waitForTrue(lib, &slow_server.request_received, 200);
+            try waitForTrue(lib, &slow_server.client_hello_received, 200);
 
             var wait_done = BoolAtomic.init(false);
             var wait_thread = try lib.Thread.spawn(threadSpawn(worker_stack), struct {
