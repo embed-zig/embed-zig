@@ -19,9 +19,9 @@ deadlines). **`lib/at/Transport` adds `flushRx`** and is not identical to
 2. **Framing & parsing** — Line splitting (`\r`/`\n`), trimming, optional echo
    stripping; incremental parsers that work on fixed buffers (no heap in the
    hot path unless an API explicitly takes an `Allocator`).
-3. **Session / command API** — Send a command, collect lines until a terminal
-   (`OK`, `ERROR`, …) with timeouts; extensible for project-specific URCs
-   (unsolicited lines).
+3. **Peer (framing + I/O)** — **`exchange`** for DTE command transactions; **`readLine`** /
+   **`writeRaw`** for DCE and for **URCs** (unsolicited lines need no reply — just read on RX).
+   **TX/RX are independent** on full-duplex links (USB/UART).
 4. **embed alignment** — Runtime primitives via injected `embed` / `lib`
    namespace where needed; avoid direct `std` in non-test library code per
    `AGENTS.md`.
@@ -40,22 +40,18 @@ deadlines). **`lib/at/Transport` adds `flushRx`** and is not identical to
 
 | Path | Role |
 |------|------|
-| `lib/at.zig` | Root module: re-exports the stable public surface (and `test_runner` table). |
+| `lib/at.zig` | Root module: **`at.Transport`** + **`at.Peer`** (and `test_runner`). **`LineReader`** stays internal to `lib/at/`. |
 | `build/lib/at.zig` | Build-system module definition (`at` module in `build.zig`). |
 | `lib/at/Transport.zig` | Type-erased byte transport: like `lib/bt/Transport.zig` plus required **`flushRx`** (discard RX buffer; `reset` remains for stronger teardown). |
 | `lib/at/LineReader.zig` (or `framing.zig`) | Fixed-buffer incremental framing aligned with **ITU-T V.250** (CR / default S3) and common **CRLF** on the wire (same CRLF idea as **HTTP/1.x** header lines). Trim / echo strip only as documented there. |
-| `lib/at/Session.zig` | **Implemented** — `Session.make(lib, line_cap)` (uses `lib.time.milliTimestamp` and `lib.mem.eql` / `startsWith` in the body). See **Session implementation scope** below. |
-| `lib/at/Dte.zig` | **Implemented** — **`at.Dte.make(lib, line_cap)`**: product-facing wrapper over `Session` (`init`, `exchange`, `writeRaw`, `readExact`, `flushRx`, `clearReader`); **`comptime`** requires `lib.time.milliTimestamp`. |
-| `lib/at/Dce.zig` | **Implemented** — **`CommandEntry` + `handleLine`**: longest-prefix match on ASCII-trimmed command line, reply written to caller buffer; optional **`default_respond`**. No I/O; pair with a loopback `Transport` in tests. |
-| `lib/at/test_runner/test_utils/dte_loopback.zig` | Smoke runner: in-process loopback `Transport` + `Dce` + `Dte`, no hardware. |
+| `lib/at/Peer.zig` | **Implemented** — **`at.Peer.make(lib)`** ([`max_line_len`](Peer.zig) fixed cap): **[`Config.wire`](Peer.zig)** (`Transport`) + internal **`LineReader`**. **`exchange`** (DTE), **`readLine`** / **`writeRaw`** (DCE), **`readUntilByte`**. Other raw reads: **`peer.config.wire.read`** (+ deadline). **`comptime`** requires `lib.time.milliTimestamp`. |
+| `lib/at/test_runner/test_utils/dte_loopback.zig` | Smoke runner: in-process loopback `Transport` with canned **`AT` / `AT+CSQ`** replies + **`Peer`**, no hardware. |
 | `lib/at/test_runner/integration/dte_serial_host.zig` | Smoke runner: host **DTE** over a real serial path (e.g. Mac + device acting as **DCE** on USB-UART). Skips when env not set. |
 
 Exact file names may shift; **layering is fixed**:
 
 ```text
-Transport → LineReader (framing) → Session → Dte
-                                    ↑
-                              Dce (tests / mock)
+Transport → Peer (LineReader inside)   (public: Transport + Peer)
 ```
 
 ## Implementation approach
@@ -70,31 +66,27 @@ Transport → LineReader (framing) → Session → Dte
      `flushRx`.
 2. **LineReader** — Produces complete lines using **V.250-style CR** and **CRLF /
    LF** rules (see `LineReader.zig` doc); no `OK`/`ERROR` semantics.
-3. **Session** — One **exchange**: send a command line, then read lines until a
-   **final result** (`OK`, `ERROR`, `+CME ERROR:`, …). Intermediate lines are
-   **information responses**; **URCs** (unsolicited) are routed through an
-   optional handler or queue so they do not terminate the current exchange.
-   See **What belongs in Session (not LineReader)** below.
-4. **Dte** — Product-facing API on the host/MCU that talks to the modem. Holds
-   config (timeouts, CRLF, echo policy).
-5. **Dce** — Table-driven **`CommandEntry { prefix, respond }`** with
-   **longest-prefix** dispatch (`handleLine`); used for **loopback tests** and modem mocks, not
-   for vendor AT profiles (those stay in app / `lib/cellular`).
+3. **Peer** — Public type: **[`Config.wire`](Peer.zig)** ([`Transport`](Transport.zig)) + line reader + **`exchange`**
+   / **`readLine`** / **`writeRaw`** / raw reads. **Full-duplex:** sending a command does not
+   block receiving **URCs** on the other wire direction at the driver level; the **single RX stream**
+   is still one ordered byte sequence (multiplex URC vs command response in your tasking model).
+   Build with **`init`**(`config`) where **`config`** is **[`Peer.Config`](Peer.zig)** (includes **`wire`**, timeouts, **`append_crlf`**). Use **`Peer.Config.with`(`&impl`)** to set **`wire`** + **`backend`** for **`peer.backendAs`(YourType)**; with a bare **`Transport`**, use **`P.init(.{ .wire = t })`** and leave **`backend`** null. Each **`exchange`** runs **`clearReader`** + **`flushRx`**
+   before sending; **`readLine`** does not.
 
-### What belongs in Session (not LineReader)
+### What belongs in Peer (not LineReader)
 
 `LineReader` only splits the byte stream on **CR / CRLF / LF** (see
 `LineReader.zig`). Anything where **line boundaries are not enough** for meaning
-belongs in **`Session` / `Dte`** (command state machine, timeouts, mode switches):
+belongs in **`Peer`** or your app (command state machine, timeouts, mode switches):
 
 | Situation | Where it is handled |
 |-----------|---------------------|
-| **Echo (ATE1)** | **Session**: `exchange` always skips a line that matches the last sent **cmd** body (ASCII trim), before counting non-terminal lines; prefer **ATE0** if echo shape does not match. |
-| **Prompts** (e.g. SMS **`>`** after `AT+CMGS`) | **Session**: detect prompt (by line or byte scan), then switch phase — do **not** treat payload as a normal “English” line. |
-| **PDU / body after prompt** | **Session**: use **`writeRaw`** / **`readExact`** (raw `Transport` I/O) for **fixed length**, until **0x1A**, or per modem spec — **bypass `LineReader`**; then **`clearReader`** / resume **`exchange`**. |
-| **Length-prefixed binary** (e.g. `+QHTTPREAD: <len>` then raw bytes) | **Caller**: one **`exchange`** or **`readLine`** to get the header line, parse `len`, then **`readExact`** for `len` bytes (not another `exchange`). |
+| **Echo (ATE1)** | **`Peer.exchange`** skips a line that matches the last sent **cmd** body (ASCII trim), before counting non-terminal lines; prefer **ATE0** if echo shape does not match. |
+| **Prompts** (e.g. SMS **`>`** after `AT+CMGS`) | **Your loop**: detect prompt (by line or byte scan), then switch phase — do **not** treat payload as a normal “English” line. |
+| **PDU / body after prompt** | **Peer**: **`writeRaw`**, then **`readUntilByte(out, 0x1A)`** (Ctrl+Z) or a loop of **`peer.config.wire.read`** (with deadlines) if there is no single sentinel — **bypass line parsing until the segment ends**; trailing bytes after the sentinel are re-queued for **`readLine`**. |
+| **Length-prefixed binary** (e.g. `+QHTTPREAD: <len>` then raw bytes) | **Caller**: one **`exchange`** or **`readLine`** to get the header line, parse `len`, then loop **`peer.config.wire.read`** (set read deadline using **`transport_read_timeout_ms`**) until `len` bytes — not another **`exchange`**. |
 | **File / bulk data** | Usually **socket or data plane** (TCP/TLS/HTTP AT), or **framed** transfer — not “read lines until EOF”. |
-| **CMUX / PPP** | **Below** Session: demux to a **single logical AT stream** first; `LineReader` + `Session` attach **only** to that stream. |
+| **CMUX / PPP** | **Below** `Peer`: demux to a **single logical AT stream** first; **`Peer`** attaches **only** to that stream. |
 
 ### `LineReader` errors: `LineTooLong` vs `OutTooSmall`
 
@@ -104,42 +96,36 @@ These are **not** fixed global byte counts; they depend on **your buffers**:
   bytes** in `pending` **without** a **complete line** (no terminator yet).
   So “too long” means: **one logical line (plus any split terminator) would need
   more than `cap` bytes** before a CR/LF-style end. Raise `cap` at compile time,
-  or treat as protocol/peer error in Session.
+  or treat as protocol/peer error in your handler.
 
 - **`error.OutTooSmall`** — The caller-supplied **`out` slice** passed to
   `readLine` / `tryPopLineInto` is **shorter than** the **trimmed line body**
   (after CR/LF removal and optional ASCII space trim). “Too small” means:
   **`out.len < line_body_len`**. Use a larger `out` buffer or handle the error
-  in Session.
+  in your handler.
 
 **Retry / layering:** `LineReader` **does not** automatically retry on
 `OutTooSmall` — it returns the error and **leaves `pending` unchanged** (the
-complete line is still buffered). **`Session` / `Dte`** is the right place to
+complete line is still buffered). **`Peer`** (or your wrapper) is the right place to
 retry with a **larger `out`** (e.g. call `tryPopLineInto` again), or to pick an
 `out` size up front that fits expected responses and avoid the error entirely.
 
-### Session implementation scope (`lib/at/Session.zig`)
+### Peer implementation scope (`lib/at/Peer.zig`)
 
-Use **`const S = at.Session.make(comptime_lib, line_cap);`** — `line_cap` must match
-the **`LineReader(cap)`** used inside (one line’s max body + terminator budget).
+**Public from `at.zig`:** **`at.Peer.make(lib)`** uses module constant **`Peer.max_line_len`** (one line’s max body + terminator budget, like fixed protocol caps elsewhere). Raise **`max_line_len`** in a fork if you need a larger compile-time cap.
 
-**Included today**
+**Included**
 
 - **`exchange(cmd, options)`** — Sends `cmd` (optional `\r\n` via `Config.append_crlf`),
   then reads lines until **`OK`**, **`ERROR`**, **`+CME ERROR:`**, or **`+CMS ERROR:`**
   (after ASCII trim). Other lines are **non-terminal**: optional **`on_info_line`**
-  callback (URC / `+CSQ:` / …); **`max_non_terminal_lines`** prevents infinite loops.
-- **Command echo** — **`exchange`** skips the first line equal to the last **`cmd`** body (after ASCII trim), so **ATE1** echo does not consume **`max_non_terminal_lines`** or **`on_info_line`**; if the modem’s echo differs from **`cmd`**, use **ATE0** or filter elsewhere.
-- **Timeouts** — **`command_timeout_ms`** bounds the whole exchange; **`transport_read_timeout_ms`**
-  / **`transport_write_timeout_ms`** are applied per `Transport` read/write attempt
-  (same pattern as `lib/bt/host/Hci.zig`). **Note:** each **`readLine`** sets the read
-  deadline **once** at entry; if one line arrives slowly over many small reads, increase
-  **`transport_read_timeout_ms`** or split work at **`Dte`** (see `LineReader` doc).
-- **`writeRaw` / `readExact`** — For **binary segments** after a **`>`** prompt or similar;
-  **`readExact`** loops **`transport.read`** with a fresh deadline each time.
-- **`flushRx` / `clearReader`** — Align RX state when switching between line mode and raw mode.
+  (URC / `+CSQ:` / … during that transaction); **`max_non_terminal_lines`** caps loops.
+- **Command echo** — **`exchange`** skips a line equal to the last **`cmd`** body (trimmed).
+- **Timeouts** — **`command_timeout_ms`** for **`exchange`**; per-read/write via **`transport_*_timeout_ms`**.
+- **`readLine`** / **`writeRaw`** / **`readUntilByte`** — See `Peer.zig` docs. Other binary: **`peer.config.wire.read`** in a loop with deadlines.
+- **`clearReader`** — Clears the internal line assembler only; **`exchange`** calls it (and **`peer.config.wire.flushRx()`**) before sending. For manual RX discard or URC drain policy, call **`peer.config.wire.flushRx()`** yourself.
 
-**Not implemented here (caller, `Dte`, or product code)**
+**Not implemented (your app)**
 
 - **`AT+CMGS` / `>`** two-phase state machine (detect prompt, then PDU, then **0x1A**).
 - Parsing **`+CME ERROR: <n>`** numeric codes.
@@ -168,7 +154,7 @@ Any backend that exposes a **reliable ordered byte stream** with read/write
 
 ### embed injection
 
-- Use `comptime lib: type` on factories (e.g. `Dte(lib, line_buf_cap)`), with
+- Use `comptime lib: type` on factories (e.g. `Peer.make(lib)`), with
   `comptime` validation of required `lib.time` symbols (`milliTimestamp` /
   `nanoTimestamp`) for deadline math, consistent with `lib/bt/host/Hci.zig` and
   `lib/cellular/modem/Modem.zig`.
@@ -192,10 +178,10 @@ type)` (and optional `makeWithOptions`) returning `testing.TestRunner`, with
 
 | Runner | Purpose |
 |--------|---------|
-| `dte_loopback` | **Memory or ring-backed `Transport`** wiring **Dte** to an in-process **Dce** table. Runs in CI without hardware. |
+| `dte_loopback` | **Memory loopback `Transport`** with canned modem lines + **Peer** (`AT`, `AT+CSQ`). Runs in CI without hardware. |
 | `dte_serial_host` | **Host-only** (e.g. macOS): open serial path from env (**e.g. `EMBED_AT_SERIAL`**), run minimal `AT` / `ATI` **exchange** against a **real DCE** (modem on device). If env unset, **log skip** and **return success** so default CI does not fail. Optional **`EMBED_AT_BAUD`** (default e.g. 115200). |
 
-On-embedded test binaries can reuse the same **Dte** surface with a board
+On-embedded test binaries can reuse the same **Peer** surface with a board
 `Transport` (UART to modem); the **serial** runner remains the usual choice for
 **Mac DTE ↔ device DCE** smoke.
 
@@ -203,7 +189,7 @@ On-embedded test binaries can reuse the same **Dte** surface with a board
 
 - **`lib/at.zig`** exports **`at.test_runner.unit`** and **`at.test_runner.integration`** (like **`bt.test_runner`**).
 - **`lib/tests.zig`** wires **`at/unit/std`**, **`at/unit/embed_std`**, **`at/integration/std`**, **`at/integration/embed_std`** through **`testing.T`** — mirror of **`bt/unit/…`** and **`bt/integration/…`**.
-- **`test_runner/unit.zig`** registers leaf runners (**`Transport`**, **`LineReader`**, **`Session`**, **`Dte`**, **`Dce`**, **`dte_loopback`**); **`test_runner/integration.zig`** runs **`dte_loopback`** then **`dte_serial_host`**.
+- **`test_runner/unit.zig`** registers leaf runners (**`Transport`**, **`LineReader`**, **`Peer`**, **`dte_loopback`**); **`test_runner/integration.zig`** runs **`dte_loopback`** then **`dte_serial_host`**.
 
 Run:
 
@@ -212,10 +198,10 @@ Run:
 
 Cases (under integration runner):
 
-- **`dte_loopback`** — in-process **Dte** ↔ **Dce** (`test_runner/test_utils/dte_loopback.zig`).
+- **`dte_loopback`** — in-process **Peer** over loopback `Transport` (`test_runner/test_utils/dte_loopback.zig`).
 - **`dte_serial_host`** — POSIX serial **DTE** vs **ESP32-S3 DCE firmware** (`test_runner/integration/dte_serial_host.zig`; not re-exported from `pub test_runner`).
 
-Host serial uses **`EMBED_AT_SERIAL`** / **`EMBED_AT_BAUD`**; unset path → skip (success).
+Host serial uses **`EMBED_AT_SERIAL`** / **`EMBED_AT_BAUD`**; unset path → skip (success). The matching **canned DCE** loop lives in the firmware test app (e.g. `~/esp/test/at_peer/src/CannedDce.zig`), not in `lib/at`.
 
 ### What not to duplicate here
 
@@ -230,9 +216,8 @@ Host serial uses **`EMBED_AT_SERIAL`** / **`EMBED_AT_BAUD`**; unset path → ski
 ### Production: UART or USB CDC
 
 1. Implement **`at.Transport`** on your driver (**`read` / `write` / `flushRx` / `reset` / `deinit`**, plus read/write deadlines mapped to your RTOS / bare-metal timer).
-2. Build **`Dte`**: `const D = at.Dte.make(board_lib, line_cap); var dte = D.init(at.Transport.init(&impl), .{});` then call **`exchange`**, **`writeRaw`**, **`readExact`** as needed.
-3. **USB CDC-ACM** is still a **byte stream** after enumeration; only the **`Transport`** implementation changes, not **`Session`** / **`Dte`**.
-4. **`Dce`** is for **tests / loopback mocks** (feed it lines from a fake RX queue, append replies to a fake TX queue), not for talking to a real modem on the wire.
+2. Build **`Peer`**: `const P = at.Peer.make(board_lib); var peer = P.init(P.Config.with(&impl));` (or `P.init(.{ .wire = at.Transport.init(&impl) })` if you do not need **`backendAs`**) then call **`exchange`** (host), or **`readLine`** + **`writeRaw`** (responder), or **`readUntilByte`** / **`peer.config.wire.read`** loops + **`writeRaw`** for raw phases.
+3. **USB CDC-ACM** is still a **byte stream** after enumeration; only the **`Transport`** implementation changes, not **`Peer`** internals.
 
 ## Next steps
 
@@ -240,8 +225,6 @@ Host serial uses **`EMBED_AT_SERIAL`** / **`EMBED_AT_BAUD`**; unset path → ski
    plus required **`flushRx`** (see layering below).
 2. **`LineReader`** — Implemented (`lib/at/LineReader.zig`); see `LineTooLong` /
    `OutTooSmall` above.
-3. **`Session`** — Implemented (`Session.make(lib, line_cap)`).
-4. **`Dte`** — Implemented (`Dte.make(lib, line_cap)`).
-5. **`Dce`** — Implemented (`handleLine`, `CommandEntry`, `respondCopy` helper).
-6. **`test_runner/integration.zig`** (**`dte_loopback`** + **`dte_serial_host`**); **`lib/tests.zig`** exposes **`at/integration/std`** and **`at/integration/embed_std`** (see above).
-7. Keep this README in sync with the public import path as APIs land.
+3. **`Peer`** — Implemented (`Peer.make(lib)` / `Peer.max_line_len`); public **`at`** entry point with **`Transport`**.
+4. **`test_runner/integration.zig`** (**`dte_loopback`** + **`dte_serial_host`**); **`lib/tests.zig`** exposes **`at/integration/std`** and **`at/integration/embed_std`** (see above).
+5. Keep this README in sync with the public import path as APIs land.

@@ -6,7 +6,7 @@
 //! protocol framing, not AT semantics).
 //!
 //! This type only finds **line boundaries**; it does not parse `OK`, `ERROR`, or URCs
-//! (that stays in `Session`).
+//! (that stays in [`Peer`](Peer.zig) for `exchange`, or in your app for `readLine`-only flows).
 
 const Transport = @import("Transport.zig");
 
@@ -32,6 +32,15 @@ pub fn LineReader(comptime cap: usize) type {
             self.pending_len = 0;
         }
 
+        /// Append raw bytes **before** whatever the next `readLine` will consume (same stream
+        /// order). Used after a raw segment read when the terminator and following bytes arrived
+        /// in one `Transport.read` — the tail must be re-fed into line framing.
+        pub fn appendPending(self: *Self, data: []const u8) error{PendingOverflow}!void {
+            if (self.pending_len + data.len > cap) return error.PendingOverflow;
+            @memcpy(self.pending[self.pending_len..][0..data.len], data);
+            self.pending_len += data.len;
+        }
+
         /// Read from `transport` until one full line is available, copy the line body
         /// into `out` (without the terminator), and return that slice.
         ///
@@ -51,7 +60,7 @@ pub fn LineReader(comptime cap: usize) type {
         /// `error.OutTooSmall`.
         ///
         /// If `read` returns `0` repeatedly while the line is incomplete, this loops
-        /// forever — use read deadlines or a blocking backend in `Session` / `Dte`.
+        /// forever — use read deadlines or a blocking backend in `Peer`.
         pub fn readLine(
             self: *Self,
             transport: Transport,
@@ -345,6 +354,33 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try testing.expectError(error.LineTooLong, reader.readLine(transport, &out, .{}));
         }
 
+        fn testAppendPendingFeedsReadLine() !void {
+            const std = @import("std");
+            const testing = std.testing;
+
+            const Impl = struct {
+                pub fn read(_: *@This(), _: []u8) Transport.ReadError!usize {
+                    return 0;
+                }
+                pub fn write(_: *@This(), _: []const u8) Transport.WriteError!usize {
+                    return 0;
+                }
+                pub fn flushRx(_: *@This()) void {}
+                pub fn reset(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?i64) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?i64) void {}
+            };
+
+            var back = Impl{};
+            const transport = Transport.init(&back);
+            var reader = LineReader(32).init();
+            try reader.appendPending("OK\r\n");
+            var out: [8]u8 = undefined;
+            const line = try reader.readLine(transport, &out, .{});
+            try testing.expectEqualStrings("OK", line);
+        }
+
         fn testOutTooSmall() !void {
             const std = @import("std");
             const testing = std.testing;
@@ -405,6 +441,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 return false;
             };
             TestCase.testLineTooLong() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testAppendPendingFeedsReadLine() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
