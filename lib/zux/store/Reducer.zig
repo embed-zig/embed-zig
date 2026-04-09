@@ -44,7 +44,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const TestCase = struct {
         fn use_case_shape(testing: anytype, _: lib.mem.Allocator) !void {
             const embed_std = @import("embed_std");
-            const store = @import("../store.zig");
+            const store = @import("../Store.zig");
 
             const ButtonStore = struct {
                 pressed: bool = false,
