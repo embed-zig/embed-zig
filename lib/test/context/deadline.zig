@@ -201,9 +201,11 @@ fn runImpl(comptime lib: type, allocator: lib.mem.Allocator) !void {
         const bg = fake_ctx_ns.background();
         const ReparentableDeadlineParent = test_utils.ReparentableDeadlineParentType(FakeLib);
         var parent_impl: ReparentableDeadlineParent = .{};
-        var parent = parent_impl.context(allocator, bg, lib.time.nanoTimestamp() + 80 * lib.time.ns_per_ms);
+        const parent_deadline = lib.time.nanoTimestamp() + 80 * lib.time.ns_per_ms;
+        var parent = parent_impl.context(allocator, bg, parent_deadline);
         ReparentThread.Condition.armTimedWaitHook();
-        var child = try fake_ctx_ns.withDeadline(parent, lib.time.nanoTimestamp() + 250 * lib.time.ns_per_ms);
+        const child_deadline = lib.time.nanoTimestamp() + 3000 * lib.time.ns_per_ms;
+        var child = try fake_ctx_ns.withDeadline(parent, child_deadline);
         defer child.deinit();
 
         ReparentThread.Condition.waitForTimedWaitHook();
@@ -219,6 +221,8 @@ fn runImpl(comptime lib: type, allocator: lib.mem.Allocator) !void {
         reparent_thread.join();
 
         lib.Thread.sleep(120 * lib.time.ns_per_ms);
+        const got_deadline = child.deadline() orelse return error.ReparentedDeadlineChildShouldKeepOwnDeadline;
+        if (got_deadline != child_deadline) return error.ReparentedDeadlineChildShouldKeepOwnDeadline;
         if (child.err() != null) return error.ReparentedDeadlineChildShouldNotUseOldDeadline;
 
         child.cancel();
