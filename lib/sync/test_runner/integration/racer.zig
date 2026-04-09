@@ -117,36 +117,63 @@ fn firstWinnerTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     defer racer.deinit();
 
     var started = U32Atomic.init(0);
-    var release = BoolAtomic.init(false);
+    var release_first = BoolAtomic.init(false);
+    var release_second = BoolAtomic.init(false);
+    var first_attempted = BoolAtomic.init(false);
+    var first_won = BoolAtomic.init(false);
+    var second_attempted = BoolAtomic.init(false);
+    var second_won = BoolAtomic.init(false);
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.State, l: type, started_count: *U32Atomic, gate: *BoolAtomic, delay_ms: u64, value: u32) void {
+        fn run(
+            ctx: R.State,
+            l: type,
+            started_count: *U32Atomic,
+            gate: *BoolAtomic,
+            attempted: *BoolAtomic,
+            result: *BoolAtomic,
+            value: u32,
+        ) void {
             _ = started_count.fetchAdd(1, .acq_rel);
             while (!gate.load(.acquire)) {
                 l.Thread.sleep(l.time.ns_per_ms);
             }
-            l.Thread.sleep(delay_ms * l.time.ns_per_ms);
-            _ = ctx.success(value);
+            result.store(ctx.success(value), .release);
+            attempted.store(true, .release);
         }
-    }.run, .{ lib, &started, &release, 20, 2 });
+    }.run, .{ lib, &started, &release_second, &second_attempted, &second_won, 2 });
 
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.State, l: type, started_count: *U32Atomic, gate: *BoolAtomic, delay_ms: u64, value: u32) void {
+        fn run(
+            ctx: R.State,
+            l: type,
+            started_count: *U32Atomic,
+            gate: *BoolAtomic,
+            attempted: *BoolAtomic,
+            result: *BoolAtomic,
+            value: u32,
+        ) void {
             _ = started_count.fetchAdd(1, .acq_rel);
             while (!gate.load(.acquire)) {
                 l.Thread.sleep(l.time.ns_per_ms);
             }
-            l.Thread.sleep(delay_ms * l.time.ns_per_ms);
-            _ = ctx.success(value);
+            result.store(ctx.success(value), .release);
+            attempted.store(true, .release);
         }
-    }.run, .{ lib, &started, &release, 5, 1 });
+    }.run, .{ lib, &started, &release_first, &first_attempted, &first_won, 1 });
 
     try waitForCount(lib, &started, 2, 200);
-    release.store(true, .release);
+    release_first.store(true, .release);
+    try waitForTrue(lib, &first_attempted, 200);
+    try testing.expect(first_won.load(.acquire));
 
     switch (racer.race()) {
         .winner => |value| try testing.expectEqual(@as(u32, 1), value),
         .exhausted => return error.ExpectedWinner,
     }
+
+    release_second.store(true, .release);
+    try waitForTrue(lib, &second_attempted, 200);
+    try testing.expect(!second_won.load(.acquire));
 
     switch (racer.race()) {
         .winner => |value| try testing.expectEqual(@as(u32, 1), value),

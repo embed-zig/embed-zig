@@ -59,7 +59,7 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
     };
     testing.allocator = alloc;
     const test_spawn_config: Thread.SpawnConfig = .{
-        .stack_size = 128 * 1024,
+        .stack_size = 1024 * 1024,
     };
 
     const Runner = struct {
