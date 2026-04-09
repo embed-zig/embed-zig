@@ -512,7 +512,7 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
 
             var ln = try Net.tls.listen(testing.allocator, .{
                 .address = addr4(0),
-            }, tlsServerConfigWithAlpn(&.{ "h2" }));
+            }, tlsServerConfigWithAlpn(&.{"h2"}));
             defer ln.deinit();
 
             const listener_impl = try ln.as(Net.tls.Listener);
@@ -585,7 +585,7 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
 
             var ln = try Net.tls.listen(testing.allocator, .{
                 .address = addr4(0),
-            }, tlsServerConfigWithAlpn(&.{ "h2" }));
+            }, tlsServerConfigWithAlpn(&.{"h2"}));
             defer ln.deinit();
 
             const listener_impl = try ln.as(Net.tls.Listener);
@@ -666,6 +666,60 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
         }
 
         fn responseBodyReadCanceledByContext() !void {
+            const BodyGate = struct {
+                mutex: Thread.Mutex = .{},
+                cond: Thread.Condition = .{},
+                released: bool = false,
+
+                fn wait(self: *@This()) void {
+                    self.mutex.lock();
+                    defer self.mutex.unlock();
+                    while (!self.released) self.cond.wait(&self.mutex);
+                }
+
+                fn release(self: *@This()) void {
+                    self.mutex.lock();
+                    defer self.mutex.unlock();
+                    self.released = true;
+                    self.cond.broadcast();
+                }
+            };
+            const BodyReadTask = struct {
+                mutex: Thread.Mutex = .{},
+                cond: Thread.Condition = .{},
+                resp: *Http.Response,
+                err: ?anyerror = null,
+                bytes: [4]u8 = undefined,
+                len: usize = 0,
+                finished: bool = false,
+
+                fn run(self: *@This()) void {
+                    defer {
+                        self.mutex.lock();
+                        self.finished = true;
+                        self.cond.broadcast();
+                        self.mutex.unlock();
+                    }
+
+                    const body = self.resp.body() orelse {
+                        self.err = error.TestUnexpectedResult;
+                        return;
+                    };
+                    self.len = body.read(&self.bytes) catch |err| {
+                        self.err = err;
+                        return;
+                    };
+                }
+
+                fn waitTimeout(self: *@This(), timeout_ms: u32) bool {
+                    self.mutex.lock();
+                    defer self.mutex.unlock();
+                    if (self.finished) return true;
+                    self.cond.timedWait(&self.mutex, @as(u64, timeout_ms) * lib.time.ns_per_ms) catch {};
+                    return self.finished;
+                }
+            };
+
             var ln = try Net.tls.listen(testing.allocator, .{
                 .address = addr4(0),
             }, tlsServerConfig());
@@ -674,9 +728,10 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             const listener_impl = try ln.as(Net.tls.Listener);
             const port = try tlsListenerPort(ln, Net);
             var server_result: ?anyerror = null;
+            var body_gate = BodyGate{};
 
             var server_thread = try Thread.spawn(test_spawn_config, struct {
-                fn run(listener: *Net.tls.Listener, result: *?anyerror) void {
+                fn run(listener: *Net.tls.Listener, result: *?anyerror, gate: *BodyGate) void {
                     var conn = listener.accept() catch |err| {
                         result.* = err;
                         return;
@@ -710,10 +765,10 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
                         result.* = err;
                         return;
                     };
-                    Thread.sleep(150 * lib.time.ns_per_ms);
+                    gate.wait();
                     io.writeAll(@TypeOf(conn), &conn, "late") catch {};
                 }
-            }.run, .{ listener_impl, &server_result });
+            }.run, .{ listener_impl, &server_result, &body_gate });
             defer server_thread.join();
 
             var ctx_api = try Context.init(testing.allocator);
@@ -733,15 +788,19 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             var resp = try transport.roundTrip(&req);
             defer resp.deinit();
 
-            const cancel_thread = try Thread.spawn(test_spawn_config, struct {
-                fn run(cancel_ctx: context_mod.Context, comptime thread_lib: type) void {
-                    thread_lib.Thread.sleep(30 * thread_lib.time.ns_per_ms);
-                    cancel_ctx.cancel();
-                }
-            }.run, .{ ctx, lib });
-            defer cancel_thread.join();
+            var read_task = BodyReadTask{ .resp = &resp };
+            var read_thread = try Thread.spawn(test_spawn_config, BodyReadTask.run, .{&read_task});
+            var read_joined = false;
+            defer if (!read_joined) read_thread.join();
+            defer body_gate.release();
 
-            try testing.expectError(error.Canceled, readBody(resp));
+            try testing.expect(!read_task.waitTimeout(120));
+            ctx.cancel();
+            try testing.expect(read_task.waitTimeout(500));
+            read_thread.join();
+            read_joined = true;
+            try testing.expect(read_task.err != null);
+            try testing.expectEqual(error.Canceled, read_task.err.?);
             if (server_result) |err| return err;
         }
 

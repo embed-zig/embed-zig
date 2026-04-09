@@ -17,8 +17,13 @@ const resolver_mod = @import("../../Resolver.zig");
 const fixtures = @import("../../tls/test_fixtures.zig");
 const Conn = net_mod.Conn;
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
-    const Runner = struct {
+fn makeCaseRunner(
+    comptime lib: type,
+    allocator_slot: *lib.mem.Allocator,
+    comptime run_fn: *const fn () anyerror!void,
+) testing_api.TestRunner {
+    const CaseRunner = struct {
+        allocator_slot: *lib.mem.Allocator,
         spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
         pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
@@ -27,12 +32,62 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
         }
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
-            _ = self;
-            runImpl(lib, t, allocator) catch |err| {
-                t.logErrorf("resolver runner failed: {}", .{err});
+            self.allocator_slot.* = allocator;
+            run_fn() catch |err| {
+                t.logFatal(@errorName(err));
                 return false;
             };
             return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = allocator;
+            lib.testing.allocator.destroy(self);
+        }
+    };
+
+    const runner = lib.testing.allocator.create(CaseRunner) catch @panic("OOM");
+    runner.* = .{
+        .allocator_slot = allocator_slot,
+    };
+    return testing_api.TestRunner.make(CaseRunner).new(runner);
+}
+
+pub fn make(comptime lib: type) testing_api.TestRunner {
+    const Cases = Suite(lib);
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            t.run("options_defaults", makeCaseRunner(lib, &Cases.allocator, Cases.optionsDefaults));
+            t.run("server_protocol_config", makeCaseRunner(lib, &Cases.allocator, Cases.serverProtocolConfig));
+            t.run("lookup_host_ignores_early_nxdomain_when_later_server_succeeds", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostIgnoresEarlyNXDOMAINWhenLaterServerSucceeds));
+            t.run("lookup_host_returns_name_not_found_after_all_servers_report_nxdomain", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostReturnsNameNotFoundAfterAllServersReportNXDOMAIN));
+            t.run("lookup_host_returns_no_data_after_empty_udp_success_responses", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostReturnsNoDataAfterEmptyUdpSuccessResponses));
+            t.run("lookup_host_returns_no_data_after_empty_tcp_success_responses", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostReturnsNoDataAfterEmptyTcpSuccessResponses));
+            t.run("lookup_host_resolves_via_tls_server", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostResolvesViaTlsServer));
+            t.run("lookup_host_rejects_tls_server_without_config", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostRejectsTlsServerWithoutConfig));
+            t.run("lookup_host_resolves_via_doh_server", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostResolvesViaDohServer));
+            t.run("lookup_host_rejects_doh_response_with_mismatched_id", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostRejectsDohResponseWithMismatchedId));
+            t.run("lookup_host_rejects_doh_server_without_config", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostRejectsDohServerWithoutConfig));
+            t.run("lookup_host_returns_partial_udp_dual_stack_result", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostReturnsPartialUdpDualStackResult));
+            t.run("lookup_host_returns_partial_udp_dual_stack_result_after_servfail", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostReturnsPartialUdpDualStackResultAfterServfail));
+            t.run("lookup_host_udp_servfail_and_empty_success_returns_timeout", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostUdpServfailAndEmptySuccessReturnsTimeout));
+            t.run("lookup_host_resolves_via_ipv6_udp_server", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostResolvesViaIpv6UdpServer));
+            t.run("lookup_host_matches_out_of_order_tcp_responses_by_id", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostMatchesOutOfOrderTcpResponsesById));
+            t.run("lookup_host_wait_blocks_until_slow_worker_cleanup", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostWaitBlocksUntilSlowWorkerCleanup));
+            t.run("lookup_host_context_returns_canceled", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostContextReturnsCanceled));
+            t.run("lookup_host_context_returns_deadline_exceeded", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostContextReturnsDeadlineExceeded));
+            t.run("lookup_host_context_returns_custom_cause", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostContextReturnsCustomCause));
+            t.run("lookup_host_returns_closed_after_deinit_starts", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostReturnsClosedAfterDeinitStarts));
+            return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
@@ -46,23 +101,21 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
     return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !void {
-    _ = t;
+fn Suite(comptime lib: type) type {
     const R = resolver_mod.Resolver(lib);
     const Net = net_mod.make(lib);
     const Addr = net_mod.netip.Addr;
     const AddrPort = net_mod.netip.AddrPort;
     const PacketConn = net_mod.PacketConn;
-    const testing = struct {
+    return struct {
+        const testing = @This();
+
         pub var allocator: lib.mem.Allocator = undefined;
         pub const expect = lib.testing.expect;
         pub const expectEqual = lib.testing.expectEqual;
         pub const expectEqualStrings = lib.testing.expectEqualStrings;
         pub const expectError = lib.testing.expectError;
-    };
-    testing.allocator = alloc;
 
-    const Runner = struct {
         fn addr4(port: u16) AddrPort {
             return AddrPort.from4(.{ 127, 0, 0, 1 }, port);
         }
@@ -91,7 +144,7 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
         }
 
         const test_spawn_config: lib.Thread.SpawnConfig = .{
-            .stack_size = 64 * 1024,
+            .stack_size = 1024 * 1024,
         };
 
         fn optionsDefaults() !void {
@@ -999,28 +1052,6 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             slow_thread.join();
         }
     };
-
-    try Runner.optionsDefaults();
-    try Runner.serverProtocolConfig();
-    try Runner.lookupHostIgnoresEarlyNXDOMAINWhenLaterServerSucceeds();
-    try Runner.lookupHostReturnsNameNotFoundAfterAllServersReportNXDOMAIN();
-    try Runner.lookupHostReturnsNoDataAfterEmptyUdpSuccessResponses();
-    try Runner.lookupHostReturnsNoDataAfterEmptyTcpSuccessResponses();
-    try Runner.lookupHostResolvesViaTlsServer();
-    try Runner.lookupHostRejectsTlsServerWithoutConfig();
-    try Runner.lookupHostResolvesViaDohServer();
-    try Runner.lookupHostRejectsDohResponseWithMismatchedId();
-    try Runner.lookupHostRejectsDohServerWithoutConfig();
-    try Runner.lookupHostReturnsPartialUdpDualStackResult();
-    try Runner.lookupHostReturnsPartialUdpDualStackResultAfterServfail();
-    try Runner.lookupHostUdpServfailAndEmptySuccessReturnsTimeout();
-    try Runner.lookupHostResolvesViaIpv6UdpServer();
-    try Runner.lookupHostMatchesOutOfOrderTcpResponsesById();
-    try Runner.lookupHostWaitBlocksUntilSlowWorkerCleanup();
-    try Runner.lookupHostContextReturnsCanceled();
-    try Runner.lookupHostContextReturnsDeadlineExceeded();
-    try Runner.lookupHostContextReturnsCustomCause();
-    try Runner.lookupHostReturnsClosedAfterDeinitStarts();
 }
 
 fn buildAResponse(comptime R: type, req: []const u8, ip: [4]u8, out: *[512]u8) !usize {
