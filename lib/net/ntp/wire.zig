@@ -80,7 +80,7 @@ pub fn unixMsToNtp(unix_ms: i64) types.NtpTimestamp {
 }
 
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, struct {
+    return testing_api.TestRunner.fromFn(lib, 0, struct {
         fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
             const testing = lib.testing;
 

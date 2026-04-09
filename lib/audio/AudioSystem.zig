@@ -1143,31 +1143,31 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("start_failure_resets_state", testing_api.TestRunner.fromFn(lib, struct {
+            t.run("start_failure_resets_state", testing_api.TestRunner.fromFn(lib, 0, struct {
                 fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.startFailureResetsState(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("readLoop_buffers_processed_audio", testing_api.TestRunner.fromFn(lib, struct {
+            t.run("readLoop_buffers_processed_audio", testing_api.TestRunner.fromFn(lib, 0, struct {
                 fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.readLoopBuffersProcessedAudio(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("read_returns_wouldblock_when_running_and_empty", testing_api.TestRunner.fromFn(lib, struct {
+            t.run("read_returns_wouldblock_when_running_and_empty", testing_api.TestRunner.fromFn(lib, 0, struct {
                 fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.readReturnsWouldBlockWhenRunningAndEmpty(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("start_allows_mic_only_mode", testing_api.TestRunner.fromFn(lib, struct {
+            t.run("start_allows_mic_only_mode", testing_api.TestRunner.fromFn(lib, 0, struct {
                 fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.startAllowsMicOnlyMode(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("start_allows_speaker_only_mode", testing_api.TestRunner.fromFn(lib, struct {
+            t.run("start_allows_speaker_only_mode", testing_api.TestRunner.fromFn(lib, 0, struct {
                 fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.startAllowsSpeakerOnlyMode(case_allocator);
                 }

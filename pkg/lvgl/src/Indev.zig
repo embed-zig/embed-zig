@@ -401,10 +401,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("lvgl/unit_tests/Indev/raw_handle_roundtrip", testing_api.TestRunner.fromFn(lib, Impl.raw_handle_roundtrip));
-            t.run("lvgl/unit_tests/Indev/configuration_and_events_roundtrip_through_wrapper", testing_api.TestRunner.fromFn(lib, Impl.configuration_and_events_roundtrip_through_wrapper));
-            t.run("lvgl/unit_tests/Indev/button_points_configuration_uses_button_devices", testing_api.TestRunner.fromFn(lib, Impl.button_points_configuration_uses_button_devices));
-            t.run("lvgl/unit_tests/Indev/remove_event_callback_with_user_data_stops_future_events", testing_api.TestRunner.fromFn(lib, Impl.remove_event_callback_with_user_data_stops_future_events));
+            t.run("lvgl/unit_tests/Indev/raw_handle_roundtrip", testing_api.TestRunner.fromFn(lib, 0, Impl.raw_handle_roundtrip));
+            t.run("lvgl/unit_tests/Indev/configuration_and_events_roundtrip_through_wrapper", testing_api.TestRunner.fromFn(lib, 0, Impl.configuration_and_events_roundtrip_through_wrapper));
+            t.run("lvgl/unit_tests/Indev/button_points_configuration_uses_button_devices", testing_api.TestRunner.fromFn(lib, 0, Impl.button_points_configuration_uses_button_devices));
+            t.run("lvgl/unit_tests/Indev/remove_event_callback_with_user_data_stops_future_events", testing_api.TestRunner.fromFn(lib, 0, Impl.remove_event_callback_with_user_data_stops_future_events));
             return t.wait();
         }
 

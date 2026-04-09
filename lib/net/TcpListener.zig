@@ -93,7 +93,7 @@ pub fn TcpListener(comptime lib: type) type {
 }
 
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, struct {
+    return testing_api.TestRunner.fromFn(lib, 0, struct {
         fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             const testing = lib.testing;
             const Addr = @import("netip/AddrPort.zig");

@@ -2,6 +2,9 @@
 //!
 //! `make(TestRunner).new(ctx)` borrows `ctx`, calls `ctx.init(allocator)` from
 //! `run()`, then forwards to `ctx.run(t, allocator)`.
+//!
+//! Factory: `fromFn` — `run_fn(t, allocator)` on a worker thread; `stack_size` selects
+//! `spawn_config.stack_size` (use `0` for platform default).
 
 const embed = @import("embed");
 const Self = @This();
@@ -84,9 +87,12 @@ pub fn make(comptime RunnerType: type) type {
 
 pub fn fromFn(
     comptime lib: type,
+    comptime stack_size: usize,
     comptime run_fn: *const fn (t: *T, allocator: lib.mem.Allocator) anyerror!void,
 ) Self {
     const Runner = struct {
+        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = stack_size },
+
         pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
             _ = self;
             _ = allocator;
@@ -406,7 +412,7 @@ pub fn TestRunner(comptime lib: type) Self {
                     _ = case_allocator;
                 }
             };
-            var from_fn_runner = Self.fromFn(lib, FromFnCases.run);
+            var from_fn_runner = Self.fromFn(lib, 0, FromFnCases.run);
             if (!from_fn_runner.run(t, allocator)) return false;
             return true;
         }

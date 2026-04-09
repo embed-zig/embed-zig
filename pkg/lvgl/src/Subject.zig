@@ -159,10 +159,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("lvgl/unit_tests/Subject/integer_subject_tracks_current_and_previous_values", testing_api.TestRunner.fromFn(lib, Impl.integer_subject_tracks_current_and_previous_values));
-            t.run("lvgl/unit_tests/Subject/pointer_subject_tracks_previous_pointer_value", testing_api.TestRunner.fromFn(lib, Impl.pointer_subject_tracks_previous_pointer_value));
-            t.run("lvgl/unit_tests/Subject/string_subject_copies_into_owned_buffers", testing_api.TestRunner.fromFn(lib, Impl.string_subject_copies_into_owned_buffers));
-            t.run("lvgl/unit_tests/Subject/string_subject_uses_caller_provided_storage", testing_api.TestRunner.fromFn(lib, Impl.string_subject_uses_caller_provided_storage));
+            t.run("lvgl/unit_tests/Subject/integer_subject_tracks_current_and_previous_values", testing_api.TestRunner.fromFn(lib, 0, Impl.integer_subject_tracks_current_and_previous_values));
+            t.run("lvgl/unit_tests/Subject/pointer_subject_tracks_previous_pointer_value", testing_api.TestRunner.fromFn(lib, 0, Impl.pointer_subject_tracks_previous_pointer_value));
+            t.run("lvgl/unit_tests/Subject/string_subject_copies_into_owned_buffers", testing_api.TestRunner.fromFn(lib, 0, Impl.string_subject_copies_into_owned_buffers));
+            t.run("lvgl/unit_tests/Subject/string_subject_uses_caller_provided_storage", testing_api.TestRunner.fromFn(lib, 0, Impl.string_subject_uses_caller_provided_storage));
             return t.wait();
         }
 

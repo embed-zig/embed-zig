@@ -17,42 +17,6 @@ const resolver_mod = @import("../../Resolver.zig");
 const fixtures = @import("../../tls/test_fixtures.zig");
 const Conn = net_mod.Conn;
 
-fn makeCaseRunner(
-    comptime lib: type,
-    allocator_slot: *lib.mem.Allocator,
-    comptime run_fn: *const fn () anyerror!void,
-) testing_api.TestRunner {
-    const CaseRunner = struct {
-        allocator_slot: *lib.mem.Allocator,
-        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
-
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
-            _ = self;
-            _ = allocator;
-        }
-
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
-            self.allocator_slot.* = allocator;
-            run_fn() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
-        }
-
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
-            _ = allocator;
-            lib.testing.allocator.destroy(self);
-        }
-    };
-
-    const runner = lib.testing.allocator.create(CaseRunner) catch @panic("OOM");
-    runner.* = .{
-        .allocator_slot = allocator_slot,
-    };
-    return testing_api.TestRunner.make(CaseRunner).new(runner);
-}
-
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Cases = Suite(lib);
 
@@ -66,27 +30,27 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("options_defaults", makeCaseRunner(lib, &Cases.allocator, Cases.optionsDefaults));
-            t.run("server_protocol_config", makeCaseRunner(lib, &Cases.allocator, Cases.serverProtocolConfig));
-            t.run("lookup_host_ignores_early_nxdomain_when_later_server_succeeds", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostIgnoresEarlyNXDOMAINWhenLaterServerSucceeds));
-            t.run("lookup_host_returns_name_not_found_after_all_servers_report_nxdomain", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostReturnsNameNotFoundAfterAllServersReportNXDOMAIN));
-            t.run("lookup_host_returns_no_data_after_empty_udp_success_responses", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostReturnsNoDataAfterEmptyUdpSuccessResponses));
-            t.run("lookup_host_returns_no_data_after_empty_tcp_success_responses", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostReturnsNoDataAfterEmptyTcpSuccessResponses));
-            t.run("lookup_host_resolves_via_tls_server", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostResolvesViaTlsServer));
-            t.run("lookup_host_rejects_tls_server_without_config", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostRejectsTlsServerWithoutConfig));
-            t.run("lookup_host_resolves_via_doh_server", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostResolvesViaDohServer));
-            t.run("lookup_host_rejects_doh_response_with_mismatched_id", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostRejectsDohResponseWithMismatchedId));
-            t.run("lookup_host_rejects_doh_server_without_config", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostRejectsDohServerWithoutConfig));
-            t.run("lookup_host_returns_partial_udp_dual_stack_result", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostReturnsPartialUdpDualStackResult));
-            t.run("lookup_host_returns_partial_udp_dual_stack_result_after_servfail", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostReturnsPartialUdpDualStackResultAfterServfail));
-            t.run("lookup_host_udp_servfail_and_empty_success_returns_timeout", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostUdpServfailAndEmptySuccessReturnsTimeout));
-            t.run("lookup_host_resolves_via_ipv6_udp_server", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostResolvesViaIpv6UdpServer));
-            t.run("lookup_host_matches_out_of_order_tcp_responses_by_id", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostMatchesOutOfOrderTcpResponsesById));
-            t.run("lookup_host_wait_blocks_until_slow_worker_cleanup", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostWaitBlocksUntilSlowWorkerCleanup));
-            t.run("lookup_host_context_returns_canceled", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostContextReturnsCanceled));
-            t.run("lookup_host_context_returns_deadline_exceeded", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostContextReturnsDeadlineExceeded));
-            t.run("lookup_host_context_returns_custom_cause", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostContextReturnsCustomCause));
-            t.run("lookup_host_returns_closed_after_deinit_starts", makeCaseRunner(lib, &Cases.allocator, Cases.lookupHostReturnsClosedAfterDeinitStarts));
+            t.run("options_defaults", testing_api.TestRunner.fromFn(lib, Cases.stack_light, Cases.optionsDefaults));
+            t.run("server_protocol_config", testing_api.TestRunner.fromFn(lib, Cases.stack_light, Cases.serverProtocolConfig));
+            t.run("lookup_host_ignores_early_nxdomain_when_later_server_succeeds", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostIgnoresEarlyNXDOMAINWhenLaterServerSucceeds));
+            t.run("lookup_host_returns_name_not_found_after_all_servers_report_nxdomain", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostReturnsNameNotFoundAfterAllServersReportNXDOMAIN));
+            t.run("lookup_host_returns_no_data_after_empty_udp_success_responses", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostReturnsNoDataAfterEmptyUdpSuccessResponses));
+            t.run("lookup_host_returns_no_data_after_empty_tcp_success_responses", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostReturnsNoDataAfterEmptyTcpSuccessResponses));
+            t.run("lookup_host_resolves_via_tls_server", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostResolvesViaTlsServer));
+            t.run("lookup_host_rejects_tls_server_without_config", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostRejectsTlsServerWithoutConfig));
+            t.run("lookup_host_resolves_via_doh_server", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostResolvesViaDohServer));
+            t.run("lookup_host_rejects_doh_response_with_mismatched_id", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostRejectsDohResponseWithMismatchedId));
+            t.run("lookup_host_rejects_doh_server_without_config", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostRejectsDohServerWithoutConfig));
+            t.run("lookup_host_returns_partial_udp_dual_stack_result", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostReturnsPartialUdpDualStackResult));
+            t.run("lookup_host_returns_partial_udp_dual_stack_result_after_servfail", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostReturnsPartialUdpDualStackResultAfterServfail));
+            t.run("lookup_host_udp_servfail_and_empty_success_returns_timeout", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostUdpServfailAndEmptySuccessReturnsTimeout));
+            t.run("lookup_host_resolves_via_ipv6_udp_server", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostResolvesViaIpv6UdpServer));
+            t.run("lookup_host_matches_out_of_order_tcp_responses_by_id", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostMatchesOutOfOrderTcpResponsesById));
+            t.run("lookup_host_wait_blocks_until_slow_worker_cleanup", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostWaitBlocksUntilSlowWorkerCleanup));
+            t.run("lookup_host_context_returns_canceled", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostContextReturnsCanceled));
+            t.run("lookup_host_context_returns_deadline_exceeded", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostContextReturnsDeadlineExceeded));
+            t.run("lookup_host_context_returns_custom_cause", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostContextReturnsCustomCause));
+            t.run("lookup_host_returns_closed_after_deinit_starts", testing_api.TestRunner.fromFn(lib, Cases.stack_heavy, Cases.lookupHostReturnsClosedAfterDeinitStarts));
             return t.wait();
         }
 
@@ -108,13 +72,19 @@ fn Suite(comptime lib: type) type {
     const AddrPort = net_mod.netip.AddrPort;
     const PacketConn = net_mod.PacketConn;
     return struct {
-        const testing = @This();
+        /// Must match `TestRunner.fromFn(..., this, ...)` for light subtests (platform default worker stack).
+        pub const stack_light: usize = 0;
+        /// Must match `TestRunner.fromFn(..., this, ...)` for resolver/network-heavy subtests.
+        pub const stack_heavy: usize = 1024 * 1024;
 
-        pub var allocator: lib.mem.Allocator = undefined;
-        pub const expect = lib.testing.expect;
-        pub const expectEqual = lib.testing.expectEqual;
-        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-        pub const expectError = lib.testing.expectError;
+        const expect = lib.testing.expect;
+        const expectEqual = lib.testing.expectEqual;
+        const expectEqualStrings = lib.testing.expectEqualStrings;
+        const expectError = lib.testing.expectError;
+
+        fn threadSpawn(stack: usize) lib.Thread.SpawnConfig {
+            return .{ .stack_size = stack };
+        }
 
         fn addr4(port: u16) AddrPort {
             return AddrPort.from4(.{ 127, 0, 0, 1 }, port);
@@ -135,47 +105,41 @@ fn Suite(comptime lib: type) type {
             return inner.port();
         }
 
-        fn initResolver(options: R.Options) !R {
+        fn initResolver(allocator: lib.mem.Allocator, worker_stack: usize, options: R.Options) !R {
             var owned = options;
-            // Resolver workers exercise relatively deep host-side networking/TLS
-            // stacks in compat tests, so give them an explicit host test stack.
-            owned.spawn_config = .{ .stack_size = 1024 * 1024 };
-            return R.init(testing.allocator, owned);
+            owned.spawn_config = .{ .stack_size = worker_stack };
+            return R.init(allocator, owned);
         }
 
-        const test_spawn_config: lib.Thread.SpawnConfig = .{
-            .stack_size = 1024 * 1024,
-        };
-
-        fn optionsDefaults() !void {
-            var r = try initResolver(.{});
+        fn optionsDefaults(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            var r = try initResolver(allocator, stack_light, .{});
             defer r.deinit();
-            try testing.expectEqual(@as(u32, 1000), r.options.timeout_ms);
-            try testing.expectEqual(@as(u32, 2), r.options.attempts);
-            try testing.expectEqual(R.QueryMode.ipv4_only, r.options.mode);
-            try testing.expectEqual(@as(usize, 4), r.options.servers.len);
+            try expectEqual(@as(u32, 1000), r.options.timeout_ms);
+            try expectEqual(@as(u32, 2), r.options.attempts);
+            try expectEqual(R.QueryMode.ipv4_only, r.options.mode);
+            try expectEqual(@as(usize, 4), r.options.servers.len);
         }
 
-        fn serverProtocolConfig() !void {
+        fn serverProtocolConfig(_: *testing_api.T, _: lib.mem.Allocator) !void {
             const s1 = R.Server.init(R.dns.ali.v4_1, .udp);
             const s2 = R.Server.init(R.dns.ali.v4_2, .tls);
             const s3 = R.Server.init(R.dns.google.v4_1, .doh);
-            try testing.expectEqual(R.Protocol.udp, s1.protocol);
-            try testing.expectEqual(R.Protocol.tls, s2.protocol);
-            try testing.expectEqual(R.Protocol.doh, s3.protocol);
-            try testing.expectEqualStrings("/dns-query", s3.doh_path);
+            try expectEqual(R.Protocol.udp, s1.protocol);
+            try expectEqual(R.Protocol.tls, s2.protocol);
+            try expectEqual(R.Protocol.doh, s3.protocol);
+            try expectEqualStrings("/dns-query", s3.doh_path);
         }
 
-        fn lookupHostIgnoresEarlyNXDOMAINWhenLaterServerSucceeds() !void {
+        fn lookupHostIgnoresEarlyNXDOMAINWhenLaterServerSucceeds(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             var negative_pc = try Net.listenPacket(.{
-                .allocator = testing.allocator,
+                .allocator = allocator,
                 .address = addr4(0),
             });
             defer negative_pc.deinit();
 
             const negative_impl = try negative_pc.as(Net.UdpConn);
             const negative_port = try negative_impl.boundPort();
-            var negative_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var negative_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(server_pc: PacketConn) void {
                     var req_buf: [512]u8 = undefined;
                     const req = server_pc.readFrom(&req_buf) catch return;
@@ -188,14 +152,14 @@ fn Suite(comptime lib: type) type {
             defer negative_thread.join();
 
             var positive_pc = try Net.listenPacket(.{
-                .allocator = testing.allocator,
+                .allocator = allocator,
                 .address = addr4(0),
             });
             defer positive_pc.deinit();
 
             const positive_impl = try positive_pc.as(Net.UdpConn);
             const positive_port = try positive_impl.boundPort();
-            var positive_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var positive_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(server_pc: PacketConn, ip: [4]u8) void {
                     var req_buf: [512]u8 = undefined;
                     const req = server_pc.readFrom(&req_buf) catch return;
@@ -209,7 +173,7 @@ fn Suite(comptime lib: type) type {
             }.run, .{ positive_pc, [4]u8{ 11, 22, 33, 44 } });
             defer positive_thread.join();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{
                     .{ .addr = addr4(negative_port), .protocol = .udp },
                     .{ .addr = addr4(positive_port), .protocol = .udp },
@@ -222,21 +186,21 @@ fn Suite(comptime lib: type) type {
 
             var addrs: [4]Addr = undefined;
             const count = try resolver.lookupHost("negative-first.test", &addrs);
-            try testing.expectEqual(@as(usize, 1), count);
+            try expectEqual(@as(usize, 1), count);
             const ip = addrs[0].as4().?;
-            try testing.expectEqual([4]u8{ 11, 22, 33, 44 }, ip);
+            try expectEqual([4]u8{ 11, 22, 33, 44 }, ip);
         }
 
-        fn lookupHostReturnsNameNotFoundAfterAllServersReportNXDOMAIN() !void {
+        fn lookupHostReturnsNameNotFoundAfterAllServersReportNXDOMAIN(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             var pc = try Net.listenPacket(.{
-                .allocator = testing.allocator,
+                .allocator = allocator,
                 .address = addr4(0),
             });
             defer pc.deinit();
 
             const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
-            var server_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var server_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(server_pc: PacketConn) void {
                     var req_buf: [512]u8 = undefined;
                     const req = server_pc.readFrom(&req_buf) catch return;
@@ -248,7 +212,7 @@ fn Suite(comptime lib: type) type {
             }.run, .{pc});
             defer server_thread.join();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(port), .protocol = .udp }},
                 .mode = .ipv4_only,
                 .timeout_ms = 500,
@@ -257,19 +221,19 @@ fn Suite(comptime lib: type) type {
             defer resolver.deinit();
 
             var addrs: [4]Addr = undefined;
-            try testing.expectError(error.NameNotFound, resolver.lookupHost("nxdomain.test", &addrs));
+            try expectError(error.NameNotFound, resolver.lookupHost("nxdomain.test", &addrs));
         }
 
-        fn lookupHostReturnsNoDataAfterEmptyUdpSuccessResponses() !void {
+        fn lookupHostReturnsNoDataAfterEmptyUdpSuccessResponses(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             var pc = try Net.listenPacket(.{
-                .allocator = testing.allocator,
+                .allocator = allocator,
                 .address = addr4(0),
             });
             defer pc.deinit();
 
             const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
-            var server_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var server_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(server_pc: PacketConn) void {
                     var req_buf: [512]u8 = undefined;
                     const req = server_pc.readFrom(&req_buf) catch return;
@@ -281,7 +245,7 @@ fn Suite(comptime lib: type) type {
             }.run, .{pc});
             defer server_thread.join();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(port), .protocol = .udp }},
                 .mode = .ipv4_only,
                 .timeout_ms = 500,
@@ -290,18 +254,18 @@ fn Suite(comptime lib: type) type {
             defer resolver.deinit();
 
             var addrs: [4]Addr = undefined;
-            try testing.expectError(error.NoData, resolver.lookupHost("empty-udp.test", &addrs));
+            try expectError(error.NoData, resolver.lookupHost("empty-udp.test", &addrs));
         }
 
-        fn lookupHostReturnsNoDataAfterEmptyTcpSuccessResponses() !void {
-            var listener = try Net.listen(testing.allocator, .{
+        fn lookupHostReturnsNoDataAfterEmptyTcpSuccessResponses(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            var listener = try Net.listen(allocator, .{
                 .address = addr4(0),
             });
             defer listener.deinit();
 
             const listener_impl = try listener.as(Net.TcpListener);
             const port = try listenerPort(listener, Net);
-            var server_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var server_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(ln: *Net.TcpListener) void {
                     var conn = ln.accept() catch return;
                     defer conn.deinit();
@@ -316,7 +280,7 @@ fn Suite(comptime lib: type) type {
             }.run, .{listener_impl});
             defer server_thread.join();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(port), .protocol = .tcp }},
                 .mode = .ipv4_only,
                 .timeout_ms = 500,
@@ -325,11 +289,11 @@ fn Suite(comptime lib: type) type {
             defer resolver.deinit();
 
             var addrs: [4]Addr = undefined;
-            try testing.expectError(error.NoData, resolver.lookupHost("empty-tcp.test", &addrs));
+            try expectError(error.NoData, resolver.lookupHost("empty-tcp.test", &addrs));
         }
 
-        fn lookupHostResolvesViaTlsServer() !void {
-            var listener = try Net.tls.listen(testing.allocator, .{
+        fn lookupHostResolvesViaTlsServer(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            var listener = try Net.tls.listen(allocator, .{
                 .address = addr4(0),
             }, .{
                 .certificates = &.{.{
@@ -343,7 +307,7 @@ fn Suite(comptime lib: type) type {
 
             const port = try tlsListenerPort(listener, Net);
             const listener_impl = try listener.as(Net.tls.Listener);
-            var server_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var server_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(ln: *Net.tls.Listener, ip: [4]u8) void {
                     var conn = ln.accept() catch return;
                     defer conn.deinit();
@@ -361,7 +325,7 @@ fn Suite(comptime lib: type) type {
             }.run, .{ listener_impl, [4]u8{ 51, 52, 53, 54 } });
             defer server_thread.join();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{
                     .addr = addr4(port),
                     .protocol = .tls,
@@ -380,13 +344,13 @@ fn Suite(comptime lib: type) type {
 
             var addrs: [4]Addr = undefined;
             const count = try resolver.lookupHost("tls-server.test", &addrs);
-            try testing.expectEqual(@as(usize, 1), count);
+            try expectEqual(@as(usize, 1), count);
             const ip = addrs[0].as4().?;
-            try testing.expectEqual([4]u8{ 51, 52, 53, 54 }, ip);
+            try expectEqual([4]u8{ 51, 52, 53, 54 }, ip);
         }
 
-        fn lookupHostRejectsTlsServerWithoutConfig() !void {
-            var resolver = try initResolver(.{
+        fn lookupHostRejectsTlsServerWithoutConfig(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(853), .protocol = .tls }},
                 .mode = .ipv4_only,
                 .timeout_ms = 200,
@@ -395,11 +359,11 @@ fn Suite(comptime lib: type) type {
             defer resolver.deinit();
 
             var addrs: [4]Addr = undefined;
-            try testing.expectError(error.InvalidTlsConfig, resolver.lookupHost("missing-tls-config.test", &addrs));
+            try expectError(error.InvalidTlsConfig, resolver.lookupHost("missing-tls-config.test", &addrs));
         }
 
-        fn lookupHostResolvesViaDohServer() !void {
-            var listener = try Net.tls.listen(testing.allocator, .{
+        fn lookupHostResolvesViaDohServer(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            var listener = try Net.tls.listen(allocator, .{
                 .address = addr4(0),
             }, .{
                 .certificates = &.{.{
@@ -413,7 +377,7 @@ fn Suite(comptime lib: type) type {
 
             const port = try tlsListenerPort(listener, Net);
             const listener_impl = try listener.as(Net.tls.Listener);
-            var server_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var server_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(ln: *Net.tls.Listener, ip: [4]u8) void {
                     var conn = ln.accept() catch return;
                     defer conn.deinit();
@@ -434,7 +398,7 @@ fn Suite(comptime lib: type) type {
             }.run, .{ listener_impl, [4]u8{ 61, 62, 63, 64 } });
             defer server_thread.join();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{
                     .addr = addr4(port),
                     .protocol = .doh,
@@ -454,13 +418,13 @@ fn Suite(comptime lib: type) type {
 
             var addrs: [4]Addr = undefined;
             const count = try resolver.lookupHost("doh-server.test", &addrs);
-            try testing.expectEqual(@as(usize, 1), count);
+            try expectEqual(@as(usize, 1), count);
             const ip = addrs[0].as4().?;
-            try testing.expectEqual([4]u8{ 61, 62, 63, 64 }, ip);
+            try expectEqual([4]u8{ 61, 62, 63, 64 }, ip);
         }
 
-        fn lookupHostRejectsDohResponseWithMismatchedId() !void {
-            var listener = try Net.tls.listen(testing.allocator, .{
+        fn lookupHostRejectsDohResponseWithMismatchedId(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            var listener = try Net.tls.listen(allocator, .{
                 .address = addr4(0),
             }, .{
                 .certificates = &.{.{
@@ -474,7 +438,7 @@ fn Suite(comptime lib: type) type {
 
             const port = try tlsListenerPort(listener, Net);
             const listener_impl = try listener.as(Net.tls.Listener);
-            var server_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var server_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(ln: *Net.tls.Listener, ip: [4]u8) void {
                     var conn = ln.accept() catch return;
                     defer conn.deinit();
@@ -496,7 +460,7 @@ fn Suite(comptime lib: type) type {
             }.run, .{ listener_impl, [4]u8{ 71, 72, 73, 74 } });
             defer server_thread.join();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{
                     .addr = addr4(port),
                     .protocol = .doh,
@@ -515,11 +479,11 @@ fn Suite(comptime lib: type) type {
             defer resolver.deinit();
 
             var addrs: [4]Addr = undefined;
-            try testing.expectError(error.Timeout, resolver.lookupHost("doh-mismatched-id.test", &addrs));
+            try expectError(error.Timeout, resolver.lookupHost("doh-mismatched-id.test", &addrs));
         }
 
-        fn lookupHostRejectsDohServerWithoutConfig() !void {
-            var resolver = try initResolver(.{
+        fn lookupHostRejectsDohServerWithoutConfig(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(443), .protocol = .doh }},
                 .mode = .ipv4_only,
                 .timeout_ms = 200,
@@ -528,19 +492,19 @@ fn Suite(comptime lib: type) type {
             defer resolver.deinit();
 
             var addrs: [4]Addr = undefined;
-            try testing.expectError(error.InvalidTlsConfig, resolver.lookupHost("missing-doh-config.test", &addrs));
+            try expectError(error.InvalidTlsConfig, resolver.lookupHost("missing-doh-config.test", &addrs));
         }
 
-        fn lookupHostReturnsPartialUdpDualStackResult() !void {
+        fn lookupHostReturnsPartialUdpDualStackResult(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             var pc = try Net.listenPacket(.{
-                .allocator = testing.allocator,
+                .allocator = allocator,
                 .address = addr4(0),
             });
             defer pc.deinit();
 
             const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
-            var server_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var server_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(server_pc: PacketConn, ip: [4]u8) void {
                     var handled: usize = 0;
                     while (handled < 2) : (handled += 1) {
@@ -561,7 +525,7 @@ fn Suite(comptime lib: type) type {
             }.run, .{ pc, [4]u8{ 21, 22, 23, 24 } });
             defer server_thread.join();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(port), .protocol = .udp }},
                 .mode = .ipv4_and_ipv6,
                 .timeout_ms = 500,
@@ -571,21 +535,21 @@ fn Suite(comptime lib: type) type {
 
             var addrs: [4]Addr = undefined;
             const count = try resolver.lookupHost("partial-udp.test", &addrs);
-            try testing.expectEqual(@as(usize, 1), count);
+            try expectEqual(@as(usize, 1), count);
             const ip = addrs[0].as4().?;
-            try testing.expectEqual([4]u8{ 21, 22, 23, 24 }, ip);
+            try expectEqual([4]u8{ 21, 22, 23, 24 }, ip);
         }
 
-        fn lookupHostReturnsPartialUdpDualStackResultAfterServfail() !void {
+        fn lookupHostReturnsPartialUdpDualStackResultAfterServfail(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             var pc = try Net.listenPacket(.{
-                .allocator = testing.allocator,
+                .allocator = allocator,
                 .address = addr4(0),
             });
             defer pc.deinit();
 
             const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
-            var server_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var server_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(server_pc: PacketConn, ip: [4]u8) void {
                     var handled: usize = 0;
                     while (handled < 2) : (handled += 1) {
@@ -606,7 +570,7 @@ fn Suite(comptime lib: type) type {
             }.run, .{ pc, [4]u8{ 25, 26, 27, 28 } });
             defer server_thread.join();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(port), .protocol = .udp }},
                 .mode = .ipv4_and_ipv6,
                 .timeout_ms = 500,
@@ -616,21 +580,21 @@ fn Suite(comptime lib: type) type {
 
             var addrs: [4]Addr = undefined;
             const count = try resolver.lookupHost("servfail-partial-udp.test", &addrs);
-            try testing.expectEqual(@as(usize, 1), count);
+            try expectEqual(@as(usize, 1), count);
             const ip = addrs[0].as4().?;
-            try testing.expectEqual([4]u8{ 25, 26, 27, 28 }, ip);
+            try expectEqual([4]u8{ 25, 26, 27, 28 }, ip);
         }
 
-        fn lookupHostUdpServfailAndEmptySuccessReturnsTimeout() !void {
+        fn lookupHostUdpServfailAndEmptySuccessReturnsTimeout(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             var pc = try Net.listenPacket(.{
-                .allocator = testing.allocator,
+                .allocator = allocator,
                 .address = addr4(0),
             });
             defer pc.deinit();
 
             const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
-            var server_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var server_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(server_pc: PacketConn) void {
                     var handled: usize = 0;
                     while (handled < 2) : (handled += 1) {
@@ -651,7 +615,7 @@ fn Suite(comptime lib: type) type {
             }.run, .{pc});
             defer server_thread.join();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(port), .protocol = .udp }},
                 .mode = .ipv4_and_ipv6,
                 .timeout_ms = 500,
@@ -660,14 +624,14 @@ fn Suite(comptime lib: type) type {
             defer resolver.deinit();
 
             var addrs: [4]Addr = undefined;
-            try testing.expectError(error.Timeout, resolver.lookupHost("servfail-empty-udp.test", &addrs));
+            try expectError(error.Timeout, resolver.lookupHost("servfail-empty-udp.test", &addrs));
         }
 
-        fn lookupHostResolvesViaIpv6UdpServer() !void {
+        fn lookupHostResolvesViaIpv6UdpServer(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             const loopback = addr6("::1", 0);
 
             var pc = try Net.listenPacket(.{
-                .allocator = testing.allocator,
+                .allocator = allocator,
                 .address = loopback,
             });
             defer pc.deinit();
@@ -676,7 +640,7 @@ fn Suite(comptime lib: type) type {
             const port = try impl.boundPort6();
             const server_addr = loopback.withPort(port);
 
-            var server_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var server_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(server_pc: PacketConn, ip: [4]u8) void {
                     var req_buf: [512]u8 = undefined;
                     const req = server_pc.readFrom(&req_buf) catch return;
@@ -688,7 +652,7 @@ fn Suite(comptime lib: type) type {
             }.run, .{ pc, [4]u8{ 41, 42, 43, 44 } });
             defer server_thread.join();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = server_addr, .protocol = .udp }},
                 .mode = .ipv4_only,
                 .timeout_ms = 500,
@@ -698,22 +662,22 @@ fn Suite(comptime lib: type) type {
 
             var addrs: [4]Addr = undefined;
             const count = try resolver.lookupHost("ipv6-server.test", &addrs);
-            try testing.expectEqual(@as(usize, 1), count);
+            try expectEqual(@as(usize, 1), count);
             const ip = addrs[0].as4().?;
-            try testing.expectEqual([4]u8{ 41, 42, 43, 44 }, ip);
+            try expectEqual([4]u8{ 41, 42, 43, 44 }, ip);
         }
 
-        fn lookupHostMatchesOutOfOrderTcpResponsesById() !void {
+        fn lookupHostMatchesOutOfOrderTcpResponsesById(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             const ipv6 = [16]u8{ 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
 
-            var listener = try Net.listen(testing.allocator, .{
+            var listener = try Net.listen(allocator, .{
                 .address = addr4(0),
             });
             defer listener.deinit();
 
             const listener_impl = try listener.as(Net.TcpListener);
             const port = try listenerPort(listener, Net);
-            var server_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var server_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(ln: *Net.TcpListener, ip4: [4]u8, ip6: [16]u8) void {
                     var conn = ln.accept() catch return;
                     defer conn.deinit();
@@ -743,7 +707,7 @@ fn Suite(comptime lib: type) type {
             }.run, .{ listener_impl, [4]u8{ 31, 32, 33, 34 }, ipv6 });
             defer server_thread.join();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(port), .protocol = .tcp }},
                 .mode = .ipv4_and_ipv6,
                 .timeout_ms = 500,
@@ -753,7 +717,7 @@ fn Suite(comptime lib: type) type {
 
             var addrs: [4]Addr = undefined;
             const count = try resolver.lookupHost("reordered-tcp.test", &addrs);
-            try testing.expectEqual(@as(usize, 2), count);
+            try expectEqual(@as(usize, 2), count);
 
             var saw_ipv4 = false;
             var saw_ipv6 = false;
@@ -767,11 +731,11 @@ fn Suite(comptime lib: type) type {
                 }
             }
 
-            try testing.expect(saw_ipv4);
-            try testing.expect(saw_ipv6);
+            try expect(saw_ipv4);
+            try expect(saw_ipv6);
         }
 
-        fn lookupHostWaitBlocksUntilSlowWorkerCleanup() !void {
+        fn lookupHostWaitBlocksUntilSlowWorkerCleanup(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             const BoolAtomic = lib.atomic.Value(bool);
 
             const SlowServer = struct {
@@ -781,14 +745,14 @@ fn Suite(comptime lib: type) type {
             };
 
             var slow_server = SlowServer{
-                .listener = try Net.listen(testing.allocator, .{
+                .listener = try Net.listen(allocator, .{
                     .address = addr4(0),
                 }),
             };
             defer slow_server.listener.deinit();
 
             const slow_port = try listenerPort(slow_server.listener, Net);
-            var slow_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var slow_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(server: *SlowServer) void {
                     var conn = server.listener.accept() catch return;
                     defer conn.deinit();
@@ -803,14 +767,14 @@ fn Suite(comptime lib: type) type {
             errdefer slow_server.release.store(true, .release);
 
             var fast_pc = try Net.listenPacket(.{
-                .allocator = testing.allocator,
+                .allocator = allocator,
                 .address = addr4(0),
             });
             defer fast_pc.deinit();
 
             const fast_impl = try fast_pc.as(Net.UdpConn);
             const fast_port = try fast_impl.boundPort();
-            var fast_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var fast_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(pc: PacketConn, accepted: *BoolAtomic, ip: [4]u8) void {
                     var req_buf: [512]u8 = undefined;
                     const req = pc.readFrom(&req_buf) catch return;
@@ -828,7 +792,7 @@ fn Suite(comptime lib: type) type {
             errdefer fast_thread.join();
             errdefer fast_pc.close();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{
                     .{ .addr = addr4(slow_port), .protocol = .tcp },
                     .{ .addr = addr4(fast_port), .protocol = .udp },
@@ -841,14 +805,14 @@ fn Suite(comptime lib: type) type {
 
             var addrs: [4]Addr = undefined;
             const count = try resolver.lookupHost("wait.test", &addrs);
-            try testing.expectEqual(@as(usize, 1), count);
+            try expectEqual(@as(usize, 1), count);
             const ip = addrs[0].as4().?;
-            try testing.expectEqual([4]u8{ 10, 20, 30, 40 }, ip);
+            try expectEqual([4]u8{ 10, 20, 30, 40 }, ip);
 
             try waitForTrue(lib, &slow_server.accepted, 200);
 
             var wait_done = BoolAtomic.init(false);
-            var wait_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var wait_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(r: *R, done: *BoolAtomic) void {
                     r.wait();
                     done.store(true, .release);
@@ -858,7 +822,7 @@ fn Suite(comptime lib: type) type {
             errdefer wait_thread.join();
 
             lib.Thread.sleep(10 * lib.time.ns_per_ms);
-            try testing.expect(!wait_done.load(.acquire));
+            try expect(!wait_done.load(.acquire));
 
             slow_server.release.store(true, .release);
             try waitForTrue(lib, &wait_done, 500);
@@ -867,13 +831,13 @@ fn Suite(comptime lib: type) type {
             slow_thread.join();
         }
 
-        fn lookupHostContextReturnsCanceled() !void {
+        fn lookupHostContextReturnsCanceled(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             const Context = context_mod.make(lib);
-            var context = try Context.init(testing.allocator);
+            var context = try Context.init(allocator);
             defer context.deinit();
 
             var pc = try Net.listenPacket(.{
-                .allocator = testing.allocator,
+                .allocator = allocator,
                 .address = addr4(0),
             });
             defer pc.deinit();
@@ -881,7 +845,7 @@ fn Suite(comptime lib: type) type {
             const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(port), .protocol = .udp }},
                 .mode = .ipv4_only,
                 .timeout_ms = 50,
@@ -894,16 +858,16 @@ fn Suite(comptime lib: type) type {
             cancel_ctx.cancel();
 
             var addrs: [4]Addr = undefined;
-            try testing.expectError(error.Canceled, resolver.lookupHostContext(cancel_ctx, "canceled.test", &addrs));
+            try expectError(error.Canceled, resolver.lookupHostContext(cancel_ctx, "canceled.test", &addrs));
         }
 
-        fn lookupHostContextReturnsDeadlineExceeded() !void {
+        fn lookupHostContextReturnsDeadlineExceeded(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             const Context = context_mod.make(lib);
-            var context = try Context.init(testing.allocator);
+            var context = try Context.init(allocator);
             defer context.deinit();
 
             var pc = try Net.listenPacket(.{
-                .allocator = testing.allocator,
+                .allocator = allocator,
                 .address = addr4(0),
             });
             defer pc.deinit();
@@ -911,7 +875,7 @@ fn Suite(comptime lib: type) type {
             const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(port), .protocol = .udp }},
                 .mode = .ipv4_only,
                 .timeout_ms = 50,
@@ -923,16 +887,16 @@ fn Suite(comptime lib: type) type {
             defer timeout_ctx.deinit();
 
             var addrs: [4]Addr = undefined;
-            try testing.expectError(error.DeadlineExceeded, resolver.lookupHostContext(timeout_ctx, "deadline.test", &addrs));
+            try expectError(error.DeadlineExceeded, resolver.lookupHostContext(timeout_ctx, "deadline.test", &addrs));
         }
 
-        fn lookupHostContextReturnsCustomCause() !void {
+        fn lookupHostContextReturnsCustomCause(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             const Context = context_mod.make(lib);
-            var context = try Context.init(testing.allocator);
+            var context = try Context.init(allocator);
             defer context.deinit();
 
             var pc = try Net.listenPacket(.{
-                .allocator = testing.allocator,
+                .allocator = allocator,
                 .address = addr4(0),
             });
             defer pc.deinit();
@@ -940,7 +904,7 @@ fn Suite(comptime lib: type) type {
             const impl = try pc.as(Net.UdpConn);
             const port = try impl.boundPort();
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(port), .protocol = .udp }},
                 .mode = .ipv4_only,
                 .timeout_ms = 50,
@@ -951,7 +915,7 @@ fn Suite(comptime lib: type) type {
             var cancel_ctx = try context.withCancel(context.background());
             defer cancel_ctx.deinit();
 
-            var cancel_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var cancel_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(cc: *context_mod.Context, l: type) void {
                     l.Thread.sleep(5 * l.time.ns_per_ms);
                     cc.cancelWithCause(error.BrokenPipe);
@@ -960,10 +924,10 @@ fn Suite(comptime lib: type) type {
             defer cancel_thread.join();
 
             var addrs: [4]Addr = undefined;
-            try testing.expectError(error.BrokenPipe, resolver.lookupHostContext(cancel_ctx, "custom-cause.test", &addrs));
+            try expectError(error.BrokenPipe, resolver.lookupHostContext(cancel_ctx, "custom-cause.test", &addrs));
         }
 
-        fn lookupHostReturnsClosedAfterDeinitStarts() !void {
+        fn lookupHostReturnsClosedAfterDeinitStarts(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             const BoolAtomic = lib.atomic.Value(bool);
 
             const SlowServer = struct {
@@ -979,14 +943,14 @@ fn Suite(comptime lib: type) type {
             };
 
             var slow_server = SlowServer{
-                .listener = try Net.listen(testing.allocator, .{
+                .listener = try Net.listen(allocator, .{
                     .address = addr4(0),
                 }),
             };
             defer slow_server.listener.deinit();
 
             const slow_port = try listenerPort(slow_server.listener, Net);
-            var slow_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var slow_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(server: *SlowServer) void {
                     var conn = server.listener.accept() catch return;
                     defer conn.deinit();
@@ -1000,7 +964,7 @@ fn Suite(comptime lib: type) type {
             errdefer slow_thread.join();
             errdefer slow_server.release.store(true, .release);
 
-            var resolver = try initResolver(.{
+            var resolver = try initResolver(allocator, stack_heavy, .{
                 .servers = &.{.{ .addr = addr4(slow_port), .protocol = .tcp }},
                 .mode = .ipv4_only,
                 .timeout_ms = 1000,
@@ -1016,7 +980,7 @@ fn Suite(comptime lib: type) type {
                 .done = &first_lookup_done,
                 .addrs = &first_addrs,
             };
-            var lookup_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var lookup_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(state: *LookupThread) void {
                     _ = state.resolver.lookupHost("closed.test", state.addrs) catch {};
                     state.done.store(true, .release);
@@ -1028,7 +992,7 @@ fn Suite(comptime lib: type) type {
             try waitForTrue(lib, &slow_server.accepted, 200);
 
             var deinit_done = BoolAtomic.init(false);
-            var deinit_thread = try lib.Thread.spawn(test_spawn_config, struct {
+            var deinit_thread = try lib.Thread.spawn(threadSpawn(stack_heavy), struct {
                 fn run(r: *R, done: *BoolAtomic) void {
                     r.deinit();
                     done.store(true, .release);
@@ -1041,8 +1005,8 @@ fn Suite(comptime lib: type) type {
             try waitUntilDeiniting(lib, &resolver, 200);
 
             var second_addrs: [4]Addr = undefined;
-            try testing.expectError(error.Closed, resolver.lookupHost("closed-again.test", &second_addrs));
-            try testing.expect(!deinit_done.load(.acquire));
+            try expectError(error.Closed, resolver.lookupHost("closed-again.test", &second_addrs));
+            try expect(!deinit_done.load(.acquire));
 
             slow_server.release.store(true, .release);
             try waitForTrue(lib, &first_lookup_done, 500);

@@ -26,7 +26,7 @@ pub const test_runner = struct {
 };
 
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, struct {
+    return testing_api.TestRunner.fromFn(lib, 0, struct {
         fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             _ = allocator;
             _ = @import("fd/SockAddr.zig");

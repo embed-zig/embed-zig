@@ -1160,7 +1160,7 @@ fn buildResolverTestAResponse(comptime R: type, req: []const u8, flags: u16, qdc
 }
 
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, struct {
+    return testing_api.TestRunner.fromFn(lib, 0, struct {
         fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
             const testing = lib.testing;
             const R = Resolver(lib);
