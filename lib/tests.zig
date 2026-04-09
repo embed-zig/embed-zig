@@ -17,8 +17,8 @@ const audio = @import("audio");
 const zux = @import("zux");
 
 pub const test_runner = struct {
-    pub const embed = @import("test/embed.zig");
-    pub const context = @import("test/context.zig");
+    pub const embed = @import("tests/embed.zig");
+    pub const context = @import("tests/context.zig");
 };
 
 test "testing/unit/std" {

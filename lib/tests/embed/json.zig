@@ -1,8 +1,8 @@
 //! JSON compatibility runner — exercises the `embed.json` std-shaped surface.
 //!
 //! Usage:
-//!   try @import("lib/test/embed/json.zig").run(std);
-//!   try @import("lib/test/embed/json.zig").run(embed);
+//!   try @import("lib/tests/embed/json.zig").run(std);
+//!   try @import("lib/tests/embed/json.zig").run(embed);
 
 const embed = @import("embed");
 const std = @import("std");

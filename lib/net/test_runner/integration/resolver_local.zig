@@ -801,6 +801,9 @@ fn Suite(comptime lib: type) type {
                     while (!request_received.load(.acquire) and waited_ms < 200) : (waited_ms += 1) {
                         lib.Thread.sleep(lib.time.ns_per_ms);
                     }
+                    // Give the slow TCP worker time to move from query write into
+                    // its blocking read before the fast UDP answer wins the race.
+                    lib.Thread.sleep(50 * lib.time.ns_per_ms);
 
                     var resp_buf: [512]u8 = undefined;
                     const resp_len = buildAResponse(R, req_buf[0..req.bytes_read], ip, &resp_buf) catch return;
