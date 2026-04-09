@@ -12,14 +12,14 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("hash", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+            t.run("hash", testing_mod.TestRunner.fromFn(lib, 256 * 1024, struct {
                 fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
                     try hashTests(lib);
                 }
             }.run));
-            t.run("hmac", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+            t.run("hmac", testing_mod.TestRunner.fromFn(lib, 256 * 1024, struct {
                 fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
@@ -40,7 +40,7 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
                     try randomTests(lib);
                 }
             }.run));
-            t.run("hkdf", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
+            t.run("hkdf", testing_mod.TestRunner.fromFn(lib, 256 * 1024, struct {
                 fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
@@ -75,7 +75,7 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
                     try eccTests(lib);
                 }
             }.run));
-            t.run("aes_block", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+            t.run("aes_block", testing_mod.TestRunner.fromFn(lib, 128 * 1024, struct {
                 fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;

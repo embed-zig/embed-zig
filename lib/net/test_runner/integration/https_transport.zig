@@ -15,7 +15,7 @@ const testing_api = @import("testing");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
-        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
+        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 3 * 1024 * 1024 },
 
         pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
             _ = self;
@@ -58,8 +58,10 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
         pub const expectError = lib.testing.expectError;
     };
     testing.allocator = alloc;
+    // These helper threads perform full TLS handshakes and tunnel bridging, so
+    // they need the same order of stack budget as the other TLS-heavy runners.
     const test_spawn_config: Thread.SpawnConfig = .{
-        .stack_size = 64 * 1024,
+        .stack_size = 2 * 1024 * 1024,
     };
 
     const Runner = struct {
