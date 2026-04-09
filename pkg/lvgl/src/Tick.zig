@@ -89,8 +89,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("lvgl/unit_tests/Tick/inc_updates_elaps", testing_api.TestRunner.fromFn(lib, 0, Impl.inc_updates_elaps));
-            t.run("lvgl/unit_tests/Tick/timer_handler_runs_after_tick", testing_api.TestRunner.fromFn(lib, 0, Impl.timer_handler_runs_after_tick));
+            t.run("lvgl/unit_tests/Tick/inc_updates_elaps", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.inc_updates_elaps));
+            t.run("lvgl/unit_tests/Tick/timer_handler_runs_after_tick", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.timer_handler_runs_after_tick));
             return t.wait();
         }
 

@@ -72,9 +72,9 @@ fn Suite(comptime lib: type) type {
     const AddrPort = net_mod.netip.AddrPort;
     const PacketConn = net_mod.PacketConn;
     return struct {
-        /// Must match `TestRunner.fromFn(..., this, ...)` for light subtests (platform default worker stack).
-        pub const stack_light: usize = 0;
-        /// Must match `TestRunner.fromFn(..., this, ...)` for resolver/network-heavy subtests.
+        /// Must match `TestRunner.fromFn(..., this, ...)` for light resolver subtests (~shallow, no helper threads).
+        pub const stack_light: usize = 256 * 1024;
+        /// Must match worker + `lib.Thread.spawn` in this file (~resolver helpers, TLS/DoH servers).
         pub const stack_heavy: usize = 1024 * 1024;
 
         const expect = lib.testing.expect;

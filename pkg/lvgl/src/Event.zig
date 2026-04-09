@@ -106,8 +106,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("lvgl/unit_tests/Event/raw_handle_roundtrip", testing_api.TestRunner.fromFn(lib, 0, Impl.raw_handle_roundtrip));
-            t.run("lvgl/unit_tests/Event/codeFromInt_preserves_custom_ids", testing_api.TestRunner.fromFn(lib, 0, Impl.codeFromInt_preserves_custom_ids));
+            t.run("lvgl/unit_tests/Event/raw_handle_roundtrip", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.raw_handle_roundtrip));
+            t.run("lvgl/unit_tests/Event/codeFromInt_preserves_custom_ids", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.codeFromInt_preserves_custom_ids));
             return t.wait();
         }
 
