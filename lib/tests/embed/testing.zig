@@ -12,11 +12,14 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            runCases(lib) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
+            t.run("make_exposes_impl_symbols", testing_mod.TestRunner.fromFn(lib, 16 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try makeExposesImplSymbolsCase(lib);
+                }
+            }.run));
+            return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
@@ -30,17 +33,11 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
     return testing_mod.TestRunner.make(Runner).new(runner);
 }
 
-fn runCases(comptime lib: type) !void {
-    const TestCase = struct {
-        fn makeExposesImplSymbols() !void {
-            const testing = embed.testing.make(lib.testing);
+fn makeExposesImplSymbolsCase(comptime lib: type) !void {
+    const testing = embed.testing.make(lib.testing);
 
-            try testing.expect(true);
-            const bytes = try testing.allocator.dupe(u8, "test");
-            defer testing.allocator.free(bytes);
-            try testing.expectEqual(@as(usize, 4), bytes.len);
-        }
-    };
-
-    try TestCase.makeExposesImplSymbols();
+    try testing.expect(true);
+    const bytes = try testing.allocator.dupe(u8, "test");
+    defer testing.allocator.free(bytes);
+    try testing.expectEqual(@as(usize, 4), bytes.len);
 }

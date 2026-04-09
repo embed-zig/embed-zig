@@ -11,11 +11,15 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
         pub fn run(self: *@This(), t: *testing_mod.T, allocator: embed.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            runImpl(lib) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
+
+            t.run("noop", testing_mod.TestRunner.fromFn(lib, 4 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try noopCase(lib);
+                }
+            }.run));
+            return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
@@ -29,6 +33,6 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
     return testing_mod.TestRunner.make(Runner).new(runner);
 }
 
-fn runImpl(comptime lib: type) !void {
+fn noopCase(comptime lib: type) !void {
     _ = lib;
 }

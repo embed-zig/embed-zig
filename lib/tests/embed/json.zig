@@ -19,11 +19,52 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            runCases(lib) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
+            t.run("declaration_parity", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try jsonDeclarationParityCase(lib);
+                }
+            }.run));
+            t.run("type_identity", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try jsonTypeIdentityCase(lib);
+                }
+            }.run));
+            t.run("parse_from_slice_struct", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    try parseFromSliceStructTests(lib, sub_allocator);
+                }
+            }.run));
+            t.run("parse_from_value", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    try parseFromValueTests(lib, sub_allocator);
+                }
+            }.run));
+            t.run("scanner", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    try scannerTests(lib, sub_allocator);
+                }
+            }.run));
+            t.run("reader_backed_parse", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    try readerBackedParseTests(lib, sub_allocator);
+                }
+            }.run));
+            t.run("stringify", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try stringifyTests(lib);
+                }
+            }.run));
+            return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
@@ -39,38 +80,30 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
 
 const json = @This();
 
-fn runCases(comptime lib: type) !void {
-    const TestCase = struct {
-        fn declarationParity() !void {
-            inline for (comptime std.meta.declarations(std.json)) |decl| {
-                try lib.testing.expect(@hasDecl(embed.json, decl.name));
-            }
-            inline for (comptime std.meta.declarations(embed.json)) |decl| {
-                try lib.testing.expect(@hasDecl(std.json, decl.name));
-            }
-        }
+fn jsonDeclarationParityCase(comptime lib: type) !void {
+    inline for (comptime std.meta.declarations(std.json)) |decl| {
+        try lib.testing.expect(@hasDecl(embed.json, decl.name));
+    }
+    inline for (comptime std.meta.declarations(embed.json)) |decl| {
+        try lib.testing.expect(@hasDecl(std.json, decl.name));
+    }
+}
 
-        fn typeIdentity() !void {
-            try lib.testing.expect(embed.json.ObjectMap == std.json.ObjectMap);
-            try lib.testing.expect(embed.json.Array == std.json.Array);
-            try lib.testing.expect(embed.json.Value == std.json.Value);
-            try lib.testing.expect(embed.json.ArrayHashMap == std.json.ArrayHashMap);
-            try lib.testing.expect(embed.json.Scanner == std.json.Scanner);
-            try lib.testing.expect(embed.json.Reader == std.json.Reader);
-            try lib.testing.expect(embed.json.Token == std.json.Token);
-            try lib.testing.expect(embed.json.ParseOptions == std.json.ParseOptions);
-            try lib.testing.expect(embed.json.Stringify == std.json.Stringify);
-            try lib.testing.expect(@TypeOf(embed.json.parseFromSlice) == @TypeOf(std.json.parseFromSlice));
-            try lib.testing.expect(@TypeOf(embed.json.parseFromTokenSource) == @TypeOf(std.json.parseFromTokenSource));
-            try lib.testing.expect(@TypeOf(embed.json.parseFromValue) == @TypeOf(std.json.parseFromValue));
-            try lib.testing.expect(@TypeOf(embed.json.fmt) == @TypeOf(std.json.fmt));
-            try lib.testing.expect(@TypeOf(embed.json.Formatter) == @TypeOf(std.json.Formatter));
-        }
-    };
-
-    try TestCase.declarationParity();
-    try TestCase.typeIdentity();
-    try json.run(lib);
+fn jsonTypeIdentityCase(comptime lib: type) !void {
+    try lib.testing.expect(embed.json.ObjectMap == std.json.ObjectMap);
+    try lib.testing.expect(embed.json.Array == std.json.Array);
+    try lib.testing.expect(embed.json.Value == std.json.Value);
+    try lib.testing.expect(embed.json.ArrayHashMap == std.json.ArrayHashMap);
+    try lib.testing.expect(embed.json.Scanner == std.json.Scanner);
+    try lib.testing.expect(embed.json.Reader == std.json.Reader);
+    try lib.testing.expect(embed.json.Token == std.json.Token);
+    try lib.testing.expect(embed.json.ParseOptions == std.json.ParseOptions);
+    try lib.testing.expect(embed.json.Stringify == std.json.Stringify);
+    try lib.testing.expect(@TypeOf(embed.json.parseFromSlice) == @TypeOf(std.json.parseFromSlice));
+    try lib.testing.expect(@TypeOf(embed.json.parseFromTokenSource) == @TypeOf(std.json.parseFromTokenSource));
+    try lib.testing.expect(@TypeOf(embed.json.parseFromValue) == @TypeOf(std.json.parseFromValue));
+    try lib.testing.expect(@TypeOf(embed.json.fmt) == @TypeOf(std.json.fmt));
+    try lib.testing.expect(@TypeOf(embed.json.Formatter) == @TypeOf(std.json.Formatter));
 }
 
 pub fn run(comptime lib: type) !void {

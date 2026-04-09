@@ -12,11 +12,57 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
         pub fn run(self: *@This(), t: *testing_mod.T, allocator: embed.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            runImpl(lib) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
+
+            t.run("type_surface", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try typeSurfaceTest(lib);
+                }
+            }.run));
+            t.run("file", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try fileTest(lib);
+                }
+            }.run));
+            t.run("seek", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try seekTests(lib);
+                }
+            }.run));
+            t.run("fcntl", testing_mod.TestRunner.fromFn(lib, 16 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try fcntlTest(lib);
+                }
+            }.run));
+            t.run("getsockopt", testing_mod.TestRunner.fromFn(lib, 16 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try getsockoptTest(lib);
+                }
+            }.run));
+            t.run("tcp", testing_mod.TestRunner.fromFn(lib, 64 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try tcpTest(lib);
+                }
+            }.run));
+            t.run("udp", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try udpTest(lib);
+                }
+            }.run));
+            return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
@@ -28,16 +74,6 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
     const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
-}
-
-fn runImpl(comptime lib: type) !void {
-    try typeSurfaceTest(lib);
-    try fileTest(lib);
-    try seekTests(lib);
-    try fcntlTest(lib);
-    try getsockoptTest(lib);
-    try tcpTest(lib);
-    try udpTest(lib);
 }
 
 fn typeSurfaceTest(comptime lib: type) !void {

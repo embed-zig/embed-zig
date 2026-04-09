@@ -12,11 +12,49 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            runCases(lib) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
+            t.run("spawn_clamps_stack_size_to_page_size", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try spawnClampsStackSizeToPageSize(lib);
+                }
+            }.run));
+            t.run("condition_make_accepts_matching_mutex_impl", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try conditionMakeCase(lib);
+                }
+            }.run));
+            t.run("thread_api", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try threadTests(lib);
+                }
+            }.run));
+            t.run("mutex", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try mutexTests(lib);
+                }
+            }.run));
+            t.run("condition", testing_mod.TestRunner.fromFn(lib, 48 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try conditionTests(lib);
+                }
+            }.run));
+            t.run("rwlock", testing_mod.TestRunner.fromFn(lib, 48 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try rwlockTests(lib);
+                }
+            }.run));
+            return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
@@ -30,123 +68,113 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
     return testing_mod.TestRunner.make(Runner).new(runner);
 }
 
-fn runCases(comptime lib: type) !void {
-    const TestCase = struct {
-        fn spawnClampsStackSizeToPageSize() !void {
-            const ThreadApi = @import("embed").Thread;
-            const Heap = struct {
-                pub fn pageSize() usize {
-                    return 4096;
-                }
-            };
+fn conditionMakeCase(comptime lib: type) !void {
+    _ = lib;
+    try conditionMakeAcceptsMatchingMutexImpl();
+}
 
-            const MutexImpl = struct {
-                pub fn lock(_: *@This()) void {}
-                pub fn unlock(_: *@This()) void {}
-                pub fn tryLock(_: *@This()) bool {
-                    return true;
-                }
-            };
-
-            const ConditionImpl = struct {
-                pub fn wait(_: *@This(), _: *MutexImpl) void {}
-                pub fn timedWait(_: *@This(), _: *MutexImpl, _: u64) error{Timeout}!void {}
-                pub fn signal(_: *@This()) void {}
-                pub fn broadcast(_: *@This()) void {}
-            };
-
-            const RwLockImpl = struct {
-                pub fn lockShared(_: *@This()) void {}
-                pub fn unlockShared(_: *@This()) void {}
-                pub fn lock(_: *@This()) void {}
-                pub fn unlock(_: *@This()) void {}
-                pub fn tryLockShared(_: *@This()) bool {
-                    return true;
-                }
-                pub fn tryLock(_: *@This()) bool {
-                    return true;
-                }
-            };
-
-            const Impl = struct {
-                pub const default_stack_size: usize = 8192;
-                pub const Id = usize;
-                pub const max_name_len: usize = 8;
-                pub const Mutex = MutexImpl;
-                pub const Condition = ConditionImpl;
-                pub const RwLock = RwLockImpl;
-
-                pub var last_stack_size: usize = 0;
-
-                pub fn spawn(config: ThreadApi.SpawnConfig, comptime f: anytype, args: anytype) ThreadApi.SpawnError!@This() {
-                    _ = f;
-                    _ = args;
-                    last_stack_size = config.stack_size;
-                    return .{};
-                }
-
-                pub fn join(_: @This()) void {}
-                pub fn detach(_: @This()) void {}
-                pub fn yield() ThreadApi.YieldError!void {}
-                pub fn sleep(_: u64) void {}
-                pub fn getCpuCount() ThreadApi.CpuCountError!usize {
-                    return 1;
-                }
-                pub fn getCurrentId() Id {
-                    return 0;
-                }
-                pub fn setName(_: []const u8) ThreadApi.SetNameError!void {}
-                pub fn getName(_: *[max_name_len:0]u8) ThreadApi.GetNameError!?[]const u8 {
-                    return null;
-                }
-            };
-
-            const Thread = ThreadApi.make(Impl, Heap);
-
-            _ = try Thread.spawn(.{ .stack_size = 1 }, struct {
-                fn run() void {}
-            }.run, .{});
-
-            try lib.testing.expectEqual(@as(usize, 4096), Impl.last_stack_size);
-        }
-
-        fn conditionMakeAcceptsMatchingMutexImpl() !void {
-            const ConditionApi = @import("embed").Thread.Condition;
-            const MutexImpl = struct {
-                state: u8 = 0,
-            };
-            const ConditionImpl = struct {
-                pub fn wait(_: *@This(), _: *MutexImpl) void {}
-                pub fn timedWait(_: *@This(), _: *MutexImpl, _: u64) error{Timeout}!void {}
-                pub fn signal(_: *@This()) void {}
-                pub fn broadcast(_: *@This()) void {}
-            };
-
-            const Condition = ConditionApi.make(ConditionImpl);
-            const Mutex = struct {
-                impl: MutexImpl = .{},
-            };
-
-            var cond: Condition = .{};
-            var mutex: Mutex = .{};
-
-            cond.wait(&mutex);
-            try cond.timedWait(&mutex, 1);
-            cond.signal();
-            cond.broadcast();
+fn spawnClampsStackSizeToPageSize(comptime lib: type) !void {
+    const ThreadApi = @import("embed").Thread;
+    const Heap = struct {
+        pub fn pageSize() usize {
+            return 4096;
         }
     };
 
-    try TestCase.spawnClampsStackSizeToPageSize();
-    try TestCase.conditionMakeAcceptsMatchingMutexImpl();
-    try runImpl(lib);
+    const MutexImpl = struct {
+        pub fn lock(_: *@This()) void {}
+        pub fn unlock(_: *@This()) void {}
+        pub fn tryLock(_: *@This()) bool {
+            return true;
+        }
+    };
+
+    const ConditionImpl = struct {
+        pub fn wait(_: *@This(), _: *MutexImpl) void {}
+        pub fn timedWait(_: *@This(), _: *MutexImpl, _: u64) error{Timeout}!void {}
+        pub fn signal(_: *@This()) void {}
+        pub fn broadcast(_: *@This()) void {}
+    };
+
+    const RwLockImpl = struct {
+        pub fn lockShared(_: *@This()) void {}
+        pub fn unlockShared(_: *@This()) void {}
+        pub fn lock(_: *@This()) void {}
+        pub fn unlock(_: *@This()) void {}
+        pub fn tryLockShared(_: *@This()) bool {
+            return true;
+        }
+        pub fn tryLock(_: *@This()) bool {
+            return true;
+        }
+    };
+
+    const Impl = struct {
+        pub const default_stack_size: usize = 8192;
+        pub const Id = usize;
+        pub const max_name_len: usize = 8;
+        pub const Mutex = MutexImpl;
+        pub const Condition = ConditionImpl;
+        pub const RwLock = RwLockImpl;
+
+        pub var last_stack_size: usize = 0;
+
+        pub fn spawn(config: ThreadApi.SpawnConfig, comptime f: anytype, args: anytype) ThreadApi.SpawnError!@This() {
+            _ = f;
+            _ = args;
+            last_stack_size = config.stack_size;
+            return .{};
+        }
+
+        pub fn join(_: @This()) void {}
+        pub fn detach(_: @This()) void {}
+        pub fn yield() ThreadApi.YieldError!void {}
+        pub fn sleep(_: u64) void {}
+        pub fn getCpuCount() ThreadApi.CpuCountError!usize {
+            return 1;
+        }
+        pub fn getCurrentId() Id {
+            return 0;
+        }
+        pub fn setName(_: []const u8) ThreadApi.SetNameError!void {}
+        pub fn getName(_: *[max_name_len:0]u8) ThreadApi.GetNameError!?[]const u8 {
+            return null;
+        }
+    };
+
+    const Thread = ThreadApi.make(Impl, Heap);
+
+    _ = try Thread.spawn(.{ .stack_size = 1 }, struct {
+        fn run() void {}
+    }.run, .{});
+
+    try lib.testing.expectEqual(@as(usize, 4096), Impl.last_stack_size);
 }
 
-fn runImpl(comptime lib: type) !void {
-    try threadTests(lib);
-    try mutexTests(lib);
-    try conditionTests(lib);
-    try rwlockTests(lib);
+fn conditionMakeAcceptsMatchingMutexImpl() !void {
+    const ConditionApi = @import("embed").Thread.Condition;
+    const MutexImpl = struct {
+        state: u8 = 0,
+    };
+    const ConditionImpl = struct {
+        pub fn wait(_: *@This(), _: *MutexImpl) void {}
+        pub fn timedWait(_: *@This(), _: *MutexImpl, _: u64) error{Timeout}!void {}
+        pub fn signal(_: *@This()) void {}
+        pub fn broadcast(_: *@This()) void {}
+    };
+
+    const Condition = ConditionApi.make(ConditionImpl);
+    const Mutex = struct {
+        impl: MutexImpl = .{},
+    };
+
+    var cond: Condition = .{};
+    var mutex: Mutex = .{};
+
+    cond.wait(&mutex);
+    try cond.timedWait(&mutex, 1);
+    cond.signal();
+    cond.broadcast();
 }
 
 fn threadTests(comptime lib: type) !void {

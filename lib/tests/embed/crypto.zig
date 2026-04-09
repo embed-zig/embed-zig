@@ -11,11 +11,92 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
         pub fn run(self: *@This(), t: *testing_mod.T, allocator: embed.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            runImpl(lib) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
+
+            t.run("hash", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try hashTests(lib);
+                }
+            }.run));
+            t.run("hmac", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try hmacTests(lib);
+                }
+            }.run));
+            t.run("aead", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try aeadTests(lib);
+                }
+            }.run));
+            t.run("random", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try randomTests(lib);
+                }
+            }.run));
+            t.run("hkdf", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try hkdfTests(lib);
+                }
+            }.run));
+            t.run("ed25519", testing_mod.TestRunner.fromFn(lib, 48 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try ed25519Tests(lib);
+                }
+            }.run));
+            t.run("ecdsa", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try ecdsaTests(lib);
+                }
+            }.run));
+            t.run("x25519", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try x25519Tests(lib);
+                }
+            }.run));
+            t.run("ecc", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try eccTests(lib);
+                }
+            }.run));
+            t.run("aes_block", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try aesBlockTests(lib);
+                }
+            }.run));
+            t.run("certificate", testing_mod.TestRunner.fromFn(lib, 56 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try certificateTests(lib);
+                }
+            }.run));
+            t.run("certificate_rsa", testing_mod.TestRunner.fromFn(lib, 96 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try certificateRsaTests(lib);
+                }
+            }.run));
+            return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
@@ -27,21 +108,6 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
     const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
-}
-
-fn runImpl(comptime lib: type) !void {
-    try hashTests(lib);
-    try hmacTests(lib);
-    try aeadTests(lib);
-    try randomTests(lib);
-    try hkdfTests(lib);
-    try ed25519Tests(lib);
-    try ecdsaTests(lib);
-    try x25519Tests(lib);
-    try eccTests(lib);
-    try aesBlockTests(lib);
-    try certificateTests(lib);
-    try certificateRsaTests(lib);
 }
 
 fn hashTests(comptime lib: type) !void {

@@ -23,11 +23,50 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
         pub fn run(self: *@This(), t: *testing_mod.T, allocator: embed.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            runImpl(lib) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
+
+            t.run("bytes_and_boolean", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try bytesAndBooleanTests(lib);
+                }
+            }.run));
+            t.run("enum_and_int", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try enumAndIntTests(lib);
+                }
+            }.run));
+            t.run("range", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try rangeTests(lib);
+                }
+            }.run));
+            t.run("float", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try floatTests(lib);
+                }
+            }.run));
+            t.run("shuffle", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try shuffleTests(lib);
+                }
+            }.run));
+            t.run("weighted_and_limit", testing_mod.TestRunner.fromFn(lib, 16 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try weightedAndLimitTests(lib);
+                }
+            }.run));
+            return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
@@ -39,15 +78,6 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
     const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
-}
-
-fn runImpl(comptime lib: type) !void {
-    try bytesAndBooleanTests(lib);
-    try enumAndIntTests(lib);
-    try rangeTests(lib);
-    try floatTests(lib);
-    try shuffleTests(lib);
-    try weightedAndLimitTests(lib);
 }
 
 fn bytesAndBooleanTests(comptime lib: type) !void {
