@@ -63,17 +63,19 @@ fn Suite(comptime lib: type) type {
         }
 
         const ServerRun = struct {
+            allocator: lib.mem.Allocator,
             listener: net_mod.Listener,
             port: u16,
-            server_err: ?anyerror = null,
+            server_err: *?anyerror,
             thread: Thread,
 
             fn stop(self: *@This(), server: anytype) !void {
+                defer self.allocator.destroy(self.server_err);
                 self.listener.close();
                 server.close();
                 self.thread.join();
                 defer self.listener.deinit();
-                if (self.server_err) |err| {
+                if (self.server_err.*) |err| {
                     if (err != error.ServerClosed) return err;
                 }
             }
@@ -788,10 +790,16 @@ fn Suite(comptime lib: type) type {
 
         fn startPlainServer(allocator: lib.mem.Allocator, server: *Http.Server, server_spawn_config: Thread.SpawnConfig) !ServerRun {
             const listener = try Net.listen(allocator, .{ .address = addr4(0) });
+            errdefer listener.deinit();
             const port = try listenerPort(listener, Net);
+            const server_err = try allocator.create(?anyerror);
+            errdefer allocator.destroy(server_err);
+            server_err.* = null;
             var run = ServerRun{
+                .allocator = allocator,
                 .listener = listener,
                 .port = port,
+                .server_err = server_err,
                 .thread = undefined,
             };
             run.thread = try Thread.spawn(server_spawn_config, struct {
@@ -800,16 +808,22 @@ fn Suite(comptime lib: type) type {
                         err.* = serve_err;
                     };
                 }
-            }.exec, .{ server, listener, &run.server_err });
+            }.exec, .{ server, listener, server_err });
             return run;
         }
 
         fn startTlsServer(allocator: lib.mem.Allocator, server: *Http.Server, server_spawn_config: Thread.SpawnConfig) !ServerRun {
             const listener = try Net.tls.listen(allocator, .{ .address = addr4(0) }, tlsServerConfig());
+            errdefer listener.deinit();
             const port = try tlsListenerPort(listener, Net);
+            const server_err = try allocator.create(?anyerror);
+            errdefer allocator.destroy(server_err);
+            server_err.* = null;
             var run = ServerRun{
+                .allocator = allocator,
                 .listener = listener,
                 .port = port,
+                .server_err = server_err,
                 .thread = undefined,
             };
             run.thread = try Thread.spawn(server_spawn_config, struct {
@@ -818,7 +832,7 @@ fn Suite(comptime lib: type) type {
                         err.* = serve_err;
                     };
                 }
-            }.exec, .{ server, listener, &run.server_err });
+            }.exec, .{ server, listener, server_err });
             return run;
         }
 

@@ -22,6 +22,8 @@ pub const test_runner = struct {
 };
 
 test "testing/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -30,6 +32,8 @@ test "testing/unit/std" {
 }
 
 test "testing/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -38,6 +42,8 @@ test "testing/unit/embed_std" {
 }
 
 test "mime/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -46,6 +52,8 @@ test "mime/unit/std" {
 }
 
 test "mime/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -54,6 +62,8 @@ test "mime/unit/embed_std" {
 }
 
 test "motion/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -62,6 +72,8 @@ test "motion/unit/std" {
 }
 
 test "motion/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -70,6 +82,8 @@ test "motion/unit/embed_std" {
 }
 
 test "audio/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -78,6 +92,8 @@ test "audio/unit/std" {
 }
 
 test "audio/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -86,6 +102,8 @@ test "audio/unit/embed_std" {
 }
 
 test "audio/integration/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
@@ -95,6 +113,8 @@ test "audio/integration/std" {
 }
 
 test "audio/integration/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
@@ -104,6 +124,8 @@ test "audio/integration/embed_std" {
 }
 
 test "zux/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -112,6 +134,8 @@ test "zux/unit/std" {
 }
 
 test "zux/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -120,6 +144,8 @@ test "zux/unit/embed_std" {
 }
 
 test "zux/integration/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
@@ -129,6 +155,8 @@ test "zux/integration/std" {
 }
 
 test "zux/integration/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
@@ -138,6 +166,8 @@ test "zux/integration/embed_std" {
 }
 
 test "bt/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -146,6 +176,8 @@ test "bt/unit/std" {
 }
 
 test "bt/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -154,6 +186,8 @@ test "bt/unit/embed_std" {
 }
 
 test "bt/integration/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
@@ -163,6 +197,8 @@ test "bt/integration/std" {
 }
 
 test "bt/integration/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
@@ -172,6 +208,8 @@ test "bt/integration/embed_std" {
 }
 
 test "sync/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -180,6 +218,8 @@ test "sync/unit/std" {
 }
 
 test "sync/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -188,6 +228,8 @@ test "sync/unit/embed_std" {
 }
 
 test "io/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -196,6 +238,8 @@ test "io/unit/std" {
 }
 
 test "io/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -204,6 +248,8 @@ test "io/unit/embed_std" {
 }
 
 test "wifi/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -212,6 +258,8 @@ test "wifi/unit/std" {
 }
 
 test "wifi/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -220,6 +268,8 @@ test "wifi/unit/embed_std" {
 }
 
 test "wifi/integration/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
@@ -229,6 +279,8 @@ test "wifi/integration/std" {
 }
 
 test "wifi/integration/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
@@ -238,6 +290,8 @@ test "wifi/integration/embed_std" {
 }
 
 test "net/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -246,6 +300,8 @@ test "net/unit/std" {
 }
 
 test "net/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -276,6 +332,8 @@ test "net/integration/embed_std" {
 }
 
 test "modem/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -284,6 +342,8 @@ test "modem/unit/std" {
 }
 
 test "modem/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -292,6 +352,8 @@ test "modem/unit/embed_std" {
 }
 
 test "at/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -300,6 +362,8 @@ test "at/unit/std" {
 }
 
 test "at/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -308,6 +372,8 @@ test "at/unit/embed_std" {
 }
 
 test "at/integration/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
     t.timeout(30 * std.time.ns_per_s);
@@ -317,6 +383,8 @@ test "at/integration/std" {
 }
 
 test "at/integration/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
     t.timeout(30 * embed_std.std.time.ns_per_s);
@@ -326,6 +394,8 @@ test "at/integration/embed_std" {
 }
 
 test "display/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -334,6 +404,8 @@ test "display/unit/std" {
 }
 
 test "display/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -342,6 +414,8 @@ test "display/unit/embed_std" {
 }
 
 test "drivers/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -350,6 +424,8 @@ test "drivers/unit/std" {
 }
 
 test "drivers/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -358,6 +434,8 @@ test "drivers/unit/embed_std" {
 }
 
 test "ledstrip/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
 
@@ -366,6 +444,8 @@ test "ledstrip/unit/std" {
 }
 
 test "ledstrip/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
 
@@ -374,6 +454,8 @@ test "ledstrip/unit/embed_std" {
 }
 
 test "sync/integration/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
@@ -383,6 +465,8 @@ test "sync/integration/std" {
 }
 
 test "sync/integration/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
@@ -414,6 +498,8 @@ test "embed/unit/embed_std" {
 }
 
 test "context/unit/std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(std, .std);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
@@ -423,6 +509,8 @@ test "context/unit/std" {
 }
 
 test "context/unit/embed_std" {
+    std.testing.log_level = .info;
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
