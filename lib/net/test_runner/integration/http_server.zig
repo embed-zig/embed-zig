@@ -49,8 +49,7 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
         pub const expectError = lib.testing.expectError;
     };
     testing.allocator = alloc;
-    // Match other net integration runners: avoid tiny stacks on Linux CI for deep HTTP/server paths.
-    const test_spawn_config: Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 };
+    const test_spawn_config: Thread.SpawnConfig = .{ .stack_size = 64 * 1024 };
 
     const Runner = struct {
         fn addr4(port: u16) net_mod.netip.AddrPort {

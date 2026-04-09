@@ -90,9 +90,8 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             return R.init(testing.allocator, owned);
         }
 
-        /// Mock TCP/TLS server threads run TLS handshakes; 64KiB is too small on Linux CI (sha2.round).
         const test_spawn_config: lib.Thread.SpawnConfig = .{
-            .stack_size = 1024 * 1024,
+            .stack_size = 64 * 1024,
         };
 
         fn optionsDefaults() !void {

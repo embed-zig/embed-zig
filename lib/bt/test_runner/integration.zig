@@ -16,7 +16,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
         pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            // Run suites sequentially so xfer pair tests are not starved by parallel central/peripheral/pair.
+            t.parallel();
             t.run("central", central.make(lib));
             t.run("peripheral", peripheral.make(lib));
             t.run("pair", pair.make(lib));
