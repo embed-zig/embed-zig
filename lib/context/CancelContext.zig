@@ -79,27 +79,41 @@ pub fn CancelContext(comptime lib: type) type {
             return self.cause.?;
         }
 
-        fn errImpl(ptr: *anyopaque) ?anyerror {
+        fn errNoLockImpl(ptr: *anyopaque) ?anyerror {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.mu.lock();
             defer self.mu.unlock();
             return self.cause;
         }
 
+        fn errImpl(ptr: *anyopaque) ?anyerror {
+            return errNoLockImpl(ptr);
+        }
+
+        fn deadlineNoLockImpl(ptr: *anyopaque) ?i128 {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            const parent = self.tree.parent orelse return null;
+            return internal.deadlineNoLock(parent);
+        }
+
         fn deadlineImpl(ptr: *anyopaque) ?i128 {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
+            return deadlineNoLockImpl(ptr);
+        }
+
+        fn valueNoLockImpl(ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque {
+            const self: *Self = @ptrCast(@alignCast(ptr));
             const parent = self.tree.parent orelse return null;
-            return parent.deadline();
+            return internal.valueNoLock(parent, key);
         }
 
         fn valueImpl(ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
-            const parent = self.tree.parent orelse return null;
-            return parent.vtable.valueFn(parent.ptr, key);
+            return valueNoLockImpl(ptr, key);
         }
 
         fn waitImpl(ptr: *anyopaque, timeout_ns: ?i64) ?anyerror {
@@ -171,8 +185,11 @@ pub fn CancelContext(comptime lib: type) type {
 
         pub const vtable: Context.VTable = .{
             .errFn = errImpl,
+            .errNoLockFn = errNoLockImpl,
             .deadlineFn = deadlineImpl,
+            .deadlineNoLockFn = deadlineNoLockImpl,
             .valueFn = valueImpl,
+            .valueNoLockFn = valueNoLockImpl,
             .waitFn = waitImpl,
             .cancelFn = cancelImpl,
             .cancelWithCauseFn = cancelWithCauseImpl,

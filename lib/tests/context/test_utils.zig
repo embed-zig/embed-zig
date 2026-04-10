@@ -106,11 +106,23 @@ pub fn LockCancelParentType(comptime lib: type) type {
             return self.cause;
         }
 
+        fn errNoLockFn(ptr: *anyopaque) ?anyerror {
+            return errFn(ptr);
+        }
+
         fn deadlineFn(_: *anyopaque) ?i128 {
             return null;
         }
 
+        fn deadlineNoLockFn(_: *anyopaque) ?i128 {
+            return null;
+        }
+
         fn valueFn(_: *anyopaque, _: *const anyopaque) ?*const anyopaque {
+            return null;
+        }
+
+        fn valueNoLockFn(_: *anyopaque, _: *const anyopaque) ?*const anyopaque {
             return null;
         }
 
@@ -173,8 +185,11 @@ pub fn LockCancelParentType(comptime lib: type) type {
 
         const vtable: Context.VTable = .{
             .errFn = errFn,
+            .errNoLockFn = errNoLockFn,
             .deadlineFn = deadlineFn,
+            .deadlineNoLockFn = deadlineNoLockFn,
             .valueFn = valueFn,
+            .valueNoLockFn = valueNoLockFn,
             .waitFn = waitFn,
             .cancelFn = cancelFn,
             .cancelWithCauseFn = cancelWithCauseFn,
@@ -213,33 +228,48 @@ pub fn ReparentableDeadlineParentType(comptime lib: type) type {
             return ctx;
         }
 
+        fn errNoLockFn(ptr: *anyopaque) ?anyerror {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            const parent = self.tree.parent orelse return null;
+            return parent.vtable.errNoLockFn(parent.ptr);
+        }
+
         fn errFn(ptr: *anyopaque) ?anyerror {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
-            const parent = self.tree.parent orelse return null;
-            return parent.err();
+            return errNoLockFn(ptr);
         }
 
-        fn deadlineFn(ptr: *anyopaque) ?i128 {
+        fn deadlineNoLockFn(ptr: *anyopaque) ?i128 {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            self.tree_rw.lockShared();
-            defer self.tree_rw.unlockShared();
             const parent = self.tree.parent;
             if (parent) |p| {
-                if (p.deadline()) |parent_deadline| {
+                if (p.vtable.deadlineNoLockFn(p.ptr)) |parent_deadline| {
                     return @min(parent_deadline, self.deadline_ns);
                 }
             }
             return self.deadline_ns;
         }
 
+        fn deadlineFn(ptr: *anyopaque) ?i128 {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            self.tree_rw.lockShared();
+            defer self.tree_rw.unlockShared();
+            return deadlineNoLockFn(ptr);
+        }
+
+        fn valueNoLockFn(ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            const parent = self.tree.parent orelse return null;
+            return parent.vtable.valueNoLockFn(parent.ptr, key);
+        }
+
         fn valueFn(ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
-            const parent = self.tree.parent orelse return null;
-            return parent.vtable.valueFn(parent.ptr, key);
+            return valueNoLockFn(ptr, key);
         }
 
         fn waitFn(ptr: *anyopaque, _: ?i64) ?anyerror {
@@ -294,8 +324,11 @@ pub fn ReparentableDeadlineParentType(comptime lib: type) type {
 
         const vtable: Context.VTable = .{
             .errFn = errFn,
+            .errNoLockFn = errNoLockFn,
             .deadlineFn = deadlineFn,
+            .deadlineNoLockFn = deadlineNoLockFn,
             .valueFn = valueFn,
+            .valueNoLockFn = valueNoLockFn,
             .waitFn = waitFn,
             .cancelFn = cancelFn,
             .cancelWithCauseFn = cancelWithCauseFn,

@@ -29,9 +29,11 @@ pub fn Resolver(comptime lib: type) type {
     const posix = lib.posix;
     const Addr = netip.Addr;
     const AddrPort = netip.AddrPort;
+    const ContextApi = context_mod.make(lib);
     const Dialer = dialer.Dialer(lib);
     const Http = http_mod.make(lib);
     const Tls = tls_mod.make(lib);
+    const Atomic = lib.atomic.Value;
     const mem = lib.mem;
     const Allocator = mem.Allocator;
     const Thread = lib.Thread;
@@ -225,6 +227,7 @@ pub fn Resolver(comptime lib: type) type {
 
         const WorkerRacer = sync.Racer(lib, WorkerResult);
         const worker_io_quantum_ms: i64 = 50;
+        const worker_attempt_cancel_poll_ns: u64 = 1 * lib.time.ns_per_ms;
 
         const LookupJob = struct {
             resolver: *Self,
@@ -277,110 +280,62 @@ pub fn Resolver(comptime lib: type) type {
             id: u16,
         };
 
-        const WorkerAttemptContext = struct {
-            allocator: Allocator,
+        const WorkerAttemptScope = struct {
             state: WorkerRacer.State,
-            deadline_ns: i128,
-            tree: context_mod.Context.TreeLink = .{},
-            tree_rw: Thread.RwLock = .{},
+            context_api: ContextApi,
+            deadline_ctx: context_mod.Context,
+            ctx: context_mod.Context,
+            stop_requested: Atomic(bool) = Atomic(bool).init(false),
+            watcher: ?Thread = null,
 
-            fn init(allocator: Allocator, state: WorkerRacer.State, timeout_ms: u32) @This() {
+            fn init(allocator: Allocator, state: WorkerRacer.State, timeout_ms: u32) Allocator.Error!@This() {
+                var context_api = try ContextApi.init(allocator);
+                errdefer context_api.deinit();
+
+                var deadline_ctx = try context_api.withDeadline(
+                    context_api.background(),
+                    lib.time.nanoTimestamp() + @as(i128, timeout_ms) * lib.time.ns_per_ms,
+                );
+                errdefer deadline_ctx.deinit();
+
+                var ctx = try context_api.withCancel(deadline_ctx);
+                errdefer ctx.deinit();
+
                 return .{
-                    .allocator = allocator,
                     .state = state,
-                    .deadline_ns = lib.time.nanoTimestamp() + @as(i128, timeout_ms) * lib.time.ns_per_ms,
+                    .context_api = context_api,
+                    .deadline_ctx = deadline_ctx,
+                    .ctx = ctx,
                 };
             }
 
+            fn start(self: *@This(), spawn_config: Thread.SpawnConfig) Thread.SpawnError!void {
+                self.watcher = try Thread.spawn(spawn_config, watchRacerDone, .{self});
+            }
+
+            fn deinit(self: *@This()) void {
+                self.stop_requested.store(true, .release);
+                if (self.watcher) |t| t.join();
+                self.ctx.deinit();
+                self.deadline_ctx.deinit();
+                self.context_api.deinit();
+                self.* = undefined;
+            }
+
             fn context(self: *@This()) context_mod.Context {
-                const ctx = context_mod.Context.init(self, &vtable, self.allocator);
-                self.tree.ctx = ctx;
-                return ctx;
+                return self.ctx;
             }
 
-            fn err(self: *@This()) ?anyerror {
-                if (self.state.done()) return error.Canceled;
-                if (lib.time.nanoTimestamp() >= self.deadline_ns) return error.DeadlineExceeded;
-                return null;
-            }
-
-            fn errFn(ptr: *anyopaque) ?anyerror {
-                const self: *@This() = @ptrCast(@alignCast(ptr));
-                return self.err();
-            }
-
-            fn deadlineFn(ptr: *anyopaque) ?i128 {
-                const self: *@This() = @ptrCast(@alignCast(ptr));
-                return self.deadline_ns;
-            }
-
-            fn valueFn(_: *anyopaque, _: *const anyopaque) ?*const anyopaque {
-                return null;
-            }
-
-            fn waitFn(ptr: *anyopaque, timeout_ns: ?i64) ?anyerror {
-                const self: *@This() = @ptrCast(@alignCast(ptr));
-                if (self.err()) |cause| return cause;
-                if (timeout_ns) |ns| {
-                    if (ns > 0) lib.Thread.sleep(@intCast(ns));
+            fn watchRacerDone(self: *@This()) void {
+                while (true) {
+                    if (self.stop_requested.load(.acquire)) return;
+                    if (self.state.done()) {
+                        self.ctx.cancel();
+                        return;
+                    }
+                    Thread.sleep(worker_attempt_cancel_poll_ns);
                 }
-                return self.err();
             }
-
-            fn cancelFn(_: *anyopaque) void {}
-            fn cancelWithCauseFn(_: *anyopaque, _: anyerror) void {}
-            fn propagateCancelWithCauseFn(_: *anyopaque, _: anyerror) void {}
-            fn deinitFn(_: *anyopaque) void {}
-
-            fn treeFn(ptr: *anyopaque) *context_mod.Context.TreeLink {
-                const self: *@This() = @ptrCast(@alignCast(ptr));
-                return &self.tree;
-            }
-
-            fn treeLockFn(ptr: *anyopaque) *anyopaque {
-                const self: *@This() = @ptrCast(@alignCast(ptr));
-                return &self.tree_rw;
-            }
-
-            fn reparentFn(_: *anyopaque, _: ?context_mod.Context) void {}
-
-            fn lockSharedFn(ptr: *anyopaque) void {
-                const self: *@This() = @ptrCast(@alignCast(ptr));
-                self.tree_rw.lockShared();
-            }
-
-            fn unlockSharedFn(ptr: *anyopaque) void {
-                const self: *@This() = @ptrCast(@alignCast(ptr));
-                self.tree_rw.unlockShared();
-            }
-
-            fn lockFn(ptr: *anyopaque) void {
-                const self: *@This() = @ptrCast(@alignCast(ptr));
-                self.tree_rw.lock();
-            }
-
-            fn unlockFn(ptr: *anyopaque) void {
-                const self: *@This() = @ptrCast(@alignCast(ptr));
-                self.tree_rw.unlock();
-            }
-
-            const vtable: context_mod.Context.VTable = .{
-                .errFn = errFn,
-                .deadlineFn = deadlineFn,
-                .valueFn = valueFn,
-                .waitFn = waitFn,
-                .cancelFn = cancelFn,
-                .cancelWithCauseFn = cancelWithCauseFn,
-                .propagateCancelWithCauseFn = propagateCancelWithCauseFn,
-                .deinitFn = deinitFn,
-                .treeFn = treeFn,
-                .treeLockFn = treeLockFn,
-                .reparentFn = reparentFn,
-                .lockSharedFn = lockSharedFn,
-                .unlockSharedFn = unlockSharedFn,
-                .lockFn = lockFn,
-                .unlockFn = unlockFn,
-            };
         };
 
         /// Public resolver calls return `anyerror` so they can transparently
@@ -600,8 +555,14 @@ pub fn Resolver(comptime lib: type) type {
 
         fn tcpAttempt(ctx: WorkerRacer.State, server: Server, job: *LookupJob, timeout_ms: u32) ?WorkerResult {
             const d = Dialer.init(job.resolver.allocator, .{});
-            var attempt_ctx_impl = WorkerAttemptContext.init(job.resolver.allocator, ctx, timeout_ms);
-            var c = d.dialContext(attempt_ctx_impl.context(), .tcp, server.addr) catch return null;
+            var attempt_ctx = WorkerAttemptScope.init(job.resolver.allocator, ctx, timeout_ms) catch |err| {
+                return WorkerResult{ .has_result = true, .err = err };
+            };
+            defer attempt_ctx.deinit();
+            attempt_ctx.start(job.resolver.options.spawn_config) catch |err| {
+                return WorkerResult{ .has_result = true, .err = err };
+            };
+            var c = d.dialContext(attempt_ctx.context(), .tcp, server.addr) catch return null;
             defer c.deinit();
 
             return streamAttempt(ctx, c, job, timeout_ms);
@@ -623,8 +584,14 @@ pub fn Resolver(comptime lib: type) type {
             const tls_config = server.tls_config orelse return null;
             const net_dialer = Dialer.init(job.resolver.allocator, .{});
             const tls_dialer = Tls.Dialer.init(net_dialer, tls_config);
-            var attempt_ctx_impl = WorkerAttemptContext.init(job.resolver.allocator, ctx, timeout_ms);
-            var c = tls_dialer.dialContext(attempt_ctx_impl.context(), .tcp, server.addr) catch return null;
+            var attempt_ctx = WorkerAttemptScope.init(job.resolver.allocator, ctx, timeout_ms) catch |err| {
+                return WorkerResult{ .has_result = true, .err = err };
+            };
+            defer attempt_ctx.deinit();
+            attempt_ctx.start(job.resolver.options.spawn_config) catch |err| {
+                return WorkerResult{ .has_result = true, .err = err };
+            };
+            var c = tls_dialer.dialContext(attempt_ctx.context(), .tcp, server.addr) catch return null;
             defer c.deinit();
 
             c.setReadTimeout(timeout_ms);
@@ -660,7 +627,7 @@ pub fn Resolver(comptime lib: type) type {
                 if (ctx.done()) return null;
 
                 var recv_buf: [2048]u8 = undefined;
-                const recv_n = dohExchange(
+                const recv_n = (dohExchange(
                     ctx,
                     server,
                     qpkt,
@@ -668,7 +635,7 @@ pub fn Resolver(comptime lib: type) type {
                     job.resolver.options.spawn_config,
                     timeout_ms,
                     &recv_buf,
-                ) orelse return null;
+                ) catch |err| return WorkerResult{ .has_result = true, .err = err }) orelse return null;
                 if (recv_n < 12) return null;
                 if (readU16(recv_buf[0..2]) != qpkt.id) return null;
 
@@ -712,9 +679,11 @@ pub fn Resolver(comptime lib: type) type {
             spawn_config: Thread.SpawnConfig,
             timeout_ms: u32,
             out: []u8,
-        ) ?usize {
+        ) LookupError!?usize {
             const tls_config = server.tls_config orelse return null;
-            var attempt_ctx_impl = WorkerAttemptContext.init(allocator, ctx, timeout_ms);
+            var attempt_ctx = try WorkerAttemptScope.init(allocator, ctx, timeout_ms);
+            defer attempt_ctx.deinit();
+            try attempt_ctx.start(spawn_config);
             // DoH here is an internal one-shot DNS wire exchange, so keep it on a
             // short-lived Transport rather than layering in Client redirect/policy
             // behavior or extra shared client state.
@@ -733,7 +702,7 @@ pub fn Resolver(comptime lib: type) type {
             const raw_url = formatDohUrl(server, &url_buf) catch return null;
             var req = Http.Request.init(allocator, "POST", raw_url) catch return null;
             defer req.deinit();
-            req = req.withContext(attempt_ctx_impl.context());
+            req = req.withContext(attempt_ctx.context());
             req.host = tls_config.server_name;
             req.close = true;
             req.addHeader(Http.Header.accept, "application/dns-message") catch return null;

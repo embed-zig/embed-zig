@@ -28,8 +28,11 @@ pub const TreeLink = struct {
 
 pub const VTable = struct {
     errFn: *const fn (ptr: *anyopaque) ?anyerror,
+    errNoLockFn: *const fn (ptr: *anyopaque) ?anyerror,
     deadlineFn: *const fn (ptr: *anyopaque) ?i128,
+    deadlineNoLockFn: *const fn (ptr: *anyopaque) ?i128,
     valueFn: *const fn (ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque,
+    valueNoLockFn: *const fn (ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque,
     waitFn: *const fn (ptr: *anyopaque, timeout_ns: ?i64) ?anyerror,
     cancelFn: *const fn (ptr: *anyopaque) void,
     cancelWithCauseFn: *const fn (ptr: *anyopaque, cause: anyerror) void,

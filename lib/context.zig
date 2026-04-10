@@ -49,11 +49,23 @@ pub fn make(comptime lib: type) type {
             return null;
         }
 
+        fn errNoLockFn(_: *anyopaque) ?anyerror {
+            return null;
+        }
+
         fn deadlineFn(_: *anyopaque) ?i128 {
             return null;
         }
 
+        fn deadlineNoLockFn(_: *anyopaque) ?i128 {
+            return null;
+        }
+
         fn valueFn(_: *anyopaque, _: *const anyopaque) ?*const anyopaque {
+            return null;
+        }
+
+        fn valueNoLockFn(_: *anyopaque, _: *const anyopaque) ?*const anyopaque {
             return null;
         }
 
@@ -108,8 +120,11 @@ pub fn make(comptime lib: type) type {
 
         const vtable: Context.VTable = .{
             .errFn = errFn,
+            .errNoLockFn = errNoLockFn,
             .deadlineFn = deadlineFn,
+            .deadlineNoLockFn = deadlineNoLockFn,
             .valueFn = valueFn,
+            .valueNoLockFn = valueNoLockFn,
             .waitFn = waitFn,
             .cancelFn = cancelFn,
             .cancelWithCauseFn = cancelWithCauseFn,
