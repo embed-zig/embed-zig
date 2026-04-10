@@ -1,5 +1,5 @@
 const LedStrip = @import("ledstrip");
-const Store = @import("store.zig");
+const Store = @import("Store.zig");
 const PipelineNodeBuilder = @import("pipeline/NodeBuilder.zig");
 const testing_api = @import("testing");
 

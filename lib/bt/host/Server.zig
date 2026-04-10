@@ -128,6 +128,12 @@ pub fn Subscription(comptime lib: type, comptime ServerType: type) type {
             state.cond.broadcast();
         }
 
+        pub fn isClosed(state: *State) bool {
+            state.mutex.lock();
+            defer state.mutex.unlock();
+            return state.closed;
+        }
+
         pub fn retain(state: *State) void {
             state.mutex.lock();
             state.ref_count += 1;
@@ -301,10 +307,15 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
                         rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                         return;
                     }
-                    const subscription = self.takePendingSubscription(req.conn_handle) orelse {
+                    var subscription = self.takePendingSubscription(req.conn_handle) orelse {
                         rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                         return;
                     };
+                    if (Self.Subscription.isClosed(subscription.state)) {
+                        subscription.deinit();
+                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                        return;
+                    }
                     self.sender.start(subscription) catch {
                         rw.err(@intFromEnum(att.ErrorCode.insufficient_resources));
                         return;
@@ -318,10 +329,15 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
                         rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                         return;
                     }
-                    const subscription = self.takePendingSubscription(req.conn_handle) orelse {
+                    var subscription = self.takePendingSubscription(req.conn_handle) orelse {
                         rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                         return;
                     };
+                    if (Self.Subscription.isClosed(subscription.state)) {
+                        subscription.deinit();
+                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                        return;
+                    }
                     self.receiver.start(subscription) catch {
                         rw.err(@intFromEnum(att.ErrorCode.insufficient_resources));
                         return;
@@ -982,6 +998,47 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 try lib.testing.expectEqual(request_not_supported, writer_state.err_code);
                 try lib.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
                 try lib.testing.expectEqual(@as(usize, 0), handler_state.write_calls);
+            }
+
+            {
+                var server = try Impl.init(lib.testing.allocator);
+                defer server.deinit();
+
+                var handler_state = HandlerState{};
+                try server.handleX(0x180D, 0x2A58, .{
+                    .onRead = HandlerState.onRead,
+                }, &handler_state);
+                server.handleSubscriptionChanged(.{
+                    .conn_handle = 11,
+                    .service_uuid = 0x180D,
+                    .char_uuid = 0x2A58,
+                    .cccd_value = 0x0001,
+                });
+
+                const route = server.xfer_routes.get(Impl.charKey(0x180D, 0x2A58)).?;
+                const stale = route.takePendingSubscription(11).?;
+                Impl.Subscription.close(stale.state);
+                route.replaceSubscription(stale);
+
+                var writer_state = WriterState{};
+                var rw = bt.Peripheral.ResponseWriter{
+                    ._impl = &writer_state,
+                    ._write_fn = WriterState.writeFn,
+                    ._ok_fn = WriterState.okFn,
+                    ._err_fn = WriterState.errFn,
+                };
+                const read_req = bt.Peripheral.Request{
+                    .op = .write,
+                    .conn_handle = 11,
+                    .service_uuid = 0x180D,
+                    .char_uuid = 0x2A58,
+                    .data = &Chunk.read_start_magic,
+                };
+                server.dispatchRequest(&read_req, &rw);
+
+                try lib.testing.expectEqual(request_not_supported, writer_state.err_code);
+                try lib.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
+                try lib.testing.expectEqual(@as(usize, 0), handler_state.read_calls);
             }
         }
     };

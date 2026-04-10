@@ -55,17 +55,21 @@ pub fn DeadlineContext(comptime lib: type) type {
             return ctx;
         }
 
-        fn effectiveDeadline(self: *const Self) i128 {
-            const self_mut: *Self = @constCast(self);
-            self_mut.tree_rw.lockShared();
-            defer self_mut.tree_rw.unlockShared();
-            const parent = self_mut.tree.parent;
+        fn effectiveDeadlineNoLock(self: *const Self) i128 {
+            const parent = self.tree.parent;
             if (parent) |p| {
-                if (p.deadline()) |parent_dl| {
+                if (internal.deadlineNoLock(p)) |parent_dl| {
                     return @min(parent_dl, self.deadline_ns);
                 }
             }
             return self.deadline_ns;
+        }
+
+        fn effectiveDeadline(self: *const Self) i128 {
+            const self_mut: *Self = @constCast(self);
+            self_mut.tree_rw.lockShared();
+            defer self_mut.tree_rw.unlockShared();
+            return self_mut.effectiveDeadlineNoLock();
         }
 
         fn ensureTimer(self: *Self) void {
@@ -166,24 +170,40 @@ pub fn DeadlineContext(comptime lib: type) type {
             return self.cause.?;
         }
 
-        fn errImpl(ptr: *anyopaque) ?anyerror {
+        fn errNoLockImpl(ptr: *anyopaque) ?anyerror {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.mu.lock();
             defer self.mu.unlock();
             return self.cause;
         }
 
+        fn errImpl(ptr: *anyopaque) ?anyerror {
+            return errNoLockImpl(ptr);
+        }
+
+        fn deadlineNoLockImpl(ptr: *anyopaque) ?i128 {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            return self.effectiveDeadlineNoLock();
+        }
+
         fn deadlineImpl(ptr: *anyopaque) ?i128 {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            return self.effectiveDeadline();
+            self.tree_rw.lockShared();
+            defer self.tree_rw.unlockShared();
+            return deadlineNoLockImpl(ptr);
+        }
+
+        fn valueNoLockImpl(ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            const parent = self.tree.parent orelse return null;
+            return internal.valueNoLock(parent, key);
         }
 
         fn valueImpl(ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
-            const parent = self.tree.parent orelse return null;
-            return parent.vtable.valueFn(parent.ptr, key);
+            return valueNoLockImpl(ptr, key);
         }
 
         fn waitImpl(ptr: *anyopaque, timeout_ns: ?i64) ?anyerror {
@@ -263,8 +283,11 @@ pub fn DeadlineContext(comptime lib: type) type {
 
         pub const vtable: Context.VTable = .{
             .errFn = errImpl,
+            .errNoLockFn = errNoLockImpl,
             .deadlineFn = deadlineImpl,
+            .deadlineNoLockFn = deadlineNoLockImpl,
             .valueFn = valueImpl,
+            .valueNoLockFn = valueNoLockImpl,
             .waitFn = waitImpl,
             .cancelFn = cancelImpl,
             .cancelWithCauseFn = cancelWithCauseImpl,

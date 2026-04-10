@@ -154,7 +154,7 @@ pub fn addHeaders(self: *Request, headers: []const Header) std.mem.Allocator.Err
 }
 
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, struct {
+    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
         fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             const testing = lib.testing;
 
@@ -184,78 +184,16 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             {
                 const req = try Request.init(allocator, "GET", "https://example.com");
+                const ContextApi = @import("context").make(lib);
+                var context_api = try ContextApi.init(allocator);
+                defer context_api.deinit();
+                var deadline_ctx = try context_api.withDeadline(
+                    context_api.background(),
+                    5000,
+                );
+                defer deadline_ctx.deinit();
 
-                const gen = struct {
-                    const FakeRoot = struct {
-                        allocator: lib.mem.Allocator,
-                        tree: Context.TreeLink = .{},
-                        tree_rw: lib.Thread.RwLock = .{},
-                    };
-
-                    fn errFn(_: *anyopaque) ?anyerror {
-                        return null;
-                    }
-                    fn deadlineFn(_: *anyopaque) ?i128 {
-                        return 5000;
-                    }
-                    fn valueFn(_: *anyopaque, _: *const anyopaque) ?*const anyopaque {
-                        return null;
-                    }
-                    fn waitFn(_: *anyopaque, _: ?i64) ?anyerror {
-                        return null;
-                    }
-                    fn cancelFn(_: *anyopaque) void {}
-                    fn cancelWithCauseFn(_: *anyopaque, _: anyerror) void {}
-                    fn propagateCancelWithCauseFn(_: *anyopaque, _: anyerror) void {}
-                    fn deinitFn(_: *anyopaque) void {}
-                    fn treeFn(ptr: *anyopaque) *Context.TreeLink {
-                        const self: *FakeRoot = @ptrCast(@alignCast(ptr));
-                        return &self.tree;
-                    }
-                    fn treeLockFn(ptr: *anyopaque) *anyopaque {
-                        const self: *FakeRoot = @ptrCast(@alignCast(ptr));
-                        return @ptrCast(&self.tree_rw);
-                    }
-                    fn reparentFn(_: *anyopaque, _: ?Context) void {}
-                    fn lockSharedFn(ptr: *anyopaque) void {
-                        const self: *FakeRoot = @ptrCast(@alignCast(ptr));
-                        self.tree_rw.lockShared();
-                    }
-                    fn unlockSharedFn(ptr: *anyopaque) void {
-                        const self: *FakeRoot = @ptrCast(@alignCast(ptr));
-                        self.tree_rw.unlockShared();
-                    }
-                    fn lockFn(ptr: *anyopaque) void {
-                        const self: *FakeRoot = @ptrCast(@alignCast(ptr));
-                        self.tree_rw.lock();
-                    }
-                    fn unlockFn(ptr: *anyopaque) void {
-                        const self: *FakeRoot = @ptrCast(@alignCast(ptr));
-                        self.tree_rw.unlock();
-                    }
-                };
-
-                const fake_vtable: Context.VTable = .{
-                    .errFn = gen.errFn,
-                    .deadlineFn = gen.deadlineFn,
-                    .valueFn = gen.valueFn,
-                    .waitFn = gen.waitFn,
-                    .cancelFn = gen.cancelFn,
-                    .cancelWithCauseFn = gen.cancelWithCauseFn,
-                    .propagateCancelWithCauseFn = gen.propagateCancelWithCauseFn,
-                    .deinitFn = gen.deinitFn,
-                    .treeFn = gen.treeFn,
-                    .treeLockFn = gen.treeLockFn,
-                    .reparentFn = gen.reparentFn,
-                    .lockSharedFn = gen.lockSharedFn,
-                    .unlockSharedFn = gen.unlockSharedFn,
-                    .lockFn = gen.lockFn,
-                    .unlockFn = gen.unlockFn,
-                };
-                var sentinel: gen.FakeRoot = .{ .allocator = allocator };
-                const fake_ctx = Context.init(&sentinel, &fake_vtable, allocator);
-
-                const req_with_ctx = req.withContext(fake_ctx);
+                const req_with_ctx = req.withContext(deadline_ctx);
                 try testing.expect(req.context() == null);
                 try testing.expect(req_with_ctx.context() != null);
                 try testing.expectEqual(@as(?i128, 5000), req_with_ctx.context().?.deadline());

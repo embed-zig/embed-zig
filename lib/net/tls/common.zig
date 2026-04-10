@@ -413,7 +413,7 @@ pub fn make(comptime lib: type) type {
 }
 
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, struct {
+    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
         fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             _ = allocator;
             const testing = lib.testing;

@@ -25,6 +25,8 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
         const default_read_max_retries: u8 = 5;
         const default_write_timeout_ms: u32 = 5_000;
         const default_send_redundancy: u8 = 3;
+        const control_write_max_attempts: u32 = 3;
+        const control_write_retry_delay_ns: u64 = 1_000_000;
         const ReadTx = struct {
             characteristic: *Self,
             subscription: SubscriptionType,
@@ -51,7 +53,7 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
             }
 
             pub fn write(self: *Transport, data: []const u8) !usize {
-                try self.characteristic.write(data);
+                try self.characteristic.writeControl(data);
                 return data.len;
             }
 
@@ -81,7 +83,7 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
             }
 
             pub fn write(self: *Transport, payload: []const u8) !usize {
-                try self.characteristic.write(payload);
+                try self.characteristic.writeControl(payload);
                 return payload.len;
             }
 
@@ -188,6 +190,25 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
             const raw_mtu = self.attMtu();
             if (raw_mtu < att.DEFAULT_MTU) return att.DEFAULT_MTU;
             return @min(raw_mtu, @as(u16, @intCast(xfer.Chunk.max_mtu)));
+        }
+
+        // xfer control packets (`read_start`, `write_start`, loss lists, ACKs) are
+        // idempotent and can safely tolerate one noisy ATT write round-trip.
+        fn writeControl(self: *Self, data: []const u8) ClientType.GattError!void {
+            var attempt: u32 = 0;
+            while (attempt < control_write_max_attempts) : (attempt += 1) {
+                self.write(data) catch |err| switch (err) {
+                    error.AttError, error.Timeout => {
+                        if (attempt + 1 < control_write_max_attempts) {
+                            lib.Thread.sleep(control_write_retry_delay_ns);
+                            continue;
+                        }
+                        return err;
+                    },
+                    else => return err,
+                };
+                return;
+            }
         }
     };
 }

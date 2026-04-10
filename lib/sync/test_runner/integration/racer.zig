@@ -14,6 +14,46 @@ const embed = @import("embed");
 const testing_api = @import("testing");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
+    const W = struct {
+        fn spawnAllocator(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try spawnAllocatorTests(lib, allocator);
+        }
+        fn zeroTask(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try zeroTaskTests(lib, allocator);
+        }
+        fn firstWinner(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try firstWinnerTests(lib, allocator);
+        }
+        fn raceContext(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try raceContextTests(lib, allocator);
+        }
+        fn cancel(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try cancelTests(lib, allocator);
+        }
+        fn doneAndWait(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try doneAndWaitTests(lib, allocator);
+        }
+        fn doneSignalRejection(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try doneSignalPublishesRejectionBeforeReadyFlagTests(lib, allocator);
+        }
+        fn exhausted(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try exhaustedTests(lib, allocator);
+        }
+        fn initOom(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            _ = allocator;
+            try initOomTests(lib);
+        }
+    };
+
     const Runner = struct {
         pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
             _ = self;
@@ -22,11 +62,19 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
             _ = self;
-            runImpl(lib, allocator) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
+            _ = allocator;
+            t.parallel();
+            // Worker stacks: only this thread runs the suite body; spawned helpers use `Thread.spawn` defaults.
+            t.run("spawn_allocator", testing_api.TestRunner.fromFn(lib, 48 * 1024, W.spawnAllocator));
+            t.run("zero_task", testing_api.TestRunner.fromFn(lib, 48 * 1024, W.zeroTask));
+            t.run("first_winner", testing_api.TestRunner.fromFn(lib, 128 * 1024, W.firstWinner));
+            t.run("race_context", testing_api.TestRunner.fromFn(lib, 192 * 1024, W.raceContext));
+            t.run("cancel", testing_api.TestRunner.fromFn(lib, 128 * 1024, W.cancel));
+            t.run("done_and_wait", testing_api.TestRunner.fromFn(lib, 128 * 1024, W.doneAndWait));
+            t.run("done_signal_rejection", testing_api.TestRunner.fromFn(lib, 128 * 1024, W.doneSignalRejection));
+            t.run("exhausted", testing_api.TestRunner.fromFn(lib, 64 * 1024, W.exhausted));
+            t.run("init_oom", testing_api.TestRunner.fromFn(lib, 40 * 1024, W.initOom));
+            return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
@@ -41,10 +89,10 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
 }
 
 pub fn run(comptime lib: type) !void {
-    try runImpl(lib, lib.testing.allocator);
+    try runSequentialSuite(lib, lib.testing.allocator);
 }
 
-fn runImpl(comptime lib: type, allocator: lib.mem.Allocator) !void {
+fn runSequentialSuite(comptime lib: type, allocator: lib.mem.Allocator) !void {
     try spawnAllocatorTests(lib, allocator);
     try zeroTaskTests(lib, allocator);
     try firstWinnerTests(lib, allocator);
@@ -117,36 +165,63 @@ fn firstWinnerTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     defer racer.deinit();
 
     var started = U32Atomic.init(0);
-    var release = BoolAtomic.init(false);
+    var release_first = BoolAtomic.init(false);
+    var release_second = BoolAtomic.init(false);
+    var first_attempted = BoolAtomic.init(false);
+    var first_won = BoolAtomic.init(false);
+    var second_attempted = BoolAtomic.init(false);
+    var second_won = BoolAtomic.init(false);
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.State, l: type, started_count: *U32Atomic, gate: *BoolAtomic, delay_ms: u64, value: u32) void {
+        fn run(
+            ctx: R.State,
+            l: type,
+            started_count: *U32Atomic,
+            gate: *BoolAtomic,
+            attempted: *BoolAtomic,
+            result: *BoolAtomic,
+            value: u32,
+        ) void {
             _ = started_count.fetchAdd(1, .acq_rel);
             while (!gate.load(.acquire)) {
                 l.Thread.sleep(l.time.ns_per_ms);
             }
-            l.Thread.sleep(delay_ms * l.time.ns_per_ms);
-            _ = ctx.success(value);
+            result.store(ctx.success(value), .release);
+            attempted.store(true, .release);
         }
-    }.run, .{ lib, &started, &release, 20, 2 });
+    }.run, .{ lib, &started, &release_second, &second_attempted, &second_won, 2 });
 
     try racer.spawn(.{}, struct {
-        fn run(ctx: R.State, l: type, started_count: *U32Atomic, gate: *BoolAtomic, delay_ms: u64, value: u32) void {
+        fn run(
+            ctx: R.State,
+            l: type,
+            started_count: *U32Atomic,
+            gate: *BoolAtomic,
+            attempted: *BoolAtomic,
+            result: *BoolAtomic,
+            value: u32,
+        ) void {
             _ = started_count.fetchAdd(1, .acq_rel);
             while (!gate.load(.acquire)) {
                 l.Thread.sleep(l.time.ns_per_ms);
             }
-            l.Thread.sleep(delay_ms * l.time.ns_per_ms);
-            _ = ctx.success(value);
+            result.store(ctx.success(value), .release);
+            attempted.store(true, .release);
         }
-    }.run, .{ lib, &started, &release, 5, 1 });
+    }.run, .{ lib, &started, &release_first, &first_attempted, &first_won, 1 });
 
     try waitForCount(lib, &started, 2, 200);
-    release.store(true, .release);
+    release_first.store(true, .release);
+    try waitForTrue(lib, &first_attempted, 200);
+    try testing.expect(first_won.load(.acquire));
 
     switch (racer.race()) {
         .winner => |value| try testing.expectEqual(@as(u32, 1), value),
         .exhausted => return error.ExpectedWinner,
     }
+
+    release_second.store(true, .release);
+    try waitForTrue(lib, &second_attempted, 200);
+    try testing.expect(!second_won.load(.acquire));
 
     switch (racer.race()) {
         .winner => |value| try testing.expectEqual(@as(u32, 1), value),

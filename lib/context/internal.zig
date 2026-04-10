@@ -12,6 +12,21 @@ pub fn lock(ctx: Context) void {
     ctx.vtable.lockFn(ctx.ptr);
 }
 
+// Caller already holds the shared root tree lock.
+pub fn errNoLock(ctx: Context) ?anyerror {
+    return ctx.vtable.errNoLockFn(ctx.ptr);
+}
+
+// Caller already holds the shared root tree lock.
+pub fn deadlineNoLock(ctx: Context) ?i128 {
+    return ctx.vtable.deadlineNoLockFn(ctx.ptr);
+}
+
+// Caller already holds the shared root tree lock.
+pub fn valueNoLock(ctx: Context, key: *const anyopaque) ?*const anyopaque {
+    return ctx.vtable.valueNoLockFn(ctx.ptr, key);
+}
+
 pub fn lockShared(ctx: Context) void {
     ctx.vtable.lockSharedFn(ctx.ptr);
 }

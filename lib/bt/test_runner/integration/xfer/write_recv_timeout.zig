@@ -1,34 +1,14 @@
-const embed = @import("embed");
 const testing_api = @import("testing");
 const harness_mod = @import("harness.zig");
 const recv_mod = @import("../../../host/xfer/recv.zig");
 
 pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
-    const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
-            _ = self;
-            _ = allocator;
+    return testing_api.TestRunner.fromFn(lib, 96 * 1024, struct {
+        fn run(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try runCase(lib, Channel, allocator);
         }
-
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
-            _ = self;
-            runCase(lib, Channel, allocator) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
-        }
-
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
-            _ = self;
-            _ = allocator;
-        }
-    };
-
-    const Holder = struct {
-        var runner: Runner = .{};
-    };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    }.run);
 }
 
 pub fn run(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.mem.Allocator) !void {

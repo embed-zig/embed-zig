@@ -1,4 +1,4 @@
-pub const store = @import("zux/store.zig");
+pub const store = @import("zux/Store.zig");
 pub const Assembler = @import("zux/Assembler.zig");
 
 pub const button = @import("zux/button.zig");

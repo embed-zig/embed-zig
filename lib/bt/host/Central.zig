@@ -15,6 +15,7 @@ pub fn make(comptime lib: type) type {
         const POLL_INTERVAL_NS: u64 = 1_000_000;
         const MIN_WAIT_TIMEOUT_MS: u32 = 1000;
         const CONNECT_TIMEOUT_MS: u32 = 5000;
+        const CCCD_DISCOVERY_MAX_ATTEMPTS: u32 = 3;
 
         hci: bt.Hci,
         state: bt.Central.State = .idle,
@@ -267,9 +268,7 @@ pub fn make(comptime lib: type) type {
                     const cccd_start = out[i].value_handle + 1;
                     const cccd_end = if (i + 1 < n) out[i + 1].decl_handle - 1 else end_handle;
                     if (cccd_start <= cccd_end) {
-                        const find_req = gatt_client.encodeFindCccd(&req_buf, cccd_start, cccd_end);
-                        const find_resp = self.sendAttRequest(conn_handle, find_req, &resp_buf) catch continue;
-                        if (gatt_client.parseFindCccdResponse(find_resp)) |cccd_handle| {
+                        if (try self.discoverCccd(conn_handle, cccd_start, cccd_end, &req_buf, &resp_buf)) |cccd_handle| {
                             out[i].cccd_handle = cccd_handle;
                         }
                     }
@@ -418,6 +417,39 @@ pub fn make(comptime lib: type) type {
                 else => error.Unexpected,
             };
             return out[0..n];
+        }
+
+        fn discoverCccd(
+            self: *Self,
+            conn_handle: u16,
+            start_handle: u16,
+            end_handle: u16,
+            req_buf: *[att.MAX_PDU_LEN]u8,
+            resp_buf: *[att.MAX_PDU_LEN]u8,
+        ) bt.Central.GattError!?u16 {
+            var attempt: u32 = 0;
+            while (attempt < CCCD_DISCOVERY_MAX_ATTEMPTS) : (attempt += 1) {
+                const find_req = gatt_client.encodeFindCccd(req_buf, start_handle, end_handle);
+                const find_resp = self.sendAttRequest(conn_handle, find_req, resp_buf) catch |err| switch (err) {
+                    error.Timeout => {
+                        if (attempt + 1 < CCCD_DISCOVERY_MAX_ATTEMPTS) {
+                            lib.Thread.sleep(POLL_INTERVAL_NS);
+                            continue;
+                        }
+                        return error.Timeout;
+                    },
+                    else => return err,
+                };
+
+                if (gatt_client.isErrorFor(find_resp, att.FIND_INFORMATION_REQUEST)) |code| {
+                    return switch (code) {
+                        .attribute_not_found => null,
+                        else => error.AttError,
+                    };
+                }
+                return gatt_client.parseFindCccdResponse(find_resp);
+            }
+            return error.Timeout;
         }
 
         fn linkToConnectionInfo(link: bt.Hci.Link) bt.Central.ConnectionInfo {
@@ -682,6 +714,90 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             try lib.testing.expectError(error.Rejected, central.connect(.{ 1, 2, 3, 4, 5, 6 }, .public, .{}));
             try lib.testing.expectEqual(bt.Central.State.idle, central.getState());
+
+            const RetryCccdHci = struct {
+                cccd_attempts: u32 = 0,
+
+                pub fn retain(_: *@This()) bt.Hci.Error!void {}
+                pub fn release(_: *@This()) void {}
+                pub fn setCentralListener(_: *@This(), _: bt.Hci.CentralListener) void {}
+                pub fn setPeripheralListener(_: *@This(), _: bt.Hci.PeripheralListener) void {}
+                pub fn startScanning(_: *@This(), _: bt.Hci.ScanConfig) bt.Hci.Error!void {}
+                pub fn stopScanning(_: *@This()) void {}
+                pub fn startAdvertising(_: *@This(), _: bt.Hci.AdvConfig) bt.Hci.Error!void {}
+                pub fn stopAdvertising(_: *@This()) void {}
+                pub fn connect(_: *@This(), _: bt.Hci.BdAddr, _: bt.Hci.AddrType, _: bt.Hci.ConnConfig) bt.Hci.Error!void {}
+                pub fn cancelConnect(_: *@This()) void {}
+                pub fn disconnect(_: *@This(), _: u16, _: u8) void {}
+                pub fn sendAcl(_: *@This(), _: u16, _: []const u8) bt.Hci.Error!void {}
+                pub fn getAddr(_: *@This()) ?bt.Hci.BdAddr {
+                    return null;
+                }
+                pub fn getLink(_: *@This(), _: bt.Hci.Role) ?bt.Hci.Link {
+                    return .{
+                        .role = .central,
+                        .conn_handle = 0x0040,
+                        .peer_addr = .{ 1, 2, 3, 4, 5, 6 },
+                        .peer_addr_type = .public,
+                        .interval = 0,
+                        .latency = 0,
+                        .timeout = 0,
+                    };
+                }
+                pub fn getLinkByHandle(_: *@This(), _: u16) ?bt.Hci.Link {
+                    return null;
+                }
+                pub fn isScanning(_: *@This()) bool {
+                    return false;
+                }
+                pub fn isAdvertising(_: *@This()) bool {
+                    return false;
+                }
+                pub fn isConnectingCentral(_: *@This()) bool {
+                    return false;
+                }
+                pub fn deinit(_: *@This()) void {}
+
+                pub fn sendAttRequest(self: *@This(), _: u16, req: []const u8, out: []u8) bt.Hci.Error!usize {
+                    switch (req[0]) {
+                        att.READ_BY_TYPE_REQUEST => {
+                            const resp = [_]u8{
+                                att.READ_BY_TYPE_RESPONSE,
+                                7,
+                                0x02, 0x00,
+                                0x10,
+                                0x03, 0x00,
+                                0x58, 0x2A,
+                            };
+                            @memcpy(out[0..resp.len], &resp);
+                            return resp.len;
+                        },
+                        att.FIND_INFORMATION_REQUEST => {
+                            self.cccd_attempts += 1;
+                            if (self.cccd_attempts == 1) return error.Timeout;
+                            const resp = [_]u8{
+                                att.FIND_INFORMATION_RESPONSE,
+                                0x01,
+                                0x04, 0x00,
+                                0x02, 0x29,
+                            };
+                            @memcpy(out[0..resp.len], &resp);
+                            return resp.len;
+                        },
+                        else => return error.Unexpected,
+                    }
+                }
+            };
+
+            var retry_hci = RetryCccdHci{};
+            var retry_central = Impl.init(bt.Hci.make(&retry_hci), lib.testing.allocator);
+            defer retry_central.deinit();
+
+            var chars: [1]bt.Central.DiscoveredChar = undefined;
+            const count = try retry_central.discoverChars(0x0040, 0x0001, 0x0004, &chars);
+            try lib.testing.expectEqual(@as(usize, 1), count);
+            try lib.testing.expectEqual(@as(u16, 0x0004), chars[0].cccd_handle);
+            try lib.testing.expectEqual(@as(u32, 2), retry_hci.cccd_attempts);
         }
     };
 

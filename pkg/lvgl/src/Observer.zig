@@ -132,9 +132,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("lvgl/unit_tests/Observer/raw_handle_roundtrip", testing_api.TestRunner.fromFn(lib, Impl.raw_handle_roundtrip));
-            t.run("lvgl/unit_tests/Observer/can_observe_subject_updates", testing_api.TestRunner.fromFn(lib, Impl.can_observe_subject_updates));
-            t.run("lvgl/unit_tests/Observer/remove_stops_future_subject_notifications", testing_api.TestRunner.fromFn(lib, Impl.remove_stops_future_subject_notifications));
+            t.run("lvgl/unit_tests/Observer/raw_handle_roundtrip", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.raw_handle_roundtrip));
+            t.run("lvgl/unit_tests/Observer/can_observe_subject_updates", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.can_observe_subject_updates));
+            t.run("lvgl/unit_tests/Observer/remove_stops_future_subject_notifications", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.remove_stops_future_subject_notifications));
             return t.wait();
         }
 

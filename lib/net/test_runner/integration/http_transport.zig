@@ -736,7 +736,10 @@ fn runImpl(
                             &c,
                             "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n",
                         ) catch {};
-                        lib.Thread.sleep(150 * lib.time.ns_per_ms);
+                        // Keep the server-side close comfortably behind the
+                        // client-side cancel so this remains a cancellation
+                        // test even on slower ARM runners under heavy load.
+                        lib.Thread.sleep(300 * lib.time.ns_per_ms);
                         io.writeAll(@TypeOf(c), &c, "late") catch {};
                     }
                 }.run,
@@ -789,7 +792,10 @@ fn runImpl(
                             &c,
                             "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n",
                         ) catch {};
-                        lib.Thread.sleep(150 * lib.time.ns_per_ms);
+                        // Keep the server-side close comfortably behind the
+                        // client-side cancel so this remains a cancellation
+                        // test even on slower ARM runners under heavy load.
+                        lib.Thread.sleep(300 * lib.time.ns_per_ms);
                         io.writeAll(@TypeOf(c), &c, "late") catch {};
                     }
                 }.run,

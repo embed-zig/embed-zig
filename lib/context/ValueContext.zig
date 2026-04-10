@@ -43,31 +43,46 @@ pub fn ValueContext(comptime lib: type, comptime T: type) type {
             return ctx;
         }
 
+        fn errNoLockImpl(ptr: *anyopaque) ?anyerror {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            const parent = self.tree.parent orelse return null;
+            return internal.errNoLock(parent);
+        }
+
         fn errImpl(ptr: *anyopaque) ?anyerror {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
+            return errNoLockImpl(ptr);
+        }
+
+        fn deadlineNoLockImpl(ptr: *anyopaque) ?i128 {
+            const self: *Self = @ptrCast(@alignCast(ptr));
             const parent = self.tree.parent orelse return null;
-            return parent.err();
+            return internal.deadlineNoLock(parent);
         }
 
         fn deadlineImpl(ptr: *anyopaque) ?i128 {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
-            const parent = self.tree.parent orelse return null;
-            return parent.deadline();
+            return deadlineNoLockImpl(ptr);
         }
 
-        fn valueImpl(ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque {
+        fn valueNoLockImpl(ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque {
             const self: *Self = @ptrCast(@alignCast(ptr));
             if (key == self.key) {
                 return @ptrCast(&self.val_storage);
             }
+            const parent = self.tree.parent orelse return null;
+            return internal.valueNoLock(parent, key);
+        }
+
+        fn valueImpl(ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque {
+            const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
-            const parent = self.tree.parent orelse return null;
-            return parent.vtable.valueFn(parent.ptr, key);
+            return valueNoLockImpl(ptr, key);
         }
 
         fn waitImpl(ptr: *anyopaque, timeout_ns: ?i64) ?anyerror {
@@ -150,8 +165,11 @@ pub fn ValueContext(comptime lib: type, comptime T: type) type {
 
         pub const vtable: Context.VTable = .{
             .errFn = errImpl,
+            .errNoLockFn = errNoLockImpl,
             .deadlineFn = deadlineImpl,
+            .deadlineNoLockFn = deadlineNoLockImpl,
             .valueFn = valueImpl,
+            .valueNoLockFn = valueNoLockImpl,
             .waitFn = waitImpl,
             .cancelFn = cancelImpl,
             .cancelWithCauseFn = cancelWithCauseImpl,

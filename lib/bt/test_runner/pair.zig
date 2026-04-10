@@ -311,10 +311,22 @@ fn runPeripheralRole(comptime lib: type, p: Peripheral) !void {
         state.mutex.unlock();
 
         if (do_notify) {
-            try p.notify(conn_handle, char_uuid, notify_value);
+            p.notify(conn_handle, char_uuid, notify_value) catch |err| switch (err) {
+                error.NotConnected => {
+                    if (waitForDisconnectRace(lib, p, &state, conn_handle)) break;
+                    return err;
+                },
+                else => return err,
+            };
         }
         if (do_indicate) {
-            try p.indicate(conn_handle, char_uuid, indicate_value);
+            p.indicate(conn_handle, char_uuid, indicate_value) catch |err| switch (err) {
+                error.NotConnected => {
+                    if (waitForDisconnectRace(lib, p, &state, conn_handle)) break;
+                    return err;
+                },
+                else => return err,
+            };
         }
         if (disconnected) break;
 
@@ -402,6 +414,23 @@ fn waitForPeripheralConnected(comptime lib: type, state: anytype, timeout_ms: u3
         lib.Thread.sleep(NS_PER_MS);
     }
     return error.Timeout;
+}
+
+fn isDisconnectRace(state: anytype, conn_handle: u16) bool {
+    state.mutex.lock();
+    defer state.mutex.unlock();
+    return state.disconnected or state.conn_handle == 0 or state.conn_handle != conn_handle;
+}
+
+fn waitForDisconnectRace(comptime lib: type, p: Peripheral, state: anytype, conn_handle: u16) bool {
+    if (p.getState() != .connected or isDisconnectRace(state, conn_handle)) return true;
+
+    var waited_ms: u32 = 0;
+    while (waited_ms < 50) : (waited_ms += 1) {
+        lib.Thread.sleep(1 * 1_000_000);
+        if (p.getState() != .connected or isDisconnectRace(state, conn_handle)) return true;
+    }
+    return false;
 }
 
 fn findService(services: []const Central.DiscoveredService, uuid: u16) ?Central.DiscoveredService {

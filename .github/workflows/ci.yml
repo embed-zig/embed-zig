@@ -1,14 +1,22 @@
 name: CI
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
+    branches:
+      - main
   pull_request:
+    types:
+      - synchronize
 
 jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -21,8 +29,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        example: [fake_platform]
+        os: [ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -30,4 +37,3 @@ jobs:
         with:
           version: 0.15.2
       - run: zig build test
-        working-directory: example/${{ matrix.example }}

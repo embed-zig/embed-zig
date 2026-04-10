@@ -35,32 +35,13 @@ pub const Options = struct {
 };
 
 pub fn make(comptime lib: type, comptime opts: Options) testing_api.TestRunner {
-    const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
-            _ = self;
+    // POSIX serial path + probe/retry loops; modest depth, no TLS-sized frames here.
+    return testing_api.TestRunner.fromFn(lib, 128 * 1024, struct {
+        fn run(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
             _ = allocator;
+            try runHostSerial(lib, opts.line_cap, t);
         }
-
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
-            _ = self;
-            _ = allocator;
-            runHostSerial(lib, opts.line_cap, t) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
-        }
-
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
-            _ = self;
-            _ = allocator;
-        }
-    };
-
-    const Holder = struct {
-        var runner: Runner = .{};
-    };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    }.run);
 }
 
 /// On Apple platforms, **`/dev/tty.*`** is the *call-in* device: `read()` can **block** waiting on

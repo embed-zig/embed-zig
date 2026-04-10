@@ -1,3 +1,7 @@
+//! Aggregates `lib/net` unit `TestRunner`s. Each leaf module passes an explicit
+//! `stack_size` to `testing.TestRunner.fromFn` chosen for that module's stack depth
+//! (net unit workers on macOS needed about 3MiB worst-case when TLS/HTTP suites run).
+
 const testing_api = @import("testing");
 
 pub const netip = @import("unit/netip.zig");

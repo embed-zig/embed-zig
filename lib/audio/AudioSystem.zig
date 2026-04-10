@@ -502,6 +502,42 @@ pub fn Builder(comptime lib: type) type {
 
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const TestCase = struct {
+                /// Upper bound for polling async read/write loops in these unit tests (success is usually ms-scale).
+                const test_async_wait_ns: i128 = 5 * lib.time.ns_per_s;
+
+                /// Poll `read` until samples arrive or `max_wait_ns` elapses. Avoids tying
+                /// readiness to a fixed iteration count (brittle under slow scheduling / CI).
+                fn pollReadSamples(system: anytype, out: []i16, max_wait_ns: i128) !usize {
+                    const Thread = lib.Thread;
+                    const time = lib.time;
+                    const deadline: i128 = time.nanoTimestamp() + max_wait_ns;
+                    while (time.nanoTimestamp() < deadline) {
+                        const n = system.read(out) catch |err| switch (err) {
+                            error.WouldBlock => {
+                                Thread.sleep(time.ns_per_ms);
+                                continue;
+                            },
+                            else => return err,
+                        };
+                        if (n > 0) return n;
+                        Thread.sleep(time.ns_per_ms);
+                    }
+                    return 0;
+                }
+
+                fn waitSpeakerWrites(ctx: anytype, deadline_ns: i128) bool {
+                    const Thread = lib.Thread;
+                    const time = lib.time;
+                    while (time.nanoTimestamp() < deadline_ns) {
+                        ctx.mu.lock();
+                        const w = ctx.writes;
+                        ctx.mu.unlock();
+                        if (w > 0) return true;
+                        Thread.sleep(time.ns_per_ms);
+                    }
+                    return false;
+                }
+
                 fn startFailureResetsState(alloc: lib.mem.Allocator) !void {
                     const testing = lib.testing;
                     const TestMic = MicMod.make(lib, 1, 4);
@@ -757,30 +793,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     defer system.stop() catch {};
 
                     var out: [8]i16 = @splat(0);
-                    var n: usize = 0;
-                    for (0..100) |_| {
-                        n = system.read(out[0..]) catch |err| switch (err) {
-                            error.WouldBlock => {
-                                Thread.sleep(time.ns_per_ms);
-                                continue;
-                            },
-                            else => return err,
-                        };
-                        if (n > 0) break;
-                    }
+                    const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
                     try testing.expect(n > 0);
                     try testing.expect(out[0] != 0);
 
-                    speaker_ctx.mu.lock();
-                    const writes = speaker_ctx.writes;
-                    speaker_ctx.mu.unlock();
-                    try testing.expect(writes > 0);
+                    // writeLoop may lag readLoop; don't assert speaker writes synchronously.
+                    try testing.expect(waitSpeakerWrites(&speaker_ctx, time.nanoTimestamp() + test_async_wait_ns));
                 }
 
                 fn readReturnsWouldBlockWhenRunningAndEmpty(alloc: lib.mem.Allocator) !void {
                     const testing = lib.testing;
                     const Thread = lib.Thread;
-                    const time = lib.time;
                     const AtomicBool = lib.atomic.Value(bool);
                     const TestMic = MicMod.make(lib, 1, 4);
                     const TestSpeaker = SpeakerMod.make(lib, 4);
@@ -922,27 +945,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     try testing.expectError(error.WouldBlock, system.read(out[0..]));
 
                     ProcessorBackend.emit.store(true, .release);
-                    var saw_data = false;
-                    for (0..100) |_| {
-                        const n = system.read(out[0..]) catch |err| switch (err) {
-                            error.WouldBlock => {
-                                Thread.sleep(time.ns_per_ms);
-                                continue;
-                            },
-                            else => return err,
-                        };
-                        if (n > 0) {
-                            saw_data = true;
-                            break;
-                        }
-                    }
-                    try testing.expect(saw_data);
+                    const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
+                    try testing.expect(n > 0);
                 }
 
                 fn startAllowsMicOnlyMode(alloc: lib.mem.Allocator) !void {
                     const testing = lib.testing;
                     const Thread = lib.Thread;
-                    const time = lib.time;
                     const TestMic = MicMod.make(lib, 1, 4);
                     const ProcessorBackend = struct {
                         fn process(frame: TestMic.Frame, out: []i16) Error!usize {
@@ -1027,17 +1036,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     defer system.stop() catch {};
 
                     var out: [8]i16 = @splat(0);
-                    var n: usize = 0;
-                    for (0..100) |_| {
-                        n = system.read(out[0..]) catch |err| switch (err) {
-                            error.WouldBlock => {
-                                Thread.sleep(time.ns_per_ms);
-                                continue;
-                            },
-                            else => return err,
-                        };
-                        if (n > 0) break;
-                    }
+                    const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
                     try testing.expect(n > 0);
                     try testing.expect(out[0] != 0);
                 }
@@ -1129,15 +1128,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     var out: [4]i16 = @splat(0);
                     try testing.expectError(error.InvalidState, system.read(out[0..]));
 
-                    var writes: usize = 0;
-                    for (0..100) |_| {
-                        speaker_ctx.mu.lock();
-                        writes = speaker_ctx.writes;
-                        speaker_ctx.mu.unlock();
-                        if (writes > 0) break;
-                        Thread.sleep(time.ns_per_ms);
-                    }
-                    try testing.expect(writes > 0);
+                    const deadline = time.nanoTimestamp() + test_async_wait_ns;
+                    try testing.expect(waitSpeakerWrites(&speaker_ctx, deadline));
                 }
     };
 
@@ -1151,31 +1143,31 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("start_failure_resets_state", testing_api.TestRunner.fromFn(lib, struct {
+            t.run("start_failure_resets_state", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
                 fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.startFailureResetsState(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("readLoop_buffers_processed_audio", testing_api.TestRunner.fromFn(lib, struct {
+            t.run("readLoop_buffers_processed_audio", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
                 fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.readLoopBuffersProcessedAudio(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("read_returns_wouldblock_when_running_and_empty", testing_api.TestRunner.fromFn(lib, struct {
+            t.run("read_returns_wouldblock_when_running_and_empty", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
                 fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.readReturnsWouldBlockWhenRunningAndEmpty(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("start_allows_mic_only_mode", testing_api.TestRunner.fromFn(lib, struct {
+            t.run("start_allows_mic_only_mode", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
                 fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.startAllowsMicOnlyMode(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("start_allows_speaker_only_mode", testing_api.TestRunner.fromFn(lib, struct {
+            t.run("start_allows_speaker_only_mode", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
                 fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.startAllowsSpeakerOnlyMode(case_allocator);
                 }

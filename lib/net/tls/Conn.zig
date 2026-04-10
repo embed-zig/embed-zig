@@ -568,7 +568,7 @@ pub fn Conn(comptime lib: type) type {
 const testing_api = @import("testing");
 
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, struct {
+    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
         fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
             const testing = lib.testing;
             {

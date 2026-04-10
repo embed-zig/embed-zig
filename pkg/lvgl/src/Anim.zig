@@ -144,8 +144,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("lvgl/unit_tests/Anim/descriptor_configures_core_fields", testing_api.TestRunner.fromFn(lib, Impl.descriptor_configures_core_fields));
-            t.run("lvgl/unit_tests/Anim/pause_state_toggles_through_lvgl_api", testing_api.TestRunner.fromFn(lib, Impl.pause_state_toggles_through_lvgl_api));
+            t.run("lvgl/unit_tests/Anim/descriptor_configures_core_fields", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.descriptor_configures_core_fields));
+            t.run("lvgl/unit_tests/Anim/pause_state_toggles_through_lvgl_api", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.pause_state_toggles_through_lvgl_api));
             return t.wait();
         }
 

@@ -68,29 +68,11 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
         }
     };
 
-    const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
-            _ = self;
-            _ = allocator;
+    // One extra thread + small mixer buffers; worker only orchestrates (spawned thread has its own stack).
+    return testing_api.TestRunner.fromFn(lib, 96 * 1024, struct {
+        fn run(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try TestCase.run(allocator);
         }
-
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
-            _ = self;
-            TestCase.run(allocator) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
-        }
-
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
-            _ = self;
-            _ = allocator;
-        }
-    };
-
-    const Holder = struct {
-        var runner: Runner = .{};
-    };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    }.run);
 }

@@ -41,29 +41,11 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
         }
     };
 
-    const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
-            _ = self;
-            _ = allocator;
+    // Slightly deeper control flow + allocations on worker than other mixer cases.
+    return testing_api.TestRunner.fromFn(lib, 128 * 1024, struct {
+        fn run(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try TestCase.run(allocator);
         }
-
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
-            _ = self;
-            TestCase.run(allocator) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
-        }
-
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
-            _ = self;
-            _ = allocator;
-        }
-    };
-
-    const Holder = struct {
-        var runner: Runner = .{};
-    };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    }.run);
 }
