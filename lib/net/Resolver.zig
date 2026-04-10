@@ -35,6 +35,7 @@ pub fn Resolver(comptime lib: type) type {
     const mem = lib.mem;
     const Allocator = mem.Allocator;
     const Thread = lib.Thread;
+    const debug_log = lib.log.scoped(.resolver_debug);
     return struct {
         allocator: Allocator,
         options: Options,
@@ -196,10 +197,21 @@ pub fn Resolver(comptime lib: type) type {
         pub fn deinit(self: *Self) void {
             self.mutex.lock();
             self.deiniting = true;
+            debug_log.info("[debug] resolver deinit begin ptr=0x{x} active_lookups={d}", .{
+                @intFromPtr(self),
+                self.active_lookups,
+            });
             while (self.active_lookups != 0) {
+                debug_log.info("[debug] resolver deinit waiting ptr=0x{x} active_lookups={d}", .{
+                    @intFromPtr(self),
+                    self.active_lookups,
+                });
                 self.cond.wait(&self.mutex);
             }
             self.mutex.unlock();
+            debug_log.info("[debug] resolver deinit done ptr=0x{x}", .{
+                @intFromPtr(self),
+            });
 
             self.allocator.free(self.options.servers);
             self.* = undefined;
@@ -969,19 +981,40 @@ pub fn Resolver(comptime lib: type) type {
         }
 
         fn beginCleanup(self: *Self, job: *LookupJob) bool {
+            debug_log.info("[debug] resolver beginCleanup ptr=0x{x} job=0x{x}", .{
+                @intFromPtr(self),
+                @intFromPtr(job),
+            });
             var t = Thread.spawn(self.cleanupSpawnConfig(), cleanupFn, .{job}) catch return false;
             t.detach();
             return true;
         }
 
         fn cleanupFn(job: *LookupJob) void {
+            const resolver_ptr = @intFromPtr(job.resolver);
+            const job_ptr = @intFromPtr(job);
+            debug_log.info("[debug] resolver cleanupFn start resolver=0x{x} job=0x{x}", .{
+                resolver_ptr,
+                job_ptr,
+            });
             job.resolver.destroyLookupJob(job);
+            debug_log.info("[debug] resolver cleanupFn done resolver=0x{x} job=0x{x}", .{
+                resolver_ptr,
+                job_ptr,
+            });
         }
 
         fn destroyLookupJob(self: *Self, job: *LookupJob) void {
+            debug_log.info("[debug] resolver destroyLookupJob begin ptr=0x{x} job=0x{x}", .{
+                @intFromPtr(self),
+                @intFromPtr(job),
+            });
             job.racer.deinit();
             self.allocator.destroy(job);
             self.finishLookup();
+            debug_log.info("[debug] resolver destroyLookupJob done ptr=0x{x}", .{
+                @intFromPtr(self),
+            });
         }
 
         fn cleanupSpawnConfig(self: *Self) Thread.SpawnConfig {

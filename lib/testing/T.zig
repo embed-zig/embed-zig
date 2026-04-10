@@ -352,12 +352,47 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
                 parent.testing_allocator.allocator()
             else
                 lib.testing.allocator;
+            const is_root = state.parent == null;
+            if (is_root) {
+                run_log.info("[debug] destroyState begin label='{s}' timeout_ctx={}", .{
+                    state.name_buf,
+                    state.timeout_ctx != null,
+                });
+            }
             state.pending_runs.deinit(state.allocator);
             if (state.timeout_ctx) |timeout_ctx| {
+                if (is_root) {
+                    run_log.info("[debug] destroyState deinit timeout_ctx label='{s}'", .{
+                        state.name_buf,
+                    });
+                }
                 timeout_ctx.deinit();
+                if (is_root) {
+                    run_log.info("[debug] destroyState timeout_ctx done label='{s}'", .{
+                        state.name_buf,
+                    });
+                }
+            }
+            if (is_root) {
+                run_log.info("[debug] destroyState deinit base_ctx label='{s}'", .{
+                    state.name_buf,
+                });
             }
             state.base_ctx.deinit();
+            if (is_root) {
+                run_log.info("[debug] destroyState base_ctx done label='{s}'", .{
+                    state.name_buf,
+                });
+                run_log.info("[debug] destroyState deinit context_api label='{s}'", .{
+                    state.name_buf,
+                });
+            }
             state.context_api.deinit();
+            if (is_root) {
+                run_log.info("[debug] destroyState context_api done label='{s}'", .{
+                    state.name_buf,
+                });
+            }
             state.allocator.free(state.name_buf);
             state.allocator.destroy(state);
             testing_allocator_owner.destroy(testing_allocator);
