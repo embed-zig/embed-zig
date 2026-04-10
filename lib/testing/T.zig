@@ -25,6 +25,12 @@ ctx: Context,
 test_name: []const u8,
 relative_started_ns: u64,
 is_parallel: bool = false,
+test_hook: TestHook = .{},
+
+pub const BeforeRunHook = *const fn (*Self, *TestRunnerHandle) void;
+pub const TestHook = struct {
+    beforeRun: ?BeforeRunHook = null,
+};
 
 pub const VTable = struct {
     onCreatedFn: *const fn (*Self) void,
@@ -44,6 +50,7 @@ const InitOptions = struct {
     context: Context,
     relative_started_ns: u64 = 0,
     vtable: *const VTable,
+    test_hook: TestHook = .{},
 };
 
 fn init(test_name: []const u8, options: InitOptions) Self {
@@ -55,6 +62,7 @@ fn init(test_name: []const u8, options: InitOptions) Self {
         .test_name = test_name,
         .relative_started_ns = options.relative_started_ns,
         .is_parallel = false,
+        .test_hook = options.test_hook,
     };
     self.vtable.onCreatedFn(&self);
     return self;
@@ -116,6 +124,10 @@ pub fn logErrorf(self: *Self, comptime format: []const u8, args: anytype) void {
 pub fn parallel(self: *Self) void {
     if (self.is_parallel) return;
     self.is_parallel = true;
+}
+
+pub fn setTestHook(self: *Self, hook: TestHook) void {
+    self.test_hook = hook;
 }
 
 pub fn timeout(self: *Self, ns: i64) void {
@@ -213,7 +225,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
             allocator: embed_mod.mem.Allocator,
         ) lib.Thread.SpawnConfig {
             var config: lib.Thread.SpawnConfig = .{
-                .allocator = allocator,
+                .allocator = runner_config.allocator orelse allocator,
             };
             if (runner_config.stack_size != 0) {
                 config.stack_size = runner_config.stack_size;
@@ -326,6 +338,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
                 .context = ctx,
                 .relative_started_ns = relative_started_ns,
                 .vtable = &vtable,
+                .test_hook = parent.test_hook,
             });
         }
 
@@ -604,15 +617,20 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
                 return;
             }
 
-            const child = createChild(self, child_name) catch {
+            var child = createChild(self, child_name) catch {
                 runner.deinit(self_state.allocator);
                 self.logFatal("subtest init failed");
                 return;
             };
 
+            var configured_runner = runner;
+            if (child.test_hook.beforeRun) |before_run| {
+                before_run(&child, &configured_runner);
+            }
+
             const pending = self_state.allocator.create(PendingRun) catch null orelse {
                 var child_copy = child;
-                runner.deinit(self_state.allocator);
+                configured_runner.deinit(self_state.allocator);
                 destroyNeverStarted(&child_copy);
                 self.logFatal("subtest state alloc failed");
                 return;
@@ -620,8 +638,8 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
 
             pending.* = .{
                 .child = child,
-                .runner = runner,
-                .testing_allocator = TestingAllocator.init(fromPtr(child.ptr).testing_allocator.allocator(), runner.memory_limit),
+                .runner = configured_runner,
+                .testing_allocator = TestingAllocator.init(fromPtr(child.ptr).testing_allocator.allocator(), configured_runner.memory_limit),
                 .worker = undefined,
             };
             const Worker = struct {
@@ -641,10 +659,14 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
 
             const child_state = fromPtr(child.ptr);
             const child_allocator = child_state.testing_allocator.allocator();
-            const dup_config = projectSpawnConfig(runner.spawn_config, child_allocator);
+            const dup_config = projectSpawnConfig(configured_runner.spawn_config, child_allocator);
 
-            pending.worker = lib.Thread.spawn(dup_config, Worker.main, .{pending}) catch {
+            pending.worker = lib.Thread.spawn(dup_config, Worker.main, .{pending}) catch |err| {
                 const child_label = child.name();
+                run_log.err("subtest Thread.spawn error: {s} (child {s})", .{
+                    @errorName(err),
+                    child_label,
+                });
                 run_log.err("{s}{s} {s}{s}{s}subtest spawn failed", .{
                     fail_color,
                     fail_marker,
@@ -2745,6 +2767,61 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             try std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
             try std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
         }
+
+        fn testBeforeRunHook() !void {
+            const std = @import("std");
+            const TR = @import("TestRunner.zig");
+
+            const HookCtx = struct {
+                var hits: usize = 0;
+                var saw_memory_limit: ?usize = null;
+
+                fn beforeRun(child: *Self, runner: *TR) void {
+                    _ = child;
+                    hits += 1;
+                    saw_memory_limit = runner.memory_limit;
+                    runner.memory_limit = 77;
+                }
+            };
+
+            const Runner = struct {
+                pub fn init(self: *@This(), allocator: embed_mod.mem.Allocator) !void {
+                    _ = self;
+                    _ = allocator;
+                }
+
+                pub fn run(self: *@This(), t: *Self, allocator: embed_mod.mem.Allocator) bool {
+                    _ = self;
+                    _ = t;
+                    _ = allocator;
+                    return true;
+                }
+
+                pub fn deinit(self: *@This(), allocator: embed_mod.mem.Allocator) void {
+                    _ = self;
+                    _ = allocator;
+                }
+            };
+
+            HookCtx.hits = 0;
+            HookCtx.saw_memory_limit = null;
+
+            var root = new(std, .std);
+            defer root.deinit();
+            root.setTestHook(.{ .beforeRun = HookCtx.beforeRun });
+
+            const Holder = struct {
+                var runner: Runner = .{};
+            };
+            const child_limit: ?usize = 9;
+            var runner = TR.make(Runner).new(&Holder.runner);
+            runner.memory_limit = child_limit;
+
+            root.run("hooked", runner);
+            try std.testing.expect(root.wait());
+            try std.testing.expectEqual(@as(usize, 1), HookCtx.hits);
+            try std.testing.expectEqual(child_limit, HookCtx.saw_memory_limit);
+        }
     };
     const Runner = struct {
         pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
@@ -2777,6 +2854,10 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
                 return false;
             };
             TestCase.testSubtestStartFailureCleanup() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testBeforeRunHook() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

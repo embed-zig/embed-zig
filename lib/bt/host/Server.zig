@@ -364,6 +364,21 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
                 _ = self.pending_subscriptions.remove(conn_handle);
                 return subscription;
             }
+
+            fn disconnectConn(self: *XferRoute, conn_handle: u16) void {
+                self.sender.closeSession(conn_handle);
+                self.receiver.closeSession(conn_handle);
+
+                self.mutex.lock();
+                if (self.pending_subscriptions.get(conn_handle)) |sub| {
+                    _ = self.pending_subscriptions.remove(conn_handle);
+                    self.mutex.unlock();
+                    var sub_mut = sub;
+                    sub_mut.deinit();
+                } else {
+                    self.mutex.unlock();
+                }
+            }
         };
         const ConnState = struct {
             att_mtu: u16 = att.DEFAULT_MTU,
@@ -557,6 +572,28 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
             return conn;
         }
 
+        fn cleanupXferRoutesForDisconnect(self: *Self, conn_handle: u16) void {
+            var routes = lib.ArrayListUnmanaged(*XferRoute).empty;
+            defer routes.deinit(self.allocator);
+
+            self.mutex.lock();
+            var xfer_it = self.xfer_routes.iterator();
+            while (xfer_it.next()) |entry| {
+                routes.append(self.allocator, entry.value_ptr.*) catch {
+                    self.mutex.unlock();
+                    for (routes.items) |route| {
+                        route.disconnectConn(conn_handle);
+                    }
+                    return;
+                };
+            }
+            self.mutex.unlock();
+
+            for (routes.items) |route| {
+                route.disconnectConn(conn_handle);
+            }
+        }
+
         fn onRequest(ctx: ?*anyopaque, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
             self.dispatchRequest(req, rw);
@@ -597,7 +634,11 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
             self.mutex.lock();
             self.closeMatchingLocked(info.conn_handle, info.service_uuid, info.char_uuid);
             if (info.cccd_value == 0) {
+                const xfer_route = self.xfer_routes.get(charKey(info.service_uuid, info.char_uuid));
                 self.mutex.unlock();
+                if (xfer_route) |route| {
+                    route.disconnectConn(info.conn_handle);
+                }
                 return;
             }
 
@@ -639,12 +680,16 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
         }
 
         fn handleDisconnect(self: *Self, conn_handle: u16) void {
+            self.cleanupXferRoutesForDisconnect(conn_handle);
+
             self.mutex.lock();
             if (self.takeConnLocked(conn_handle)) |conn_state| {
                 var conn = conn_state;
+                self.mutex.unlock();
                 conn.deinit(self.allocator);
+            } else {
+                self.mutex.unlock();
             }
-            self.mutex.unlock();
         }
 
         fn handleMtuChanged(self: *Self, info: bt.Peripheral.MtuInfo) void {
