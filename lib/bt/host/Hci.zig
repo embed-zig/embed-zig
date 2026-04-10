@@ -410,7 +410,7 @@ pub fn make(comptime lib: type) type {
                 if (role) |resolved_role| {
                     self.mutex.lock();
                     const response = self.attStateForRole(resolved_role);
-                    if (response.waiting and attResponseMatches(response.request_opcode, opcode)) {
+                    if (response.waiting and attResponseMatches(response.request_opcode, data)) {
                         const n = @min(data.len, response.data.len);
                         @memcpy(response.data[0..n], data[0..n]);
                         response.len = n;
@@ -628,8 +628,16 @@ pub fn make(comptime lib: type) type {
             };
         }
 
-        fn attResponseMatches(request_opcode: u8, response_opcode: u8) bool {
-            if (response_opcode == att.ERROR_RESPONSE) return true;
+        fn attResponseMatches(request_opcode: u8, response: []const u8) bool {
+            if (response.len == 0) return false;
+            const response_opcode = response[0];
+            if (response_opcode == att.ERROR_RESPONSE) {
+                const pdu = att.decodePdu(response) orelse return false;
+                return switch (pdu) {
+                    .error_response => |err| err.request_opcode == request_opcode,
+                    else => false,
+                };
+            }
             return switch (request_opcode) {
                 att.EXCHANGE_MTU_REQUEST => response_opcode == att.EXCHANGE_MTU_RESPONSE,
                 att.FIND_INFORMATION_REQUEST => response_opcode == att.FIND_INFORMATION_RESPONSE,
@@ -790,6 +798,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 hci.handleHciEvent(&.{ 0x04, 0x3E, 0x13, 0x01, 0x08, 0x40, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x18, 0x00, 0x00, 0x00, 0xC8, 0x00 });
 
                 try lib.testing.expectEqual(@as(u32, 0), connected_count);
+            }
+
+            {
+                const Impl = make(lib);
+                var err_buf: [att.MAX_PDU_LEN]u8 = undefined;
+                const mismatched = att.encodeErrorResponse(&err_buf, att.FIND_INFORMATION_REQUEST, 0x0001, .request_not_supported);
+                try lib.testing.expect(!Impl.attResponseMatches(att.WRITE_REQUEST, mismatched));
+                try lib.testing.expect(Impl.attResponseMatches(att.FIND_INFORMATION_REQUEST, mismatched));
             }
         }
     };

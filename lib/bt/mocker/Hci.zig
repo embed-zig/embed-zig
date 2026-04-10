@@ -32,7 +32,8 @@ pub fn Hci(comptime lib: type) type {
         const PROP_INDICATE: u8 = 0x20;
         const NS_PER_MS: u64 = 1_000_000;
         const DEFAULT_RECV_TIMEOUT_MS: u32 = 10;
-        const DEFAULT_PEER_TIMEOUT_MS: u32 = 100;
+        const DEFAULT_PEER_TIMEOUT_MS: u32 = 500;
+        const CCCD_DISCOVERY_MAX_ATTEMPTS: u32 = 3;
 
         pub const CharacteristicConfig = struct {
             uuid: u16,
@@ -784,9 +785,7 @@ pub fn Hci(comptime lib: type) type {
                     const cccd_start = out[i].value_handle + 1;
                     const cccd_end = if (i + 1 < n) out[i + 1].decl_handle - 1 else end_handle;
                     if (cccd_start <= cccd_end) {
-                        const find_req = gatt_client.encodeFindCccd(&req_buf, cccd_start, cccd_end);
-                        const find_resp = self.sendAttToHostExpectResponse(find_req) catch continue;
-                        if (gatt_client.parseFindCccdResponse(find_resp)) |cccd_handle| {
+                        if (try self.discoverHostCccd(cccd_start, cccd_end, &req_buf)) |cccd_handle| {
                             out[i].cccd_handle = cccd_handle;
                         }
                     }
@@ -851,6 +850,32 @@ pub fn Hci(comptime lib: type) type {
             const req = gatt_client.encodeUnsubscribe(&req_buf, cccd_handle);
             const resp = try self.sendAttToHostExpectResponse(req);
             if (gatt_client.isErrorFor(resp, att.WRITE_REQUEST)) |_| return error.AttError;
+        }
+
+        fn discoverHostCccd(self: *Self, start_handle: u16, end_handle: u16, req_buf: *[att.MAX_PDU_LEN]u8) PeerError!?u16 {
+            var attempt: u32 = 0;
+            while (attempt < CCCD_DISCOVERY_MAX_ATTEMPTS) : (attempt += 1) {
+                const find_req = gatt_client.encodeFindCccd(req_buf, start_handle, end_handle);
+                const find_resp = self.sendAttToHostExpectResponse(find_req) catch |err| switch (err) {
+                    error.Timeout => {
+                        if (attempt + 1 < CCCD_DISCOVERY_MAX_ATTEMPTS) {
+                            lib.Thread.sleep(NS_PER_MS);
+                            continue;
+                        }
+                        return error.Timeout;
+                    },
+                    else => return err,
+                };
+
+                if (gatt_client.isErrorFor(find_resp, att.FIND_INFORMATION_REQUEST)) |code| {
+                    return switch (code) {
+                        .attribute_not_found => null,
+                        else => error.AttError,
+                    };
+                }
+                return gatt_client.parseFindCccdResponse(find_resp);
+            }
+            return error.Timeout;
         }
 
         fn makeLink(self: *Self, role: BtHci.Role) BtHci.Link {
