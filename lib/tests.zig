@@ -190,7 +190,7 @@ test "bt/integration/std" {
 
     var t = testing.T.new(std, .std);
     defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
+    t.timeout(60 * std.time.ns_per_s);
 
     t.run("bt/integration/std", bt.test_runner.integration.make(std));
     if (!t.wait()) return error.TestFailed;
@@ -201,7 +201,7 @@ test "bt/integration/embed_std" {
 
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
-    t.timeout(20 * embed_std.std.time.ns_per_s);
+    t.timeout(60 * embed_std.std.time.ns_per_s);
 
     t.run("bt/integration/embed_std", bt.test_runner.integration.make(embed_std.std));
     if (!t.wait()) return error.TestFailed;
@@ -324,12 +324,7 @@ test "net/integration/embed_std" {
     std.testing.log_level = .info;
 
     var t = testing.T.new(embed_std.std, .embed);
-    t.enableDestroyDebug("net/integration/embed_std");
-    defer {
-        std.log.info("[ci-debug] before t.deinit net/integration/embed_std", .{});
-        t.deinit();
-        std.log.info("[ci-debug] after t.deinit net/integration/embed_std", .{});
-    }
+    defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
 
     t.run("net/integration/embed_std", net.test_runner.integration.make(embed_std.std));

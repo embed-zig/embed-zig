@@ -360,39 +360,12 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
                 parent.testing_allocator.allocator()
             else
                 lib.testing.allocator;
-            if (state.destroy_debug_tag) |tag| {
-                run_log.info("[ci-debug] destroyState begin tag='{s}' timeout_ctx={} pending_runs={d}", .{
-                    tag,
-                    state.timeout_ctx != null,
-                    state.pending_runs.items.len,
-                });
-            }
             state.pending_runs.deinit(state.allocator);
-            if (state.destroy_debug_tag) |tag| {
-                run_log.info("[ci-debug] destroyState pending_runs done tag='{s}'", .{tag});
-            }
             if (state.timeout_ctx) |timeout_ctx| {
-                if (state.destroy_debug_tag) |tag| {
-                    run_log.info("[ci-debug] destroyState timeout_ctx begin tag='{s}'", .{tag});
-                }
                 timeout_ctx.deinit();
-                if (state.destroy_debug_tag) |tag| {
-                    run_log.info("[ci-debug] destroyState timeout_ctx done tag='{s}'", .{tag});
-                }
-            }
-            if (state.destroy_debug_tag) |tag| {
-                run_log.info("[ci-debug] destroyState base_ctx begin tag='{s}'", .{tag});
             }
             state.base_ctx.deinit();
-            if (state.destroy_debug_tag) |tag| {
-                run_log.info("[ci-debug] destroyState base_ctx done tag='{s}'", .{tag});
-                run_log.info("[ci-debug] destroyState context_api begin tag='{s}'", .{tag});
-            }
             state.context_api.deinit();
-            if (state.destroy_debug_tag) |tag| {
-                run_log.info("[ci-debug] destroyState context_api done tag='{s}'", .{tag});
-                run_log.info("[ci-debug] destroyState allocator teardown begin tag='{s}'", .{tag});
-            }
             state.allocator.free(state.name_buf);
             state.allocator.destroy(state);
             testing_allocator_owner.destroy(testing_allocator);
