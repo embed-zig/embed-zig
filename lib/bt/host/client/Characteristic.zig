@@ -3,7 +3,6 @@
 const att = @import("../att.zig");
 const bt = @import("../../../bt.zig");
 const xfer = @import("../xfer.zig");
-const Chunk = xfer.Chunk;
 
 pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime SubscriptionType: type) type {
     return struct {
@@ -141,15 +140,13 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
             });
         }
 
-        pub fn readX(self: *Self, allocator: lib.mem.Allocator, topic: Chunk.Topic, metadata: []const u8) ![]u8 {
+        pub fn readX(self: *Self, allocator: lib.mem.Allocator) ![]u8 {
             var transport = try ReadTx.init(self);
             const mtu = effectiveMtu(self);
             return xfer.read(lib, allocator, &transport, .{
                 .att_mtu = mtu,
                 .timeout_ms = default_read_timeout_ms,
                 .max_timeout_retries = default_read_max_retries,
-                .topic = topic,
-                .metadata = metadata,
             }) catch |err| switch (err) {
                 error.Closed => return error.SubscriptionClosed,
                 else => return err,
@@ -190,7 +187,7 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
         fn effectiveMtu(self: *Self) u16 {
             const raw_mtu = self.attMtu();
             if (raw_mtu < att.DEFAULT_MTU) return att.DEFAULT_MTU;
-            return @min(raw_mtu, @as(u16, @intCast(Chunk.max_mtu)));
+            return @min(raw_mtu, @as(u16, @intCast(xfer.Chunk.max_mtu)));
         }
     };
 }

@@ -26,12 +26,14 @@ pub const host = struct {
 
     pub const server = struct {
         pub const Receiver = @import("unit/host/server/Receiver.zig");
-        pub const ServeMux = @import("unit/host/server/ServeMux.zig");
+        pub const Server = @import("unit/host/server/Server.zig");
+        pub const Sender = @import("unit/host/server/Sender.zig");
     };
 
     pub const xfer = struct {
         pub const Chunk = @import("unit/host/xfer/Chunk.zig");
         pub const read = @import("unit/host/xfer/read.zig");
+        pub const send = @import("unit/host/xfer/send.zig");
         pub const write = @import("unit/host/xfer/write.zig");
         pub const recv = @import("unit/host/xfer/recv.zig");
     };
@@ -70,9 +72,11 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             t.run("host/hci/events", host.hci.events.make(lib));
             t.run("host/hci/acl", host.hci.acl.make(lib));
             t.run("host/server/Receiver", host.server.Receiver.make(lib));
-            t.run("host/server/ServeMux", host.server.ServeMux.make(lib));
+            t.run("host/server/Server", host.server.Server.make(lib));
+            t.run("host/server/Sender", host.server.Sender.make(lib));
             t.run("host/xfer/Chunk", host.xfer.Chunk.make(lib));
             t.run("host/xfer/read", host.xfer.read.make(lib));
+            t.run("host/xfer/send", host.xfer.send.make(lib));
             t.run("host/xfer/write", host.xfer.write.make(lib));
             t.run("host/xfer/recv", host.xfer.recv.make(lib));
             t.run("mocker/Hci", mocker.Hci.make(lib));

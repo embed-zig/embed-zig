@@ -253,6 +253,37 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
             sessions.deinit(self.allocator);
         }
 
+        pub fn start(self: *Self, sub: Subscription) !void {
+            var subscription = sub;
+            const conn_handle = subscription.connHandle();
+
+            self.mutex.lock();
+            const previous = self.sessions.get(conn_handle);
+            if (previous != null) {
+                _ = self.sessions.remove(conn_handle);
+            }
+            self.mutex.unlock();
+
+            if (previous) |session| {
+                session.close();
+                session.release(self.allocator);
+            }
+
+            const session = Session.init(self.allocator, self, subscription) catch |err| {
+                subscription.deinit();
+                return err;
+            };
+
+            self.mutex.lock();
+            self.sessions.put(self.allocator, conn_handle, session) catch |err| {
+                self.mutex.unlock();
+                session.close();
+                session.release(self.allocator);
+                return err;
+            };
+            self.mutex.unlock();
+        }
+
         fn removeSession(self: *Self, session: *Session) bool {
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -272,16 +303,27 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
             self.handler_ctx = ctx;
         }
 
-        pub fn handler() ServerType.Handler {
-            return .{
-                .onRequest = onRequest,
-                .onSubscription = onSubscription,
-            };
+        pub fn hasActiveSession(self: *Self, conn_handle: u16) bool {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            return self.sessions.contains(conn_handle);
         }
 
-        pub fn onRequest(ctx: ?*anyopaque, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
-            const self: *Self = @ptrCast(@alignCast(ctx.?));
+        pub fn closeSession(self: *Self, conn_handle: u16) void {
+            self.mutex.lock();
+            const session = self.sessions.get(conn_handle);
+            if (session) |active| {
+                active.retain();
+            }
+            self.mutex.unlock();
 
+            if (session) |active| {
+                active.close();
+                active.release(self.allocator);
+            }
+        }
+
+        pub fn dispatchRequest(self: *Self, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
             self.mutex.lock();
             const session = self.sessions.get(req.conn_handle);
             if (session) |active| {
@@ -297,36 +339,21 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
             }
         }
 
+        pub fn handler() ServerType.Handler {
+            return .{
+                .onRequest = onRequest,
+                .onSubscription = onSubscription,
+            };
+        }
+
+        pub fn onRequest(ctx: ?*anyopaque, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
+            const self: *Self = @ptrCast(@alignCast(ctx.?));
+            self.dispatchRequest(req, rw);
+        }
+
         pub fn onSubscription(ctx: ?*anyopaque, sub: Subscription) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
-            var subscription = sub;
-            const conn_handle = subscription.connHandle();
-
-            self.mutex.lock();
-            const previous = self.sessions.get(conn_handle);
-            if (previous != null) {
-                _ = self.sessions.remove(conn_handle);
-            }
-            self.mutex.unlock();
-
-            if (previous) |session| {
-                session.close();
-                session.release(self.allocator);
-            }
-
-            const session = Session.init(self.allocator, self, subscription) catch {
-                subscription.deinit();
-                return;
-            };
-
-            self.mutex.lock();
-            self.sessions.put(self.allocator, conn_handle, session) catch {
-                self.mutex.unlock();
-                session.close();
-                session.release(self.allocator);
-                return;
-            };
-            self.mutex.unlock();
+            self.start(sub) catch {};
         }
     };
 }

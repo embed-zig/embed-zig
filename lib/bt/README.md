@@ -146,8 +146,8 @@ lib/bt/
     client/
       Characteristic.zig      Host-level characteristic helpers including readX/writeX
     server/
+      Sender.zig              Chunked read responder bound to one characteristic
       Receiver.zig            Chunked write receiver bound to one characteristic
-      ServeMux.zig            Topic-routed chunked read responder
     xfer/
       // host.Server / host.Client protocol helpers
       Chunk.zig               Shared xfer wire helpers
@@ -256,7 +256,7 @@ Events: `device_found`, `connected`, `disconnected`, `notification`.
 
 Type-erased BLE Peripheral interface. Same VTable pattern as Central.
 
-Design follows the `http.ServeMux` pattern:
+Design follows a small request-router pattern:
 
 | HTTP                | BLE Peripheral                       |
 |---------------------|--------------------------------------|
@@ -415,9 +415,8 @@ Reasoning:
 
 - They are not backend-agnostic transport primitives.
 - They build on host client/server connection semantics and GATT conventions.
-- Future features such as RPC-style topic routing belong next to the existing
-  xfer engine and host server helpers rather than inside generic client or
-  server wrappers.
+- Future higher-level RPC or routing helpers should build above the existing
+  xfer engine rather than inside generic client or server wrappers.
 
 The layout is:
 
@@ -430,7 +429,7 @@ host/xfer/
   recv.zig
 
 host/server/
-  ServeMux.zig
+  Sender.zig
   Receiver.zig
 ```
 
@@ -438,10 +437,10 @@ In other words, `xfer` becomes a **host-only transfer extension layer**,
 not a separate top-level Bluetooth abstraction.
 
 `host/client/Characteristic.zig` exposes the client convenience methods
-`readX` and `writeX`. On the server side, `host/server/ServeMux.zig` and
-`host/server/Receiver.zig` bind one xfer characteristic each, while
-`host/xfer/send.zig` and `host/xfer/recv.zig` carry the shared protocol
-loops.
+`readX` and `writeX`. On the server side, `host.Server.handleX(...)` bridges
+`host/server/Sender.zig` and `host/server/Receiver.zig` onto one xfer
+characteristic, while `host/xfer/send.zig` and `host/xfer/recv.zig` carry the
+shared protocol loops.
 
 Internally, `Hci` orchestrates:
 1. Send HCI commands via `Transport.send`

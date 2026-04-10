@@ -49,7 +49,6 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
     const ReadTask = struct {
         allocator: lib.mem.Allocator,
         transport: Harness.Endpoint,
-        expected: []const u8,
         result: ?[]u8 = null,
         err: ?anyerror = null,
 
@@ -58,8 +57,6 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
                 .att_mtu = 23,
                 .timeout_ms = 20,
                 .max_timeout_retries = 3,
-                .topic = harness_mod.test_topic,
-                .metadata = self.expected,
             }) catch |err| {
                 self.err = err;
                 return;
@@ -72,8 +69,23 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
         transport: Harness.Endpoint,
         err: ?anyerror = null,
 
+        fn dataFn(
+            payload_allocator: embed.mem.Allocator,
+            conn_handle: u16,
+            service_uuid: u16,
+            char_uuid: u16,
+        ) ![]u8 {
+            if (conn_handle != harness_mod.test_conn_handle) return error.UnexpectedConnHandle;
+            if (service_uuid != harness_mod.test_service_uuid) return error.UnexpectedServiceUuid;
+            if (char_uuid != harness_mod.test_char_uuid) return error.UnexpectedCharUuid;
+
+            var payload: [96]u8 = undefined;
+            harness_mod.fillPattern(&payload, 0x21);
+            return payload_allocator.dupe(u8, &payload);
+        }
+
         fn run(self: *@This()) void {
-            send_mod.send(lib, self.allocator, &self.transport, harness_mod.echoDataFn, .{
+            send_mod.send(lib, self.allocator, &self.transport, dataFn, .{
                 .att_mtu = 23,
                 .timeout_ms = 20,
                 .send_redundancy = 1,
@@ -88,7 +100,6 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
     var read_task = ReadTask{
         .allocator = allocator,
         .transport = harness.left(),
-        .expected = &expected,
     };
     var send_task = SendTask{
         .allocator = allocator,

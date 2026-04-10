@@ -30,14 +30,6 @@ pub const write_start_magic = [4]u8{ 0xFF, 0xFF, 0x00, 0x02 };
 /// ACK marker sent by the receiver once all chunks arrive.
 pub const ack_signal = [2]u8{ 0xFF, 0xFF };
 
-pub const Topic = u64;
-pub const topic_size: usize = @sizeOf(Topic);
-
-pub const ReadStartMetadata = struct {
-    topic: Topic,
-    metadata: []const u8 = &.{},
-};
-
 pub const Header = struct {
     total: u16,
     seq: u16,
@@ -73,23 +65,6 @@ pub fn isWriteStartMagic(data: []const u8) bool {
 
 pub fn isAck(data: []const u8) bool {
     return data.len >= ack_signal.len and data[0] == 0xFF and data[1] == 0xFF;
-}
-
-pub fn encodeReadStartMetadata(buf: []u8, topic: Topic, metadata: []const u8) []u8 {
-    if (buf.len < topic_size + metadata.len) unreachable;
-    writeInt(Topic, buf[0..topic_size], topic);
-    if (metadata.len > 0) {
-        @memcpy(buf[topic_size .. topic_size + metadata.len], metadata);
-    }
-    return buf[0 .. topic_size + metadata.len];
-}
-
-pub fn decodeReadStartMetadata(data: []const u8) error{InvalidReadStartMetadata}!ReadStartMetadata {
-    if (data.len < topic_size) return error.InvalidReadStartMetadata;
-    return .{
-        .topic = readInt(Topic, data[0..topic_size]),
-        .metadata = data[topic_size..],
-    };
 }
 
 pub fn encodeLossList(seqs: []const u16, buf: []u8) []u8 {
@@ -182,24 +157,6 @@ pub fn chunksNeeded(data_len: usize, mtu: u16) usize {
     const dcs = dataChunkSize(mtu);
     if (data_len == 0) return 0;
     return (data_len + dcs - 1) / dcs;
-}
-
-fn writeInt(comptime T: type, buf: []u8, value: T) void {
-    var shift: usize = (buf.len - 1) * 8;
-    var i: usize = 0;
-    while (i < buf.len) : (i += 1) {
-        buf[i] = @intCast((value >> @intCast(shift)) & 0xFF);
-        if (shift == 0) break;
-        shift -= 8;
-    }
-}
-
-fn readInt(comptime T: type, buf: []const u8) T {
-    var value: T = 0;
-    for (buf) |byte| {
-        value = (value << 8) | @as(T, byte);
-    }
-    return value;
 }
 
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
@@ -307,21 +264,6 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try lib.testing.expectEqual(@as(usize, 4), chunksNeeded(964, 247));
             try lib.testing.expectEqual(@as(usize, 5), chunksNeeded(1000, 247));
             try lib.testing.expectEqual(@as(usize, 3), chunksNeeded(56, 30));
-
-            var metadata_buf: [topic_size + 3]u8 = undefined;
-            const topic_only = encodeReadStartMetadata(metadata_buf[0..], 0x0102030405060708, &.{});
-            try lib.testing.expectEqual(@as(usize, topic_size), topic_only.len);
-            const decoded_topic_only = try decodeReadStartMetadata(topic_only);
-            try lib.testing.expectEqual(@as(Topic, 0x0102030405060708), decoded_topic_only.topic);
-            try lib.testing.expectEqual(@as(usize, 0), decoded_topic_only.metadata.len);
-
-            const topic_and_metadata = encodeReadStartMetadata(metadata_buf[0..], 0x0102030405060708, &.{ 0xAA, 0xBB, 0xCC });
-            try lib.testing.expectEqual(@as(usize, topic_size + 3), topic_and_metadata.len);
-            const decoded_topic_and_metadata = try decodeReadStartMetadata(topic_and_metadata);
-            try lib.testing.expectEqual(@as(Topic, 0x0102030405060708), decoded_topic_and_metadata.topic);
-            try lib.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC }, decoded_topic_and_metadata.metadata);
-            try lib.testing.expectError(error.InvalidReadStartMetadata, decodeReadStartMetadata(&.{}));
-            try lib.testing.expectError(error.InvalidReadStartMetadata, decodeReadStartMetadata(&.{ 0x01, 0x02, 0x03 }));
         }
     };
     const Runner = struct {

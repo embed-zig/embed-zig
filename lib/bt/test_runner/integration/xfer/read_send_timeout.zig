@@ -47,7 +47,5 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
         .att_mtu = 23,
         .timeout_ms = 5,
         .max_timeout_retries = 2,
-        .topic = harness_mod.test_topic,
-        .metadata = "timeout",
     }));
 }

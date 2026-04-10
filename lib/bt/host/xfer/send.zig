@@ -11,6 +11,7 @@
 const embed = @import("embed");
 const att = @import("../att.zig");
 const Chunk = @import("Chunk.zig");
+const testing_api = @import("testing");
 const write_xfer = @import("write.zig");
 
 pub const Config = struct {
@@ -25,7 +26,6 @@ pub const DataFn = *const fn (
     conn_handle: u16,
     service_uuid: u16,
     char_uuid: u16,
-    start: Chunk.ReadStartMetadata,
 ) anyerror![]u8;
 
 pub fn send(
@@ -82,15 +82,12 @@ pub fn send(
     var req_buf: [Chunk.max_mtu]u8 = undefined;
     const req_len = try transport.read(config.timeout_ms, &req_buf);
     const req = req_buf[0..req_len];
-    if (!Chunk.isReadStartMagic(req)) return error.InvalidReadStart;
-
-    const start = try Chunk.decodeReadStartMetadata(req[Chunk.read_start_magic.len..]);
+    if (!Chunk.isReadStartMagic(req) or req.len != Chunk.read_start_magic.len) return error.InvalidReadStart;
     const payload = try dataFn(
         allocator,
         transport.connHandle(),
         transport.serviceUuid(),
         transport.charUuid(),
-        start,
     );
     defer if (payload.len > 0) allocator.free(payload);
 
@@ -102,4 +99,183 @@ pub fn send(
         .send_redundancy = config.send_redundancy,
         .max_timeout_retries = config.max_timeout_retries,
     });
+}
+
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const invalid_read_start = [_]u8{ 0xFF, 0xFF, 0x00, 0x03 };
+            const oversized_read_start = [_]u8{ 0xFF, 0xFF, 0x00, 0x01, 0xAA };
+
+            const InvalidStartTransport = struct {
+                deinited: bool = false,
+
+                pub fn connHandle(_: *@This()) u16 {
+                    return 0x0042;
+                }
+
+                pub fn serviceUuid(_: *@This()) u16 {
+                    return 0x180D;
+                }
+
+                pub fn charUuid(_: *@This()) u16 {
+                    return 0x2A58;
+                }
+
+                pub fn read(_: *@This(), _: u32, out: []u8) anyerror!usize {
+                    @memcpy(out[0..invalid_read_start.len], &invalid_read_start);
+                    return invalid_read_start.len;
+                }
+
+                pub fn write(_: *@This(), data: []const u8) anyerror!usize {
+                    return data.len;
+                }
+
+                pub fn writeNoResp(_: *@This(), data: []const u8) anyerror!usize {
+                    return data.len;
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    self.deinited = true;
+                }
+            };
+
+            var invalid_transport = InvalidStartTransport{};
+            try lib.testing.expectError(error.InvalidReadStart, send(
+                lib,
+                lib.testing.allocator,
+                &invalid_transport,
+                struct {
+                    fn dataFn(_: embed.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
+                        return error.ShouldNotRun;
+                    }
+                }.dataFn,
+                .{},
+            ));
+            try lib.testing.expect(invalid_transport.deinited);
+
+            const OversizedStartTransport = struct {
+                deinited: bool = false,
+
+                pub fn connHandle(_: *@This()) u16 {
+                    return 0x0042;
+                }
+
+                pub fn serviceUuid(_: *@This()) u16 {
+                    return 0x180D;
+                }
+
+                pub fn charUuid(_: *@This()) u16 {
+                    return 0x2A58;
+                }
+
+                pub fn read(_: *@This(), _: u32, out: []u8) anyerror!usize {
+                    @memcpy(out[0..oversized_read_start.len], &oversized_read_start);
+                    return oversized_read_start.len;
+                }
+
+                pub fn write(_: *@This(), data: []const u8) anyerror!usize {
+                    return data.len;
+                }
+
+                pub fn writeNoResp(_: *@This(), data: []const u8) anyerror!usize {
+                    return data.len;
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    self.deinited = true;
+                }
+            };
+
+            var oversized_transport = OversizedStartTransport{};
+            try lib.testing.expectError(error.InvalidReadStart, send(
+                lib,
+                lib.testing.allocator,
+                &oversized_transport,
+                struct {
+                    fn dataFn(_: embed.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
+                        return error.ShouldNotRun;
+                    }
+                }.dataFn,
+                .{},
+            ));
+            try lib.testing.expect(oversized_transport.deinited);
+
+            const EmptyPayloadTransport = struct {
+                write_count: usize = 0,
+                deinited: bool = false,
+
+                pub fn connHandle(_: *@This()) u16 {
+                    return 0x0042;
+                }
+
+                pub fn serviceUuid(_: *@This()) u16 {
+                    return 0x180D;
+                }
+
+                pub fn charUuid(_: *@This()) u16 {
+                    return 0x2A58;
+                }
+
+                pub fn read(_: *@This(), _: u32, out: []u8) anyerror!usize {
+                    @memcpy(out[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
+                    return Chunk.read_start_magic.len;
+                }
+
+                pub fn write(self: *@This(), data: []const u8) anyerror!usize {
+                    self.write_count += 1;
+                    return data.len;
+                }
+
+                pub fn writeNoResp(_: *@This(), data: []const u8) anyerror!usize {
+                    return data.len;
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    self.deinited = true;
+                }
+            };
+
+            var empty_transport = EmptyPayloadTransport{};
+            try lib.testing.expectError(error.EmptyData, send(
+                lib,
+                lib.testing.allocator,
+                &empty_transport,
+                struct {
+                    fn dataFn(_: embed.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
+                        return &.{};
+                    }
+                }.dataFn,
+                .{},
+            ));
+            try lib.testing.expectEqual(@as(usize, 0), empty_transport.write_count);
+            try lib.testing.expect(empty_transport.deinited);
+        }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

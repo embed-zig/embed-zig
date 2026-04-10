@@ -3,6 +3,10 @@
 const std = @import("std");
 const bt = @import("../../bt.zig");
 const att = @import("att.zig");
+const Chunk = @import("xfer.zig").Chunk;
+const sender_mod = @import("server/Sender.zig");
+const receiver_mod = @import("server/Receiver.zig");
+const testing_api = @import("testing");
 
 const root = @This();
 
@@ -184,6 +188,14 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
             onSubscription: ?OnSubscriptionFn = null,
         };
         pub const Subscription = root.Subscription(lib, Self);
+        pub const Sender = sender_mod.make(lib, Self);
+        pub const Receiver = receiver_mod.make(lib, Self);
+        pub const XferReadRequest = sender_mod.Request;
+        pub const XferWriteRequest = receiver_mod.Request;
+        pub const XferHandler = struct {
+            onRead: ?Sender.HandlerFn = null,
+            onWrite: ?receiver_mod.HandlerFn = null,
+        };
         pub const HandleError = error{
             DuplicateRoute,
             Unexpected,
@@ -195,6 +207,163 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
         const Route = struct {
             handler: Handler,
             ctx: ?*anyopaque,
+        };
+        const XferRoute = struct {
+            allocator: lib.mem.Allocator,
+            sender: Sender,
+            receiver: Receiver,
+            has_read_handler: bool,
+            has_write_handler: bool,
+            pending_subscriptions: lib.AutoHashMapUnmanaged(u16, Self.Subscription) = .{},
+            mutex: lib.Thread.Mutex = .{},
+
+            fn init(
+                allocator: lib.mem.Allocator,
+                xfer_handler: XferHandler,
+                ctx: ?*anyopaque,
+            ) !XferRoute {
+                var sender = Sender.init(allocator);
+                errdefer sender.deinit();
+                var receiver = Receiver.init(allocator);
+                errdefer receiver.deinit();
+
+                if (xfer_handler.onRead) |read_handler| {
+                    try sender.handle(read_handler, ctx);
+                }
+                if (xfer_handler.onWrite) |write_handler| {
+                    try receiver.handle(write_handler, ctx);
+                }
+
+                return .{
+                    .allocator = allocator,
+                    .sender = sender,
+                    .receiver = receiver,
+                    .has_read_handler = xfer_handler.onRead != null,
+                    .has_write_handler = xfer_handler.onWrite != null,
+                };
+            }
+
+            fn deinit(self: *XferRoute) void {
+                self.mutex.lock();
+                var pending = self.pending_subscriptions;
+                self.pending_subscriptions = .{};
+                self.mutex.unlock();
+
+                var pending_iter = pending.iterator();
+                while (pending_iter.next()) |entry| {
+                    var subscription = entry.value_ptr.*;
+                    subscription.deinit();
+                }
+                pending.deinit(self.allocator);
+                self.sender.deinit();
+                self.receiver.deinit();
+            }
+
+            fn handler(self: *XferRoute) Handler {
+                _ = self;
+                return .{
+                    .onRequest = xferOnRequest,
+                    .onSubscription = xferOnSubscription,
+                };
+            }
+
+            fn xferOnRequest(ctx: ?*anyopaque, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
+                const self: *XferRoute = @ptrCast(@alignCast(ctx.?));
+                self.dispatchRequest(req, rw);
+            }
+
+            fn xferOnSubscription(ctx: ?*anyopaque, subscription: Self.Subscription) void {
+                const self: *XferRoute = @ptrCast(@alignCast(ctx.?));
+                self.replaceSubscription(subscription);
+            }
+
+            fn dispatchRequest(self: *XferRoute, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
+                if (self.sender.hasActiveSession(req.conn_handle)) {
+                    if (Chunk.isWriteStartMagic(req.data)) {
+                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                        return;
+                    }
+                    self.sender.dispatchRequest(req, rw);
+                    return;
+                }
+
+                if (self.receiver.hasActiveSession(req.conn_handle)) {
+                    if (req.data.len == Chunk.read_start_magic.len and Chunk.isReadStartMagic(req.data)) {
+                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                        return;
+                    }
+                    self.receiver.dispatchRequest(req, rw);
+                    return;
+                }
+
+                if (req.data.len == Chunk.read_start_magic.len and Chunk.isReadStartMagic(req.data)) {
+                    if (!self.has_read_handler) {
+                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                        return;
+                    }
+                    const subscription = self.takePendingSubscription(req.conn_handle) orelse {
+                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                        return;
+                    };
+                    self.sender.start(subscription) catch {
+                        rw.err(@intFromEnum(att.ErrorCode.insufficient_resources));
+                        return;
+                    };
+                    self.sender.dispatchRequest(req, rw);
+                    return;
+                }
+
+                if (req.data.len == Chunk.write_start_magic.len and Chunk.isWriteStartMagic(req.data)) {
+                    if (!self.has_write_handler) {
+                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                        return;
+                    }
+                    const subscription = self.takePendingSubscription(req.conn_handle) orelse {
+                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                        return;
+                    };
+                    self.receiver.start(subscription) catch {
+                        rw.err(@intFromEnum(att.ErrorCode.insufficient_resources));
+                        return;
+                    };
+                    self.receiver.dispatchRequest(req, rw);
+                    return;
+                }
+
+                rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+            }
+
+            fn replaceSubscription(self: *XferRoute, sub: Self.Subscription) void {
+                var subscription = sub;
+                const conn_handle = subscription.connHandle();
+
+                self.sender.closeSession(conn_handle);
+                self.receiver.closeSession(conn_handle);
+
+                self.mutex.lock();
+                const existing = self.pending_subscriptions.get(conn_handle);
+                const gop = self.pending_subscriptions.getOrPut(self.allocator, conn_handle) catch {
+                    self.mutex.unlock();
+                    subscription.deinit();
+                    return;
+                };
+                gop.value_ptr.* = subscription;
+                self.mutex.unlock();
+
+                if (existing) |old| {
+                    var old_subscription = old;
+                    old_subscription.deinit();
+                }
+            }
+
+            fn takePendingSubscription(self: *XferRoute, conn_handle: u16) ?Self.Subscription {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+
+                const subscription = self.pending_subscriptions.get(conn_handle) orelse return null;
+                _ = self.pending_subscriptions.remove(conn_handle);
+                return subscription;
+            }
         };
         const ConnState = struct {
             att_mtu: u16 = att.DEFAULT_MTU,
@@ -222,6 +391,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
         hook_installed: bool = false,
         mutex: lib.Thread.Mutex = .{},
         routes: lib.AutoHashMapUnmanaged(CharKey, Route) = .{},
+        xfer_routes: lib.AutoHashMapUnmanaged(CharKey, *XferRoute) = .{},
         conns: lib.AutoHashMapUnmanaged(u16, ConnState) = .{},
 
         pub fn init(allocator: lib.mem.Allocator) !Self {
@@ -256,13 +426,28 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
             }
 
             self.mutex.lock();
-            var conn_iter = self.conns.iterator();
+            var xfer_routes = self.xfer_routes;
+            self.xfer_routes = .{};
+            var conns = self.conns;
+            self.conns = .{};
+            var routes = self.routes;
+            self.routes = .{};
+            self.mutex.unlock();
+
+            var xfer_iter = xfer_routes.iterator();
+            while (xfer_iter.next()) |entry| {
+                const route = entry.value_ptr.*;
+                route.deinit();
+                self.allocator.destroy(route);
+            }
+            xfer_routes.deinit(self.allocator);
+
+            var conn_iter = conns.iterator();
             while (conn_iter.next()) |entry| {
                 entry.value_ptr.deinit(self.allocator);
             }
-            self.conns.deinit(self.allocator);
-            self.routes.deinit(self.allocator);
-            self.mutex.unlock();
+            conns.deinit(self.allocator);
+            routes.deinit(self.allocator);
 
             self.peripheral = null;
         }
@@ -297,6 +482,36 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
 
         pub fn handle(self: *Self, service_uuid: u16, char_uuid: u16, handler: Handler, ctx: ?*anyopaque) HandleError!void {
             return self.registerRoute(service_uuid, char_uuid, handler, ctx);
+        }
+
+        pub fn handleX(
+            self: *Self,
+            service_uuid: u16,
+            char_uuid: u16,
+            xfer_handler: XferHandler,
+            ctx: ?*anyopaque,
+        ) HandleError!void {
+            const route = self.allocator.create(XferRoute) catch return error.Unexpected;
+            errdefer self.allocator.destroy(route);
+
+            route.* = XferRoute.init(self.allocator, xfer_handler, ctx) catch return error.Unexpected;
+            errdefer route.deinit();
+
+            const key = charKey(service_uuid, char_uuid);
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            if (self.routes.contains(key)) {
+                return error.DuplicateRoute;
+            }
+            self.routes.put(self.allocator, key, .{
+                .handler = route.handler(),
+                .ctx = route,
+            }) catch return error.Unexpected;
+            self.xfer_routes.put(self.allocator, key, route) catch {
+                _ = self.routes.remove(key);
+                return error.Unexpected;
+            };
         }
 
         fn unregisterSubscription(self: *Self, state: *Self.Subscription.State) bool {
@@ -491,5 +706,265 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
             return self.routes.get(charKey(service_uuid, char_uuid));
         }
     };
+}
+
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn run() !void {
+            const DummyChannel = struct {
+                fn make(comptime T: type) type {
+                    return struct {
+                        pub fn make(_: lib.mem.Allocator, _: usize) !@This() {
+                            return .{};
+                        }
+
+                        pub fn deinit(_: *@This()) void {}
+
+                        pub fn close(_: *@This()) void {}
+
+                        pub fn recvTimeout(_: *@This(), _: u32) anyerror!struct { ok: bool, value: T } {
+                            return error.Unexpected;
+                        }
+
+                        pub fn recv(_: *@This()) anyerror!struct { ok: bool, value: T } {
+                            return error.Unexpected;
+                        }
+
+                        pub fn send(_: *@This(), _: T) anyerror!struct { ok: bool } {
+                            return .{ .ok = true };
+                        }
+                    };
+                }
+            };
+
+            const WriterState = struct {
+                ok_count: usize = 0,
+                err_code: ?u8 = null,
+
+                fn writeFn(_: *anyopaque, _: []const u8) void {}
+
+                fn okFn(ctx: *anyopaque) void {
+                    const self: *@This() = @ptrCast(@alignCast(ctx));
+                    self.ok_count += 1;
+                }
+
+                fn errFn(ctx: *anyopaque, code: u8) void {
+                    const self: *@This() = @ptrCast(@alignCast(ctx));
+                    self.err_code = code;
+                }
+            };
+
+            const Impl = make(lib, DummyChannel.make);
+
+            const HandlerState = struct {
+                read_calls: usize = 0,
+                write_calls: usize = 0,
+
+                fn onRead(ctx: ?*anyopaque, allocator: lib.mem.Allocator, req: *const sender_mod.Request) ![]u8 {
+                    const self: *@This() = @ptrCast(@alignCast(ctx.?));
+                    self.read_calls += 1;
+                    if (req.service_uuid != 0x180D or req.char_uuid != 0x2A58) return error.UnexpectedRequest;
+                    return allocator.dupe(u8, "ok");
+                }
+
+                fn onWrite(ctx: ?*anyopaque, req: *const receiver_mod.Request) void {
+                    const self: *@This() = @ptrCast(@alignCast(ctx.?));
+                    self.write_calls += 1;
+                    _ = req;
+                }
+            };
+            const request_not_supported = @as(?u8, @intFromEnum(att.ErrorCode.request_not_supported));
+
+            {
+                var server = try Impl.init(lib.testing.allocator);
+                defer server.deinit();
+
+                var handler_state = HandlerState{};
+                try server.handleX(0x180D, 0x2A58, .{
+                    .onRead = HandlerState.onRead,
+                }, &handler_state);
+                try lib.testing.expectError(error.DuplicateRoute, server.handleX(0x180D, 0x2A58, .{
+                    .onWrite = HandlerState.onWrite,
+                }, &handler_state));
+            }
+
+            {
+                var server = try Impl.init(lib.testing.allocator);
+                defer server.deinit();
+
+                var handler_state = HandlerState{};
+                try server.handleX(0x180D, 0x2A58, .{
+                    .onRead = HandlerState.onRead,
+                }, &handler_state);
+                server.handleSubscriptionChanged(.{
+                    .conn_handle = 1,
+                    .service_uuid = 0x180D,
+                    .char_uuid = 0x2A58,
+                    .cccd_value = 0x0001,
+                });
+
+                var writer_state = WriterState{};
+                var rw = bt.Peripheral.ResponseWriter{
+                    ._impl = &writer_state,
+                    ._write_fn = WriterState.writeFn,
+                    ._ok_fn = WriterState.okFn,
+                    ._err_fn = WriterState.errFn,
+                };
+                const write_req = bt.Peripheral.Request{
+                    .op = .write,
+                    .conn_handle = 1,
+                    .service_uuid = 0x180D,
+                    .char_uuid = 0x2A58,
+                    .data = &Chunk.write_start_magic,
+                };
+                server.dispatchRequest(&write_req, &rw);
+
+                try lib.testing.expectEqual(request_not_supported, writer_state.err_code);
+                try lib.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
+                try lib.testing.expectEqual(@as(usize, 0), handler_state.write_calls);
+            }
+
+            {
+                var server = try Impl.init(lib.testing.allocator);
+                defer server.deinit();
+
+                var handler_state = HandlerState{};
+                try server.handleX(0x180D, 0x2A58, .{
+                    .onWrite = HandlerState.onWrite,
+                }, &handler_state);
+                server.handleSubscriptionChanged(.{
+                    .conn_handle = 1,
+                    .service_uuid = 0x180D,
+                    .char_uuid = 0x2A58,
+                    .cccd_value = 0x0001,
+                });
+
+                var writer_state = WriterState{};
+                var rw = bt.Peripheral.ResponseWriter{
+                    ._impl = &writer_state,
+                    ._write_fn = WriterState.writeFn,
+                    ._ok_fn = WriterState.okFn,
+                    ._err_fn = WriterState.errFn,
+                };
+                const read_req = bt.Peripheral.Request{
+                    .op = .write,
+                    .conn_handle = 1,
+                    .service_uuid = 0x180D,
+                    .char_uuid = 0x2A58,
+                    .data = &Chunk.read_start_magic,
+                };
+                server.dispatchRequest(&read_req, &rw);
+
+                try lib.testing.expectEqual(request_not_supported, writer_state.err_code);
+                try lib.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
+                try lib.testing.expectEqual(@as(usize, 0), handler_state.read_calls);
+            }
+
+            {
+                var server = try Impl.init(lib.testing.allocator);
+                defer server.deinit();
+
+                var handler_state = HandlerState{};
+                try server.handleX(0x180D, 0x2A58, .{
+                    .onRead = HandlerState.onRead,
+                }, &handler_state);
+                server.handleSubscriptionChanged(.{
+                    .conn_handle = 7,
+                    .service_uuid = 0x180D,
+                    .char_uuid = 0x2A58,
+                    .cccd_value = 0x0001,
+                });
+                server.handleDisconnect(7);
+
+                var writer_state = WriterState{};
+                var rw = bt.Peripheral.ResponseWriter{
+                    ._impl = &writer_state,
+                    ._write_fn = WriterState.writeFn,
+                    ._ok_fn = WriterState.okFn,
+                    ._err_fn = WriterState.errFn,
+                };
+                const read_req = bt.Peripheral.Request{
+                    .op = .write,
+                    .conn_handle = 7,
+                    .service_uuid = 0x180D,
+                    .char_uuid = 0x2A58,
+                    .data = &Chunk.read_start_magic,
+                };
+                server.dispatchRequest(&read_req, &rw);
+
+                try lib.testing.expectEqual(request_not_supported, writer_state.err_code);
+                try lib.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
+                try lib.testing.expectEqual(@as(usize, 0), handler_state.read_calls);
+            }
+
+            {
+                var server = try Impl.init(lib.testing.allocator);
+                defer server.deinit();
+
+                var handler_state = HandlerState{};
+                try server.handleX(0x180D, 0x2A58, .{
+                    .onWrite = HandlerState.onWrite,
+                }, &handler_state);
+                server.handleSubscriptionChanged(.{
+                    .conn_handle = 9,
+                    .service_uuid = 0x180D,
+                    .char_uuid = 0x2A58,
+                    .cccd_value = 0x0001,
+                });
+                server.handleSubscriptionChanged(.{
+                    .conn_handle = 9,
+                    .service_uuid = 0x180D,
+                    .char_uuid = 0x2A58,
+                    .cccd_value = 0x0000,
+                });
+
+                var writer_state = WriterState{};
+                var rw = bt.Peripheral.ResponseWriter{
+                    ._impl = &writer_state,
+                    ._write_fn = WriterState.writeFn,
+                    ._ok_fn = WriterState.okFn,
+                    ._err_fn = WriterState.errFn,
+                };
+                const write_req = bt.Peripheral.Request{
+                    .op = .write,
+                    .conn_handle = 9,
+                    .service_uuid = 0x180D,
+                    .char_uuid = 0x2A58,
+                    .data = &Chunk.write_start_magic,
+                };
+                server.dispatchRequest(&write_req, &rw);
+
+                try lib.testing.expectEqual(request_not_supported, writer_state.err_code);
+                try lib.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
+                try lib.testing.expectEqual(@as(usize, 0), handler_state.write_calls);
+            }
+        }
+    };
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.run() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 

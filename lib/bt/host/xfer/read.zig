@@ -15,8 +15,6 @@ pub const Config = struct {
     att_mtu: u16 = att.DEFAULT_MTU,
     timeout_ms: u32 = 1_000,
     max_timeout_retries: u8 = 5,
-    topic: Chunk.Topic,
-    metadata: []const u8 = &.{},
 };
 
 pub fn read(
@@ -39,12 +37,7 @@ pub fn read(
 
     defer transport.deinit();
 
-    const request = try allocator.alloc(u8, Chunk.read_start_magic.len + Chunk.topic_size + config.metadata.len);
-    defer allocator.free(request);
-
-    @memcpy(request[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
-    _ = Chunk.encodeReadStartMetadata(request[Chunk.read_start_magic.len..], config.topic, config.metadata);
-    _ = try transport.write(request);
+    _ = try transport.write(&Chunk.read_start_magic);
 
     const mtu = config.att_mtu;
     const dcs = Chunk.dataChunkSize(mtu);
@@ -65,7 +58,7 @@ pub fn read(
                 timeout_count += 1;
                 if (timeout_count >= config.max_timeout_retries) return error.Timeout;
                 if (!initialized) {
-                    _ = try transport.write(request);
+                    _ = try transport.write(&Chunk.read_start_magic);
                     continue;
                 }
                 try sendMissingReadChunks(transport, rcvmask[0..Chunk.Bitmask.requiredBytes(total)], total, max_chunk_msg);
@@ -190,19 +183,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var transport = HappyTransport.init();
             const payload_bytes = try read(lib, lib.testing.allocator, &transport, .{
                 .att_mtu = 9,
-                .topic = 0x0102030405060708,
             });
             defer lib.testing.allocator.free(payload_bytes);
-
-            var expected_req: [Chunk.read_start_magic.len + Chunk.topic_size]u8 = undefined;
-            @memcpy(expected_req[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
-            _ = Chunk.encodeReadStartMetadata(expected_req[Chunk.read_start_magic.len..], 0x0102030405060708, &.{});
 
             try lib.testing.expectEqual(@as(usize, 5), payload_bytes.len);
             try lib.testing.expectEqualSlices(u8, "hello", payload_bytes);
             try lib.testing.expect(transport.deinited);
             try lib.testing.expectEqual(@as(usize, 2), transport.write_count);
-            try lib.testing.expectEqualSlices(u8, &expected_req, transport.writes[0][0..transport.write_lens[0]]);
+            try lib.testing.expectEqualSlices(u8, &Chunk.read_start_magic, transport.writes[0][0..transport.write_lens[0]]);
             try lib.testing.expectEqualSlices(u8, &Chunk.ack_signal, transport.writes[1][0..transport.write_lens[1]]);
 
             const Step = union(enum) {
@@ -268,7 +256,6 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var retry_transport = RetryTransport.init();
             const retry_payload = try read(lib, lib.testing.allocator, &retry_transport, .{
                 .att_mtu = 9,
-                .topic = 0x0102030405060708,
             });
             defer lib.testing.allocator.free(retry_payload);
 
@@ -278,7 +265,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try lib.testing.expectEqualSlices(u8, "hello", retry_payload);
             try lib.testing.expect(retry_transport.deinited);
             try lib.testing.expectEqual(@as(usize, 3), retry_transport.write_count);
-            try lib.testing.expectEqualSlices(u8, &expected_req, retry_transport.writes[0][0..retry_transport.write_lens[0]]);
+            try lib.testing.expectEqualSlices(u8, &Chunk.read_start_magic, retry_transport.writes[0][0..retry_transport.write_lens[0]]);
             try lib.testing.expectEqualSlices(u8, expected, retry_transport.writes[1][0..retry_transport.write_lens[1]]);
             try lib.testing.expectEqualSlices(u8, &Chunk.ack_signal, retry_transport.writes[2][0..retry_transport.write_lens[2]]);
         }

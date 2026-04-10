@@ -1,12 +1,10 @@
-//! host.server.ServeMux — topic-routed server helper for xfer.read clients.
+//! host.server.Sender — server helper for xfer.read clients.
 //!
-//! A ServeMux instance is bound to one xfer characteristic. Clients initiate a
-//! request with `xfer.read(...)`, which writes a `read_start` packet into this
-//! characteristic and then waits for chunked replies via notify/indicate. The
-//! mux creates one session per subscribed connection and feeds inbound control
-//! packets into `xfer.send(...)`.
+//! A Sender instance is bound to one xfer characteristic. Clients initiate a
+//! transfer with `xfer.read(...)`, which writes a `read_start` packet into this
+//! characteristic. The sender runs one read handler and streams the resulting
+//! byte payload back with `xfer.send(...)`.
 
-const embed = @import("embed");
 const bt = @import("../../../bt.zig");
 const att = @import("../att.zig");
 const sync = @import("sync");
@@ -18,129 +16,18 @@ pub const Request = struct {
     conn_handle: u16,
     service_uuid: u16,
     char_uuid: u16,
-    topic: Chunk.Topic,
-    metadata: []const u8,
 };
-
-// Handlers return bytes allocated from the provided allocator, or `&.{}`.
-pub const HandlerFn = *const fn (?*anyopaque, embed.mem.Allocator, *const Request) anyerror![]u8;
 
 pub fn make(comptime lib: type, comptime ServerType: type) type {
     return struct {
         const Self = @This();
-        const Subscription = ServerType.Subscription;
         const Inbox = ServerType.ChannelFactory([]u8);
+        const Subscription = ServerType.Subscription;
 
-        const Route = struct {
-            handler: HandlerFn,
-            ctx: ?*anyopaque,
-        };
-
-        allocator: lib.mem.Allocator,
-        sessions: lib.AutoHashMapUnmanaged(u16, *Session) = .{},
-        routes: lib.AutoHashMapUnmanaged(Chunk.Topic, Route) = .{},
-        mutex: lib.Thread.Mutex = .{},
-
-        pub fn init(allocator: lib.mem.Allocator) !Self {
-            return .{ .allocator = allocator };
-        }
-
-        pub fn deinit(self: *Self) void {
-            self.mutex.lock();
-            var sessions = self.sessions;
-            self.sessions = .{};
-            self.routes.deinit(self.allocator);
-            self.routes = .{};
-            self.mutex.unlock();
-
-            var iter = sessions.iterator();
-            while (iter.next()) |entry| {
-                const session = entry.value_ptr.*;
-                Session.close(session);
-                Session.release(session);
-            }
-            sessions.deinit(self.allocator);
-        }
-
-        pub fn handle(self: *Self, topic: Chunk.Topic, read_handler: HandlerFn, ctx: ?*anyopaque) !void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            if (self.routes.contains(topic)) return error.DuplicateRoute;
-            try self.routes.put(self.allocator, topic, .{
-                .handler = read_handler,
-                .ctx = ctx,
-            });
-        }
-
-        pub fn handler(self: *Self) ServerType.Handler {
-            _ = self;
-            return .{
-                .onRequest = onRequest,
-                .onSubscription = onSubscription,
-            };
-        }
-
-        fn onRequest(ctx: ?*anyopaque, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
-            const self: *Self = @ptrCast(@alignCast(ctx.?));
-            self.dispatchRequest(req, rw);
-        }
-
-        fn onSubscription(ctx: ?*anyopaque, subscription: Subscription) void {
-            const self: *Self = @ptrCast(@alignCast(ctx.?));
-            self.replaceSession(subscription);
-        }
-
-        fn dispatchRequest(self: *Self, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
-            const session = self.retainSession(req.conn_handle) orelse {
-                rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
-                return;
-            };
-            defer Session.release(session);
-            session.injectRequest(req, rw);
-        }
-
-        fn replaceSession(self: *Self, subscription: Subscription) void {
-            const session = Session.init(self, subscription) catch {
-                var sub = subscription;
-                sub.deinit();
-                return;
-            };
-
-            self.mutex.lock();
-            const existing = self.sessions.get(session.conn_handle);
-            self.sessions.put(self.allocator, session.conn_handle, session) catch {
-                self.mutex.unlock();
-                Session.close(session);
-                Session.release(session);
-                return;
-            };
-            self.mutex.unlock();
-
-            if (existing) |old| {
-                Session.close(old);
-                Session.release(old);
-            }
-        }
-
-        fn retainSession(self: *Self, conn_handle: u16) ?*Session {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            const session = self.sessions.get(conn_handle) orelse return null;
-            Session.retain(session);
-            return session;
-        }
-
-        fn removeSession(self: *Self, session: *Session) bool {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            const existing = self.sessions.get(session.conn_handle) orelse return false;
-            if (existing != session) return false;
-            _ = self.sessions.remove(session.conn_handle);
-            return true;
-        }
+        pub const HandlerFn = *const fn (?*anyopaque, lib.mem.Allocator, *const Request) anyerror![]u8;
 
         const Session = struct {
-            mux: *Self,
+            sender: *Self,
             subscription: Subscription,
             conn_handle: u16,
             inbox: Inbox,
@@ -150,15 +37,15 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
             closed: bool = false,
             ref_count: usize = 1,
 
-            fn init(mux: *Self, subscription: Subscription) !*Session {
-                const session = try mux.allocator.create(Session);
-                errdefer mux.allocator.destroy(session);
+            fn init(sender: *Self, subscription: Subscription) !*Session {
+                const session = try sender.allocator.create(Session);
+                errdefer sender.allocator.destroy(session);
 
                 session.* = .{
-                    .mux = mux,
+                    .sender = sender,
                     .subscription = subscription,
                     .conn_handle = subscription.connHandle(),
-                    .inbox = try Inbox.make(mux.allocator, 64),
+                    .inbox = try Inbox.make(sender.allocator, 64),
                 };
                 errdefer session.inbox.deinit();
                 errdefer session.subscription.deinit();
@@ -179,7 +66,7 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
 
             fn finishTx(self: *Session) void {
                 self.close();
-                if (self.mux.removeSession(self)) {
+                if (self.sender.removeSession(self)) {
                     self.release();
                 }
             }
@@ -215,10 +102,10 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
                 }
 
                 self.worker_id = null;
-                drainInbox(self.mux.allocator, &self.inbox);
+                drainInbox(self.sender.allocator, &self.inbox);
                 self.inbox.deinit();
                 self.subscription.deinit();
-                self.mux.allocator.destroy(self);
+                self.sender.allocator.destroy(self);
             }
 
             fn injectRequest(self: *Session, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
@@ -270,7 +157,7 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
                 var transport = Transport{ .session = self };
                 SessionSend.active_session = self;
                 defer SessionSend.active_session = null;
-                xfer.send(lib, self.mux.allocator, &transport, SessionSend.dataFn, .{
+                xfer.send(lib, self.sender.allocator, &transport, SessionSend.dataFn, .{
                     .att_mtu = self.subscription.attMtu(),
                     .send_redundancy = 1,
                 }) catch {
@@ -279,11 +166,11 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
             }
 
             fn dupData(self: *Session, data: []const u8) ![]u8 {
-                return self.mux.allocator.dupe(u8, data);
+                return self.sender.allocator.dupe(u8, data);
             }
 
             fn destroyData(self: *Session, data: []u8) void {
-                self.mux.allocator.free(data);
+                self.sender.allocator.free(data);
             }
 
             const Transport = struct {
@@ -344,27 +231,147 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
                     conn_handle: u16,
                     service_uuid: u16,
                     char_uuid: u16,
-                    start: Chunk.ReadStartMetadata,
                 ) ![]u8 {
                     const session = active_session orelse return error.Unexpected;
-                    const topic = start.topic;
 
-                    session.mux.mutex.lock();
-                    const route = session.mux.routes.get(topic);
-                    session.mux.mutex.unlock();
-                    const matched = route orelse return error.AttributeNotFound;
+                    session.sender.mutex.lock();
+                    const maybe_handler = session.sender.read_handler;
+                    const handler_ctx = session.sender.handler_ctx;
+                    session.sender.mutex.unlock();
+                    const read_handler = maybe_handler orelse return error.AttributeNotFound;
 
                     var request = Request{
                         .conn_handle = conn_handle,
                         .service_uuid = service_uuid,
                         .char_uuid = char_uuid,
-                        .topic = topic,
-                        .metadata = start.metadata,
                     };
-                    return matched.handler(matched.ctx, allocator, &request);
+                    return read_handler(handler_ctx, allocator, &request);
                 }
             };
         };
+
+        allocator: lib.mem.Allocator,
+        mutex: lib.Thread.Mutex = .{},
+        read_handler: ?HandlerFn = null,
+        handler_ctx: ?*anyopaque = null,
+        sessions: lib.AutoHashMapUnmanaged(u16, *Session) = .{},
+
+        pub fn init(allocator: lib.mem.Allocator) Self {
+            return .{
+                .allocator = allocator,
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.mutex.lock();
+            var sessions = self.sessions;
+            self.sessions = .{};
+            self.read_handler = null;
+            self.handler_ctx = null;
+            self.mutex.unlock();
+
+            var conn_iter = sessions.iterator();
+            while (conn_iter.next()) |entry| {
+                entry.value_ptr.*.close();
+                entry.value_ptr.*.release();
+            }
+            sessions.deinit(self.allocator);
+        }
+
+        pub fn start(self: *Self, subscription: Subscription) !void {
+            const session = Session.init(self, subscription) catch |err| {
+                var sub = subscription;
+                sub.deinit();
+                return err;
+            };
+
+            self.mutex.lock();
+            const existing = self.sessions.get(session.conn_handle);
+            self.sessions.put(self.allocator, session.conn_handle, session) catch |err| {
+                self.mutex.unlock();
+                session.close();
+                session.release();
+                return err;
+            };
+            self.mutex.unlock();
+
+            if (existing) |old| {
+                Session.close(old);
+                Session.release(old);
+            }
+        }
+
+        pub fn handle(self: *Self, read_handler: HandlerFn, ctx: ?*anyopaque) !void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            if (self.read_handler != null) return error.DuplicateHandler;
+            self.read_handler = read_handler;
+            self.handler_ctx = ctx;
+        }
+
+        pub fn hasActiveSession(self: *Self, conn_handle: u16) bool {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            return self.sessions.contains(conn_handle);
+        }
+
+        pub fn closeSession(self: *Self, conn_handle: u16) void {
+            self.mutex.lock();
+            const session = self.sessions.get(conn_handle);
+            if (session) |active| {
+                Session.retain(active);
+            }
+            self.mutex.unlock();
+
+            if (session) |active| {
+                active.close();
+                active.release();
+            }
+        }
+
+        pub fn dispatchRequest(self: *Self, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
+            self.mutex.lock();
+            const session = self.sessions.get(req.conn_handle);
+            if (session) |active| {
+                Session.retain(active);
+            }
+            self.mutex.unlock();
+
+            if (session) |active| {
+                defer active.release();
+                active.injectRequest(req, rw);
+            } else {
+                rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+            }
+        }
+
+        pub fn handler() ServerType.Handler {
+            return .{
+                .onRequest = onRequest,
+                .onSubscription = onSubscription,
+            };
+        }
+
+        pub fn onRequest(ctx: ?*anyopaque, req: *const bt.Peripheral.Request, rw: *bt.Peripheral.ResponseWriter) void {
+            const self: *Self = @ptrCast(@alignCast(ctx.?));
+            self.dispatchRequest(req, rw);
+        }
+
+        pub fn onSubscription(ctx: ?*anyopaque, subscription: Subscription) void {
+            const self: *Self = @ptrCast(@alignCast(ctx.?));
+            self.start(subscription) catch {};
+        }
+
+        fn removeSession(self: *Self, session: *Session) bool {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            const active = self.sessions.get(session.conn_handle) orelse return false;
+            if (active != session) return false;
+
+            _ = self.sessions.remove(session.conn_handle);
+            return true;
+        }
 
         fn drainInbox(allocator: lib.mem.Allocator, inbox: *Inbox) void {
             while (true) {
@@ -450,8 +457,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             };
 
             const Impl = make(lib, FakeServer);
-            var mux = try Impl.init(lib.testing.allocator);
-            defer mux.deinit();
+            var sender = Impl.init(lib.testing.allocator);
+            defer sender.deinit();
 
             var writer_state = WriterState{};
             var rw = bt.Peripheral.ResponseWriter{
@@ -468,7 +475,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 .data = &Chunk.read_start_magic,
             };
 
-            mux.handler().onRequest.?(&mux, &req, &rw);
+            Impl.onRequest(&sender, &req, &rw);
 
             try lib.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
             try lib.testing.expectEqual(@as(?u8, @intFromEnum(att.ErrorCode.request_not_supported)), writer_state.err_code);

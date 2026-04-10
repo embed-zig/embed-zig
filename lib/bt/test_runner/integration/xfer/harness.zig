@@ -1,10 +1,8 @@
-const embed = @import("embed");
 const Chunk = @import("../../../host/xfer.zig").Chunk;
 
 pub const test_conn_handle: u16 = 0x0042;
 pub const test_service_uuid: u16 = 0x180D;
 pub const test_char_uuid: u16 = 0x2A37;
-pub const test_topic: Chunk.Topic = 0x0102_0304_0506_0708;
 
 pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
     const ByteChannel = Channel([]u8);
@@ -136,18 +134,4 @@ pub fn fillPattern(out: []u8, seed: u8) void {
     for (out, 0..) |*byte, i| {
         byte.* = seed +% @as(u8, @truncate(i * 17));
     }
-}
-
-pub fn echoDataFn(
-    allocator: embed.mem.Allocator,
-    conn_handle: u16,
-    service_uuid: u16,
-    char_uuid: u16,
-    start: Chunk.ReadStartMetadata,
-) ![]u8 {
-    if (conn_handle != test_conn_handle) return error.UnexpectedConnHandle;
-    if (service_uuid != test_service_uuid) return error.UnexpectedServiceUuid;
-    if (char_uuid != test_char_uuid) return error.UnexpectedCharUuid;
-    if (start.topic != test_topic) return error.UnexpectedTopic;
-    return allocator.dupe(u8, start.metadata);
 }
