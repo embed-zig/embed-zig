@@ -8,7 +8,6 @@ pub fn DeadlineContext(comptime lib: type) type {
     const Mutex = lib.Thread.Mutex;
     const Condition = lib.Thread.Condition;
     const RwLock = lib.Thread.RwLock;
-    const debug_log = lib.log.scoped(.context_deadline);
 
     return struct {
         allocator: Allocator,
@@ -80,32 +79,18 @@ pub fn DeadlineContext(comptime lib: type) type {
         }
 
         fn timerFn(self: *Self) void {
-            debug_log.info("[debug] deadline timer start ptr=0x{x} generation={d}", .{
-                @intFromPtr(self),
-                self.timer_generation,
-            });
             while (true) {
                 self.timer_mu.lock();
                 const generation = self.timer_generation;
                 const timer_canceled = self.timer_canceled;
                 self.timer_mu.unlock();
-                if (timer_canceled) {
-                    debug_log.info("[debug] deadline timer exit canceled ptr=0x{x} generation={d}", .{
-                        @intFromPtr(self),
-                        generation,
-                    });
-                    return;
-                }
+                if (timer_canceled) return;
 
                 const remaining_ns = self.effectiveDeadline() - lib.time.nanoTimestamp();
 
                 self.timer_mu.lock();
                 if (self.timer_canceled) {
                     self.timer_mu.unlock();
-                    debug_log.info("[debug] deadline timer exit canceled-after-lock ptr=0x{x} generation={d}", .{
-                        @intFromPtr(self),
-                        generation,
-                    });
                     return;
                 }
                 if (self.timer_generation != generation) {
@@ -121,13 +106,7 @@ pub fn DeadlineContext(comptime lib: type) type {
                 self.timer_cond.timedWait(&self.timer_mu, wait_ns) catch {};
                 const timer_stopped = self.timer_canceled;
                 self.timer_mu.unlock();
-                if (timer_stopped) {
-                    debug_log.info("[debug] deadline timer exit canceled-after-wait ptr=0x{x} generation={d}", .{
-                        @intFromPtr(self),
-                        generation,
-                    });
-                    return;
-                }
+                if (timer_stopped) return;
             }
 
             self.mu.lock();
@@ -139,31 +118,17 @@ pub fn DeadlineContext(comptime lib: type) type {
                 defer self.tree_rw.unlockShared();
                 self.markCanceled(Context.DeadlineExceeded);
             }
-            debug_log.info("[debug] deadline timer exit deadline ptr=0x{x}", .{
-                @intFromPtr(self),
-            });
         }
 
         fn stopTimer(self: *Self) void {
-            debug_log.info("[debug] deadline stopTimer begin ptr=0x{x} started={} has_thread={}", .{
-                @intFromPtr(self),
-                self.timer_started,
-                self.timer_thread != null,
-            });
             self.timer_mu.lock();
             self.timer_canceled = true;
             self.timer_mu.unlock();
             self.timer_cond.signal();
 
             if (self.timer_thread) |t| {
-                debug_log.info("[debug] deadline stopTimer joining ptr=0x{x}", .{
-                    @intFromPtr(self),
-                });
                 t.join();
                 self.timer_thread = null;
-                debug_log.info("[debug] deadline stopTimer joined ptr=0x{x}", .{
-                    @intFromPtr(self),
-                });
             }
         }
 
