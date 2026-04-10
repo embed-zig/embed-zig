@@ -1,3 +1,4 @@
+const embed = @import("embed");
 const testing_api = @import("testing");
 const harness_mod = @import("harness.zig");
 const read_mod = @import("../../../host/xfer/read.zig");

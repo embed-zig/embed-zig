@@ -99,6 +99,12 @@ pub fn Subscription(comptime lib: type, comptime ServerType: type) type {
             return self.state.cccd_value;
         }
 
+        pub fn isClosed(self: *const Self) bool {
+            self.state.mutex.lock();
+            defer self.state.mutex.unlock();
+            return self.state.closed;
+        }
+
         pub fn attMtu(self: *const Self) u16 {
             self.state.mutex.lock();
             defer self.state.mutex.unlock();
@@ -301,10 +307,15 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
                         rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                         return;
                     }
-                    const subscription = self.takePendingSubscription(req.conn_handle) orelse {
+                    var subscription = self.takePendingSubscription(req.conn_handle) orelse {
                         rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                         return;
                     };
+                    if (subscription.isClosed()) {
+                        subscription.deinit();
+                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                        return;
+                    }
                     self.sender.start(subscription) catch {
                         rw.err(@intFromEnum(att.ErrorCode.insufficient_resources));
                         return;
@@ -318,10 +329,15 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
                         rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                         return;
                     }
-                    const subscription = self.takePendingSubscription(req.conn_handle) orelse {
+                    var subscription = self.takePendingSubscription(req.conn_handle) orelse {
                         rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
                         return;
                     };
+                    if (subscription.isClosed()) {
+                        subscription.deinit();
+                        rw.err(@intFromEnum(att.ErrorCode.request_not_supported));
+                        return;
+                    }
                     self.receiver.start(subscription) catch {
                         rw.err(@intFromEnum(att.ErrorCode.insufficient_resources));
                         return;
