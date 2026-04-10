@@ -1,6 +1,9 @@
+const context_mod = @import("context");
 const embed = @import("embed");
+const fd_mod = @import("../../../fd.zig");
+const netip = @import("../../../netip.zig");
 const testing_api = @import("testing");
-const suite_mod = @import("suite.zig");
+const test_utils = @import("test_utils.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
@@ -15,8 +18,27 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             const Body = struct {
                 fn call(a: lib.mem.Allocator) !void {
-                    const Suite = suite_mod.Suite(lib);
-                    return Suite.packetConnectContextDeadlineExceededDuringConnect(a);
+                    const Context = context_mod.make(lib);
+                    const Packet = fd_mod.Packet(lib);
+                    const AddrPort = netip.AddrPort;
+                    const posix = lib.posix;
+                    var ctx_api = try Context.init(a);
+                    defer ctx_api.deinit();
+
+                    var ctx = try ctx_api.withDeadline(ctx_api.background(), lib.time.nanoTimestamp() + 40 * lib.time.ns_per_ms);
+                    defer ctx.deinit();
+
+                    var packet = try Packet.initSocket(posix.AF.INET);
+                    defer packet.deinit();
+
+                    packet.connectContext(ctx, AddrPort.from4(.{ 203, 0, 113, 1 }, 9)) catch |err| switch (err) {
+                        error.DeadlineExceeded => return,
+                        else => return test_utils.skipIfConnectDidNotPend(err),
+                    };
+
+                    // UDP connect may complete synchronously on some hosts because there
+                    // is no handshake to force an in-progress state.
+                    return error.SkipZigTest;
                 }
             };
             Body.call(allocator) catch |err| switch (err) {

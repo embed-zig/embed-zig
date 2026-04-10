@@ -1,6 +1,6 @@
 const embed = @import("embed");
+const fd_mod = @import("../../../fd.zig");
 const testing_api = @import("testing");
-const suite_mod = @import("suite.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
@@ -14,8 +14,20 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
         pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const Suite = suite_mod.Suite(lib);
-            Suite.packetCloseIsIdempotent() catch |err| {
+            const Body = struct {
+                fn call() !void {
+                    const Packet = fd_mod.Packet(lib);
+                    const posix = lib.posix;
+                    const testing = lib.testing;
+                    var packet = try Packet.initSocket(posix.AF.INET);
+                    packet.close();
+                    packet.close();
+
+                    var buf: [1]u8 = undefined;
+                    try testing.expectError(error.Closed, packet.readFrom(&buf));
+                }
+            };
+            Body.call() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

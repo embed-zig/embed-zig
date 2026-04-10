@@ -1,6 +1,7 @@
 const embed = @import("embed");
+const fd_mod = @import("../../../fd.zig");
+const netip = @import("../../../netip.zig");
 const testing_api = @import("testing");
-const suite_mod = @import("suite.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
@@ -14,8 +15,24 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
         pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const Suite = suite_mod.Suite(lib);
-            Suite.packetOpsAfterCloseReturnClosed() catch |err| {
+            const Body = struct {
+                fn call() !void {
+                    const Packet = fd_mod.Packet(lib);
+                    const AddrPort = netip.AddrPort;
+                    const posix = lib.posix;
+                    const testing = lib.testing;
+                    var packet = try Packet.initSocket(posix.AF.INET);
+                    packet.close();
+
+                    var buf: [1]u8 = undefined;
+                    try testing.expectError(error.Closed, packet.read(&buf));
+                    try testing.expectError(error.Closed, packet.readFrom(&buf));
+                    try testing.expectError(error.Closed, packet.write("x"));
+                    try testing.expectError(error.Closed, packet.writeTo("x", AddrPort.from4(.{ 127, 0, 0, 1 }, 1)));
+                    try testing.expectError(error.Closed, packet.connect(AddrPort.from4(.{ 127, 0, 0, 1 }, 1)));
+                }
+            };
+            Body.call() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
