@@ -36,6 +36,7 @@ pub const VTable = struct {
     onCreatedFn: *const fn (*Self) void,
     onDestroyedFn: *const fn (*Self) void,
     deinitFn: *const fn (*Self) void,
+    enableDestroyDebugFn: *const fn (*Self, []const u8) void,
     logInfoFn: *const fn (*anyopaque, []const u8) void,
     logErrorFn: *const fn (*anyopaque, []const u8) void,
     logFatalFn: *const fn (*Self, []const u8) void,
@@ -72,6 +73,10 @@ pub fn deinit(self: *Self) void {
     self.vtable.onDestroyedFn(self);
     self.vtable.deinitFn(self);
     self.* = undefined;
+}
+
+pub fn enableDestroyDebug(self: *Self, tag: []const u8) void {
+    self.vtable.enableDestroyDebugFn(self, tag);
 }
 
 pub fn context(self: Self) Context {
@@ -206,6 +211,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
         failure_ns: u64 = 0,
         finished_ns: u64 = 0,
         is_wait_done: bool = false,
+        destroy_debug_tag: ?[]const u8 = null,
 
         state_mutex: lib.Thread.Mutex = .{},
         is_failed: bool = false,
@@ -275,6 +281,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
                 .failure_ns = 0,
                 .finished_ns = 0,
                 .is_wait_done = false,
+                .destroy_debug_tag = null,
                 .is_failed = false,
                 .is_fatal = false,
             };
@@ -329,6 +336,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
                 .failure_ns = 0,
                 .finished_ns = 0,
                 .is_wait_done = false,
+                .destroy_debug_tag = null,
                 .is_failed = false,
                 .is_fatal = false,
             };
@@ -352,15 +360,47 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
                 parent.testing_allocator.allocator()
             else
                 lib.testing.allocator;
+            if (state.destroy_debug_tag) |tag| {
+                run_log.info("[ci-debug] destroyState begin tag='{s}' timeout_ctx={} pending_runs={d}", .{
+                    tag,
+                    state.timeout_ctx != null,
+                    state.pending_runs.items.len,
+                });
+            }
             state.pending_runs.deinit(state.allocator);
+            if (state.destroy_debug_tag) |tag| {
+                run_log.info("[ci-debug] destroyState pending_runs done tag='{s}'", .{tag});
+            }
             if (state.timeout_ctx) |timeout_ctx| {
+                if (state.destroy_debug_tag) |tag| {
+                    run_log.info("[ci-debug] destroyState timeout_ctx begin tag='{s}'", .{tag});
+                }
                 timeout_ctx.deinit();
+                if (state.destroy_debug_tag) |tag| {
+                    run_log.info("[ci-debug] destroyState timeout_ctx done tag='{s}'", .{tag});
+                }
+            }
+            if (state.destroy_debug_tag) |tag| {
+                run_log.info("[ci-debug] destroyState base_ctx begin tag='{s}'", .{tag});
             }
             state.base_ctx.deinit();
+            if (state.destroy_debug_tag) |tag| {
+                run_log.info("[ci-debug] destroyState base_ctx done tag='{s}'", .{tag});
+                run_log.info("[ci-debug] destroyState context_api begin tag='{s}'", .{tag});
+            }
             state.context_api.deinit();
+            if (state.destroy_debug_tag) |tag| {
+                run_log.info("[ci-debug] destroyState context_api done tag='{s}'", .{tag});
+                run_log.info("[ci-debug] destroyState allocator teardown begin tag='{s}'", .{tag});
+            }
             state.allocator.free(state.name_buf);
             state.allocator.destroy(state);
             testing_allocator_owner.destroy(testing_allocator);
+        }
+
+        fn enableDestroyDebugFn(self: *Self, tag: []const u8) void {
+            const state = fromPtr(self.ptr);
+            state.destroy_debug_tag = tag;
         }
 
         fn destroyNeverStarted(self: *Self) void {
@@ -721,6 +761,7 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
             .onCreatedFn = onCreatedFn,
             .onDestroyedFn = onDestroyedFn,
             .deinitFn = deinitFn,
+            .enableDestroyDebugFn = enableDestroyDebugFn,
             .logFatalFn = logFatalFn,
             .timeoutFn = timeoutFn,
             .logInfoFn = logInfoFn,

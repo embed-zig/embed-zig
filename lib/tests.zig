@@ -322,9 +322,14 @@ test "net/integration/std" {
 
 test "net/integration/embed_std" {
     std.testing.log_level = .info;
-    
+
     var t = testing.T.new(embed_std.std, .embed);
-    defer t.deinit();
+    t.enableDestroyDebug("net/integration/embed_std");
+    defer {
+        std.log.info("[ci-debug] before t.deinit net/integration/embed_std", .{});
+        t.deinit();
+        std.log.info("[ci-debug] after t.deinit net/integration/embed_std", .{});
+    }
     t.timeout(20 * embed_std.std.time.ns_per_s);
 
     t.run("net/integration/embed_std", net.test_runner.integration.make(embed_std.std));
