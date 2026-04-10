@@ -153,11 +153,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
             _ = self;
-            runImpl(lib, Channel, allocator) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
+            const Suite = ChannelSuite(lib, Channel);
+            return Suite.runUnderT(t, allocator);
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
@@ -176,11 +173,11 @@ pub fn run(comptime lib: type, comptime Channel: fn (type) type) !void {
 }
 
 fn runImpl(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.mem.Allocator) !void {
-    const Runner = TestRunner(lib, Channel);
+    const Runner = ChannelSuite(lib, Channel);
     return Runner.exec(allocator);
 }
 
-fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
+fn ChannelSuite(comptime lib: type, comptime Channel: fn (type) type) type {
     const Ch = Channel(u32);
     const Thread = lib.Thread;
     const Allocator = lib.mem.Allocator;
@@ -191,78 +188,96 @@ fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) type {
     const Event = u32;
 
     return struct {
+        const case_row = struct {
+            name: []const u8,
+            stack: usize,
+            f: *const fn (Allocator) anyerror!void,
+        };
+
+        /// Per-case worker stacks; spawns live on `Thread` with default sizes—only the suite worker is tuned here.
+        const case_rows: []const case_row = &.{
+            .{ .name = "unbufferedInit", .stack = 96 * 1024, .f = testUnbufferedInit },
+            .{ .name = "unbufferedRendezvous", .stack = 96 * 1024, .f = testUnbufferedRendezvous },
+            .{ .name = "unbufferedSendBlocks", .stack = 96 * 1024, .f = testUnbufferedSendBlocks },
+            .{ .name = "unbufferedRecvBlocks", .stack = 96 * 1024, .f = testUnbufferedRecvBlocks },
+            .{ .name = "unbufferedMultiRound", .stack = 96 * 1024, .f = testUnbufferedMultiRound },
+            .{ .name = "unbufferedCloseWakesRecv", .stack = 96 * 1024, .f = testUnbufferedCloseWakesRecv },
+            .{ .name = "unbufferedCloseWakesSend", .stack = 96 * 1024, .f = testUnbufferedCloseWakesSend },
+            .{ .name = "unbufferedSendAfterClose", .stack = 96 * 1024, .f = testUnbufferedSendAfterClose },
+            .{ .name = "unbufferedRecvAfterClose", .stack = 96 * 1024, .f = testUnbufferedRecvAfterClose },
+            .{ .name = "unbufferedSpsc", .stack = 128 * 1024, .f = testUnbufferedSpsc },
+            .{ .name = "unbufferedMpsc", .stack = 128 * 1024, .f = testUnbufferedMpsc },
+            .{ .name = "unbufferedDeinit", .stack = 96 * 1024, .f = testUnbufferedDeinit },
+            .{ .name = "initBuffered", .stack = 96 * 1024, .f = testInitBuffered },
+            .{ .name = "initialStateBuffered", .stack = 96 * 1024, .f = testInitialStateBuffered },
+            .{ .name = "deinitClean", .stack = 96 * 1024, .f = testDeinitClean },
+            .{ .name = "sendRecvSingle", .stack = 96 * 1024, .f = testSendRecvSingle },
+            .{ .name = "fifoOrder", .stack = 96 * 1024, .f = testFifoOrder },
+            .{ .name = "ringWrap", .stack = 96 * 1024, .f = testRingWrap },
+            .{ .name = "sendRecvInterleaved", .stack = 96 * 1024, .f = testSendRecvInterleaved },
+            .{ .name = "recvReturnsCorrectValue", .stack = 96 * 1024, .f = testRecvReturnsCorrectValue },
+            .{ .name = "sendReturnsOk", .stack = 96 * 1024, .f = testSendReturnsOk },
+            .{ .name = "bufferedSendImmediate", .stack = 96 * 1024, .f = testBufferedSendImmediate },
+            .{ .name = "fillBufferExactly", .stack = 96 * 1024, .f = testFillBufferExactly },
+            .{ .name = "capacityOne", .stack = 96 * 1024, .f = testCapacityOne },
+            .{ .name = "ringWrapExtended", .stack = 96 * 1024, .f = testRingWrapExtended },
+            .{ .name = "fillDrainTokenBalance", .stack = 96 * 1024, .f = testFillDrainTokenBalance },
+            .{ .name = "multiRoundFillDrain", .stack = 96 * 1024, .f = testMultiRoundFillDrain },
+            .{ .name = "closeSuccess", .stack = 96 * 1024, .f = testCloseSuccess },
+            .{ .name = "sendAfterClose", .stack = 96 * 1024, .f = testSendAfterClose },
+            .{ .name = "multiSendAfterClose", .stack = 96 * 1024, .f = testMultiSendAfterClose },
+            .{ .name = "closeFlushBufferedData", .stack = 96 * 1024, .f = testCloseFlushBufferedData },
+            .{ .name = "recvAfterCloseEmpty", .stack = 96 * 1024, .f = testRecvAfterCloseEmpty },
+            .{ .name = "multiRecvAfterClose", .stack = 96 * 1024, .f = testMultiRecvAfterClose },
+            .{ .name = "closeFlushFullFlow", .stack = 96 * 1024, .f = testCloseFlushFullFlow },
+            .{ .name = "resourceSafetyNormal", .stack = 96 * 1024, .f = testResourceSafetyNormal },
+            .{ .name = "resourceSafetyUnconsumed", .stack = 96 * 1024, .f = testResourceSafetyUnconsumed },
+            .{ .name = "resourceSafetyCloseAndDeinit", .stack = 96 * 1024, .f = testResourceSafetyCloseAndDeinit },
+            .{ .name = "sendBlocksWhenFull", .stack = 96 * 1024, .f = testSendBlocksWhenFull },
+            .{ .name = "recvUnblocksSend", .stack = 96 * 1024, .f = testRecvUnblocksSend },
+            .{ .name = "recvBlocksWhenEmpty", .stack = 96 * 1024, .f = testRecvBlocksWhenEmpty },
+            .{ .name = "sendUnblocksRecv", .stack = 96 * 1024, .f = testSendUnblocksRecv },
+            .{ .name = "recvWokenBySend", .stack = 96 * 1024, .f = testRecvWokenBySend },
+            .{ .name = "sendWokenByRecv", .stack = 96 * 1024, .f = testSendWokenByRecv },
+            .{ .name = "recvTimeoutContract", .stack = 96 * 1024, .f = testRecvTimeoutContract },
+            .{ .name = "recvWokenByClose", .stack = 96 * 1024, .f = testRecvWokenByClose },
+            .{ .name = "sendWokenByClose", .stack = 96 * 1024, .f = testSendWokenByClose },
+            .{ .name = "closeWakesMultiRecv", .stack = 128 * 1024, .f = testCloseWakesMultiRecv },
+            .{ .name = "closeWakesMultiSend", .stack = 128 * 1024, .f = testCloseWakesMultiSend },
+            .{ .name = "highThroughputNoDeadlock", .stack = 128 * 1024, .f = testHighThroughputNoDeadlock },
+            .{ .name = "spscNoDrop", .stack = 128 * 1024, .f = testSpscNoDrop },
+            .{ .name = "mpscNoDrop", .stack = 128 * 1024, .f = testMpscNoDrop },
+            .{ .name = "spmcNoDuplicate", .stack = 128 * 1024, .f = testSpmcNoDuplicate },
+            .{ .name = "mpmcIntegrity", .stack = 128 * 1024, .f = testMpmcIntegrity },
+            .{ .name = "concurrentCloseRecv", .stack = 128 * 1024, .f = testConcurrentCloseRecv },
+            .{ .name = "concurrentCloseSend", .stack = 128 * 1024, .f = testConcurrentCloseSend },
+            .{ .name = "rapidCloseRecv", .stack = 128 * 1024, .f = testRapidCloseRecv },
+            .{ .name = "rapidCloseSend", .stack = 128 * 1024, .f = testRapidCloseSend },
+            .{ .name = "bufferedRecvEmptyAfterDrain", .stack = 96 * 1024, .f = testBufferedRecvEmptyAfterDrain },
+        };
+
+        pub fn runUnderT(t: *testing_api.T, allocator: Allocator) bool {
+            _ = allocator;
+            t.parallel();
+            inline for (case_rows) |row| {
+                const stack = row.stack;
+                const f = row.f;
+                t.run(row.name, testing_api.TestRunner.fromFn(lib, stack, struct {
+                    fn run(tt: *testing_api.T, a: Allocator) !void {
+                        _ = tt;
+                        try f(a);
+                    }
+                }.run));
+            }
+            return t.wait();
+        }
+
         fn exec(allocator: Allocator) !void {
             var passed: u32 = 0;
             var failed: u32 = 0;
-
-            runOne("unbufferedInit", allocator, &passed, &failed, testUnbufferedInit);
-            runOne("unbufferedRendezvous", allocator, &passed, &failed, testUnbufferedRendezvous);
-            runOne("unbufferedSendBlocks", allocator, &passed, &failed, testUnbufferedSendBlocks);
-            runOne("unbufferedRecvBlocks", allocator, &passed, &failed, testUnbufferedRecvBlocks);
-            runOne("unbufferedMultiRound", allocator, &passed, &failed, testUnbufferedMultiRound);
-            runOne("unbufferedCloseWakesRecv", allocator, &passed, &failed, testUnbufferedCloseWakesRecv);
-            runOne("unbufferedCloseWakesSend", allocator, &passed, &failed, testUnbufferedCloseWakesSend);
-            runOne("unbufferedSendAfterClose", allocator, &passed, &failed, testUnbufferedSendAfterClose);
-            runOne("unbufferedRecvAfterClose", allocator, &passed, &failed, testUnbufferedRecvAfterClose);
-            runOne("unbufferedSpsc", allocator, &passed, &failed, testUnbufferedSpsc);
-            runOne("unbufferedMpsc", allocator, &passed, &failed, testUnbufferedMpsc);
-            runOne("unbufferedDeinit", allocator, &passed, &failed, testUnbufferedDeinit);
-
-            runOne("initBuffered", allocator, &passed, &failed, testInitBuffered);
-            runOne("initialStateBuffered", allocator, &passed, &failed, testInitialStateBuffered);
-            runOne("deinitClean", allocator, &passed, &failed, testDeinitClean);
-
-            runOne("sendRecvSingle", allocator, &passed, &failed, testSendRecvSingle);
-            runOne("fifoOrder", allocator, &passed, &failed, testFifoOrder);
-            runOne("ringWrap", allocator, &passed, &failed, testRingWrap);
-            runOne("sendRecvInterleaved", allocator, &passed, &failed, testSendRecvInterleaved);
-            runOne("recvReturnsCorrectValue", allocator, &passed, &failed, testRecvReturnsCorrectValue);
-            runOne("sendReturnsOk", allocator, &passed, &failed, testSendReturnsOk);
-
-            runOne("bufferedSendImmediate", allocator, &passed, &failed, testBufferedSendImmediate);
-            runOne("fillBufferExactly", allocator, &passed, &failed, testFillBufferExactly);
-            runOne("capacityOne", allocator, &passed, &failed, testCapacityOne);
-            runOne("ringWrapExtended", allocator, &passed, &failed, testRingWrapExtended);
-            runOne("fillDrainTokenBalance", allocator, &passed, &failed, testFillDrainTokenBalance);
-            runOne("multiRoundFillDrain", allocator, &passed, &failed, testMultiRoundFillDrain);
-
-            runOne("closeSuccess", allocator, &passed, &failed, testCloseSuccess);
-            runOne("sendAfterClose", allocator, &passed, &failed, testSendAfterClose);
-            runOne("multiSendAfterClose", allocator, &passed, &failed, testMultiSendAfterClose);
-            runOne("closeFlushBufferedData", allocator, &passed, &failed, testCloseFlushBufferedData);
-            runOne("recvAfterCloseEmpty", allocator, &passed, &failed, testRecvAfterCloseEmpty);
-            runOne("multiRecvAfterClose", allocator, &passed, &failed, testMultiRecvAfterClose);
-            runOne("closeFlushFullFlow", allocator, &passed, &failed, testCloseFlushFullFlow);
-
-            runOne("resourceSafetyNormal", allocator, &passed, &failed, testResourceSafetyNormal);
-            runOne("resourceSafetyUnconsumed", allocator, &passed, &failed, testResourceSafetyUnconsumed);
-            runOne("resourceSafetyCloseAndDeinit", allocator, &passed, &failed, testResourceSafetyCloseAndDeinit);
-
-            runOne("sendBlocksWhenFull", allocator, &passed, &failed, testSendBlocksWhenFull);
-            runOne("recvUnblocksSend", allocator, &passed, &failed, testRecvUnblocksSend);
-            runOne("recvBlocksWhenEmpty", allocator, &passed, &failed, testRecvBlocksWhenEmpty);
-            runOne("sendUnblocksRecv", allocator, &passed, &failed, testSendUnblocksRecv);
-
-            runOne("recvWokenBySend", allocator, &passed, &failed, testRecvWokenBySend);
-            runOne("sendWokenByRecv", allocator, &passed, &failed, testSendWokenByRecv);
-            runOne("recvTimeoutContract", allocator, &passed, &failed, testRecvTimeoutContract);
-            runOne("recvWokenByClose", allocator, &passed, &failed, testRecvWokenByClose);
-            runOne("sendWokenByClose", allocator, &passed, &failed, testSendWokenByClose);
-            runOne("closeWakesMultiRecv", allocator, &passed, &failed, testCloseWakesMultiRecv);
-            runOne("closeWakesMultiSend", allocator, &passed, &failed, testCloseWakesMultiSend);
-            runOne("highThroughputNoDeadlock", allocator, &passed, &failed, testHighThroughputNoDeadlock);
-
-            runOne("spscNoDrop", allocator, &passed, &failed, testSpscNoDrop);
-            runOne("mpscNoDrop", allocator, &passed, &failed, testMpscNoDrop);
-            runOne("spmcNoDuplicate", allocator, &passed, &failed, testSpmcNoDuplicate);
-            runOne("mpmcIntegrity", allocator, &passed, &failed, testMpmcIntegrity);
-            runOne("concurrentCloseRecv", allocator, &passed, &failed, testConcurrentCloseRecv);
-            runOne("concurrentCloseSend", allocator, &passed, &failed, testConcurrentCloseSend);
-
-            runOne("rapidCloseRecv", allocator, &passed, &failed, testRapidCloseRecv);
-            runOne("rapidCloseSend", allocator, &passed, &failed, testRapidCloseSend);
-            runOne("bufferedRecvEmptyAfterDrain", allocator, &passed, &failed, testBufferedRecvEmptyAfterDrain);
-
+            inline for (case_rows) |row| {
+                runOne(row.name, allocator, &passed, &failed, row.f);
+            }
             if (failed > 0) return error.TestsFailed;
         }
 

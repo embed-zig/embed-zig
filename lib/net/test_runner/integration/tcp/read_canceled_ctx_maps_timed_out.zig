@@ -1,0 +1,79 @@
+const embed = @import("embed");
+const context_mod = @import("context");
+const io = @import("io");
+const testing_api = @import("testing");
+const net = @import("../../../../net.zig");
+const test_utils = @import("test_utils.zig");
+
+pub fn make(comptime lib: type) testing_api.TestRunner {
+    const Runner = struct {
+        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
+
+        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            const Body = struct {
+                fn call(a: lib.mem.Allocator) !void {
+                    const Net = net.make(lib);
+                    const Context = context_mod.make(lib);
+                    const Thread = lib.Thread;
+
+                    var ctx_api = try Context.init(a);
+                    defer ctx_api.deinit();
+
+                    var io_ctx = try ctx_api.withCancel(ctx_api.background());
+                    defer io_ctx.deinit();
+
+                    var ln = try Net.listen(a, .{ .address = test_utils.addr4(.{ 127, 0, 0, 1 }, 0) });
+                    defer ln.deinit();
+
+                    const port = try test_utils.listenerPort(ln, Net);
+
+                    var cc = try Net.dial(a, .tcp, test_utils.addr4(.{ 127, 0, 0, 1 }, port));
+                    defer cc.deinit();
+
+                    var ac = try ln.accept();
+                    defer ac.deinit();
+
+                    const accepted = try ac.as(Net.TcpConn);
+                    accepted.pushIoContext(io_ctx);
+
+                    const cancel_thread = try Thread.spawn(.{}, struct {
+                        fn run(ctx: context_mod.Context, comptime thread_lib: type) void {
+                            thread_lib.Thread.sleep(30 * thread_lib.time.ns_per_ms);
+                            ctx.cancel();
+                        }
+                    }.run, .{ io_ctx, lib });
+                    defer cancel_thread.join();
+
+                    var buf: [16]u8 = undefined;
+                    try lib.testing.expectError(error.TimedOut, ac.read(&buf));
+
+                    accepted.popIoContext();
+                    try io.writeAll(@TypeOf(cc), &cc, "ok");
+                    try io.readFull(@TypeOf(ac), &ac, buf[0..2]);
+                    try lib.testing.expectEqualStrings("ok", buf[0..2]);
+                }
+            };
+            Body.call(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+}

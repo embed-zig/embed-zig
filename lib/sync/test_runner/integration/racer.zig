@@ -14,6 +14,46 @@ const embed = @import("embed");
 const testing_api = @import("testing");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
+    const W = struct {
+        fn spawnAllocator(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try spawnAllocatorTests(lib, allocator);
+        }
+        fn zeroTask(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try zeroTaskTests(lib, allocator);
+        }
+        fn firstWinner(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try firstWinnerTests(lib, allocator);
+        }
+        fn raceContext(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try raceContextTests(lib, allocator);
+        }
+        fn cancel(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try cancelTests(lib, allocator);
+        }
+        fn doneAndWait(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try doneAndWaitTests(lib, allocator);
+        }
+        fn doneSignalRejection(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try doneSignalPublishesRejectionBeforeReadyFlagTests(lib, allocator);
+        }
+        fn exhausted(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            try exhaustedTests(lib, allocator);
+        }
+        fn initOom(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            _ = t;
+            _ = allocator;
+            try initOomTests(lib);
+        }
+    };
+
     const Runner = struct {
         pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
             _ = self;
@@ -22,11 +62,19 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
             _ = self;
-            runImpl(lib, allocator) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
+            _ = allocator;
+            t.parallel();
+            // Worker stacks: only this thread runs the suite body; spawned helpers use `Thread.spawn` defaults.
+            t.run("spawn_allocator", testing_api.TestRunner.fromFn(lib, 48 * 1024, W.spawnAllocator));
+            t.run("zero_task", testing_api.TestRunner.fromFn(lib, 48 * 1024, W.zeroTask));
+            t.run("first_winner", testing_api.TestRunner.fromFn(lib, 128 * 1024, W.firstWinner));
+            t.run("race_context", testing_api.TestRunner.fromFn(lib, 192 * 1024, W.raceContext));
+            t.run("cancel", testing_api.TestRunner.fromFn(lib, 128 * 1024, W.cancel));
+            t.run("done_and_wait", testing_api.TestRunner.fromFn(lib, 128 * 1024, W.doneAndWait));
+            t.run("done_signal_rejection", testing_api.TestRunner.fromFn(lib, 128 * 1024, W.doneSignalRejection));
+            t.run("exhausted", testing_api.TestRunner.fromFn(lib, 64 * 1024, W.exhausted));
+            t.run("init_oom", testing_api.TestRunner.fromFn(lib, 40 * 1024, W.initOom));
+            return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
@@ -41,10 +89,10 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
 }
 
 pub fn run(comptime lib: type) !void {
-    try runImpl(lib, lib.testing.allocator);
+    try runSequentialSuite(lib, lib.testing.allocator);
 }
 
-fn runImpl(comptime lib: type, allocator: lib.mem.Allocator) !void {
+fn runSequentialSuite(comptime lib: type, allocator: lib.mem.Allocator) !void {
     try spawnAllocatorTests(lib, allocator);
     try zeroTaskTests(lib, allocator);
     try firstWinnerTests(lib, allocator);

@@ -7,38 +7,20 @@ const Color = @import("../Color.zig");
 const LedStrip = @import("../LedStrip.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
-    const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
-            _ = self;
-            _ = allocator;
+    // Fake strip + Animator: no host threads; shallow call depth (~same class as embed fmt/json tests).
+    return testing_api.TestRunner.fromFn(lib, 32 * 1024, struct {
+        fn run(t: *testing_api.T, allocator: embed.mem.Allocator) !void {
+            _ = t;
+            try runAnimatorSuite(lib, allocator);
         }
-
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
-            _ = self;
-            runImpl(lib, allocator) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
-        }
-
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
-            _ = self;
-            _ = allocator;
-        }
-    };
-
-    const Holder = struct {
-        var runner: Runner = .{};
-    };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    }.run);
 }
 
 pub fn run(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    try runImpl(lib, allocator);
+    try runAnimatorSuite(lib, allocator);
 }
 
-fn runImpl(comptime lib: type, allocator: lib.mem.Allocator) !void {
+fn runAnimatorSuite(comptime lib: type, allocator: lib.mem.Allocator) !void {
     const Suite = SuiteType(lib);
     try Suite.exec(allocator);
 }
