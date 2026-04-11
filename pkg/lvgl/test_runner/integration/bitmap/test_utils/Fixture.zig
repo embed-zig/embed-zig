@@ -1,5 +1,5 @@
 const std = @import("std");
-const display_api = @import("display");
+const display_api = @import("drivers");
 const lvgl = @import("../../../../../lvgl.zig");
 
 const Display = display_api.Display;

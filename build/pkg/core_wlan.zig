@@ -15,11 +15,11 @@ pub fn create(
 
 pub fn link(b: *std.Build) void {
     const embed = b.modules.get("embed") orelse @panic("core_wlan requires embed");
-    const wifi = b.modules.get("wifi") orelse @panic("core_wlan requires wifi");
+    const drivers = b.modules.get("drivers") orelse @panic("core_wlan requires drivers");
     const testing = b.modules.get("testing") orelse @panic("core_wlan requires testing");
     const mod = b.modules.get("core_wlan") orelse @panic("core_wlan module missing");
     mod.addImport("embed", embed);
-    mod.addImport("wifi", wifi);
+    mod.addImport("drivers", drivers);
     mod.addImport("testing", testing);
     mod.linkFramework("CoreWLAN", .{});
     mod.linkFramework("Foundation", .{});

@@ -1,21 +1,21 @@
-# pkg/core_wlan — Apple CoreWLAN backend for lib/wifi
+# pkg/core_wlan — Apple CoreWLAN backend for drivers.wifi
 
-Implements `wifi.Sta` on macOS by bridging to Apple's public CoreWLAN
+Implements `drivers.wifi.Sta` on macOS by bridging to Apple's public CoreWLAN
 framework (`CWWiFiClient`, `CWInterface`, `CWNetwork`) via the Objective-C
 runtime.
 
 This package intentionally does **not** implement SoftAP / hotspot hosting.
 Apple does not provide a public macOS API for a general-purpose Wi-Fi AP
-backend, so `wifi.Ap.start(...)` returns `error.Unsupported`.
+backend, so `drivers.wifi.Ap.start(...)` returns `error.Unsupported`.
 
 ## Usage
 
 App's `build.zig`:
 
 ```zig
-const wifi_mod = embed_dep.module("wifi");
+const drivers_mod = embed_dep.module("drivers");
 const core_wlan_mod = embed_dep.module("core_wlan");
-app_mod.addImport("wifi", wifi_mod);
+app_mod.addImport("drivers", drivers_mod);
 app_mod.addImport("core_wlan", core_wlan_mod);
 ```
 
@@ -23,10 +23,10 @@ App code:
 
 ```zig
 const std = @import("std");
-const wifi = @import("wifi");
+const drivers = @import("drivers");
 const core_wlan = @import("core_wlan");
 
-const CoreWlanWifi = wifi.Wifi.make(std, core_wlan.Wifi);
+const CoreWlanWifi = drivers.wifi.Wifi.make(std, core_wlan.Wifi);
 const device = try CoreWlanWifi.init(.{
     .allocator = allocator,
     .source_id = 1,
@@ -50,18 +50,18 @@ pkg/core_wlan.zig
 
 ## Mapping
 
-### `wifi.Sta`
+### `drivers.wifi.Sta`
 
-| `wifi.Sta` method | CoreWLAN API |
+| `drivers.wifi.Sta` method | CoreWLAN API |
 |---|---|
 | `startScan` | `-[CWInterface scanForNetworksWithName:includeHidden:error:]` |
 | `connect` | `-[CWInterface associateToNetwork:password:error:]` |
 | `disconnect` | `-[CWInterface disassociate]` |
 | `getMacAddr` | `-[CWInterface hardwareAddress]` |
 
-### `wifi.Ap`
+### `drivers.wifi.Ap`
 
-`wifi.Ap.start(...)` returns `error.Unsupported`.
+`drivers.wifi.Ap.start(...)` returns `error.Unsupported`.
 
 ## Notes
 

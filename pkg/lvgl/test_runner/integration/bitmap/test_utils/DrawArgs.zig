@@ -1,4 +1,4 @@
-const display_api = @import("display");
+const display_api = @import("drivers");
 
 x: u16,
 y: u16,

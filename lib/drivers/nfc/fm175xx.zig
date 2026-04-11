@@ -5,7 +5,9 @@
 
 const Fm175xx = @This();
 
-const drivers_io = @import("../io.zig");
+const Delay = @import("../Delay.zig");
+const I2c = @import("../I2c.zig");
+const Spi = @import("../Spi.zig");
 const TypeA = @import("io/TypeA.zig");
 const regs = @import("fm175xx/regs.zig");
 const type_a = @import("fm175xx/type_a.zig");
@@ -39,7 +41,7 @@ pub const RfPath = enum(u2) {
 pub const TypeACard = type_a.Card;
 
 pub const I2cConfig = struct {
-    address: drivers_io.I2c.Address = 0x28,
+    address: I2c.Address = 0x28,
     power: ?Power = null,
 };
 
@@ -96,11 +98,11 @@ pub const Power = struct {
     }
 };
 
-delay: drivers_io.Delay,
+delay: Delay,
 power: ?Power,
 backend: Backend,
 
-pub fn initI2c(bus: drivers_io.I2c, delay: drivers_io.Delay, config: I2cConfig) Fm175xx {
+pub fn initI2c(bus: I2c, delay: Delay, config: I2cConfig) Fm175xx {
     return .{
         .delay = delay,
         .power = config.power,
@@ -113,7 +115,7 @@ pub fn initI2c(bus: drivers_io.I2c, delay: drivers_io.Delay, config: I2cConfig) 
     };
 }
 
-pub fn initSpi(bus: drivers_io.Spi, delay: drivers_io.Delay, config: SpiConfig) Fm175xx {
+pub fn initSpi(bus: Spi, delay: Delay, config: SpiConfig) Fm175xx {
     return .{
         .delay = delay,
         .power = config.power,
@@ -334,8 +336,8 @@ const Backend = union(enum) {
 };
 
 const I2cBackend = struct {
-    bus: drivers_io.I2c,
-    address: drivers_io.I2c.Address,
+    bus: I2c,
+    address: I2c.Address,
 
     fn writeByte(self: *const I2cBackend, addr: u8, value: u8) TypeA.Error!void {
         return self.bus.write(self.address, &.{ addr, value });
@@ -364,7 +366,7 @@ const I2cBackend = struct {
 };
 
 const SpiBackend = struct {
-    bus: drivers_io.Spi,
+    bus: Spi,
 
     fn writeByte(self: *const SpiBackend, addr: u8, value: u8) TypeA.Error!void {
         var rx: [2]u8 = undefined;
@@ -521,7 +523,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 writes: [32][2]u8 = undefined,
                 write_count: usize = 0,
 
-                pub fn write(self: *@This(), _: drivers_io.I2c.Address, data: []const u8) drivers_io.I2c.Error!void {
+                pub fn write(self: *@This(), _: I2c.Address, data: []const u8) I2c.Error!void {
                     if (data.len >= 2) {
                         self.regs_map[data[0]] = data[1];
                         self.writes[self.write_count] = .{ data[0], data[1] };
@@ -529,12 +531,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     }
                 }
 
-                pub fn read(self: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
+                pub fn read(self: *@This(), _: I2c.Address, buf: []u8) I2c.Error!void {
                     _ = self;
                     @memset(buf, 0);
                 }
 
-                pub fn writeRead(self: *@This(), _: drivers_io.I2c.Address, tx: []const u8, rx: []u8) drivers_io.I2c.Error!void {
+                pub fn writeRead(self: *@This(), _: I2c.Address, tx: []const u8, rx: []u8) I2c.Error!void {
                     if (tx.len == 0) return error.Unexpected;
                     rx[0] = self.regs_map[tx[0]];
                 }
@@ -563,7 +565,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var delay = FakeDelay{};
             var power = FakePower{};
 
-            var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{
+            var reader = Fm175xx.initI2c(I2c.init(&i2c), Delay.init(&delay), .{
                 .address = 0x28,
                 .power = Power.init(&power),
             });
@@ -585,7 +587,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const FakeI2c = struct {
                 regs_map: [256]u8 = [_]u8{0} ** 256,
 
-                pub fn write(self: *@This(), _: drivers_io.I2c.Address, data: []const u8) drivers_io.I2c.Error!void {
+                pub fn write(self: *@This(), _: I2c.Address, data: []const u8) I2c.Error!void {
                     if (data.len < 2) return;
                     if ((data[0] == regs.fifo_level) and (data[1] == 0x80)) {
                         self.regs_map[data[0]] = 0;
@@ -594,12 +596,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     self.regs_map[data[0]] = data[1];
                 }
 
-                pub fn read(self: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
+                pub fn read(self: *@This(), _: I2c.Address, buf: []u8) I2c.Error!void {
                     _ = self;
                     @memset(buf, 0);
                 }
 
-                pub fn writeRead(self: *@This(), _: drivers_io.I2c.Address, tx: []const u8, rx: []u8) drivers_io.I2c.Error!void {
+                pub fn writeRead(self: *@This(), _: I2c.Address, tx: []const u8, rx: []u8) I2c.Error!void {
                     if (tx[0] == regs.com_irq) {
                         rx[0] = 0;
                         return;
@@ -618,7 +620,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var i2c = FakeI2c{};
             i2c.regs_map[regs.tx_ctrl] = 0x80;
             var delay = FakeDelay{};
-            var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{});
+            var reader = Fm175xx.initI2c(I2c.init(&i2c), Delay.init(&delay), .{});
 
             try reader.setRf(.path2);
             try lib.testing.expectEqual(@as(u8, 0x82), i2c.regs_map[regs.tx_ctrl]);
@@ -633,12 +635,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 last_tx: [8]u8 = [_]u8{0} ** 8,
                 call_index: usize = 0,
 
-                pub fn write(self: *@This(), data: []const u8) drivers_io.Spi.Error!void {
+                pub fn write(self: *@This(), data: []const u8) Spi.Error!void {
                     self.last_tx_len = data.len;
                     @memcpy(self.last_tx[0..data.len], data);
                 }
 
-                pub fn transfer(self: *@This(), tx: []const u8, rx: []u8) drivers_io.Spi.Error!void {
+                pub fn transfer(self: *@This(), tx: []const u8, rx: []u8) Spi.Error!void {
                     self.last_tx_len = tx.len;
                     @memcpy(self.last_tx[0..tx.len], tx);
                     @memset(rx, 0);
@@ -658,7 +660,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             var spi = FakeSpi{};
             var delay = FakeDelay{};
-            var reader = Fm175xx.initSpi(drivers_io.Spi.init(&spi), drivers_io.Delay.init(&delay), .{});
+            var reader = Fm175xx.initSpi(Spi.init(&spi), Delay.init(&delay), .{});
 
             try reader.setRf(.path1);
 
@@ -673,7 +675,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 fifo_level_reads: usize = 0,
                 control_reads: usize = 0,
 
-                pub fn write(self: *@This(), _: drivers_io.I2c.Address, data: []const u8) drivers_io.I2c.Error!void {
+                pub fn write(self: *@This(), _: I2c.Address, data: []const u8) I2c.Error!void {
                     if (data.len < 2) return;
                     if ((data[0] == regs.fifo_level) and (data[1] == 0x80)) {
                         self.regs_map[data[0]] = 0;
@@ -682,11 +684,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     self.regs_map[data[0]] = data[1];
                 }
 
-                pub fn read(_: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
+                pub fn read(_: *@This(), _: I2c.Address, buf: []u8) I2c.Error!void {
                     @memset(buf, 0);
                 }
 
-                pub fn writeRead(self: *@This(), _: drivers_io.I2c.Address, tx: []const u8, rx: []u8) drivers_io.I2c.Error!void {
+                pub fn writeRead(self: *@This(), _: I2c.Address, tx: []const u8, rx: []u8) I2c.Error!void {
                     const addr = tx[0];
                     if (addr == regs.com_irq) {
                         rx[0] = if (self.com_irq_reads == 0) 0x04 else 0x20;
@@ -721,7 +723,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             var i2c = FakeI2c{};
             var delay = FakeDelay{};
-            var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{});
+            var reader = Fm175xx.initI2c(I2c.init(&i2c), Delay.init(&delay), .{});
 
             var rx: [2]u8 = undefined;
             const bits = try reader.transceive(.{
@@ -739,7 +741,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const FakeI2c = struct {
                 regs_map: [256]u8 = [_]u8{0} ** 256,
 
-                pub fn write(self: *@This(), _: drivers_io.I2c.Address, data: []const u8) drivers_io.I2c.Error!void {
+                pub fn write(self: *@This(), _: I2c.Address, data: []const u8) I2c.Error!void {
                     if (data.len < 2) return;
                     if ((data[0] == regs.fifo_level) and (data[1] == 0x80)) {
                         self.regs_map[data[0]] = 0;
@@ -748,11 +750,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     self.regs_map[data[0]] = data[1];
                 }
 
-                pub fn read(_: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
+                pub fn read(_: *@This(), _: I2c.Address, buf: []u8) I2c.Error!void {
                     @memset(buf, 0);
                 }
 
-                pub fn writeRead(self: *@This(), _: drivers_io.I2c.Address, tx: []const u8, rx: []u8) drivers_io.I2c.Error!void {
+                pub fn writeRead(self: *@This(), _: I2c.Address, tx: []const u8, rx: []u8) I2c.Error!void {
                     if (tx[0] == regs.com_irq) {
                         rx[0] = 0;
                         return;
@@ -770,7 +772,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             var i2c = FakeI2c{};
             var delay = FakeDelay{};
-            var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{});
+            var reader = Fm175xx.initI2c(I2c.init(&i2c), Delay.init(&delay), .{});
 
             var rx: [1]u8 = undefined;
             try lib.testing.expectError(error.Timeout, reader.transceive(.{
@@ -783,11 +785,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
         fn transceiveRejectsInvalidExchangeInputs() !void {
             const FakeI2c = struct {
-                pub fn write(_: *@This(), _: drivers_io.I2c.Address, _: []const u8) drivers_io.I2c.Error!void {}
-                pub fn read(_: *@This(), _: drivers_io.I2c.Address, buf: []u8) drivers_io.I2c.Error!void {
+                pub fn write(_: *@This(), _: I2c.Address, _: []const u8) I2c.Error!void {}
+                pub fn read(_: *@This(), _: I2c.Address, buf: []u8) I2c.Error!void {
                     @memset(buf, 0);
                 }
-                pub fn writeRead(_: *@This(), _: drivers_io.I2c.Address, _: []const u8, rx: []u8) drivers_io.I2c.Error!void {
+                pub fn writeRead(_: *@This(), _: I2c.Address, _: []const u8, rx: []u8) I2c.Error!void {
                     @memset(rx, 0);
                 }
             };
@@ -798,7 +800,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             var i2c = FakeI2c{};
             var delay = FakeDelay{};
-            var reader = Fm175xx.initI2c(drivers_io.I2c.init(&i2c), drivers_io.Delay.init(&delay), .{});
+            var reader = Fm175xx.initI2c(I2c.init(&i2c), Delay.init(&delay), .{});
             var rx: [1]u8 = undefined;
 
             try lib.testing.expectError(error.InvalidArgument, reader.transceive(.{

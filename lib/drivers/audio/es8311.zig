@@ -15,12 +15,12 @@
 //! - `lib/drivers/audio/es8311.pdf`
 //!
 //! Usage:
-//!   var codec = drivers.audio.Es8311.init(drivers.io.I2c.init(&my_i2c), .{});
+//!   var codec = drivers.audio.Es8311.init(drivers.I2c.init(&my_i2c), .{});
 //!   try codec.open();
 //!   try codec.setSampleRate(16_000);
 //!   try codec.setMicGain(.@"24dB");
 
-const io = @import("../io.zig");
+const I2c = @import("../I2c.zig");
 const es8311 = @This();
 const testing_api = @import("testing");
 
@@ -315,16 +315,16 @@ pub const Config = struct {
     no_dac_ref: bool = false,
 };
 
-/// ES8311 Audio Codec Driver using `drivers.io.I2c`.
+/// ES8311 Audio Codec Driver using `drivers.I2c`.
 const Self = @This();
 
-bus: io.I2c,
+bus: I2c,
 config: Config,
 is_open: bool = false,
 enabled: bool = false,
 
 /// Initialize driver with I2C driver and configuration
-pub fn init(driver: io.I2c, config: Config) Self {
+pub fn init(driver: I2c, config: Config) Self {
     return .{
         .bus = driver,
         .config = config,
@@ -669,17 +669,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 writes: [4][2]u8 = [_][2]u8{[_]u8{ 0, 0 }} ** 4,
                 write_count: usize = 0,
 
-                pub fn write(self: *@This(), _: io.I2c.Address, data: []const u8) io.I2c.Error!void {
+                pub fn write(self: *@This(), _: I2c.Address, data: []const u8) I2c.Error!void {
                     self.writes[self.write_count] = .{ data[0], data[1] };
                     self.write_count += 1;
                 }
 
-                pub fn read(self: *@This(), _: io.I2c.Address, _: []u8) io.I2c.Error!void {
+                pub fn read(self: *@This(), _: I2c.Address, _: []u8) I2c.Error!void {
                     _ = self;
                     return error.Unexpected;
                 }
 
-                pub fn writeRead(self: *@This(), _: io.I2c.Address, tx: []const u8, rx: []u8) io.I2c.Error!void {
+                pub fn writeRead(self: *@This(), _: I2c.Address, tx: []const u8, rx: []u8) I2c.Error!void {
                     _ = self;
                     if (tx[0] == @intFromEnum(Register.chip_id1)) {
                         rx[0] = 0x83;
@@ -694,7 +694,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             };
 
             var fake = FakeI2c{};
-            var codec = es8311.init(io.I2c.init(&fake), .{
+            var codec = es8311.init(I2c.init(&fake), .{
                 .address = @intFromEnum(Address.ad0_low),
             });
 

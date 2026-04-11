@@ -1,7 +1,7 @@
 //! Bitmap suite runner — aggregated per-display bitmap cases (shared by integration).
 
 const embed = @import("embed");
-const display_api = @import("display");
+const display_api = @import("drivers");
 const testing = @import("testing");
 
 pub const Display = display_api.Display;

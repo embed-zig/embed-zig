@@ -14,11 +14,11 @@
 //! - `lib/drivers/gpio/tca9554.pdf`
 //!
 //! Usage:
-//!   var gpio = drivers.gpio.Tca9554.init(drivers.io.I2c.init(&my_i2c), 0x20);
+//!   var gpio = drivers.gpio.Tca9554.init(drivers.I2c.init(&my_i2c), 0x20);
 //!   try gpio.setDirection(.pin6, .output);
 //!   try gpio.write(.pin6, .high);
 
-const io = @import("../io.zig");
+const I2c = @import("../I2c.zig");
 const tca9554 = @This();
 const testing_api = @import("testing");
 
@@ -88,16 +88,16 @@ pub const Level = enum(u1) {
 // Driver Implementation
 // ============================================================================
 
-/// TCA9554 GPIO Expander Driver using `drivers.io.I2c`.
+/// TCA9554 GPIO Expander Driver using `drivers.I2c`.
 const Self = @This();
 
-i2c: io.I2c,
+i2c: I2c,
 address: u7,
 
 output_cache: u8 = 0xFF,
 config_cache: u8 = 0xFF,
 
-pub fn init(i2c: io.I2c, address: u7) Self {
+pub fn init(i2c: I2c, address: u7) Self {
     return .{
         .i2c = i2c,
         .address = address,
@@ -292,24 +292,24 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 writes: [4][2]u8 = [_][2]u8{[_]u8{ 0, 0 }} ** 4,
                 write_count: usize = 0,
 
-                pub fn write(self: *@This(), _: io.I2c.Address, data: []const u8) io.I2c.Error!void {
+                pub fn write(self: *@This(), _: I2c.Address, data: []const u8) I2c.Error!void {
                     self.writes[self.write_count] = .{ data[0], data[1] };
                     self.write_count += 1;
                 }
 
-                pub fn read(self: *@This(), _: io.I2c.Address, _: []u8) io.I2c.Error!void {
+                pub fn read(self: *@This(), _: I2c.Address, _: []u8) I2c.Error!void {
                     _ = self;
                     return error.Unexpected;
                 }
 
-                pub fn writeRead(self: *@This(), _: io.I2c.Address, _: []const u8, _: []u8) io.I2c.Error!void {
+                pub fn writeRead(self: *@This(), _: I2c.Address, _: []const u8, _: []u8) I2c.Error!void {
                     _ = self;
                     return error.Unexpected;
                 }
             };
 
             var fake = FakeI2c{};
-            var gpio = tca9554.init(io.I2c.init(&fake), Address.TCA9554_BASE);
+            var gpio = tca9554.init(I2c.init(&fake), Address.TCA9554_BASE);
 
             try gpio.setDirection(.pin6, .output);
             try gpio.write(.pin6, .low);

@@ -1,5 +1,5 @@
 const std = @import("std");
-const display_api = @import("display");
+const display_api = @import("drivers");
 const display_error = @import("Error.zig");
 const DrawArgs = @import("DrawArgs.zig");
 const Comparer = @import("Comparer.zig");

@@ -1,5 +1,5 @@
 const embed = @import("embed");
-const display_api = @import("display");
+const display_api = @import("drivers");
 const testing = @import("testing");
 const Display = display_api.Display;
 const Fixture = @import("test_utils/Fixture.zig");

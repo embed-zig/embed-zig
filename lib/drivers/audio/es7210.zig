@@ -15,14 +15,14 @@
 //! - `lib/drivers/audio/es7210.pdf`
 //!
 //! Usage:
-//!   var adc = drivers.audio.Es7210.init(drivers.io.I2c.init(&my_i2c), .{
+//!   var adc = drivers.audio.Es7210.init(drivers.I2c.init(&my_i2c), .{
 //!       .mic_select = .{ .mic1 = true, .mic2 = true },
 //!   });
 //!   try adc.open();
 //!   try adc.setSampleRate(16_000);
 //!   try adc.setGainAll(.@"30dB");
 
-const io = @import("../io.zig");
+const I2c = @import("../I2c.zig");
 const es7210 = @This();
 const testing_api = @import("testing");
 
@@ -320,14 +320,14 @@ pub const Config = struct {
     mclk_div: u16 = 256,
 };
 
-/// ES7210 4-Channel ADC Driver using `drivers.io.I2c`.
+/// ES7210 4-Channel ADC Driver using `drivers.I2c`.
 const Self = @This();
 
 /// Constants from parent module
 pub const channel_count: u8 = 4;
 pub const max_gain_db: i8 = 37;
 
-bus: io.I2c,
+bus: I2c,
 config: Config,
 is_open: bool = false,
 enabled: bool = false,
@@ -335,7 +335,7 @@ gain: Self.Gain = .@"30dB",
 clock_off_reg: u8 = 0,
 
 /// Initialize driver with I2C driver and configuration
-pub fn init(driver: io.I2c, config: Config) Self {
+pub fn init(driver: I2c, config: Config) Self {
     return .{
         .bus = driver,
         .config = config,
@@ -687,24 +687,24 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 writes: [32][2]u8 = [_][2]u8{[_]u8{ 0, 0 }} ** 32,
                 write_count: usize = 0,
 
-                pub fn write(self: *@This(), _: io.I2c.Address, data: []const u8) io.I2c.Error!void {
+                pub fn write(self: *@This(), _: I2c.Address, data: []const u8) I2c.Error!void {
                     self.writes[self.write_count] = .{ data[0], data[1] };
                     self.write_count += 1;
                 }
 
-                pub fn read(self: *@This(), _: io.I2c.Address, _: []u8) io.I2c.Error!void {
+                pub fn read(self: *@This(), _: I2c.Address, _: []u8) I2c.Error!void {
                     _ = self;
                     return error.Unexpected;
                 }
 
-                pub fn writeRead(self: *@This(), _: io.I2c.Address, _: []const u8, rx: []u8) io.I2c.Error!void {
+                pub fn writeRead(self: *@This(), _: I2c.Address, _: []const u8, rx: []u8) I2c.Error!void {
                     _ = self;
                     @memset(rx, 0);
                 }
             };
 
             var fake = FakeI2c{};
-            var adc = es7210.init(io.I2c.init(&fake), .{
+            var adc = es7210.init(I2c.init(&fake), .{
                 .mic_select = .{ .mic1 = true, .mic2 = true, .mic3 = true },
             });
 

@@ -1,9 +1,11 @@
 //! CWApUnsupported — macOS CoreWLAN does not expose public SoftAP support.
 
-const std = @import("std");
-const wifi = @import("wifi");
+const embed = @import("embed");
+const drivers = @import("drivers");
+const testing_api = @import("testing");
+const wifi = drivers.wifi;
 const Ap = wifi.Ap;
-const Allocator = std.mem.Allocator;
+const Allocator = embed.mem.Allocator;
 
 const CWApUnsupported = @This();
 
@@ -52,9 +54,41 @@ pub fn getMacAddr(self: *CWApUnsupported) ?Ap.MacAddr {
     return null;
 }
 
-test "core_wlan/unit_tests/ap_backend_reports_unsupported" {
-    var backend = CWApUnsupported.init(std.testing.allocator, .{});
-    try std.testing.expectError(error.Unsupported, backend.start(.{
-        .ssid = "test-ap",
-    }));
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn apBackendReportsUnsupported() !void {
+            var backend = CWApUnsupported.init(lib.testing.allocator, .{});
+            try lib.testing.expectError(error.Unsupported, backend.start(.{
+                .ssid = "test-ap",
+            }));
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.apBackendReportsUnsupported() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

@@ -16,14 +16,15 @@
 //!
 //! Usage:
 //!   var imu = drivers.imu.Qmi8658.init(
-//!       drivers.io.I2c.init(&my_i2c),
-//!       drivers.io.Delay.init(&my_delay),
+//!       drivers.I2c.init(&my_i2c),
+//!       drivers.Delay.init(&my_delay),
 //!       .{ .address = 0x6A },
 //!   );
 //!   try imu.open();
 //!   const data = try imu.readRaw();
 
-const io = @import("../io.zig");
+const Delay = @import("../Delay.zig");
+const I2c = @import("../I2c.zig");
 const qmi8658 = @This();
 const testing_api = @import("testing");
 const degrees_per_radian: f32 = 57.29577951308232;
@@ -245,7 +246,7 @@ pub const Config = struct {
 // Driver Implementation
 // ============================================================================
 
-/// QMI8658 6-Axis IMU Driver using `drivers.io.I2c` and `drivers.io.Delay`.
+/// QMI8658 6-Axis IMU Driver using `drivers.I2c` and `drivers.Delay`.
 const Self = @This();
 
 pub const capabilities = struct {
@@ -254,12 +255,12 @@ pub const capabilities = struct {
     pub const axis_count = 6;
 };
 
-i2c: io.I2c,
-delay: io.Delay,
+i2c: I2c,
+delay: Delay,
 config: Config,
 is_open: bool = false,
 
-pub fn init(i2c: io.I2c, delay: io.Delay, config: Config) Self {
+pub fn init(i2c: I2c, delay: Delay, config: Config) Self {
     return .{
         .i2c = i2c,
         .delay = delay,
@@ -411,20 +412,20 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const FakeI2c = struct {
                 writes: [8][2]u8 = [_][2]u8{[_]u8{ 0, 0 }} ** 8,
                 write_count: usize = 0,
-                last_addr: io.I2c.Address = 0,
+                last_addr: I2c.Address = 0,
 
-                pub fn write(self: *@This(), addr: io.I2c.Address, data: []const u8) io.I2c.Error!void {
+                pub fn write(self: *@This(), addr: I2c.Address, data: []const u8) I2c.Error!void {
                     self.last_addr = addr;
                     self.writes[self.write_count] = .{ data[0], data[1] };
                     self.write_count += 1;
                 }
 
-                pub fn read(self: *@This(), _: io.I2c.Address, _: []u8) io.I2c.Error!void {
+                pub fn read(self: *@This(), _: I2c.Address, _: []u8) I2c.Error!void {
                     _ = self;
                     return error.Unexpected;
                 }
 
-                pub fn writeRead(self: *@This(), addr: io.I2c.Address, tx: []const u8, rx: []u8) io.I2c.Error!void {
+                pub fn writeRead(self: *@This(), addr: I2c.Address, tx: []const u8, rx: []u8) I2c.Error!void {
                     self.last_addr = addr;
                     if (tx.len == 1 and tx[0] == @intFromEnum(Register.who_am_i)) {
                         rx[0] = WHO_AM_I_VALUE;
@@ -446,7 +447,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             var fake_i2c = FakeI2c{};
             var fake_delay = FakeDelay{};
-            var imu = qmi8658.init(io.I2c.init(&fake_i2c), io.Delay.init(&fake_delay), .{
+            var imu = qmi8658.init(I2c.init(&fake_i2c), Delay.init(&fake_delay), .{
                 .address = @intFromEnum(Address.sa0_low),
             });
 
@@ -454,7 +455,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             try lib.testing.expect(imu.is_open);
             try lib.testing.expectEqual(@as(usize, 5), fake_i2c.write_count);
-            try lib.testing.expectEqual(@as(io.I2c.Address, 0x6A), fake_i2c.last_addr);
+            try lib.testing.expectEqual(@as(I2c.Address, 0x6A), fake_i2c.last_addr);
             try lib.testing.expectEqual(@as(u32, 10), fake_delay.last_ms);
             try lib.testing.expectEqual(@as(usize, 1), fake_delay.calls);
             try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.reset), 0xB0 }, fake_i2c.writes[0]);

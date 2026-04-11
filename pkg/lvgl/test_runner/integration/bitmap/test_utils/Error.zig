@@ -1,4 +1,4 @@
-const display_api = @import("display");
+const display_api = @import("drivers");
 
 pub const Error = display_api.Display.Error || error{
     UnexpectedDraw,

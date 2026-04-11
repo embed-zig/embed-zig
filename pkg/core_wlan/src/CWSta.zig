@@ -1,22 +1,24 @@
-//! CWSta — wifi.Sta implementation via Apple CoreWLAN.
+//! CWSta — drivers.wifi.Sta implementation via Apple CoreWLAN.
 //!
 //! CoreWLAN exposes synchronous scan / associate / disassociate operations.
-//! This backend translates those calls into the `wifi.Sta` interface and
+//! This backend translates those calls into the `drivers.wifi.Sta` interface and
 //! emits best-effort events from operations initiated through this adapter.
 
-const std = @import("std");
-const wifi = @import("wifi");
+const embed = @import("embed");
+const drivers = @import("drivers");
+const testing_api = @import("testing");
+const wifi = drivers.wifi;
 const Sta = wifi.Sta;
 const objc = @import("objc.zig");
-const Allocator = std.mem.Allocator;
+const Allocator = embed.mem.Allocator;
 
 const CWSta = @This();
 
 allocator: Allocator,
 interface_name: ?[]const u8,
 state: Sta.State = .idle,
-hooks: std.ArrayListUnmanaged(EventHook) = .{},
-mutex: std.Thread.Mutex = .{},
+hooks: embed.ArrayListUnmanaged(EventHook) = .{},
+mutex: embed.Thread.Mutex = .{},
 
 const EventHook = struct {
     ctx: ?*anyopaque,
@@ -246,7 +248,7 @@ fn networkMatches(network: objc.Id, config: Sta.ConnectConfig) bool {
     var ssid_buf: [Sta.max_ssid_len]u8 = [_]u8{0} ** Sta.max_ssid_len;
     const ssid_obj = objc.msgSend(?objc.Id, network, objc.sel("ssid"), .{}) orelse return false;
     const ssid = objc.nsStringGetBytes(ssid_obj, &ssid_buf);
-    if (!std.mem.eql(u8, ssid, config.ssid)) return false;
+    if (!embed.mem.eql(u8, ssid, config.ssid)) return false;
 
     if (config.channel != 0) {
         const channel_obj = objc.msgSend(?objc.Id, network, objc.sel("wlanChannel"), .{}) orelse return false;
@@ -258,7 +260,7 @@ fn networkMatches(network: objc.Id, config: Sta.ConnectConfig) bool {
         const bssid_obj = objc.msgSend(?objc.Id, network, objc.sel("bssid"), .{}) orelse return false;
         var bssid_buf: [17]u8 = undefined;
         const parsed = parseMacAddress(objc.nsStringGetBytes(bssid_obj, &bssid_buf)) orelse return false;
-        return std.mem.eql(u8, parsed[0..], bssid[0..]);
+        return embed.mem.eql(u8, parsed[0..], bssid[0..]);
     }
 
     return true;
@@ -358,21 +360,53 @@ fn mapConnectError(err_obj: objc.Id) Sta.ConnectError {
 }
 
 fn parseMacAddress(value: []const u8) ?Sta.MacAddr {
-    var parts = std.mem.tokenizeScalar(u8, value, ':');
+    var parts = embed.mem.tokenizeScalar(u8, value, ':');
     var addr: Sta.MacAddr = undefined;
     var index: usize = 0;
     while (parts.next()) |part| {
         if (index >= addr.len) return null;
-        addr[index] = std.fmt.parseInt(u8, part, 16) catch return null;
+        addr[index] = embed.fmt.parseInt(u8, part, 16) catch return null;
         index += 1;
     }
     if (index != addr.len) return null;
     return addr;
 }
 
-test "core_wlan/unit_tests/parse_mac_address" {
-    try std.testing.expectEqualDeep(
-        Sta.MacAddr{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
-        parseMacAddress("10:20:30:40:50:60").?,
-    );
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn parseMacAddressParsesColonSeparatedHexBytes() !void {
+            try lib.testing.expectEqualDeep(
+                Sta.MacAddr{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
+                parseMacAddress("10:20:30:40:50:60").?,
+            );
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.parseMacAddressParsesColonSeparatedHexBytes() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

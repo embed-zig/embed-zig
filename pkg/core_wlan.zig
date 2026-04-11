@@ -1,22 +1,28 @@
-//! core_wlan — Apple CoreWLAN backend for lib/wifi.
+//! core_wlan — Apple CoreWLAN backend for drivers.wifi.
 //!
-//! Implements a `wifi.Wifi`-compatible backend with:
-//! - `wifi.Sta` backed by CoreWLAN on macOS
-//! - `wifi.Ap` reporting `error.Unsupported`
+//! Implements a `drivers.wifi.Wifi`-compatible backend with:
+//! - `drivers.wifi.Sta` backed by CoreWLAN on macOS
+//! - `drivers.wifi.Ap` reporting `error.Unsupported`
 
-const std = @import("std");
-const wifi = @import("wifi");
+const embed = @import("embed");
+const drivers = @import("drivers");
+const testing_api = @import("testing");
 const CWSta = @import("core_wlan/src/CWSta.zig");
 const CWApUnsupported = @import("core_wlan/src/CWApUnsupported.zig");
+const wifi = drivers.wifi;
 
 pub const Sta = CWSta;
 pub const Ap = CWApUnsupported;
+pub const test_runner = struct {
+    pub const unit = @import("core_wlan/test_runner/unit.zig");
+    pub const integration = @import("core_wlan/test_runner/integration.zig");
+};
 
 pub const Wifi = struct {
     pub const StaConfig = CWSta.Config;
     pub const ApConfig = CWApUnsupported.Config;
     pub const Config = struct {
-        allocator: std.mem.Allocator,
+        allocator: embed.mem.Allocator,
         source_id: u32 = 0,
         sta: StaConfig = .{},
         ap: ApConfig = .{},
@@ -99,52 +105,102 @@ pub const Wifi = struct {
     }
 };
 
-test "core_wlan/unit_tests" {
-    const Impl = Wifi;
-    comptime {
-        _ = wifi.Wifi.make(std, Impl).init;
-        _ = Wifi.sta;
-        _ = Wifi.ap;
-        _ = Wifi.setEventCallback;
-        _ = Wifi.clearEventCallback;
-    }
-}
+pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    const TestCase = struct {
+        fn rootSurfaceExposesWifiContract() !void {
+            const Impl = Wifi;
+            comptime {
+                _ = wifi.Wifi.make(lib, Impl).init;
+                _ = Wifi.sta;
+                _ = Wifi.ap;
+                _ = Wifi.setEventCallback;
+                _ = Wifi.clearEventCallback;
+            }
+        }
 
-test "core_wlan/unit_tests/Wifi_forwards_sta_events_through_top_level_callback" {
-    const Sink = struct {
-        hits: usize = 0,
-        last_source_id: u32 = 0,
-        saw_sta_event: bool = false,
+        fn wifiForwardsStaEventsThroughTopLevelCallback() !void {
+            const Sink = struct {
+                hits: usize = 0,
+                last_source_id: u32 = 0,
+                saw_sta_event: bool = false,
 
-        fn cb(ctx: *const anyopaque, source_id: u32, event: wifi.Wifi.Event) void {
-            const self: *@This() = @ptrCast(@alignCast(@constCast(ctx)));
-            self.hits += 1;
-            self.last_source_id = source_id;
-            self.saw_sta_event = switch (event) {
-                .sta => true,
-                else => false,
+                fn cb(ctx: *const anyopaque, source_id: u32, event: wifi.Wifi.Event) void {
+                    const self: *@This() = @ptrCast(@alignCast(@constCast(ctx)));
+                    self.hits += 1;
+                    self.last_source_id = source_id;
+                    self.saw_sta_event = switch (event) {
+                        .sta => true,
+                        else => false,
+                    };
+                }
             };
+
+            var device = try Wifi.init(.{
+                .allocator = lib.testing.allocator,
+                .source_id = 41,
+            });
+            defer device.deinit();
+
+            var sink = Sink{};
+            device.setEventCallback(@ptrCast(&sink), Sink.cb);
+            Wifi.onStaEvent(@ptrCast(&device), .{ .lost_ip = {} });
+            try lib.testing.expectEqual(@as(usize, 1), sink.hits);
+            try lib.testing.expectEqual(@as(u32, 41), sink.last_source_id);
+            try lib.testing.expect(sink.saw_sta_event);
+
+            device.clearEventCallback();
+            Wifi.onStaEvent(@ptrCast(&device), .{ .lost_ip = {} });
+            try lib.testing.expectEqual(@as(usize, 1), sink.hits);
         }
     };
 
-    var device = try Wifi.init(.{
-        .allocator = std.testing.allocator,
-        .source_id = 41,
-    });
-    defer device.deinit();
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
 
-    var sink = Sink{};
-    device.setEventCallback(@ptrCast(&sink), Sink.cb);
-    Wifi.onStaEvent(@ptrCast(&device), .{ .lost_ip = {} });
-    try std.testing.expectEqual(@as(usize, 1), sink.hits);
-    try std.testing.expectEqual(@as(u32, 41), sink.last_source_id);
-    try std.testing.expect(sink.saw_sta_event);
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
 
-    device.clearEventCallback();
-    Wifi.onStaEvent(@ptrCast(&device), .{ .lost_ip = {} });
-    try std.testing.expectEqual(@as(usize, 1), sink.hits);
+            TestCase.rootSurfaceExposesWifiContract() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.wifiForwardsStaEventsThroughTopLevelCallback() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+}
+
+test "core_wlan/unit_tests" {
+    const std = @import("std");
+    var t = testing_api.T.new(std, .core_wlan_unit);
+    defer t.deinit();
+
+    t.run("unit", test_runner.unit.TestRunner(std));
+    if (!t.wait()) return error.TestFailed;
 }
 
 test "core_wlan/integration_tests" {
-    _ = @import("core_wlan/integration_test/sta.zig");
+    const std = @import("std");
+    var t = testing_api.T.new(std, .core_wlan_integration);
+    defer t.deinit();
+
+    t.run("integration", test_runner.integration.TestRunner(std));
+    if (!t.wait()) return error.TestFailed;
 }

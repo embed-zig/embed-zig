@@ -1,4 +1,4 @@
-const display_api = @import("display");
+const display_api = @import("drivers");
 const testing_mod = @import("testing");
 const TestingDisplay = @import("TestingDisplay.zig");
 const Fixture = @import("Fixture.zig");
