@@ -5,14 +5,21 @@ const Conn = @import("../Conn.zig");
 const Header = @import("Header.zig");
 const Request = @import("Request.zig");
 const status = @import("status.zig");
+const textproto_writer_mod = @import("../textproto/Writer.zig");
 const testing_api = @import("testing");
 
 pub fn ResponseWriter(comptime lib: type) type {
     const Allocator = lib.mem.Allocator;
+    const BufferedConnWriter = io.BufferedWriter(Conn);
+    const TextprotoWriter = textproto_writer_mod.Writer(BufferedConnWriter);
+    const write_buf_len = 1024;
 
     return struct {
         allocator: Allocator,
         conn: Conn,
+        buffered: BufferedConnWriter = undefined,
+        buffered_initialized: bool = false,
+        write_buf: [write_buf_len]u8 = undefined,
         request_method: []const u8 = "GET",
         header: lib.ArrayList(Header) = .{},
         status_code: u16 = status.ok,
@@ -69,14 +76,15 @@ pub fn ResponseWriter(comptime lib: type) type {
             if (!self.committed_flag) try self.writeHeader(self.status_code);
             if (!self.body_allowed or buf.len == 0) return buf.len;
 
+            const buffered = self.bufferedWriter();
             if (self.use_chunked) {
                 var prefix_buf: [32]u8 = undefined;
                 const prefix = try lib.fmt.bufPrint(&prefix_buf, "{x}\r\n", .{buf.len});
-                try io.writeAll(@TypeOf(self.conn), &self.conn, prefix);
-                try io.writeAll(@TypeOf(self.conn), &self.conn, buf);
-                try io.writeAll(@TypeOf(self.conn), &self.conn, "\r\n");
+                try self.writeAllBuffered(buffered, prefix);
+                try self.writeAllBuffered(buffered, buf);
+                try self.writeAllBuffered(buffered, "\r\n");
             } else {
-                try io.writeAll(@TypeOf(self.conn), &self.conn, buf);
+                try self.writeAllBuffered(buffered, buf);
             }
 
             return buf.len;
@@ -85,9 +93,11 @@ pub fn ResponseWriter(comptime lib: type) type {
         pub fn finish(self: *Self) !void {
             if (self.finished_flag) return;
             if (!self.committed_flag) try self.writeHeader(self.status_code);
+            const buffered = self.bufferedWriter();
             if (self.use_chunked and self.body_allowed) {
-                try io.writeAll(@TypeOf(self.conn), &self.conn, "0\r\n\r\n");
+                try self.writeAllBuffered(buffered, "0\r\n\r\n");
             }
+            try self.flushBuffered(buffered);
             self.finished_flag = true;
         }
 
@@ -124,28 +134,37 @@ pub fn ResponseWriter(comptime lib: type) type {
                 try self.header.append(self.allocator, Header.init(Header.transfer_encoding, "chunked"));
             }
 
-            var head = lib.ArrayList(u8){};
-            defer head.deinit(self.allocator);
-
-            try head.appendSlice(self.allocator, "HTTP/1.1 ");
             const reason = status.text(self.status_code) orelse "Unknown";
             var code_buf: [32]u8 = undefined;
             const code = try lib.fmt.bufPrint(&code_buf, "{d}", .{self.status_code});
-            try head.appendSlice(self.allocator, code);
-            try head.appendSlice(self.allocator, " ");
-            try head.appendSlice(self.allocator, reason);
-            try head.appendSlice(self.allocator, "\r\n");
+            var writer = TextprotoWriter.fromBuffered(self.bufferedWriter());
+
+            try writer.writeLineParts(&.{ "HTTP/1.1 ", code, " ", reason });
             for (self.header.items) |hdr| {
                 if (!self.body_allowed and hdr.is(Header.transfer_encoding)) continue;
-                try head.appendSlice(self.allocator, hdr.name);
-                try head.appendSlice(self.allocator, ": ");
-                try head.appendSlice(self.allocator, hdr.value);
-                try head.appendSlice(self.allocator, "\r\n");
+                try writer.writeLineParts(&.{ hdr.name, ": ", hdr.value });
             }
-            try head.appendSlice(self.allocator, "\r\n");
+            try writer.writeLine("");
 
-            try io.writeAll(@TypeOf(self.conn), &self.conn, head.items);
             self.committed_flag = true;
+        }
+
+        fn bufferedWriter(self: *Self) *BufferedConnWriter {
+            if (!self.buffered_initialized) {
+                self.buffered = BufferedConnWriter.init(&self.conn, &self.write_buf);
+                self.buffered_initialized = true;
+            }
+            return &self.buffered;
+        }
+
+        fn writeAllBuffered(self: *Self, buffered: *BufferedConnWriter, buf: []const u8) !void {
+            _ = self;
+            buffered.ioWriter().writeAll(buf) catch return buffered.err() orelse error.Unexpected;
+        }
+
+        fn flushBuffered(self: *Self, buffered: *BufferedConnWriter) !void {
+            _ = self;
+            buffered.flush() catch return buffered.err() orelse error.Unexpected;
         }
 
         fn removeHeader(self: *Self, name: []const u8) void {
@@ -193,6 +212,47 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try testing.expect(!bodyAllowed("HEAD", status.ok));
             try testing.expect(!bodyAllowed("GET", status.no_content));
             try testing.expect(bodyAllowed("GET", status.ok));
+
+            const MockConn = struct {
+                storage: [256]u8 = undefined,
+                len: usize = 0,
+
+                pub fn read(_: *@This(), _: []u8) Conn.ReadError!usize {
+                    return 0;
+                }
+
+                pub fn write(self: *@This(), buf: []const u8) Conn.WriteError!usize {
+                    if (buf.len > self.storage.len - self.len) return error.Unexpected;
+                    @memcpy(self.storage[self.len..][0..buf.len], buf);
+                    self.len += buf.len;
+                    return buf.len;
+                }
+
+                pub fn close(_: *@This()) void {}
+                pub fn deinit(_: *@This()) void {}
+                pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+            };
+
+            var mock_conn = MockConn{};
+            var response_writer = Writer.init(allocator, Conn.init(&mock_conn), null, false);
+            defer response_writer.deinit();
+
+            try response_writer.setHeader("Content-Type", "text/plain");
+            _ = try response_writer.write("ok");
+            try response_writer.finish();
+
+            try testing.expectEqualStrings(
+                "HTTP/1.1 200 OK\r\n" ++
+                    "Content-Type: text/plain\r\n" ++
+                    "Connection: close\r\n" ++
+                    "Transfer-Encoding: chunked\r\n" ++
+                    "\r\n" ++
+                    "2\r\n" ++
+                    "ok\r\n" ++
+                    "0\r\n\r\n",
+                mock_conn.storage[0..mock_conn.len],
+            );
         }
     }.run);
 }

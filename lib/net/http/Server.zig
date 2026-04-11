@@ -11,8 +11,11 @@ const ResponseWriter = @import("ResponseWriter.zig").ResponseWriter;
 const handler_mod = @import("Handler.zig");
 const serve_mux_mod = @import("ServeMux.zig");
 const status = @import("status.zig");
+const textproto_reader_mod = @import("../textproto/Reader.zig");
 const testing_api = @import("testing");
 const url_mod = @import("../url.zig");
+const BufferedConnReader = io.BufferedReader(Conn);
+const TextprotoReader = textproto_reader_mod.Reader(BufferedConnReader);
 
 pub fn Server(comptime lib: type) type {
     const Allocator = lib.mem.Allocator;
@@ -23,8 +26,6 @@ pub fn Server(comptime lib: type) type {
     const HandlerFunc = handler_mod.HandlerFunc(lib);
     const ServeMux = serve_mux_mod.ServeMux(lib);
     const Writer = ResponseWriter(lib);
-    const Stream = io.PrefixReader(Conn);
-
     return struct {
         allocator: Allocator,
         options: Options,
@@ -79,7 +80,7 @@ pub fn Server(comptime lib: type) type {
         };
 
         pub const RequestBodyState = struct {
-            stream: Stream,
+            buffered: *BufferedConnReader,
             mode: RequestBodyMode,
             complete: bool = false,
             closed: bool = false,
@@ -101,7 +102,7 @@ pub fn Server(comptime lib: type) type {
                     self.complete = true;
                     return 0;
                 }
-                const n = try self.stream.read(buf[0..@min(buf.len, remaining.*)]);
+                const n = try self.readFromBuffered(buf[0..@min(buf.len, remaining.*)]);
                 if (n == 0) return error.EndOfStream;
                 remaining.* -= n;
                 if (remaining.* == 0) self.complete = true;
@@ -115,13 +116,13 @@ pub fn Server(comptime lib: type) type {
                 }
                 if (chunked.remaining_in_chunk == 0) {
                     var line_buf: [128]u8 = undefined;
-                    const raw_line = try self.stream.readLine(&line_buf);
+                    const raw_line = try self.readBufferedLine(&line_buf);
                     const semi = lib.mem.indexOfScalar(u8, raw_line, ';') orelse raw_line.len;
                     const size_text = lib.mem.trim(u8, raw_line[0..semi], " ");
                     const chunk_size = try lib.fmt.parseInt(usize, size_text, 16);
                     if (chunk_size == 0) {
                         while (true) {
-                            const trailer = try self.stream.readLine(&line_buf);
+                            const trailer = try self.readBufferedLine(&line_buf);
                             if (trailer.len == 0) break;
                         }
                         chunked.final_chunk_seen = true;
@@ -131,11 +132,42 @@ pub fn Server(comptime lib: type) type {
                     chunked.remaining_in_chunk = chunk_size;
                 }
 
-                const n = try self.stream.read(buf[0..@min(buf.len, chunked.remaining_in_chunk)]);
+                const n = try self.readFromBuffered(buf[0..@min(buf.len, chunked.remaining_in_chunk)]);
                 if (n == 0) return error.EndOfStream;
                 chunked.remaining_in_chunk -= n;
-                if (chunked.remaining_in_chunk == 0) try self.stream.expectCrlf();
+                if (chunked.remaining_in_chunk == 0) try self.expectBufferedCrlf();
                 return n;
+            }
+
+            fn readFromBuffered(self: *@This(), buf: []u8) anyerror!usize {
+                return self.buffered.ioReader().readSliceShort(buf) catch |err| switch (err) {
+                    error.ReadFailed => return self.buffered.err() orelse error.Unexpected,
+                    else => return err,
+                };
+            }
+
+            fn readBufferedByte(self: *@This()) anyerror!u8 {
+                var one: [1]u8 = undefined;
+                const n = try self.readFromBuffered(&one);
+                if (n == 0) return error.EndOfStream;
+                return one[0];
+            }
+
+            fn readBufferedLine(self: *@This(), out: []u8) anyerror![]const u8 {
+                const raw = self.buffered.ioReader().takeDelimiterInclusive('\n') catch |err| switch (err) {
+                    error.ReadFailed => return self.buffered.err() orelse error.Unexpected,
+                    else => return err,
+                };
+                if (raw.len < 2 or raw[raw.len - 2] != '\r') return error.InvalidResponse;
+                const line = raw[0 .. raw.len - 2];
+                if (line.len > out.len) return error.BufferTooSmall;
+                @memcpy(out[0..line.len], line);
+                return out[0..line.len];
+            }
+
+            fn expectBufferedCrlf(self: *@This()) anyerror!void {
+                if (try self.readBufferedByte() != '\r') return error.InvalidResponse;
+                if (try self.readBufferedByte() != '\n') return error.InvalidResponse;
             }
         };
 
@@ -412,12 +444,15 @@ pub fn Server(comptime lib: type) type {
             defer owned_conn.deinit();
             defer self.unregisterConn(conn_id);
 
+            var buffered = BufferedConnReader.initAlloc(&owned_conn, self.allocator, self.options.max_header_bytes) catch return;
+            defer buffered.deinit();
+
             var first_request = true;
             while (true) {
                 if (!first_request and self.shouldStopBeforeNextRequest()) break;
                 self.setConnIdle(conn_id, !first_request);
 
-                var parsed = self.readNextRequest(owned_conn, first_request) catch |err| switch (err) {
+                var parsed = self.readNextRequest(owned_conn, &buffered, first_request) catch |err| switch (err) {
                     error.EndOfStream,
                     error.ConnectionReset,
                     error.ConnectionRefused,
@@ -452,7 +487,7 @@ pub fn Server(comptime lib: type) type {
             }
         }
 
-        fn readNextRequest(self: *Self, conn: Conn, first_request: bool) anyerror!ParsedRequestState {
+        fn readNextRequest(self: *Self, conn: Conn, buffered: *BufferedConnReader, first_request: bool) anyerror!ParsedRequestState {
             if (first_request) {
                 if (self.options.read_header_timeout_ms) |ms| conn.setReadTimeout(ms);
             } else if (self.options.idle_timeout_ms) |ms| {
@@ -463,13 +498,10 @@ pub fn Server(comptime lib: type) type {
                 conn.setReadTimeout(null);
             }
 
-            const raw = try readRequestHead(lib, self.allocator, conn, self.options.max_header_bytes);
+            const raw = try readRequestHead(self.allocator, buffered, self.options.max_header_bytes);
             errdefer self.allocator.free(raw);
-            const head_end = lib.mem.indexOf(u8, raw, "\r\n\r\n") orelse return error.BadRequest;
-            const head = raw[0..head_end];
-            const body_prefix = raw[head_end + 4 ..];
 
-            var req = try parseRequest(lib, self.allocator, head);
+            var req = try parseRequest(lib, self.allocator, raw);
             errdefer req.deinit();
 
             const request_ctx = try self.contexts.withCancel(self.contexts.background());
@@ -487,7 +519,7 @@ pub fn Server(comptime lib: type) type {
             if (requestHasBody(&parsed.req)) {
                 const body_state = try self.allocator.create(RequestBodyState);
                 errdefer self.allocator.destroy(body_state);
-                body_state.* = try initRequestBody(lib, conn, body_prefix, &parsed.req);
+                body_state.* = try initRequestBody(lib, buffered, &parsed.req);
                 parsed.body_state = body_state;
                 parsed.req.body_reader = ReadCloser.init(body_state);
             }
@@ -505,34 +537,27 @@ fn requestHasBody(req: *const Request) bool {
     return req.content_length > 0 or req.transfer_encoding.len != 0;
 }
 
-fn initRequestBody(comptime lib: type, conn: Conn, prefix: []const u8, req: *const Request) !Server(lib).RequestBodyState {
-    const stream = io.PrefixReader(Conn).init(conn, prefix);
+fn initRequestBody(comptime lib: type, buffered: *io.BufferedReader(Conn), req: *const Request) !Server(lib).RequestBodyState {
     if (headerValue(req.header, Header.transfer_encoding)) |value| {
         if (!lib.ascii.eqlIgnoreCase(value, "chunked")) return error.BadRequest;
         return .{
-            .stream = stream,
+            .buffered = buffered,
             .mode = .{ .chunked = .{} },
         };
     }
     return .{
-        .stream = stream,
+        .buffered = buffered,
         .mode = .{ .fixed = @intCast(req.content_length) },
     };
 }
 
-fn readRequestHead(comptime lib: type, allocator: anytype, conn: Conn, max_header_bytes: usize) ![]u8 {
-    var bytes = lib.ArrayList(u8){};
-    errdefer bytes.deinit(allocator);
-
-    var buf: [512]u8 = undefined;
-    while (true) {
-        const n = try conn.read(&buf);
-        if (n == 0) break;
-        try bytes.appendSlice(allocator, buf[0..n]);
-        if (bytes.items.len > max_header_bytes) return error.BufferTooSmall;
-        if (lib.mem.indexOf(u8, bytes.items, "\r\n\r\n") != null) break;
-    }
-    return bytes.toOwnedSlice(allocator);
+fn readRequestHead(allocator: anytype, buffered: *BufferedConnReader, max_header_bytes: usize) ![]u8 {
+    var reader = TextprotoReader.fromBuffered(buffered);
+    return reader.readHeaderBlockAlloc(allocator, max_header_bytes, .{}) catch |err| switch (err) {
+        error.InvalidLineEnding => return error.BadRequest,
+        error.OutTooSmall => return error.BufferTooSmall,
+        else => return err,
+    };
 }
 
 fn parseRequest(comptime lib: type, allocator: anytype, head: []u8) !Request {

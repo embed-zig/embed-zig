@@ -146,6 +146,192 @@ pub fn BufferedReader(comptime Reader: type) type {
     };
 }
 
+pub fn BufferedWriter(comptime Writer: type) type {
+    return struct {
+        buffer_allocator: ?embed.mem.Allocator = null,
+        wr: *Writer,
+        write_err: ?anyerror = null,
+        interface: Io.Writer,
+
+        const Self = @This();
+
+        fn initInterface(buffer: []u8) Io.Writer {
+            return .{
+                .vtable = &.{
+                    .drain = drain,
+                    .flush = flushWriter,
+                },
+                .buffer = buffer,
+            };
+        }
+
+        /// `buf` must be non-empty.
+        pub fn init(wr: *Writer, buf: []u8) Self {
+            embed.debug.assert(buf.len > 0);
+            return .{
+                .wr = wr,
+                .interface = initInterface(buf),
+            };
+        }
+
+        pub fn initAlloc(wr: *Writer, allocator: embed.mem.Allocator, bufsize: usize) embed.mem.Allocator.Error!Self {
+            const buffer = try allocator.alloc(u8, @max(@as(usize, 1), bufsize));
+            return .{
+                .buffer_allocator = allocator,
+                .wr = wr,
+                .interface = initInterface(buffer),
+            };
+        }
+
+        pub fn ioWriter(self: *Self) *Io.Writer {
+            return &self.interface;
+        }
+
+        /// Returns the underlying write/flush failure after the `Io.Writer`
+        /// surface reports `error.WriteFailed`.
+        pub fn err(self: *const Self) ?anyerror {
+            return self.write_err;
+        }
+
+        pub fn flush(self: *Self) Io.Writer.Error!void {
+            return self.interface.flush();
+        }
+
+        pub fn deinit(self: *Self) void {
+            if (self.buffer_allocator) |allocator| {
+                allocator.free(self.interface.buffer);
+                self.buffer_allocator = null;
+            }
+        }
+
+        fn drain(w: *Io.Writer, data: []const []const u8, splat: usize) Io.Writer.Error!usize {
+            const self: *Self = @alignCast(@fieldParentPtr("interface", w));
+            embed.debug.assert(data.len > 0);
+
+            try flushBuffered(self, w);
+
+            const count = Io.Writer.countSplat(data, splat);
+            if (count == 0) return 0;
+
+            if (count <= w.buffer.len) {
+                bufferComposite(w.buffer, data, splat);
+                w.end = count;
+                self.write_err = null;
+                return count;
+            }
+
+            try writeCompositeAll(self, data, splat);
+            return count;
+        }
+
+        fn flushWriter(w: *Io.Writer) Io.Writer.Error!void {
+            const self: *Self = @alignCast(@fieldParentPtr("interface", w));
+            while (w.end != 0) _ = try drain(w, &.{""}, 1);
+            try flushUnderlying(self);
+        }
+
+        fn flushBuffered(self: *Self, w: *Io.Writer) Io.Writer.Error!void {
+            var offset: usize = 0;
+            while (offset < w.end) {
+                const n = writeSome(self.wr, w.buffer[offset..w.end]) catch |write_err| {
+                    self.write_err = write_err;
+                    if (offset != 0) {
+                        const remaining = w.end - offset;
+                        @memmove(w.buffer[0..remaining], w.buffer[offset..w.end]);
+                        w.end = remaining;
+                    }
+                    return error.WriteFailed;
+                };
+                if (n == 0) {
+                    self.write_err = error.Unexpected;
+                    if (offset != 0) {
+                        const remaining = w.end - offset;
+                        @memmove(w.buffer[0..remaining], w.buffer[offset..w.end]);
+                        w.end = remaining;
+                    }
+                    return error.WriteFailed;
+                }
+                offset += n;
+            }
+            w.end = 0;
+            self.write_err = null;
+        }
+
+        fn writeCompositeAll(self: *Self, data: []const []const u8, splat: usize) Io.Writer.Error!void {
+            for (data[0 .. data.len - 1]) |bytes| {
+                try writeAllInto(self, bytes);
+            }
+            const pattern = data[data.len - 1];
+            for (0..splat) |_| {
+                try writeAllInto(self, pattern);
+            }
+        }
+
+        fn bufferComposite(dst: []u8, data: []const []const u8, splat: usize) void {
+            var used: usize = 0;
+            for (data[0 .. data.len - 1]) |bytes| {
+                @memcpy(dst[used..][0..bytes.len], bytes);
+                used += bytes.len;
+            }
+            const pattern = data[data.len - 1];
+            switch (pattern.len) {
+                0 => {},
+                1 => {
+                    @memset(dst[used..][0..splat], pattern[0]);
+                    used += splat;
+                },
+                else => for (0..splat) |_| {
+                    @memcpy(dst[used..][0..pattern.len], pattern);
+                    used += pattern.len;
+                },
+            }
+        }
+
+        fn writeAllInto(self: *Self, bytes: []const u8) Io.Writer.Error!void {
+            var written: usize = 0;
+            while (written < bytes.len) {
+                const n = writeSome(self.wr, bytes[written..]) catch |write_err| {
+                    self.write_err = write_err;
+                    return error.WriteFailed;
+                };
+                if (n == 0) {
+                    self.write_err = error.Unexpected;
+                    return error.WriteFailed;
+                }
+                written += n;
+            }
+            self.write_err = null;
+        }
+
+        fn flushUnderlying(self: *Self) Io.Writer.Error!void {
+            flushSome(self.wr) catch |flush_err| {
+                self.write_err = flush_err;
+                return error.WriteFailed;
+            };
+            self.write_err = null;
+        }
+
+        fn writeSome(writer: *Writer, buf: []const u8) anyerror!usize {
+            if (Writer == Io.Writer) {
+                return writer.write(buf);
+            }
+            if (@hasDecl(Writer, "write")) {
+                return writer.write(buf);
+            }
+            @compileError("io.BufferedWriter requires a writer with write([]const u8)!usize or embed.Io.Writer-compatible write([]const u8).");
+        }
+
+        fn flushSome(writer: *Writer) anyerror!void {
+            if (Writer == Io.Writer) {
+                return writer.flush();
+            }
+            if (@hasDecl(Writer, "flush")) {
+                return writer.flush();
+            }
+        }
+    };
+}
+
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const TestCase = struct {
         fn bufferedReaderInitAllocSupportsPeekAndTake(allocator: lib.mem.Allocator) !void {
@@ -252,6 +438,147 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try lib.testing.expect(br.err() != null);
             try lib.testing.expect(br.err().? == error.BufferTooSmall);
         }
+
+        fn bufferedWriterBuffersUntilFlush() !void {
+            const Writer = struct {
+                out: []u8,
+                pos: usize = 0,
+
+                fn write(self: *@This(), buf: []const u8) !usize {
+                    @memcpy(self.out[self.pos..][0..buf.len], buf);
+                    self.pos += buf.len;
+                    return buf.len;
+                }
+            };
+
+            var storage: [8]u8 = undefined;
+            var sink = Writer{ .out = &storage };
+            var backing: [8]u8 = undefined;
+            var bw = BufferedWriter(Writer).init(&sink, &backing);
+            const writer = bw.ioWriter();
+
+            try writer.writeAll("hello");
+            try lib.testing.expectEqual(@as(usize, 0), sink.pos);
+            try lib.testing.expectEqualStrings("hello", writer.buffered());
+
+            try bw.flush();
+            try lib.testing.expectEqual(@as(usize, 5), sink.pos);
+            try lib.testing.expectEqualStrings("hello", storage[0..5]);
+            try lib.testing.expectEqual(@as(usize, 0), writer.buffered().len);
+        }
+
+        fn bufferedWriterLargeWriteDrainsDirectly() !void {
+            const Writer = struct {
+                out: []u8,
+                pos: usize = 0,
+
+                fn write(self: *@This(), buf: []const u8) !usize {
+                    @memcpy(self.out[self.pos..][0..buf.len], buf);
+                    self.pos += buf.len;
+                    return buf.len;
+                }
+            };
+
+            var storage: [16]u8 = undefined;
+            var sink = Writer{ .out = &storage };
+            var backing: [4]u8 = undefined;
+            var bw = BufferedWriter(Writer).init(&sink, &backing);
+
+            try bw.ioWriter().writeAll("abcdef");
+            try lib.testing.expectEqualStrings("abcdef", storage[0..6]);
+            try lib.testing.expectEqual(@as(usize, 0), bw.ioWriter().buffered().len);
+        }
+
+        fn bufferedWriterFlushPropagatesUnderlyingFlush() !void {
+            const Writer = struct {
+                out: []u8,
+                pos: usize = 0,
+                flush_count: usize = 0,
+
+                fn write(self: *@This(), buf: []const u8) !usize {
+                    @memcpy(self.out[self.pos..][0..buf.len], buf);
+                    self.pos += buf.len;
+                    return buf.len;
+                }
+
+                fn flush(self: *@This()) !void {
+                    self.flush_count += 1;
+                }
+            };
+
+            var storage: [8]u8 = undefined;
+            var sink = Writer{ .out = &storage };
+            var backing: [8]u8 = undefined;
+            var bw = BufferedWriter(Writer).init(&sink, &backing);
+
+            try bw.ioWriter().writeAll("ok");
+            try bw.flush();
+            try lib.testing.expectEqual(@as(usize, 1), sink.flush_count);
+            try lib.testing.expectEqualStrings("ok", storage[0..2]);
+        }
+
+        fn bufferedWriterInitAllocZeroBufsizeStillWrites(allocator: lib.mem.Allocator) !void {
+            const Writer = struct {
+                out: []u8,
+                pos: usize = 0,
+
+                fn write(self: *@This(), buf: []const u8) !usize {
+                    @memcpy(self.out[self.pos..][0..buf.len], buf);
+                    self.pos += buf.len;
+                    return buf.len;
+                }
+            };
+
+            var storage: [4]u8 = undefined;
+            var sink = Writer{ .out = &storage };
+            var bw = try BufferedWriter(Writer).initAlloc(&sink, allocator, 0);
+            defer bw.deinit();
+
+            try lib.testing.expect(bw.ioWriter().buffer.len >= 1);
+            try bw.ioWriter().writeAll("a");
+            try bw.flush();
+            try lib.testing.expectEqualStrings("a", storage[0..1]);
+        }
+
+        fn bufferedWriterErrPreservesRemainingBufferedBytes() !void {
+            const Writer = struct {
+                out: []u8,
+                pos: usize = 0,
+                call_count: usize = 0,
+
+                fn write(self: *@This(), buf: []const u8) anyerror!usize {
+                    self.call_count += 1;
+                    return switch (self.call_count) {
+                        1 => blk: {
+                            self.out[self.pos] = buf[0];
+                            self.pos += 1;
+                            break :blk 1;
+                        },
+                        2 => error.ConnectionReset,
+                        else => blk: {
+                            @memcpy(self.out[self.pos..][0..buf.len], buf);
+                            self.pos += buf.len;
+                            break :blk buf.len;
+                        },
+                    };
+                }
+            };
+
+            var storage: [8]u8 = undefined;
+            var sink = Writer{ .out = &storage };
+            var backing: [8]u8 = undefined;
+            var bw = BufferedWriter(Writer).init(&sink, &backing);
+
+            try bw.ioWriter().writeAll("ok");
+            try lib.testing.expectError(error.WriteFailed, bw.flush());
+            try lib.testing.expect(bw.err() != null);
+            try lib.testing.expect(bw.err().? == error.ConnectionReset);
+            try lib.testing.expectEqualStrings("k", bw.ioWriter().buffered());
+
+            try bw.flush();
+            try lib.testing.expect(bw.err() == null);
+            try lib.testing.expectEqualStrings("ok", storage[0..2]);
+        }
     };
 
     const Runner = struct {
@@ -288,6 +615,26 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 return false;
             };
             TestCase.bufferedReaderReportsBufferTooSmallViaErrWhenWindowCannotGrow() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.bufferedWriterBuffersUntilFlush() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.bufferedWriterLargeWriteDrainsDirectly() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.bufferedWriterFlushPropagatesUnderlyingFlush() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.bufferedWriterInitAllocZeroBufsizeStillWrites(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.bufferedWriterErrPreservesRemainingBufferedBytes() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

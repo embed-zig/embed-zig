@@ -22,8 +22,14 @@ const ReadCloser = @import("ReadCloser.zig");
 const Request = @import("Request.zig");
 const Response = @import("Response.zig");
 const RoundTripper = @import("RoundTripper.zig");
+const textproto_reader_mod = @import("../textproto/Reader.zig");
+const textproto_writer_mod = @import("../textproto/Writer.zig");
 const url_mod = @import("../url.zig");
 const proxy_authorization_value_limit = 32 * 1024;
+const BufferedConnReader = io.BufferedReader(Conn);
+const BufferedConnWriter = io.BufferedWriter(Conn);
+const TextprotoReader = textproto_reader_mod.Reader(BufferedConnReader);
+const TextprotoWriter = textproto_writer_mod.Writer(BufferedConnWriter);
 
 pub fn Transport(comptime lib: type) type {
     const Allocator = lib.mem.Allocator;
@@ -34,8 +40,6 @@ pub fn Transport(comptime lib: type) type {
     const TcpConn = tcp_conn_mod.TcpConn(lib);
     const Tls = tls_mod.make(lib);
     const Thread = lib.Thread;
-    const Stream = io.PrefixReader(Conn);
-    const BufferedConnReader = io.BufferedReader(Conn);
     const default_user_agent = "embed-zig-http-client/1.0";
     const default_max_header_bytes = 32 * 1024;
     const unlimited_body_bytes = std.math.maxInt(usize);
@@ -177,7 +181,8 @@ pub fn Transport(comptime lib: type) type {
 
         const BodyState = struct {
             allocator: Allocator,
-            stream: Stream,
+            conn: Conn,
+            buffered: BufferedConnReader,
             ctx: ?Context,
             mode: BodyMode = .none,
             max_header_bytes: usize = default_max_header_bytes,
@@ -226,21 +231,21 @@ pub fn Transport(comptime lib: type) type {
                 self.finishRequestBody() catch {};
                 if (self.owns_conn) {
                     if (self.transport) |transport| {
-                        transport.discardConn(self.stream.reader, self.pool_key);
+                        transport.discardConn(self.conn, self.pool_key);
                         self.owns_conn = false;
                         self.released_conn = true;
                         self.pool_key = &.{};
                     } else {
-                        self.stream.reader.close();
+                        self.conn.close();
                     }
                 }
-                self.freePrefix();
                 self.freePoolKey();
             }
 
             pub fn deinit(self: *BodyState) void {
                 self.close();
-                if (self.owns_conn) self.stream.reader.deinit();
+                self.buffered.deinit();
+                if (self.owns_conn) self.conn.deinit();
                 if (self.request_body_state) |writer| {
                     writer.destroy();
                     self.request_body_state = null;
@@ -250,7 +255,7 @@ pub fn Transport(comptime lib: type) type {
             fn readFixed(self: *BodyState, buf: []u8, remaining: *usize) anyerror!usize {
                 if (remaining.* == 0) return self.finishAndReturnEof();
 
-                const n = self.streamRead(buf[0..@min(buf.len, remaining.*)]) catch |err| return self.mapReadError(err);
+                const n = self.readFromBuffered(buf[0..@min(buf.len, remaining.*)]) catch |err| return self.mapReadError(err);
                 if (n == 0) return error.InvalidResponse;
                 remaining.* -= n;
                 return self.noteBytesRead(n);
@@ -275,7 +280,7 @@ pub fn Transport(comptime lib: type) type {
 
                 chunked.remaining_in_chunk -= n;
                 if (chunked.remaining_in_chunk == 0) {
-                    self.streamExpectCrlf() catch |err| return self.mapReadError(err);
+                    self.expectBufferedCrlf() catch |err| return self.mapReadError(err);
                 }
                 return n;
             }
@@ -303,7 +308,7 @@ pub fn Transport(comptime lib: type) type {
                 const remaining_budget = self.remainingBudget();
                 if (remaining_budget == 0) {
                     var overflow_probe: [1]u8 = undefined;
-                    const n = self.streamRead(&overflow_probe) catch |err| switch (err) {
+                    const n = self.readFromBuffered(&overflow_probe) catch |err| switch (err) {
                         error.EndOfStream => return self.finishAndReturnEof(),
                         else => return self.mapReadError(err),
                     };
@@ -311,7 +316,7 @@ pub fn Transport(comptime lib: type) type {
                     return error.BodyTooLarge;
                 }
 
-                const n = self.streamRead(buf[0..@min(buf.len, remaining_budget)]) catch |err| switch (err) {
+                const n = self.readFromBuffered(buf[0..@min(buf.len, remaining_budget)]) catch |err| switch (err) {
                     error.EndOfStream => return self.finishAndReturnEof(),
                     else => return self.mapReadError(err),
                 };
@@ -352,18 +357,10 @@ pub fn Transport(comptime lib: type) type {
                 if (!self.reusable or self.released_conn or !self.owns_conn) return;
                 const transport = self.transport orelse return;
 
-                transport.releaseConn(self.stream.reader, self.pool_key, self.pool_generation);
+                transport.releaseConn(self.conn, self.pool_key, self.pool_generation);
                 self.owns_conn = false;
                 self.released_conn = true;
                 self.pool_key = &.{};
-            }
-
-            fn freePrefix(self: *BodyState) void {
-                if (self.stream.prefix.len != 0) {
-                    self.allocator.free(self.stream.prefix);
-                    self.stream.prefix = &.{};
-                }
-                self.stream.prefix_offset = 0;
             }
 
             fn freePoolKey(self: *BodyState) void {
@@ -376,28 +373,58 @@ pub fn Transport(comptime lib: type) type {
             fn streamRead(self: *BodyState, buf: []u8) anyerror!usize {
                 const active = self.pushIoContext();
                 defer self.popIoContext(active);
-                return self.stream.read(buf);
+                return self.buffered.ioReader().readSliceShort(buf) catch |err| switch (err) {
+                    error.ReadFailed => return self.buffered.err() orelse error.Unexpected,
+                    else => return err,
+                };
             }
 
             fn streamReadLine(self: *BodyState, buf: []u8) anyerror![]const u8 {
                 const active = self.pushIoContext();
                 defer self.popIoContext(active);
-                return self.stream.readLine(buf);
+                const raw = self.buffered.ioReader().takeDelimiterInclusive('\n') catch |err| switch (err) {
+                    error.ReadFailed => return self.buffered.err() orelse error.Unexpected,
+                    else => return err,
+                };
+                if (raw.len < 2 or raw[raw.len - 2] != '\r') return error.InvalidResponse;
+                const line = raw[0 .. raw.len - 2];
+                if (line.len > buf.len) return error.BufferTooSmall;
+                @memcpy(buf[0..line.len], line);
+                return buf[0..line.len];
             }
 
             fn streamExpectCrlf(self: *BodyState) anyerror!void {
                 const active = self.pushIoContext();
                 defer self.popIoContext(active);
-                try self.stream.expectCrlf();
+                if (try self.readBufferedByteNoContext() != '\r') return error.InvalidResponse;
+                if (try self.readBufferedByteNoContext() != '\n') return error.InvalidResponse;
+            }
+
+            fn readFromBuffered(self: *BodyState, buf: []u8) anyerror!usize {
+                return self.streamRead(buf);
+            }
+
+            fn expectBufferedCrlf(self: *BodyState) anyerror!void {
+                return self.streamExpectCrlf();
+            }
+
+            fn readBufferedByteNoContext(self: *BodyState) anyerror!u8 {
+                var one: [1]u8 = undefined;
+                const n = self.buffered.ioReader().readSliceShort(&one) catch |err| switch (err) {
+                    error.ReadFailed => return self.buffered.err() orelse error.Unexpected,
+                    else => return err,
+                };
+                if (n == 0) return error.EndOfStream;
+                return one[0];
             }
 
             fn pushIoContext(self: *BodyState) bool {
                 const ctx = self.ctx orelse return false;
-                if (self.stream.reader.as(TcpConn)) |tcp_conn| {
+                if (self.conn.as(TcpConn)) |tcp_conn| {
                     tcp_conn.pushIoContext(ctx);
                     return true;
                 } else |_| {}
-                if (self.stream.reader.as(Tls.Conn)) |tls_conn| {
+                if (self.conn.as(Tls.Conn)) |tls_conn| {
                     tls_conn.pushIoContext(ctx);
                     return true;
                 } else |_| {}
@@ -406,11 +433,11 @@ pub fn Transport(comptime lib: type) type {
 
             fn popIoContext(self: *BodyState, active: bool) void {
                 if (!active) return;
-                if (self.stream.reader.as(TcpConn)) |tcp_conn| {
+                if (self.conn.as(TcpConn)) |tcp_conn| {
                     tcp_conn.popIoContext();
                     return;
                 } else |_| {}
-                if (self.stream.reader.as(Tls.Conn)) |tls_conn| {
+                if (self.conn.as(Tls.Conn)) |tls_conn| {
                     tls_conn.popIoContext();
                 } else |_| {}
             }
@@ -430,7 +457,7 @@ pub fn Transport(comptime lib: type) type {
                     error.TimedOut => self.contextTimeoutError(),
                     error.ConnectionReset => error.ConnectionReset,
                     error.ConnectionRefused => error.ConnectionRefused,
-                    else => error.Unexpected,
+                    else => error.InvalidResponse,
                 };
             }
         };
@@ -439,6 +466,7 @@ pub fn Transport(comptime lib: type) type {
             allocator: Allocator,
             transport: *Self,
             conn: Conn,
+            buffered: BufferedConnWriter,
             req: Request,
             body: ReadCloser,
             io_buf: []u8 = &.{},
@@ -463,6 +491,7 @@ pub fn Transport(comptime lib: type) type {
                 allocator: Allocator,
                 transport: *Self,
                 conn: Conn,
+                buffered: BufferedConnWriter,
                 req: *const Request,
                 body: ReadCloser,
                 send_chunked: bool,
@@ -480,6 +509,7 @@ pub fn Transport(comptime lib: type) type {
                     .allocator = allocator,
                     .transport = transport,
                     .conn = conn,
+                    .buffered = buffered,
                     .req = req.*,
                     .body = body,
                     .io_buf = io_buf,
@@ -529,6 +559,7 @@ pub fn Transport(comptime lib: type) type {
 
             fn destroy(self: *RequestBodyState) void {
                 self.freeIoBuf();
+                self.buffered.deinit();
                 self.allocator.destroy(self);
             }
 
@@ -598,13 +629,21 @@ pub fn Transport(comptime lib: type) type {
                 const should_send = self.waitForBodySend();
                 if (!should_send) return;
                 if (self.send_chunked) {
-                    self.transport.writeChunkedBody(self.conn, &self.req, self.body, self.io_buf) catch |err| {
+                    self.transport.writeChunkedBody(&self.buffered, self.conn, &self.req, self.body, self.io_buf, true) catch |err| {
+                        self.recordResult(err);
+                        return;
+                    };
+                    self.transport.flushBufferedWriter(&self.buffered, self.conn, &self.req) catch |err| {
                         self.recordResult(err);
                     };
                     return;
                 }
 
-                self.transport.writeFixedBody(self.conn, &self.req, self.body, self.content_length, self.io_buf) catch |err| {
+                self.transport.writeFixedBody(&self.buffered, self.conn, &self.req, self.body, self.content_length, self.io_buf, true) catch |err| {
+                    self.recordResult(err);
+                    return;
+                };
+                self.transport.flushBufferedWriter(&self.buffered, self.conn, &self.req) catch |err| {
                     self.recordResult(err);
                 };
             }
@@ -716,7 +755,13 @@ pub fn Transport(comptime lib: type) type {
             };
 
             try self.applyTimeouts(lease.conn.?, req);
-            try self.writeRequestHead(lease.conn.?, req);
+            var conn_writer = lease.conn.?;
+            var buffered_writer = try BufferedConnWriter.initAlloc(&conn_writer, req.allocator, self.options.body_io_buf_len);
+            var buffered_writer_transferred = false;
+            defer if (!buffered_writer_transferred) buffered_writer.deinit();
+
+            try self.writeRequestHead(&buffered_writer, conn_writer, req);
+            try self.flushBufferedWriter(&buffered_writer, conn_writer, req);
 
             defer if (request_body_state) |state| {
                 state.requestAbort();
@@ -731,7 +776,8 @@ pub fn Transport(comptime lib: type) type {
                 request_body_state = try RequestBodyState.spawn(
                     req.allocator,
                     self,
-                    lease.conn.?,
+                    conn_writer,
+                    buffered_writer,
                     req,
                     body,
                     send_chunked,
@@ -739,6 +785,7 @@ pub fn Transport(comptime lib: type) type {
                     wait_for_continue,
                     self.options.expect_continue_timeout_ms,
                 );
+                buffered_writer_transferred = true;
             }
 
             try self.applyResponseHeaderReadTimeout(lease.conn.?, req);
@@ -920,7 +967,11 @@ pub fn Transport(comptime lib: type) type {
             {
                 errdefer proxy_conn.deinit();
                 try self.applyTimeouts(proxy_conn, req);
-                try self.writeConnectRequest(proxy_conn, req, proxy, route.target_port);
+                var proxy_conn_writer = proxy_conn;
+                var buffered_writer = try BufferedConnWriter.initAlloc(&proxy_conn_writer, req.allocator, self.options.body_io_buf_len);
+                defer buffered_writer.deinit();
+                try self.writeConnectRequest(&buffered_writer, proxy_conn_writer, req, proxy, route.target_port);
+                try self.flushBufferedWriter(&buffered_writer, proxy_conn_writer, req);
                 try self.applyResponseHeaderReadTimeout(proxy_conn, req);
                 try self.readConnectResponse(proxy_conn, req);
             }
@@ -1072,7 +1123,10 @@ pub fn Transport(comptime lib: type) type {
         }
 
         fn writeRequest(self: *Self, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
-            try self.writeRequestHead(conn, req);
+            var conn_writer = conn;
+            var buffered_writer = try BufferedConnWriter.initAlloc(&conn_writer, req.allocator, self.options.body_io_buf_len);
+            defer buffered_writer.deinit();
+            try self.writeRequestHead(&buffered_writer, conn_writer, req);
 
             if (req.body()) |read_closer| {
                 defer read_closer.close();
@@ -1086,14 +1140,15 @@ pub fn Transport(comptime lib: type) type {
                 defer self.allocator.free(io_buf);
 
                 if (send_chunked) {
-                    try self.writeChunkedBody(conn, req, read_closer, io_buf);
+                    try self.writeChunkedBody(&buffered_writer, conn_writer, req, read_closer, io_buf, false);
                 } else {
-                    try self.writeFixedBody(conn, req, read_closer, content_length, io_buf);
+                    try self.writeFixedBody(&buffered_writer, conn_writer, req, read_closer, content_length, io_buf, false);
                 }
             }
+            try self.flushBufferedWriter(&buffered_writer, conn_writer, req);
         }
 
-        fn writeRequestHead(self: *Self, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
+        fn writeRequestHead(self: *Self, buffered: *BufferedConnWriter, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
             const allocator = req.allocator;
             const target = try self.requestTarget(allocator, req);
             defer allocator.free(target);
@@ -1113,12 +1168,8 @@ pub fn Transport(comptime lib: type) type {
             try self.validateRequestBodyLimit(req);
             if (req.trailer.len != 0) return error.UnsupportedTrailers;
 
-            try self.writeAll(conn, req, method);
-            try self.writeAll(conn, req, " ");
-            try self.writeAll(conn, req, target);
-            try self.writeAll(conn, req, " ");
-            try self.writeAll(conn, req, req.proto);
-            try self.writeAll(conn, req, "\r\n");
+            var writer = TextprotoWriter.fromBuffered(buffered);
+            try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ method, " ", target, " ", req.proto });
 
             var has_host = false;
             var has_connection = false;
@@ -1140,41 +1191,59 @@ pub fn Transport(comptime lib: type) type {
                     continue;
                 }
 
-                try self.writeHeaderLine(conn, req, hdr.name, hdr.value);
+                try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ hdr.name, ": ", hdr.value });
             }
 
-            if (!has_host) try self.writeHeaderLine(conn, req, Header.host, host_value);
-            if (!has_connection and wants_close) try self.writeHeaderLine(conn, req, Header.connection, "close");
+            if (!has_host) try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ Header.host, ": ", host_value });
+            if (!has_connection and wants_close) try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ Header.connection, ": ", "close" });
             if (!saw_user_agent) {
                 if (self.options.user_agent.len != 0) {
-                    try self.writeHeaderLine(conn, req, Header.user_agent, self.options.user_agent);
+                    try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ Header.user_agent, ": ", self.options.user_agent });
                 }
             } else if (user_agent_value) |value| {
-                if (value.len != 0) try self.writeHeaderLine(conn, req, Header.user_agent, value);
+                if (value.len != 0) try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ Header.user_agent, ": ", value });
             }
             if (send_chunked and !has_transfer_encoding) {
-                try self.writeHeaderLine(conn, req, Header.transfer_encoding, "chunked");
+                try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ Header.transfer_encoding, ": ", "chunked" });
             } else if (!has_content_length and (body != null or req.content_length > 0)) {
                 const len_buf = try std.fmt.allocPrint(allocator, "{d}", .{content_length});
                 defer allocator.free(len_buf);
-                try self.writeHeaderLine(conn, req, Header.content_length, len_buf);
+                try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ Header.content_length, ": ", len_buf });
             }
 
-            try self.writeAll(conn, req, "\r\n");
+            try self.writeTextprotoLine(&writer, buffered, conn, req, &.{});
         }
 
-        fn writeAll(self: *Self, conn: Conn, req: *const Request, buf: []const u8) RoundTripper.RoundTripError!void {
-            var c = conn;
+        fn writeAllBuffered(self: *Self, buffered: *BufferedConnWriter, conn: Conn, req: *const Request, buf: []const u8) RoundTripper.RoundTripError!void {
             const io_ctx_active = self.pushConnIoContext(conn, req.context());
             defer self.popConnIoContext(conn, io_ctx_active);
-            io.writeAll(@TypeOf(c), &c, buf) catch |err| return self.mapWriteError(err, req);
+            buffered.ioWriter().writeAll(buf) catch return self.mapBufferedWriteError(buffered, req);
         }
 
-        fn writeHeaderLine(self: *Self, conn: Conn, req: *const Request, name: []const u8, value: []const u8) RoundTripper.RoundTripError!void {
-            try self.writeAll(conn, req, name);
-            try self.writeAll(conn, req, ": ");
-            try self.writeAll(conn, req, value);
-            try self.writeAll(conn, req, "\r\n");
+        fn flushBufferedWriter(self: *Self, buffered: *BufferedConnWriter, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
+            const io_ctx_active = self.pushConnIoContext(conn, req.context());
+            defer self.popConnIoContext(conn, io_ctx_active);
+            buffered.flush() catch return self.mapBufferedWriteError(buffered, req);
+        }
+
+        fn mapBufferedWriteError(self: *Self, buffered: *BufferedConnWriter, req: *const Request) RoundTripper.RoundTripError {
+            return self.mapWriteError(buffered.err() orelse error.Unexpected, req);
+        }
+
+        fn writeTextprotoLine(
+            self: *Self,
+            writer: *TextprotoWriter,
+            buffered: *BufferedConnWriter,
+            conn: Conn,
+            req: *const Request,
+            parts: []const []const u8,
+        ) RoundTripper.RoundTripError!void {
+            const io_ctx_active = self.pushConnIoContext(conn, req.context());
+            defer self.popConnIoContext(conn, io_ctx_active);
+            writer.writeLineParts(parts) catch |err| switch (err) {
+                error.InvalidLine => return error.InvalidHeader,
+                error.WriteFailed => return self.mapBufferedWriteError(buffered, req),
+            };
         }
 
         fn shouldSendChunkedRequest(_: *Self, req: *const Request) bool {
@@ -1191,7 +1260,16 @@ pub fn Transport(comptime lib: type) type {
             return @min(self.options.body_io_buf_len, content_length);
         }
 
-        fn writeFixedBody(self: *Self, conn: Conn, req: *const Request, body: ReadCloser, content_length: usize, buf: []u8) RoundTripper.RoundTripError!void {
+        fn writeFixedBody(
+            self: *Self,
+            buffered: *BufferedConnWriter,
+            conn: Conn,
+            req: *const Request,
+            body: ReadCloser,
+            content_length: usize,
+            buf: []u8,
+            flush_each_chunk: bool,
+        ) RoundTripper.RoundTripError!void {
             if (content_length > self.options.max_body_bytes) return error.BodyTooLarge;
             if (content_length == 0) return;
             if (buf.len == 0) return error.Unexpected;
@@ -1201,12 +1279,21 @@ pub fn Transport(comptime lib: type) type {
             while (remaining != 0) {
                 const n = try reader.read(buf[0..@min(buf.len, remaining)]);
                 if (n == 0) return error.InvalidResponse;
-                try self.writeAll(conn, req, buf[0..n]);
+                try self.writeAllBuffered(buffered, conn, req, buf[0..n]);
+                if (flush_each_chunk) try self.flushBufferedWriter(buffered, conn, req);
                 remaining -= n;
             }
         }
 
-        fn writeChunkedBody(self: *Self, conn: Conn, req: *const Request, body: ReadCloser, buf: []u8) RoundTripper.RoundTripError!void {
+        fn writeChunkedBody(
+            self: *Self,
+            buffered: *BufferedConnWriter,
+            conn: Conn,
+            req: *const Request,
+            body: ReadCloser,
+            buf: []u8,
+            flush_each_chunk: bool,
+        ) RoundTripper.RoundTripError!void {
             if (buf.len == 0) return error.Unexpected;
 
             var reader = body;
@@ -1220,12 +1307,14 @@ pub fn Transport(comptime lib: type) type {
                 total_written += n;
 
                 const size_line = std.fmt.bufPrint(&size_buf, "{x}\r\n", .{n}) catch return error.Unexpected;
-                try self.writeAll(conn, req, size_line);
-                try self.writeAll(conn, req, buf[0..n]);
-                try self.writeAll(conn, req, "\r\n");
+                try self.writeAllBuffered(buffered, conn, req, size_line);
+                try self.writeAllBuffered(buffered, conn, req, buf[0..n]);
+                try self.writeAllBuffered(buffered, conn, req, "\r\n");
+                if (flush_each_chunk) try self.flushBufferedWriter(buffered, conn, req);
             }
 
-            try self.writeAll(conn, req, "0\r\n\r\n");
+            try self.writeAllBuffered(buffered, conn, req, "0\r\n\r\n");
+            if (flush_each_chunk) try self.flushBufferedWriter(buffered, conn, req);
         }
 
         fn requestTarget(_: *Self, allocator: Allocator, req: *const Request) Allocator.Error![]u8 {
@@ -1325,7 +1414,8 @@ pub fn Transport(comptime lib: type) type {
             const allocator = req.allocator;
             var conn_reader = lease.conn orelse unreachable;
             var buffered = try BufferedConnReader.initAlloc(&conn_reader, allocator, self.options.max_header_bytes);
-            defer buffered.deinit();
+            var buffered_transferred = false;
+            defer if (!buffered_transferred) buffered.deinit();
             var informational_responses: usize = 0;
 
             while (true) {
@@ -1393,7 +1483,8 @@ pub fn Transport(comptime lib: type) type {
                 const body_state = try allocator.create(BodyState);
                 body_state.* = .{
                     .allocator = allocator,
-                    .stream = Stream.init(conn_reader, &.{}),
+                    .conn = conn_reader,
+                    .buffered = buffered,
                     .ctx = req.context(),
                     .max_header_bytes = self.options.max_header_bytes,
                     .max_trailer_bytes = self.options.max_header_bytes,
@@ -1403,11 +1494,12 @@ pub fn Transport(comptime lib: type) type {
                     .pool_generation = lease.pool_generation,
                     .reusable = !skipped_waiting_request_body and lease.reusable and self.responseCanReuseConnection(req, parsed),
                 };
+                body_state.buffered.rd = &body_state.conn;
+                buffered_transferred = true;
                 errdefer {
                     body_state.deinit();
                     allocator.destroy(body_state);
                 }
-                body_state.stream.prefix = if (tail.len == 0) &.{} else try allocator.dupe(u8, tail);
                 body_state.mode = self.responseBodyMode(req, parsed);
                 body_state.request_body_state = request_body_state.*;
                 state.body_state = body_state;
@@ -1431,7 +1523,7 @@ pub fn Transport(comptime lib: type) type {
                         body_state.reusable = false;
                         body_state.abortRequestBody();
                         try body_state.finishRequestBody();
-                        if (body_state.owns_conn) body_state.stream.reader.close();
+                        if (body_state.owns_conn) body_state.conn.close();
                     } else {
                         _ = try body_state.finishAndReturnEof();
                     }
@@ -1461,19 +1553,12 @@ pub fn Transport(comptime lib: type) type {
         }
 
         fn readResponseHead(self: *Self, buffered: *BufferedConnReader, allocator: Allocator) RoundTripper.RoundTripError![]u8 {
-            const reader = buffered.ioReader();
-            var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
-            errdefer bytes.deinit(allocator);
-
-            while (true) {
-                const line = try reader.takeDelimiterInclusive('\n');
-                if (line.len < 2 or line[line.len - 2] != '\r') return error.InvalidResponse;
-                if (line.len == 2 and line[0] == '\r' and line[1] == '\n') break;
-                if (bytes.items.len + line.len > self.options.max_header_bytes) return error.BufferTooSmall;
-                try bytes.appendSlice(allocator, line);
-            }
-
-            return bytes.toOwnedSlice(allocator);
+            var reader = TextprotoReader.fromBuffered(buffered);
+            return reader.readHeaderBlockAlloc(allocator, self.options.max_header_bytes, .{}) catch |err| switch (err) {
+                error.InvalidLineEnding => return error.InvalidResponse,
+                error.OutTooSmall => return error.BufferTooSmall,
+                else => return err,
+            };
         }
 
         fn parseHead(_: *Self, state: *ResponseState) RoundTripper.RoundTripError!ParsedHead {
@@ -1626,6 +1711,7 @@ pub fn Transport(comptime lib: type) type {
 
         fn writeConnectRequest(
             self: *Self,
+            buffered: *BufferedConnWriter,
             conn: Conn,
             req: *const Request,
             proxy: ProxyConfig,
@@ -1643,20 +1729,19 @@ pub fn Transport(comptime lib: type) type {
                 try proxyAuthorizationValue(allocator, proxy.url);
             defer if (proxy_authorization) |value| allocator.free(value);
 
-            try self.writeAll(conn, req, "CONNECT ");
-            try self.writeAll(conn, req, authority);
-            try self.writeAll(conn, req, " HTTP/1.1\r\n");
+            var writer = TextprotoWriter.fromBuffered(buffered);
+            try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ "CONNECT ", authority, " HTTP/1.1" });
 
             var has_host = false;
             for (proxy.connect_headers) |hdr| {
                 if (hdr.is(Header.host)) has_host = true;
-                try self.writeHeaderLine(conn, req, hdr.name, hdr.value);
+                try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ hdr.name, ": ", hdr.value });
             }
             if (proxy_authorization) |value| {
-                try self.writeHeaderLine(conn, req, Header.proxy_authorization, value);
+                try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ Header.proxy_authorization, ": ", value });
             }
-            if (!has_host) try self.writeHeaderLine(conn, req, Header.host, authority);
-            try self.writeAll(conn, req, "\r\n");
+            if (!has_host) try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ Header.host, ": ", authority });
+            try self.writeTextprotoLine(&writer, buffered, conn, req, &.{});
         }
 
         fn readConnectResponse(self: *Self, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
@@ -2386,12 +2471,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 };
                 var conn: ?Conn = Conn.init(&mock_conn);
 
-                try testing.expectError(error.OutOfMemory, transport.readResponse(&conn, &req));
-                if (conn) |owned_conn| owned_conn.deinit();
+                var resp = try transport.readResponse(&conn, &req);
+                defer resp.deinit();
 
-                try testing.expect(failing_allocator.failed);
-                try testing.expectEqual(@as(usize, 1), mock_conn.close_count);
-                try testing.expectEqual(@as(usize, 1), mock_conn.deinit_count);
+                try testing.expect(!failing_allocator.failed);
+                try testing.expectEqual(@as(usize, 0), mock_conn.close_count);
+                try testing.expectEqual(@as(usize, 0), mock_conn.deinit_count);
             }
 
             {
@@ -2574,13 +2659,18 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         "ok",
                 };
                 var conn: ?Conn = Conn.init(&mock_conn);
-                try transport.writeRequestHead(conn.?, &req);
+                var conn_writer = conn.?;
+                var write_buf: [16]u8 = undefined;
+                var buffered_writer = io.BufferedWriter(Conn).init(&conn_writer, &write_buf);
+                try transport.writeRequestHead(&buffered_writer, conn_writer, &req);
+                try transport.flushBufferedWriter(&buffered_writer, conn_writer, &req);
                 mock_conn.fail_writes = true;
 
                 const writer = try HttpTransport.RequestBodyState.spawn(
                     allocator,
                     &transport,
-                    conn.?,
+                    conn_writer,
+                    buffered_writer,
                     &req,
                     req.body().?,
                     false,
@@ -2684,11 +2774,16 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 req.content_length = 1;
 
                 var mock_conn = MockConn{};
-                const conn = Conn.init(&mock_conn);
+                var conn = Conn.init(&mock_conn);
+                var body_buf: [16]u8 = undefined;
+                var write_buf: [16]u8 = undefined;
+                const buffered = io.BufferedReader(Conn).init(&conn, &body_buf);
+                const buffered_writer = io.BufferedWriter(Conn).init(&conn, &write_buf);
                 const writer = try HttpTransport.RequestBodyState.spawn(
                     allocator,
                     &transport,
                     conn,
+                    buffered_writer,
                     &req,
                     req.body().?,
                     false,
@@ -2703,7 +2798,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 var body_state: HttpTransport.BodyState = .{
                     .allocator = allocator,
-                    .stream = io.PrefixReader(Conn).init(conn, &.{}),
+                    .conn = conn,
+                    .buffered = buffered,
                     .ctx = null,
                     .max_body_bytes = transport.options.max_body_bytes,
                     .owns_conn = true,
@@ -2994,11 +3090,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 var req = try Request.init(allocator, "POST", "http://example.com/continue");
                 req = req.withBody(ReadCloser.init(&source));
                 req.content_length = 5;
+                var conn = Conn.init(&mock_conn);
+                var write_buf: [16]u8 = undefined;
+                const buffered_writer = io.BufferedWriter(Conn).init(&conn, &write_buf);
 
                 const writer = try HttpTransport.RequestBodyState.spawn(
                     allocator,
                     &transport,
-                    Conn.init(&mock_conn),
+                    conn,
+                    buffered_writer,
                     &req,
                     req.body().?,
                     false,
@@ -3070,11 +3170,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 var req = try Request.init(allocator, "POST", "http://example.com/continue-timeout");
                 req = req.withBody(ReadCloser.init(&source));
                 req.content_length = 5;
+                var conn = Conn.init(&mock_conn);
+                var write_buf: [16]u8 = undefined;
+                const buffered_writer = io.BufferedWriter(Conn).init(&conn, &write_buf);
 
                 const writer = try HttpTransport.RequestBodyState.spawn(
                     allocator,
                     &transport,
-                    Conn.init(&mock_conn),
+                    conn,
+                    buffered_writer,
                     &req,
                     req.body().?,
                     false,

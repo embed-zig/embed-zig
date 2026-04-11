@@ -14,6 +14,7 @@ networking primitives.
 - [net (root)](#net-root)
   - [Conn](#conn)
   - [Listener](#listener)
+  - [Cmux](#cmux)
   - [PacketConn](#packetconn)
   - [Dial / Listen](#dial--listen)
   - [ListenPacket](#listenpacket)
@@ -66,11 +67,17 @@ lib/
   net/
     Conn.zig           Type-erased byte stream interface (Go's net.Conn)
     Listener.zig       Type-erased stream listener interface (Go's net.Listener)
+    Cmux.zig           CMUX session facade over one bearer Conn
     PacketConn.zig     Type-erased datagram interface (Go's net.PacketConn)
     Dialer.zig         Configurable network dialer (Go's net.Dialer)
     TcpConn.zig        Conn over TCP socket fd (Go's net.TCPConn)
     UdpConn.zig        PacketConn + Conn over UDP socket fd (Go's net.UDPConn)
     TcpListener.zig    Listener for TCP (Go's net.TCPListener)
+    cmux/
+      Conn.zig         Logical channel wrapper adapted to net.Conn
+      Session.zig      CMUX session engine over a bearer net.Conn
+      frame.zig        Basic-mode frame encode/decode helpers
+      control.zig      Minimal CMUX control-plane constants/helpers
     fd.zig             Internal fd-layer namespace and fd-local test runners
     fd/
       Stream.zig       Internal non-blocking stream socket wrapper
@@ -139,14 +146,14 @@ the fd layer remains an internal implementation detail.
 
 Regression coverage is split between unit topic aggregators under
 `lib/net/test_runner/unit/` and deterministic local integration aggregators
-under `lib/net/test_runner/integration/`, all wired from `lib/test.zig`.
+under `lib/net/test_runner/integration/`, all wired from `lib/tests.zig`.
 
 ## Test layout
 
 - `lib/net.zig` exports only `net.test_runner.unit` and `net.test_runner.integration`.
-- `lib/test.zig` wires `net/unit/std`, `net/unit/embed_std`, `net/integration/std`, and `net/integration/embed_std`.
-- `lib/net/test_runner/unit.zig` fans out into topic suites such as `netip`, `http`, `resolver`, `tls`, `fd`, and `core`.
-- `lib/net/test_runner/integration.zig` fans out into deterministic local runners such as `fd_stream`, `tcp`, `resolver_local`, `http_transport_local`, and `http_transport_layer01`.
+- `lib/tests.zig` wires `net/unit/std`, `net/unit/embed_std`, `net/integration/std`, and `net/integration/embed_std`.
+- `lib/net/test_runner/unit.zig` fans out into topic suites such as `netip`, `http`, `textproto`, `cmux`, `resolver`, `tls`, `fd`, and `core`.
+- `lib/net/test_runner/integration.zig` fans out into deterministic local runners such as `fd_stream`, `tcp`, `resolver_local`, `cmux_http_tcp`, `http_transport_local`, and `http_transport_layer01`.
 - Host-only or optional public-network helpers live under `lib/net/test_runner/integration/compat/` and `integration/public/` and are not wired from `integration.zig`; examples include `integration/compat/tls_std_compat.zig`, `integration/public/tls_dial.zig`, and `integration/public/resolver_dns.zig`.
 
 ## net (root)
@@ -189,6 +196,24 @@ pub const VTable = struct {
 ```
 
 Concrete implementation: **TcpListener**.
+
+### Cmux
+
+`Cmux` is the basic-mode CMUX transport multiplexer for `lib/net`.
+
+It takes ownership of one existing bearer `net.Conn` and exposes:
+
+- `listener` — a `net.Listener` view for remotely opened logical channels
+- `dial(dlci)` — a `net.Conn` for a locally opened logical channel
+
+Important scope boundary:
+
+- `Cmux` is transport-only. It does not parse AT, HTTP, or other higher-layer
+  protocols.
+- `DLCI 0` stays internal to the CMUX control plane and is not exposed as a
+  user-facing `net.Conn`.
+- The current implementation target is basic mode only; advanced mode remains
+  future work.
 
 ### PacketConn
 

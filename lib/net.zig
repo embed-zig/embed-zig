@@ -27,10 +27,10 @@ pub const netip = @import("net/netip.zig");
 pub const stack = @import("net/stack.zig");
 pub const url = @import("net/url.zig");
 pub const http = @import("net/http.zig");
+pub const textproto = @import("net/textproto.zig");
+pub const Cmux = @import("net/Cmux.zig");
 pub const ntp = @import("net/ntp.zig");
 pub const tls = @import("net/tls.zig");
-pub const testing_mod = @import("testing");
-
 const tcp_conn = @import("net/TcpConn.zig");
 const tcp_listener = @import("net/TcpListener.zig");
 const dialer_mod = @import("net/Dialer.zig");
@@ -55,6 +55,8 @@ pub fn make(comptime lib: type) type {
         pub const Resolver = resolver_mod.Resolver(lib);
         pub const stack = @import("net/stack.zig");
         pub const http = @import("net/http.zig").make(lib);
+        pub const textproto = @import("net/textproto.zig").make(lib);
+        pub const Cmux = @import("net/Cmux.zig").Cmux(lib);
         pub const ntp = @import("net/ntp.zig").make(lib);
         pub const tls = @import("net/tls.zig").make(lib);
         pub const ListenOptions = TL.Options;

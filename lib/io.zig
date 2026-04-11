@@ -8,6 +8,7 @@ const io = @import("io/io.zig");
 
 pub const bufio = @import("io/bufio.zig");
 pub const BufferedReader = bufio.BufferedReader;
+pub const BufferedWriter = bufio.BufferedWriter;
 pub const PrefixReader = io.PrefixReader;
 pub const readFull = io.readFull;
 pub const readAll = io.readAll;

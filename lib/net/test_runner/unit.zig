@@ -7,6 +7,8 @@ const testing_api = @import("testing");
 pub const netip = @import("unit/netip.zig");
 pub const url = @import("unit/url.zig");
 pub const http = @import("unit/http.zig");
+pub const textproto = @import("unit/textproto.zig");
+pub const cmux = @import("unit/cmux.zig");
 pub const ntp = @import("unit/ntp.zig");
 pub const stack = @import("unit/stack.zig");
 pub const resolver = @import("unit/resolver.zig");
@@ -29,6 +31,8 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             t.run("netip", netip.make(lib));
             t.run("url", url.make(lib));
             t.run("http", http.make(lib));
+            t.run("textproto", textproto.make(lib));
+            t.run("cmux", cmux.make(lib));
             t.run("ntp", ntp.make(lib));
             t.run("stack", stack.make(lib));
             t.run("resolver", resolver.make(lib));

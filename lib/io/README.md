@@ -14,6 +14,7 @@ For example, `http.ReadCloser` belongs under `net/http`, not here.
 const io = @import("io");
 
 const BufferedReader = io.BufferedReader;
+const BufferedWriter = io.BufferedWriter;
 const PrefixReader = io.PrefixReader;
 const readFull = io.readFull;
 const readAll = io.readAll;
@@ -23,6 +24,7 @@ const writeAll = io.writeAll;
 Today `lib/io` exports:
 
 - `bufio.BufferedReader`
+- `bufio.BufferedWriter`
 - `io.PrefixReader`
 - `io.readFull`
 - `io.readAll`
