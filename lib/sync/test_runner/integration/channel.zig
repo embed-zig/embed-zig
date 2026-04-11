@@ -191,13 +191,14 @@ const resource_safety_normal = @import("channel/resource_safety_normal.zig");
 const resource_safety_unconsumed = @import("channel/resource_safety_unconsumed.zig");
 const resource_safety_close_and_deinit = @import("channel/resource_safety_close_and_deinit.zig");
 
-// 阻塞与唤醒：满/空槽、recvTimeout、单侧 close 唤醒（#13–#16、#28–#31）
+// 阻塞与唤醒：满/空槽、sendTimeout/recvTimeout、单侧 close 唤醒（#13–#16、#28–#31）
 const send_blocks_when_full = @import("channel/send_blocks_when_full.zig");
 const recv_unblocks_send = @import("channel/recv_unblocks_send.zig");
 const recv_blocks_when_empty = @import("channel/recv_blocks_when_empty.zig");
 const send_unblocks_recv = @import("channel/send_unblocks_recv.zig");
 const recv_woken_by_send = @import("channel/recv_woken_by_send.zig");
 const send_woken_by_recv = @import("channel/send_woken_by_recv.zig");
+const send_timeout_contract = @import("channel/send_timeout_contract.zig");
 const recv_timeout_contract = @import("channel/recv_timeout_contract.zig");
 const recv_woken_by_close = @import("channel/recv_woken_by_close.zig");
 const send_woken_by_close = @import("channel/send_woken_by_close.zig");
@@ -279,6 +280,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
             t.run("sendUnblocksRecv", send_unblocks_recv.make(lib, Channel));
             t.run("recvWokenBySend", recv_woken_by_send.make(lib, Channel));
             t.run("sendWokenByRecv", send_woken_by_recv.make(lib, Channel));
+            t.run("sendTimeoutContract", send_timeout_contract.make(lib, Channel));
             t.run("recvTimeoutContract", recv_timeout_contract.make(lib, Channel));
             t.run("recvWokenByClose", recv_woken_by_close.make(lib, Channel));
             t.run("sendWokenByClose", send_woken_by_close.make(lib, Channel));

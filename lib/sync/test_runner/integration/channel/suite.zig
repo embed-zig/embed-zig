@@ -506,6 +506,70 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
             try testing.expect(send_ok.load(.acquire));
         }
 
+        pub fn testSendTimeoutContract(allocator: Allocator) !void {
+            {
+                var ch = try Ch.make(allocator, 0);
+                defer ch.deinit();
+
+                try testing.expectError(error.Timeout, ch.sendTimeout(0xD00D, 5));
+                try testing.expectError(error.Timeout, ch.recvTimeout(5));
+
+                var recv_ok = Atomic(bool).init(false);
+                var recv_val = Atomic(Event).init(0);
+                const receiver = try Thread.spawn(.{}, struct {
+                    fn run(c: *Ch, ok: *Atomic(bool), value: *Atomic(Event)) void {
+                        Thread.sleep(time.ns_per_ms);
+                        const r = c.recv() catch return;
+                        ok.store(r.ok, .release);
+                        if (r.ok) value.store(r.value, .release);
+                    }
+                }.run, .{ &ch, &recv_ok, &recv_val });
+
+                const sent = try ch.sendTimeout(0xBEEF, 200);
+                try testing.expect(sent.ok);
+                receiver.join();
+                try testing.expect(recv_ok.load(.acquire));
+                try testing.expectEqual(@as(Event, 0xBEEF), recv_val.load(.acquire));
+
+                ch.close();
+                const closed = try ch.sendTimeout(0xBEEF, 5);
+                try testing.expect(!closed.ok);
+            }
+
+            {
+                var ch = try Ch.make(allocator, 1);
+                defer ch.deinit();
+
+                _ = try ch.send(1);
+                try testing.expectError(error.Timeout, ch.sendTimeout(0xD00D, 5));
+
+                var recv_ok = Atomic(bool).init(false);
+                var recv_val = Atomic(Event).init(0);
+                const receiver = try Thread.spawn(.{}, struct {
+                    fn run(c: *Ch, ok: *Atomic(bool), value: *Atomic(Event)) void {
+                        Thread.sleep(time.ns_per_ms);
+                        const r = c.recv() catch return;
+                        ok.store(r.ok, .release);
+                        if (r.ok) value.store(r.value, .release);
+                    }
+                }.run, .{ &ch, &recv_ok, &recv_val });
+
+                const sent = try ch.sendTimeout(0xD00D, 200);
+                try testing.expect(sent.ok);
+                receiver.join();
+                try testing.expect(recv_ok.load(.acquire));
+                try testing.expectEqual(@as(Event, 1), recv_val.load(.acquire));
+
+                const queued = try ch.recv();
+                try testing.expect(queued.ok);
+                try testing.expectEqual(@as(Event, 0xD00D), queued.value);
+
+                ch.close();
+                const closed = try ch.sendTimeout(0xBEEF, 5);
+                try testing.expect(!closed.ok);
+            }
+        }
+
         pub fn testRecvTimeoutContract(allocator: Allocator) !void {
             const cases = [_]usize{ 0, 1 };
 

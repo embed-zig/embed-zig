@@ -297,6 +297,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         return self.inner.send(value);
                     }
 
+                    pub fn sendTimeout(self: *@This(), value: T, timeout_ms: u32) !sync_mod.channel.SendResult() {
+                        return self.inner.sendTimeout(value, timeout_ms);
+                    }
+
                     pub fn recv(self: *@This()) !sync_mod.channel.RecvResult(T) {
                         return self.inner.recv();
                     }

@@ -28,6 +28,7 @@ pub fn RecvResult(comptime T: type) type {
 ///   fn deinit(*Ch) void
 ///   fn close(*Ch) void
 ///   fn send(*Ch, T) anyerror!SendResult()
+///   fn sendTimeout(*Ch, T, u32) anyerror!SendResult()
 ///   fn recv(*Ch) anyerror!RecvResult(T)
 ///   fn recvTimeout(*Ch, u32) anyerror!RecvResult(T)
 pub fn make(comptime impl: fn (type) type) fn (type) type {
@@ -37,6 +38,7 @@ pub fn make(comptime impl: fn (type) type) fn (type) type {
 
             comptime {
                 _ = @as(*const fn (*Ch, T) anyerror!SendResult(), &Ch.send);
+                _ = @as(*const fn (*Ch, T, u32) anyerror!SendResult(), &Ch.sendTimeout);
                 _ = @as(*const fn (*Ch) anyerror!RecvResult(T), &Ch.recv);
                 _ = @as(*const fn (*Ch, u32) anyerror!RecvResult(T), &Ch.recvTimeout);
                 _ = @as(*const fn (*Ch) void, &Ch.close);
@@ -65,6 +67,10 @@ pub fn make(comptime impl: fn (type) type) fn (type) type {
                     return self.ch.send(value);
                 }
 
+                pub fn sendTimeout(self: *Self, value: T, timeout_ms: u32) !SendResult() {
+                    return self.ch.sendTimeout(value, timeout_ms);
+                }
+
                 pub fn recv(self: *Self) !RecvResult(T) {
                     return self.ch.recv();
                 }
@@ -86,6 +92,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         slot: ?T = null,
                         closed: bool = false,
                         init_capacity: usize = 0,
+                        last_send_timeout_ms: ?u32 = null,
 
                         pub fn init(allocator: embed.mem.Allocator, capacity: usize) !@This() {
                             _ = allocator;
@@ -104,6 +111,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                             if (self.closed) return .{ .ok = false };
                             self.slot = value;
                             return .{ .ok = true };
+                        }
+
+                        pub fn sendTimeout(self: *@This(), value: T, timeout_ms: u32) !SendResult() {
+                            self.last_send_timeout_ms = timeout_ms;
+                            return self.send(value);
                         }
 
                         pub fn recv(self: *@This()) !RecvResult(T) {
@@ -132,9 +144,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const send_ok = try ch.send(42);
             try lib.testing.expect(send_ok.ok);
 
+            const send_timeout_ok = try ch.sendTimeout(24, 11);
+            try lib.testing.expect(send_timeout_ok.ok);
+            try lib.testing.expectEqual(@as(?u32, 11), ch.ch.last_send_timeout_ms);
+
             const recv_ok = try ch.recv();
             try lib.testing.expect(recv_ok.ok);
-            try lib.testing.expectEqual(@as(u32, 42), recv_ok.value);
+            try lib.testing.expectEqual(@as(u32, 24), recv_ok.value);
 
             ch.close();
             const send_closed = try ch.send(99);

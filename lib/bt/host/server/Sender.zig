@@ -424,6 +424,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         pub fn send(_: *@This(), _: T) !sync.channel.SendResult() {
                             return .{ .ok = true };
                         }
+                        pub fn sendTimeout(_: *@This(), _: T, _: u32) !sync.channel.SendResult() {
+                            return .{ .ok = true };
+                        }
                     };
                 }
             };

@@ -794,6 +794,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         pub fn send(_: *@This(), _: T) anyerror!struct { ok: bool } {
                             return .{ .ok = true };
                         }
+
+                        pub fn sendTimeout(_: *@This(), _: T, _: u32) anyerror!struct { ok: bool } {
+                            return .{ .ok = true };
+                        }
                     };
                 }
             };
@@ -1069,4 +1073,3 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     };
     return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
-
