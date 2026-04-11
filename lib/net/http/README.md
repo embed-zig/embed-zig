@@ -85,6 +85,8 @@ Current behavior:
   `Handler` boundary rather than giving `Server` a second dispatch path
 - supports single-connection keep-alive loops, read-header/read-body/write and
   keep-alive-idle timeout controls, and close-on-unread-request-body behavior
+- supports `ResponseWriter.flush()` so handlers can explicitly push buffered
+  headers/body before `finish()`
 - supports graceful shutdown and hard close over borrowed listeners
 - uses listener stacking for TLS rather than a separate `ServeTLS`-style core
 

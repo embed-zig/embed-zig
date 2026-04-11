@@ -27,6 +27,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             t.run("malformed_request_gets_bad_request", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.malformedRequestGetsBadRequest));
             t.run("conflicting_length_and_chunked_gets_bad_request", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.conflictingLengthAndChunkedGetsBadRequest));
             t.run("chunked_request_body_round_trips", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.chunkedRequestBodyRoundTrips));
+            t.run("flush_streams_chunked_response", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.flushStreamsChunkedResponse));
             t.run("mux_routes_and_redirects", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.muxRoutesAndRedirects));
             t.run("read_header_timeout_closes_slow_header", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.readHeaderTimeoutClosesSlowHeader));
             t.run("idle_timeout_closes_keep_alive_conn", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.idleTimeoutClosesKeepAliveConn));
@@ -358,6 +359,75 @@ fn Suite(comptime lib: type) type {
             defer allocator.free(resp.body);
             try expectEqualStrings("HTTP/1.1 200 OK", firstLine(resp.head));
             try expectEqualStrings("abcdef", resp.body);
+        }
+
+        fn flushStreamsChunkedResponse(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
+            var server = try Http.Server.init(allocator, .{});
+            defer server.deinit();
+
+            var first_chunk_flushed = Gate{};
+            var release = Gate{};
+            const StreamingHandler = struct {
+                first_chunk_flushed: *Gate,
+                release: *Gate,
+
+                pub fn serveHTTP(self: *@This(), rw: *Http.ResponseWriter, _: *Http.Request) void {
+                    _ = rw.write("a") catch return;
+                    rw.flush() catch return;
+                    self.first_chunk_flushed.signal();
+                    self.release.wait();
+                    _ = rw.write("b") catch {};
+                }
+            };
+
+            var streaming_handler = StreamingHandler{
+                .first_chunk_flushed = &first_chunk_flushed,
+                .release = &release,
+            };
+            try server.handle("/stream", Http.Handler.init(&streaming_handler));
+
+            var srv_run = try startPlainServer(allocator, &server, server_spawn_config);
+            defer srv_run.stop(&server) catch {};
+
+            var conn = try Net.dial(allocator, .tcp, addr4(srv_run.port));
+            defer conn.deinit();
+            conn.setReadTimeout(200);
+            defer conn.setReadTimeout(null);
+
+            try io.writeAll(@TypeOf(conn), &conn, "GET /stream HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n");
+            first_chunk_flushed.wait();
+
+            var partial = lib.ArrayList(u8){};
+            defer partial.deinit(allocator);
+            var buf: [256]u8 = undefined;
+            while (lib.mem.indexOf(u8, partial.items, "1\r\na\r\n") == null) {
+                const n = try conn.read(&buf);
+                if (n == 0) return error.EndOfStream;
+                try partial.appendSlice(allocator, buf[0..n]);
+            }
+
+            try expect(lib.mem.indexOf(u8, partial.items, "HTTP/1.1 200 OK\r\n") != null);
+            try expect(lib.mem.indexOf(u8, partial.items, "Transfer-Encoding: chunked\r\n") != null);
+            try expect(lib.mem.indexOf(u8, partial.items, "1\r\na\r\n") != null);
+            try expect(lib.mem.indexOf(u8, partial.items, "1\r\nb\r\n") == null);
+            try expect(lib.mem.indexOf(u8, partial.items, "0\r\n\r\n") == null);
+
+            release.signal();
+
+            while (true) {
+                const n = conn.read(&buf) catch |err| switch (err) {
+                    error.EndOfStream,
+                    error.ConnectionReset,
+                    error.BrokenPipe,
+                    => break,
+                    else => return err,
+                };
+                if (n == 0) break;
+                try partial.appendSlice(allocator, buf[0..n]);
+            }
+
+            try expect(lib.mem.indexOf(u8, partial.items, "1\r\na\r\n1\r\nb\r\n0\r\n\r\n") != null);
         }
 
         fn muxRoutesAndRedirects(_: *testing_api.T, allocator: lib.mem.Allocator) !void {

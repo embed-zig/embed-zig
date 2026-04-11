@@ -90,6 +90,12 @@ pub fn ResponseWriter(comptime lib: type) type {
             return buf.len;
         }
 
+        pub fn flush(self: *Self) !void {
+            if (self.finished_flag) return error.Closed;
+            if (!self.committed_flag) try self.writeHeader(self.status_code);
+            try self.flushBuffered(self.bufferedWriter());
+        }
+
         pub fn finish(self: *Self) !void {
             if (self.finished_flag) return;
             if (!self.committed_flag) try self.writeHeader(self.status_code);
@@ -240,6 +246,21 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             try response_writer.setHeader("Content-Type", "text/plain");
             _ = try response_writer.write("ok");
+            try testing.expectEqual(@as(usize, 0), mock_conn.len);
+
+            try response_writer.flush();
+
+            try testing.expectEqualStrings(
+                "HTTP/1.1 200 OK\r\n" ++
+                    "Content-Type: text/plain\r\n" ++
+                    "Connection: close\r\n" ++
+                    "Transfer-Encoding: chunked\r\n" ++
+                    "\r\n" ++
+                    "2\r\n" ++
+                    "ok\r\n",
+                mock_conn.storage[0..mock_conn.len],
+            );
+
             try response_writer.finish();
 
             try testing.expectEqualStrings(
