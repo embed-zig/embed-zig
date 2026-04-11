@@ -13,7 +13,7 @@ pub fn Config(comptime lib: type) type {
     };
 }
 
-pub fn make(comptime lib: type, comptime config: Config(lib)) type {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type, comptime config: Config(lib)) type {
     comptime {
         if (config.tick_interval_ns == 0) {
             @compileError("zux.pipeline.Pipeline.Config.tick_interval_ns must be > 0");
@@ -23,7 +23,7 @@ pub fn make(comptime lib: type, comptime config: Config(lib)) type {
     return struct {
         const Self = @This();
 
-        pub const MessageChannel = sync.Channel(lib.Channel)(Message);
+        pub const MessageChannel = Channel(Message);
         pub const Allocator = lib.mem.Allocator;
         pub const Worker = lib.Thread;
         pub const default_capacity: usize = 64;
@@ -66,6 +66,7 @@ pub fn make(comptime lib: type, comptime config: Config(lib)) type {
         receivers: ReceiverList = .empty,
 
         stopping: BoolAtomic = BoolAtomic.init(false),
+        tick_seq: u64 = 0,
 
         pub fn init(allocator: Allocator) !Self {
             return .{
@@ -89,7 +90,12 @@ pub fn make(comptime lib: type, comptime config: Config(lib)) type {
         }
 
         pub fn tick(self: *Self) !void {
-            return self.emit(.{ .tick = .{} });
+            self.tick_seq +%= 1;
+            return self.inject(.{
+                .origin = .timer,
+                .timestamp_ns = lib.time.nanoTimestamp(),
+                .body = .{ .tick = .{ .seq = self.tick_seq } },
+            });
         }
 
         pub fn bindOutput(self: *Self, out: Emitter) void {
@@ -264,58 +270,19 @@ pub fn make(comptime lib: type, comptime config: Config(lib)) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    const embed_std = @import("embed_std");
-    const sync_mod = @import("sync");
-
+pub fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
     const HarnessLib = struct {
-        pub const mem = embed_std.std.mem;
-        pub const Thread = embed_std.std.Thread;
-        pub const atomic = embed_std.std.atomic;
-        pub const time = embed_std.std.time;
-        pub const debug = embed_std.std.debug;
-        pub const ArrayList = embed_std.std.ArrayList;
-        pub const Channel = struct {
-            fn factory(comptime T: type) type {
-                const Wrapped = embed_std.sync.Channel(T);
-                return struct {
-                    inner: Wrapped,
-
-                    pub fn init(allocator: embed_std.std.mem.Allocator, capacity: usize) !@This() {
-                        return .{ .inner = try Wrapped.make(allocator, capacity) };
-                    }
-
-                    pub fn deinit(self: *@This()) void {
-                        self.inner.deinit();
-                    }
-
-                    pub fn close(self: *@This()) void {
-                        self.inner.close();
-                    }
-
-                    pub fn send(self: *@This(), value: T) !sync_mod.channel.SendResult() {
-                        return self.inner.send(value);
-                    }
-
-                    pub fn sendTimeout(self: *@This(), value: T, timeout_ms: u32) !sync_mod.channel.SendResult() {
-                        return self.inner.sendTimeout(value, timeout_ms);
-                    }
-
-                    pub fn recv(self: *@This()) !sync_mod.channel.RecvResult(T) {
-                        return self.inner.recv();
-                    }
-
-                    pub fn recvTimeout(self: *@This(), timeout_ms: u32) !sync_mod.channel.RecvResult(T) {
-                        return self.inner.recvTimeout(timeout_ms);
-                    }
-                };
-            }
-        }.factory;
+        pub const mem = lib.mem;
+        pub const Thread = lib.Thread;
+        pub const atomic = lib.atomic;
+        pub const time = lib.time;
+        pub const debug = lib.debug;
+        pub const ArrayList = lib.ArrayList;
     };
 
     const TestCase = struct {
         fn pollFromDrivesRootAndStopsCleanly(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const TestPipeline = make(HarnessLib, .{});
+            const TestPipeline = make(HarnessLib, Channel, .{});
             const AtomicU32 = HarnessLib.atomic.Value(u32);
 
             const RootImpl = struct {
@@ -398,7 +365,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         }
 
         fn startRequiresBoundOutput(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const TestPipeline = make(HarnessLib, .{});
+            const TestPipeline = make(HarnessLib, Channel, .{});
 
             var pipeline = try TestPipeline.init(allocator);
             defer pipeline.deinit();
@@ -407,7 +374,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         }
 
         fn startEmitsTickMessages(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const TestPipeline = make(HarnessLib, .{
+            const TestPipeline = make(HarnessLib, Channel, .{
                 .tick_interval_ns = HarnessLib.time.ns_per_ms,
             });
             const AtomicU32 = HarnessLib.atomic.Value(u32);
@@ -445,14 +412,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             try testing.expect(root_impl.tick_count.load(.acquire) > 0);
-            try testing.expectEqual(@intFromEnum(Message.Origin.manual), root_impl.last_origin.load(.acquire));
+            try testing.expectEqual(@intFromEnum(Message.Origin.timer), root_impl.last_origin.load(.acquire));
 
             pipeline.stop();
             pipeline.wait();
         }
 
         fn manualTickInjectsTickMessage(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const TestPipeline = make(HarnessLib, .{
+            const TestPipeline = make(HarnessLib, Channel, .{
                 .tick_interval_ns = 100 * HarnessLib.time.ns_per_ms,
             });
             const AtomicU32 = HarnessLib.atomic.Value(u32);
@@ -494,7 +461,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         }
 
         fn manualEmitWrapsBodyWithManualOrigin(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const TestPipeline = make(HarnessLib, .{
+            const TestPipeline = make(HarnessLib, Channel, .{
                 .tick_interval_ns = 100 * HarnessLib.time.ns_per_ms,
             });
             const AtomicU8 = HarnessLib.atomic.Value(u8);
@@ -545,7 +512,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         }
 
         fn hookOnForwardsCallbackBodiesAndUnsetsReceiverOnStop(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const TestPipeline = make(HarnessLib, .{
+            const TestPipeline = make(HarnessLib, Channel, .{
                 .tick_interval_ns = 100 * HarnessLib.time.ns_per_ms,
             });
             const AtomicU8 = HarnessLib.atomic.Value(u8);

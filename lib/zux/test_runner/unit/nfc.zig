@@ -1,6 +1,6 @@
 const testing_api = @import("testing");
 
-const Nfc = @import("../../Nfc.zig");
+const nfc = @import("../../component/Nfc.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
@@ -14,7 +14,9 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
 
             t.parallel();
-            t.run("Nfc", Nfc.TestRunner(lib));
+            t.run("component.nfc", nfc.TestRunner(lib));
+            t.run("component.nfc.EventHook", nfc.EventHook.TestRunner(lib));
+            t.run("component.nfc.Reducer", nfc.Reducer.TestRunner(lib));
             return t.wait();
         }
 

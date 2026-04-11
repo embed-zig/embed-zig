@@ -4,10 +4,8 @@ const testing = @import("testing");
 const bt = @import("bt");
 const sync = @import("sync");
 const io = @import("io");
-const wifi = @import("wifi");
 const modem = @import("modem");
 const at = @import("at");
-const display = @import("display");
 const ledstrip = @import("ledstrip");
 const drivers = @import("drivers");
 const mime = @import("mime");
@@ -24,7 +22,7 @@ pub const test_runner = struct {
 test "testing/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .testing);
     defer t.deinit();
 
     t.run("testing/unit/std", testing.test_runner.unit.make(std));
@@ -34,7 +32,7 @@ test "testing/unit/std" {
 test "testing/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .testing);
     defer t.deinit();
 
     t.run("testing/unit/embed_std", testing.test_runner.unit.make(embed_std.std));
@@ -44,7 +42,7 @@ test "testing/unit/embed_std" {
 test "mime/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .mime);
     defer t.deinit();
 
     t.run("mime/unit/std", mime.test_runner.unit.make(std));
@@ -54,7 +52,7 @@ test "mime/unit/std" {
 test "mime/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .mime);
     defer t.deinit();
 
     t.run("mime/unit/embed_std", mime.test_runner.unit.make(embed_std.std));
@@ -64,7 +62,7 @@ test "mime/unit/embed_std" {
 test "motion/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .motion);
     defer t.deinit();
 
     t.run("motion/unit/std", motion.test_runner.unit.make(std));
@@ -74,7 +72,7 @@ test "motion/unit/std" {
 test "motion/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .motion);
     defer t.deinit();
 
     t.run("motion/unit/embed_std", motion.test_runner.unit.make(embed_std.std));
@@ -84,7 +82,7 @@ test "motion/unit/embed_std" {
 test "audio/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .audio);
     defer t.deinit();
 
     t.run("audio/unit/std", audio.test_runner.unit.make(std));
@@ -94,7 +92,7 @@ test "audio/unit/std" {
 test "audio/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .audio);
     defer t.deinit();
 
     t.run("audio/unit/embed_std", audio.test_runner.unit.make(embed_std.std));
@@ -104,7 +102,7 @@ test "audio/unit/embed_std" {
 test "audio/integration/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .audio);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
@@ -115,7 +113,7 @@ test "audio/integration/std" {
 test "audio/integration/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .audio);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
 
@@ -126,49 +124,49 @@ test "audio/integration/embed_std" {
 test "zux/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .zux);
     defer t.deinit();
 
-    t.run("zux/unit/std", zux.test_runner.unit.make(std));
+    t.run("zux/unit/std", zux.test_runner.unit.make(std, embed_std.sync.Channel));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "zux/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .zux);
     defer t.deinit();
 
-    t.run("zux/unit/embed_std", zux.test_runner.unit.make(embed_std.std));
+    t.run("zux/unit/embed_std", zux.test_runner.unit.make(embed_std.std, embed_std.sync.Channel));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "zux/integration/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .zux);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
-    t.run("zux/integration/std", zux.test_runner.integration.make(std));
+    t.run("zux/integration/std", zux.test_runner.integration.make(std, embed_std.sync.Channel));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "zux/integration/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .zux);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
 
-    t.run("zux/integration/embed_std", zux.test_runner.integration.make(embed_std.std));
+    t.run("zux/integration/embed_std", zux.test_runner.integration.make(embed_std.std, embed_std.sync.Channel));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "bt/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .bt);
     defer t.deinit();
 
     t.run("bt/unit/std", bt.test_runner.unit.make(std));
@@ -178,7 +176,7 @@ test "bt/unit/std" {
 test "bt/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .bt);
     defer t.deinit();
 
     t.run("bt/unit/embed_std", bt.test_runner.unit.make(embed_std.std));
@@ -188,7 +186,7 @@ test "bt/unit/embed_std" {
 test "bt/integration/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .bt);
     defer t.deinit();
     t.timeout(60 * std.time.ns_per_s);
 
@@ -199,7 +197,7 @@ test "bt/integration/std" {
 test "bt/integration/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .bt);
     defer t.deinit();
     t.timeout(60 * embed_std.std.time.ns_per_s);
 
@@ -210,7 +208,7 @@ test "bt/integration/embed_std" {
 test "sync/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .sync);
     defer t.deinit();
 
     t.run("sync/unit/std", sync.test_runner.unit.make(std));
@@ -220,7 +218,7 @@ test "sync/unit/std" {
 test "sync/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .sync);
     defer t.deinit();
 
     t.run("sync/unit/embed_std", sync.test_runner.unit.make(embed_std.std));
@@ -230,7 +228,7 @@ test "sync/unit/embed_std" {
 test "io/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .io);
     defer t.deinit();
 
     t.run("io/unit/std", io.test_runner.unit.make(std));
@@ -240,59 +238,17 @@ test "io/unit/std" {
 test "io/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .io);
     defer t.deinit();
 
     t.run("io/unit/embed_std", io.test_runner.unit.make(embed_std.std));
     if (!t.wait()) return error.TestFailed;
 }
 
-test "wifi/unit/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .std);
-    defer t.deinit();
-
-    t.run("wifi/unit/std", wifi.test_runner.unit.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "wifi/unit/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .embed);
-    defer t.deinit();
-
-    t.run("wifi/unit/embed_std", wifi.test_runner.unit.make(embed_std.std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "wifi/integration/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .std);
-    defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
-
-    t.run("wifi/integration/std", wifi.test_runner.integration.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "wifi/integration/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .embed);
-    defer t.deinit();
-    t.timeout(20 * embed_std.std.time.ns_per_s);
-
-    t.run("wifi/integration/embed_std", wifi.test_runner.integration.make(embed_std.std));
-    if (!t.wait()) return error.TestFailed;
-}
-
 test "net/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .net);
     defer t.deinit();
 
     t.run("net/unit/std", net.test_runner.unit.make(std));
@@ -302,7 +258,7 @@ test "net/unit/std" {
 test "net/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .net);
     defer t.deinit();
 
     t.run("net/unit/embed_std", net.test_runner.unit.make(embed_std.std));
@@ -312,7 +268,7 @@ test "net/unit/embed_std" {
 test "net/integration/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .net);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
@@ -323,7 +279,7 @@ test "net/integration/std" {
 test "net/integration/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .net);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
 
@@ -334,7 +290,7 @@ test "net/integration/embed_std" {
 test "modem/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .modem);
     defer t.deinit();
 
     t.run("modem/unit/std", modem.test_runner.unit.make(std));
@@ -344,7 +300,7 @@ test "modem/unit/std" {
 test "modem/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .modem);
     defer t.deinit();
 
     t.run("modem/unit/embed_std", modem.test_runner.unit.make(embed_std.std));
@@ -354,7 +310,7 @@ test "modem/unit/embed_std" {
 test "at/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .at);
     defer t.deinit();
 
     t.run("at/unit/std", at.test_runner.unit.make(std));
@@ -364,7 +320,7 @@ test "at/unit/std" {
 test "at/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .at);
     defer t.deinit();
 
     t.run("at/unit/embed_std", at.test_runner.unit.make(embed_std.std));
@@ -374,7 +330,7 @@ test "at/unit/embed_std" {
 test "at/integration/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .at);
     defer t.deinit();
     t.timeout(30 * std.time.ns_per_s);
 
@@ -385,7 +341,7 @@ test "at/integration/std" {
 test "at/integration/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .at);
     defer t.deinit();
     t.timeout(30 * embed_std.std.time.ns_per_s);
 
@@ -393,30 +349,10 @@ test "at/integration/embed_std" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "display/unit/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .std);
-    defer t.deinit();
-
-    t.run("display/unit/std", display.test_runner.unit.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "display/unit/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .embed);
-    defer t.deinit();
-
-    t.run("display/unit/embed_std", display.test_runner.unit.make(embed_std.std));
-    if (!t.wait()) return error.TestFailed;
-}
-
 test "drivers/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .drivers);
     defer t.deinit();
 
     t.run("drivers/unit/std", drivers.test_runner.unit.make(std));
@@ -426,7 +362,7 @@ test "drivers/unit/std" {
 test "drivers/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .drivers);
     defer t.deinit();
 
     t.run("drivers/unit/embed_std", drivers.test_runner.unit.make(embed_std.std));
@@ -436,7 +372,7 @@ test "drivers/unit/embed_std" {
 test "ledstrip/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .ledstrip);
     defer t.deinit();
 
     t.run("ledstrip/unit/std", ledstrip.test_runner.unit.make(std));
@@ -446,7 +382,7 @@ test "ledstrip/unit/std" {
 test "ledstrip/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .ledstrip);
     defer t.deinit();
 
     t.run("ledstrip/unit/embed_std", ledstrip.test_runner.unit.make(embed_std.std));
@@ -456,7 +392,7 @@ test "ledstrip/unit/embed_std" {
 test "sync/integration/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .sync);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
@@ -467,7 +403,7 @@ test "sync/integration/std" {
 test "sync/integration/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .sync);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
 
@@ -478,7 +414,7 @@ test "sync/integration/embed_std" {
 test "embed/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .embed);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
@@ -500,7 +436,7 @@ test "embed/unit/embed_std" {
 test "context/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .std);
+    var t = testing.T.new(std, .context);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
@@ -511,7 +447,7 @@ test "context/unit/std" {
 test "context/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .context);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
 

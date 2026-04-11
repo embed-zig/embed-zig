@@ -5,13 +5,14 @@ pub const button = @import("unit/button.zig");
 pub const bt = @import("unit/bt.zig");
 pub const event = @import("unit/event.zig");
 pub const imu = @import("unit/imu.zig");
+pub const modem = @import("unit/modem.zig");
 pub const netstack = @import("unit/netstack.zig");
 pub const nfc = @import("unit/nfc.zig");
 pub const pipeline = @import("unit/pipeline.zig");
 pub const store = @import("unit/store.zig");
 pub const wifi = @import("unit/wifi.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
@@ -23,14 +24,15 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
 
             t.parallel();
-            t.run("assembler", assembler.make(lib));
+            t.run("assembler", assembler.make(lib, Channel));
             t.run("button", button.make(lib));
             t.run("bt", bt.make(lib));
             t.run("event", event.make(lib));
             t.run("imu", imu.make(lib));
+            t.run("modem", modem.make(lib));
             t.run("netstack", netstack.make(lib));
             t.run("nfc", nfc.make(lib));
-            t.run("pipeline", pipeline.make(lib));
+            t.run("pipeline", pipeline.make(lib, Channel));
             t.run("store", store.make(lib));
             t.run("wifi", wifi.make(lib));
             return t.wait();

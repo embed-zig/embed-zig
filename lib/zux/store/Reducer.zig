@@ -15,12 +15,15 @@ pub fn make(comptime Store: type) type {
         pub const Stores = Store.Stores;
         pub const ReducerFn = *const fn (stores: *Stores, message: Message, emit: Emitter) anyerror!usize;
 
-        pub fn init(self: *Self, stores: *Stores, reducer: ReducerFn) Node {
-            self.* = .{
+        pub fn init(stores: *Stores, reducer: ReducerFn) Self {
+            return .{
                 .stores = stores,
                 .reducer = reducer,
                 .out = null,
             };
+        }
+
+        pub fn node(self: *Self) Node {
             return Node.init(Self, self);
         }
 
@@ -35,7 +38,14 @@ pub fn make(comptime Store: type) type {
 
             var noop = NoopSink{};
             const emit = self.out orelse Emitter.init(&noop);
-            return self.reducer(self.stores, message, emit);
+            const reduced = try self.reducer(self.stores, message, emit);
+            if (message.body == .tick) {
+                if (self.out) |out| {
+                    try out.emit(message);
+                    return reduced + 1;
+                }
+            }
+            return reduced;
         }
     };
 }
@@ -106,10 +116,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var stores: AppStore.Stores = .{
                 .button = .{},
             };
-            var reducer_impl: ReducerTy = undefined;
+            var reducer_impl = ReducerTy.init(&stores, ButtonReducer.reduce);
             var sink = Sink{};
 
-            var node = reducer_impl.init(&stores, ButtonReducer.reduce);
+            var node = reducer_impl.node();
             node.bindOutput(Emitter.init(&sink));
 
             const emitted = try node.process(.{

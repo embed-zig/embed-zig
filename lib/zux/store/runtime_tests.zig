@@ -52,7 +52,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     builder.setStore(.wifi, Wifi);
                     builder.setStore(.cellular, Cellular);
                     builder.setState("ui", .{ .wifi, .cellular });
-                    builder.setState("ui.home", .{.wifi});
+                    builder.setState("ui/home", .{.wifi});
                 }
             }.apply);
 
@@ -97,7 +97,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const S = makeTestStore(StoreLib, struct {
                 fn apply(builder: *DefaultBuilder) void {
                     builder.setStore(.wifi, Wifi);
-                    builder.setState("ui.home", .{});
+                    builder.setState("ui/home", .{});
                 }
             }.apply);
 
@@ -191,7 +191,6 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try store.handle("ui", Recorder.onUi);
 
             store.stores.wifi.set(.{ .enabled = true });
-            store.stores.wifi.tick();
             store.tick();
 
             try testing.expectEqual(@as(usize, 1), Recorder.calls);
@@ -205,7 +204,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const S = makeTestStore(StoreLib, struct {
                 fn apply(builder: *DefaultBuilder) void {
                     builder.setStore(.wifi, Wifi);
-                    builder.setState("ui.home", .{});
+                    builder.setState("ui/home", .{});
                 }
             }.apply);
 
@@ -265,7 +264,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const S = makeTestStore(StoreLib, struct {
                 fn apply(builder: *DefaultBuilder) void {
                     builder.setStore(.wifi, Wifi);
-                    builder.setState("ui.home", .{});
+                    builder.setState("ui/home", .{});
                 }
             }.apply);
 
@@ -404,7 +403,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 fn apply(builder: *DefaultBuilder) void {
                     builder.setStore(.wifi, Wifi);
                     builder.setStore(.cellular, Cellular);
-                    builder.setState("ui.home", .{});
+                    builder.setState("ui/home", .{});
                     builder.setState("device", .{});
                 }
             }.apply);

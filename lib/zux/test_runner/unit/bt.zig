@@ -1,6 +1,6 @@
 const testing_api = @import("testing");
 
-const Bt = @import("../../Bt.zig");
+const component_bt = @import("../../component/bt.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
@@ -14,7 +14,10 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
 
             t.parallel();
-            t.run("Bt", Bt.TestRunner(lib));
+            t.run("component.bt", component_bt.TestRunner(lib));
+            t.run("component.bt.EventHook", component_bt.EventHook.TestRunner(lib));
+            t.run("component.bt.CentralReducer", component_bt.CentralReducer.TestRunner(lib));
+            t.run("component.bt.PeriphReducer", component_bt.PeriphReducer.TestRunner(lib));
             return t.wait();
         }
 

@@ -1,8 +1,6 @@
 const testing_api = @import("testing");
 
-const Accel = @import("../../imu/Accel.zig");
-const Gyro = @import("../../imu/Gyro.zig");
-const MotionDetector = @import("../../imu/MotionDetector.zig");
+const Reducer = @import("../../component/imu/Reducer.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
@@ -15,10 +13,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.parallel();
-            t.run("Accel", Accel.TestRunner(lib));
-            t.run("Gyro", Gyro.TestRunner(lib));
-            t.run("MotionDetector", MotionDetector.TestRunner(lib));
+            t.run("Reducer", Reducer.TestRunner(lib));
             return t.wait();
         }
 

@@ -1,8 +1,8 @@
 const testing_api = @import("testing");
 
-pub const bt = @import("integration/bt.zig");
+pub const component = @import("integration/component.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
@@ -13,7 +13,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("bt", bt.make(lib));
+            t.run("component", component.make(lib, Channel));
             return t.wait();
         }
 

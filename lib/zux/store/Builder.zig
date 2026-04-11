@@ -1,4 +1,5 @@
-const builtin = @import("std").builtin;
+const embed = @import("embed");
+const builtin = embed.builtin;
 const testing_api = @import("testing");
 const StoreState = @import("State.zig");
 const StoreTypes = @import("Stores.zig");
@@ -19,7 +20,7 @@ const ValidationError = error{
     EmptyStoreLabel,
     EmptyStatePath,
     EmptyStatePathSegment,
-    SlashSeparatedStatePath,
+    DotSeparatedStatePath,
     ReservedStateField,
     UnsupportedStoreLabel,
     UnsupportedStateLabels,
@@ -87,7 +88,7 @@ pub fn Builder(comptime options: BuilderOptions) type {
             self.store_count += 1;
         }
 
-        // Set the store labels for one dot-delimited state node path,
+        // Set the store labels for one slash-delimited state node path,
         // implicitly creating any missing intermediate nodes.
         // Repeated calls for the same path should overwrite the previous labels.
         pub fn setState(self: *Self, comptime path: []const u8, comptime labels: anytype) void {
@@ -170,7 +171,16 @@ pub fn Builder(comptime options: BuilderOptions) type {
                 }
 
                 pub fn tick(self_store: *Generated) void {
+                    tickStores(&self_store.stores);
                     StoreState.tick(State, self_store.state, &self_store.stores);
+                }
+
+                fn tickStores(stores: *Stores) void {
+                    inline for (@typeInfo(Stores).@"struct".fields) |field| {
+                        if (@hasDecl(field.type, "tick")) {
+                            @field(stores.*, field.name).tick();
+                        }
+                    }
                 }
             };
         }
@@ -196,7 +206,7 @@ fn validationErrorMessage(err: ValidationError) []const u8 {
         error.EmptyStoreLabel => "zux.store.Builder store labels must not be empty",
         error.EmptyStatePath => "zux.store.Builder.setState paths must not be empty",
         error.EmptyStatePathSegment => "zux.store.Builder.setState paths must not contain empty segments",
-        error.SlashSeparatedStatePath => "zux.store.Builder.setState paths must use '.' separators instead of '/'",
+        error.DotSeparatedStatePath => "zux.store.Builder.setState paths must use '/' separators instead of '.'",
         error.ReservedStateField => "zux.store.Builder.setState paths cannot use reserved state field names",
         error.UnsupportedStoreLabel => "zux.store.Builder.setStore labels must be enum literals or string literals",
         error.UnsupportedStateLabels => "zux.store.Builder.setState labels must be enum literals, string literals, or tuples/arrays of them",
@@ -237,22 +247,21 @@ fn sentinelName(comptime text: []const u8) [:0]const u8 {
 
 fn validateStatePath(comptime path: []const u8, comptime max_depth: usize) ValidationError![]const u8 {
     if (path.len == 0) return error.EmptyStatePath;
-    if (path[0] == '.' or path[path.len - 1] == '.') return error.EmptyStatePathSegment;
+    if (path[0] == '/' or path[path.len - 1] == '/') return error.EmptyStatePathSegment;
 
     comptime var depth: usize = 1;
     comptime var segment_start: usize = 0;
 
     inline for (path, 0..) |c, i| {
-        switch (c) {
-            '/' => return error.SlashSeparatedStatePath,
-            '.' => {
-                if (i == segment_start) return error.EmptyStatePathSegment;
-                try validateStateSegment(path[segment_start..i]);
-                depth += 1;
-                if (depth > max_depth) return error.MaxDepthExceeded;
-                segment_start = i + 1;
-            },
-            else => {},
+        if (c == '.') {
+            return error.DotSeparatedStatePath;
+        }
+        if (c == '/') {
+            if (i == segment_start) return error.EmptyStatePathSegment;
+            try validateStateSegment(path[segment_start..i]);
+            depth += 1;
+            if (depth > max_depth) return error.MaxDepthExceeded;
+            segment_start = i + 1;
         }
     }
 
@@ -366,7 +375,7 @@ fn countStateNodes(comptime builder: anytype) usize {
     inline for (0..builder.state_binding_count) |i| {
         const path = builder.state_bindings[i].path;
         inline for (path, 0..) |c, idx| {
-            if (c != '.') continue;
+            if (c != '/') continue;
             appendUniqueString(&prefixes, &prefix_len, path[0..idx]);
         }
         appendUniqueString(&prefixes, &prefix_len, path);
@@ -549,16 +558,16 @@ fn collectChildPrefixes(
 
 fn immediateChildPrefix(comptime path: []const u8, comptime prefix: []const u8) ?[]const u8 {
     if (prefix.len == 0) {
-        const end = firstDotIndex(path) orelse path.len;
+        const end = firstPathSeparatorIndex(path) orelse path.len;
         return path[0..end];
     }
     if (!startsWith(path, prefix)) return null;
     if (path.len <= prefix.len) return null;
-    if (path[prefix.len] != '.') return null;
+    if (path[prefix.len] != '/') return null;
 
     const rest_start = prefix.len + 1;
     const rest = path[rest_start..];
-    const rel_end = firstDotIndex(rest) orelse rest.len;
+    const rel_end = firstPathSeparatorIndex(rest) orelse rest.len;
     return path[0 .. rest_start + rel_end];
 }
 
@@ -572,9 +581,9 @@ fn startsWith(comptime text: []const u8, comptime prefix: []const u8) bool {
     return comptimeEql(text[0..prefix.len], prefix);
 }
 
-fn firstDotIndex(comptime text: []const u8) ?usize {
+fn firstPathSeparatorIndex(comptime text: []const u8) ?usize {
     inline for (text, 0..) |c, i| {
-        if (c == '.') return i;
+        if (c == '/') return i;
     }
     return null;
 }
@@ -593,9 +602,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 var next = B.init();
                 next.setStore(.wifi, Wifi);
                 next.setStore(.cellular, Cellular);
-                next.setState("ui.home", .{ .wifi, .cellular });
+                next.setState("ui/home", .{ .wifi, .cellular });
                 next.setState("ui", .{.wifi});
-                next.setState("ui.home", .{.wifi});
+                next.setState("ui/home", .{.wifi});
                 next.setStore(.wifi, Wifi2);
                 break :blk next;
             };
@@ -609,11 +618,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
         fn validate_state_path_reports_errors(testing: anytype, _: lib.mem.Allocator) !void {
             try testing.expectError(error.EmptyStatePath, validateStatePath("", 4));
-            try testing.expectError(error.EmptyStatePathSegment, validateStatePath(".ui", 4));
-            try testing.expectError(error.EmptyStatePathSegment, validateStatePath("ui..home", 4));
-            try testing.expectError(error.SlashSeparatedStatePath, validateStatePath("ui/home", 4));
-            try testing.expectError(error.ReservedStateField, validateStatePath("ui.stores", 4));
-            try testing.expectError(error.MaxDepthExceeded, validateStatePath("a.b.c", 2));
+            try testing.expectError(error.DotSeparatedStatePath, validateStatePath(".ui", 4));
+            try testing.expectError(error.DotSeparatedStatePath, validateStatePath("ui..home", 4));
+            try testing.expectError(error.DotSeparatedStatePath, validateStatePath("ui.home", 4));
+            try testing.expectEqualStrings("ui/home", try validateStatePath("ui/home", 4));
+            try testing.expectError(error.ReservedStateField, validateStatePath("ui/stores", 4));
+            try testing.expectError(error.MaxDepthExceeded, validateStatePath("a/b/c", 2));
         }
 
         fn collect_labels_accepts_singles_tuples_and_dedupes(testing: anytype, _: lib.mem.Allocator) !void {
@@ -650,7 +660,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 builder.setStore(.wifi, Wifi);
                 builder.setStore(.cellular, Cellular);
                 builder.setState("ui", .{});
-                builder.setState("ui.home", .{});
+                builder.setState("ui/home", .{});
                 break :blk builder.make(StoreLib);
             };
 
@@ -683,7 +693,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             const AppStore = comptime blk: {
                 var builder = B.init();
-                builder.setState("ui.home", .{.wifi});
+                builder.setState("ui/home", .{.wifi});
                 builder.setStore(.wifi, Wifi);
                 break :blk builder.make(StoreLib);
             };

@@ -1,6 +1,6 @@
 const testing_api = @import("testing");
 
-const Wifi = @import("../../Wifi.zig");
+const component_wifi = @import("../../component/wifi.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
@@ -14,7 +14,10 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
 
             t.parallel();
-            t.run("Wifi", Wifi.TestRunner(lib));
+            t.run("component.wifi", component_wifi.TestRunner(lib));
+            t.run("component.wifi.EventHook", component_wifi.EventHook.TestRunner(lib));
+            t.run("component.wifi.StaReducer", component_wifi.StaReducer.TestRunner(lib));
+            t.run("component.wifi.ApReducer", component_wifi.ApReducer.TestRunner(lib));
             return t.wait();
         }
 

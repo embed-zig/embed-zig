@@ -1,8 +1,6 @@
 const testing_api = @import("testing");
 
-const Button = @import("../../button/Button.zig");
-const GroupedButton = @import("../../button/GroupedButton.zig");
-const GestureDetector = @import("../../button/GestureDetector.zig");
+const button = @import("../../component/button.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
@@ -15,10 +13,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.parallel();
-            t.run("Button", Button.TestRunner(lib));
-            t.run("GroupedButton", GroupedButton.TestRunner(lib));
-            t.run("GestureDetector", GestureDetector.TestRunner(lib));
+            t.run("button.Reducer", button.Reducer.TestRunner(lib));
             return t.wait();
         }
 

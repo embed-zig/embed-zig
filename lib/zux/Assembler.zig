@@ -1,126 +1,119 @@
-const LedStrip = @import("ledstrip");
-const Store = @import("Store.zig");
-const PipelineNodeBuilder = @import("pipeline/NodeBuilder.zig");
-const testing_api = @import("testing");
+const Config = @import("assembler/Config.zig");
+const assembler_builder = @import("assembler/Builder.zig");
+const BuildContext = @import("assembler/BuildContext.zig");
+const assembler_build_config = @import("assembler/BuildConfig.zig");
+const NodeBuilder = @import("pipeline/NodeBuilder.zig");
+const Store = @import("store.zig");
+const registry_adc_button = @import("assembler/registry/adc_button.zig");
+const registry_gpio_button = @import("assembler/registry/gpio_button.zig");
+const registry_ledstrip = @import("assembler/registry/ledstrip.zig");
 
-pub fn make(comptime lib: type, comptime config: anytype) type {
-    const StoreBuilder = Store.Builder(.{});
-    const NodeBuilder = PipelineNodeBuilder.Builder(.{});
+pub fn make(
+    comptime lib: type,
+    comptime config: Config,
+    comptime Channel: fn (type) type,
+) type {
+    const StoreBuilderType = Store.Builder(config.store);
+    const NodeBuilderType = NodeBuilder.Builder(config.node);
+    const AdcButtonRegistryType = registry_adc_button.make(config.max_adc_buttons);
+    const GpioButtonRegistryType = registry_gpio_button.make(config.max_gpio_buttons);
+    const LedStripRegistryType = registry_ledstrip.make(config.max_led_strips);
 
     return struct {
         const Self = @This();
 
+        store_builder: StoreBuilderType,
+        node_builder: NodeBuilderType,
+        adc_button_registry: AdcButtonRegistryType,
+        gpio_button_registry: GpioButtonRegistryType,
+        ledstrip_registry: LedStripRegistryType,
+
         pub const Lib = lib;
         pub const Config = config;
-        pub const StoreBuilderType = StoreBuilder;
-        pub const NodeBuilderType = NodeBuilder;
+        pub const ChannelType = Channel;
 
-        fn addBtHost(comptime id: u32, comptime Host: type) void {
-            _ = Host;
-            _ = id;
-            @compileError("zux.Assembler.addBtHost is not implemented yet");
-        }
-
-        pub const LedStripOptions = struct {
-            pixel_count: usize,
-            max_frames: usize = 16,
-        };
-
-        pub const LedStripShape = struct {
-            AnimatorType: type,
-            reducer_store_label: []const u8,
-            reducer_state_path: []const u8,
-            refresh_store_label: []const u8,
-        };
-
-        pub fn ledStripShape(comptime id: u32, comptime Strip: type, comptime options: LedStripOptions) LedStripShape {
-            _ = Strip;
-            _ = id;
+        pub fn init() Self {
             return .{
-                .AnimatorType = LedStrip.Animator.make(options.pixel_count, options.max_frames),
-                .reducer_store_label = "ledstrip",
-                .reducer_state_path = "ledstrip",
-                .refresh_store_label = "ledstrip",
+                .store_builder = StoreBuilderType.init(),
+                .node_builder = NodeBuilderType.init(),
+                .adc_button_registry = AdcButtonRegistryType.init(),
+                .gpio_button_registry = GpioButtonRegistryType.init(),
+                .ledstrip_registry = LedStripRegistryType.init(),
             };
         }
 
-        pub fn addLedStrip(comptime id: u32, comptime Strip: type, comptime options: LedStripOptions) void {
-            const shape = ledStripShape(id, Strip, options);
-            _ = shape;
-            @compileError("zux.Assembler.addLedStrip is not implemented yet");
+        pub fn setStore(self: *Self, comptime label: anytype, comptime StoreType: type) void {
+            self.store_builder.setStore(label, StoreType);
         }
 
-        pub fn build(comptime build_config: anytype) type {
-            _ = build_config;
-            @compileError("zux.Assembler.build is not implemented yet");
-        }
-    };
-}
-
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    const TestCase = struct {
-        fn exposesPlannedShape(testing: anytype) !void {
-            const TestLib = struct {};
-
-            const AssType = make(TestLib, .{});
-
-            try testing.expect(@TypeOf(AssType) == type);
-            try testing.expect(@hasDecl(AssType, "Lib"));
-            try testing.expect(@hasDecl(AssType, "Config"));
-            try testing.expect(@hasDecl(AssType, "StoreBuilderType"));
-            try testing.expect(@hasDecl(AssType, "NodeBuilderType"));
-            try testing.expect(@hasDecl(AssType, "LedStripOptions"));
-            try testing.expect(@hasDecl(AssType, "LedStripShape"));
-            try testing.expect(@hasDecl(AssType, "build"));
-            try testing.expect(@hasDecl(AssType, "addLedStrip"));
+        pub fn setState(self: *Self, comptime path: []const u8, comptime labels: anytype) void {
+            self.store_builder.setState(path, labels);
         }
 
-        fn addLedStripShapeDescribesAnimatorStoreNodeAndRefreshIntent(testing: anytype) !void {
-            const TestLib = struct {};
+        pub fn addGroupedButton(
+            self: *Self,
+            comptime label: @Type(.enum_literal),
+            comptime id: u32,
+            comptime button_count: usize,
+        ) void {
+            self.adc_button_registry.add(label, id, button_count);
+        }
 
-            const AssType = make(TestLib, .{});
-            const shape = AssType.ledStripShape(7, LedStrip, .{
-                .pixel_count = 24,
-                .max_frames = 8,
+        pub fn addSingleButton(
+            self: *Self,
+            comptime label: @Type(.enum_literal),
+            comptime id: u32,
+        ) void {
+            self.gpio_button_registry.add(label, id);
+        }
+
+        pub fn addLedStrip(
+            self: *Self,
+            comptime label: @Type(.enum_literal),
+            comptime id: u32,
+            comptime pixel_count: usize,
+        ) void {
+            self.ledstrip_registry.add(label, id, pixel_count);
+        }
+
+        pub fn BuildConfig(comptime self: Self) type {
+            return assembler_build_config.make(.{
+                .adc_button = self.adc_button_registry,
+                .gpio_button = self.gpio_button_registry,
+                .ledstrip = self.ledstrip_registry,
             });
+        }
 
-            try testing.expect(shape.AnimatorType == LedStrip.Animator.make(24, 8));
-            try testing.expectEqualStrings("ledstrip", shape.reducer_store_label);
-            try testing.expectEqualStrings("ledstrip", shape.reducer_state_path);
-            try testing.expectEqualStrings("ledstrip", shape.refresh_store_label);
+        pub fn build(comptime self: Self, comptime build_config: self.BuildConfig()) type {
+            return assembler_builder.init().build(BuildContext.make(.{
+                .lib = lib,
+                .assembler_config = config,
+                .build_config = build_config,
+                .registries = .{
+                    .adc_button = self.adc_button_registry,
+                    .gpio_button = self.gpio_button_registry,
+                    .ledstrip = self.ledstrip_registry,
+                },
+                .store_builder = self.store_builder,
+                .node_builder = self.node_builder,
+                .channel = Channel,
+            }));
+        }
+
+        pub fn node(self: *Self, comptime tag: @Type(.enum_literal)) void {
+            self.node_builder.node(tag);
+        }
+
+        pub fn beginSwitch(self: *Self) void {
+            self.node_builder.beginSwitch();
+        }
+
+        pub fn case(self: *Self, comptime kind: @import("pipeline/Message.zig").Kind) void {
+            self.node_builder.case(kind);
+        }
+
+        pub fn endSwitch(self: *Self) void {
+            self.node_builder.endSwitch();
         }
     };
-
-    const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
-            _ = self;
-            _ = allocator;
-        }
-
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
-            _ = self;
-            _ = allocator;
-            const testing = lib.testing;
-
-            TestCase.exposesPlannedShape(testing) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.addLedStripShapeDescribesAnimatorStoreNodeAndRefreshIntent(testing) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
-        }
-
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
-            _ = self;
-            _ = allocator;
-        }
-    };
-
-    const Holder = struct {
-        var runner: Runner = .{};
-    };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

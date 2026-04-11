@@ -1,4 +1,5 @@
-const builtin = @import("std").builtin;
+const embed = @import("embed");
+const builtin = embed.builtin;
 const testing_api = @import("testing");
 const BranchNode = @import("BranchNode.zig");
 const Emitter = @import("Emitter.zig");
@@ -8,7 +9,6 @@ const Node = @import("Node.zig");
 const EnumLiteral = @Type(.enum_literal);
 const route_count = @typeInfo(Message.Kind).@"enum".fields.len;
 const ValidationError = error{
-    EmptyBuilder,
     UnterminatedSwitch,
     EmptySequence,
     InvalidNodeSpan,
@@ -108,12 +108,39 @@ pub fn Builder(comptime options: BuilderOptions) type {
             const GeneratedConfig = makeConfig(self);
 
             return struct {
+                const Bypass = struct {
+                    out: ?Emitter = null,
+
+                    pub fn bindOutput(node_impl: *@This(), out: Emitter) void {
+                        node_impl.out = out;
+                    }
+
+                    pub fn process(node_impl: *@This(), message: Message) !usize {
+                        if (node_impl.out) |out| {
+                            try out.emit(message);
+                            return 1;
+                        }
+                        return 0;
+                    }
+                };
+
                 pub const BuiltConfig = GeneratedConfig;
                 pub const Config = BuiltConfig;
 
                 pub fn build(config: *BuiltConfig) Node {
+                    if (self.len == 0) {
+                        return makeBypassNode();
+                    }
                     var next_branch_index: usize = 0;
                     return buildSeqRange(self, 0, self.len, config, &next_branch_index, null);
+                }
+
+                fn makeBypassNode() Node {
+                    const Holder = struct {
+                        var impl: Bypass = .{};
+                    };
+                    Holder.impl = .{};
+                    return Node.init(Bypass, &Holder.impl);
                 }
             };
         }
@@ -176,7 +203,6 @@ pub fn Builder(comptime options: BuilderOptions) type {
 
 fn validationErrorMessage(err: ValidationError) []const u8 {
     return switch (err) {
-        error.EmptyBuilder => "zux.pipeline.NodeBuilder.Builder.make requires at least one node or switch",
         error.UnterminatedSwitch => "zux.pipeline.NodeBuilder.Builder.make found an unterminated switch",
         error.EmptySequence => "zux.pipeline.NodeBuilder encountered an empty sequence",
         error.InvalidNodeSpan => "zux.pipeline.NodeBuilder node item had an invalid span",
@@ -193,7 +219,7 @@ fn validationErrorMessage(err: ValidationError) []const u8 {
 }
 
 fn validateBuilder(comptime builder: anytype) ValidationError!void {
-    if (builder.len == 0) return error.EmptyBuilder;
+    if (builder.len == 0) return;
     if (builder.frame_len != 0) return error.UnterminatedSwitch;
     try validateSeqRange(builder, 0, builder.len);
 }
@@ -631,13 +657,37 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try testing.expectEqual(@as(usize, 4), collector.count);
         }
 
-        fn validateRejectsEmptyBuilder(testing: anytype) !void {
-            const result = comptime blk: {
+        fn buildAllowsEmptyBuilder(testing: anytype) !void {
+            const Built = comptime blk: {
                 const builder = Builder(.{}).init();
-                break :blk builder.validate();
+                break :blk builder.make();
             };
 
-            try testing.expectError(error.EmptyBuilder, result);
+            const Collector = struct {
+                called: bool = false,
+                last_kind: ?Message.Kind = null,
+
+                pub fn emit(self: *@This(), message: Message) !void {
+                    self.called = true;
+                    self.last_kind = message.kind();
+                }
+            };
+
+            var config: Built.Config = .{};
+            var root = Built.build(&config);
+            var collector = Collector{};
+            root.bindOutput(Emitter.init(&collector));
+
+            const emitted = try root.process(.{
+                .origin = .manual,
+                .body = .{
+                    .tick = .{},
+                },
+            });
+
+            try testing.expectEqual(@as(usize, 1), emitted);
+            try testing.expect(collector.called);
+            try testing.expectEqual(Message.Kind.tick, collector.last_kind.?);
         }
 
         fn validateRejectsUnterminatedSwitch(testing: anytype) !void {
@@ -776,7 +826,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             inline for (.{
                 TestCase.buildReturnsRootNode,
-                TestCase.validateRejectsEmptyBuilder,
+                TestCase.buildAllowsEmptyBuilder,
                 TestCase.validateRejectsUnterminatedSwitch,
                 TestCase.validateRejectsDuplicateCase,
                 TestCase.buildHandlesNestedSwitches,

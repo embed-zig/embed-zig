@@ -1,8 +1,13 @@
-const std = @import("std");
-const builtin = std.builtin;
+const embed = @import("embed");
+const builtin = embed.builtin;
 
 pub const Context = @import("event/Context.zig");
 pub const EventReceiver = @import("event/EventReceiver.zig");
+const bt_event = @import("component/bt/event.zig");
+const button_event = @import("component/button/event.zig");
+const modem_event = @import("component/modem/event.zig");
+const nfc_event = @import("component/nfc/event.zig");
+const wifi_event = @import("component/wifi/event.zig");
 
 pub fn make(comptime Events: anytype) type {
     const count = Events.len;
@@ -25,7 +30,7 @@ pub fn make(comptime Events: anytype) type {
 
     const KindType = @Type(.{
         .@"enum" = .{
-            .tag_type = std.math.IntFittingRange(0, count - 1),
+            .tag_type = if (count == 0) u0 else embed.math.IntFittingRange(0, count - 1),
             .fields = &enum_fields,
             .decls = &.{},
             .is_exhaustive = true,
@@ -44,26 +49,44 @@ pub fn make(comptime Events: anytype) type {
 
 pub const Event = make(.{
     @import("pipeline/Tick.zig"),
-    @import("button/Button.zig").Event,
-    @import("button/GroupedButton.zig").Event,
-    @import("button/GestureDetector.zig").Event,
-    @import("imu/Accel.zig").Event,
-    @import("imu/Gyro.zig").Event,
-    @import("imu/MotionDetector.zig").Event,
-    @import("Nfc.zig").FoundEvent,
-    @import("Nfc.zig").ReadEvent,
-    @import("Wifi.zig").StaScanResultEvent,
-    @import("Wifi.zig").StaConnectedEvent,
-    @import("Wifi.zig").StaDisconnectedEvent,
-    @import("Bt.zig").PeriphAdvertisingStartedEvent,
-    @import("Bt.zig").PeriphAdvertisingStoppedEvent,
-    @import("Bt.zig").CentralFoundEvent,
-    @import("Bt.zig").CentralConnectedEvent,
-    @import("Bt.zig").CentralDisconnectedEvent,
-    @import("Bt.zig").CentralNotificationEvent,
-    @import("Bt.zig").PeriphConnectedEvent,
-    @import("Bt.zig").PeriphDisconnectedEvent,
-    @import("Bt.zig").PeriphMtuChangedEvent,
+    button_event.Single,
+    button_event.Grouped,
+    button_event.Detected,
+    @import("component/ledstrip/event.zig").Set,
+    @import("component/ledstrip/event.zig").SetPixels,
+    @import("component/ledstrip/event.zig").Flash,
+    @import("component/ledstrip/event.zig").Pingpong,
+    @import("component/ledstrip/event.zig").Rotate,
+    @import("component/imu/event.zig").Accel,
+    @import("component/imu/event.zig").Gyro,
+    @import("component/imu/event.zig").Motion,
+    modem_event.SimStateChanged,
+    modem_event.RegistrationChanged,
+    modem_event.PacketStateChanged,
+    modem_event.SignalChanged,
+    modem_event.ApnChanged,
+    nfc_event.Found,
+    nfc_event.Read,
+    wifi_event.StaScanResult,
+    wifi_event.StaConnected,
+    wifi_event.StaDisconnected,
+    wifi_event.StaGotIp,
+    wifi_event.StaLostIp,
+    wifi_event.ApStarted,
+    wifi_event.ApStopped,
+    wifi_event.ApClientJoined,
+    wifi_event.ApClientLeft,
+    wifi_event.ApLeaseGranted,
+    wifi_event.ApLeaseReleased,
+    bt_event.PeriphAdvertisingStarted,
+    bt_event.PeriphAdvertisingStopped,
+    bt_event.CentralFound,
+    bt_event.CentralConnected,
+    bt_event.CentralDisconnected,
+    bt_event.CentralNotification,
+    bt_event.PeriphConnected,
+    bt_event.PeriphDisconnected,
+    bt_event.PeriphMtuChanged,
     @import("NetStack.zig").NetifCreatedEvent,
     @import("NetStack.zig").NetifDestroyedEvent,
     @import("NetStack.zig").NetifUpEvent,
