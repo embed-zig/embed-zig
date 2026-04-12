@@ -1,19 +1,17 @@
-const drivers = @import("drivers");
+const EnumLiteral = @Type(.enum_literal);
 const registry_unique = @import("unique.zig");
 
-const EnumLiteral = @Type(.enum_literal);
-
-pub fn make(comptime max_nfc: usize) type {
+pub fn make(comptime max_flows: usize) type {
     return struct {
         const Self = @This();
 
-        pub const Periph = struct {
+        pub const Flow = struct {
             label: EnumLiteral,
             id: u32,
-            control_type: type,
+            FlowType: type,
         };
 
-        periphs: [max_nfc]Periph = undefined,
+        periphs: [max_flows]Flow = undefined,
         len: usize = 0,
 
         pub fn init() Self {
@@ -24,23 +22,24 @@ pub fn make(comptime max_nfc: usize) type {
             self: *Self,
             comptime label: EnumLiteral,
             comptime id: u32,
+            comptime FlowType: type,
         ) void {
-            if (self.len >= max_nfc) {
-                @compileError("zux.Assembler exceeded max_nfc");
+            if (self.len >= max_flows) {
+                @compileError("zux.Assembler exceeded max_flows");
             }
             registry_unique.ensureUnique(
                 self.periphs,
                 self.len,
                 label,
                 id,
-                "zux.Assembler.addNfc duplicate label",
-                "zux.Assembler.addNfc duplicate id",
+                "zux.Assembler.addFlow duplicate label",
+                "zux.Assembler.addFlow duplicate id",
             );
 
             self.periphs[self.len] = .{
                 .label = label,
                 .id = id,
-                .control_type = drivers.nfc.Reader,
+                .FlowType = FlowType,
             };
             self.len += 1;
         }

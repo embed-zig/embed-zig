@@ -2,6 +2,7 @@ const testing_api = @import("testing");
 
 const Context = @import("../../event/Context.zig");
 const EventReceiver = @import("../../event/EventReceiver.zig");
+const zux_event = @import("../../event.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
@@ -14,9 +15,24 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
+            const testing = lib.testing;
+            const TestCase = struct {
+                fn event_union_requires_source_id_except_tick() !void {
+                    inline for (@typeInfo(zux_event.Event).@"union".fields) |field| {
+                        if (field.type.kind == .tick) continue;
+                        try testing.expect(@hasField(field.type, "source_id"));
+                        try testing.expect(@FieldType(field.type, "source_id") == u32);
+                    }
+                }
+            };
+
             t.parallel();
             t.run("Context", Context.TestRunner(lib));
             t.run("EventReceiver", EventReceiver.TestRunner(lib));
+            TestCase.event_union_requires_source_id_except_tick() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
             return t.wait();
         }
 

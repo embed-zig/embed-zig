@@ -7,6 +7,10 @@ const bt_event = @import("component/bt/event.zig");
 const button_event = @import("component/button/event.zig");
 const modem_event = @import("component/modem/event.zig");
 const nfc_event = @import("component/nfc/event.zig");
+const ui_flow_event = @import("component/ui/flow/event.zig");
+const ui_overlay_event = @import("component/ui/overlay/event.zig");
+const ui_route_event = @import("component/ui/route/event.zig");
+const ui_selection_event = @import("component/ui/selection/event.zig");
 const wifi_event = @import("component/wifi/event.zig");
 
 pub fn make(comptime Events: anytype) type {
@@ -17,6 +21,9 @@ pub fn make(comptime Events: anytype) type {
 
     inline for (Events, 0..) |T, i| {
         const name = @tagName(T.kind);
+        if (T.kind != .tick and (!@hasField(T, "source_id") or @FieldType(T, "source_id") != u32)) {
+            @compileError("zux.event.make requires events except `tick` to expose `source_id: u32`");
+        }
         enum_fields[i] = .{
             .name = name,
             .value = i,
@@ -93,6 +100,24 @@ pub const Event = make(.{
     bt_event.PeriphConnected,
     bt_event.PeriphDisconnected,
     bt_event.PeriphMtuChanged,
+    ui_flow_event.Move,
+    ui_flow_event.Reset,
+    ui_overlay_event.Show,
+    ui_overlay_event.Hide,
+    ui_overlay_event.SetName,
+    ui_overlay_event.SetBlocking,
+    ui_selection_event.Next,
+    ui_selection_event.Prev,
+    ui_selection_event.Set,
+    ui_selection_event.Reset,
+    ui_selection_event.SetCount,
+    ui_selection_event.SetLoop,
+    ui_route_event.Push,
+    ui_route_event.Replace,
+    ui_route_event.Reset,
+    ui_route_event.Pop,
+    ui_route_event.PopToRoot,
+    ui_route_event.SetTransitioning,
     @import("NetStack.zig").NetifCreatedEvent,
     @import("NetStack.zig").NetifDestroyedEvent,
     @import("NetStack.zig").NetifUpEvent,

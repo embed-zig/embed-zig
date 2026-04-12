@@ -7,6 +7,7 @@ pub const led_strip = @import("component/led_strip.zig");
 pub const modem = @import("component/modem.zig");
 pub const nfc = @import("component/nfc.zig");
 pub const wifi = @import("component/wifi.zig");
+pub const ui = @import("component/ui.zig");
 
 pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
     const Runner = struct {
@@ -26,6 +27,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
             t.run("modem", modem.make(lib, Channel));
             t.run("nfc", nfc.make(lib, Channel));
             t.run("wifi", wifi.make(lib, Channel));
+            t.run("ui", ui.make(lib, Channel));
             return t.wait();
         }
 

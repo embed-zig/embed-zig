@@ -1,6 +1,20 @@
 const testing_api = @import("testing");
 
 const Assembler = @import("../../Assembler.zig");
+const registry_unique = @import("../../assembler/registry/unique.zig");
+const overlay = @import("../../component/ui/overlay.zig");
+const route = @import("../../component/ui/route.zig");
+const selection = @import("../../component/ui/selection.zig");
+const ui_flow = @import("../../component/ui/flow.zig");
+
+const PairingFlow = blk: {
+    var builder = ui_flow.Builder.init();
+    builder.addNode(.idle);
+    builder.addNode(.searching);
+    builder.setInitial(.idle);
+    builder.addEdge(.idle, .searching, .start);
+    break :blk builder.build();
+};
 
 pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
     const Runner = struct {
@@ -35,6 +49,10 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                         .max_nfc = 2,
                         .max_wifi_sta = 2,
                         .max_wifi_ap = 2,
+                        .max_flows = 2,
+                        .max_overlays = 2,
+                        .max_routers = 2,
+                        .max_selections = 2,
                     }, Channel);
 
                     const assembler = comptime AssemblerType.init();
@@ -50,6 +68,10 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expectEqual(@as(usize, 2), assembler.nfc_registry.periphs.len);
                     try testing.expectEqual(@as(usize, 2), assembler.wifi_sta_registry.periphs.len);
                     try testing.expectEqual(@as(usize, 2), assembler.wifi_ap_registry.periphs.len);
+                    try testing.expectEqual(@as(usize, 2), assembler.flow_registry.periphs.len);
+                    try testing.expectEqual(@as(usize, 2), assembler.overlay_registry.periphs.len);
+                    try testing.expectEqual(@as(usize, 2), assembler.router_registry.periphs.len);
+                    try testing.expectEqual(@as(usize, 2), assembler.selection_registry.periphs.len);
                     try testing.expectEqual(@as(usize, 0), assembler.store_builder.store_count);
                     try testing.expectEqual(@as(usize, 0), assembler.node_builder.len);
                     try testing.expectEqual(@as(usize, 0), assembler.adc_button_registry.len);
@@ -60,6 +82,10 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expectEqual(@as(usize, 0), assembler.nfc_registry.len);
                     try testing.expectEqual(@as(usize, 0), assembler.wifi_sta_registry.len);
                     try testing.expectEqual(@as(usize, 0), assembler.wifi_ap_registry.len);
+                    try testing.expectEqual(@as(usize, 0), assembler.flow_registry.len);
+                    try testing.expectEqual(@as(usize, 0), assembler.overlay_registry.len);
+                    try testing.expectEqual(@as(usize, 0), assembler.router_registry.len);
+                    try testing.expectEqual(@as(usize, 0), assembler.selection_registry.len);
                 }
 
                 fn reexports_store_and_node_builder_methods() !void {
@@ -189,6 +215,299 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expectEqual(@as(u32, 21), assembler.wifi_ap_registry.periphs[0].id);
                 }
 
+                fn add_ui_registries_record_entries() !void {
+                    const embed_std = @import("embed_std");
+
+                    const assembler = comptime blk: {
+                        const AssemblerType = Assembler.make(embed_std.std, .{
+                            .max_flows = 1,
+                            .max_overlays = 1,
+                            .max_routers = 1,
+                            .max_selections = 1,
+                        }, Channel);
+                        var next = AssemblerType.init();
+                        next.addFlow(.pairing, 31, PairingFlow);
+                        next.addOverlay(.loading, 41, overlay.State{});
+                        next.addRouter(.nav, 51, route.Router.Item{
+                            .screen_id = 5,
+                            .arg0 = 1,
+                        });
+                        next.addSelection(.menu, 61, selection.State{
+                            .count = 3,
+                            .loop = false,
+                        });
+                        break :blk next;
+                    };
+
+                    try testing.expectEqual(@as(usize, 1), assembler.flow_registry.len);
+                    try testing.expectEqual(@as(u32, 31), assembler.flow_registry.periphs[0].id);
+                    try testing.expect(@hasDecl(assembler.flow_registry.periphs[0].FlowType, "Reducer"));
+                    try testing.expectEqual(@as(usize, 1), assembler.overlay_registry.len);
+                    try testing.expectEqual(@as(u32, 41), assembler.overlay_registry.periphs[0].id);
+                    try testing.expect(!assembler.overlay_registry.periphs[0].initial_state.visible);
+                    try testing.expectEqual(@as(usize, 1), assembler.router_registry.len);
+                    try testing.expectEqual(@as(u32, 51), assembler.router_registry.periphs[0].id);
+                    try testing.expectEqual(@as(u32, 5), assembler.router_registry.periphs[0].initial_item.screen_id);
+                    try testing.expectEqual(@as(usize, 1), assembler.selection_registry.len);
+                    try testing.expectEqual(@as(u32, 61), assembler.selection_registry.periphs[0].id);
+                    try testing.expectEqual(@as(usize, 3), assembler.selection_registry.periphs[0].initial_state.count);
+                    try testing.expectEqual(@as(usize, 3), assembler.store_builder.store_count);
+                }
+
+                fn component_duplicate_detector_rejects_reused_labels_and_ids() !void {
+                    const embed_std = @import("embed_std");
+                    const assembler = comptime blk: {
+                        const AssemblerType = Assembler.make(embed_std.std, .{
+                            .max_gpio_buttons = 1,
+                            .max_flows = 1,
+                            .max_overlays = 1,
+                            .max_routers = 1,
+                            .max_selections = 1,
+                        }, Channel);
+                        var next = AssemblerType.init();
+                        next.addSingleButton(.shared, 7);
+                        next.addFlow(.pairing, 31, PairingFlow);
+                        next.addOverlay(.loading, 41, overlay.State{});
+                        next.addRouter(.nav, 51, .{ .screen_id = 1 });
+                        next.addSelection(.menu, 61, selection.State{ .count = 2 });
+                        break :blk next;
+                    };
+
+                    try testing.expect(!registry_unique.isUniqueAcross(
+                        .{
+                            assembler.gpio_button_registry,
+                            assembler.flow_registry,
+                            assembler.overlay_registry,
+                            assembler.router_registry,
+                            assembler.selection_registry,
+                        },
+                        .shared,
+                        99,
+                    ));
+                    try testing.expect(!registry_unique.isUniqueAcross(
+                        .{
+                            assembler.gpio_button_registry,
+                            assembler.flow_registry,
+                            assembler.overlay_registry,
+                            assembler.router_registry,
+                            assembler.selection_registry,
+                        },
+                        .fresh,
+                        31,
+                    ));
+                    try testing.expect(registry_unique.isUniqueAcross(
+                        .{
+                            assembler.gpio_button_registry,
+                            assembler.flow_registry,
+                            assembler.overlay_registry,
+                            assembler.router_registry,
+                            assembler.selection_registry,
+                        },
+                        .fresh,
+                        99,
+                    ));
+                }
+
+                fn build_without_optional_ui_still_returns_valid_app() !void {
+                    const embed_std = @import("embed_std");
+
+                    const Built = comptime blk: {
+                        const AssemblerType = Assembler.make(embed_std.std, .{}, Channel);
+                        var next = AssemblerType.init();
+                        const BuildConfig = next.BuildConfig();
+                        const build_config: BuildConfig = .{};
+                        break :blk next.build(build_config);
+                    };
+
+                    try testing.expectEqual(@as(usize, 0), @typeInfo(Built.FlowLabel).@"enum".fields.len);
+                    try testing.expectEqual(@as(usize, 0), @typeInfo(Built.RouterLabel).@"enum".fields.len);
+                    try testing.expectEqual(@as(usize, 0), @typeInfo(Built.OverlayLabel).@"enum".fields.len);
+                    try testing.expectEqual(@as(usize, 0), @typeInfo(Built.SelectionLabel).@"enum".fields.len);
+
+                    var app = try Built.init(.{
+                        .allocator = testing.allocator,
+                    });
+                    try app.start();
+                    try app.stop();
+                    app.deinit();
+                }
+
+                fn ui_source_ids_follow_configured_ids() !void {
+                    const embed_std = @import("embed_std");
+
+                    const Built = comptime blk: {
+                        const AssemblerType = Assembler.make(embed_std.std, .{
+                            .max_flows = 2,
+                            .max_overlays = 2,
+                            .max_routers = 2,
+                            .max_selections = 2,
+                        }, Channel);
+                        var next = AssemblerType.init();
+                        next.addFlow(.pairing_a, 31, PairingFlow);
+                        next.addFlow(.pairing_b, 32, PairingFlow);
+                        next.addOverlay(.loading_a, 41, overlay.State{});
+                        next.addOverlay(.loading_b, 42, overlay.State{});
+                        next.addRouter(.nav_a, 51, route.Router.Item{
+                            .screen_id = 1,
+                        });
+                        next.addRouter(.nav_b, 52, route.Router.Item{
+                            .screen_id = 2,
+                        });
+                        next.addSelection(.menu_a, 61, selection.State{
+                            .count = 2,
+                        });
+                        next.addSelection(.menu_b, 62, selection.State{
+                            .count = 2,
+                        });
+
+                        const BuildConfig = next.BuildConfig();
+                        const build_config: BuildConfig = .{};
+                        break :blk next.build(build_config);
+                    };
+
+                    var app = try Built.init(.{
+                        .allocator = testing.allocator,
+                    });
+                    defer app.deinit();
+
+                    try app.start();
+                    defer app.stop() catch {};
+
+                    try app.push_route(.nav_a, .{ .screen_id = 8 });
+                    switch (app.impl.last_event.?) {
+                        .ui_route_push => |event_value| {
+                            try testing.expectEqual(@as(u32, 51), event_value.source_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+
+                    try app.push_route(.nav_b, .{ .screen_id = 9 });
+                    switch (app.impl.last_event.?) {
+                        .ui_route_push => |event_value| {
+                            try testing.expectEqual(@as(u32, 52), event_value.source_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+
+                    try app.move_flow(.pairing_a, .forward, .start);
+                    switch (app.impl.last_event.?) {
+                        .ui_flow_move => |event_value| {
+                            try testing.expectEqual(@as(u32, 31), event_value.source_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+
+                    try app.move_flow(.pairing_b, .forward, .start);
+                    switch (app.impl.last_event.?) {
+                        .ui_flow_move => |event_value| {
+                            try testing.expectEqual(@as(u32, 32), event_value.source_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+
+                    try app.reset_flow(.pairing_b);
+                    switch (app.impl.last_event.?) {
+                        .ui_flow_reset => |event_value| {
+                            try testing.expectEqual(@as(u32, 32), event_value.source_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+
+                    try app.show_overlay(.loading_a, "base", false);
+                    switch (app.impl.last_event.?) {
+                        .ui_overlay_show => |event_value| {
+                            try testing.expectEqual(@as(u32, 41), event_value.source_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+
+                    try app.show_overlay(.loading_b, "busy", true);
+                    switch (app.impl.last_event.?) {
+                        .ui_overlay_show => |event_value| {
+                            try testing.expectEqual(@as(u32, 42), event_value.source_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+
+                    try app.hide_overlay(.loading_b);
+                    switch (app.impl.last_event.?) {
+                        .ui_overlay_hide => |event_value| {
+                            try testing.expectEqual(@as(u32, 42), event_value.source_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+
+                    try app.next_selection(.menu_a);
+                    switch (app.impl.last_event.?) {
+                        .ui_selection_next => |event_value| {
+                            try testing.expectEqual(@as(u32, 61), event_value.source_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+
+                    try app.next_selection(.menu_b);
+                    switch (app.impl.last_event.?) {
+                        .ui_selection_next => |event_value| {
+                            try testing.expectEqual(@as(u32, 62), event_value.source_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+
+                    try app.reset_selection(.menu_b);
+                    switch (app.impl.last_event.?) {
+                        .ui_selection_reset => |event_value| {
+                            try testing.expectEqual(@as(u32, 62), event_value.source_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+                }
+
+                fn built_app_exposes_registry_metadata() !void {
+                    const embed_std = @import("embed_std");
+                    const Built = comptime blk: {
+                        const AssemblerType = Assembler.make(embed_std.std, .{
+                            .max_adc_buttons = 1,
+                            .max_flows = 1,
+                            .max_overlays = 1,
+                            .max_routers = 1,
+                            .max_selections = 1,
+                        }, Channel);
+                        var next = AssemblerType.init();
+                        next.addGroupedButton(.buttons, 7, 3);
+                        next.addFlow(.pairing, 31, PairingFlow);
+                        next.addOverlay(.loading, 41, overlay.State{});
+                        next.addRouter(.nav, 51, .{ .screen_id = 5 });
+                        next.addSelection(.menu, 61, .{ .count = 2, .loop = false });
+
+                        const BuildConfig = next.BuildConfig();
+                        const build_config: BuildConfig = .{
+                            .buttons = @import("drivers").button.Grouped,
+                        };
+                        break :blk next.build(build_config);
+                    };
+
+                    const meta = comptime .{
+                        .grouped_button_id = Built.registries.adc_button.periphs[0].id,
+                        .flow_id = Built.registries.flow.periphs[0].id,
+                        .overlay_id = Built.registries.overlay.periphs[0].id,
+                        .router_id = Built.registries.router.periphs[0].id,
+                        .selection_id = Built.registries.selection.periphs[0].id,
+                    };
+
+                    try testing.expect(@hasDecl(Built, "Registries"));
+                    try testing.expect(@hasDecl(Built, "registries"));
+                    try testing.expectEqual(@as(usize, 1), Built.registries.adc_button.len);
+                    try testing.expectEqual(@as(usize, 1), Built.registries.flow.len);
+                    try testing.expectEqual(@as(usize, 1), Built.registries.overlay.len);
+                    try testing.expectEqual(@as(usize, 1), Built.registries.router.len);
+                    try testing.expectEqual(@as(usize, 1), Built.registries.selection.len);
+                    try testing.expectEqual(@as(u32, 7), meta.grouped_button_id);
+                    try testing.expectEqual(@as(u32, 31), meta.flow_id);
+                    try testing.expectEqual(@as(u32, 41), meta.overlay_id);
+                    try testing.expectEqual(@as(u32, 51), meta.router_id);
+                    try testing.expectEqual(@as(u32, 61), meta.selection_id);
+                }
+
                 fn build_returns_app_methods() !void {
                     const drivers = @import("drivers");
                     const embed_std = @import("embed_std");
@@ -208,6 +527,15 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                         var next = AssemblerType.init();
                         next.addGroupedButton(.buttons, 7, 3);
                         next.addLedStrip(.strip, 11, 4);
+                        next.addFlow(.pairing, 31, PairingFlow);
+                        next.addOverlay(.loading, 41, overlay.State{});
+                        next.addRouter(.nav, 51, route.Router.Item{
+                            .screen_id = 5,
+                        });
+                        next.addSelection(.menu, 61, selection.State{
+                            .count = 2,
+                            .loop = false,
+                        });
 
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{
@@ -230,6 +558,12 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expect(@hasDecl(Built, "set_led_strip_flash"));
                     try testing.expect(@hasDecl(Built, "set_led_strip_pingpong"));
                     try testing.expect(@hasDecl(Built, "set_led_strip_rotate"));
+                    try testing.expect(@hasDecl(Built, "router"));
+                    try testing.expect(@hasDecl(Built, "push_route"));
+                    try testing.expect(@hasDecl(Built, "move_flow"));
+                    try testing.expect(@hasDecl(Built, "available_moves"));
+                    try testing.expect(@hasDecl(Built, "show_overlay"));
+                    try testing.expect(@hasDecl(Built, "next_selection"));
                     try testing.expectEqual(@as(usize, 1), Built.poller_count);
                     try testing.expectEqual(@as(usize, 4), Built.pixel_count);
                     try testing.expectEqual(@as(u64, 7 * embed_std.std.time.ns_per_ms), Built.ImplType.pipeline_config.tick_interval_ns);
@@ -242,6 +576,10 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expectEqualStrings("buttons", @typeInfo(Built.PeriphLabel).@"enum".fields[0].name);
                     try testing.expect(@hasField(Built.Store.Stores, "buttons"));
                     try testing.expect(@hasField(Built.Store.Stores, "strip"));
+                    try testing.expect(@hasField(Built.Store.Stores, "pairing"));
+                    try testing.expect(@hasField(Built.Store.Stores, "loading"));
+                    try testing.expect(@hasField(Built.Store.Stores, "nav"));
+                    try testing.expect(@hasField(Built.Store.Stores, "menu"));
 
                     const MockGrouped = struct {
                         pub fn pressedButtonId(_: *@This()) !?u32 {
@@ -294,6 +632,12 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                         .strip = dummy_strip.handle(),
                     });
                     try app.start();
+                    try testing.expectEqual(@as(u32, 5), app.router(.nav).currentPage());
+                    const moves = try app.available_moves(.pairing, testing.allocator);
+                    defer testing.allocator.free(moves);
+                    try testing.expectEqual(@as(usize, 1), moves.len);
+                    try testing.expect(moves[0].direction == .forward);
+                    try testing.expect(moves[0].edge == .start);
                     try testing.expectError(error.InvalidPeriphKind, app.press_single_button(.buttons));
                     try testing.expectError(error.InvalidPeriphKind, app.release_single_button(.buttons));
                     try testing.expectError(error.InvalidPeriphKind, app.set_led_strip_pixels(.buttons, Built.FrameType{}, 1));
@@ -363,6 +707,38 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                         },
                         else => return error.UnexpectedMessage,
                     }
+                    try app.push_route(.nav, .{ .screen_id = 9 });
+                    switch (app.impl.last_event.?) {
+                        .ui_route_push => |event_value| {
+                            try testing.expectEqual(@as(u32, 51), event_value.source_id);
+                            try testing.expectEqual(@as(u32, 9), event_value.item.screen_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+                    try app.move_flow(.pairing, .forward, .start);
+                    switch (app.impl.last_event.?) {
+                        .ui_flow_move => |event_value| {
+                            try testing.expectEqual(@as(u32, 31), event_value.source_id);
+                            try testing.expect(event_value.direction == .forward);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+                    try app.show_overlay(.loading, "sync", true);
+                    switch (app.impl.last_event.?) {
+                        .ui_overlay_show => |event_value| {
+                            try testing.expectEqual(@as(u32, 41), event_value.source_id);
+                            try testing.expectEqual(@as(u8, 4), event_value.name_len);
+                            try testing.expect(event_value.blocking);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+                    try app.next_selection(.menu);
+                    switch (app.impl.last_event.?) {
+                        .ui_selection_next => |event_value| {
+                            try testing.expectEqual(@as(u32, 61), event_value.source_id);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
                     try app.stop();
                     try testing.expectError(error.NotStarted, app.release_grouped_button(.buttons));
                     app.deinit();
@@ -386,6 +762,26 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 return false;
             };
             TestCase.add_component_registries_record_entries() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.add_ui_registries_record_entries() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.build_without_optional_ui_still_returns_valid_app() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.component_duplicate_detector_rejects_reused_labels_and_ids() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.ui_source_ids_follow_configured_ids() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.built_app_exposes_registry_metadata() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

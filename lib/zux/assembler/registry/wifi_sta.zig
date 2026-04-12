@@ -1,4 +1,5 @@
 const drivers = @import("drivers");
+const registry_unique = @import("unique.zig");
 
 const EnumLiteral = @Type(.enum_literal);
 
@@ -27,6 +28,14 @@ pub fn make(comptime max_wifi_sta: usize) type {
             if (self.len >= max_wifi_sta) {
                 @compileError("zux.Assembler exceeded max_wifi_sta");
             }
+            registry_unique.ensureUnique(
+                self.periphs,
+                self.len,
+                label,
+                id,
+                "zux.Assembler.addWifiSta duplicate label",
+                "zux.Assembler.addWifiSta duplicate id",
+            );
 
             self.periphs[self.len] = .{
                 .label = label,

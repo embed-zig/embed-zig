@@ -1,4 +1,5 @@
 const modem_api = @import("modem");
+const registry_unique = @import("unique.zig");
 
 const EnumLiteral = @Type(.enum_literal);
 
@@ -27,6 +28,14 @@ pub fn make(comptime max_modem: usize) type {
             if (self.len >= max_modem) {
                 @compileError("zux.Assembler exceeded max_modem");
             }
+            registry_unique.ensureUnique(
+                self.periphs,
+                self.len,
+                label,
+                id,
+                "zux.Assembler.addModem duplicate label",
+                "zux.Assembler.addModem duplicate id",
+            );
 
             self.periphs[self.len] = .{
                 .label = label,

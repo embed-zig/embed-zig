@@ -1,4 +1,5 @@
 const drivers = @import("drivers");
+const registry_unique = @import("unique.zig");
 
 const EnumLiteral = @Type(.enum_literal);
 
@@ -27,6 +28,14 @@ pub fn make(comptime max_gpio_buttons: usize) type {
             if (self.len >= max_gpio_buttons) {
                 @compileError("zux.Assembler exceeded max_gpio_buttons");
             }
+            registry_unique.ensureUnique(
+                self.periphs,
+                self.len,
+                label,
+                id,
+                "zux.Assembler.addSingleButton duplicate label",
+                "zux.Assembler.addSingleButton duplicate id",
+            );
 
             self.periphs[self.len] = .{
                 .label = label,

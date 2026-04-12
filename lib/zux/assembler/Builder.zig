@@ -7,6 +7,10 @@ const component_modem = @import("../component/modem.zig");
 const component_nfc = @import("../component/Nfc.zig");
 const component_wifi = @import("../component/wifi.zig");
 const ledstrip_component = @import("../component/ledstrip.zig");
+const flow_component = @import("../component/ui/flow.zig");
+const overlay_component = @import("../component/ui/overlay.zig");
+const selection_component = @import("../component/ui/selection.zig");
+const route_component = @import("../component/ui/route.zig");
 const Emitter = @import("../pipeline/Emitter.zig");
 const Message = @import("../pipeline/Message.zig");
 const Node = @import("../pipeline/Node.zig");
@@ -22,6 +26,170 @@ const root = @This();
 
 pub fn init() root {
     return .{};
+}
+
+pub fn makeRouterStoreType(comptime lib: type, comptime initial: route_component.Router.Item) type {
+    const Inner = route_component.Reducer.make(lib);
+
+    return struct {
+        const Self = @This();
+
+        inner: Inner,
+
+        pub fn init(allocator: lib.mem.Allocator, _: anytype) !Self {
+            return .{
+                .inner = try Inner.init(allocator, initial),
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.inner.deinit();
+        }
+
+        pub fn get(self: *Self) Inner.StateType {
+            return self.inner.get();
+        }
+
+        pub fn router(self: *Self) route_component.Router {
+            return self.inner.router();
+        }
+
+        pub fn subscribe(self: *Self, subscriber: anytype) error{OutOfMemory}!void {
+            try self.inner.subscribe(subscriber);
+        }
+
+        pub fn unsubscribe(self: *Self, subscriber: anytype) bool {
+            return self.inner.unsubscribe(subscriber);
+        }
+
+        pub fn tick(self: *Self) void {
+            self.inner.tick();
+        }
+
+        pub fn reduce(self: anytype, message: Message, emit: Emitter) !usize {
+            return Inner.reduce(&self.inner, message, emit);
+        }
+    };
+}
+
+pub fn makeSelectionStoreType(comptime lib: type, comptime initial: selection_component.State) type {
+    const Inner = selection_component.Reducer.make(lib);
+
+    return struct {
+        const Self = @This();
+
+        inner: Inner,
+
+        pub fn init(allocator: lib.mem.Allocator, _: anytype) Self {
+            return .{
+                .inner = Inner.init(allocator, initial),
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.inner.deinit();
+        }
+
+        pub fn get(self: *Self) Inner.StateType {
+            return self.inner.get();
+        }
+
+        pub fn subscribe(self: *Self, subscriber: anytype) error{OutOfMemory}!void {
+            try self.inner.subscribe(subscriber);
+        }
+
+        pub fn unsubscribe(self: *Self, subscriber: anytype) bool {
+            return self.inner.unsubscribe(subscriber);
+        }
+
+        pub fn tick(self: *Self) void {
+            self.inner.tick();
+        }
+
+        pub fn reduce(self: anytype, message: Message, emit: Emitter) !usize {
+            return Inner.reduce(&self.inner, message, emit);
+        }
+    };
+}
+
+pub fn makeFlowStoreType(comptime lib: type, comptime FlowType: type) type {
+    const Inner = FlowType.Reducer(lib);
+
+    return struct {
+        const Self = @This();
+
+        inner: Inner,
+
+        pub fn init(allocator: lib.mem.Allocator, _: anytype) Self {
+            return .{
+                .inner = Inner.init(allocator, FlowType.initialState()),
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.inner.deinit();
+        }
+
+        pub fn get(self: *Self) Inner.StateType {
+            return self.inner.get();
+        }
+
+        pub fn subscribe(self: *Self, subscriber: anytype) error{OutOfMemory}!void {
+            try self.inner.subscribe(subscriber);
+        }
+
+        pub fn unsubscribe(self: *Self, subscriber: anytype) bool {
+            return self.inner.unsubscribe(subscriber);
+        }
+
+        pub fn tick(self: *Self) void {
+            self.inner.tick();
+        }
+
+        pub fn reduce(self: anytype, message: Message, emit: Emitter) !usize {
+            return Inner.reduce(&self.inner, message, emit);
+        }
+    };
+}
+
+pub fn makeOverlayStoreType(comptime lib: type, comptime initial: overlay_component.State) type {
+    const Inner = overlay_component.Reducer.make(lib);
+
+    return struct {
+        const Self = @This();
+
+        inner: Inner,
+
+        pub fn init(allocator: lib.mem.Allocator, _: anytype) Self {
+            return .{
+                .inner = Inner.init(allocator, initial),
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.inner.deinit();
+        }
+
+        pub fn get(self: *Self) Inner.StateType {
+            return self.inner.get();
+        }
+
+        pub fn subscribe(self: *Self, subscriber: anytype) error{OutOfMemory}!void {
+            try self.inner.subscribe(subscriber);
+        }
+
+        pub fn unsubscribe(self: *Self, subscriber: anytype) bool {
+            return self.inner.unsubscribe(subscriber);
+        }
+
+        pub fn tick(self: *Self) void {
+            self.inner.tick();
+        }
+
+        pub fn reduce(self: anytype, message: Message, emit: Emitter) !usize {
+            return Inner.reduce(&self.inner, message, emit);
+        }
+    };
 }
 
 pub fn build(builder: root, comptime context: anytype) type {
@@ -46,6 +214,10 @@ pub fn build(builder: root, comptime context: anytype) type {
     const nfc_registry = context.registries.nfc;
     const wifi_sta_registry = context.registries.wifi_sta;
     const wifi_ap_registry = context.registries.wifi_ap;
+    const flow_registry = context.flow_registry;
+    const overlay_registry = context.overlay_registry;
+    const router_registry = context.router_registry;
+    const selection_registry = context.selection_registry;
     const adc_count = registryPeriphLen(adc_registry);
     const gpio_count = registryPeriphLen(gpio_registry);
     const imu_count = registryPeriphLen(imu_registry);
@@ -54,6 +226,10 @@ pub fn build(builder: root, comptime context: anytype) type {
     const nfc_count = registryPeriphLen(nfc_registry);
     const wifi_sta_count = registryPeriphLen(wifi_sta_registry);
     const wifi_ap_count = registryPeriphLen(wifi_ap_registry);
+    const flow_count = registryPeriphLen(flow_registry);
+    const overlay_count = registryPeriphLen(overlay_registry);
+    const router_count = registryPeriphLen(router_registry);
+    const selection_count = registryPeriphLen(selection_registry);
     const has_button_runtime = (adc_count + gpio_count) > 0;
     const has_imu_runtime = imu_count > 0;
     const has_ledstrip_runtime = ledstrip_count > 0;
@@ -61,6 +237,10 @@ pub fn build(builder: root, comptime context: anytype) type {
     const has_nfc_runtime = nfc_count > 0;
     const has_wifi_sta_runtime = wifi_sta_count > 0;
     const has_wifi_ap_runtime = wifi_ap_count > 0;
+    const has_flow_runtime = flow_count > 0;
+    const has_overlay_runtime = overlay_count > 0;
+    const has_router_runtime = router_count > 0;
+    const has_selection_runtime = selection_count > 0;
     const has_user_root_config = context.node_builder.len > 0;
     const runtime_poller_count = totalPollerCount(context.registries);
     const ledstrip_pixel_count = ledStripPixelCount(ledstrip_registry);
@@ -97,6 +277,10 @@ pub fn build(builder: root, comptime context: anytype) type {
     );
 
     const AppLabel = makeLabelEnum(context.registries);
+    const GeneratedFlowLabel = makeSingleRegistryLabelEnum(flow_registry);
+    const GeneratedOverlayLabel = makeSingleRegistryLabelEnum(overlay_registry);
+    const GeneratedRouterLabel = makeSingleRegistryLabelEnum(router_registry);
+    const GeneratedSelectionLabel = makeSingleRegistryLabelEnum(selection_registry);
     const periph_ids = makePeriphIdTable(context.registries);
     const periph_kinds = makePeriphKindTable(context.registries);
     const runtime_poller_config: Poller.Config = context.assembler_config.poller;
@@ -404,14 +588,43 @@ pub fn build(builder: root, comptime context: anytype) type {
         pub const BuildConfig = @TypeOf(context.build_config);
         pub const build_config = context.build_config;
         pub const pipeline_config = runtime_pipeline_config;
+        pub const registries = .{
+            .adc_button = adc_registry,
+            .gpio_button = gpio_registry,
+            .imu = imu_registry,
+            .ledstrip = ledstrip_registry,
+            .modem = modem_registry,
+            .nfc = nfc_registry,
+            .wifi_sta = wifi_sta_registry,
+            .wifi_ap = wifi_ap_registry,
+            .flow = flow_registry,
+            .overlay = overlay_registry,
+            .router = router_registry,
+            .selection = selection_registry,
+        };
         pub const InitConfig = GeneratedInitConfig;
         pub const Store = StoreType;
         pub const Root = BuiltRoot;
         pub const Label = AppLabel;
         pub const PeriphLabel = AppLabel;
+        pub const FlowLabel = GeneratedFlowLabel;
+        pub const OverlayLabel = GeneratedOverlayLabel;
+        pub const RouterLabel = GeneratedRouterLabel;
+        pub const SelectionLabel = GeneratedSelectionLabel;
         pub const poller_count: usize = runtime_poller_count;
         pub const pixel_count: usize = ledstrip_pixel_count;
         pub const FrameType = ledstrip.Frame.make(pixel_count);
+
+        pub fn FlowEdgeLabel(comptime label: FlowLabel) type {
+            return flowTypeForLabel(label).EdgeLabel;
+        }
+
+        pub fn FlowMove(comptime label: FlowLabel) type {
+            return struct {
+                direction: flow_component.event.Direction,
+                edge: FlowEdgeLabel(label),
+            };
+        }
 
         const Runtime = struct {
             allocator: Lib.mem.Allocator,
@@ -438,6 +651,10 @@ pub fn build(builder: root, comptime context: anytype) type {
             wifi_ap_reducers: if (has_wifi_ap_runtime) [wifi_ap_count]component_wifi.ApReducer else void,
             wifi_sta_store_reducer: if (has_wifi_sta_runtime) WifiStaStoreReducerNode else void,
             wifi_ap_store_reducer: if (has_wifi_ap_runtime) WifiApStoreReducerNode else void,
+            flow_store_reducer: if (has_flow_runtime) StoreReducerType else void,
+            overlay_store_reducer: if (has_overlay_runtime) StoreReducerType else void,
+            route_store_reducer: if (has_router_runtime) StoreReducerType else void,
+            selection_store_reducer: if (has_selection_runtime) StoreReducerType else void,
             store_tick: StoreTickNode,
             root_config: BuiltRoot.Config,
             root: Node,
@@ -522,6 +739,31 @@ pub fn build(builder: root, comptime context: anytype) type {
                         .stores = &runtime.store.stores,
                         .reducers = &runtime.wifi_ap_reducers,
                     };
+                }
+
+                if (has_flow_runtime) {
+                    runtime.flow_store_reducer = StoreReducerType.init(
+                        &runtime.store.stores,
+                        FlowStoreReducerFn.reduce,
+                    );
+                }
+                if (has_overlay_runtime) {
+                    runtime.overlay_store_reducer = StoreReducerType.init(
+                        &runtime.store.stores,
+                        OverlayStoreReducerFn.reduce,
+                    );
+                }
+                if (has_router_runtime) {
+                    runtime.route_store_reducer = StoreReducerType.init(
+                        &runtime.store.stores,
+                        RouterStoreReducerFn.reduce,
+                    );
+                }
+                if (has_selection_runtime) {
+                    runtime.selection_store_reducer = StoreReducerType.init(
+                        &runtime.store.stores,
+                        SelectionStoreReducerFn.reduce,
+                    );
                 }
                 runtime.store_tick = .{
                     .store = &runtime.store,
@@ -666,6 +908,19 @@ pub fn build(builder: root, comptime context: anytype) type {
                 }
                 if (has_wifi_ap_runtime) {
                     config._zux_wifi_ap_store_reducer = runtime.wifi_ap_store_reducer.node();
+                }
+
+                if (has_flow_runtime) {
+                    config._zux_flow_store_reducer = runtime.flow_store_reducer.node();
+                }
+                if (has_overlay_runtime) {
+                    config._zux_overlay_store_reducer = runtime.overlay_store_reducer.node();
+                }
+                if (has_router_runtime) {
+                    config._zux_route_store_reducer = runtime.route_store_reducer.node();
+                }
+                if (has_selection_runtime) {
+                    config._zux_selection_store_reducer = runtime.selection_store_reducer.node();
                 }
                 config._zux_store_tick = runtime.store_tick.node();
 
@@ -884,6 +1139,112 @@ pub fn build(builder: root, comptime context: anytype) type {
             }
         };
 
+        const FlowStoreReducerFn = struct {
+            fn reduce(stores: *StoreType.Stores, message: Message, emit: Emitter) !usize {
+                switch (message.body) {
+                    .ui_flow_move,
+                    .ui_flow_reset,
+                    => {
+                        const flow_id = messageFlowId(message);
+                        inline for (0..flow_count) |i| {
+                            const flow_record = flow_registry.periphs[i];
+                            if (flow_id == periphIdForRecord(flow_record)) {
+                                return @TypeOf(@field(stores, periphLabel(flow_record))).reduce(
+                                    &@field(stores, periphLabel(flow_record)),
+                                    message,
+                                    emit,
+                                );
+                            }
+                        }
+                        return 0;
+                    },
+                    else => return 0,
+                }
+            }
+        };
+
+        const OverlayStoreReducerFn = struct {
+            fn reduce(stores: *StoreType.Stores, message: Message, emit: Emitter) !usize {
+                switch (message.body) {
+                    .ui_overlay_show,
+                    .ui_overlay_hide,
+                    .ui_overlay_set_name,
+                    .ui_overlay_set_blocking,
+                    => {
+                        const overlay_id = messageOverlayId(message);
+                        inline for (0..overlay_count) |i| {
+                            const overlay_record = overlay_registry.periphs[i];
+                            if (overlay_id == periphIdForRecord(overlay_record)) {
+                                return @TypeOf(@field(stores, periphLabel(overlay_record))).reduce(
+                                    &@field(stores, periphLabel(overlay_record)),
+                                    message,
+                                    emit,
+                                );
+                            }
+                        }
+                        return 0;
+                    },
+                    else => return 0,
+                }
+            }
+        };
+
+        const RouterStoreReducerFn = struct {
+            fn reduce(stores: *StoreType.Stores, message: Message, emit: Emitter) !usize {
+                switch (message.body) {
+                    .ui_route_push,
+                    .ui_route_replace,
+                    .ui_route_reset,
+                    .ui_route_pop,
+                    .ui_route_pop_to_root,
+                    .ui_route_set_transitioning,
+                    => {
+                        const router_id = messageRouterId(message);
+                        inline for (0..router_count) |i| {
+                            const router_record = router_registry.periphs[i];
+                            if (router_id == periphIdForRecord(router_record)) {
+                                return @TypeOf(@field(stores, periphLabel(router_record))).reduce(
+                                    &@field(stores, periphLabel(router_record)),
+                                    message,
+                                    emit,
+                                );
+                            }
+                        }
+                        return 0;
+                    },
+                    else => return 0,
+                }
+            }
+        };
+
+        const SelectionStoreReducerFn = struct {
+            fn reduce(stores: *StoreType.Stores, message: Message, emit: Emitter) !usize {
+                switch (message.body) {
+                    .ui_selection_next,
+                    .ui_selection_prev,
+                    .ui_selection_set,
+                    .ui_selection_reset,
+                    .ui_selection_set_count,
+                    .ui_selection_set_loop,
+                    => {
+                        const selection_id = messageSelectionId(message);
+                        inline for (0..selection_count) |i| {
+                            const selection_record = selection_registry.periphs[i];
+                            if (selection_id == periphIdForRecord(selection_record)) {
+                                return @TypeOf(@field(stores, periphLabel(selection_record))).reduce(
+                                    &@field(stores, periphLabel(selection_record)),
+                                    message,
+                                    emit,
+                                );
+                            }
+                        }
+                        return 0;
+                    },
+                    else => return 0,
+                }
+            }
+        };
+
         runtime: *Runtime,
         started: bool = false,
         closed: bool = false,
@@ -1002,13 +1363,15 @@ pub fn build(builder: root, comptime context: anytype) type {
                     .pressed = true,
                 },
             });
-            self.last_grouped_button_ids[@intFromEnum(label)] = button_id;
+            const index = if (comptime periph_ids.len == 0) unreachable else @intFromEnum(label);
+            self.last_grouped_button_ids[index] = button_id;
         }
 
         pub fn release_grouped_button(self: *Self, label: PeriphLabel) !void {
             if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .grouped_button) return error.InvalidPeriphKind;
-            const last_button_id = self.last_grouped_button_ids[@intFromEnum(label)];
+            const index = if (comptime periph_ids.len == 0) unreachable else @intFromEnum(label);
+            const last_button_id = self.last_grouped_button_ids[index];
             try self.emitBody(.{
                 .raw_grouped_button = .{
                     .source_id = periphId(label),
@@ -1016,7 +1379,7 @@ pub fn build(builder: root, comptime context: anytype) type {
                     .pressed = false,
                 },
             });
-            self.last_grouped_button_ids[@intFromEnum(label)] = null;
+            self.last_grouped_button_ids[index] = null;
         }
 
         pub fn imu_accel(self: *Self, label: PeriphLabel, accel: drivers.imu.Vec3) !void {
@@ -1365,6 +1728,212 @@ pub fn build(builder: root, comptime context: anytype) type {
             }));
         }
 
+        pub fn router(self: *Self, label: RouterLabel) route_component.Router {
+            inline for (0..router_count) |i| {
+                const router_record = router_registry.periphs[i];
+                if (label == @field(RouterLabel, periphLabel(router_record))) {
+                    return @field(self.runtime.store.stores, periphLabel(router_record)).router();
+                }
+            }
+            unreachable;
+        }
+
+        pub fn push_route(self: *Self, label: RouterLabel, item: route_component.Router.Item) !void {
+            try self.emitBody(.{
+                .ui_route_push = .{
+                    .source_id = routerId(label),
+                    .item = item,
+                },
+            });
+        }
+
+        pub fn replace_route(self: *Self, label: RouterLabel, item: route_component.Router.Item) !void {
+            try self.emitBody(.{
+                .ui_route_replace = .{
+                    .source_id = routerId(label),
+                    .item = item,
+                },
+            });
+        }
+
+        pub fn reset_route(self: *Self, label: RouterLabel, item: route_component.Router.Item) !void {
+            try self.emitBody(.{
+                .ui_route_reset = .{
+                    .source_id = routerId(label),
+                    .item = item,
+                },
+            });
+        }
+
+        pub fn pop_route(self: *Self, label: RouterLabel) !void {
+            try self.emitBody(.{
+                .ui_route_pop = .{
+                    .source_id = routerId(label),
+                },
+            });
+        }
+
+        pub fn pop_route_to_root(self: *Self, label: RouterLabel) !void {
+            try self.emitBody(.{
+                .ui_route_pop_to_root = .{
+                    .source_id = routerId(label),
+                },
+            });
+        }
+
+        pub fn set_route_transitioning(self: *Self, label: RouterLabel, value: bool) !void {
+            try self.emitBody(.{
+                .ui_route_set_transitioning = .{
+                    .source_id = routerId(label),
+                    .value = value,
+                },
+            });
+        }
+
+        pub fn move_flow(
+            self: *Self,
+            comptime label: FlowLabel,
+            direction: flow_component.event.Direction,
+            edge: FlowEdgeLabel(label),
+        ) !void {
+            try self.emitBody(.{
+                .ui_flow_move = .{
+                    .source_id = flowId(label),
+                    .direction = direction,
+                    .edge_id = flowEdgeId(label, edge),
+                },
+            });
+        }
+
+        pub fn available_moves(
+            self: *Self,
+            comptime label: FlowLabel,
+            allocator: Lib.mem.Allocator,
+        ) ![]FlowMove(label) {
+            const FlowType = flowTypeForLabel(label);
+            const state = flowStateForLabel(self, label);
+            const forward_edges = FlowType.forwardEdges(state.node);
+            const reverse_edges = FlowType.reverseEdges(state.node);
+            const moves = try allocator.alloc(FlowMove(label), forward_edges.len + reverse_edges.len);
+            var next_index: usize = 0;
+
+            for (forward_edges) |edge| {
+                moves[next_index] = .{
+                    .direction = .forward,
+                    .edge = edge,
+                };
+                next_index += 1;
+            }
+            for (reverse_edges) |edge| {
+                moves[next_index] = .{
+                    .direction = .reverse,
+                    .edge = edge,
+                };
+                next_index += 1;
+            }
+
+            return moves;
+        }
+
+        pub fn reset_flow(self: *Self, comptime label: FlowLabel) !void {
+            try self.emitBody(.{
+                .ui_flow_reset = .{
+                    .source_id = flowId(label),
+                },
+            });
+        }
+
+        pub fn show_overlay(self: *Self, label: OverlayLabel, name: []const u8, blocking: bool) !void {
+            const name_fields = try overlay_component.State.nameFields(name);
+            try self.emitBody(.{
+                .ui_overlay_show = .{
+                    .source_id = overlayId(label),
+                    .name = name_fields.name,
+                    .name_len = name_fields.name_len,
+                    .blocking = blocking,
+                },
+            });
+        }
+
+        pub fn hide_overlay(self: *Self, label: OverlayLabel) !void {
+            try self.emitBody(.{
+                .ui_overlay_hide = .{
+                    .source_id = overlayId(label),
+                },
+            });
+        }
+
+        pub fn set_overlay_name(self: *Self, label: OverlayLabel, name: []const u8) !void {
+            const name_fields = try overlay_component.State.nameFields(name);
+            try self.emitBody(.{
+                .ui_overlay_set_name = .{
+                    .source_id = overlayId(label),
+                    .name = name_fields.name,
+                    .name_len = name_fields.name_len,
+                },
+            });
+        }
+
+        pub fn set_overlay_blocking(self: *Self, label: OverlayLabel, value: bool) !void {
+            try self.emitBody(.{
+                .ui_overlay_set_blocking = .{
+                    .source_id = overlayId(label),
+                    .value = value,
+                },
+            });
+        }
+
+        pub fn next_selection(self: *Self, label: SelectionLabel) !void {
+            try self.emitBody(.{
+                .ui_selection_next = .{
+                    .source_id = selectionId(label),
+                },
+            });
+        }
+
+        pub fn prev_selection(self: *Self, label: SelectionLabel) !void {
+            try self.emitBody(.{
+                .ui_selection_prev = .{
+                    .source_id = selectionId(label),
+                },
+            });
+        }
+
+        pub fn set_selection(self: *Self, label: SelectionLabel, index: usize) !void {
+            try self.emitBody(.{
+                .ui_selection_set = .{
+                    .source_id = selectionId(label),
+                    .index = index,
+                },
+            });
+        }
+
+        pub fn reset_selection(self: *Self, label: SelectionLabel) !void {
+            try self.emitBody(.{
+                .ui_selection_reset = .{
+                    .source_id = selectionId(label),
+                },
+            });
+        }
+
+        pub fn set_selection_count(self: *Self, label: SelectionLabel, count: usize) !void {
+            try self.emitBody(.{
+                .ui_selection_set_count = .{
+                    .source_id = selectionId(label),
+                    .count = count,
+                },
+            });
+        }
+
+        pub fn set_selection_loop(self: *Self, label: SelectionLabel, value: bool) !void {
+            try self.emitBody(.{
+                .ui_selection_set_loop = .{
+                    .source_id = selectionId(label),
+                    .value = value,
+                },
+            });
+        }
+
         pub fn store(self: *Self) *StoreType {
             return &self.runtime.store;
         }
@@ -1376,13 +1945,81 @@ pub fn build(builder: root, comptime context: anytype) type {
         }
 
         fn periphId(label: PeriphLabel) u32 {
-            if (comptime periph_ids.len == 0) return 0;
-            return periph_ids[@intFromEnum(label)];
+            return if (comptime periph_ids.len == 0)
+                unreachable
+            else
+                periph_ids[@intFromEnum(label)];
         }
 
         fn dispatchKind(label: PeriphLabel) PeriphDispatchKind {
-            if (comptime periph_ids.len == 0) return .single_button;
-            return periph_kinds[@intFromEnum(label)];
+            return if (comptime periph_kinds.len == 0)
+                unreachable
+            else
+                periph_kinds[@intFromEnum(label)];
+        }
+
+        fn routerId(label: RouterLabel) u32 {
+            inline for (0..router_count) |i| {
+                const router_record = router_registry.periphs[i];
+                if (label == @field(RouterLabel, periphLabel(router_record))) {
+                    return periphIdForRecord(router_record);
+                }
+            }
+            unreachable;
+        }
+
+        fn flowId(label: FlowLabel) u32 {
+            inline for (0..flow_count) |i| {
+                const flow_record = flow_registry.periphs[i];
+                if (label == @field(FlowLabel, periphLabel(flow_record))) {
+                    return periphIdForRecord(flow_record);
+                }
+            }
+            unreachable;
+        }
+
+        fn flowEdgeId(comptime label: FlowLabel, edge: FlowEdgeLabel(label)) u32 {
+            return flowTypeForLabel(label).edgeId(edge);
+        }
+
+        fn flowTypeForLabel(comptime label: FlowLabel) type {
+            inline for (0..flow_count) |i| {
+                const flow_record = flow_registry.periphs[i];
+                if (label == @field(FlowLabel, periphLabel(flow_record))) {
+                    return flow_record.FlowType;
+                }
+            }
+            unreachable;
+        }
+
+        fn flowStateForLabel(self: *Self, comptime label: FlowLabel) flowTypeForLabel(label).State {
+            inline for (0..flow_count) |i| {
+                const flow_record = flow_registry.periphs[i];
+                if (label == @field(FlowLabel, periphLabel(flow_record))) {
+                    return @field(self.runtime.store.stores, periphLabel(flow_record)).get();
+                }
+            }
+            unreachable;
+        }
+
+        fn overlayId(label: OverlayLabel) u32 {
+            inline for (0..overlay_count) |i| {
+                const overlay_record = overlay_registry.periphs[i];
+                if (label == @field(OverlayLabel, periphLabel(overlay_record))) {
+                    return periphIdForRecord(overlay_record);
+                }
+            }
+            unreachable;
+        }
+
+        fn selectionId(label: SelectionLabel) u32 {
+            inline for (0..selection_count) |i| {
+                const selection_record = selection_registry.periphs[i];
+                if (label == @field(SelectionLabel, periphLabel(selection_record))) {
+                    return periphIdForRecord(selection_record);
+                }
+            }
+            unreachable;
         }
     };
 
@@ -1434,6 +2071,14 @@ fn makeRuntimeStoreBuilder(comptime context: anytype) @TypeOf(context.store_buil
         builder.setStore(periph.label, store.Object.make(context.lib, component_wifi.state.Ap, periph.label));
     }
 
+    inline for (0..registryPeriphLen(context.flow_registry)) |i| {
+        const flow_record = context.flow_registry.periphs[i];
+        builder.setStore(
+            flow_record.label,
+            makeFlowStoreType(context.lib, flow_record.FlowType),
+        );
+    }
+
     inline for (0..context.store_builder.store_count) |i| {
         const binding = context.store_builder.store_bindings[i];
         builder.setStore(binding.name, binding.StoreType);
@@ -1473,6 +2118,19 @@ fn makeRuntimeNodeBuilder(comptime context: anytype) @TypeOf(context.node_builde
     }
     if (registryPeriphLen(context.registries.wifi_ap) > 0) {
         builder.node(._zux_wifi_ap_store_reducer);
+    }
+
+    if (registryPeriphLen(context.flow_registry) > 0) {
+        builder.node(._zux_flow_store_reducer);
+    }
+    if (registryPeriphLen(context.overlay_registry) > 0) {
+        builder.node(._zux_overlay_store_reducer);
+    }
+    if (registryPeriphLen(context.router_registry) > 0) {
+        builder.node(._zux_route_store_reducer);
+    }
+    if (registryPeriphLen(context.selection_registry) > 0) {
+        builder.node(._zux_selection_store_reducer);
     }
 
     inline for (0..context.node_builder.len) |i| {
@@ -1646,6 +2304,36 @@ fn makeLabelEnum(comptime registries: anytype) type {
     });
 }
 
+fn makeSingleRegistryLabelEnum(comptime registry: anytype) type {
+    const total_len = registryPeriphLen(registry);
+    var fields: [total_len]builtin.Type.EnumField = undefined;
+
+    inline for (0..total_len) |i| {
+        const record = registry.periphs[i];
+        const name = periphLabel(record);
+
+        inline for (0..i) |existing_idx| {
+            if (comptimeEql(fields[existing_idx].name, name)) {
+                @compileError("zux.assembler.Builder.build found duplicate router labels");
+            }
+        }
+
+        fields[i] = .{
+            .name = sentinelName(name),
+            .value = i,
+        };
+    }
+
+    return @Type(.{
+        .@"enum" = .{
+            .tag_type = if (total_len == 0) u0 else embed.math.IntFittingRange(0, total_len - 1),
+            .fields = &fields,
+            .decls = &.{},
+            .is_exhaustive = true,
+        },
+    });
+}
+
 fn makePeriphIdTable(comptime registries: anytype) [totalPeriphLen(registries)]u32 {
     const info = configStructInfo(registries);
     const total_len = totalPeriphLen(registries);
@@ -1775,6 +2463,48 @@ fn messageSourceId(message: Message) u32 {
         .wifi_ap_lease_granted => |event| event.source_id,
         .wifi_ap_lease_released => |event| event.source_id,
         else => @panic("zux.assembler.Builder.messageSourceId expected source-tagged event"),
+    };
+}
+
+fn messageRouterId(message: Message) u32 {
+    return switch (message.body) {
+        .ui_route_push => |event| event.source_id,
+        .ui_route_replace => |event| event.source_id,
+        .ui_route_reset => |event| event.source_id,
+        .ui_route_pop => |event| event.source_id,
+        .ui_route_pop_to_root => |event| event.source_id,
+        .ui_route_set_transitioning => |event| event.source_id,
+        else => @panic("zux.assembler.Builder.messageRouterId expected route event"),
+    };
+}
+
+fn messageFlowId(message: Message) u32 {
+    return switch (message.body) {
+        .ui_flow_move => |event| event.source_id,
+        .ui_flow_reset => |event| event.source_id,
+        else => @panic("zux.assembler.Builder.messageFlowId expected flow event"),
+    };
+}
+
+fn messageOverlayId(message: Message) u32 {
+    return switch (message.body) {
+        .ui_overlay_show => |event| event.source_id,
+        .ui_overlay_hide => |event| event.source_id,
+        .ui_overlay_set_name => |event| event.source_id,
+        .ui_overlay_set_blocking => |event| event.source_id,
+        else => @panic("zux.assembler.Builder.messageOverlayId expected overlay event"),
+    };
+}
+
+fn messageSelectionId(message: Message) u32 {
+    return switch (message.body) {
+        .ui_selection_next => |event| event.source_id,
+        .ui_selection_prev => |event| event.source_id,
+        .ui_selection_set => |event| event.source_id,
+        .ui_selection_reset => |event| event.source_id,
+        .ui_selection_set_count => |event| event.source_id,
+        .ui_selection_set_loop => |event| event.source_id,
+        else => @panic("zux.assembler.Builder.messageSelectionId expected selection event"),
     };
 }
 

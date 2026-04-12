@@ -10,6 +10,7 @@ pub const netstack = @import("unit/netstack.zig");
 pub const nfc = @import("unit/nfc.zig");
 pub const pipeline = @import("unit/pipeline.zig");
 pub const store = @import("unit/store.zig");
+pub const ui = @import("unit/ui.zig");
 pub const wifi = @import("unit/wifi.zig");
 
 pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
@@ -34,6 +35,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
             t.run("nfc", nfc.make(lib));
             t.run("pipeline", pipeline.make(lib, Channel));
             t.run("store", store.make(lib));
+            t.run("ui", ui.make(lib));
             t.run("wifi", wifi.make(lib));
             return t.wait();
         }
