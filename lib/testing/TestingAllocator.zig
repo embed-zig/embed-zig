@@ -1,6 +1,7 @@
 //! Allocator wrapper for tests that can enforce a live-byte limit and
 //! capture peak concurrent live usage.
 
+const builtin = @import("builtin");
 const embed = @import("embed");
 const atomic = embed.atomic;
 const mem = embed.mem;
@@ -143,6 +144,32 @@ const vtable: mem.Allocator.VTable = .{
 };
 
 pub fn TestRunner(comptime lib: type) TestRunnerApi {
+    if (builtin.target.os.tag == .freestanding) {
+        const Runner = struct {
+            pub fn init(self: *@This(), allocator_arg: lib.mem.Allocator) !void {
+                _ = self;
+                _ = allocator_arg;
+            }
+
+            pub fn run(self: *@This(), t: *T, allocator_arg: mem.Allocator) bool {
+                _ = self;
+                _ = t;
+                _ = allocator_arg;
+                return true;
+            }
+
+            pub fn deinit(self: *@This(), allocator_arg: mem.Allocator) void {
+                _ = self;
+                _ = allocator_arg;
+            }
+        };
+
+        const Holder = struct {
+            var runner: Runner = .{};
+        };
+        return TestRunnerApi.make(Runner).new(&Holder.runner);
+    }
+
     const TestCase = struct {
         fn testEnforcesLimitAndTracksPeak() !void {
             const std = @import("std");

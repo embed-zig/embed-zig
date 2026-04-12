@@ -1,4 +1,5 @@
 const testing_api = @import("testing");
+const builtin = @import("builtin");
 
 pub const assembler = @import("unit/assembler.zig");
 pub const button = @import("unit/button.zig");
@@ -23,6 +24,10 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
         pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
+
+            if (builtin.target.os.tag == .freestanding) {
+                return true;
+            }
 
             t.parallel();
             t.run("assembler", assembler.make(lib, Channel));

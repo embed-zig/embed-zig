@@ -1,4 +1,5 @@
 const testing_api = @import("testing");
+const builtin = @import("builtin");
 
 pub const Transport = @import("unit/Transport.zig");
 pub const LineReader = @import("unit/LineReader.zig");
@@ -17,6 +18,10 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
         pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
+
+            if (builtin.target.os.tag == .freestanding) {
+                return true;
+            }
 
             t.parallel();
             t.run("Transport", Transport.make(lib));

@@ -1,7 +1,12 @@
+const builtin = @import("builtin");
 const testing_api = @import("testing");
 
 pub const dte_loopback = @import("test_utils/dte_loopback.zig");
-pub const dte_serial_host = @import("integration/dte_serial_host.zig");
+
+const host_serial_supported = switch (builtin.os.tag) {
+    .linux, .macos, .ios => true,
+    else => false,
+};
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
@@ -16,7 +21,10 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
 
             t.parallel();
             t.run("dte_loopback", dte_loopback.make(lib, 256));
-            t.run("dte_serial_host", dte_serial_host.make(lib, .{}));
+            if (host_serial_supported) {
+                const dte_serial_host = @import("integration/dte_serial_host.zig");
+                t.run("dte_serial_host", dte_serial_host.make(lib, .{}));
+            }
             return t.wait();
         }
 

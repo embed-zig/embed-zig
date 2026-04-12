@@ -81,6 +81,12 @@ pub const StaticStringMapWithEql = collections.StaticStringMapWithEql;
 pub const BitStack = collections.BitStack;
 
 pub fn make(comptime Impl: type) type {
+    comptime {
+        if (!@hasDecl(Impl, "atomic")) {
+            @compileError("embed.make requires Impl.atomic; std-backed runtimes must re-export embed_std.embed.atomic");
+        }
+    }
+
     return struct {
         const Self = @This();
         pub const heap = root.heap.make(Impl.heap);
@@ -95,7 +101,7 @@ pub fn make(comptime Impl: type) type {
         pub const meta = root.meta;
         pub const Io = root.Io;
         pub const debug = root.debug;
-        pub const atomic = root.atomic;
+        pub const atomic = root.atomic.make(Impl.atomic);
         pub const builtin = root.builtin;
         pub const testing = root.testing.make(Impl.testing);
         pub const Random = root.Random;

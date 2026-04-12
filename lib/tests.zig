@@ -190,7 +190,7 @@ test "bt/integration/std" {
     defer t.deinit();
     t.timeout(60 * std.time.ns_per_s);
 
-    t.run("bt/integration/std", bt.test_runner.integration.make(std));
+    t.run("bt/integration/std", bt.test_runner.integration.make(std, embed_std.sync.Channel));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -201,7 +201,7 @@ test "bt/integration/embed_std" {
     defer t.deinit();
     t.timeout(60 * embed_std.std.time.ns_per_s);
 
-    t.run("bt/integration/embed_std", bt.test_runner.integration.make(embed_std.std));
+    t.run("bt/integration/embed_std", bt.test_runner.integration.make(embed_std.std, embed_std.sync.Channel));
     if (!t.wait()) return error.TestFailed;
 }
 

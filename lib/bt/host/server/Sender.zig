@@ -155,9 +155,7 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
                 defer self.finishTx();
 
                 var transport = Transport{ .session = self };
-                SessionSend.active_session = self;
-                defer SessionSend.active_session = null;
-                xfer.send(lib, self.sender.allocator, &transport, SessionSend.dataFn, .{
+                xfer.send(lib, self.sender.allocator, &transport, @ptrCast(self), SessionSend.dataFn, .{
                     .att_mtu = self.subscription.attMtu(),
                     .send_redundancy = 1,
                 }) catch {
@@ -224,15 +222,14 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
             };
 
             const SessionSend = struct {
-                threadlocal var active_session: ?*Session = null;
-
                 fn dataFn(
+                    ctx: ?*anyopaque,
                     allocator: lib.mem.Allocator,
                     conn_handle: u16,
                     service_uuid: u16,
                     char_uuid: u16,
                 ) ![]u8 {
-                    const session = active_session orelse return error.Unexpected;
+                    const session: *Session = @ptrCast(@alignCast(ctx orelse return error.Unexpected));
 
                     session.sender.mutex.lock();
                     const maybe_handler = session.sender.read_handler;

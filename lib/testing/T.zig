@@ -1,5 +1,6 @@
 //! testing.T — type-erased test handle with vtable-backed behavior.
 
+const builtin = @import("builtin");
 const embed_mod = @import("embed");
 const context_mod = @import("context");
 const Context = context_mod.Context;
@@ -748,6 +749,32 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
 }
 
 pub fn TestRunner(comptime lib: type) TestRunnerHandle {
+    if (builtin.target.os.tag == .freestanding) {
+        const Runner = struct {
+            pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+                _ = self;
+                _ = allocator;
+            }
+
+            pub fn run(self: *@This(), t: *Self, allocator: lib.mem.Allocator) bool {
+                _ = self;
+                _ = t;
+                _ = allocator;
+                return true;
+            }
+
+            pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+                _ = self;
+                _ = allocator;
+            }
+        };
+
+        const Holder = struct {
+            var runner: Runner = .{};
+        };
+        return TestRunnerHandle.make(Runner).new(&Holder.runner);
+    }
+
     const TestCase = struct {
         fn testFormatMemoryUsage() !void {
             const std = @import("std");

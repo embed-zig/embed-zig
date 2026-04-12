@@ -225,7 +225,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type, comptime confi
         }
 
         fn reportAsyncFailure(comptime label: []const u8, err: anyerror) noreturn {
-            lib.debug.print("zux.pipeline.Pipeline {s}: {s}\n", .{ label, @errorName(err) });
+            const run_log = lib.log.scoped(.zux_pipeline);
+            run_log.err("{s}: {s}", .{ label, @errorName(err) });
             @panic("zux.pipeline.Pipeline background worker failed");
         }
 
@@ -277,6 +278,7 @@ pub fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) testing_
         pub const atomic = lib.atomic;
         pub const time = lib.time;
         pub const debug = lib.debug;
+        pub const log = lib.log;
         pub const ArrayList = lib.ArrayList;
     };
 

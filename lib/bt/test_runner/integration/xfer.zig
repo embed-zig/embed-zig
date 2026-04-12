@@ -1,12 +1,11 @@
 const embed = @import("embed");
 const bt = @import("../../../bt.zig");
-const embed_std = @import("embed_std");
 const pair_xfer_runner = @import("../pair_xfer.zig");
 const testing_api = @import("testing");
 
 pub const protocol = @import("xfer/protocol.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
             _ = self;
@@ -17,8 +16,8 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            const Bt = bt.make(lib, embed_std.sync.Channel);
-            const Mocker = bt.Mocker(lib);
+            const Bt = bt.make(lib, Channel);
+            const Mocker = bt.Mocker(lib, Channel);
             var mocker = Mocker.init(lib.testing.allocator, .{});
             defer mocker.deinit();
 
@@ -44,7 +43,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             defer server_host.deinit();
 
             t.parallel();
-            t.run("protocol", protocol.make(lib));
+            t.run("protocol", protocol.makeWithChannel(lib, Channel));
             t.run("peripheral", pair_xfer_runner.makePeripheral(lib, Bt.Server, &server_host));
             t.run("central", pair_xfer_runner.makeCentral(lib, Bt.Client, &client_host));
             return t.wait();

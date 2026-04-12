@@ -52,6 +52,7 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
         err: ?anyerror = null,
 
         fn dataFn(
+            _: ?*anyopaque,
             payload_allocator: embed.mem.Allocator,
             conn_handle: u16,
             service_uuid: u16,
@@ -67,7 +68,7 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
         }
 
         fn run(self: *@This()) void {
-            send_mod.send(lib, self.allocator, &self.transport, dataFn, .{
+            send_mod.send(lib, self.allocator, &self.transport, null, dataFn, .{
                 .att_mtu = 23,
                 .timeout_ms = 20,
                 .send_redundancy = 1,

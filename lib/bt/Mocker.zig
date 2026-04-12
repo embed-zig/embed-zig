@@ -5,14 +5,13 @@
 //! carry a 3D position for future spatial simulation.
 
 const std = @import("std");
-const embed_std = @import("embed_std");
 const root = @import("../bt.zig");
 const host_mod = @import("Host.zig");
 const Hci = @import("mocker/Hci.zig").Hci;
 
-pub fn Mocker(comptime lib: type) type {
+pub fn Mocker(comptime lib: type, comptime Channel: fn (type) type) type {
     const HciImpl = Hci(lib);
-    const HostCtor = host_mod.makeHci(lib, embed_std.sync.Channel);
+    const HostCtor = host_mod.makeHci(lib, Channel);
 
     return struct {
         const Self = @This();

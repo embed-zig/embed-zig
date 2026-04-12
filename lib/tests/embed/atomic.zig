@@ -33,6 +33,13 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
                     try swapCase(lib);
                 }
             }.run));
+            t.run("make_uses_custom_atomic", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try makeUsesCustomAtomicCase();
+                }
+            }.run));
             return t.wait();
         }
 
@@ -80,4 +87,71 @@ fn swapCase(comptime lib: type) !void {
     const old = v.swap(77, .seq_cst);
     if (old != 99) return error.SwapOldWrong;
     if (v.load(.seq_cst) != 77) return error.SwapNewWrong;
+}
+
+fn makeUsesCustomAtomicCase() !void {
+    const std = @import("std");
+    const embed_std = @import("embed_std");
+
+    const CustomAtomic = struct {
+        pub fn Value(comptime T: type) type {
+            return struct {
+                pub const marker = true;
+
+                inner: std.atomic.Value(T),
+
+                pub fn init(value: T) @This() {
+                    return .{ .inner = std.atomic.Value(T).init(value) };
+                }
+
+                pub fn load(self: *@This(), comptime order: std.builtin.AtomicOrder) T {
+                    return self.inner.load(order);
+                }
+
+                pub fn store(self: *@This(), value: T, comptime order: std.builtin.AtomicOrder) void {
+                    self.inner.store(value, order);
+                }
+
+                pub fn swap(self: *@This(), value: T, comptime order: std.builtin.AtomicOrder) T {
+                    return self.inner.swap(value, order);
+                }
+
+                pub fn fetchAdd(self: *@This(), operand: T, comptime order: std.builtin.AtomicOrder) T {
+                    return self.inner.fetchAdd(operand, order);
+                }
+
+                pub fn fetchSub(self: *@This(), operand: T, comptime order: std.builtin.AtomicOrder) T {
+                    return self.inner.fetchSub(operand, order);
+                }
+
+                pub fn cmpxchgStrong(
+                    self: *@This(),
+                    expected_value: T,
+                    new_value: T,
+                    comptime success_order: std.builtin.AtomicOrder,
+                    comptime failure_order: std.builtin.AtomicOrder,
+                ) ?T {
+                    return self.inner.cmpxchgStrong(expected_value, new_value, success_order, failure_order);
+                }
+            };
+        }
+    };
+
+    const CustomLib = embed.make(struct {
+        pub const Thread = embed_std.embed.Thread;
+        pub const heap = embed_std.embed.heap;
+        pub const log = embed_std.embed.log;
+        pub const testing = embed_std.embed.testing;
+        pub const posix = embed_std.embed.posix;
+        pub const time = embed_std.embed.time;
+        pub const crypto = embed_std.embed.crypto;
+        pub const atomic = CustomAtomic;
+    });
+
+    try std.testing.expect(@hasDecl(CustomLib.atomic.Value(u32), "marker"));
+
+    var value = CustomLib.atomic.Value(u32).init(41);
+    try std.testing.expectEqual(@as(u32, 41), value.load(.seq_cst));
+    value.store(42, .seq_cst);
+    try std.testing.expectEqual(@as(u32, 42), value.load(.seq_cst));
 }

@@ -197,309 +197,178 @@ fn isValidQuotedPairChar(c: u8) bool {
 }
 
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    const TestCase = struct {
-        fn testInitStoresValueAndParams() !void {
+    return testing_api.TestRunner.fromFn(lib, 64 * 1024, struct {
+        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
             const std = @import("std");
-            const params = [_]Parameter{
-                .{ .name = "charset", .value = "utf-8" },
-            };
-            const mt = MediaType.init("text/html", &params);
+            const testing = lib.testing;
 
-            try std.testing.expectEqualStrings("text/html", mt.value);
-            try std.testing.expectEqual(@as(usize, 1), mt.params.len);
-            try std.testing.expectEqualStrings("charset", mt.params[0].name);
-            try std.testing.expectEqualStrings("utf-8", mt.params[0].value);
+            {
+                const params = [_]Parameter{
+                    .{ .name = "charset", .value = "utf-8" },
+                };
+                const mt = MediaType.init("text/html", &params);
+                try testing.expectEqualStrings("text/html", mt.value);
+                try testing.expectEqual(@as(usize, 1), mt.params.len);
+                try testing.expectEqualStrings("charset", mt.params[0].name);
+                try testing.expectEqualStrings("utf-8", mt.params[0].value);
+            }
+
+            {
+                var params_buf: [2]Parameter = undefined;
+                const mt = try MediaType.parse("text/html; charset=utf-8; boundary=abc123", &params_buf);
+                try testing.expectEqualStrings("text/html", mt.value);
+                try testing.expectEqual(@as(usize, 2), mt.params.len);
+                try testing.expectEqualStrings("charset", mt.params[0].name);
+                try testing.expectEqualStrings("utf-8", mt.params[0].value);
+                try testing.expectEqualStrings("boundary", mt.params[1].name);
+                try testing.expectEqualStrings("abc123", mt.params[1].value);
+            }
+
+            {
+                var params_buf: [1]Parameter = undefined;
+                const mt = try MediaType.parse("text/plain; charset=\"utf-8\"", &params_buf);
+                try testing.expectEqualStrings("text/plain", mt.value);
+                try testing.expectEqual(@as(usize, 1), mt.params.len);
+                try testing.expectEqualStrings("charset", mt.params[0].name);
+                try testing.expectEqualStrings("utf-8", mt.params[0].value);
+            }
+
+            {
+                var params_buf: [1]Parameter = undefined;
+                const mt = try MediaType.parse("text/plain; title=\"hello;world\"", &params_buf);
+                try testing.expectEqualStrings("text/plain", mt.value);
+                try testing.expectEqual(@as(usize, 1), mt.params.len);
+                try testing.expectEqualStrings("title", mt.params[0].name);
+                try testing.expectEqualStrings("hello;world", mt.params[0].value);
+            }
+
+            {
+                var params_buf: [1]Parameter = undefined;
+                const mt = try MediaType.parse("text/plain; title=\"hello\\\"world\\\\path\"", &params_buf);
+                try testing.expectEqualStrings("text/plain", mt.value);
+                try testing.expectEqual(@as(usize, 1), mt.params.len);
+                try testing.expectEqualStrings("title", mt.params[0].name);
+                try testing.expectEqualStrings("hello\\\"world\\\\path", mt.params[0].value);
+            }
+
+            {
+                var params_buf: [1]Parameter = undefined;
+                try testing.expectError(error.UnterminatedQuotedValue, MediaType.parse("text/plain; title=\"unterminated", &params_buf));
+                try testing.expectError(error.UnterminatedQuotedValue, MediaType.parse("text/plain; title=\"unterminated; charset=utf-8", &params_buf));
+                try testing.expectError(error.InvalidParameter, MediaType.parse("text/plain;", &params_buf));
+                try testing.expectError(error.InvalidParameter, MediaType.parse("text/plain;;charset=utf-8", &params_buf));
+                try testing.expectError(error.InvalidParameter, MediaType.parse("text/plain; ; charset=utf-8", &params_buf));
+                try testing.expectError(error.InvalidParameter, MediaType.parse("text/plain;   ", &params_buf));
+                try testing.expectError(error.InvalidMediaType, MediaType.parse("text", &params_buf));
+                try testing.expectError(error.InvalidMediaType, MediaType.parse("/plain", &params_buf));
+                try testing.expectError(error.InvalidMediaType, MediaType.parse("text/", &params_buf));
+                try testing.expectError(error.InvalidMediaType, MediaType.parse("text /plain", &params_buf));
+                try testing.expectError(error.InvalidMediaType, MediaType.parse("te\xE9xt/plain", &params_buf));
+                try testing.expectError(error.InvalidMediaType, MediaType.parse("text/pl\xFFain", &params_buf));
+                try testing.expectError(error.InvalidParameter, MediaType.parse("text/plain; na\xE9me=value", &params_buf));
+                try testing.expectError(error.InvalidParameter, MediaType.parse("text/plain; name=\xE9", &params_buf));
+                try testing.expectError(error.InvalidParameter, MediaType.parse("text/plain; title=hello world", &params_buf));
+                try testing.expectError(error.InvalidParameter, MediaType.parse("text/plain; title=hello,world", &params_buf));
+                try testing.expectError(error.InvalidQuotedPair, MediaType.parse("text/plain; title=\"hello\rworld\"", &params_buf));
+                try testing.expectError(error.InvalidQuotedPair, MediaType.parse("text/plain; title=\"hello\nworld\"", &params_buf));
+                try testing.expectError(
+                    error.TooManyParameters,
+                    MediaType.parse("text/plain; charset=utf-8; boundary=abc123", &params_buf),
+                );
+            }
+
+            {
+                const params = [_]Parameter{
+                    .{ .name = "charset", .value = "utf-8" },
+                    .{ .name = "filename", .value = "hello world.txt" },
+                };
+                const mt = MediaType.init("text/plain", &params);
+
+                var buf: [128]u8 = undefined;
+                var stream = std.io.fixedBufferStream(&buf);
+                try mt.format(stream.writer());
+                try testing.expectEqualStrings(
+                    "text/plain; charset=utf-8; filename=\"hello world.txt\"",
+                    stream.getWritten(),
+                );
+            }
+
+            {
+                const params = [_]Parameter{
+                    .{ .name = "title", .value = "hello\\\"world\\\\path" },
+                };
+                const mt = MediaType.init("text/plain", &params);
+
+                var buf: [128]u8 = undefined;
+                var stream = std.io.fixedBufferStream(&buf);
+                try mt.format(stream.writer());
+                try testing.expectEqualStrings(
+                    "text/plain; title=\"hello\\\"world\\\\path\"",
+                    stream.getWritten(),
+                );
+            }
+
+            {
+                const params = [_]Parameter{
+                    .{ .name = "title", .value = "hello\"world" },
+                };
+                const mt = MediaType.init("text/plain", &params);
+
+                var buf: [128]u8 = undefined;
+                var stream = std.io.fixedBufferStream(&buf);
+                try testing.expectError(error.InvalidQuotedPair, mt.format(stream.writer()));
+            }
+
+            {
+                const params = [_]Parameter{
+                    .{ .name = "title", .value = "hello\rworld" },
+                };
+                const mt = MediaType.init("text/plain", &params);
+
+                var buf: [128]u8 = undefined;
+                var stream = std.io.fixedBufferStream(&buf);
+                try testing.expectError(error.InvalidQuotedPair, mt.format(stream.writer()));
+                try testing.expectEqual(@as(usize, 0), stream.getWritten().len);
+            }
+
+            {
+                const bad_type = MediaType.init("text/plain\r\nX-Test: yes", &.{});
+                const bad_name_params = [_]Parameter{
+                    .{ .name = "charset", .value = "utf-8" },
+                    .{ .name = "file\xE9name", .value = "report.txt" },
+                };
+                const bad_name = MediaType.init("text/plain", &bad_name_params);
+
+                var type_buf: [128]u8 = undefined;
+                var type_stream = std.io.fixedBufferStream(&type_buf);
+                try testing.expectError(error.InvalidMediaType, bad_type.format(type_stream.writer()));
+                try testing.expectEqual(@as(usize, 0), type_stream.getWritten().len);
+
+                var name_buf: [128]u8 = undefined;
+                var name_stream = std.io.fixedBufferStream(&name_buf);
+                try testing.expectError(error.InvalidParameter, bad_name.format(name_stream.writer()));
+                try testing.expectEqual(@as(usize, 0), name_stream.getWritten().len);
+            }
+
+            {
+                var parsed_params: [1]Parameter = undefined;
+                const parsed = try MediaType.parse("text/plain; title=\"hello\\\"world\\\\path\"", &parsed_params);
+
+                var buf: [128]u8 = undefined;
+                var stream = std.io.fixedBufferStream(&buf);
+                try parsed.format(stream.writer());
+                try testing.expectEqualStrings(
+                    "text/plain; title=\"hello\\\"world\\\\path\"",
+                    stream.getWritten(),
+                );
+
+                var reparsed_params: [1]Parameter = undefined;
+                const reparsed = try MediaType.parse(stream.getWritten(), &reparsed_params);
+                try testing.expectEqualStrings(parsed.value, reparsed.value);
+                try testing.expectEqual(@as(usize, 1), reparsed.params.len);
+                try testing.expectEqualStrings(parsed.params[0].name, reparsed.params[0].name);
+                try testing.expectEqualStrings(parsed.params[0].value, reparsed.params[0].value);
+            }
         }
-        fn testParseParsesValueAndParamsWithoutAllocation() !void {
-            const std = @import("std");
-            var params_buf: [2]Parameter = undefined;
-            const mt = try MediaType.parse("text/html; charset=utf-8; boundary=abc123", &params_buf);
-
-            try std.testing.expectEqualStrings("text/html", mt.value);
-            try std.testing.expectEqual(@as(usize, 2), mt.params.len);
-            try std.testing.expectEqualStrings("charset", mt.params[0].name);
-            try std.testing.expectEqualStrings("utf-8", mt.params[0].value);
-            try std.testing.expectEqualStrings("boundary", mt.params[1].name);
-            try std.testing.expectEqualStrings("abc123", mt.params[1].value);
-        }
-        fn testParseAcceptsQuotedParameterValues() !void {
-            const std = @import("std");
-            var params_buf: [1]Parameter = undefined;
-            const mt = try MediaType.parse("text/plain; charset=\"utf-8\"", &params_buf);
-
-            try std.testing.expectEqualStrings("text/plain", mt.value);
-            try std.testing.expectEqual(@as(usize, 1), mt.params.len);
-            try std.testing.expectEqualStrings("charset", mt.params[0].name);
-            try std.testing.expectEqualStrings("utf-8", mt.params[0].value);
-        }
-        fn testParseAcceptsSemicolonsInsideQuotedParameterValues() !void {
-            const std = @import("std");
-            var params_buf: [1]Parameter = undefined;
-            const mt = try MediaType.parse("text/plain; title=\"hello;world\"", &params_buf);
-
-            try std.testing.expectEqualStrings("text/plain", mt.value);
-            try std.testing.expectEqual(@as(usize, 1), mt.params.len);
-            try std.testing.expectEqualStrings("title", mt.params[0].name);
-            try std.testing.expectEqualStrings("hello;world", mt.params[0].value);
-        }
-        fn testParseAcceptsQuotedPairEscapes() !void {
-            const std = @import("std");
-            var params_buf: [1]Parameter = undefined;
-            const mt = try MediaType.parse("text/plain; title=\"hello\\\"world\\\\path\"", &params_buf);
-
-            try std.testing.expectEqualStrings("text/plain", mt.value);
-            try std.testing.expectEqual(@as(usize, 1), mt.params.len);
-            try std.testing.expectEqualStrings("title", mt.params[0].name);
-            try std.testing.expectEqualStrings("hello\\\"world\\\\path", mt.params[0].value);
-        }
-        fn testParseRejectsUnterminatedQuotedValues() !void {
-            const std = @import("std");
-            var params_buf: [1]Parameter = undefined;
-
-            try std.testing.expectError(error.UnterminatedQuotedValue, MediaType.parse("text/plain; title=\"unterminated", &params_buf));
-            try std.testing.expectError(error.UnterminatedQuotedValue, MediaType.parse("text/plain; title=\"unterminated; charset=utf-8", &params_buf));
-        }
-        fn testParseRejectsEmptyParameterSegments() !void {
-            const std = @import("std");
-            var params_buf: [1]Parameter = undefined;
-
-            try std.testing.expectError(error.InvalidParameter, MediaType.parse("text/plain;", &params_buf));
-            try std.testing.expectError(error.InvalidParameter, MediaType.parse("text/plain;;charset=utf-8", &params_buf));
-            try std.testing.expectError(error.InvalidParameter, MediaType.parse("text/plain; ; charset=utf-8", &params_buf));
-            try std.testing.expectError(error.InvalidParameter, MediaType.parse("text/plain;   ", &params_buf));
-        }
-        fn testParseRejectsNonAsciiTokens() !void {
-            const std = @import("std");
-            var params_buf: [1]Parameter = undefined;
-
-            try std.testing.expectError(error.InvalidMediaType, MediaType.parse("te\xE9xt/plain", &params_buf));
-            try std.testing.expectError(error.InvalidMediaType, MediaType.parse("text/pl\xFFain", &params_buf));
-            try std.testing.expectError(error.InvalidParameter, MediaType.parse("text/plain; na\xE9me=value", &params_buf));
-            try std.testing.expectError(error.InvalidParameter, MediaType.parse("text/plain; name=\xE9", &params_buf));
-        }
-        fn testParseRejectsControlBytesInQuotedValues() !void {
-            const std = @import("std");
-            var params_buf: [1]Parameter = undefined;
-
-            try std.testing.expectError(error.InvalidQuotedPair, MediaType.parse("text/plain; title=\"hello\rworld\"", &params_buf));
-            try std.testing.expectError(error.InvalidQuotedPair, MediaType.parse("text/plain; title=\"hello\nworld\"", &params_buf));
-        }
-        fn testParseRejectsInvalidMediaTypeShapes() !void {
-            const std = @import("std");
-            var params_buf: [1]Parameter = undefined;
-
-            try std.testing.expectError(error.InvalidMediaType, MediaType.parse("text", &params_buf));
-            try std.testing.expectError(error.InvalidMediaType, MediaType.parse("/plain", &params_buf));
-            try std.testing.expectError(error.InvalidMediaType, MediaType.parse("text/", &params_buf));
-            try std.testing.expectError(error.InvalidMediaType, MediaType.parse("text /plain", &params_buf));
-        }
-        fn testParseRejectsInvalidUnquotedParameterValues() !void {
-            const std = @import("std");
-            var params_buf: [1]Parameter = undefined;
-
-            try std.testing.expectError(error.InvalidParameter, MediaType.parse("text/plain; title=hello world", &params_buf));
-            try std.testing.expectError(error.InvalidParameter, MediaType.parse("text/plain; title=hello,world", &params_buf));
-        }
-        fn testParseRejectsTooManyParameters() !void {
-            const std = @import("std");
-            var params_buf: [1]Parameter = undefined;
-
-            try std.testing.expectError(
-                error.TooManyParameters,
-                MediaType.parse("text/plain; charset=utf-8; boundary=abc123", &params_buf),
-            );
-        }
-        fn testFormatWritesMediaTypeText() !void {
-            const std = @import("std");
-            const params = [_]Parameter{
-                .{ .name = "charset", .value = "utf-8" },
-                .{ .name = "filename", .value = "hello world.txt" },
-            };
-            const mt = MediaType.init("text/plain", &params);
-
-            var buf: [128]u8 = undefined;
-            var stream = std.io.fixedBufferStream(&buf);
-            try mt.format(stream.writer());
-
-            try std.testing.expectEqualStrings(
-                "text/plain; charset=utf-8; filename=\"hello world.txt\"",
-                stream.getWritten(),
-            );
-        }
-        fn testFormatRejectsValuesRequiringEscapeSequences() !void {
-            const std = @import("std");
-            const params = [_]Parameter{
-                .{ .name = "title", .value = "hello\"world" },
-            };
-            const mt = MediaType.init("text/plain", &params);
-
-            var buf: [128]u8 = undefined;
-            var stream = std.io.fixedBufferStream(&buf);
-            try std.testing.expectError(error.InvalidQuotedPair, mt.format(stream.writer()));
-        }
-        fn testFormatPreservesQuotedPairEscapes() !void {
-            const std = @import("std");
-            const params = [_]Parameter{
-                .{ .name = "title", .value = "hello\\\"world\\\\path" },
-            };
-            const mt = MediaType.init("text/plain", &params);
-
-            var buf: [128]u8 = undefined;
-            var stream = std.io.fixedBufferStream(&buf);
-            try mt.format(stream.writer());
-
-            try std.testing.expectEqualStrings(
-                "text/plain; title=\"hello\\\"world\\\\path\"",
-                stream.getWritten(),
-            );
-        }
-        fn testParseAndFormatRoundtripQuotedValuesWithoutDecoding() !void {
-            const std = @import("std");
-
-            var parsed_params: [1]Parameter = undefined;
-            const parsed = try MediaType.parse("text/plain; title=\"hello\\\"world\\\\path\"", &parsed_params);
-
-            var buf: [128]u8 = undefined;
-            var stream = std.io.fixedBufferStream(&buf);
-            try parsed.format(stream.writer());
-            try std.testing.expectEqualStrings(
-                "text/plain; title=\"hello\\\"world\\\\path\"",
-                stream.getWritten(),
-            );
-
-            var reparsed_params: [1]Parameter = undefined;
-            const reparsed = try MediaType.parse(stream.getWritten(), &reparsed_params);
-            try std.testing.expectEqualStrings(parsed.value, reparsed.value);
-            try std.testing.expectEqual(@as(usize, 1), reparsed.params.len);
-            try std.testing.expectEqualStrings(parsed.params[0].name, reparsed.params[0].name);
-            try std.testing.expectEqualStrings(parsed.params[0].value, reparsed.params[0].value);
-        }
-        fn testFormatRejectsInvalidMediaTypeAndParameterNames() !void {
-            const std = @import("std");
-            const bad_type = MediaType.init("text/plain\r\nX-Test: yes", &.{});
-            const bad_name_params = [_]Parameter{
-                .{ .name = "charset", .value = "utf-8" },
-                .{ .name = "file\xE9name", .value = "report.txt" },
-            };
-            const bad_name = MediaType.init("text/plain", &bad_name_params);
-
-            var type_buf: [128]u8 = undefined;
-            var type_stream = std.io.fixedBufferStream(&type_buf);
-            try std.testing.expectError(error.InvalidMediaType, bad_type.format(type_stream.writer()));
-            try std.testing.expectEqual(@as(usize, 0), type_stream.getWritten().len);
-
-            var name_buf: [128]u8 = undefined;
-            var name_stream = std.io.fixedBufferStream(&name_buf);
-            try std.testing.expectError(error.InvalidParameter, bad_name.format(name_stream.writer()));
-            try std.testing.expectEqual(@as(usize, 0), name_stream.getWritten().len);
-        }
-        fn testFormatRejectsControlBytesInQuotedValues() !void {
-            const std = @import("std");
-            const params = [_]Parameter{
-                .{ .name = "title", .value = "hello\rworld" },
-            };
-            const mt = MediaType.init("text/plain", &params);
-
-            var buf: [128]u8 = undefined;
-            var stream = std.io.fixedBufferStream(&buf);
-            try std.testing.expectError(error.InvalidQuotedPair, mt.format(stream.writer()));
-            try std.testing.expectEqual(@as(usize, 0), stream.getWritten().len);
-        }
-    };
-
-    const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
-            _ = self;
-            _ = allocator;
-        }
-
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
-            _ = self;
-            _ = allocator;
-
-            TestCase.testInitStoresValueAndParams() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testParseParsesValueAndParamsWithoutAllocation() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testParseAcceptsQuotedParameterValues() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testParseAcceptsSemicolonsInsideQuotedParameterValues() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testParseAcceptsQuotedPairEscapes() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testParseRejectsUnterminatedQuotedValues() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testParseRejectsEmptyParameterSegments() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testParseRejectsNonAsciiTokens() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testParseRejectsControlBytesInQuotedValues() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testParseRejectsInvalidMediaTypeShapes() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testParseRejectsInvalidUnquotedParameterValues() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testParseRejectsTooManyParameters() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testFormatWritesMediaTypeText() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testFormatRejectsValuesRequiringEscapeSequences() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testFormatPreservesQuotedPairEscapes() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testParseAndFormatRoundtripQuotedValuesWithoutDecoding() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testFormatRejectsInvalidMediaTypeAndParameterNames() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.testFormatRejectsControlBytesInQuotedValues() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            return true;
-        }
-
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
-            _ = self;
-            _ = allocator;
-        }
-    };
-
-    const Holder = struct {
-        var runner: Runner = .{};
-    };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    }.run);
 }

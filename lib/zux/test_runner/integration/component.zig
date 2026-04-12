@@ -20,7 +20,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
             _ = self;
             _ = allocator;
 
-            t.run("bt", bt.make(lib));
+            t.run("bt", bt.make(lib, Channel));
             t.run("button", button.make(lib, Channel));
             t.run("imu", imu.make(lib, Channel));
             t.run("led_strip", led_strip.make(lib, Channel));

@@ -6,6 +6,7 @@
 //! Factory: `fromFn` — `run_fn(t, allocator)` on a worker thread; `stack_size` sets
 //! `spawn_config.stack_size` for that worker (callers choose an explicit size per case).
 
+const builtin = @import("builtin");
 const embed = @import("embed");
 const Self = @This();
 const T = @import("T.zig");
@@ -127,6 +128,32 @@ fn defaultCtx() *anyopaque {
 fn noopDeinit(_: Self, _: embed.mem.Allocator) void {}
 
 pub fn TestRunner(comptime lib: type) Self {
+    if (builtin.target.os.tag == .freestanding) {
+        const Runner = struct {
+            pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+                _ = self;
+                _ = allocator;
+            }
+
+            pub fn run(self: *@This(), t: *T, allocator: embed.mem.Allocator) bool {
+                _ = self;
+                _ = t;
+                _ = allocator;
+                return true;
+            }
+
+            pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                _ = self;
+                _ = allocator;
+            }
+        };
+
+        const Holder = struct {
+            var runner: Runner = .{};
+        };
+        return Self.make(Runner).new(&Holder.runner);
+    }
+
     const TestCase = struct {
         fn testForwardsRunAndDeinit() !void {
             const std = @import("std");

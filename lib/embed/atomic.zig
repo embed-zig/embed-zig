@@ -1,9 +1,14 @@
-//! Atomic utilities — re-exports from std.atomic.
+//! Atomic utilities.
+//!
+//! By default this re-exports `std.atomic.Value`, but runtimes may provide a
+//! compatible `Value` implementation through `embed.make`.
 
-const re_export = struct {
-    const std = @import("std");
+const std = @import("std");
 
-    pub const Value = std.atomic.Value;
-};
+pub const Value = std.atomic.Value;
 
-pub const Value = re_export.Value;
+pub fn make(comptime Impl: type) type {
+    return struct {
+        pub const Value = Impl.Value;
+    };
+}

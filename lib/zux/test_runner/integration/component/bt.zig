@@ -6,10 +6,10 @@ const zux_event = @import("../../../event.zig");
 
 const EventReceiver = zux_event.EventReceiver;
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
     const TestCase = struct {
         fn initAdaptsMockerHostUpdates(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const World = bt.Mocker(lib);
+            const World = bt.Mocker(lib, Channel);
             var world = World.init(allocator, .{});
             defer world.deinit();
 

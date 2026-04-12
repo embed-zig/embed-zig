@@ -22,6 +22,7 @@ pub const Config = struct {
 };
 
 pub const DataFn = *const fn (
+    ctx: ?*anyopaque,
     allocator: embed.mem.Allocator,
     conn_handle: u16,
     service_uuid: u16,
@@ -32,6 +33,7 @@ pub fn send(
     comptime lib: type,
     allocator: embed.mem.Allocator,
     transport: anytype,
+    data_ctx: ?*anyopaque,
     dataFn: DataFn,
     config: Config,
 ) !void {
@@ -84,6 +86,7 @@ pub fn send(
     const req = req_buf[0..req_len];
     if (!Chunk.isReadStartMagic(req) or req.len != Chunk.read_start_magic.len) return error.InvalidReadStart;
     const payload = try dataFn(
+        data_ctx,
         allocator,
         transport.connHandle(),
         transport.serviceUuid(),
@@ -145,8 +148,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 lib,
                 lib.testing.allocator,
                 &invalid_transport,
+                null,
                 struct {
-                    fn dataFn(_: embed.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
+                    fn dataFn(_: ?*anyopaque, _: embed.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
                         return error.ShouldNotRun;
                     }
                 }.dataFn,
@@ -192,8 +196,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 lib,
                 lib.testing.allocator,
                 &oversized_transport,
+                null,
                 struct {
-                    fn dataFn(_: embed.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
+                    fn dataFn(_: ?*anyopaque, _: embed.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
                         return error.ShouldNotRun;
                     }
                 }.dataFn,
@@ -241,8 +246,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 lib,
                 lib.testing.allocator,
                 &empty_transport,
+                null,
                 struct {
-                    fn dataFn(_: embed.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
+                    fn dataFn(_: ?*anyopaque, _: embed.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
                         return &.{};
                     }
                 }.dataFn,

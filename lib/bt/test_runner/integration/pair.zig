@@ -3,7 +3,7 @@ const bt = @import("../../../bt.zig");
 const pair_runner = @import("../pair.zig");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
             _ = self;
@@ -14,7 +14,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            const Mocker = bt.Mocker(lib);
+            const Mocker = bt.Mocker(lib, Channel);
             var mocker = Mocker.init(lib.testing.allocator, .{});
             defer mocker.deinit();
 
