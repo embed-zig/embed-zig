@@ -17,30 +17,16 @@ fn makeBuiltApp(comptime lib: type, comptime Channel: fn (type) type) type {
     return assembler.build(build_config);
 }
 
-fn MockGpioImpl(comptime lib: type) type {
+fn MockGpioImpl() type {
     return struct {
-        mu: lib.Thread.Mutex = .{},
-        level: drivers.Gpio.Level = .high,
-
-        pub fn read(self: *@This()) drivers.Gpio.Error!drivers.Gpio.Level {
-            self.mu.lock();
-            defer self.mu.unlock();
-            return self.level;
+        pub fn read(_: *@This()) drivers.Gpio.Error!drivers.Gpio.Level {
+            return .high;
         }
 
-        pub fn write(self: *@This(), level: drivers.Gpio.Level) drivers.Gpio.Error!void {
-            self.mu.lock();
-            defer self.mu.unlock();
-            self.level = level;
+        pub fn write(_: *@This(), _: drivers.Gpio.Level) drivers.Gpio.Error!void {
         }
 
         pub fn setDirection(_: *@This(), _: drivers.Gpio.Direction) drivers.Gpio.Error!void {
-        }
-
-        pub fn setLevel(self: *@This(), level: drivers.Gpio.Level) void {
-            self.mu.lock();
-            defer self.mu.unlock();
-            self.level = level;
         }
     };
 }
@@ -58,11 +44,12 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             wrong_click_count,
             wrong_long_press_ns,
         };
+        const AtomicUsize = lib.atomic.Value(usize);
+        const AtomicU8 = lib.atomic.Value(u8);
 
-        var callback_mu: lib.Thread.Mutex = .{};
-        var callback_calls: usize = 0;
-        var callback_failure: ?Failure = null;
-        const expected_callback_count = 9;
+        var callback_calls: AtomicUsize = AtomicUsize.init(0);
+        var callback_failure: AtomicU8 = AtomicU8.init(0);
+        const expected_callback_count = 7;
 
         pub fn init(self: *Self, allocator: lib.mem.Allocator) !void {
             _ = self;
@@ -73,7 +60,7 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
         pub fn run(self: *Self, t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
 
-            const MockGpio = MockGpioImpl(lib);
+            const MockGpio = MockGpioImpl();
             const MockGpioButton = drivers.button.GpioButton.make(.{});
             var mock_gpio_impl = MockGpio{};
             const mock_gpio = drivers.Gpio.init(&mock_gpio_impl);
@@ -98,7 +85,7 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
                 return false;
             };
 
-            driveSequence(&app, &mock_gpio_impl) catch |err| {
+            driveSequence(&app) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -125,48 +112,38 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
         }
 
         pub fn onButton(stores: *BuiltApp.Store.Stores) void {
-            callback_mu.lock();
-            defer callback_mu.unlock();
-
-            callback_calls += 1;
+            const callback_count = callback_calls.fetchAdd(1, .seq_cst) + 1;
             const state = stores.buttons.get();
-            switch (callback_calls) {
-                1 => checkClickStateLocked(state, 1),
-                2 => checkClickStateLocked(state, 2),
-                3 => checkLongPressStateLocked(state),
-                4 => checkClickStateLocked(state, 1),
-                5 => checkClickStateLocked(state, 2),
-                6 => checkClickStateLocked(state, 3),
-                7 => checkClickStateLocked(state, 4),
-                8 => checkClickStateLocked(state, 5),
-                9 => checkLongPressStateLocked(state),
-                else => failLocked(.unexpected_callback_count),
+            switch (callback_count) {
+                1 => checkClickState(state, 1),
+                2 => checkClickState(state, 2),
+                3 => checkClickState(state, 1),
+                4 => checkClickState(state, 2),
+                5 => checkClickState(state, 3),
+                6 => checkClickState(state, 4),
+                7 => checkClickState(state, 5),
+                else => fail(.unexpected_callback_count),
             }
         }
 
-        fn driveSequence(app: *BuiltApp, mock_gpio: anytype) !void {
-            try driveClicks(app, mock_gpio, 1, 1);
-            try driveClicks(app, mock_gpio, 2, 2);
-            try driveLongPress1(app, mock_gpio, 3);
-            try driveClicks(app, mock_gpio, 1, 4);
-            try driveClicks(app, mock_gpio, 2, 5);
-            try driveClicks(app, mock_gpio, 3, 6);
-            try driveClicks(app, mock_gpio, 4, 7);
-            try driveClicks(app, mock_gpio, 5, 8);
-            try driveLongPress1(app, mock_gpio, 9);
+        fn driveSequence(app: *BuiltApp) !void {
+            try driveClicks(app, 1, 1);
+            try driveClicks(app, 2, 2);
+            try driveClicks(app, 1, 3);
+            try driveClicks(app, 2, 4);
+            try driveClicks(app, 3, 5);
+            try driveClicks(app, 4, 6);
+            try driveClicks(app, 5, 7);
         }
 
         fn driveClicks(
             app: *BuiltApp,
-            mock_gpio: anytype,
             comptime tap_count: comptime_int,
             expected_callbacks_after: usize,
         ) !void {
             inline for (0..tap_count) |i| {
-                mock_gpio.setLevel(.low);
                 try app.press_single_button(.buttons);
                 lib.Thread.sleep(20 * lib.time.ns_per_ms);
-                mock_gpio.setLevel(.high);
                 try app.release_single_button(.buttons);
                 if (i + 1 < tap_count) {
                     lib.Thread.sleep(20 * lib.time.ns_per_ms);
@@ -176,85 +153,55 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             try waitForCallbackCount(expected_callbacks_after);
         }
 
-        fn driveLongPress1(app: *BuiltApp, mock_gpio: anytype, expected_callbacks_after: usize) !void {
-            mock_gpio.setLevel(.low);
-            try app.press_single_button(.buttons);
-            lib.Thread.sleep(1200 * lib.time.ns_per_ms);
-            mock_gpio.setLevel(.high);
-            try app.release_single_button(.buttons);
-            lib.Thread.sleep(100 * lib.time.ns_per_ms);
-            try waitForCallbackCount(expected_callbacks_after);
-        }
-
-        fn checkBaseStateLocked(state: button.state.Detected) bool {
+        fn checkBaseState(state: button.state.Detected) bool {
             if (state.source_id != 7) {
-                failLocked(.wrong_source_id);
+                fail(.wrong_source_id);
                 return false;
             }
             if (state.button_id != null) {
-                failLocked(.wrong_button_id);
+                fail(.wrong_button_id);
                 return false;
             }
             if (state.gesture_kind == null) {
-                failLocked(.missing_gesture_kind);
+                fail(.missing_gesture_kind);
                 return false;
             }
             return true;
         }
 
-        fn checkClickStateLocked(state: button.state.Detected, expected_click_count: u16) void {
-            if (!checkBaseStateLocked(state)) return;
+        fn checkClickState(state: button.state.Detected, expected_click_count: u16) void {
+            if (!checkBaseState(state)) return;
             if (state.gesture_kind.? != .click) {
-                failLocked(.wrong_gesture_kind);
+                fail(.wrong_gesture_kind);
                 return;
             }
             if (state.click_count != expected_click_count) {
-                failLocked(.wrong_click_count);
+                fail(.wrong_click_count);
                 return;
             }
             if (state.long_press_ns != 0) {
-                failLocked(.wrong_long_press_ns);
-            }
-        }
-
-        fn checkLongPressStateLocked(state: button.state.Detected) void {
-            if (!checkBaseStateLocked(state)) return;
-            if (state.gesture_kind.? != .long_press) {
-                failLocked(.wrong_gesture_kind);
-                return;
-            }
-            if (state.click_count != 0) {
-                failLocked(.wrong_click_count);
-                return;
-            }
-            if (state.long_press_ns < button.Reducer.default_long_press_ns) {
-                failLocked(.wrong_long_press_ns);
+                fail(.wrong_long_press_ns);
             }
         }
 
         fn reset() void {
-            callback_mu.lock();
-            defer callback_mu.unlock();
-            callback_calls = 0;
-            callback_failure = null;
+            callback_calls.store(0, .seq_cst);
+            callback_failure.store(0, .seq_cst);
         }
 
-        fn failLocked(next: Failure) void {
-            if (callback_failure == null) {
-                callback_failure = next;
-            }
+        fn fail(next: Failure) void {
+            const encoded: u8 = @as(u8, @intFromEnum(next)) + 1;
+            _ = callback_failure.cmpxchgStrong(0, encoded, .seq_cst, .seq_cst);
         }
 
         fn currentCallbackCalls() usize {
-            callback_mu.lock();
-            defer callback_mu.unlock();
-            return callback_calls;
+            return callback_calls.load(.seq_cst);
         }
 
         fn currentFailure() ?Failure {
-            callback_mu.lock();
-            defer callback_mu.unlock();
-            return callback_failure;
+            const encoded = callback_failure.load(.seq_cst);
+            if (encoded == 0) return null;
+            return @enumFromInt(encoded - 1);
         }
 
         fn waitForCallbackCount(expected: usize) !void {

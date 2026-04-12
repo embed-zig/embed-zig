@@ -27,9 +27,14 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                         .node = .{
                             .max_ops = 24,
                         },
+                        .max_imu = 2,
                         .max_adc_buttons = 4,
                         .max_gpio_buttons = 6,
                         .max_led_strips = 3,
+                        .max_modem = 2,
+                        .max_nfc = 2,
+                        .max_wifi_sta = 2,
+                        .max_wifi_ap = 2,
                     }, Channel);
 
                     const assembler = comptime AssemblerType.init();
@@ -39,12 +44,22 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expectEqual(@as(usize, 24), assembler.node_builder.ops.len);
                     try testing.expectEqual(@as(usize, 4), assembler.adc_button_registry.periphs.len);
                     try testing.expectEqual(@as(usize, 6), assembler.gpio_button_registry.periphs.len);
+                    try testing.expectEqual(@as(usize, 2), assembler.imu_registry.periphs.len);
                     try testing.expectEqual(@as(usize, 3), assembler.ledstrip_registry.periphs.len);
+                    try testing.expectEqual(@as(usize, 2), assembler.modem_registry.periphs.len);
+                    try testing.expectEqual(@as(usize, 2), assembler.nfc_registry.periphs.len);
+                    try testing.expectEqual(@as(usize, 2), assembler.wifi_sta_registry.periphs.len);
+                    try testing.expectEqual(@as(usize, 2), assembler.wifi_ap_registry.periphs.len);
                     try testing.expectEqual(@as(usize, 0), assembler.store_builder.store_count);
                     try testing.expectEqual(@as(usize, 0), assembler.node_builder.len);
                     try testing.expectEqual(@as(usize, 0), assembler.adc_button_registry.len);
                     try testing.expectEqual(@as(usize, 0), assembler.gpio_button_registry.len);
+                    try testing.expectEqual(@as(usize, 0), assembler.imu_registry.len);
                     try testing.expectEqual(@as(usize, 0), assembler.ledstrip_registry.len);
+                    try testing.expectEqual(@as(usize, 0), assembler.modem_registry.len);
+                    try testing.expectEqual(@as(usize, 0), assembler.nfc_registry.len);
+                    try testing.expectEqual(@as(usize, 0), assembler.wifi_sta_registry.len);
+                    try testing.expectEqual(@as(usize, 0), assembler.wifi_ap_registry.len);
                 }
 
                 fn reexports_store_and_node_builder_methods() !void {
@@ -98,16 +113,31 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     const BuildConfig = comptime blk: {
                         const AssemblerType = Assembler.make(embed_std.std, .{
                             .max_adc_buttons = 2,
+                            .max_imu = 1,
                             .max_led_strips = 1,
+                            .max_modem = 1,
+                            .max_nfc = 1,
+                            .max_wifi_sta = 1,
+                            .max_wifi_ap = 1,
                         }, Channel);
                         var next = AssemblerType.init();
                         next.addGroupedButton(.buttons, 7, 3);
+                        next.addImu(.imu, 13);
                         next.addLedStrip(.strip, 9, 4);
+                        next.addModem(.modem, 15);
+                        next.addNfc(.nfc, 17);
+                        next.addWifiSta(.sta, 19);
+                        next.addWifiAp(.ap, 21);
                         break :blk next.BuildConfig();
                     };
 
                     try testing.expect(@hasField(BuildConfig, "buttons"));
+                    try testing.expect(@hasField(BuildConfig, "imu"));
                     try testing.expect(@hasField(BuildConfig, "strip"));
+                    try testing.expect(@hasField(BuildConfig, "modem"));
+                    try testing.expect(@hasField(BuildConfig, "nfc"));
+                    try testing.expect(@hasField(BuildConfig, "sta"));
+                    try testing.expect(@hasField(BuildConfig, "ap"));
                 }
 
                 fn add_led_strip_records_registry_entry() !void {
@@ -125,6 +155,38 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expectEqual(@as(usize, 1), assembler.ledstrip_registry.len);
                     try testing.expectEqual(@as(u32, 9), assembler.ledstrip_registry.periphs[0].id);
                     try testing.expectEqual(@as(usize, 4), assembler.ledstrip_registry.periphs[0].pixel_count);
+                }
+
+                fn add_component_registries_record_entries() !void {
+                    const embed_std = @import("embed_std");
+
+                    const assembler = comptime blk: {
+                        const AssemblerType = Assembler.make(embed_std.std, .{
+                            .max_imu = 1,
+                            .max_modem = 1,
+                            .max_nfc = 1,
+                            .max_wifi_sta = 1,
+                            .max_wifi_ap = 1,
+                        }, Channel);
+                        var next = AssemblerType.init();
+                        next.addImu(.imu, 13);
+                        next.addModem(.modem, 15);
+                        next.addNfc(.nfc, 17);
+                        next.addWifiSta(.sta, 19);
+                        next.addWifiAp(.ap, 21);
+                        break :blk next;
+                    };
+
+                    try testing.expectEqual(@as(usize, 1), assembler.imu_registry.len);
+                    try testing.expectEqual(@as(u32, 13), assembler.imu_registry.periphs[0].id);
+                    try testing.expectEqual(@as(usize, 1), assembler.modem_registry.len);
+                    try testing.expectEqual(@as(u32, 15), assembler.modem_registry.periphs[0].id);
+                    try testing.expectEqual(@as(usize, 1), assembler.nfc_registry.len);
+                    try testing.expectEqual(@as(u32, 17), assembler.nfc_registry.periphs[0].id);
+                    try testing.expectEqual(@as(usize, 1), assembler.wifi_sta_registry.len);
+                    try testing.expectEqual(@as(u32, 19), assembler.wifi_sta_registry.periphs[0].id);
+                    try testing.expectEqual(@as(usize, 1), assembler.wifi_ap_registry.len);
+                    try testing.expectEqual(@as(u32, 21), assembler.wifi_ap_registry.periphs[0].id);
                 }
 
                 fn build_returns_app_methods() !void {
@@ -256,17 +318,25 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try app.set_led_strip_pixels(.strip, Built.FrameType{}, 200);
                     switch (app.impl.last_event.?) {
                         .ledstrip_set_pixels => |event_value| {
-                            try testing.expectEqual(@as(u32, 11), event_value.periph_id);
+                            try testing.expectEqual(@as(u32, 11), event_value.source_id);
                             try testing.expectEqual(@as(usize, 4), event_value.pixels.len);
                             try testing.expectEqual(@as(u8, 200), event_value.brightness);
                         },
                         else => return error.UnexpectedMessage,
                     }
                     try app.set_led_strip_animated(.strip, Built.FrameType{}, 128, 42);
-                    try testing.expect(app.impl.last_event.? == .ledstrip_set);
+                    switch (app.impl.last_event.?) {
+                        .ledstrip_set => |event_value| {
+                            try testing.expectEqual(@as(u32, 11), event_value.source_id);
+                            try testing.expectEqual(@as(u8, 128), event_value.brightness);
+                            try testing.expectEqual(@as(u32, 42), event_value.duration);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
                     try app.set_led_strip_flash(.strip, Built.FrameType{}, 111, 5_000_000, 12_000_000);
                     switch (app.impl.last_event.?) {
                         .ledstrip_flash => |event_value| {
+                            try testing.expectEqual(@as(u32, 11), event_value.source_id);
                             try testing.expectEqual(@as(u8, 111), event_value.brightness);
                             try testing.expectEqual(@as(u64, 5_000_000), event_value.duration_ns);
                             try testing.expectEqual(@as(u64, 12_000_000), event_value.interval_ns);
@@ -276,6 +346,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try app.set_led_strip_pingpong(.strip, Built.FrameType{}, Built.FrameType{}, 99, 9_000_000, 21_000_000);
                     switch (app.impl.last_event.?) {
                         .ledstrip_pingpong => |event_value| {
+                            try testing.expectEqual(@as(u32, 11), event_value.source_id);
                             try testing.expectEqual(@as(u8, 99), event_value.brightness);
                             try testing.expectEqual(@as(u64, 9_000_000), event_value.duration_ns);
                             try testing.expectEqual(@as(u64, 21_000_000), event_value.interval_ns);
@@ -285,6 +356,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try app.set_led_strip_rotate(.strip, Built.FrameType{}, 77, 3_000_000, 7_000_000);
                     switch (app.impl.last_event.?) {
                         .ledstrip_rotate => |event_value| {
+                            try testing.expectEqual(@as(u32, 11), event_value.source_id);
                             try testing.expectEqual(@as(u8, 77), event_value.brightness);
                             try testing.expectEqual(@as(u64, 3_000_000), event_value.duration_ns);
                             try testing.expectEqual(@as(u64, 7_000_000), event_value.interval_ns);
@@ -310,6 +382,10 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 return false;
             };
             TestCase.add_led_strip_records_registry_entry() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.add_component_registries_record_entries() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

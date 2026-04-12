@@ -7,6 +7,10 @@ const root = @This();
 ptr: *anyopaque,
 vtable: *const VTable,
 
+pub const max_apn_len: usize = 32;
+pub const max_phone_number_len: usize = 32;
+pub const max_sms_text_len: usize = 256;
+
 pub const Rat = enum {
     unknown,
     gsm,
@@ -49,6 +53,94 @@ pub const SignalInfo = struct {
     rat: Rat = .unknown,
 };
 
+pub const CallDirection = enum {
+    incoming,
+    outgoing,
+};
+
+pub const CallState = enum {
+    incoming,
+    dialing,
+    alerting,
+    active,
+    held,
+    waiting,
+};
+
+pub const CallEndReason = enum {
+    unknown,
+    local_hangup,
+    remote_hangup,
+    missed,
+    rejected,
+    busy,
+    failed,
+};
+
+pub const CallInfo = struct {
+    call_id: u8 = 0,
+    direction: CallDirection = .incoming,
+    number: ?[]const u8 = null,
+};
+
+pub const CallStatus = struct {
+    call_id: u8 = 0,
+    direction: CallDirection = .incoming,
+    state: CallState,
+    number: ?[]const u8 = null,
+};
+
+pub const CallEndInfo = struct {
+    call_id: u8 = 0,
+    reason: CallEndReason = .unknown,
+};
+
+pub const SmsStorage = enum {
+    unknown,
+    sim,
+    modem,
+};
+
+pub const SmsEncoding = enum {
+    gsm7,
+    utf8,
+    ucs2,
+    binary,
+};
+
+pub const SmsMessage = struct {
+    index: ?u16 = null,
+    storage: SmsStorage = .unknown,
+    sender: ?[]const u8 = null,
+    text: []const u8,
+    encoding: SmsEncoding = .utf8,
+};
+
+pub const GnssState = enum {
+    idle,
+    acquiring,
+    fixed,
+};
+
+pub const GnssFixQuality = enum {
+    none,
+    two_d,
+    three_d,
+};
+
+pub const GnssFix = struct {
+    quality: GnssFixQuality = .none,
+    latitude_deg: f64 = 0,
+    longitude_deg: f64 = 0,
+    altitude_m: ?f32 = null,
+    speed_mps: ?f32 = null,
+    course_deg: ?f32 = null,
+    hdop: ?f32 = null,
+    satellites_in_view: u8 = 0,
+    satellites_used: u8 = 0,
+    timestamp_ms: ?u64 = null,
+};
+
 pub const State = struct {
     sim: SimState = .unknown,
     registration: RegistrationState = .offline,
@@ -56,12 +148,42 @@ pub const State = struct {
     signal: ?SignalInfo = null,
 };
 
-pub const Event = union(enum) {
-    sim_state_changed: SimState,
+pub const SimEvent = union(enum) {
+    state_changed: SimState,
+};
+
+pub const NetworkEvent = union(enum) {
     registration_changed: RegistrationState,
-    packet_state_changed: PacketState,
     signal_changed: SignalInfo,
+};
+
+pub const DataEvent = union(enum) {
+    packet_state_changed: PacketState,
     apn_changed: []const u8,
+};
+
+pub const CallEvent = union(enum) {
+    incoming: CallInfo,
+    state_changed: CallStatus,
+    ended: CallEndInfo,
+};
+
+pub const SmsEvent = union(enum) {
+    received: SmsMessage,
+};
+
+pub const GnssEvent = union(enum) {
+    state_changed: GnssState,
+    fix_changed: GnssFix,
+};
+
+pub const Event = union(enum) {
+    sim: SimEvent,
+    network: NetworkEvent,
+    data: DataEvent,
+    call: CallEvent,
+    sms: SmsEvent,
+    gnss: GnssEvent,
 };
 
 pub const SetApnError = error{
@@ -326,7 +448,25 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 _ = root.RegistrationState;
                 _ = root.PacketState;
                 _ = root.SignalInfo;
+                _ = root.CallDirection;
+                _ = root.CallState;
+                _ = root.CallEndReason;
+                _ = root.CallInfo;
+                _ = root.CallStatus;
+                _ = root.CallEndInfo;
+                _ = root.SmsStorage;
+                _ = root.SmsEncoding;
+                _ = root.SmsMessage;
+                _ = root.GnssState;
+                _ = root.GnssFixQuality;
+                _ = root.GnssFix;
                 _ = root.State;
+                _ = root.SimEvent;
+                _ = root.NetworkEvent;
+                _ = root.DataEvent;
+                _ = root.CallEvent;
+                _ = root.SmsEvent;
+                _ = root.GnssEvent;
                 _ = root.Event;
                 _ = root.SetApnError;
                 _ = root.CallbackFn;
@@ -346,7 +486,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 imei_value: []const u8 = "860000000000001",
                 imsi_value: []const u8 = "460001234567890",
-                apn_buf: [32]u8 = [_]u8{0} ** 32,
+                apn_buf: [max_apn_len]u8 = [_]u8{0} ** max_apn_len,
                 apn_len: usize = "internet".len,
 
                 const Self = @This();

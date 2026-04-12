@@ -1,20 +1,11 @@
-const motion = @import("motion");
+const State = @This();
 
-pub const Accel = struct {
-    source_id: u32 = 0,
-    x: f32 = 0,
-    y: f32 = 0,
-    z: f32 = 0,
+pub const Motion = enum {
+    shake,
+    tilt,
+    flip,
+    free_fall,
 };
 
-pub const Gyro = struct {
-    source_id: u32 = 0,
-    x: f32 = 0,
-    y: f32 = 0,
-    z: f32 = 0,
-};
-
-pub const Motion = struct {
-    source_id: u32 = 0,
-    motion: ?motion.Action = null,
-};
+source_id: u32 = 0,
+motion: ?Motion = null,

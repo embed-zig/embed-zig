@@ -1,7 +1,8 @@
 const types = @import("types.zig");
 const testing_api = @import("testing");
 
-const Detector = @This();
+const GestureDetector = @This();
+const Detector = GestureDetector;
 
 const pi: f32 = 3.141592653589793;
 const half_pi: f32 = pi / 2.0;
@@ -9,7 +10,12 @@ const degrees_per_radian: f32 = 57.29577951308232;
 const action_queue_capacity: usize = 4;
 
 pub const AccelData = types.AccelData;
+pub const GyroData = types.GyroData;
 pub const Sample = types.Sample;
+pub const GyroSample = types.GyroSample;
+pub const Face = types.Face;
+pub const FlipData = types.FlipData;
+pub const FreeFallData = types.FreeFallData;
 pub const ShakeData = types.ShakeData;
 pub const TiltData = types.TiltData;
 pub const Action = types.Action;
@@ -30,9 +36,25 @@ pub const TiltState = struct {
     last_event_time_ms: u64 = 0,
 };
 
+pub const FreeFallState = struct {
+    active: bool = false,
+    emitted: bool = false,
+    start_time_ms: u64 = 0,
+    min_magnitude: f32 = 0,
+};
+
+pub const FlipState = struct {
+    face: ?Face = null,
+    saw_turn: bool = false,
+    last_turn_time_ms: u64 = 0,
+    last_event_time_ms: u64 = 0,
+};
+
 thresholds: Thresholds,
 shake_state: ShakeState = .{},
 tilt_state: TiltState = .{},
+free_fall_state: FreeFallState = .{},
+flip_state: FlipState = .{},
 actions: [action_queue_capacity]?Action = [_]?Action{null} ** action_queue_capacity,
 read_idx: usize = 0,
 count: usize = 0,
@@ -50,6 +72,8 @@ pub fn initDefault() Detector {
 pub fn reset(self: *Detector) void {
     self.shake_state = .{};
     self.tilt_state = .{};
+    self.free_fall_state = .{};
+    self.flip_state = .{};
     self.actions = [_]?Action{null} ** action_queue_capacity;
     self.read_idx = 0;
     self.count = 0;
@@ -57,7 +81,19 @@ pub fn reset(self: *Detector) void {
 
 pub fn update(self: *Detector, sample: Sample) ?Action {
     self.detectShake(sample);
-    self.detectTilt(sample);
+    self.detectFreeFall(sample);
+    const action_count = self.count;
+    self.detectFlip(sample);
+    if (self.count == action_count) {
+        self.detectTilt(sample);
+    } else {
+        self.syncTiltBaseline(sample);
+    }
+    return self.nextAction();
+}
+
+pub fn updateGyro(self: *Detector, sample: GyroSample) ?Action {
+    self.detectFlipGyro(sample);
     return self.nextAction();
 }
 
@@ -165,12 +201,90 @@ fn detectTilt(self: *Detector, sample: Sample) void {
     }
 }
 
+fn detectFreeFall(self: *Detector, sample: Sample) void {
+    const mag = sample.accel.magnitude();
+
+    if (mag <= self.thresholds.free_fall_threshold_g) {
+        if (!self.free_fall_state.active) {
+            self.free_fall_state.active = true;
+            self.free_fall_state.emitted = false;
+            self.free_fall_state.start_time_ms = sample.timestamp_ms;
+            self.free_fall_state.min_magnitude = mag;
+            return;
+        }
+
+        self.free_fall_state.min_magnitude = minf(self.free_fall_state.min_magnitude, mag);
+        const duration_ms = sample.timestamp_ms -| self.free_fall_state.start_time_ms;
+        if (!self.free_fall_state.emitted and
+            duration_ms >= self.thresholds.free_fall_min_duration_ms)
+        {
+            self.queueAction(.{
+                .free_fall = .{
+                    .duration_ms = saturatingU32(duration_ms),
+                    .min_magnitude = self.free_fall_state.min_magnitude,
+                },
+            });
+            self.free_fall_state.emitted = true;
+        }
+        return;
+    }
+
+    self.free_fall_state.active = false;
+    self.free_fall_state.emitted = false;
+    self.free_fall_state.start_time_ms = 0;
+    self.free_fall_state.min_magnitude = 0;
+}
+
+fn detectFlip(self: *Detector, sample: Sample) void {
+    const face = dominantFace(sample.accel) orelse return;
+
+    if (self.flip_state.face) |prev_face| {
+        if (prev_face != face and
+            self.flip_state.saw_turn and
+            sample.timestamp_ms -| self.flip_state.last_turn_time_ms <= self.thresholds.flip_recent_turn_ms and
+            (self.flip_state.last_event_time_ms == 0 or
+                sample.timestamp_ms -| self.flip_state.last_event_time_ms >= self.thresholds.flip_debounce_ms))
+        {
+            self.queueAction(.{
+                .flip = .{
+                    .from = prev_face,
+                    .to = face,
+                },
+            });
+            self.flip_state.last_event_time_ms = sample.timestamp_ms;
+        }
+    }
+
+    self.flip_state.face = face;
+}
+
+fn detectFlipGyro(self: *Detector, sample: GyroSample) void {
+    if (sample.gyro.magnitude() < self.thresholds.flip_gyro_threshold_dps) return;
+
+    self.flip_state.saw_turn = true;
+    self.flip_state.last_turn_time_ms = sample.timestamp_ms;
+}
+
+fn syncTiltBaseline(self: *Detector, sample: Sample) void {
+    const roll = atan2Approx(sample.accel.y, sample.accel.z) * degrees_per_radian;
+    const pitch = atan2Approx(-sample.accel.x, @sqrt(sample.accel.y * sample.accel.y + sample.accel.z * sample.accel.z)) * degrees_per_radian;
+
+    self.tilt_state.initialized = true;
+    self.tilt_state.last_roll = roll;
+    self.tilt_state.last_pitch = pitch;
+    self.tilt_state.last_event_time_ms = sample.timestamp_ms;
+}
+
 fn absf(x: f32) f32 {
     return if (x < 0) -x else x;
 }
 
 fn maxf(a: f32, b: f32) f32 {
     return if (a > b) a else b;
+}
+
+fn minf(a: f32, b: f32) f32 {
+    return if (a < b) a else b;
 }
 
 fn saturatingU32(value: u64) u32 {
@@ -199,20 +313,29 @@ fn atan2Approx(y: f32, x: f32) f32 {
     return 0.0;
 }
 
+fn dominantFace(accel: AccelData) ?Face {
+    const mag = accel.magnitude();
+    if (mag < 0.6 or mag > 1.4) return null;
+    if (absf(accel.x) > 0.45 or absf(accel.y) > 0.45) return null;
+    if (accel.z >= 0.75) return .up;
+    if (accel.z <= -0.75) return .down;
+    return null;
+}
+
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const TestCase = struct {
         fn testFirstSampleOnlySeedsBaseline() !void {
-            const std = @import("std");
+            const testing = lib.testing;
 
             var detector = Detector.initDefault();
-            try std.testing.expect(detector.update(.{
+            try testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
-            try std.testing.expect(!detector.hasPendingActions());
+            try testing.expect(!detector.hasPendingActions());
         }
         fn testShakeEmitsAfterActivityReturnsQuiet() !void {
-            const std = @import("std");
+            const testing = lib.testing;
 
             var detector = Detector.init(.{
                 .shake_threshold_g = 1.0,
@@ -221,24 +344,24 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 .tilt_threshold_deg = 9999,
             });
 
-            try std.testing.expect(detector.update(.{
+            try testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
-            try std.testing.expect(detector.update(.{
+            try testing.expect(detector.update(.{
                 .accel = .{ .x = 2.0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 10,
             }) == null);
-            try std.testing.expect(detector.update(.{
+            try testing.expect(detector.update(.{
                 .accel = .{ .x = -2.0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 20,
             }) == null);
-            try std.testing.expect(detector.update(.{
+            try testing.expect(detector.update(.{
                 .accel = .{ .x = 2.0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 30,
             }) == null);
 
-            try std.testing.expect(detector.update(.{
+            try testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 80,
             }) == null);
@@ -250,14 +373,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             switch (action) {
                 .shake => |shake| {
-                    try std.testing.expect(shake.magnitude >= 1.0);
-                    try std.testing.expect(shake.duration_ms >= 50);
+                    try testing.expect(shake.magnitude >= 1.0);
+                    try testing.expect(shake.duration_ms >= 50);
                 },
-                else => try std.testing.expect(false),
+                else => try testing.expect(false),
             }
         }
         fn testTiltEmitsAbsoluteAngles() !void {
-            const std = @import("std");
+            const testing = lib.testing;
 
             var detector = Detector.init(.{
                 .shake_threshold_g = 9999,
@@ -265,7 +388,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 .tilt_debounce_ms = 0,
             });
 
-            try std.testing.expect(detector.update(.{
+            try testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
@@ -277,13 +400,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             switch (action) {
                 .tilt => |tilt| {
-                    try std.testing.expect(absf(tilt.pitch) > 20.0);
+                    try testing.expect(absf(tilt.pitch) > 20.0);
                 },
-                else => try std.testing.expect(false),
+                else => try testing.expect(false),
             }
         }
         fn testTiltDebounceBlocksRapidRepeat() !void {
-            const std = @import("std");
+            const testing = lib.testing;
 
             var detector = Detector.init(.{
                 .shake_threshold_g = 9999,
@@ -291,7 +414,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 .tilt_debounce_ms = 200,
             });
 
-            try std.testing.expect(detector.update(.{
+            try testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
@@ -300,16 +423,16 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 .accel = .{ .x = 0.5, .y = 0, .z = 0.866 },
                 .timestamp_ms = 100,
             });
-            try std.testing.expect(!detector.hasPendingActions());
+            try testing.expect(!detector.hasPendingActions());
 
-            try std.testing.expect(detector.update(.{
+            try testing.expect(detector.update(.{
                 .accel = .{ .x = 0.7, .y = 0, .z = 0.714 },
                 .timestamp_ms = 150,
             }) == null);
-            try std.testing.expect(!detector.hasPendingActions());
+            try testing.expect(!detector.hasPendingActions());
         }
         fn testSpeakerLikeSmallVibrationStaysQuiet() !void {
-            const std = @import("std");
+            const testing = lib.testing;
 
             var detector = Detector.init(.{
                 .shake_threshold_g = 1.0,
@@ -318,7 +441,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 .tilt_threshold_deg = 9999,
             });
 
-            try std.testing.expect(detector.update(.{
+            try testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
@@ -335,15 +458,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 .{ .ts = 120, .x = 0.00 },
                 .{ .ts = 180, .x = 0.00 },
             }) |sample| {
-                try std.testing.expect(detector.update(.{
+                try testing.expect(detector.update(.{
                     .accel = .{ .x = sample.x, .y = 0, .z = 1.0 },
                     .timestamp_ms = sample.ts,
                 }) == null);
-                try std.testing.expect(!detector.hasPendingActions());
+                try testing.expect(!detector.hasPendingActions());
             }
         }
         fn testSlowReorientationDoesNotLookLikeShake() !void {
-            const std = @import("std");
+            const testing = lib.testing;
 
             var detector = Detector.init(.{
                 .shake_threshold_g = 1.0,
@@ -359,12 +482,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 .{ .accel = .{ .x = 0.5000, .y = 0, .z = 0.8660 }, .timestamp_ms = 300 },
                 .{ .accel = .{ .x = 0.6428, .y = 0, .z = 0.7660 }, .timestamp_ms = 400 },
             }) |sample| {
-                try std.testing.expect(detector.update(sample) == null);
-                try std.testing.expect(!detector.hasPendingActions());
+                try testing.expect(detector.update(sample) == null);
+                try testing.expect(!detector.hasPendingActions());
             }
         }
         fn testHumanShakeStillWinsAfterSmallVibrationNoise() !void {
-            const std = @import("std");
+            const testing = lib.testing;
 
             var detector = Detector.init(.{
                 .shake_threshold_g = 1.0,
@@ -383,7 +506,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 .{ .accel = .{ .x = 2.0, .y = 0, .z = 1.0 }, .timestamp_ms = 90 },
                 .{ .accel = .{ .x = 0.0, .y = 0, .z = 1.0 }, .timestamp_ms = 140 },
             }) |sample| {
-                try std.testing.expect(detector.update(sample) == null);
+                try testing.expect(detector.update(sample) == null);
             }
 
             const action = detector.update(.{
@@ -393,15 +516,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             switch (action) {
                 .shake => |shake| {
-                    try std.testing.expect(shake.magnitude >= 1.0);
-                    try std.testing.expect(shake.duration_ms >= 80);
+                    try testing.expect(shake.magnitude >= 1.0);
+                    try testing.expect(shake.duration_ms >= 80);
                 },
-                else => try std.testing.expect(false),
+                else => try testing.expect(false),
             }
-            try std.testing.expect(!detector.hasPendingActions());
+            try testing.expect(!detector.hasPendingActions());
         }
         fn testTiltCanFireAgainAfterDebounceWindow() !void {
-            const std = @import("std");
+            const testing = lib.testing;
 
             var detector = Detector.init(.{
                 .shake_threshold_g = 9999,
@@ -409,16 +532,16 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 .tilt_debounce_ms = 200,
             });
 
-            try std.testing.expect(detector.update(.{
+            try testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
 
-            try std.testing.expect(detector.update(.{
+            try testing.expect(detector.update(.{
                 .accel = .{ .x = 0.5, .y = 0, .z = 0.866 },
                 .timestamp_ms = 100,
             }) == null);
-            try std.testing.expect(!detector.hasPendingActions());
+            try testing.expect(!detector.hasPendingActions());
 
             const action = detector.update(.{
                 .accel = .{ .x = 0.7, .y = 0, .z = 0.714 },
@@ -427,13 +550,91 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             switch (action) {
                 .tilt => |tilt| {
-                    try std.testing.expect(absf(tilt.pitch) > 20.0);
+                    try testing.expect(absf(tilt.pitch) > 20.0);
                 },
-                else => try std.testing.expect(false),
+                else => try testing.expect(false),
+            }
+        }
+        fn testFlipNeedsRecentTurnAndFaceChange() !void {
+            const testing = lib.testing;
+
+            var detector = Detector.init(.{
+                .shake_threshold_g = 9999,
+                .tilt_threshold_deg = 9999,
+                .flip_gyro_threshold_dps = 90.0,
+                .flip_recent_turn_ms = 400,
+                .flip_debounce_ms = 0,
+            });
+
+            try testing.expect(detector.update(.{
+                .accel = .{ .x = 0, .y = 0, .z = 1.0 },
+                .timestamp_ms = 0,
+            }) == null);
+            try testing.expect(detector.update(.{
+                .accel = .{ .x = 0, .y = 0, .z = -1.0 },
+                .timestamp_ms = 100,
+            }) == null);
+
+            try testing.expect(detector.update(.{
+                .accel = .{ .x = 0, .y = 0, .z = 1.0 },
+                .timestamp_ms = 200,
+            }) == null);
+            try testing.expect(detector.updateGyro(.{
+                .gyro = .{ .x = 0, .y = 0, .z = 140.0 },
+                .timestamp_ms = 220,
+            }) == null);
+
+            const action = detector.update(.{
+                .accel = .{ .x = 0, .y = 0, .z = -1.0 },
+                .timestamp_ms = 260,
+            }).?;
+
+            switch (action) {
+                .flip => |flip| {
+                    try testing.expectEqual(Face.up, flip.from);
+                    try testing.expectEqual(Face.down, flip.to);
+                },
+                else => try testing.expect(false),
+            }
+        }
+        fn testFreeFallNeedsSustainedLowMagnitude() !void {
+            const testing = lib.testing;
+
+            var detector = Detector.init(.{
+                .shake_threshold_g = 9999,
+                .tilt_threshold_deg = 9999,
+                .free_fall_threshold_g = 0.25,
+                .free_fall_min_duration_ms = 120,
+            });
+
+            try testing.expect(detector.update(.{
+                .accel = .{ .x = 0, .y = 0, .z = 1.0 },
+                .timestamp_ms = 0,
+            }) == null);
+            try testing.expect(detector.update(.{
+                .accel = .{ .x = 0.05, .y = 0.02, .z = 0.08 },
+                .timestamp_ms = 40,
+            }) == null);
+            try testing.expect(detector.update(.{
+                .accel = .{ .x = 0.02, .y = 0.01, .z = 0.06 },
+                .timestamp_ms = 100,
+            }) == null);
+
+            const action = detector.update(.{
+                .accel = .{ .x = 0.01, .y = 0.00, .z = 0.04 },
+                .timestamp_ms = 170,
+            }).?;
+
+            switch (action) {
+                .free_fall => |free_fall| {
+                    try testing.expect(free_fall.duration_ms >= 120);
+                    try testing.expect(free_fall.min_magnitude <= 0.1);
+                },
+                else => try testing.expect(false),
             }
         }
         fn testQueueOverflowDropsOldestAction() !void {
-            const std = @import("std");
+            const testing = lib.testing;
 
             var detector = Detector.initDefault();
 
@@ -443,7 +644,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             detector.queueAction(.{ .shake = .{ .magnitude = 4.0, .duration_ms = 4 } });
             detector.queueAction(.{ .shake = .{ .magnitude = 5.0, .duration_ms = 5 } });
 
-            try std.testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
+            try testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
 
             const first = detector.nextAction().?;
             const second = detector.nextAction().?;
@@ -454,10 +655,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try expectShakeDuration(second, 3);
             try expectShakeDuration(third, 4);
             try expectShakeDuration(fourth, 5);
-            try std.testing.expect(detector.nextAction() == null);
+            try testing.expect(detector.nextAction() == null);
         }
         fn testQueueOverflowAfterWrapPreservesFifoOrder() !void {
-            const std = @import("std");
+            const testing = lib.testing;
 
             var detector = Detector.initDefault();
 
@@ -471,19 +672,19 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             detector.queueAction(.{ .shake = .{ .magnitude = 5.0, .duration_ms = 5 } });
             detector.queueAction(.{ .shake = .{ .magnitude = 6.0, .duration_ms = 6 } });
 
-            try std.testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
+            try testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
             try expectShakeDuration(detector.nextAction().?, 3);
             try expectShakeDuration(detector.nextAction().?, 4);
             try expectShakeDuration(detector.nextAction().?, 5);
             try expectShakeDuration(detector.nextAction().?, 6);
-            try std.testing.expect(detector.nextAction() == null);
+            try testing.expect(detector.nextAction() == null);
         }
         fn expectShakeDuration(action: Action, expected_duration_ms: u32) !void {
-            const std = @import("std");
+            const testing = lib.testing;
 
             switch (action) {
-                .shake => |shake| try std.testing.expectEqual(expected_duration_ms, shake.duration_ms),
-                else => try std.testing.expect(false),
+                .shake => |shake| try testing.expectEqual(expected_duration_ms, shake.duration_ms),
+                else => try testing.expect(false),
             }
         }
     };
@@ -527,6 +728,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 return false;
             };
             TestCase.testTiltCanFireAgainAfterDebounceWindow() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testFlipNeedsRecentTurnAndFaceChange() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.testFreeFallNeedsSustainedLowMagnitude() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

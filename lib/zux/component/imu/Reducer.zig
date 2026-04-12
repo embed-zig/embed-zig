@@ -3,36 +3,37 @@ const motion = @import("motion");
 
 const Context = @import("../../event/Context.zig");
 const imu_event = @import("event.zig");
-const imu_state = @import("state.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const Message = @import("../../pipeline/Message.zig");
 const Node = @import("../../pipeline/Node.zig");
+const State = @import("state.zig");
 const testing_api = @import("testing");
 
 const Reducer = @This();
-const State = imu_state.Motion;
 
 allocator: embed.mem.Allocator,
-detectors: embed.AutoHashMap(u32, motion.Detector),
+detectors: embed.AutoHashMap(u32, motion.GestureDetector),
 thresholds: motion.Thresholds,
 out: ?Emitter = null,
 
 pub fn init(
-    self: *Reducer,
     allocator: embed.mem.Allocator,
     thresholds: motion.Thresholds,
-) Node {
-    self.* = .{
+) Reducer {
+    return .{
         .allocator = allocator,
-        .detectors = embed.AutoHashMap(u32, motion.Detector).init(allocator),
+        .detectors = embed.AutoHashMap(u32, motion.GestureDetector).init(allocator),
         .thresholds = thresholds,
         .out = null,
     };
-    return Node.init(Reducer, self);
 }
 
-pub fn initDefault(self: *Reducer, allocator: embed.mem.Allocator) Node {
-    return self.init(allocator, motion.Thresholds.default);
+pub fn initDefault(allocator: embed.mem.Allocator) Reducer {
+    return init(allocator, motion.Thresholds.default);
+}
+
+pub fn node(self: *Reducer) Node {
+    return Node.init(Reducer, self);
 }
 
 pub fn deinit(self: *Reducer) void {
@@ -46,6 +47,7 @@ pub fn bindOutput(self: *Reducer, out: Emitter) void {
 pub fn process(self: *Reducer, message: Message) !usize {
     return switch (message.body) {
         .raw_imu_accel => |accel| self.processAccel(message, accel),
+        .raw_imu_gyro => |gyro| self.processGyro(message, gyro),
         else => self.forward(message),
     };
 }
@@ -54,10 +56,22 @@ pub fn reduce(store: anytype, message: Message, emit: Emitter) !usize {
     _ = emit;
 
     switch (message.body) {
+        .raw_imu_accel => |accel| {
+            const current_state = store.get();
+            if (current_state.source_id == accel.source_id and
+                current_state.motion != null)
+            {
+                store.set(State{
+                    .source_id = accel.source_id,
+                    .motion = null,
+                });
+            }
+            return 0;
+        },
         .imu_motion => |imu_motion| {
             store.set(State{
                 .source_id = imu_motion.source_id,
-                .motion = imu_motion.motion,
+                .motion = motionKind(imu_motion.motion),
             });
             return 0;
         },
@@ -74,7 +88,7 @@ fn processAccel(
 
     const gop = try self.detectors.getOrPut(accel.source_id);
     if (!gop.found_existing) {
-        gop.value_ptr.* = motion.Detector.init(self.thresholds);
+        gop.value_ptr.* = motion.GestureDetector.init(self.thresholds);
     }
 
     const sample: motion.Sample = .{
@@ -91,6 +105,37 @@ fn processAccel(
     }
     while (gop.value_ptr.nextAction()) |action| {
         emitted += try self.emitMotion(message.timestamp_ns, accel.source_id, action, accel.ctx);
+    }
+
+    return emitted;
+}
+
+fn processGyro(
+    self: *Reducer,
+    message: Message,
+    gyro: imu_event.Gyro,
+) !usize {
+    var emitted = try self.forward(message);
+
+    const gop = try self.detectors.getOrPut(gyro.source_id);
+    if (!gop.found_existing) {
+        gop.value_ptr.* = motion.GestureDetector.init(self.thresholds);
+    }
+
+    const sample: motion.GyroSample = .{
+        .gyro = .{
+            .x = gyro.x,
+            .y = gyro.y,
+            .z = gyro.z,
+        },
+        .timestamp_ms = timestampMs(message.timestamp_ns),
+    };
+
+    if (gop.value_ptr.updateGyro(sample)) |action| {
+        emitted += try self.emitMotion(message.timestamp_ns, gyro.source_id, action, gyro.ctx);
+    }
+    while (gop.value_ptr.nextAction()) |action| {
+        emitted += try self.emitMotion(message.timestamp_ns, gyro.source_id, action, gyro.ctx);
     }
 
     return emitted;
@@ -138,6 +183,15 @@ fn timestampMs(timestamp_ns: i128) u64 {
     return @intCast(timestamp_ms);
 }
 
+fn motionKind(action: motion.Action) State.Motion {
+    return switch (action) {
+        .shake => .shake,
+        .tilt => .tilt,
+        .flip => .flip,
+        .free_fall => .free_fall,
+    };
+}
+
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const TestCase = struct {
         fn forwardsRawAccelAndEmitsShake(testing: anytype) !void {
@@ -160,15 +214,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 }
             };
 
-            var detector_impl: Reducer = undefined;
-            defer detector_impl.deinit();
-            var collector = Collector{};
-            var detector = detector_impl.init(testing.allocator, .{
+            var detector_impl = Reducer.init(testing.allocator, .{
                 .shake_threshold_g = 1.0,
                 .shake_min_duration_ms = 50,
                 .shake_max_duration_ms = 500,
                 .tilt_threshold_deg = 9999,
             });
+            defer detector_impl.deinit();
+            var collector = Collector{};
+            var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
             inline for ([_]struct { ts: i128, x: f32, y: f32, z: f32 }{
@@ -229,10 +283,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 }
             };
 
-            var detector_impl: Reducer = undefined;
+            var detector_impl = Reducer.initDefault(testing.allocator);
             defer detector_impl.deinit();
             var collector = Collector{};
-            var detector = detector_impl.initDefault(testing.allocator);
+            var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
             try testing.expectEqual(@as(usize, 1), try detector.process(.{
@@ -260,15 +314,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 }
             };
 
-            var detector_impl: Reducer = undefined;
-            defer detector_impl.deinit();
-            var collector = Collector{};
-            var detector = detector_impl.init(testing.allocator, .{
+            var detector_impl = Reducer.init(testing.allocator, .{
                 .shake_threshold_g = 1.0,
                 .shake_min_duration_ms = 50,
                 .shake_max_duration_ms = 500,
                 .tilt_threshold_deg = 9999,
             });
+            defer detector_impl.deinit();
+            var collector = Collector{};
+            var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
             inline for ([_]struct { source_id: u32, ts_ms: i128, x: f32 }{
@@ -313,15 +367,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 }
             };
 
-            var detector_impl: Reducer = undefined;
-            defer detector_impl.deinit();
-            var collector = Collector{};
-            var detector = detector_impl.init(testing.allocator, .{
+            var detector_impl = Reducer.init(testing.allocator, .{
                 .shake_threshold_g = 1.0,
                 .shake_min_duration_ms = 50,
                 .shake_max_duration_ms = 500,
                 .tilt_threshold_deg = 9999,
             });
+            defer detector_impl.deinit();
+            var collector = Collector{};
+            var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
             inline for ([_]struct { ts_ms: i128, x: f32 }{
@@ -352,6 +406,124 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try testing.expectEqual(@as(usize, 9), collector.raw_count);
             try testing.expectEqual(@as(usize, 0), collector.motion_count);
         }
+        fn forwardsRawGyroAndEmitsFlipAfterFaceChange(testing: anytype) !void {
+            const Collector = struct {
+                raw_accel_count: usize = 0,
+                raw_gyro_count: usize = 0,
+                motion_count: usize = 0,
+                last_motion: ?motion.Action = null,
+
+                pub fn emit(self: *@This(), message: Message) !void {
+                    switch (message.body) {
+                        .raw_imu_accel => self.raw_accel_count += 1,
+                        .raw_imu_gyro => self.raw_gyro_count += 1,
+                        .imu_motion => |imu_motion| {
+                            self.motion_count += 1;
+                            self.last_motion = imu_motion.motion;
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+                }
+            };
+
+            var detector_impl = Reducer.init(testing.allocator, .{
+                .shake_threshold_g = 9999,
+                .tilt_threshold_deg = 9999,
+                .flip_gyro_threshold_dps = 90.0,
+                .flip_recent_turn_ms = 400,
+                .flip_debounce_ms = 0,
+            });
+            defer detector_impl.deinit();
+            var collector = Collector{};
+            var detector = detector_impl.node();
+            detector.bindOutput(Emitter.init(&collector));
+
+            _ = try detector.process(.{
+                .origin = .source,
+                .timestamp_ns = 0,
+                .body = .{
+                    .raw_imu_accel = .{
+                        .source_id = 5,
+                        .x = 0,
+                        .y = 0,
+                        .z = 1.0,
+                    },
+                },
+            });
+            _ = try detector.process(.{
+                .origin = .source,
+                .timestamp_ns = 220 * lib.time.ns_per_ms,
+                .body = .{
+                    .raw_imu_gyro = .{
+                        .source_id = 5,
+                        .x = 0,
+                        .y = 0,
+                        .z = 140.0,
+                    },
+                },
+            });
+            _ = try detector.process(.{
+                .origin = .source,
+                .timestamp_ns = 260 * lib.time.ns_per_ms,
+                .body = .{
+                    .raw_imu_accel = .{
+                        .source_id = 5,
+                        .x = 0,
+                        .y = 0,
+                        .z = -1.0,
+                    },
+                },
+            });
+
+            try testing.expectEqual(@as(usize, 2), collector.raw_accel_count);
+            try testing.expectEqual(@as(usize, 1), collector.raw_gyro_count);
+            try testing.expectEqual(@as(usize, 1), collector.motion_count);
+            switch (collector.last_motion.?) {
+                .flip => |flip| {
+                    try testing.expectEqual(motion.Face.up, flip.from);
+                    try testing.expectEqual(motion.Face.down, flip.to);
+                },
+                else => try testing.expect(false),
+            }
+        }
+        fn rawAccelClearsTransientMotionState(testing: anytype) !void {
+            const FakeStore = struct {
+                value: State = .{},
+
+                pub fn get(self: *@This()) State {
+                    return self.value;
+                }
+
+                pub fn set(self: *@This(), next: State) void {
+                    self.value = next;
+                }
+            };
+
+            inline for ([_]State.Motion{ .shake, .tilt, .flip, .free_fall }) |motion_kind| {
+                var store = FakeStore{
+                    .value = .{
+                        .source_id = 17,
+                        .motion = motion_kind,
+                    },
+                };
+
+                _ = try Reducer.reduce(&store, .{
+                    .origin = .source,
+                    .timestamp_ns = 0,
+                    .body = .{
+                        .raw_imu_accel = .{
+                            .source_id = 17,
+                            .x = 0,
+                            .y = 0,
+                            .z = 1.0,
+                        },
+                    },
+                }, undefined);
+
+                try testing.expectEqual(@as(u32, 17), store.value.source_id);
+                try testing.expect(store.value.motion == null);
+            }
+        }
     };
 
     const Runner = struct {
@@ -378,6 +550,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 return false;
             };
             TestCase.speakerLikeVibrationOnlyForwardsRawSamples(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.forwardsRawGyroAndEmitsFlipAfterFaceChange(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.rawAccelClearsTransientMotionState(testing) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

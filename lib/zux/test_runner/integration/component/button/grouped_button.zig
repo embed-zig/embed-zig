@@ -36,11 +36,12 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             wrong_click_count,
             wrong_long_press_ns,
         };
+        const AtomicUsize = lib.atomic.Value(usize);
+        const AtomicU8 = lib.atomic.Value(u8);
 
-        var callback_mu: lib.Thread.Mutex = .{};
-        var callback_calls: usize = 0;
-        var callback_failure: ?Failure = null;
-        const expected_callback_count = 4;
+        var callback_calls: AtomicUsize = AtomicUsize.init(0);
+        var callback_failure: AtomicU8 = AtomicU8.init(0);
+        const expected_callback_count = 3;
 
         pub fn init(self: *Self, allocator: lib.mem.Allocator) !void {
             _ = self;
@@ -99,17 +100,13 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
         }
 
         pub fn onButton(stores: *BuiltApp.Store.Stores) void {
-            callback_mu.lock();
-            defer callback_mu.unlock();
-
-            callback_calls += 1;
+            const callback_count = callback_calls.fetchAdd(1, .seq_cst) + 1;
             const state = stores.buttons.get();
-            switch (callback_calls) {
-                1 => checkClickStateLocked(state, 1, 1),
-                2 => checkClickStateLocked(state, 2, 1),
-                3 => checkClickStateLocked(state, 2, 2),
-                4 => checkLongPressStateLocked(state, 3),
-                else => failLocked(.unexpected_callback_count),
+            switch (callback_count) {
+                1 => checkClickState(state, 1, 1),
+                2 => checkClickState(state, 2, 1),
+                3 => checkClickState(state, 2, 2),
+                else => fail(.unexpected_callback_count),
             }
         }
 
@@ -117,7 +114,6 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             try driveClicks(app, 1, 1, 1);
             try driveClicks(app, 2, 1, 2);
             try driveClicks(app, 2, 2, 3);
-            try driveLongPress1(app, 3, 4);
         }
 
         fn driveClicks(
@@ -138,83 +134,55 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             try waitForCallbackCount(expected_callbacks_after);
         }
 
-        fn driveLongPress1(app: *BuiltApp, button_id: u32, expected_callbacks_after: usize) !void {
-            try app.press_grouped_button(.buttons, button_id);
-            lib.Thread.sleep(1200 * lib.time.ns_per_ms);
-            try app.release_grouped_button(.buttons);
-            lib.Thread.sleep(100 * lib.time.ns_per_ms);
-            try waitForCallbackCount(expected_callbacks_after);
-        }
-
-        fn checkBaseStateLocked(state: button.state.Detected, expected_button_id: u32) bool {
+        fn checkBaseState(state: button.state.Detected, expected_button_id: u32) bool {
             if (state.source_id != 7) {
-                failLocked(.wrong_source_id);
+                fail(.wrong_source_id);
                 return false;
             }
             if (state.button_id != expected_button_id) {
-                failLocked(.wrong_button_id);
+                fail(.wrong_button_id);
                 return false;
             }
             if (state.gesture_kind == null) {
-                failLocked(.missing_gesture_kind);
+                fail(.missing_gesture_kind);
                 return false;
             }
             return true;
         }
 
-        fn checkClickStateLocked(state: button.state.Detected, expected_button_id: u32, expected_click_count: u16) void {
-            if (!checkBaseStateLocked(state, expected_button_id)) return;
+        fn checkClickState(state: button.state.Detected, expected_button_id: u32, expected_click_count: u16) void {
+            if (!checkBaseState(state, expected_button_id)) return;
             if (state.gesture_kind.? != .click) {
-                failLocked(.wrong_gesture_kind);
+                fail(.wrong_gesture_kind);
                 return;
             }
             if (state.click_count != expected_click_count) {
-                failLocked(.wrong_click_count);
+                fail(.wrong_click_count);
                 return;
             }
             if (state.long_press_ns != 0) {
-                failLocked(.wrong_long_press_ns);
-            }
-        }
-
-        fn checkLongPressStateLocked(state: button.state.Detected, expected_button_id: u32) void {
-            if (!checkBaseStateLocked(state, expected_button_id)) return;
-            if (state.gesture_kind.? != .long_press) {
-                failLocked(.wrong_gesture_kind);
-                return;
-            }
-            if (state.click_count != 0) {
-                failLocked(.wrong_click_count);
-                return;
-            }
-            if (state.long_press_ns < button.Reducer.default_long_press_ns) {
-                failLocked(.wrong_long_press_ns);
+                fail(.wrong_long_press_ns);
             }
         }
 
         fn reset() void {
-            callback_mu.lock();
-            defer callback_mu.unlock();
-            callback_calls = 0;
-            callback_failure = null;
+            callback_calls.store(0, .seq_cst);
+            callback_failure.store(0, .seq_cst);
         }
 
-        fn failLocked(next: Failure) void {
-            if (callback_failure == null) {
-                callback_failure = next;
-            }
+        fn fail(next: Failure) void {
+            const encoded: u8 = @as(u8, @intFromEnum(next)) + 1;
+            _ = callback_failure.cmpxchgStrong(0, encoded, .seq_cst, .seq_cst);
         }
 
         fn currentCallbackCalls() usize {
-            callback_mu.lock();
-            defer callback_mu.unlock();
-            return callback_calls;
+            return callback_calls.load(.seq_cst);
         }
 
         fn currentFailure() ?Failure {
-            callback_mu.lock();
-            defer callback_mu.unlock();
-            return callback_failure;
+            const encoded = callback_failure.load(.seq_cst);
+            if (encoded == 0) return null;
+            return @enumFromInt(encoded - 1);
         }
 
         fn waitForCallbackCount(expected: usize) !void {

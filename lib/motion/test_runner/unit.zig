@@ -1,6 +1,7 @@
 const testing_api = @import("testing");
 
-const Detector = @import("../Detector.zig");
+const ClickDetector = @import("../ClickDetector.zig");
+const GestureDetector = @import("../GestureDetector.zig");
 const types = @import("../types.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
@@ -16,7 +17,8 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
 
             t.parallel();
             t.run("types", types.TestRunner(lib));
-            t.run("Detector", Detector.TestRunner(lib));
+            t.run("GestureDetector", GestureDetector.TestRunner(lib));
+            t.run("ClickDetector", ClickDetector.TestRunner(lib));
             return t.wait();
         }
 

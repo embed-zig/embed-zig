@@ -31,7 +31,7 @@ pub fn detach(_: *const EventHook, adapter: modem_api.Modem) void {
 pub fn emitFn(ctx: *const anyopaque, source_id: u32, adapter_event: modem_api.Modem.Event) void {
     const self: *const EventHook = @ptrCast(@alignCast(ctx));
     const out = self.out orelse return;
-    const value = modem_event.make(zux_event.Event, source_id, adapter_event) catch @panic("zux.component.modem.EventHook received invalid modem event");
+    const value = modem_event.make(zux_event.Event, source_id, adapter_event) catch return;
 
     out.emit(.{
         .origin = .source,
@@ -51,7 +51,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pub fn emit(self: *@This(), message: @import("../../pipeline/Message.zig")) !void {
                     self.called = true;
                     switch (message.body) {
-                        .modem_signal_changed => |value| {
+                        .modem_network_signal_changed => |value| {
                             self.last_source_id = value.source_id;
                             self.last_rssi_dbm = value.signal.rssi_dbm;
                         },
@@ -65,10 +65,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             hook.bindOutput(Emitter.init(&sink));
 
             EventHook.emitFn(@ptrCast(&hook), 51, .{
-                .signal_changed = .{
-                    .rssi_dbm = -73,
-                    .ber = 2,
-                    .rat = .lte,
+                .network = .{
+                    .signal_changed = .{
+                        .rssi_dbm = -73,
+                        .ber = 2,
+                        .rat = .lte,
+                    },
                 },
             });
 
@@ -86,7 +88,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pub fn emit(self: *@This(), message: @import("../../pipeline/Message.zig")) !void {
                     self.called = true;
                     switch (message.body) {
-                        .modem_apn_changed => |value| {
+                        .modem_data_apn_changed => |value| {
                             self.last_source_id = value.source_id;
                             self.last_apn_len = value.apn().len;
                         },
@@ -100,12 +102,130 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             hook.bindOutput(Emitter.init(&sink));
 
             EventHook.emitFn(@ptrCast(&hook), 52, .{
-                .apn_changed = "internet",
+                .data = .{
+                    .apn_changed = "internet",
+                },
             });
 
             try testing.expect(sink.called);
             try testing.expectEqual(@as(u32, 52), sink.last_source_id);
             try testing.expectEqual(@as(usize, 8), sink.last_apn_len);
+        }
+
+        fn emitFnForwardsIncomingCallThroughEmitter(testing: anytype) !void {
+            const Sink = struct {
+                called: bool = false,
+                last_source_id: u32 = 0,
+                last_call_id: u8 = 0,
+                last_number_len: usize = 0,
+
+                pub fn emit(self: *@This(), message: @import("../../pipeline/Message.zig")) !void {
+                    self.called = true;
+                    switch (message.body) {
+                        .modem_call_incoming => |value| {
+                            self.last_source_id = value.source_id;
+                            self.last_call_id = value.call_id;
+                            self.last_number_len = value.number().len;
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+                }
+            };
+
+            var sink = Sink{};
+            var hook = EventHook.init();
+            hook.bindOutput(Emitter.init(&sink));
+
+            EventHook.emitFn(@ptrCast(&hook), 53, .{
+                .call = .{
+                    .incoming = .{
+                        .call_id = 7,
+                        .direction = .incoming,
+                        .number = "+8613800138000",
+                    },
+                },
+            });
+
+            try testing.expect(sink.called);
+            try testing.expectEqual(@as(u32, 53), sink.last_source_id);
+            try testing.expectEqual(@as(u8, 7), sink.last_call_id);
+            try testing.expectEqual(@as(usize, 14), sink.last_number_len);
+        }
+
+        fn emitFnDropsInvalidApn(testing: anytype) !void {
+            const Sink = struct {
+                called: bool = false,
+
+                pub fn emit(self: *@This(), _: @import("../../pipeline/Message.zig")) !void {
+                    self.called = true;
+                }
+            };
+
+            var sink = Sink{};
+            var hook = EventHook.init();
+            hook.bindOutput(Emitter.init(&sink));
+
+            var apn_buf = [_]u8{'a'} ** (modem_event.max_apn_len + 1);
+            EventHook.emitFn(@ptrCast(&hook), 54, .{
+                .data = .{
+                    .apn_changed = apn_buf[0..],
+                },
+            });
+
+            try testing.expect(!sink.called);
+        }
+
+        fn emitFnDropsInvalidIncomingCall(testing: anytype) !void {
+            const Sink = struct {
+                called: bool = false,
+
+                pub fn emit(self: *@This(), _: @import("../../pipeline/Message.zig")) !void {
+                    self.called = true;
+                }
+            };
+
+            var sink = Sink{};
+            var hook = EventHook.init();
+            hook.bindOutput(Emitter.init(&sink));
+
+            var number_buf = [_]u8{'1'} ** (modem_event.max_phone_number_len + 1);
+            EventHook.emitFn(@ptrCast(&hook), 55, .{
+                .call = .{
+                    .incoming = .{
+                        .call_id = 8,
+                        .direction = .incoming,
+                        .number = number_buf[0..],
+                    },
+                },
+            });
+
+            try testing.expect(!sink.called);
+        }
+
+        fn emitFnDropsInvalidSmsText(testing: anytype) !void {
+            const Sink = struct {
+                called: bool = false,
+
+                pub fn emit(self: *@This(), _: @import("../../pipeline/Message.zig")) !void {
+                    self.called = true;
+                }
+            };
+
+            var sink = Sink{};
+            var hook = EventHook.init();
+            hook.bindOutput(Emitter.init(&sink));
+
+            var text_buf = [_]u8{'x'} ** (modem_event.max_sms_text_len + 1);
+            EventHook.emitFn(@ptrCast(&hook), 56, .{
+                .sms = .{
+                    .received = .{
+                        .sender = "10010",
+                        .text = text_buf[0..],
+                    },
+                },
+            });
+
+            try testing.expect(!sink.called);
         }
     };
 
@@ -125,6 +245,22 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 return false;
             };
             TestCase.emitFnForwardsApnThroughEmitter(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.emitFnForwardsIncomingCallThroughEmitter(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.emitFnDropsInvalidApn(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.emitFnDropsInvalidIncomingCall(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.emitFnDropsInvalidSmsText(testing) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

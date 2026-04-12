@@ -3,7 +3,7 @@ const zux_event = @import("../event.zig");
 const testing_api = @import("testing");
 
 pub const event = @import("nfc/event.zig");
-pub const state = @import("nfc/state.zig");
+pub const State = @import("nfc/State.zig");
 pub const EventHook = @import("nfc/EventHook.zig");
 pub const Reducer = @import("nfc/Reducer.zig");
 

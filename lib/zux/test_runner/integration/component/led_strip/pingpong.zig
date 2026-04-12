@@ -8,15 +8,18 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
         const Self = @This();
         const Failure = enum {
             missing_callback_count,
+            unexpected_callback_count,
             wrong_brightness,
             wrong_current_color,
             wrong_total_frames,
             timed_out_waiting_for_color,
         };
+        const AtomicUsize = lib.atomic.Value(usize);
+        const AtomicU8 = lib.atomic.Value(u8);
 
-        var callback_mu: lib.Thread.Mutex = .{};
-        var callback_calls: usize = 0;
-        var callback_failure: ?Failure = null;
+        var callback_calls: AtomicUsize = AtomicUsize.init(0);
+        var callback_failure: AtomicU8 = AtomicU8.init(0);
+        var visible_state_mu: lib.Thread.Mutex = .{};
         var last_visible_color: ?ledstrip.Color = null;
         const expected_callback_count = 17;
 
@@ -65,7 +68,7 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
                 t.logFatal(@tagName(failure));
                 return false;
             }
-            if (currentCallbackCalls() < expected_callback_count) {
+            if (currentCallbackCalls() != expected_callback_count) {
                 t.logFatal(@tagName(Failure.missing_callback_count));
                 return false;
             }
@@ -78,8 +81,8 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
         }
 
         pub fn onLedStrip(stores: *BuiltApp.Store.Stores) void {
-            callback_mu.lock();
-            defer callback_mu.unlock();
+            visible_state_mu.lock();
+            defer visible_state_mu.unlock();
 
             const expected_colors = [_]ledstrip.Color{
                 ledstrip.Color.rgb(128, 0, 0),
@@ -106,13 +109,16 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             }
             last_visible_color = state.current.pixels[0];
 
-            callback_calls += 1;
-            if (callback_calls > expected_callback_count) return;
-            checkStateLocked(
+            const callback_count = callback_calls.fetchAdd(1, .seq_cst) + 1;
+            if (callback_count > expected_callback_count) {
+                fail(.unexpected_callback_count);
+                return;
+            }
+            checkState(
                 state,
-                expected_colors[callback_calls - 1],
+                expected_colors[callback_count - 1],
                 128,
-                if (callback_calls == 1) 1 else 2,
+                if (callback_count == 1) 1 else 2,
             );
         }
 
@@ -133,44 +139,41 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             try waitForCallbackCount(expected_callback_count);
         }
 
-        fn checkStateLocked(state: anytype, expected: ledstrip.Color, expected_brightness: u8, expected_frames: usize) void {
+        fn checkState(state: anytype, expected: ledstrip.Color, expected_brightness: u8, expected_frames: usize) void {
             if (state.brightness != expected_brightness) {
-                failLocked(.wrong_brightness);
+                fail(.wrong_brightness);
                 return;
             }
             if (state.total_frames != expected_frames) {
-                failLocked(.wrong_total_frames);
+                fail(.wrong_total_frames);
                 return;
             }
             if (!common.colorEql(state.current.pixels[0], expected)) {
-                failLocked(.wrong_current_color);
+                fail(.wrong_current_color);
             }
         }
 
         fn reset() void {
-            callback_mu.lock();
-            defer callback_mu.unlock();
-            callback_calls = 0;
-            callback_failure = null;
+            callback_calls.store(0, .seq_cst);
+            callback_failure.store(0, .seq_cst);
+            visible_state_mu.lock();
             last_visible_color = null;
+            visible_state_mu.unlock();
         }
 
-        fn failLocked(next: Failure) void {
-            if (callback_failure == null) {
-                callback_failure = next;
-            }
+        fn fail(next: Failure) void {
+            const encoded: u8 = @as(u8, @intFromEnum(next)) + 1;
+            _ = callback_failure.cmpxchgStrong(0, encoded, .seq_cst, .seq_cst);
         }
 
         fn currentCallbackCalls() usize {
-            callback_mu.lock();
-            defer callback_mu.unlock();
-            return callback_calls;
+            return callback_calls.load(.seq_cst);
         }
 
         fn currentFailure() ?Failure {
-            callback_mu.lock();
-            defer callback_mu.unlock();
-            return callback_failure;
+            const encoded = callback_failure.load(.seq_cst);
+            if (encoded == 0) return null;
+            return @enumFromInt(encoded - 1);
         }
 
         fn waitForCallbackCount(expected: usize) !void {
@@ -179,9 +182,7 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
                 if (currentCallbackCalls() >= expected) return;
                 lib.Thread.sleep(10 * lib.time.ns_per_ms);
             }
-            callback_mu.lock();
-            defer callback_mu.unlock();
-            failLocked(.timed_out_waiting_for_color);
+            fail(.timed_out_waiting_for_color);
             return error.TimedOut;
         }
     };

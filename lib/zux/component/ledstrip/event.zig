@@ -6,7 +6,7 @@ pub const Pixels = []const ledstrip.Color;
 pub const Set = struct {
     pub const kind = .ledstrip_set;
 
-    periph_id: u32,
+    source_id: u32,
     pixels: Pixels,
     brightness: u8 = 255,
     duration: u32 = 0,
@@ -16,7 +16,7 @@ pub const Set = struct {
 pub const SetPixels = struct {
     pub const kind = .ledstrip_set_pixels;
 
-    periph_id: u32,
+    source_id: u32,
     pixels: Pixels,
     brightness: u8 = 255,
     ctx: Context.Type = null,
@@ -25,7 +25,7 @@ pub const SetPixels = struct {
 pub const Flash = struct {
     pub const kind = .ledstrip_flash;
 
-    periph_id: u32,
+    source_id: u32,
     pixels: Pixels,
     brightness: u8 = 255,
     duration_ns: u64,
@@ -36,7 +36,7 @@ pub const Flash = struct {
 pub const Pingpong = struct {
     pub const kind = .ledstrip_pingpong;
 
-    periph_id: u32,
+    source_id: u32,
     from_pixels: Pixels,
     to_pixels: Pixels,
     brightness: u8 = 255,
@@ -48,7 +48,7 @@ pub const Pingpong = struct {
 pub const Rotate = struct {
     pub const kind = .ledstrip_rotate;
 
-    periph_id: u32,
+    source_id: u32,
     pixels: Pixels,
     brightness: u8 = 255,
     duration_ns: u64,

@@ -2,6 +2,10 @@ const embed = @import("embed");
 const builtin = embed.builtin;
 const App = @import("../App.zig");
 const button = @import("../component/button.zig");
+const component_imu = @import("../component/Imu.zig");
+const component_modem = @import("../component/modem.zig");
+const component_nfc = @import("../component/Nfc.zig");
+const component_wifi = @import("../component/wifi.zig");
 const ledstrip_component = @import("../component/ledstrip.zig");
 const Emitter = @import("../pipeline/Emitter.zig");
 const Message = @import("../pipeline/Message.zig");
@@ -10,7 +14,9 @@ const Poller = @import("../pipeline/Poller.zig");
 const Pipeline = @import("../pipeline/Pipeline.zig");
 const store = @import("../store.zig");
 const build_config = @import("BuildConfig.zig");
+const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
+const modem_api = @import("modem");
 
 const root = @This();
 
@@ -21,6 +27,10 @@ pub fn init() root {
 pub fn build(builder: root, comptime context: anytype) type {
     _ = builder;
 
+    comptime {
+        @setEvalBranchQuota(20_000);
+    }
+
     const GeneratedBuildConfig = build_config.make(context.registries);
     comptime {
         if (@TypeOf(context.build_config) != GeneratedBuildConfig) {
@@ -30,12 +40,27 @@ pub fn build(builder: root, comptime context: anytype) type {
 
     const adc_registry = context.registries.adc_button;
     const gpio_registry = context.registries.gpio_button;
+    const imu_registry = context.registries.imu;
     const ledstrip_registry = context.registries.ledstrip;
+    const modem_registry = context.registries.modem;
+    const nfc_registry = context.registries.nfc;
+    const wifi_sta_registry = context.registries.wifi_sta;
+    const wifi_ap_registry = context.registries.wifi_ap;
     const adc_count = registryPeriphLen(adc_registry);
     const gpio_count = registryPeriphLen(gpio_registry);
+    const imu_count = registryPeriphLen(imu_registry);
     const ledstrip_count = registryPeriphLen(ledstrip_registry);
+    const modem_count = registryPeriphLen(modem_registry);
+    const nfc_count = registryPeriphLen(nfc_registry);
+    const wifi_sta_count = registryPeriphLen(wifi_sta_registry);
+    const wifi_ap_count = registryPeriphLen(wifi_ap_registry);
     const has_button_runtime = (adc_count + gpio_count) > 0;
+    const has_imu_runtime = imu_count > 0;
     const has_ledstrip_runtime = ledstrip_count > 0;
+    const has_modem_runtime = modem_count > 0;
+    const has_nfc_runtime = nfc_count > 0;
+    const has_wifi_sta_runtime = wifi_sta_count > 0;
+    const has_wifi_ap_runtime = wifi_ap_count > 0;
     const has_user_root_config = context.node_builder.len > 0;
     const runtime_poller_count = totalPollerCount(context.registries);
     const ledstrip_pixel_count = ledStripPixelCount(ledstrip_registry);
@@ -57,7 +82,12 @@ pub fn build(builder: root, comptime context: anytype) type {
 
     const SingleButtonInstances = makePeriphInstancesType(context.build_config, gpio_registry);
     const GroupedButtonInstances = makePeriphInstancesType(context.build_config, adc_registry);
+    const ImuInstances = makePeriphInstancesType(context.build_config, imu_registry);
     const LedStripInstances = makePeriphInstancesType(context.build_config, ledstrip_registry);
+    const ModemInstances = makePeriphInstancesType(context.build_config, modem_registry);
+    const NfcInstances = makePeriphInstancesType(context.build_config, nfc_registry);
+    const WifiStaInstances = makePeriphInstancesType(context.build_config, wifi_sta_registry);
+    const WifiApInstances = makePeriphInstancesType(context.build_config, wifi_ap_registry);
     const GeneratedInitConfig = makeInitConfigType(
         context.lib,
         context.build_config,
@@ -73,6 +103,31 @@ pub fn build(builder: root, comptime context: anytype) type {
 
     const SingleButtonPoller = button.SinglePoller.make(context.lib);
     const GroupedButtonPoller = button.GroupedPoller.make(context.lib);
+    const ImuPollerType = component_imu.Poller.make(context.lib);
+    const ImuPollerWrapper = if (has_imu_runtime) struct {
+        inner: ImuPollerType,
+
+        pub fn bindOutput(self: *@This(), out: Emitter) void {
+            self.inner.bindOutput(out);
+        }
+
+        pub fn start(self: *@This(), config: Poller.Config) !void {
+            self.inner.poll_interval_ns = config.poll_interval_ns;
+            self.inner.spawn_config = adaptSpawnConfig(
+                context.lib.Thread.SpawnConfig,
+                config.spawn_config,
+            );
+            try self.inner.start();
+        }
+
+        pub fn stop(self: *@This()) void {
+            self.inner.stop();
+        }
+
+        pub fn deinit(self: *@This()) void {
+            self.inner.deinit();
+        }
+    } else void;
     const LedStripReducerType = if (has_ledstrip_runtime)
         ledstrip_component.Reducer.make(
             ledstrip_pixel_count,
@@ -113,6 +168,233 @@ pub fn build(builder: root, comptime context: anytype) type {
             return 0;
         }
     };
+    const NfcStoreReducerNode = if (has_nfc_runtime) struct {
+        stores: *StoreType.Stores,
+        out: ?Emitter = null,
+
+        pub fn node(self: *@This()) Node {
+            return Node.init(@This(), self);
+        }
+
+        pub fn bindOutput(self: *@This(), out: Emitter) void {
+            self.out = out;
+        }
+
+        pub fn process(self: *@This(), message: Message) !usize {
+            const NoopSink = struct {
+                pub fn emit(_: *@This(), _: Message) !void {}
+            };
+
+            var noop = NoopSink{};
+            const emit = self.out orelse Emitter.init(&noop);
+            switch (message.body) {
+                .nfc_found,
+                .nfc_read,
+                => {
+                    inline for (0..nfc_count) |i| {
+                        const periph = nfc_registry.periphs[i];
+                        if (messageSourceId(message) == periphIdForRecord(periph)) {
+                            return component_nfc.Reducer.reduce(
+                                &@field(self.stores, periphLabel(periph)),
+                                message,
+                                emit,
+                            );
+                        }
+                    }
+                    return 0;
+                },
+                .tick => {
+                    if (self.out) |out| {
+                        try out.emit(message);
+                        return 1;
+                    }
+                    return 0;
+                },
+                else => {
+                    if (self.out) |out| {
+                        try out.emit(message);
+                        return 1;
+                    }
+                    return 0;
+                },
+            }
+        }
+    } else void;
+    const ModemStoreReducerNode = if (has_modem_runtime) struct {
+        stores: *StoreType.Stores,
+        reducer: *component_modem.Reducer,
+        out: ?Emitter = null,
+
+        pub fn node(self: *@This()) Node {
+            return Node.init(@This(), self);
+        }
+
+        pub fn bindOutput(self: *@This(), out: Emitter) void {
+            self.out = out;
+        }
+
+        pub fn process(self: *@This(), message: Message) !usize {
+            const NoopSink = struct {
+                pub fn emit(_: *@This(), _: Message) !void {}
+            };
+
+            var noop = NoopSink{};
+            const emit = self.out orelse Emitter.init(&noop);
+            switch (message.body) {
+                .modem_sim_state_changed,
+                .modem_network_registration_changed,
+                .modem_network_signal_changed,
+                .modem_data_packet_state_changed,
+                .modem_data_apn_changed,
+                .modem_call_incoming,
+                .modem_call_state_changed,
+                .modem_call_ended,
+                .modem_sms_received,
+                .modem_gnss_state_changed,
+                .modem_gnss_fix_changed,
+                => {
+                    inline for (0..modem_count) |i| {
+                        const periph = modem_registry.periphs[i];
+                        if (messageSourceId(message) == periphIdForRecord(periph)) {
+                            return self.reducer.reduce(
+                                &@field(self.stores, periphLabel(periph)),
+                                message,
+                                emit,
+                            );
+                        }
+                    }
+                    return 0;
+                },
+                .tick => {
+                    if (self.out) |out| {
+                        try out.emit(message);
+                        return 1;
+                    }
+                    return 0;
+                },
+                else => {
+                    if (self.out) |out| {
+                        try out.emit(message);
+                        return 1;
+                    }
+                    return 0;
+                },
+            }
+        }
+    } else void;
+    const WifiStaStoreReducerNode = if (has_wifi_sta_runtime) struct {
+        stores: *StoreType.Stores,
+        reducer: *component_wifi.StaReducer,
+        out: ?Emitter = null,
+
+        pub fn node(self: *@This()) Node {
+            return Node.init(@This(), self);
+        }
+
+        pub fn bindOutput(self: *@This(), out: Emitter) void {
+            self.out = out;
+        }
+
+        pub fn process(self: *@This(), message: Message) !usize {
+            const NoopSink = struct {
+                pub fn emit(_: *@This(), _: Message) !void {}
+            };
+
+            var noop = NoopSink{};
+            const emit = self.out orelse Emitter.init(&noop);
+            switch (message.body) {
+                .wifi_sta_scan_result,
+                .wifi_sta_connected,
+                .wifi_sta_disconnected,
+                .wifi_sta_got_ip,
+                .wifi_sta_lost_ip,
+                => {
+                    inline for (0..wifi_sta_count) |i| {
+                        const periph = wifi_sta_registry.periphs[i];
+                        if (messageSourceId(message) == periphIdForRecord(periph)) {
+                            return self.reducer.reduce(
+                                &@field(self.stores, periphLabel(periph)),
+                                message,
+                                emit,
+                            );
+                        }
+                    }
+                    return 0;
+                },
+                .tick => {
+                    if (self.out) |out| {
+                        try out.emit(message);
+                        return 1;
+                    }
+                    return 0;
+                },
+                else => {
+                    if (self.out) |out| {
+                        try out.emit(message);
+                        return 1;
+                    }
+                    return 0;
+                },
+            }
+        }
+    } else void;
+    const WifiApStoreReducerNode = if (has_wifi_ap_runtime) struct {
+        stores: *StoreType.Stores,
+        reducers: *[wifi_ap_count]component_wifi.ApReducer,
+        out: ?Emitter = null,
+
+        pub fn node(self: *@This()) Node {
+            return Node.init(@This(), self);
+        }
+
+        pub fn bindOutput(self: *@This(), out: Emitter) void {
+            self.out = out;
+        }
+
+        pub fn process(self: *@This(), message: Message) !usize {
+            const NoopSink = struct {
+                pub fn emit(_: *@This(), _: Message) !void {}
+            };
+
+            var noop = NoopSink{};
+            const emit = self.out orelse Emitter.init(&noop);
+            switch (message.body) {
+                .wifi_ap_started,
+                .wifi_ap_stopped,
+                .wifi_ap_client_joined,
+                .wifi_ap_client_left,
+                .wifi_ap_lease_granted,
+                .wifi_ap_lease_released,
+                => {
+                    inline for (0..wifi_ap_count) |i| {
+                        const periph = wifi_ap_registry.periphs[i];
+                        if (messageSourceId(message) == periphIdForRecord(periph)) {
+                            return self.reducers[i].reduce(
+                                &@field(self.stores, periphLabel(periph)),
+                                message,
+                                emit,
+                            );
+                        }
+                    }
+                    return 0;
+                },
+                .tick => {
+                    if (self.out) |out| {
+                        try out.emit(message);
+                        return 1;
+                    }
+                    return 0;
+                },
+                else => {
+                    if (self.out) |out| {
+                        try out.emit(message);
+                        return 1;
+                    }
+                    return 0;
+                },
+            }
+        }
+    } else void;
 
     const Impl = struct {
         const Self = @This();
@@ -136,10 +418,26 @@ pub fn build(builder: root, comptime context: anytype) type {
             store: StoreType,
             single_buttons: SingleButtonInstances,
             grouped_buttons: GroupedButtonInstances,
+            imus: ImuInstances,
             led_strips: LedStripInstances,
+            modems: ModemInstances,
+            nfcs: NfcInstances,
+            wifi_stas: WifiStaInstances,
+            wifi_aps: WifiApInstances,
             detector: if (has_button_runtime) button.Reducer else void,
             store_reducer: if (has_button_runtime) StoreReducerType else void,
+            imu_detector: if (has_imu_runtime) component_imu.Reducer else void,
+            imu_store_reducer: if (has_imu_runtime) StoreReducerType else void,
             ledstrip_store_reducer: if (has_ledstrip_runtime) StoreReducerType else void,
+            modem_event_hooks: if (has_modem_runtime) [modem_count]component_modem.EventHook else void,
+            modem_reducer: if (has_modem_runtime) component_modem.Reducer else void,
+            modem_store_reducer: if (has_modem_runtime) ModemStoreReducerNode else void,
+            nfc_event_hooks: if (has_nfc_runtime) [nfc_count]component_nfc.EventHook else void,
+            nfc_store_reducer: if (has_nfc_runtime) NfcStoreReducerNode else void,
+            wifi_sta_reducer: if (has_wifi_sta_runtime) component_wifi.StaReducer else void,
+            wifi_ap_reducers: if (has_wifi_ap_runtime) [wifi_ap_count]component_wifi.ApReducer else void,
+            wifi_sta_store_reducer: if (has_wifi_sta_runtime) WifiStaStoreReducerNode else void,
+            wifi_ap_store_reducer: if (has_wifi_ap_runtime) WifiApStoreReducerNode else void,
             store_tick: StoreTickNode,
             root_config: BuiltRoot.Config,
             root: Node,
@@ -147,6 +445,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             pipeline_sink: PipelineSink,
             single_button_pollers: [gpio_count]SingleButtonPoller = undefined,
             grouped_button_pollers: [adc_count]GroupedButtonPoller = undefined,
+            imu_pollers: [imu_count]ImuPollerWrapper = undefined,
             pollers: [runtime_poller_count]Poller = undefined,
 
             pub fn init(init_config: InitConfig) !*Runtime {
@@ -156,7 +455,12 @@ pub fn build(builder: root, comptime context: anytype) type {
                 runtime.allocator = init_config.allocator;
                 runtime.single_buttons = initSingleButtonInstances(init_config);
                 runtime.grouped_buttons = initGroupedButtonInstances(init_config);
+                runtime.imus = initImuInstances(init_config);
                 runtime.led_strips = initLedStripInstances(init_config);
+                runtime.modems = initModemInstances(init_config);
+                runtime.nfcs = initNfcInstances(init_config);
+                runtime.wifi_stas = initWifiStaInstances(init_config);
+                runtime.wifi_aps = initWifiApInstances(init_config);
 
                 const stores = try initStoreValues(init_config.allocator);
                 runtime.store = try StoreType.init(init_config.allocator, stores);
@@ -174,11 +478,50 @@ pub fn build(builder: root, comptime context: anytype) type {
                         ButtonStoreReducerFn.reduce,
                     );
                 }
+                if (has_imu_runtime) {
+                    runtime.imu_detector = component_imu.Reducer.initDefault(init_config.allocator);
+                    errdefer runtime.imu_detector.deinit();
+
+                    runtime.imu_store_reducer = StoreReducerType.init(
+                        &runtime.store.stores,
+                        ImuStoreReducerFn.reduce,
+                    );
+                }
                 if (has_ledstrip_runtime) {
                     runtime.ledstrip_store_reducer = StoreReducerType.init(
                         &runtime.store.stores,
                         LedStripStoreReducerFn.reduce,
                     );
+                }
+                if (has_modem_runtime) {
+                    runtime.modem_reducer = component_modem.Reducer.init();
+                    runtime.modem_store_reducer = .{
+                        .stores = &runtime.store.stores,
+                        .reducer = &runtime.modem_reducer,
+                    };
+                }
+                if (has_wifi_sta_runtime) {
+                    runtime.wifi_sta_reducer = component_wifi.StaReducer.init();
+                    runtime.wifi_sta_store_reducer = .{
+                        .stores = &runtime.store.stores,
+                        .reducer = &runtime.wifi_sta_reducer,
+                    };
+                }
+                if (has_wifi_ap_runtime) {
+                    var initialized_wifi_ap_reducer_count: usize = 0;
+                    errdefer {
+                        for (runtime.wifi_ap_reducers[0..initialized_wifi_ap_reducer_count]) |*reducer| {
+                            reducer.deinit();
+                        }
+                    }
+                    inline for (0..wifi_ap_count) |i| {
+                        runtime.wifi_ap_reducers[i] = component_wifi.ApReducer.init(init_config.allocator);
+                        initialized_wifi_ap_reducer_count = i + 1;
+                    }
+                    runtime.wifi_ap_store_reducer = .{
+                        .stores = &runtime.store.stores,
+                        .reducers = &runtime.wifi_ap_reducers,
+                    };
                 }
                 runtime.store_tick = .{
                     .store = &runtime.store,
@@ -190,6 +533,22 @@ pub fn build(builder: root, comptime context: anytype) type {
                 runtime.pipeline_sink = .{
                     .pipeline = &runtime.pipeline,
                 };
+
+                if (has_modem_runtime) {
+                    inline for (0..modem_count) |i| {
+                        runtime.modem_event_hooks[i] = component_modem.EventHook.init();
+                        runtime.modem_event_hooks[i].bindOutput(Emitter.init(&runtime.pipeline_sink));
+                    }
+                }
+                if (has_nfc_runtime) {
+                    inline for (0..nfc_count) |i| {
+                        runtime.nfc_event_hooks[i] = component_nfc.EventHook.init();
+                        runtime.nfc_event_hooks[i].bindOutput(Emitter.init(&runtime.pipeline_sink));
+                    }
+                    runtime.nfc_store_reducer = .{
+                        .stores = &runtime.store.stores,
+                    };
+                }
 
                 initPollers(runtime);
                 runtime.root_config = buildRootConfig(runtime, init_config);
@@ -207,6 +566,28 @@ pub fn build(builder: root, comptime context: anytype) type {
 
                 if (has_button_runtime) {
                     runtime.detector.deinit();
+                }
+                if (has_imu_runtime) {
+                    runtime.imu_detector.deinit();
+                }
+                if (has_modem_runtime) {
+                    runtime.modem_reducer.deinit();
+                    inline for (&runtime.modem_event_hooks) |*hook| {
+                        hook.clearOutput();
+                    }
+                }
+                if (has_nfc_runtime) {
+                    inline for (&runtime.nfc_event_hooks) |*hook| {
+                        hook.clearOutput();
+                    }
+                }
+                if (has_wifi_ap_runtime) {
+                    inline for (&runtime.wifi_ap_reducers) |*reducer| {
+                        reducer.deinit();
+                    }
+                }
+                if (has_wifi_sta_runtime) {
+                    runtime.wifi_sta_reducer.deinit();
                 }
 
                 runtime.store.deinit();
@@ -239,6 +620,25 @@ pub fn build(builder: root, comptime context: anytype) type {
                     );
                     runtime.pollers[poller_index].bindOutput(Emitter.init(&runtime.pipeline_sink));
                 }
+
+                inline for (0..imu_count) |i| {
+                    const periph = imu_registry.periphs[i];
+                    const label_name = comptime periphLabel(periph);
+                    const poller_index = gpio_count + adc_count + i;
+                    runtime.imu_pollers[i] = .{
+                        .inner = ImuPollerType.init(
+                            @field(runtime.imus, label_name),
+                            .{
+                                .source_id = periphIdForRecord(periph),
+                            },
+                        ),
+                    };
+                    runtime.pollers[poller_index] = Poller.init(
+                        ImuPollerWrapper,
+                        &runtime.imu_pollers[i],
+                    );
+                    runtime.pollers[poller_index].bindOutput(Emitter.init(&runtime.pipeline_sink));
+                }
             }
 
             fn buildRootConfig(runtime: *Runtime, init_config: InitConfig) BuiltRoot.Config {
@@ -248,8 +648,24 @@ pub fn build(builder: root, comptime context: anytype) type {
                     config._zux_button_detector = runtime.detector.node();
                     config._zux_button_store_reducer = runtime.store_reducer.node();
                 }
+                if (has_imu_runtime) {
+                    config._zux_imu_detector = runtime.imu_detector.node();
+                    config._zux_imu_store_reducer = runtime.imu_store_reducer.node();
+                }
                 if (has_ledstrip_runtime) {
                     config._zux_ledstrip_store_reducer = runtime.ledstrip_store_reducer.node();
+                }
+                if (has_modem_runtime) {
+                    config._zux_modem_store_reducer = runtime.modem_store_reducer.node();
+                }
+                if (has_nfc_runtime) {
+                    config._zux_nfc_store_reducer = runtime.nfc_store_reducer.node();
+                }
+                if (has_wifi_sta_runtime) {
+                    config._zux_wifi_sta_store_reducer = runtime.wifi_sta_store_reducer.node();
+                }
+                if (has_wifi_ap_runtime) {
+                    config._zux_wifi_ap_store_reducer = runtime.wifi_ap_store_reducer.node();
                 }
                 config._zux_store_tick = runtime.store_tick.node();
 
@@ -287,6 +703,16 @@ pub fn build(builder: root, comptime context: anytype) type {
                 return grouped_buttons;
             }
 
+            fn initImuInstances(init_config: InitConfig) ImuInstances {
+                var imus: ImuInstances = undefined;
+                inline for (0..imu_count) |i| {
+                    const periph = imu_registry.periphs[i];
+                    const label_name = comptime periphLabel(periph);
+                    @field(imus, label_name) = @field(init_config, label_name);
+                }
+                return imus;
+            }
+
             fn initLedStripInstances(init_config: InitConfig) LedStripInstances {
                 var led_strips: LedStripInstances = undefined;
                 inline for (0..ledstrip_count) |i| {
@@ -295,6 +721,46 @@ pub fn build(builder: root, comptime context: anytype) type {
                     @field(led_strips, label_name) = @field(init_config, label_name);
                 }
                 return led_strips;
+            }
+
+            fn initModemInstances(init_config: InitConfig) ModemInstances {
+                var modems: ModemInstances = undefined;
+                inline for (0..modem_count) |i| {
+                    const periph = modem_registry.periphs[i];
+                    const label_name = comptime periphLabel(periph);
+                    @field(modems, label_name) = @field(init_config, label_name);
+                }
+                return modems;
+            }
+
+            fn initNfcInstances(init_config: InitConfig) NfcInstances {
+                var nfcs: NfcInstances = undefined;
+                inline for (0..nfc_count) |i| {
+                    const periph = nfc_registry.periphs[i];
+                    const label_name = comptime periphLabel(periph);
+                    @field(nfcs, label_name) = @field(init_config, label_name);
+                }
+                return nfcs;
+            }
+
+            fn initWifiStaInstances(init_config: InitConfig) WifiStaInstances {
+                var wifi_stas: WifiStaInstances = undefined;
+                inline for (0..wifi_sta_count) |i| {
+                    const periph = wifi_sta_registry.periphs[i];
+                    const label_name = comptime periphLabel(periph);
+                    @field(wifi_stas, label_name) = @field(init_config, label_name);
+                }
+                return wifi_stas;
+            }
+
+            fn initWifiApInstances(init_config: InitConfig) WifiApInstances {
+                var wifi_aps: WifiApInstances = undefined;
+                inline for (0..wifi_ap_count) |i| {
+                    const periph = wifi_ap_registry.periphs[i];
+                    const label_name = comptime periphLabel(periph);
+                    @field(wifi_aps, label_name) = @field(init_config, label_name);
+                }
+                return wifi_aps;
             }
 
             fn initStoreValues(allocator: Lib.mem.Allocator) !StoreType.Stores {
@@ -361,6 +827,29 @@ pub fn build(builder: root, comptime context: anytype) type {
             }
         };
 
+        const ImuStoreReducerFn = struct {
+            fn reduce(stores: *StoreType.Stores, message: Message, emit: Emitter) !usize {
+                const source_id = switch (message.body) {
+                    .raw_imu_accel => |raw_imu_accel| raw_imu_accel.source_id,
+                    .raw_imu_gyro => |raw_imu_gyro| raw_imu_gyro.source_id,
+                    .imu_motion => |imu_motion| imu_motion.source_id,
+                    else => return 0,
+                };
+
+                inline for (0..imu_count) |i| {
+                    const periph = imu_registry.periphs[i];
+                    if (source_id == periphIdForRecord(periph)) {
+                        return component_imu.Reducer.reduce(
+                            &@field(stores, periphLabel(periph)),
+                            message,
+                            emit,
+                        );
+                    }
+                }
+                return 0;
+            }
+        };
+
         const LedStripStoreReducerFn = struct {
             fn reduce(stores: *StoreType.Stores, message: Message, emit: Emitter) !usize {
                 switch (message.body) {
@@ -372,7 +861,7 @@ pub fn build(builder: root, comptime context: anytype) type {
                     => {
                         inline for (0..ledstrip_count) |i| {
                             const periph = ledstrip_registry.periphs[i];
-                            if (messagePeriphId(message) == periphIdForRecord(periph)) {
+                            if (messageSourceId(message) == periphIdForRecord(periph)) {
                                 return LedStripReducerType.reduce(&@field(stores, periphLabel(periph)), message, emit);
                             }
                         }
@@ -435,12 +924,41 @@ pub fn build(builder: root, comptime context: anytype) type {
                 };
             }
 
+            if (has_modem_runtime) {
+                inline for (0..modem_count) |i| {
+                    const periph = modem_registry.periphs[i];
+                    const label_name = comptime periphLabel(periph);
+                    self.runtime.modem_event_hooks[i].attach(@field(self.runtime.modems, label_name));
+                }
+            }
+            if (has_nfc_runtime) {
+                inline for (0..nfc_count) |i| {
+                    const periph = nfc_registry.periphs[i];
+                    const label_name = comptime periphLabel(periph);
+                    self.runtime.nfc_event_hooks[i].attach(@field(self.runtime.nfcs, label_name));
+                }
+            }
+
             self.started = true;
         }
 
         pub fn stop(self: *Self) !void {
             if (!self.started) return error.InvalidState;
 
+            if (has_modem_runtime) {
+                inline for (0..modem_count) |i| {
+                    const periph = modem_registry.periphs[i];
+                    const label_name = comptime periphLabel(periph);
+                    self.runtime.modem_event_hooks[i].detach(@field(self.runtime.modems, label_name));
+                }
+            }
+            if (has_nfc_runtime) {
+                inline for (0..nfc_count) |i| {
+                    const periph = nfc_registry.periphs[i];
+                    const label_name = comptime periphLabel(periph);
+                    self.runtime.nfc_event_hooks[i].detach(@field(self.runtime.nfcs, label_name));
+                }
+            }
             inline for (&self.runtime.pollers) |*poller| {
                 poller.stop();
             }
@@ -453,6 +971,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         }
 
         pub fn press_single_button(self: *Self, label: PeriphLabel) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .single_button) return error.InvalidPeriphKind;
             try self.emitBody(.{
                 .raw_single_button = .{
@@ -463,6 +982,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         }
 
         pub fn release_single_button(self: *Self, label: PeriphLabel) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .single_button) return error.InvalidPeriphKind;
             try self.emitBody(.{
                 .raw_single_button = .{
@@ -473,6 +993,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         }
 
         pub fn press_grouped_button(self: *Self, label: PeriphLabel, button_id: u32) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .grouped_button) return error.InvalidPeriphKind;
             try self.emitBody(.{
                 .raw_grouped_button = .{
@@ -485,6 +1006,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         }
 
         pub fn release_grouped_button(self: *Self, label: PeriphLabel) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .grouped_button) return error.InvalidPeriphKind;
             const last_button_id = self.last_grouped_button_ids[@intFromEnum(label)];
             try self.emitBody(.{
@@ -497,11 +1019,137 @@ pub fn build(builder: root, comptime context: anytype) type {
             self.last_grouped_button_ids[@intFromEnum(label)] = null;
         }
 
+        pub fn imu_accel(self: *Self, label: PeriphLabel, accel: drivers.imu.Vec3) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
+            if (dispatchKind(label) != .imu) return error.InvalidPeriphKind;
+            try self.emitBody(.{
+                .raw_imu_accel = .{
+                    .source_id = periphId(label),
+                    .x = accel.x,
+                    .y = accel.y,
+                    .z = accel.z,
+                },
+            });
+        }
+
+        pub fn imu_gyro(self: *Self, label: PeriphLabel, gyro: drivers.imu.Vec3) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
+            if (dispatchKind(label) != .imu) return error.InvalidPeriphKind;
+            try self.emitBody(.{
+                .raw_imu_gyro = .{
+                    .source_id = periphId(label),
+                    .x = gyro.x,
+                    .y = gyro.y,
+                    .z = gyro.z,
+                },
+            });
+        }
+
+        pub fn modem_sim_state_changed(self: *Self, label: PeriphLabel, sim: modem_api.Modem.SimState) !void {
+            if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
+            try self.emitBody(try component_modem.event.make(Message.Event, periphId(label), .{
+                .sim = .{
+                    .state_changed = sim,
+                },
+            }));
+        }
+
+        pub fn modem_network_registration_changed(self: *Self, label: PeriphLabel, registration: modem_api.Modem.RegistrationState) !void {
+            if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
+            try self.emitBody(try component_modem.event.make(Message.Event, periphId(label), .{
+                .network = .{
+                    .registration_changed = registration,
+                },
+            }));
+        }
+
+        pub fn modem_network_signal_changed(self: *Self, label: PeriphLabel, signal: modem_api.Modem.SignalInfo) !void {
+            if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
+            try self.emitBody(try component_modem.event.make(Message.Event, periphId(label), .{
+                .network = .{
+                    .signal_changed = signal,
+                },
+            }));
+        }
+
+        pub fn modem_data_packet_state_changed(self: *Self, label: PeriphLabel, packet: modem_api.Modem.PacketState) !void {
+            if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
+            try self.emitBody(try component_modem.event.make(Message.Event, periphId(label), .{
+                .data = .{
+                    .packet_state_changed = packet,
+                },
+            }));
+        }
+
+        pub fn modem_data_apn_changed(self: *Self, label: PeriphLabel, apn: []const u8) !void {
+            if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
+            try self.emitBody(try component_modem.event.make(Message.Event, periphId(label), .{
+                .data = .{
+                    .apn_changed = apn,
+                },
+            }));
+        }
+
+        pub fn modem_call_incoming(self: *Self, label: PeriphLabel, call: modem_api.Modem.CallInfo) !void {
+            if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
+            try self.emitBody(try component_modem.event.make(Message.Event, periphId(label), .{
+                .call = .{
+                    .incoming = call,
+                },
+            }));
+        }
+
+        pub fn modem_call_state_changed(self: *Self, label: PeriphLabel, call: modem_api.Modem.CallStatus) !void {
+            if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
+            try self.emitBody(try component_modem.event.make(Message.Event, periphId(label), .{
+                .call = .{
+                    .state_changed = call,
+                },
+            }));
+        }
+
+        pub fn modem_call_ended(self: *Self, label: PeriphLabel, call: modem_api.Modem.CallEndInfo) !void {
+            if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
+            try self.emitBody(try component_modem.event.make(Message.Event, periphId(label), .{
+                .call = .{
+                    .ended = call,
+                },
+            }));
+        }
+
+        pub fn modem_sms_received(self: *Self, label: PeriphLabel, sms: modem_api.Modem.SmsMessage) !void {
+            if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
+            try self.emitBody(try component_modem.event.make(Message.Event, periphId(label), .{
+                .sms = .{
+                    .received = sms,
+                },
+            }));
+        }
+
+        pub fn modem_gnss_state_changed(self: *Self, label: PeriphLabel, state: modem_api.Modem.GnssState) !void {
+            if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
+            try self.emitBody(try component_modem.event.make(Message.Event, periphId(label), .{
+                .gnss = .{
+                    .state_changed = state,
+                },
+            }));
+        }
+
+        pub fn modem_gnss_fix_changed(self: *Self, label: PeriphLabel, fix: modem_api.Modem.GnssFix) !void {
+            if (dispatchKind(label) != .modem) return error.InvalidPeriphKind;
+            try self.emitBody(try component_modem.event.make(Message.Event, periphId(label), .{
+                .gnss = .{
+                    .fix_changed = fix,
+                },
+            }));
+        }
+
         pub fn set_led_strip_pixels(self: *Self, label: PeriphLabel, frame: FrameType, brightness: u8) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
             try self.emitBody(.{
                 .ledstrip_set_pixels = .{
-                    .periph_id = periphId(label),
+                    .source_id = periphId(label),
                     .pixels = frame.pixels[0..],
                     .brightness = brightness,
                 },
@@ -515,10 +1163,11 @@ pub fn build(builder: root, comptime context: anytype) type {
             brightness: u8,
             duration: u32,
         ) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
             try self.emitBody(.{
                 .ledstrip_set = .{
-                    .periph_id = periphId(label),
+                    .source_id = periphId(label),
                     .pixels = frame.pixels[0..],
                     .brightness = brightness,
                     .duration = duration,
@@ -534,10 +1183,11 @@ pub fn build(builder: root, comptime context: anytype) type {
             duration_ns: u64,
             interval_ns: u64,
         ) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
             try self.emitBody(.{
                 .ledstrip_flash = .{
-                    .periph_id = periphId(label),
+                    .source_id = periphId(label),
                     .pixels = frame.pixels[0..],
                     .brightness = brightness,
                     .duration_ns = duration_ns,
@@ -555,10 +1205,11 @@ pub fn build(builder: root, comptime context: anytype) type {
             duration_ns: u64,
             interval_ns: u64,
         ) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
             try self.emitBody(.{
                 .ledstrip_pingpong = .{
-                    .periph_id = periphId(label),
+                    .source_id = periphId(label),
                     .from_pixels = from_frame.pixels[0..],
                     .to_pixels = to_frame.pixels[0..],
                     .brightness = brightness,
@@ -576,16 +1227,142 @@ pub fn build(builder: root, comptime context: anytype) type {
             duration_ns: u64,
             interval_ns: u64,
         ) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
             try self.emitBody(.{
                 .ledstrip_rotate = .{
-                    .periph_id = periphId(label),
+                    .source_id = periphId(label),
                     .pixels = frame.pixels[0..],
                     .brightness = brightness,
                     .duration_ns = duration_ns,
                     .interval_ns = interval_ns,
                 },
             });
+        }
+
+        pub fn nfc_found(self: *Self, label: PeriphLabel, uid: []const u8, card_type: drivers.nfc.CardType) !void {
+            if (dispatchKind(label) != .nfc) return error.InvalidPeriphKind;
+            try self.emitBody(try component_nfc.event.make(Message.Event, .{
+                .source_id = periphId(label),
+                .uid = uid,
+                .payload = null,
+                .card_type = card_type,
+            }, null));
+        }
+
+        pub fn nfc_read(
+            self: *Self,
+            label: PeriphLabel,
+            uid: []const u8,
+            payload: []const u8,
+            card_type: drivers.nfc.CardType,
+        ) !void {
+            if (dispatchKind(label) != .nfc) return error.InvalidPeriphKind;
+            try self.emitBody(try component_nfc.event.make(Message.Event, .{
+                .source_id = periphId(label),
+                .uid = uid,
+                .payload = payload,
+                .card_type = card_type,
+            }, null));
+        }
+
+        pub fn wifi_sta_scan_result(self: *Self, label: PeriphLabel, report: drivers.wifi.Sta.ScanResult) !void {
+            if (dispatchKind(label) != .wifi_sta) return error.InvalidPeriphKind;
+            try self.emitBody(try component_wifi.event.make(Message.Event, periphId(label), .{
+                .sta = .{
+                    .scan_result = report,
+                },
+            }));
+        }
+
+        pub fn wifi_sta_connected(self: *Self, label: PeriphLabel, info: drivers.wifi.Sta.LinkInfo) !void {
+            if (dispatchKind(label) != .wifi_sta) return error.InvalidPeriphKind;
+            try self.emitBody(try component_wifi.event.make(Message.Event, periphId(label), .{
+                .sta = .{
+                    .connected = info,
+                },
+            }));
+        }
+
+        pub fn wifi_sta_disconnected(self: *Self, label: PeriphLabel, info: drivers.wifi.Sta.DisconnectInfo) !void {
+            if (dispatchKind(label) != .wifi_sta) return error.InvalidPeriphKind;
+            try self.emitBody(try component_wifi.event.make(Message.Event, periphId(label), .{
+                .sta = .{
+                    .disconnected = info,
+                },
+            }));
+        }
+
+        pub fn wifi_sta_got_ip(self: *Self, label: PeriphLabel, info: drivers.wifi.Sta.IpInfo) !void {
+            if (dispatchKind(label) != .wifi_sta) return error.InvalidPeriphKind;
+            try self.emitBody(try component_wifi.event.make(Message.Event, periphId(label), .{
+                .sta = .{
+                    .got_ip = info,
+                },
+            }));
+        }
+
+        pub fn wifi_sta_lost_ip(self: *Self, label: PeriphLabel) !void {
+            if (dispatchKind(label) != .wifi_sta) return error.InvalidPeriphKind;
+            try self.emitBody(try component_wifi.event.make(Message.Event, periphId(label), .{
+                .sta = .{
+                    .lost_ip = {},
+                },
+            }));
+        }
+
+        pub fn wifi_ap_started(self: *Self, label: PeriphLabel, info: drivers.wifi.Ap.StartedInfo) !void {
+            if (dispatchKind(label) != .wifi_ap) return error.InvalidPeriphKind;
+            try self.emitBody(try component_wifi.event.make(Message.Event, periphId(label), .{
+                .ap = .{
+                    .started = info,
+                },
+            }));
+        }
+
+        pub fn wifi_ap_stopped(self: *Self, label: PeriphLabel) !void {
+            if (dispatchKind(label) != .wifi_ap) return error.InvalidPeriphKind;
+            try self.emitBody(try component_wifi.event.make(Message.Event, periphId(label), .{
+                .ap = .{
+                    .stopped = {},
+                },
+            }));
+        }
+
+        pub fn wifi_ap_client_joined(self: *Self, label: PeriphLabel, info: drivers.wifi.Ap.ClientInfo) !void {
+            if (dispatchKind(label) != .wifi_ap) return error.InvalidPeriphKind;
+            try self.emitBody(try component_wifi.event.make(Message.Event, periphId(label), .{
+                .ap = .{
+                    .client_joined = info,
+                },
+            }));
+        }
+
+        pub fn wifi_ap_client_left(self: *Self, label: PeriphLabel, info: drivers.wifi.Ap.ClientInfo) !void {
+            if (dispatchKind(label) != .wifi_ap) return error.InvalidPeriphKind;
+            try self.emitBody(try component_wifi.event.make(Message.Event, periphId(label), .{
+                .ap = .{
+                    .client_left = info,
+                },
+            }));
+        }
+
+        pub fn wifi_ap_lease_granted(self: *Self, label: PeriphLabel, info: drivers.wifi.Ap.LeaseInfo) !void {
+            if (dispatchKind(label) != .wifi_ap) return error.InvalidPeriphKind;
+            try self.emitBody(try component_wifi.event.make(Message.Event, periphId(label), .{
+                .ap = .{
+                    .lease_granted = info,
+                },
+            }));
+        }
+
+        pub fn wifi_ap_lease_released(self: *Self, label: PeriphLabel, info: drivers.wifi.Ap.LeaseInfo) !void {
+            if (dispatchKind(label) != .wifi_ap) return error.InvalidPeriphKind;
+            try self.emitBody(try component_wifi.event.make(Message.Event, periphId(label), .{
+                .ap = .{
+                    .lease_released = info,
+                },
+            }));
         }
 
         pub fn store(self: *Self) *StoreType {
@@ -599,10 +1376,12 @@ pub fn build(builder: root, comptime context: anytype) type {
         }
 
         fn periphId(label: PeriphLabel) u32 {
+            if (comptime periph_ids.len == 0) return 0;
             return periph_ids[@intFromEnum(label)];
         }
 
         fn dispatchKind(label: PeriphLabel) PeriphDispatchKind {
+            if (comptime periph_ids.len == 0) return .single_button;
             return periph_kinds[@intFromEnum(label)];
         }
     };
@@ -630,9 +1409,29 @@ fn makeRuntimeStoreBuilder(comptime context: anytype) @TypeOf(context.store_buil
         const periph = context.registries.adc_button.periphs[i];
         builder.setStore(periph.label, store.Object.make(context.lib, button.state.Detected, periph.label));
     }
+    inline for (0..registryPeriphLen(context.registries.imu)) |i| {
+        const periph = context.registries.imu.periphs[i];
+        builder.setStore(periph.label, store.Object.make(context.lib, component_imu.State, periph.label));
+    }
     inline for (0..ledstrip_count) |i| {
         const periph = ledstrip_registry.periphs[i];
         builder.setStore(periph.label, store.Object.make(context.lib, LedStripStateType, periph.label));
+    }
+    inline for (0..registryPeriphLen(context.registries.modem)) |i| {
+        const periph = context.registries.modem.periphs[i];
+        builder.setStore(periph.label, store.Object.make(context.lib, component_modem.State, periph.label));
+    }
+    inline for (0..registryPeriphLen(context.registries.nfc)) |i| {
+        const periph = context.registries.nfc.periphs[i];
+        builder.setStore(periph.label, store.Object.make(context.lib, component_nfc.State, periph.label));
+    }
+    inline for (0..registryPeriphLen(context.registries.wifi_sta)) |i| {
+        const periph = context.registries.wifi_sta.periphs[i];
+        builder.setStore(periph.label, store.Object.make(context.lib, component_wifi.state.Sta, periph.label));
+    }
+    inline for (0..registryPeriphLen(context.registries.wifi_ap)) |i| {
+        const periph = context.registries.wifi_ap.periphs[i];
+        builder.setStore(periph.label, store.Object.make(context.lib, component_wifi.state.Ap, periph.label));
     }
 
     inline for (0..context.store_builder.store_count) |i| {
@@ -652,12 +1451,28 @@ fn makeRuntimeNodeBuilder(comptime context: anytype) @TypeOf(context.node_builde
     const NodeBuilderType = @TypeOf(context.node_builder);
     var builder = NodeBuilderType.init();
 
-    if (totalPollerCount(context.registries) > 0) {
+    if (buttonPollerCount(context.registries) > 0) {
         builder.node(._zux_button_detector);
         builder.node(._zux_button_store_reducer);
     }
+    if (registryPeriphLen(context.registries.imu) > 0) {
+        builder.node(._zux_imu_detector);
+        builder.node(._zux_imu_store_reducer);
+    }
     if (registryPeriphLen(context.registries.ledstrip) > 0) {
         builder.node(._zux_ledstrip_store_reducer);
+    }
+    if (registryPeriphLen(context.registries.modem) > 0) {
+        builder.node(._zux_modem_store_reducer);
+    }
+    if (registryPeriphLen(context.registries.nfc) > 0) {
+        builder.node(._zux_nfc_store_reducer);
+    }
+    if (registryPeriphLen(context.registries.wifi_sta) > 0) {
+        builder.node(._zux_wifi_sta_store_reducer);
+    }
+    if (registryPeriphLen(context.registries.wifi_ap) > 0) {
+        builder.node(._zux_wifi_ap_store_reducer);
     }
 
     inline for (0..context.node_builder.len) |i| {
@@ -780,6 +1595,10 @@ fn totalPeriphLen(comptime registries: anytype) usize {
 }
 
 fn totalPollerCount(comptime registries: anytype) usize {
+    return buttonPollerCount(registries) + registryPeriphLen(registries.imu);
+}
+
+fn buttonPollerCount(comptime registries: anytype) usize {
     return registryPeriphLen(registries.gpio_button) + registryPeriphLen(registries.adc_button);
 }
 
@@ -866,7 +1685,12 @@ fn makePeriphKindTable(comptime registries: anytype) [totalPeriphLen(registries)
 const PeriphDispatchKind = enum {
     single_button,
     grouped_button,
+    imu,
     led_strip,
+    modem,
+    nfc,
+    wifi_sta,
+    wifi_ap,
 };
 
 fn periphIdForRecord(comptime periph: anytype) u32 {
@@ -885,7 +1709,12 @@ fn dispatchKindForRecord(comptime periph: anytype) PeriphDispatchKind {
     const ControlType = @field(periph, "control_type");
     if (ControlType == @import("drivers").button.Single) return .single_button;
     if (ControlType == @import("drivers").button.Grouped) return .grouped_button;
+    if (ControlType == @import("drivers").imu) return .imu;
     if (ControlType == ledstrip.LedStrip) return .led_strip;
+    if (ControlType == modem_api.Modem) return .modem;
+    if (ControlType == @import("drivers").nfc.Reader) return .nfc;
+    if (ControlType == @import("drivers").wifi.Sta) return .wifi_sta;
+    if (ControlType == @import("drivers").wifi.Ap) return .wifi_ap;
     @compileError("zux.assembler.Builder.build encountered unsupported periph control_type");
 }
 
@@ -908,14 +1737,44 @@ fn ledStripFrameCapacity(comptime registry: anytype) usize {
     return if (pixel_count < 2) 2 else pixel_count;
 }
 
-fn messagePeriphId(message: Message) u32 {
+fn messageSourceId(message: Message) u32 {
     return switch (message.body) {
-        .ledstrip_set => |event| event.periph_id,
-        .ledstrip_set_pixels => |event| event.periph_id,
-        .ledstrip_flash => |event| event.periph_id,
-        .ledstrip_pingpong => |event| event.periph_id,
-        .ledstrip_rotate => |event| event.periph_id,
-        else => @panic("zux.assembler.Builder.messagePeriphId expected ledstrip event"),
+        .button_gesture => |event| event.source_id,
+        .raw_single_button => |event| event.source_id,
+        .raw_grouped_button => |event| event.source_id,
+        .ledstrip_set => |event| event.source_id,
+        .ledstrip_set_pixels => |event| event.source_id,
+        .ledstrip_flash => |event| event.source_id,
+        .ledstrip_pingpong => |event| event.source_id,
+        .ledstrip_rotate => |event| event.source_id,
+        .raw_imu_accel => |event| event.source_id,
+        .raw_imu_gyro => |event| event.source_id,
+        .imu_motion => |event| event.source_id,
+        .modem_sim_state_changed => |event| event.source_id,
+        .modem_network_registration_changed => |event| event.source_id,
+        .modem_network_signal_changed => |event| event.source_id,
+        .modem_data_packet_state_changed => |event| event.source_id,
+        .modem_data_apn_changed => |event| event.source_id,
+        .modem_call_incoming => |event| event.source_id,
+        .modem_call_state_changed => |event| event.source_id,
+        .modem_call_ended => |event| event.source_id,
+        .modem_sms_received => |event| event.source_id,
+        .modem_gnss_state_changed => |event| event.source_id,
+        .modem_gnss_fix_changed => |event| event.source_id,
+        .nfc_found => |event| event.source_id,
+        .nfc_read => |event| event.source_id,
+        .wifi_sta_scan_result => |event| event.source_id,
+        .wifi_sta_connected => |event| event.source_id,
+        .wifi_sta_disconnected => |event| event.source_id,
+        .wifi_sta_got_ip => |event| event.source_id,
+        .wifi_sta_lost_ip => |event| event.source_id,
+        .wifi_ap_started => |event| event.source_id,
+        .wifi_ap_stopped => |event| event.source_id,
+        .wifi_ap_client_joined => |event| event.source_id,
+        .wifi_ap_client_left => |event| event.source_id,
+        .wifi_ap_lease_granted => |event| event.source_id,
+        .wifi_ap_lease_released => |event| event.source_id,
+        else => @panic("zux.assembler.Builder.messageSourceId expected source-tagged event"),
     };
 }
 

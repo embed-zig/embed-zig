@@ -1,4 +1,5 @@
 const embed = @import("embed");
+const motion = @import("motion");
 const Context = @import("../../event/Context.zig");
 const button_event = @import("event.zig");
 const button_state = @import("state.zig");
@@ -11,33 +12,18 @@ const Reducer = @This();
 const State = button_state.Detected;
 const GroupedState = button_state.Grouped;
 const SingleState = button_state.Single;
+const ClickDetector = motion.ClickDetector;
 
 const Key = struct {
     source_id: u32,
     button_id: ?u32 = null,
 };
 
-const PendingPress = struct {
-    pressed_at_ns: i128,
-    ctx: Context.Type,
-};
-
-const PendingClicks = struct {
-    last_click_at_ns: i128,
-    count: u16,
-    ctx: Context.Type,
-};
-
-const PressState = struct {
-    pending_press: ?PendingPress = null,
-    pending_clicks: ?PendingClicks = null,
-};
-
-pub const default_long_press_ns: u64 = 500 * embed.time.ns_per_ms;
-pub const default_multi_click_window_ns: u64 = 300 * embed.time.ns_per_ms;
+pub const default_long_press_ns: u64 = ClickDetector.default_long_press_ns;
+pub const default_multi_click_window_ns: u64 = ClickDetector.default_multi_click_window_ns;
 
 allocator: embed.mem.Allocator,
-states: embed.AutoHashMap(Key, PressState),
+states: embed.AutoHashMap(Key, ClickDetector),
 out: ?Emitter = null,
 long_press_ns: u64 = default_long_press_ns,
 multi_click_window_ns: u64 = default_multi_click_window_ns,
@@ -45,7 +31,7 @@ multi_click_window_ns: u64 = default_multi_click_window_ns,
 pub fn init(allocator: embed.mem.Allocator) Reducer {
     return .{
         .allocator = allocator,
-        .states = embed.AutoHashMap(Key, PressState).init(allocator),
+        .states = embed.AutoHashMap(Key, ClickDetector).init(allocator),
         .out = null,
         .long_press_ns = default_long_press_ns,
         .multi_click_window_ns = default_multi_click_window_ns,
@@ -170,51 +156,35 @@ fn processRaw(
     };
     const gop = try self.states.getOrPut(key);
     if (!gop.found_existing) {
-        gop.value_ptr.* = .{};
+        gop.value_ptr.* = ClickDetector.init(.{
+            .long_press_ns = self.long_press_ns,
+            .multi_click_window_ns = self.multi_click_window_ns,
+        });
     }
 
-    const state = gop.value_ptr;
-    var emitted = try self.flushDue(timestamp_ns, key, state);
+    const detector = gop.value_ptr;
+    var emitted = try self.flushDue(timestamp_ns, key, detector);
 
-    if (pressed) {
-        if (state.pending_press != null) return emitted;
-
-        state.pending_press = .{
-            .pressed_at_ns = timestamp_ns,
-            .ctx = ctx,
-        };
-        return emitted;
-    }
-
-    const pending_press = state.pending_press orelse return emitted;
-    state.pending_press = null;
-
-    const held_ns = elapsedNs(pending_press.pressed_at_ns, timestamp_ns);
-    if (held_ns >= self.long_press_ns) {
-        state.pending_clicks = null;
+    if (detector.update(.{
+        .timestamp_ns = timestamp_ns,
+        .pressed = pressed,
+        .ctx = ctx,
+    })) |action| {
         emitted += try self.emitGesture(
             source_id,
             button_id,
-            .{ .long_press_ns = held_ns },
-            ctx,
+            gestureValue(action.gesture),
+            action.ctx,
         );
-        return emitted;
     }
-
-    if (state.pending_clicks) |*pending_clicks| {
-        if (elapsedNs(pending_clicks.last_click_at_ns, timestamp_ns) < self.multi_click_window_ns) {
-            pending_clicks.count += 1;
-            pending_clicks.last_click_at_ns = timestamp_ns;
-            pending_clicks.ctx = ctx;
-            return emitted;
-        }
+    while (detector.nextAction()) |action| {
+        emitted += try self.emitGesture(
+            source_id,
+            button_id,
+            gestureValue(action.gesture),
+            action.ctx,
+        );
     }
-
-    state.pending_clicks = .{
-        .last_click_at_ns = timestamp_ns,
-        .count = 1,
-        .ctx = ctx,
-    };
     return emitted;
 }
 
@@ -222,47 +192,41 @@ fn flushDue(
     self: *Reducer,
     timestamp_ns: i128,
     key: Key,
-    state: *PressState,
+    detector: *ClickDetector,
 ) !usize {
     var emitted: usize = 0;
+    self.syncDetectorConfig(detector);
 
-    if (state.pending_press) |pending_press| {
-        const held_ns = elapsedNs(pending_press.pressed_at_ns, timestamp_ns);
-        if (held_ns >= self.long_press_ns) {
-            state.pending_press = null;
-            state.pending_clicks = null;
-            emitted += try self.emitGesture(
-                key.source_id,
-                key.button_id,
-                .{ .long_press_ns = held_ns },
-                pending_press.ctx,
-            );
-        }
+    if (detector.flush(timestamp_ns)) |action| {
+        emitted += try self.emitGesture(
+            key.source_id,
+            key.button_id,
+            gestureValue(action.gesture),
+            action.ctx,
+        );
     }
-
-    if (state.pending_clicks) |pending_clicks| {
-        const quiet_ns = elapsedNs(pending_clicks.last_click_at_ns, timestamp_ns);
-        if (quiet_ns >= self.multi_click_window_ns) {
-            state.pending_clicks = null;
-            emitted += try self.emitGesture(
-                key.source_id,
-                key.button_id,
-                .{ .click = pending_clicks.count },
-                pending_clicks.ctx,
-            );
-        }
+    while (detector.nextAction()) |action| {
+        emitted += try self.emitGesture(
+            key.source_id,
+            key.button_id,
+            gestureValue(action.gesture),
+            action.ctx,
+        );
     }
 
     return emitted;
 }
 
-fn elapsedNs(start_ns: i128, end_ns: i128) u64 {
-    if (end_ns <= start_ns) return 0;
+fn syncDetectorConfig(self: *const Reducer, detector: *ClickDetector) void {
+    detector.long_press_ns = self.long_press_ns;
+    detector.multi_click_window_ns = self.multi_click_window_ns;
+}
 
-    const delta_ns = end_ns - start_ns;
-    const max_u64_ns: i128 = @intCast(embed.math.maxInt(u64));
-    if (delta_ns >= max_u64_ns) return embed.math.maxInt(u64);
-    return @intCast(delta_ns);
+fn gestureValue(gesture: ClickDetector.Gesture) button_event.Detected.Value {
+    return switch (gesture) {
+        .click => |count| .{ .click = count },
+        .long_press_ns => |held_ns| .{ .long_press_ns = held_ns },
+    };
 }
 
 fn emitGesture(
@@ -434,7 +398,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try testing.expectEqual(@as(usize, 1), collector.count);
         }
 
-        fn longPressEmitsDuration(testing: anytype) !void {
+        fn longPressEmitsUpdatedDuration(testing: anytype) !void {
             const Collector = struct {
                 count: usize = 0,
                 last_long_press_ns: u64 = 0,
@@ -483,9 +447,22 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try testing.expectEqual(default_long_press_ns + 25, collector.last_long_press_ns);
             try testing.expectEqual(@as(usize, 1), collector.count);
 
-            try testing.expectEqual(@as(usize, 0), try detector.process(.{
+            try testing.expectEqual(
+                @as(usize, 2),
+                try detector.process(.{
+                    .origin = .timer,
+                    .timestamp_ns = 10 + @as(i128, default_long_press_ns) + 75,
+                    .body = .{
+                        .tick = .{},
+                    },
+                }),
+            );
+            try testing.expectEqual(default_long_press_ns + 75, collector.last_long_press_ns);
+            try testing.expectEqual(@as(usize, 2), collector.count);
+
+            try testing.expectEqual(@as(usize, 1), try detector.process(.{
                 .origin = .source,
-                .timestamp_ns = 10 + @as(i128, default_long_press_ns) + 50,
+                .timestamp_ns = 10 + @as(i128, default_long_press_ns) + 100,
                 .body = .{
                     .raw_single_button = .{
                         .source_id = 9,
@@ -493,6 +470,122 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     },
                 },
             }));
+            try testing.expectEqual(default_long_press_ns + 100, collector.last_long_press_ns);
+            try testing.expectEqual(@as(usize, 3), collector.count);
+        }
+
+        fn updatedLongPressThresholdAppliesToExistingKey(testing: anytype) !void {
+            const Collector = struct {
+                long_press_ns: u64 = 0,
+                count: usize = 0,
+
+                pub fn emit(self: *@This(), message: Message) !void {
+                    switch (message.body) {
+                        .button_gesture => |button| {
+                            switch (button.gesture) {
+                                .click => return error.UnexpectedGesture,
+                                .long_press_ns => |held_ns| self.long_press_ns = held_ns,
+                            }
+                            self.count += 1;
+                        },
+                        .tick => {},
+                        else => return error.UnexpectedMessage,
+                    }
+                }
+            };
+
+            var detector_impl = Reducer.init(testing.allocator);
+            defer detector_impl.deinit();
+            var collector = Collector{};
+            var detector = detector_impl.node();
+            detector.bindOutput(Emitter.init(&collector));
+
+            _ = try detector.process(.{
+                .origin = .source,
+                .timestamp_ns = 10,
+                .body = .{
+                    .raw_single_button = .{
+                        .source_id = 11,
+                        .pressed = true,
+                    },
+                },
+            });
+
+            detector_impl.long_press_ns = 100;
+            try testing.expectEqual(
+                @as(usize, 2),
+                try detector.process(.{
+                    .origin = .timer,
+                    .timestamp_ns = 110,
+                    .body = .{
+                        .tick = .{},
+                    },
+                }),
+            );
+            try testing.expectEqual(@as(u64, 100), collector.long_press_ns);
+            try testing.expectEqual(@as(usize, 1), collector.count);
+        }
+
+        fn updatedMultiClickWindowAppliesToExistingKey(testing: anytype) !void {
+            const Collector = struct {
+                click_count: u16 = 0,
+                count: usize = 0,
+
+                pub fn emit(self: *@This(), message: Message) !void {
+                    switch (message.body) {
+                        .button_gesture => |button| {
+                            switch (button.gesture) {
+                                .click => |count| self.click_count = count,
+                                .long_press_ns => return error.UnexpectedGesture,
+                            }
+                            self.count += 1;
+                        },
+                        .tick => {},
+                        else => return error.UnexpectedMessage,
+                    }
+                }
+            };
+
+            var detector_impl = Reducer.init(testing.allocator);
+            defer detector_impl.deinit();
+            var collector = Collector{};
+            var detector = detector_impl.node();
+            detector.bindOutput(Emitter.init(&collector));
+
+            _ = try detector.process(.{
+                .origin = .source,
+                .timestamp_ns = 1_000,
+                .body = .{
+                    .raw_single_button = .{
+                        .source_id = 13,
+                        .pressed = true,
+                    },
+                },
+            });
+            _ = try detector.process(.{
+                .origin = .source,
+                .timestamp_ns = 1_010,
+                .body = .{
+                    .raw_single_button = .{
+                        .source_id = 13,
+                        .pressed = false,
+                    },
+                },
+            });
+
+            detector_impl.multi_click_window_ns = 50;
+            try testing.expectEqual(
+                @as(usize, 2),
+                try detector.process(.{
+                    .origin = .timer,
+                    .timestamp_ns = 1_060,
+                    .body = .{
+                        .tick = .{},
+                    },
+                }),
+            );
+            try testing.expectEqual(@as(u16, 1), collector.click_count);
+            try testing.expectEqual(@as(usize, 1), collector.count);
         }
 
         fn reduceGroupedUpdatesStore(testing: anytype) !void {
@@ -609,7 +702,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.longPressEmitsDuration(testing) catch |err| {
+            TestCase.longPressEmitsUpdatedDuration(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.updatedLongPressThresholdAppliesToExistingKey(testing) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.updatedMultiClickWindowAppliesToExistingKey(testing) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

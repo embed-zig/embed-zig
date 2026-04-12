@@ -2,6 +2,7 @@ const embed = @import("embed");
 const builtin = embed.builtin;
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
+const modem_api = @import("modem");
 
 pub fn make(comptime config: anytype) type {
     const info = configStructInfo(config);
@@ -95,6 +96,11 @@ fn periphBuildType(comptime periph: anytype) type {
     const ControlType = @field(periph, "control_type");
     if (ControlType == drivers.button.Single) return drivers.button.Single;
     if (ControlType == drivers.button.Grouped) return drivers.button.Grouped;
+    if (ControlType == drivers.imu) return drivers.imu;
+    if (ControlType == modem_api.Modem) return modem_api.Modem;
+    if (ControlType == drivers.nfc.Reader) return drivers.nfc.Reader;
+    if (ControlType == drivers.wifi.Sta) return drivers.wifi.Sta;
+    if (ControlType == drivers.wifi.Ap) return drivers.wifi.Ap;
     if (ControlType == ledstrip.LedStrip) return ledstrip.LedStrip;
     @compileError("zux.assembler.BuildConfig.make encountered unsupported periph control_type");
 }
