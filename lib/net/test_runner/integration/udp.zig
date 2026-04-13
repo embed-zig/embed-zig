@@ -25,6 +25,7 @@ const dial_context_deadline_exceeded_before_start = @import("udp/dial_context_de
 const dial_context_canceled_during_connect = @import("udp/dial_context_canceled_during_connect.zig");
 const dial_context_deadline_exceeded_during_connect = @import("udp/dial_context_deadline_exceeded_during_connect.zig");
 const packet_conn_as_downcast = @import("udp/packet_conn_as_downcast.zig");
+const packet_conn_batch_as_udp_conn = @import("udp/packet_conn_batch_as_udp_conn.zig");
 const conn_as_downcast = @import("udp/conn_as_downcast.zig");
 const conn_ops_after_close = @import("udp/conn_ops_after_close.zig");
 const packet_conn_ops_after_close = @import("udp/packet_conn_ops_after_close.zig");
@@ -54,6 +55,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             t.run("dial_context_canceled_during_connect", dial_context_canceled_during_connect.make(lib));
             t.run("dial_context_deadline_exceeded_during_connect", dial_context_deadline_exceeded_during_connect.make(lib));
             t.run("packet_conn_as_downcast", packet_conn_as_downcast.make(lib));
+            t.run("packet_conn_batch_as_udp_conn", packet_conn_batch_as_udp_conn.make(lib));
             t.run("conn_as_downcast", conn_as_downcast.make(lib));
             t.run("conn_ops_after_close", conn_ops_after_close.make(lib));
             t.run("packet_conn_ops_after_close", packet_conn_ops_after_close.make(lib));

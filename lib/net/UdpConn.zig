@@ -32,6 +32,27 @@ pub fn UdpConn(comptime lib: type) type {
 
         const Self = @This();
 
+        pub const BatchItem = struct {
+            buf: []u8,
+            len: usize = 0,
+            addr: PacketConn.AddrStorage = @splat(0),
+            addr_len: u32 = 0,
+        };
+
+        pub const BatchReadError = PacketConn.ReadFromError || error{
+            InvalidBatchItem,
+        };
+
+        pub const BatchWriteError = PacketConn.WriteToError || error{
+            InvalidBatchItem,
+            ShortWrite,
+        };
+
+        pub const LocalAddrError = posix.GetSockNameError || error{
+            Closed,
+            Unexpected,
+        };
+
         pub fn read(self: *Self, buf: []u8) Conn.ReadError!usize {
             if (self.closed) return error.EndOfStream;
             if (buf.len == 0) return 0;
@@ -96,6 +117,89 @@ pub fn UdpConn(comptime lib: type) type {
             };
         }
 
+        // Returns the number of datagrams transferred. A short return means the batch
+        // made partial progress and the caller should only trust slots 0..count.
+        pub fn recvBatch(self: *Self, batch: []BatchItem, timeout_ms: ?u32) BatchReadError!usize {
+            if (self.closed) return error.Closed;
+            if (batch.len == 0) return 0;
+            for (batch) |item| {
+                if (item.buf.len == 0) return error.InvalidBatchItem;
+            }
+
+            const saved_timeout = self.read_timeout_ms;
+            defer self.read_timeout_ms = saved_timeout;
+
+            const deadline_ms = batchDeadline(timeout_ms orelse saved_timeout);
+            var received: usize = 0;
+            while (received < batch.len) : (received += 1) {
+                self.read_timeout_ms = remainingTimeoutMs(deadline_ms);
+
+                const result = self.readFrom(batch[received].buf) catch |err| {
+                    if (received != 0) return received;
+                    return err;
+                };
+
+                batch[received].len = result.bytes_read;
+                batch[received].addr = result.addr;
+                batch[received].addr_len = result.addr_len;
+            }
+
+            return received;
+        }
+
+        pub fn sendBatch(self: *Self, batch: []const BatchItem) BatchWriteError!usize {
+            return self.sendBatchWithTimeout(batch, self.write_timeout_ms);
+        }
+
+        // Returns the number of datagrams transferred. A short return means the batch
+        // made partial progress and the caller should only retry the remaining suffix.
+        pub fn sendBatchWithTimeout(self: *Self, batch: []const BatchItem, timeout_ms: ?u32) BatchWriteError!usize {
+            if (self.closed) return error.Closed;
+            if (batch.len == 0) return 0;
+            for (batch) |item| {
+                if (item.len > item.buf.len) return error.InvalidBatchItem;
+                if (!isValidRawSockaddrLen(item.addr_len)) return error.InvalidBatchItem;
+            }
+
+            const saved_timeout = self.write_timeout_ms;
+            defer self.write_timeout_ms = saved_timeout;
+
+            const deadline_ms = batchDeadline(timeout_ms orelse saved_timeout);
+            var sent: usize = 0;
+            while (sent < batch.len) : (sent += 1) {
+                self.write_timeout_ms = remainingTimeoutMs(deadline_ms);
+
+                const written = self.writeTo(
+                    batch[sent].buf[0..batch[sent].len],
+                    @ptrCast(&batch[sent].addr),
+                    batch[sent].addr_len,
+                ) catch |err| {
+                    if (sent != 0) return sent;
+                    return err;
+                };
+
+                if (written != batch[sent].len) {
+                    if (sent != 0) return sent;
+                    return error.ShortWrite;
+                }
+            }
+
+            return sent;
+        }
+
+        pub fn localAddr(self: *const Self) LocalAddrError!AddrPort {
+            if (self.closed) return error.Closed;
+
+            var bound: posix.sockaddr.storage = undefined;
+            var bound_len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
+            try posix.getsockname(self.fd, @ptrCast(&bound), &bound_len);
+            return rawSockaddrToAddr(@ptrCast(&bound), @intCast(bound_len)) catch error.Unexpected;
+        }
+
+        pub fn decodeAddrStorage(addr: PacketConn.AddrStorage, addr_len: u32) error{Unexpected}!AddrPort {
+            return rawSockaddrToAddr(@ptrCast(&addr), addr_len);
+        }
+
         pub fn close(self: *Self) void {
             if (!self.closed) {
                 self.packet.close();
@@ -118,6 +222,7 @@ pub fn UdpConn(comptime lib: type) type {
         }
 
         pub fn boundPort(self: *const Self) !u16 {
+            if (self.closed) return error.Closed;
             var bound: posix.sockaddr.storage = undefined;
             var bound_len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
             try posix.getsockname(self.fd, @ptrCast(&bound), &bound_len);
@@ -127,6 +232,7 @@ pub fn UdpConn(comptime lib: type) type {
         }
 
         pub fn boundPort6(self: *const Self) !u16 {
+            if (self.closed) return error.Closed;
             var bound: posix.sockaddr.storage = undefined;
             var bound_len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
             try posix.getsockname(self.fd, @ptrCast(&bound), &bound_len);
@@ -148,11 +254,27 @@ pub fn UdpConn(comptime lib: type) type {
             return lib.time.milliTimestamp() + timeout_ms;
         }
 
+        fn batchDeadline(timeout_ms: ?u32) ?i64 {
+            const ms = timeout_ms orelse return null;
+            return lib.time.milliTimestamp() + @as(i64, ms);
+        }
+
+        fn remainingTimeoutMs(deadline_ms: ?i64) ?u32 {
+            const deadline = deadline_ms orelse return null;
+            const now = lib.time.milliTimestamp();
+            if (deadline <= now) return 0;
+            return @intCast(deadline - now);
+        }
+
         fn copySockaddrBytes(dst: *PacketConn.AddrStorage, src: *const posix.sockaddr.storage, len: u32) void {
             const dst_bytes: [*]u8 = @ptrCast(dst);
             const src_bytes: [*]const u8 = @ptrCast(src);
             const copy_len = @min(@as(usize, len), @sizeOf(PacketConn.AddrStorage));
             for (0..copy_len) |i| dst_bytes[i] = src_bytes[i];
+        }
+
+        fn isValidRawSockaddrLen(addr_len: u32) bool {
+            return addr_len >= @sizeOf(posix.sockaddr) and addr_len <= @sizeOf(PacketConn.AddrStorage);
         }
 
         fn rawSockaddrToAddr(addr: [*]const u8, addr_len: u32) error{Unexpected}!AddrPort {
