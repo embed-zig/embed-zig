@@ -18,8 +18,4 @@ Before starting any development work, read the repository-wide conduct rules in 
 
 ## Package Docs
 
-- Read [`pkg/core_bluetooth/README.md`](pkg/core_bluetooth/README.md) before editing the Apple BLE backend / CoreBluetooth package.
-- Read [`pkg/lvgl/README.md`](pkg/lvgl/README.md) before editing LVGL bindings, OSAL wiring, display tests, or screenshot-comparison logic.
-- Read [`pkg/ogg/README.md`](pkg/ogg/README.md) before editing Ogg bindings or package tests.
-- Read [`pkg/opus/README.md`](pkg/opus/README.md) before editing Opus bindings or package tests.
-- Read [`pkg/stb_truetype/README.md`](pkg/stb_truetype/README.md) before editing stb_truetype bindings, font tests, or package wiring.
+- Read [`lib/audio/ogg/AGENTS.md`](lib/audio/ogg/AGENTS.md) before editing the pure Zig Ogg implementation or its tests.

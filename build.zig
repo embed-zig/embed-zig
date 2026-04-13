@@ -18,14 +18,7 @@ const lib_ledstrip = @import("build/lib/ledstrip.zig");
 const lib_embed_std = @import("build/lib/embed_std.zig");
 const lib_zux = @import("build/lib/zux.zig");
 
-const pkg_core_bluetooth = @import("build/pkg/core_bluetooth.zig");
-const pkg_core_wlan = @import("build/pkg/core_wlan.zig");
-const pkg_ogg = @import("build/pkg/ogg.zig");
-const pkg_stb_truetype = @import("build/pkg/stb_truetype.zig");
-const pkg_opus = @import("build/pkg/opus.zig");
-const pkg_lvgl = @import("build/pkg/lvgl.zig");
-const pkg_portaudio = @import("build/pkg/portaudio.zig");
-const pkg_speexdsp = @import("build/pkg/speexdsp.zig");
+const Packages = struct {};
 
 const Libraries = struct {
     pub const embed = lib_embed;
@@ -44,17 +37,6 @@ const Libraries = struct {
     pub const ledstrip = lib_ledstrip;
     pub const embed_std = lib_embed_std;
     pub const zux = lib_zux;
-};
-
-const Packages = struct {
-    pub const core_bluetooth = pkg_core_bluetooth;
-    pub const core_wlan = pkg_core_wlan;
-    pub const ogg = pkg_ogg;
-    pub const stb_truetype = pkg_stb_truetype;
-    pub const opus = pkg_opus;
-    pub const lvgl = pkg_lvgl;
-    pub const portaudio = pkg_portaudio;
-    pub const speexdsp = pkg_speexdsp;
 };
 
 pub fn build(b: *std.Build) void {
