@@ -37,7 +37,7 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
                 fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try makeUsesCustomAtomicCase();
+                    try makeUsesCustomAtomicCase(lib);
                 }
             }.run));
             return t.wait();
@@ -89,38 +89,37 @@ fn swapCase(comptime lib: type) !void {
     if (v.load(.seq_cst) != 77) return error.SwapNewWrong;
 }
 
-fn makeUsesCustomAtomicCase() !void {
-    const std = @import("std");
-    const embed_std = @import("embed_std");
+fn makeUsesCustomAtomicCase(comptime lib: type) !void {
+    const AtomicOrder = embed.builtin.AtomicOrder;
 
     const CustomAtomic = struct {
         pub fn Value(comptime T: type) type {
             return struct {
                 pub const marker = true;
 
-                inner: std.atomic.Value(T),
+                inner: lib.atomic.Value(T),
 
                 pub fn init(value: T) @This() {
-                    return .{ .inner = std.atomic.Value(T).init(value) };
+                    return .{ .inner = lib.atomic.Value(T).init(value) };
                 }
 
-                pub fn load(self: *@This(), comptime order: std.builtin.AtomicOrder) T {
+                pub fn load(self: *@This(), comptime order: AtomicOrder) T {
                     return self.inner.load(order);
                 }
 
-                pub fn store(self: *@This(), value: T, comptime order: std.builtin.AtomicOrder) void {
+                pub fn store(self: *@This(), value: T, comptime order: AtomicOrder) void {
                     self.inner.store(value, order);
                 }
 
-                pub fn swap(self: *@This(), value: T, comptime order: std.builtin.AtomicOrder) T {
+                pub fn swap(self: *@This(), value: T, comptime order: AtomicOrder) T {
                     return self.inner.swap(value, order);
                 }
 
-                pub fn fetchAdd(self: *@This(), operand: T, comptime order: std.builtin.AtomicOrder) T {
+                pub fn fetchAdd(self: *@This(), operand: T, comptime order: AtomicOrder) T {
                     return self.inner.fetchAdd(operand, order);
                 }
 
-                pub fn fetchSub(self: *@This(), operand: T, comptime order: std.builtin.AtomicOrder) T {
+                pub fn fetchSub(self: *@This(), operand: T, comptime order: AtomicOrder) T {
                     return self.inner.fetchSub(operand, order);
                 }
 
@@ -128,8 +127,8 @@ fn makeUsesCustomAtomicCase() !void {
                     self: *@This(),
                     expected_value: T,
                     new_value: T,
-                    comptime success_order: std.builtin.AtomicOrder,
-                    comptime failure_order: std.builtin.AtomicOrder,
+                    comptime success_order: AtomicOrder,
+                    comptime failure_order: AtomicOrder,
                 ) ?T {
                     return self.inner.cmpxchgStrong(expected_value, new_value, success_order, failure_order);
                 }
@@ -138,20 +137,20 @@ fn makeUsesCustomAtomicCase() !void {
     };
 
     const CustomLib = embed.make(struct {
-        pub const Thread = embed_std.embed.Thread;
-        pub const heap = embed_std.embed.heap;
-        pub const log = embed_std.embed.log;
-        pub const testing = embed_std.embed.testing;
-        pub const posix = embed_std.embed.posix;
-        pub const time = embed_std.embed.time;
-        pub const crypto = embed_std.embed.crypto;
+        pub const Thread = lib.Thread;
+        pub const heap = lib.heap;
+        pub const log = lib.log;
+        pub const testing = lib.testing;
+        pub const posix = lib.posix;
+        pub const time = lib.time;
+        pub const crypto = lib.crypto;
         pub const atomic = CustomAtomic;
     });
 
-    try std.testing.expect(@hasDecl(CustomLib.atomic.Value(u32), "marker"));
+    try lib.testing.expect(@hasDecl(CustomLib.atomic.Value(u32), "marker"));
 
     var value = CustomLib.atomic.Value(u32).init(41);
-    try std.testing.expectEqual(@as(u32, 41), value.load(.seq_cst));
+    try lib.testing.expectEqual(@as(u32, 41), value.load(.seq_cst));
     value.store(42, .seq_cst);
-    try std.testing.expectEqual(@as(u32, 42), value.load(.seq_cst));
+    try lib.testing.expectEqual(@as(u32, 42), value.load(.seq_cst));
 }
