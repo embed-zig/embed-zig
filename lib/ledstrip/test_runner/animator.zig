@@ -28,7 +28,6 @@ fn runAnimatorSuite(comptime lib: type, allocator: lib.mem.Allocator) !void {
 fn SuiteType(comptime lib: type) type {
     const testing = lib.testing;
     const Allocator = lib.mem.Allocator;
-    const run_log = lib.log.scoped(.ledstrip_animator_runner);
     const max_fake_pixels = 8;
 
     const StripState = struct {
@@ -77,25 +76,23 @@ fn SuiteType(comptime lib: type) type {
 
     return struct {
         fn exec(allocator: Allocator) !void {
-            try runCase("render_equal_length_strip", allocator, testRenderEqualLengthStrip);
-            try runCase("render_shorter_strip_truncates", allocator, testRenderShorterStripTruncates);
-            try runCase("render_longer_strip_preserves_tail", allocator, testRenderLongerStripPreservesTail);
-            try runCase("render_zero_count_strip_refreshes", allocator, testRenderZeroCountStripRefreshes);
-            try runCase("render_zero_pixel_animator_refreshes", allocator, testRenderZeroPixelAnimatorRefreshes);
-            try runCase("tick_without_frames_preserves_current", allocator, testTickWithoutFramesPreservesCurrent);
-            try runCase("interval_zero_advances_every_tick", allocator, testIntervalZeroAdvancesEveryTick);
-            try runCase("brightness_extremes_apply", allocator, testBrightnessExtremesApply);
-            try runCase("flash_and_pingpong_degrade_at_capacity_one", allocator, testFlashAndPingpongDegradeAtCapacityOne);
-            try runCase("rotate_anim_clamps_to_capacity", allocator, testRotateAnimClampsToCapacity);
-            try runCase("step_amount_zero_does_not_converge", allocator, testStepAmountZeroDoesNotConverge);
+            try runCase(allocator, testRenderEqualLengthStrip);
+            try runCase(allocator, testRenderShorterStripTruncates);
+            try runCase(allocator, testRenderLongerStripPreservesTail);
+            try runCase(allocator, testRenderZeroCountStripRefreshes);
+            try runCase(allocator, testRenderZeroPixelAnimatorRefreshes);
+            try runCase(allocator, testTickWithoutFramesPreservesCurrent);
+            try runCase(allocator, testIntervalZeroAdvancesEveryTick);
+            try runCase(allocator, testBrightnessExtremesApply);
+            try runCase(allocator, testFlashAndPingpongDegradeAtCapacityOne);
+            try runCase(allocator, testRotateAnimClampsToCapacity);
+            try runCase(allocator, testStepAmountZeroDoesNotConverge);
         }
 
         fn runCase(
-            comptime name: []const u8,
             allocator: Allocator,
             comptime case_fn: *const fn (Allocator) anyerror!void,
         ) !void {
-            run_log.info("case={s}", .{name});
             try case_fn(allocator);
         }
 

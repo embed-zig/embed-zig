@@ -1,7 +1,7 @@
 const embed = @import("embed");
 const NodeBuilder = @import("../pipeline/NodeBuilder.zig");
 const Poller = @import("../pipeline/Poller.zig");
-const Store = @import("../store.zig");
+const Store = @import("../Store.zig");
 
 const root = @This();
 
