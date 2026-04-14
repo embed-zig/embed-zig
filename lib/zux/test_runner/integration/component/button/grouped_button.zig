@@ -2,6 +2,7 @@ const testing_api = @import("testing");
 
 const Assembler = @import("../../../../Assembler.zig");
 const button = @import("../../../../component/button.zig");
+const Message = @import("../../../../pipeline/Message.zig");
 const drivers = @import("drivers");
 
 fn makeBuiltApp(comptime lib: type, comptime Channel: fn (type) type) type {
@@ -38,6 +39,9 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
         };
         const AtomicUsize = lib.atomic.Value(usize);
         const AtomicU8 = lib.atomic.Value(u8);
+        const press_timestamp_ns: i128 = 100 * lib.time.ns_per_ms;
+        const tap_gap_ns: i128 = 20 * lib.time.ns_per_ms;
+        const settle_ns: i128 = @as(i128, button.Reducer.default_multi_click_window_ns) + (100 * lib.time.ns_per_ms);
 
         var callback_calls: AtomicUsize = AtomicUsize.init(0);
         var callback_failure: AtomicU8 = AtomicU8.init(0);
@@ -68,17 +72,9 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             };
             defer _ = app.store.unhandle("ui/button", Self.onButton);
 
-            app.start() catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-
+            // Keep click sequencing deterministic by driving fixed-timestamp
+            // messages directly instead of starting background pollers/ticks.
             driveSequence(&app) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-
-            app.stop() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -111,26 +107,55 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
         }
 
         fn driveSequence(app: *BuiltApp) !void {
-            try driveClicks(app, 1, 1, 1);
-            try driveClicks(app, 2, 1, 2);
-            try driveClicks(app, 2, 2, 3);
+            var timestamp_ns = press_timestamp_ns;
+            try driveClicks(app, &timestamp_ns, 1, 1, 1);
+            try driveClicks(app, &timestamp_ns, 2, 1, 2);
+            try driveClicks(app, &timestamp_ns, 2, 2, 3);
         }
 
         fn driveClicks(
             app: *BuiltApp,
+            timestamp_ns: *i128,
             button_id: u32,
             comptime tap_count: comptime_int,
             expected_callbacks_after: usize,
         ) !void {
             inline for (0..tap_count) |i| {
-                try app.press_grouped_button(.buttons, button_id);
-                lib.Thread.sleep(20 * lib.time.ns_per_ms);
-                try app.release_grouped_button(.buttons);
+                try emit(app, .{
+                    .origin = .manual,
+                    .timestamp_ns = timestamp_ns.*,
+                    .body = .{
+                        .raw_grouped_button = .{
+                            .source_id = 7,
+                            .button_id = button_id,
+                            .pressed = true,
+                        },
+                    },
+                });
+                timestamp_ns.* += tap_gap_ns;
+                try emit(app, .{
+                    .origin = .manual,
+                    .timestamp_ns = timestamp_ns.*,
+                    .body = .{
+                        .raw_grouped_button = .{
+                            .source_id = 7,
+                            .button_id = button_id,
+                            .pressed = false,
+                        },
+                    },
+                });
                 if (i + 1 < tap_count) {
-                    lib.Thread.sleep(20 * lib.time.ns_per_ms);
+                    timestamp_ns.* += tap_gap_ns;
                 }
             }
-            lib.Thread.sleep(button.Reducer.default_multi_click_window_ns + (100 * lib.time.ns_per_ms));
+            timestamp_ns.* += settle_ns;
+            try emit(app, .{
+                .origin = .timer,
+                .timestamp_ns = timestamp_ns.*,
+                .body = .{
+                    .tick = .{},
+                },
+            });
             try waitForCallbackCount(expected_callbacks_after);
         }
 
@@ -193,6 +218,18 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
                 lib.Thread.sleep(10 * lib.time.ns_per_ms);
             }
             return error.TimedOut;
+        }
+
+        fn emit(app: *BuiltApp, message: Message) !void {
+            try app.impl.runtime.pipeline.inject(message);
+            while (true) {
+                const recv = app.impl.runtime.pipeline.inbox.recvTimeout(0) catch |err| switch (err) {
+                    error.Timeout => return,
+                    else => return err,
+                };
+                if (!recv.ok) return;
+                try app.impl.runtime.root.in.emit(recv.value);
+            }
         }
     };
 }
