@@ -553,11 +553,12 @@ fn initRequestBody(comptime lib: type, buffered: *io.BufferedReader(Conn), req: 
 
 fn readRequestHead(allocator: anytype, buffered: *BufferedConnReader, max_header_bytes: usize) ![]u8 {
     var reader = TextprotoReader.fromBuffered(buffered);
-    return reader.readHeaderBlockAlloc(allocator, max_header_bytes, .{}) catch |err| switch (err) {
+    const raw = reader.takeHeaderBlockMax(max_header_bytes, .{}) catch |err| switch (err) {
         error.InvalidLineEnding => return error.BadRequest,
-        error.OutTooSmall => return error.BufferTooSmall,
+        error.BufferTooSmall => return error.BufferTooSmall,
         else => return err,
     };
+    return allocator.dupe(u8, raw);
 }
 
 fn parseRequest(comptime lib: type, allocator: anytype, head: []u8) !Request {

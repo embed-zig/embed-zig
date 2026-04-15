@@ -1,4 +1,4 @@
-const modem_api = @import("modem");
+const modem_api = @import("drivers");
 const modem_event = @import("event.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const zux_event = @import("../../event.zig");

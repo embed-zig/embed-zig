@@ -1,4 +1,4 @@
-const modem_api = @import("modem");
+const modem_api = @import("drivers");
 const Context = @import("../../event/Context.zig");
 
 pub const max_apn_len = modem_api.Modem.max_apn_len;
@@ -300,3 +300,4 @@ fn copySmsTextBuf(value: []const u8) ![max_sms_text_len]u8 {
     @memcpy(buf[0..value.len], value);
     return buf;
 }
+

@@ -72,14 +72,13 @@ pub fn Reader(comptime Buffered: type) type {
 
         pub const Response = struct {
             code: u16,
-            message: []const u8,
+            raw: []const u8,
             multiline: bool,
         };
 
         pub const ReadLineError = Io.Reader.Error || error{
             StreamTooLong,
             InvalidLineEnding,
-            OutTooSmall,
         };
 
         pub const ReadContinuedLineError = ReadLineError || error{
@@ -87,8 +86,8 @@ pub fn Reader(comptime Buffered: type) type {
         };
 
         pub const ReadHeaderBlockError = ReadLineError;
-        pub const ReadHeaderBlockAllocError = ReadHeaderBlockError || error{
-            OutOfMemory,
+        pub const ReadHeaderBlockMaxError = ReadHeaderBlockError || error{
+            BufferTooSmall,
         };
 
         pub const ReadLineGroupError = ReadLineError || error{
@@ -192,108 +191,56 @@ pub fn Reader(comptime Buffered: type) type {
             return self.buffered.err();
         }
 
-        /// Reads one logical line into `out`, excluding the line terminator.
+        /// Takes one logical line, excluding the line terminator.
         ///
-        /// The returned slice aliases `out`.
-        pub fn readLine(self: *Self, out: []u8, options: ReadLineOptions) ReadLineError![]const u8 {
+        /// The returned slice aliases the underlying `Io.Reader` buffer.
+        pub fn takeLine(self: *Self, options: ReadLineOptions) ReadLineError![]const u8 {
             const raw = try self.takeRawLine();
-            const body = try self.decodeBorrowedLine(raw, options);
-            if (body.len > out.len) return error.OutTooSmall;
-            @memcpy(out[0..body.len], body);
-            return out[0..body.len];
+            return try self.decodeBorrowedLine(raw, options);
         }
 
-        /// Reads a CRLF-style header section until the terminating blank line.
+        /// Takes a CRLF-style header section until the terminating blank line.
         ///
-        /// The returned slice aliases `out`, preserves each header line's
-        /// on-wire line ending, and excludes the final blank line terminator.
-        pub fn readHeaderBlock(
-            self: *Self,
-            out: []u8,
-            options: ReadHeaderBlockOptions,
-        ) ReadHeaderBlockError![]const u8 {
-            var used: usize = 0;
-            while (true) {
-                const raw = try self.takeRawLine();
-                const line = try self.decodeBorrowedLine(raw, .{
-                    .line_ending = options.line_ending,
-                });
-                if (line.len == 0) return out[0..used];
-                if (used + raw.len > out.len) return error.OutTooSmall;
-                @memcpy(out[used..][0..raw.len], raw);
-                used += raw.len;
-            }
+        /// The returned slice aliases the underlying `Io.Reader` buffer,
+        /// preserves each header line's on-wire line ending, and excludes the
+        /// final blank line terminator.
+        pub fn takeHeaderBlock(self: *Self, options: ReadHeaderBlockOptions) ReadHeaderBlockError![]const u8 {
+            const scanned = try self.scanHeaderBlock(options);
+            const block = if (scanned.content_len == 0) &.{} else try self.ioReader().take(scanned.content_len);
+            _ = try self.ioReader().take(scanned.terminator_len);
+            return block;
         }
 
-        /// Reads a CRLF-style header section into allocator-owned storage.
+        /// Takes a CRLF-style header section with an explicit byte ceiling.
         ///
-        /// The returned slice preserves each header line's on-wire line ending
-        /// and excludes the final blank line terminator.
-        pub fn readHeaderBlockAlloc(
-            self: *Self,
-            allocator: anytype,
-            max_bytes: usize,
-            options: ReadHeaderBlockOptions,
-        ) ReadHeaderBlockAllocError![]u8 {
-            const storage = try allocator.alloc(u8, max_bytes);
-            errdefer allocator.free(storage);
-
-            const head = try self.readHeaderBlock(storage, options);
-            return try allocator.realloc(storage, head.len);
+        /// The returned slice aliases the underlying `Io.Reader` buffer,
+        /// preserves each header line's on-wire line ending, and excludes the
+        /// final blank line terminator.
+        pub fn takeHeaderBlockMax(self: *Self, max_bytes: usize, options: ReadHeaderBlockOptions) ReadHeaderBlockMaxError![]const u8 {
+            const scanned = try self.scanHeaderBlockMax(max_bytes, options);
+            const block = if (scanned.content_len == 0) &.{} else try self.ioReader().take(scanned.content_len);
+            _ = try self.ioReader().take(scanned.terminator_len);
+            return block;
         }
 
-        /// Reads one logical continued line, joining folded segments with one
-        /// ASCII space.
+        /// Takes one logical continued line block, preserving the on-wire bytes
+        /// of the first line and each folded continuation line.
         ///
-        /// The returned slice aliases `out`.
-        pub fn readContinuedLine(
-            self: *Self,
-            out: []u8,
-            options: ReadContinuedLineOptions,
-        ) ReadContinuedLineError![]const u8 {
-            const first_raw = try self.takeRawLine();
-            var used: usize = 0;
-            const first = trimAsciiRight(try self.decodeBorrowedLine(first_raw, options.line));
-            if (first.len > out.len) return error.OutTooSmall;
-            @memcpy(out[0..first.len], first);
-            used = first.len;
-
-            while (true) {
-                const next = self.ioReader().peek(1) catch |err| switch (err) {
-                    error.EndOfStream => break,
-                    else => return err,
-                };
-                if (next.len == 0 or (next[0] != ' ' and next[0] != '\t')) break;
-
-                const raw = try self.takeRawLine();
-                const decoded = try self.decodeBorrowedLine(raw, options.line);
-                const segment = trimAscii(trimAsciiLeft(decoded));
-
-                if (used != 0 and segment.len != 0) {
-                    if (used == out.len) return error.OutTooSmall;
-                    out[used] = ' ';
-                    used += 1;
-                }
-                if (used + segment.len > out.len) return error.OutTooSmall;
-                @memcpy(out[used..][0..segment.len], segment);
-                used += segment.len;
-            }
-
-            return out[0..used];
+        /// The returned slice aliases the underlying `Io.Reader` buffer.
+        pub fn takeContinuedLine(self: *Self, options: ReadContinuedLineOptions) ReadContinuedLineError![]const u8 {
+            const total_len = try self.scanContinuedLineLen(options);
+            return try self.ioReader().take(total_len);
         }
 
         /// Reads ordinary lines until `is_terminal` reports the final line.
         ///
         /// Non-terminal lines are streamed through `on_non_terminal_line` when
-        /// provided. The returned final-line slice aliases `out`.
-        pub fn readLineGroup(
-            self: *Self,
-            out: []u8,
-            options: ReadLineGroupOptions,
-        ) ReadLineGroupError!LineGroupResult {
+        /// provided. The returned final-line slice aliases the underlying
+        /// `Io.Reader` buffer.
+        pub fn takeLineGroup(self: *Self, options: ReadLineGroupOptions) ReadLineGroupError!LineGroupResult {
             var non_terminal_lines: usize = 0;
             while (true) {
-                const line = try self.readLine(out, options.line);
+                const line = try self.takeLine(options.line);
                 if (options.is_terminal(options.terminal_ctx, line)) {
                     return .{
                         .final_line = line,
@@ -312,13 +259,9 @@ pub fn Reader(comptime Buffered: type) type {
 
         /// Reads exactly one numeric status line of the form `XYZ message`.
         ///
-        /// The returned `message` slice aliases `line_buf`.
-        pub fn readCodeLine(
-            self: *Self,
-            line_buf: []u8,
-            options: ReadCodeLineOptions,
-        ) ReadCodeLineError!CodeLine {
-            const line = try self.readLine(line_buf, options.line);
+        /// The returned `message` slice aliases the underlying `Io.Reader` buffer.
+        pub fn takeCodeLine(self: *Self, options: ReadCodeLineOptions) ReadCodeLineError!CodeLine {
+            const line = try self.takeLine(options.line);
             const parsed = parseCodePrefix(line, true) catch |err| switch (err) {
                 error.InvalidCodeLine => return error.InvalidCodeLine,
                 error.MultiLineResponse => return error.MultiLineResponse,
@@ -334,49 +277,15 @@ pub fn Reader(comptime Buffered: type) type {
             };
         }
 
-        /// Reads a Go-style numeric response block, joining message lines into
-        /// `message_buf` with `\n`.
-        pub fn readResponse(
-            self: *Self,
-            line_buf: []u8,
-            message_buf: []u8,
-            options: ReadResponseOptions,
-        ) ReadResponseError!Response {
-            const first_line = try self.readLine(line_buf, options.line);
-            const first = parseCodePrefix(first_line, false) catch |err| switch (err) {
-                error.InvalidResponse, error.InvalidCodeLine, error.MultiLineResponse => return error.InvalidResponse,
+        /// Takes a Go-style numeric response block and returns the raw on-wire
+        /// bytes for the full response.
+        pub fn takeResponse(self: *Self, options: ReadResponseOptions) ReadResponseError!Response {
+            const scanned = try self.scanResponseBlock(options);
+            return .{
+                .code = scanned.code,
+                .raw = try self.ioReader().take(scanned.total_len),
+                .multiline = scanned.multiline,
             };
-            if (options.expect_code) |expected| {
-                if (first.code != expected) return error.UnexpectedCode;
-            }
-
-            var used: usize = 0;
-            var line_count: usize = 0;
-            used = try appendMessageLine(message_buf, used, first.message, &line_count, options.max_lines);
-
-            if (first.separator != '-') {
-                return .{
-                    .code = first.code,
-                    .message = message_buf[0..used],
-                    .multiline = false,
-                };
-            }
-
-            while (true) {
-                const line = try self.readLine(line_buf, options.line);
-                if (isFinalResponseLine(line, first.code)) {
-                    const last = line[4..];
-                    used = try appendMessageLine(message_buf, used, last, &line_count, options.max_lines);
-                    return .{
-                        .code = first.code,
-                        .message = message_buf[0..used],
-                        .multiline = true,
-                    };
-                }
-
-                const segment = if (hasSameCodeContinuation(line, first.code)) line[4..] else line;
-                used = try appendMessageLine(message_buf, used, segment, &line_count, options.max_lines);
-            }
         }
 
         /// Returns a streaming dot-decoder view over the current reader.
@@ -407,6 +316,152 @@ pub fn Reader(comptime Buffered: type) type {
 
             body = if (options.trim_ascii_space) trimAscii(body) else body;
             return body;
+        }
+
+        fn scanHeaderBlock(self: *Self, options: ReadHeaderBlockOptions) ReadHeaderBlockError!struct {
+            content_len: usize,
+            terminator_len: usize,
+        } {
+            var offset: usize = 0;
+            while (true) {
+                const raw = try self.peekRawLineAt(offset);
+                const line = try self.decodeBorrowedLine(raw, .{
+                    .line_ending = options.line_ending,
+                });
+                if (line.len == 0) {
+                    return .{
+                        .content_len = offset,
+                        .terminator_len = raw.len,
+                    };
+                }
+                offset += raw.len;
+            }
+        }
+
+        fn scanHeaderBlockMax(self: *Self, max_bytes: usize, options: ReadHeaderBlockOptions) ReadHeaderBlockMaxError!struct {
+            content_len: usize,
+            terminator_len: usize,
+        } {
+            var offset: usize = 0;
+            const max_total = max_bytes +| 2;
+            while (true) {
+                const raw = try self.peekRawLineAtMax(offset, max_total);
+                const line = try self.decodeBorrowedLine(raw, .{
+                    .line_ending = options.line_ending,
+                });
+                if (line.len == 0) {
+                    return .{
+                        .content_len = offset,
+                        .terminator_len = raw.len,
+                    };
+                }
+                if (offset > max_bytes or raw.len > max_bytes - offset) return error.BufferTooSmall;
+                offset += raw.len;
+            }
+        }
+
+        fn scanContinuedLineLen(self: *Self, options: ReadContinuedLineOptions) ReadContinuedLineError!usize {
+            var offset: usize = 0;
+            const first_raw = try self.peekRawLineAt(offset);
+            _ = try self.decodeBorrowedLine(first_raw, options.line);
+            offset += first_raw.len;
+
+            while (true) {
+                const window = self.peekUnreadAtLeast(offset + 1) catch |err| switch (err) {
+                    error.EndOfStream => break,
+                    else => return err,
+                };
+                if (window[offset] != ' ' and window[offset] != '\t') break;
+
+                const raw = try self.peekRawLineAt(offset);
+                _ = try self.decodeBorrowedLine(raw, options.line);
+                offset += raw.len;
+            }
+
+            return offset;
+        }
+
+        fn scanResponseBlock(self: *Self, options: ReadResponseOptions) ReadResponseError!struct {
+            code: u16,
+            multiline: bool,
+            total_len: usize,
+        } {
+            var offset: usize = 0;
+            var line_count: usize = 0;
+
+            const first_raw = try self.peekRawLineAt(offset);
+            const first_line = try self.decodeBorrowedLine(first_raw, options.line);
+            const first = parseCodePrefix(first_line, false) catch |err| switch (err) {
+                error.InvalidResponse, error.InvalidCodeLine, error.MultiLineResponse => return error.InvalidResponse,
+            };
+            if (options.expect_code) |expected| {
+                if (first.code != expected) return error.UnexpectedCode;
+            }
+            line_count += 1;
+            if (line_count > options.max_lines) return error.TooManyLines;
+
+            offset += first_raw.len;
+            if (first.separator != '-') {
+                return .{
+                    .code = first.code,
+                    .multiline = false,
+                    .total_len = offset,
+                };
+            }
+
+            while (true) {
+                const raw = try self.peekRawLineAt(offset);
+                const line = try self.decodeBorrowedLine(raw, options.line);
+                offset += raw.len;
+
+                line_count += 1;
+                if (line_count > options.max_lines) return error.TooManyLines;
+                if (isFinalResponseLine(line, first.code)) {
+                    return .{
+                        .code = first.code,
+                        .multiline = true,
+                        .total_len = offset,
+                    };
+                }
+            }
+        }
+
+        fn peekRawLineAt(self: *Self, start: usize) (Io.Reader.Error || error{StreamTooLong})![]const u8 {
+            var needed = start + 1;
+            while (true) {
+                const window = try self.peekUnreadAtLeast(needed);
+                var idx = start;
+                while (idx < window.len) : (idx += 1) {
+                    if (window[idx] == '\n') return window[start .. idx + 1];
+                }
+                needed = window.len + 1;
+            }
+        }
+
+        fn peekRawLineAtMax(self: *Self, start: usize, max_total: usize) (Io.Reader.Error || error{ StreamTooLong, BufferTooSmall })![]const u8 {
+            var needed = start +| 1;
+            while (true) {
+                if (needed > max_total) return error.BufferTooSmall;
+                const window = try self.peekUnreadAtLeast(needed);
+                var idx = start;
+                while (idx < window.len) : (idx += 1) {
+                    if (window[idx] == '\n') return window[start .. idx + 1];
+                }
+                if (window.len >= max_total) return error.BufferTooSmall;
+                needed = window.len + 1;
+            }
+        }
+
+        fn peekUnreadAtLeast(self: *Self, needed: usize) (Io.Reader.Error || error{StreamTooLong})![]const u8 {
+            return self.ioReader().peek(needed) catch |err| switch (err) {
+                error.ReadFailed => {
+                    if (self.underlyingErr()) |underlying_err| {
+                        if (underlying_err == error.BufferTooSmall) return error.StreamTooLong;
+                    }
+                    return error.ReadFailed;
+                },
+                else => return err,
+            };
         }
     };
 }
@@ -449,37 +504,10 @@ fn parseCodePrefix(line: []const u8, require_space_separator: bool) error{ Inval
     };
 }
 
-fn appendMessageLine(
-    out: []u8,
-    used: usize,
-    line: []const u8,
-    line_count: *usize,
-    max_lines: usize,
-) error{ OutTooSmall, TooManyLines }!usize {
-    if (line_count.* >= max_lines) return error.TooManyLines;
-    var next_used = used;
-    if (line_count.* > 0) {
-        if (next_used == out.len) return error.OutTooSmall;
-        out[next_used] = '\n';
-        next_used += 1;
-    }
-    if (next_used + line.len > out.len) return error.OutTooSmall;
-    @memcpy(out[next_used..][0..line.len], line);
-    next_used += line.len;
-    line_count.* += 1;
-    return next_used;
-}
-
 fn isFinalResponseLine(line: []const u8, code: u16) bool {
     return line.len >= 4 and
         sameCode(line, code) and
         line[3] == ' ';
-}
-
-fn hasSameCodeContinuation(line: []const u8, code: u16) bool {
-    return line.len >= 4 and
-        sameCode(line, code) and
-        line[3] == '-';
 }
 
 fn sameCode(line: []const u8, code: u16) bool {
@@ -592,7 +620,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             }
         }
 
-        fn readLineTrimsCrlf() !void {
+        fn takeLineTrimsCrlf() !void {
             const testing = lib.testing;
             const Io = embed.Io;
 
@@ -602,13 +630,13 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var out: [32]u8 = undefined;
-            const line = try reader.readLine(&out, .{});
+            const line = try reader.takeLine(.{});
             try testing.expectEqualStrings("PING a", line);
         }
 
-        fn readLineTrimsLf() !void {
+        fn takeLineTrimsLf() !void {
             const testing = lib.testing;
             const Io = embed.Io;
 
@@ -618,13 +646,13 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var out: [32]u8 = undefined;
-            const line = try reader.readLine(&out, .{});
+            const line = try reader.takeLine(.{});
             try testing.expectEqualStrings("PING a", line);
         }
 
-        fn readLineTrimAsciiSpace() !void {
+        fn takeLineTrimAsciiSpace() !void {
             const testing = lib.testing;
             const Io = embed.Io;
 
@@ -634,13 +662,13 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var out: [32]u8 = undefined;
-            const line = try reader.readLine(&out, .{ .trim_ascii_space = true });
+            const line = try reader.takeLine(.{ .trim_ascii_space = true });
             try testing.expectEqualStrings("PING a", line);
         }
 
-        fn readLineRejectsLfWhenCrlfOnly() !void {
+        fn takeLineRejectsLfWhenCrlfOnly() !void {
             const Io = embed.Io;
 
             var src = Io.Reader.fixed("PING a\n");
@@ -649,26 +677,38 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.init(&buffered, .{ .default_line_ending = .crlf_only });
+            defer reader.deinit();
 
-            var out: [32]u8 = undefined;
-            try expectError(error.InvalidLineEnding, reader.readLine(&out, .{}));
+            try expectError(error.InvalidLineEnding, reader.takeLine(.{}));
         }
 
-        fn readLineOutTooSmall() !void {
+        fn takeLineGrowsAcrossShortThenLongLine(allocator: lib.mem.Allocator) !void {
+            const testing = lib.testing;
             const Io = embed.Io;
+            const long_body = [_]u8{'A'} ** 600;
+            const input = "AT\r\n" ++ long_body ++ "\r\nOK\r\n";
 
-            var src = Io.Reader.fixed("PING a\r\n");
-            var backing: [32]u8 = undefined;
+            var src = Io.Reader.fixed(input);
             const BufferedReader = io.BufferedReader(@TypeOf(src));
             const TpReader = Reader(BufferedReader);
-            var buffered = BufferedReader.init(&src, &backing);
+            var buffered = try BufferedReader.initAlloc(&src, allocator, 4);
+            defer buffered.deinit();
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var out: [4]u8 = undefined;
-            try expectError(error.OutTooSmall, reader.readLine(&out, .{}));
+            const first = try reader.takeLine(.{});
+            try lib.testing.expectEqualStrings("AT", first);
+
+            const second = try reader.takeLine(.{});
+            try testing.expectEqual(@as(usize, long_body.len), second.len);
+            try testing.expect(second[0] == 'A');
+            try testing.expect(second[second.len - 1] == 'A');
+
+            const final = try reader.takeLine(.{});
+            try lib.testing.expectEqualStrings("OK", final);
         }
 
-        fn readContinuedLineJoinsFoldedSegments() !void {
+        fn takeContinuedLineReturnsRawFoldedBlock() !void {
             const testing = lib.testing;
             const Io = embed.Io;
 
@@ -678,16 +718,16 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var out: [64]u8 = undefined;
-            const logical = try reader.readContinuedLine(&out, .{});
-            try testing.expectEqualStrings("hello world zig", logical);
+            const logical = try reader.takeContinuedLine(.{});
+            try testing.expectEqualStrings("hello\r\n world\r\n\tzig \t\r\n", logical);
 
-            const next = try reader.readLine(&out, .{});
+            const next = try reader.takeLine(.{});
             try testing.expectEqualStrings("next", next);
         }
 
-        fn readHeaderBlockCollectsCrlfLines() !void {
+        fn takeHeaderBlockCollectsCrlfLines() !void {
             const testing = lib.testing;
             const Io = embed.Io;
 
@@ -697,17 +737,16 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var out: [96]u8 = undefined;
-            const head = try reader.readHeaderBlock(&out, .{});
+            const head = try reader.takeHeaderBlock(.{});
             try testing.expectEqualStrings("Host: example.com\r\nUser-Agent: zig\r\n", head);
 
-            var next_out: [16]u8 = undefined;
-            const next = try reader.readLine(&next_out, .{});
+            const next = try reader.takeLine(.{});
             try testing.expectEqualStrings("NEXT", next);
         }
 
-        fn readHeaderBlockAllowsEmptySection() !void {
+        fn takeHeaderBlockAllowsEmptySection() !void {
             const testing = lib.testing;
             const Io = embed.Io;
 
@@ -717,13 +756,13 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var out: [32]u8 = undefined;
-            const head = try reader.readHeaderBlock(&out, .{});
+            const head = try reader.takeHeaderBlock(.{});
             try testing.expectEqual(@as(usize, 0), head.len);
         }
 
-        fn readHeaderBlockRejectsLfWhenCrlfOnly() !void {
+        fn takeHeaderBlockRejectsLfWhenCrlfOnly() !void {
             const Io = embed.Io;
 
             var src = Io.Reader.fixed("Host: example.com\n\n");
@@ -732,45 +771,26 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var out: [48]u8 = undefined;
-            try expectError(error.InvalidLineEnding, reader.readHeaderBlock(&out, .{}));
+            try expectError(error.InvalidLineEnding, reader.takeHeaderBlock(.{}));
         }
 
-        fn readHeaderBlockOutTooSmall() !void {
+        fn takeHeaderBlockMaxRejectsOversizedManagedSection(allocator: lib.mem.Allocator) !void {
             const Io = embed.Io;
 
             var src = Io.Reader.fixed("Host: example.com\r\n\r\n");
-            var backing: [48]u8 = undefined;
             const BufferedReader = io.BufferedReader(@TypeOf(src));
             const TpReader = Reader(BufferedReader);
-            var buffered = BufferedReader.init(&src, &backing);
+            var buffered = try BufferedReader.initAlloc(&src, allocator, 4);
+            defer buffered.deinit();
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var out: [8]u8 = undefined;
-            try expectError(error.OutTooSmall, reader.readHeaderBlock(&out, .{}));
+            try expectError(error.BufferTooSmall, reader.takeHeaderBlockMax(8, .{}));
         }
 
-        fn readHeaderBlockAllocReturnsOwnedSlice(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const Io = embed.Io;
-
-            var src = Io.Reader.fixed("Host: example.com\r\nUser-Agent: zig\r\n\r\nNEXT\r\n");
-            var backing: [96]u8 = undefined;
-            const BufferedReader = io.BufferedReader(@TypeOf(src));
-            const TpReader = Reader(BufferedReader);
-            var buffered = BufferedReader.init(&src, &backing);
-            var reader = TpReader.fromBuffered(&buffered);
-            const head = try reader.readHeaderBlockAlloc(allocator, 96, .{});
-            defer allocator.free(head);
-            try testing.expectEqualStrings("Host: example.com\r\nUser-Agent: zig\r\n", head);
-
-            var next_out: [16]u8 = undefined;
-            const next = try reader.readLine(&next_out, .{});
-            try testing.expectEqualStrings("NEXT", next);
-        }
-
-        fn readLineGroupStopsOnTerminalLine() !void {
+        fn takeLineGroupStopsOnTerminalLine() !void {
             const testing = lib.testing;
             const Io = embed.Io;
 
@@ -796,10 +816,10 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var out: [32]u8 = undefined;
             var ctx = Ctx{};
-            const result = try reader.readLineGroup(&out, .{
+            const result = try reader.takeLineGroup(.{
                 .terminal_ctx = null,
                 .is_terminal = Ctx.isTerminal,
                 .on_non_terminal_line_ctx = @ptrCast(&ctx),
@@ -811,7 +831,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             try testing.expectEqual(@as(usize, 2), ctx.count);
         }
 
-        fn readLineGroupRespectsNonTerminalLimit() !void {
+        fn takeLineGroupRespectsNonTerminalLimit() !void {
             const Io = embed.Io;
 
             const Cb = struct {
@@ -826,15 +846,15 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var out: [32]u8 = undefined;
-            try expectError(error.TooManyNonTerminalLines, reader.readLineGroup(&out, .{
+            try expectError(error.TooManyNonTerminalLines, reader.takeLineGroup(.{
                 .max_non_terminal_lines = 1,
                 .is_terminal = Cb.isTerminal,
             }));
         }
 
-        fn readCodeLineParsesSingleLine() !void {
+        fn takeCodeLineParsesSingleLine() !void {
             const testing = lib.testing;
             const Io = embed.Io;
 
@@ -844,14 +864,14 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var line_buf: [64]u8 = undefined;
-            const result = try reader.readCodeLine(&line_buf, .{ .expect_code = 220 });
+            const result = try reader.takeCodeLine(.{ .expect_code = 220 });
             try testing.expectEqual(@as(u16, 220), result.code);
             try testing.expectEqualStrings("smtp.example", result.message);
         }
 
-        fn readCodeLineRejectsUnexpectedCode() !void {
+        fn takeCodeLineRejectsUnexpectedCode() !void {
             const Io = embed.Io;
 
             var src = Io.Reader.fixed("421 unavailable\r\n");
@@ -860,12 +880,12 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var line_buf: [64]u8 = undefined;
-            try expectError(error.UnexpectedCode, reader.readCodeLine(&line_buf, .{ .expect_code = 220 }));
+            try expectError(error.UnexpectedCode, reader.takeCodeLine(.{ .expect_code = 220 }));
         }
 
-        fn readCodeLineRejectsMultilineForm() !void {
+        fn takeCodeLineRejectsMultilineForm() !void {
             const Io = embed.Io;
 
             var src = Io.Reader.fixed("220-smtp.example\r\n");
@@ -874,12 +894,12 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var line_buf: [64]u8 = undefined;
-            try expectError(error.MultiLineResponse, reader.readCodeLine(&line_buf, .{}));
+            try expectError(error.MultiLineResponse, reader.takeCodeLine(.{}));
         }
 
-        fn readResponseParsesSingleLine() !void {
+        fn takeResponseParsesSingleLine() !void {
             const testing = lib.testing;
             const Io = embed.Io;
 
@@ -889,16 +909,15 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var line_buf: [64]u8 = undefined;
-            var message_buf: [64]u8 = undefined;
-            const result = try reader.readResponse(&line_buf, &message_buf, .{ .expect_code = 250 });
+            const result = try reader.takeResponse(.{ .expect_code = 250 });
             try testing.expectEqual(@as(u16, 250), result.code);
-            try testing.expectEqualStrings("ok", result.message);
+            try testing.expectEqualStrings("250 ok\r\n", result.raw);
             try testing.expect(!result.multiline);
         }
 
-        fn readResponseParsesMultilineBlock() !void {
+        fn takeResponseParsesMultilineBlock() !void {
             const testing = lib.testing;
             const Io = embed.Io;
 
@@ -908,16 +927,15 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var line_buf: [64]u8 = undefined;
-            var message_buf: [128]u8 = undefined;
-            const result = try reader.readResponse(&line_buf, &message_buf, .{ .expect_code = 250 });
+            const result = try reader.takeResponse(.{ .expect_code = 250 });
             try testing.expectEqual(@as(u16, 250), result.code);
-            try testing.expectEqualStrings("first line\nsecond line\nthird line", result.message);
+            try testing.expectEqualStrings("250-first line\r\nsecond line\r\n250 third line\r\n", result.raw);
             try testing.expect(result.multiline);
         }
 
-        fn readResponseRejectsUnexpectedCode() !void {
+        fn takeResponseRejectsUnexpectedCode() !void {
             const Io = embed.Io;
 
             var src = Io.Reader.fixed("550 denied\r\n");
@@ -926,13 +944,12 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var line_buf: [64]u8 = undefined;
-            var message_buf: [64]u8 = undefined;
-            try expectError(error.UnexpectedCode, reader.readResponse(&line_buf, &message_buf, .{ .expect_code = 250 }));
+            try expectError(error.UnexpectedCode, reader.takeResponse(.{ .expect_code = 250 }));
         }
 
-        fn readResponseRespectsMaxLines() !void {
+        fn takeResponseRespectsMaxLines() !void {
             const Io = embed.Io;
 
             var src = Io.Reader.fixed("250-first\r\nsecond\r\n250 third\r\n");
@@ -941,10 +958,9 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
-            var line_buf: [64]u8 = undefined;
-            var message_buf: [128]u8 = undefined;
-            try expectError(error.TooManyLines, reader.readResponse(&line_buf, &message_buf, .{
+            try expectError(error.TooManyLines, reader.takeResponse(.{
                 .max_lines = 2,
             }));
         }
@@ -959,14 +975,14 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const TpReader = Reader(BufferedReader);
             var buffered = BufferedReader.init(&src, &backing);
             var reader = TpReader.fromBuffered(&buffered);
+            defer reader.deinit();
 
             var dot = reader.dotReader();
             var dot_out: [64]u8 = undefined;
             const body = try readAllDot(&dot, &dot_out);
             try testing.expectEqualStrings("alpha\n.beta\n", body);
 
-            var line_out: [32]u8 = undefined;
-            const next = try reader.readLine(&line_out, .{});
+            const next = try reader.takeLine(.{});
             try testing.expectEqualStrings("NEXT", next);
         }
     };
@@ -984,30 +1000,28 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.readHeaderBlockAllocReturnsOwnedSlice(allocator) catch |err| {
+            TestCase.takeLineGrowsAcrossShortThenLongLine(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             inline for (.{
-                TestCase.readLineTrimsCrlf,
-                TestCase.readLineTrimsLf,
-                TestCase.readLineTrimAsciiSpace,
-                TestCase.readLineRejectsLfWhenCrlfOnly,
-                TestCase.readLineOutTooSmall,
-                TestCase.readContinuedLineJoinsFoldedSegments,
-                TestCase.readHeaderBlockCollectsCrlfLines,
-                TestCase.readHeaderBlockAllowsEmptySection,
-                TestCase.readHeaderBlockRejectsLfWhenCrlfOnly,
-                TestCase.readHeaderBlockOutTooSmall,
-                TestCase.readLineGroupStopsOnTerminalLine,
-                TestCase.readLineGroupRespectsNonTerminalLimit,
-                TestCase.readCodeLineParsesSingleLine,
-                TestCase.readCodeLineRejectsUnexpectedCode,
-                TestCase.readCodeLineRejectsMultilineForm,
-                TestCase.readResponseParsesSingleLine,
-                TestCase.readResponseParsesMultilineBlock,
-                TestCase.readResponseRejectsUnexpectedCode,
-                TestCase.readResponseRespectsMaxLines,
+                TestCase.takeLineTrimsCrlf,
+                TestCase.takeLineTrimsLf,
+                TestCase.takeLineTrimAsciiSpace,
+                TestCase.takeLineRejectsLfWhenCrlfOnly,
+                TestCase.takeContinuedLineReturnsRawFoldedBlock,
+                TestCase.takeHeaderBlockCollectsCrlfLines,
+                TestCase.takeHeaderBlockAllowsEmptySection,
+                TestCase.takeHeaderBlockRejectsLfWhenCrlfOnly,
+                TestCase.takeLineGroupStopsOnTerminalLine,
+                TestCase.takeLineGroupRespectsNonTerminalLimit,
+                TestCase.takeCodeLineParsesSingleLine,
+                TestCase.takeCodeLineRejectsUnexpectedCode,
+                TestCase.takeCodeLineRejectsMultilineForm,
+                TestCase.takeResponseParsesSingleLine,
+                TestCase.takeResponseParsesMultilineBlock,
+                TestCase.takeResponseRejectsUnexpectedCode,
+                TestCase.takeResponseRespectsMaxLines,
                 TestCase.dotReaderUnstuffsAndLeavesFollowingLine,
             }) |case_fn| {
                 case_fn() catch |err| {
@@ -1015,6 +1029,10 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                     return false;
                 };
             }
+            TestCase.takeHeaderBlockMaxRejectsOversizedManagedSection(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
             return true;
         }
 

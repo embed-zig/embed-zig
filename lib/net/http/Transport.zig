@@ -1554,10 +1554,13 @@ pub fn Transport(comptime lib: type) type {
 
         fn readResponseHead(self: *Self, buffered: *BufferedConnReader, allocator: Allocator) RoundTripper.RoundTripError![]u8 {
             var reader = TextprotoReader.fromBuffered(buffered);
-            return reader.readHeaderBlockAlloc(allocator, self.options.max_header_bytes, .{}) catch |err| switch (err) {
+            const raw = reader.takeHeaderBlockMax(self.options.max_header_bytes, .{}) catch |err| switch (err) {
                 error.InvalidLineEnding => return error.InvalidResponse,
-                error.OutTooSmall => return error.BufferTooSmall,
+                error.BufferTooSmall => return error.BufferTooSmall,
                 else => return err,
+            };
+            return allocator.dupe(u8, raw) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
             };
         }
 

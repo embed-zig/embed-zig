@@ -1,4 +1,4 @@
-const modem_api = @import("modem");
+const modem_api = @import("drivers");
 const registry_unique = @import("unique.zig");
 
 const EnumLiteral = @Type(.enum_literal);

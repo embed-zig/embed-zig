@@ -22,6 +22,7 @@ pub fn BufferedReader(comptime Reader: type) type {
                 .vtable = &.{
                     .stream = stream,
                     .readVec = readVec,
+                    .rebase = rebase,
                 },
                 .buffer = buffer,
                 .seek = 0,
@@ -99,10 +100,20 @@ pub fn BufferedReader(comptime Reader: type) type {
             };
             if (n == 0) return error.EndOfStream;
             r.end += n;
+
+            // Reserve explicit headroom for delimiter-style scans so the next
+            // fillMore() does not immediately re-enter with a full buffer.
+            if (self.buffer_allocator != null and r.end == r.buffer.len) {
+                try ensureManagedCapacity(self, r, r.buffer.len *| 2);
+            }
         }
 
         fn ensureTailCapacity(self: *Self, r: *Io.Reader) Io.Reader.Error!void {
             if (r.end < r.buffer.len) return;
+
+            if (self.buffer_allocator != null) {
+                return ensureManagedCapacity(self, r, r.end - r.seek + 1);
+            }
 
             if (r.seek == 0) {
                 self.read_err = error.BufferTooSmall;
@@ -114,6 +125,54 @@ pub fn BufferedReader(comptime Reader: type) type {
                 self.read_err = error.BufferTooSmall;
                 return error.ReadFailed;
             }
+        }
+
+        fn rebase(r: *Io.Reader, capacity: usize) Io.Reader.RebaseError!void {
+            const self: *Self = @alignCast(@fieldParentPtr("interface", r));
+            const unread_len = r.end - r.seek;
+            if (r.seek != 0 and unread_len != 0) {
+                @memmove(r.buffer[0..unread_len], r.buffer[r.seek..r.end]);
+            }
+            r.seek = 0;
+            r.end = unread_len;
+
+            if (r.buffer.len >= capacity) return;
+            if (self.buffer_allocator) |allocator| {
+                const next_len = nextBufferLen(r.buffer.len, capacity);
+                r.buffer = allocator.realloc(r.buffer, next_len) catch @panic("io.BufferedReader rebase out of memory");
+                return;
+            }
+
+            embed.debug.assert(r.buffer.len >= capacity);
+        }
+
+        fn ensureManagedCapacity(self: *Self, r: *Io.Reader, capacity: usize) Io.Reader.Error!void {
+            const allocator = self.buffer_allocator.?;
+            const unread_len = r.end - r.seek;
+
+            if (r.seek != 0 and unread_len != 0) {
+                @memmove(r.buffer[0..unread_len], r.buffer[r.seek..r.end]);
+            }
+            r.seek = 0;
+            r.end = unread_len;
+
+            if (r.buffer.len >= capacity) return;
+
+            const next_len = nextBufferLen(r.buffer.len, capacity);
+            r.buffer = allocator.realloc(r.buffer, next_len) catch |alloc_err| {
+                self.read_err = alloc_err;
+                return error.ReadFailed;
+            };
+        }
+
+        fn nextBufferLen(current_len: usize, required_len: usize) usize {
+            var next_len = if (current_len == 0) @as(usize, 1) else current_len;
+            while (next_len < required_len) {
+                const doubled = next_len *| 2;
+                if (doubled <= next_len) return required_len;
+                next_len = doubled;
+            }
+            return next_len;
         }
 
         fn readInto(self: *Self, dest: []u8) anyerror!usize {
@@ -336,12 +395,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const TestCase = struct {
         fn bufferedReaderInitAllocSupportsPeekAndTake(allocator: lib.mem.Allocator) !void {
             var src = Io.Reader.fixed("hello\r\nworld");
-            var br = try BufferedReader(@TypeOf(src)).initAlloc(&src, allocator, 16);
+            var br = try BufferedReader(@TypeOf(src)).initAlloc(&src, allocator, 1);
             defer br.deinit();
             const reader = br.ioReader();
 
             const peeked = try reader.peek(5);
             try lib.testing.expectEqualStrings("hello", peeked);
+            try lib.testing.expect(reader.buffer.len >= 5);
             try lib.testing.expectEqualStrings("h", try reader.take(1));
 
             const rest = try reader.takeDelimiterInclusive('\n');
@@ -374,12 +434,61 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try lib.testing.expectEqualStrings("cd\r\n", line2);
         }
 
-        fn bufferedReaderReportsStreamTooLongForOverlongLine() !void {
+        fn bufferedReaderInitReportsStreamTooLongForOverlongLine() !void {
             var src = Io.Reader.fixed("abcdX\n");
             var backing: [4]u8 = undefined;
             var br = BufferedReader(@TypeOf(src)).init(&src, &backing);
 
             try lib.testing.expectError(error.StreamTooLong, br.ioReader().takeDelimiterInclusive('\n'));
+        }
+
+        fn bufferedReaderInitAllocGrowsForExplicitPeekAndTake(allocator: lib.mem.Allocator) !void {
+            var src = Io.Reader.fixed("abcdX\n");
+            var br = try BufferedReader(@TypeOf(src)).initAlloc(&src, allocator, 4);
+            defer br.deinit();
+
+            const line = try br.ioReader().peek(6);
+            try lib.testing.expectEqualStrings("abcdX\n", line);
+            try lib.testing.expectEqualStrings("abcdX\n", try br.ioReader().take(6));
+            try lib.testing.expect(br.ioReader().buffer.len >= 6);
+        }
+
+        fn bufferedReaderInitAllocPeekGrowsAcrossShortThenLongLine(allocator: lib.mem.Allocator) !void {
+            const long_body = [_]u8{'A'} ** 600;
+            const input = "AT\r\n" ++ long_body ++ "\r\n";
+
+            var src = Io.Reader.fixed(input);
+            var br = try BufferedReader(@TypeOf(src)).initAlloc(&src, allocator, 4);
+            defer br.deinit();
+            const reader = br.ioReader();
+
+            const first = try reader.takeDelimiterInclusive('\n');
+            try lib.testing.expectEqualStrings("AT\r\n", first);
+
+            const second = try reader.peek(long_body.len + 2);
+            try lib.testing.expectEqual(@as(usize, long_body.len + 2), second.len);
+            try lib.testing.expect(second[0] == 'A');
+            try lib.testing.expect(second[long_body.len - 1] == 'A');
+            try lib.testing.expectEqualStrings("\r\n", second[long_body.len..]);
+            try lib.testing.expectEqualStrings(second, try reader.take(long_body.len + 2));
+            try lib.testing.expect(reader.buffer.len >= long_body.len + 2);
+        }
+
+        fn bufferedReaderInitAllocTakeDelimiterInclusiveGrowsAcrossShortThenLongLine(allocator: lib.mem.Allocator) !void {
+            const long_body = [_]u8{'A'} ** 600;
+            const input = "AT\r\n" ++ long_body ++ "\r\n";
+
+            var src = Io.Reader.fixed(input);
+            var br = try BufferedReader(@TypeOf(src)).initAlloc(&src, allocator, 4);
+            defer br.deinit();
+            const reader = br.ioReader();
+
+            try lib.testing.expectEqualStrings("AT\r\n", try reader.takeDelimiterInclusive('\n'));
+            const second = try reader.takeDelimiterInclusive('\n');
+            try lib.testing.expectEqual(@as(usize, long_body.len + 2), second.len);
+            try lib.testing.expect(second[0] == 'A');
+            try lib.testing.expect(second[long_body.len - 1] == 'A');
+            try lib.testing.expectEqualStrings("\r\n", second[long_body.len..]);
         }
 
         fn bufferedReaderInitAllocZeroBufsizeStillReads(allocator: lib.mem.Allocator) !void {
@@ -602,7 +711,19 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.bufferedReaderReportsStreamTooLongForOverlongLine() catch |err| {
+            TestCase.bufferedReaderInitReportsStreamTooLongForOverlongLine() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.bufferedReaderInitAllocGrowsForExplicitPeekAndTake(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.bufferedReaderInitAllocPeekGrowsAcrossShortThenLongLine(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.bufferedReaderInitAllocTakeDelimiterInclusiveGrowsAcrossShortThenLongLine(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

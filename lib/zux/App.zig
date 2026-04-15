@@ -1,6 +1,6 @@
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
-const modem_api = @import("modem");
+const modem_api = @import("drivers");
 const flow_event = @import("component/ui/flow/event.zig");
 const route = @import("component/ui/route.zig");
 

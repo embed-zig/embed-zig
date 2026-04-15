@@ -2,7 +2,7 @@ const embed = @import("embed");
 const builtin = embed.builtin;
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
-const modem_api = @import("modem");
+const modem_api = @import("drivers");
 
 pub fn make(comptime config: anytype) type {
     const info = configStructInfo(config);

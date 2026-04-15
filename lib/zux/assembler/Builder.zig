@@ -20,7 +20,7 @@ const store = @import("../Store.zig");
 const build_config = @import("BuildConfig.zig");
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
-const modem_api = @import("modem");
+const modem_api = @import("drivers");
 
 const root = @This();
 

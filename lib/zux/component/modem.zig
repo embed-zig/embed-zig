@@ -1,4 +1,4 @@
-const modem_api = @import("modem");
+const modem_api = @import("drivers");
 const zux_event = @import("../event.zig");
 const testing_api = @import("testing");
 
@@ -474,6 +474,35 @@ const adapter_vtable = modem_api.Modem.VTable{
             const self: *TestCaseModem = @ptrCast(@alignCast(ptr));
             return self.setApn(value);
         }
+    }.call,
+    .dataOpen = struct {
+        fn call(_: *anyopaque) modem_api.Modem.DataOpenError!void {
+            return error.Unsupported;
+        }
+    }.call,
+    .dataClose = struct {
+        fn call(_: *anyopaque) void {}
+    }.call,
+    .dataRead = struct {
+        fn call(_: *anyopaque, _: []u8) modem_api.Modem.DataReadError!usize {
+            return error.Unsupported;
+        }
+    }.call,
+    .dataWrite = struct {
+        fn call(_: *anyopaque, _: []const u8) modem_api.Modem.DataWriteError!usize {
+            return error.Unsupported;
+        }
+    }.call,
+    .dataState = struct {
+        fn call(_: *anyopaque) modem_api.Modem.DataState {
+            return .closed;
+        }
+    }.call,
+    .setDataReadTimeout = struct {
+        fn call(_: *anyopaque, _: ?u32) void {}
+    }.call,
+    .setDataWriteTimeout = struct {
+        fn call(_: *anyopaque, _: ?u32) void {}
     }.call,
     .setEventCallback = struct {
         fn call(ptr: *anyopaque, ctx: *const anyopaque, emit_fn: CallbackFn) void {

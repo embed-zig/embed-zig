@@ -1,4 +1,7 @@
-//! modem.Modem — type-erased modem adapter bundle.
+//! drivers.Modem — type-erased modem driver bundle.
+//!
+//! This is the low-level driver contract for modem control plus the optional
+//! data bearer used by PPP / CMUX payload paths.
 
 const testing_api = @import("testing");
 
@@ -192,6 +195,58 @@ pub const SetApnError = error{
     Unexpected,
 };
 
+const CommandError = error{
+    Busy,
+    InvalidConfig,
+    Unsupported,
+    TimedOut,
+    Unexpected,
+    UnexpectedResponse,
+};
+
+const CmuxConfig = struct {
+    mode: u8 = 0,
+    subset: u8 = 0,
+    port_speed: u8 = 5,
+    frame_size: u16 = 127,
+    max_retransmissions: u8 = 3,
+    ack_timer_t1_ms: u16 = 10,
+    response_timer_t2_ms: u16 = 30,
+    wakeup_timer_t3_ms: u16 = 10,
+    window_size: u8 = 2,
+};
+
+pub const DataState = enum {
+    closed,
+    opening,
+    open,
+    closing,
+};
+
+pub const DataOpenError = error{
+    Busy,
+    InvalidConfig,
+    TimedOut,
+    Unsupported,
+    Unexpected,
+};
+
+pub const DataReadError = error{
+    EndOfStream,
+    ConnectionReset,
+    TimedOut,
+    Unsupported,
+    Unexpected,
+};
+
+pub const DataWriteError = error{
+    BrokenPipe,
+    ConnectionReset,
+    TimedOut,
+    Unsupported,
+    Unexpected,
+};
+
 pub const CallbackFn = *const fn (ctx: *const anyopaque, source_id: u32, event: Event) void;
 
 pub const VTable = struct {
@@ -201,6 +256,13 @@ pub const VTable = struct {
     imsi: *const fn (ptr: *anyopaque) ?[]const u8,
     apn: *const fn (ptr: *anyopaque) ?[]const u8,
     setApn: *const fn (ptr: *anyopaque, apn: []const u8) SetApnError!void,
+    dataOpen: *const fn (ptr: *anyopaque) DataOpenError!void,
+    dataClose: *const fn (ptr: *anyopaque) void,
+    dataRead: *const fn (ptr: *anyopaque, buf: []u8) DataReadError!usize,
+    dataWrite: *const fn (ptr: *anyopaque, buf: []const u8) DataWriteError!usize,
+    dataState: *const fn (ptr: *anyopaque) DataState,
+    setDataReadTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
+    setDataWriteTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
     setEventCallback: *const fn (ptr: *anyopaque, ctx: *const anyopaque, emit_fn: CallbackFn) void,
     clearEventCallback: *const fn (ptr: *anyopaque) void,
 };
@@ -227,6 +289,34 @@ pub fn apn(self: root) ?[]const u8 {
 
 pub fn setApn(self: root, value: []const u8) SetApnError!void {
     return self.vtable.setApn(self.ptr, value);
+}
+
+pub fn dataOpen(self: root) DataOpenError!void {
+    return self.vtable.dataOpen(self.ptr);
+}
+
+pub fn dataClose(self: root) void {
+    self.vtable.dataClose(self.ptr);
+}
+
+pub fn dataRead(self: root, buf: []u8) DataReadError!usize {
+    return self.vtable.dataRead(self.ptr, buf);
+}
+
+pub fn dataWrite(self: root, buf: []const u8) DataWriteError!usize {
+    return self.vtable.dataWrite(self.ptr, buf);
+}
+
+pub fn dataState(self: root) DataState {
+    return self.vtable.dataState(self.ptr);
+}
+
+pub fn setDataReadTimeout(self: root, ms: ?u32) void {
+    self.vtable.setDataReadTimeout(self.ptr, ms);
+}
+
+pub fn setDataWriteTimeout(self: root, ms: ?u32) void {
+    self.vtable.setDataWriteTimeout(self.ptr, ms);
 }
 
 pub fn setEventCallback(self: root, ctx: *const anyopaque, emit_fn: CallbackFn) void {
@@ -292,6 +382,38 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
             return self.impl.setApn(value);
         }
 
+        pub fn dataOpen(self: *@This()) DataOpenError!void {
+            if (@hasDecl(Impl, "dataOpen")) return self.impl.dataOpen();
+            return error.Unsupported;
+        }
+
+        pub fn dataClose(self: *@This()) void {
+            if (@hasDecl(Impl, "dataClose")) self.impl.dataClose();
+        }
+
+        pub fn dataRead(self: *@This(), buf: []u8) DataReadError!usize {
+            if (@hasDecl(Impl, "dataRead")) return self.impl.dataRead(buf);
+            return error.Unsupported;
+        }
+
+        pub fn dataWrite(self: *@This(), buf: []const u8) DataWriteError!usize {
+            if (@hasDecl(Impl, "dataWrite")) return self.impl.dataWrite(buf);
+            return error.Unsupported;
+        }
+
+        pub fn dataState(self: *@This()) DataState {
+            if (@hasDecl(Impl, "dataState")) return self.impl.dataState();
+            return .closed;
+        }
+
+        pub fn setDataReadTimeout(self: *@This(), ms: ?u32) void {
+            if (@hasDecl(Impl, "setDataReadTimeout")) self.impl.setDataReadTimeout(ms);
+        }
+
+        pub fn setDataWriteTimeout(self: *@This(), ms: ?u32) void {
+            if (@hasDecl(Impl, "setDataWriteTimeout")) self.impl.setDataWriteTimeout(ms);
+        }
+
         pub fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: CallbackFn) void {
             self.impl.setEventCallback(ctx, emit_fn);
         }
@@ -331,6 +453,41 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
             return self.setApn(value);
         }
 
+        fn dataOpenFn(ptr: *anyopaque) DataOpenError!void {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            return self.dataOpen();
+        }
+
+        fn dataCloseFn(ptr: *anyopaque) void {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            self.dataClose();
+        }
+
+        fn dataReadFn(ptr: *anyopaque, buf: []u8) DataReadError!usize {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            return self.dataRead(buf);
+        }
+
+        fn dataWriteFn(ptr: *anyopaque, buf: []const u8) DataWriteError!usize {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            return self.dataWrite(buf);
+        }
+
+        fn dataStateFn(ptr: *anyopaque) DataState {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            return self.dataState();
+        }
+
+        fn setDataReadTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            self.setDataReadTimeout(ms);
+        }
+
+        fn setDataWriteTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            self.setDataWriteTimeout(ms);
+        }
+
         fn setEventCallbackFn(ptr: *anyopaque, ctx: *const anyopaque, emit_fn: CallbackFn) void {
             const self: *Ctx = @ptrCast(@alignCast(ptr));
             self.setEventCallback(ctx, emit_fn);
@@ -348,6 +505,13 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
             .imsi = imsiFn,
             .apn = apnFn,
             .setApn = setApnFn,
+            .dataOpen = dataOpenFn,
+            .dataClose = dataCloseFn,
+            .dataRead = dataReadFn,
+            .dataWrite = dataWriteFn,
+            .dataState = dataStateFn,
+            .setDataReadTimeout = setDataReadTimeoutFn,
+            .setDataWriteTimeout = setDataWriteTimeoutFn,
             .setEventCallback = setEventCallbackFn,
             .clearEventCallback = clearEventCallbackFn,
         };
@@ -441,6 +605,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 _ = root.imsi;
                 _ = root.apn;
                 _ = root.setApn;
+                _ = root.dataOpen;
+                _ = root.dataClose;
+                _ = root.dataRead;
+                _ = root.dataWrite;
+                _ = root.dataState;
+                _ = root.setDataReadTimeout;
+                _ = root.setDataWriteTimeout;
                 _ = root.setEventCallback;
                 _ = root.clearEventCallback;
                 _ = root.Rat;
@@ -469,6 +640,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 _ = root.GnssEvent;
                 _ = root.Event;
                 _ = root.SetApnError;
+                _ = root.DataState;
+                _ = root.DataOpenError;
+                _ = root.DataReadError;
+                _ = root.DataWriteError;
                 _ = root.CallbackFn;
                 _ = root.make;
                 _ = make(lib, Impl).init;
@@ -561,6 +736,156 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try modem.setApn("cmnet");
             try lib.testing.expectEqualStrings("cmnet", modem.apn().?);
         }
+
+        fn optionalDataSurfaceDefaultsToUnsupported(allocator: lib.mem.Allocator) !void {
+            const Impl = struct {
+                pub const Config = struct {
+                    allocator: lib.mem.Allocator,
+                };
+
+                pub fn init(config: Config) !@This() {
+                    _ = config;
+                    return .{};
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    _ = self;
+                }
+
+                pub fn state(_: *@This()) State {
+                    return .{};
+                }
+
+                pub fn imei(_: *@This()) ?[]const u8 {
+                    return null;
+                }
+
+                pub fn imsi(_: *@This()) ?[]const u8 {
+                    return null;
+                }
+
+                pub fn apn(_: *@This()) ?[]const u8 {
+                    return null;
+                }
+
+                pub fn setApn(_: *@This(), _: []const u8) SetApnError!void {}
+
+                pub fn setEventCallback(_: *@This(), _: *const anyopaque, _: CallbackFn) void {}
+
+                pub fn clearEventCallback(_: *@This()) void {}
+            };
+
+            const Built = make(lib, Impl);
+            var modem = try Built.init(.{ .allocator = allocator });
+            defer modem.deinit();
+
+            try lib.testing.expectError(error.Unsupported, modem.dataOpen());
+            var buf: [8]u8 = undefined;
+            try lib.testing.expectError(error.Unsupported, modem.dataRead(&buf));
+            try lib.testing.expectError(error.Unsupported, modem.dataWrite("abc"));
+            try lib.testing.expectEqual(DataState.closed, modem.dataState());
+        }
+
+        fn forwardsPublicDataSurface(allocator: lib.mem.Allocator) !void {
+            const Impl = struct {
+                pub const Config = struct {
+                    allocator: lib.mem.Allocator,
+                };
+
+                data_state_value: DataState = .closed,
+                data_read_timeout_ms: ?u32 = null,
+                data_write_timeout_ms: ?u32 = null,
+
+                const Self = @This();
+
+                pub fn init(config: Config) !Self {
+                    _ = config;
+                    return .{};
+                }
+
+                pub fn deinit(self: *Self) void {
+                    _ = self;
+                }
+
+                pub fn state(_: *Self) State {
+                    return .{
+                        .sim = .ready,
+                        .registration = .home,
+                        .packet = .connected,
+                    };
+                }
+
+                pub fn imei(_: *Self) ?[]const u8 {
+                    return "860000000000002";
+                }
+
+                pub fn imsi(_: *Self) ?[]const u8 {
+                    return "460009876543210";
+                }
+
+                pub fn apn(_: *Self) ?[]const u8 {
+                    return "internet";
+                }
+
+                pub fn setApn(_: *Self, _: []const u8) SetApnError!void {}
+
+                pub fn dataOpen(self: *Self) DataOpenError!void {
+                    self.data_state_value = .open;
+                }
+
+                pub fn dataClose(self: *Self) void {
+                    self.data_state_value = .closed;
+                }
+
+                pub fn dataRead(self: *Self, buf: []u8) DataReadError!usize {
+                    _ = self;
+                    if (buf.len == 0) return 0;
+                    buf[0] = 0x7e;
+                    return 1;
+                }
+
+                pub fn dataWrite(self: *Self, buf: []const u8) DataWriteError!usize {
+                    _ = self;
+                    return buf.len;
+                }
+
+                pub fn dataState(self: *Self) DataState {
+                    return self.data_state_value;
+                }
+
+                pub fn setDataReadTimeout(self: *Self, ms: ?u32) void {
+                    self.data_read_timeout_ms = ms;
+                }
+
+                pub fn setDataWriteTimeout(self: *Self, ms: ?u32) void {
+                    self.data_write_timeout_ms = ms;
+                }
+
+                pub fn setEventCallback(self: *Self, ctx: *const anyopaque, emit_fn: CallbackFn) void {
+                    _ = self;
+                    _ = ctx;
+                    _ = emit_fn;
+                }
+
+                pub fn clearEventCallback(self: *Self) void {
+                    _ = self;
+                }
+            };
+
+            const Built = make(lib, Impl);
+            var modem = try Built.init(.{ .allocator = allocator });
+            defer modem.deinit();
+
+            try modem.dataOpen();
+            try lib.testing.expectEqual(DataState.open, modem.dataState());
+            modem.setDataReadTimeout(100);
+            modem.setDataWriteTimeout(200);
+            var buf: [4]u8 = undefined;
+            try lib.testing.expectEqual(@as(usize, 1), try modem.dataRead(&buf));
+            try lib.testing.expectEqual(@as(usize, 3), try modem.dataWrite("abc"));
+            modem.dataClose();
+            try lib.testing.expectEqual(DataState.closed, modem.dataState());
+        }
     };
 
     const Runner = struct {
@@ -577,6 +902,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 return false;
             };
             TestCase.forwardsIdentityAndApnSurface(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.optionalDataSurfaceDefaultsToUnsupported(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.forwardsPublicDataSurface(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

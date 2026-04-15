@@ -19,7 +19,6 @@ pub fn link(b: *std.Build) void {
     const net = b.modules.get("net") orelse @panic("zux requires net");
     const sync = b.modules.get("sync") orelse @panic("zux requires sync");
     const bt = b.modules.get("bt") orelse @panic("zux requires bt");
-    const modem = b.modules.get("modem") orelse @panic("zux requires modem");
     const drivers = b.modules.get("drivers") orelse @panic("zux requires drivers");
     const ledstrip = b.modules.get("ledstrip") orelse @panic("zux requires ledstrip");
     const embed_std = b.modules.get("embed_std") orelse @panic("zux requires embed_std");
@@ -30,7 +29,6 @@ pub fn link(b: *std.Build) void {
     mod.addImport("net", net);
     mod.addImport("sync", sync);
     mod.addImport("bt", bt);
-    mod.addImport("modem", modem);
     mod.addImport("drivers", drivers);
     mod.addImport("ledstrip", ledstrip);
     mod.addImport("embed_std", embed_std);

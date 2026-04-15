@@ -4,7 +4,6 @@ const testing = @import("testing");
 const bt = @import("bt");
 const sync = @import("sync");
 const io = @import("io");
-const modem = @import("modem");
 const at = @import("at");
 const ledstrip = @import("ledstrip");
 const drivers = @import("drivers");
@@ -287,26 +286,6 @@ test "net/integration/embed_std" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "modem/unit/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .modem);
-    defer t.deinit();
-
-    t.run("modem/unit/std", modem.test_runner.unit.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "modem/unit/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .modem);
-    defer t.deinit();
-
-    t.run("modem/unit/embed_std", modem.test_runner.unit.make(embed_std.std));
-    if (!t.wait()) return error.TestFailed;
-}
-
 test "at/unit/std" {
     std.testing.log_level = .info;
 
@@ -424,7 +403,7 @@ test "embed/unit/std" {
 
 test "embed/unit/embed_std" {
     std.testing.log_level = .info;
-    
+
     var t = testing.T.new(embed_std.std, .embed);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
