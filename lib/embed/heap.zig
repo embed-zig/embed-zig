@@ -5,6 +5,8 @@
 
 const std = @import("std");
 
+pub const ArenaAllocator = std.heap.ArenaAllocator;
+
 pub fn make(comptime Impl: type) type {
     comptime {
         if (@TypeOf(Impl.pageSize) != @TypeOf(std.heap.pageSize))
@@ -12,6 +14,8 @@ pub fn make(comptime Impl: type) type {
     }
 
     return struct {
+        pub const ArenaAllocator = std.heap.ArenaAllocator;
+
         pub inline fn pageSize() usize {
             return Impl.pageSize();
         }

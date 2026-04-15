@@ -6,6 +6,7 @@ pub const log = @import("embed/log.zig");
 pub const posix = @import("embed/posix.zig");
 pub const time = @import("embed/time.zig");
 pub const atomic = @import("embed/atomic.zig");
+pub const heap = @import("embed/heap.zig");
 pub const mem = @import("embed/mem.zig");
 pub const fmt = @import("embed/fmt.zig");
 pub const json = @import("embed/json.zig");
@@ -32,6 +33,7 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             t.run("posix", posix.make(lib));
             t.run("time", time.make(lib));
             t.run("atomic", atomic.make(lib));
+            t.run("heap", heap.make(lib));
             t.run("mem", mem.make(lib));
             t.run("fmt", fmt.make(lib));
             t.run("json", json.make(lib));

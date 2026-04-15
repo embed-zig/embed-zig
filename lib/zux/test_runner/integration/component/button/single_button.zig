@@ -1,9 +1,9 @@
 const testing_api = @import("testing");
+const drivers = @import("drivers");
 
 const Assembler = @import("../../../../Assembler.zig");
 const button = @import("../../../../component/button.zig");
 const Message = @import("../../../../pipeline/Message.zig");
-const drivers = @import("drivers");
 
 fn makeBuiltApp(comptime lib: type, comptime Channel: fn (type) type) type {
     const AssemblerType = Assembler.make(lib, .{}, Channel);

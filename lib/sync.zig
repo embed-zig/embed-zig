@@ -5,6 +5,8 @@
 //!   const U32Racer = sync.Racer(lib, u32);
 //!   const Channel = sync.Channel(platform.Channel);
 //!   const IntChan = Channel(u32);
+//!   const TimerImpl = sync.Timer.make(lib);
+//!   const BytesPool = sync.Pool.make(lib, [256]u8);
 //!
 //!   var racer = try U32Racer.init(allocator);
 //!   defer racer.deinit();
@@ -17,6 +19,8 @@
 
 pub const channel = @import("sync/Channel.zig");
 const racer_mod = @import("sync/Racer.zig");
+pub const Pool = @import("sync/Pool.zig");
+pub const Timer = @import("sync/Timer.zig");
 
 pub fn Channel(comptime impl: fn (type) type) fn (type) type {
     return channel.make(impl);
