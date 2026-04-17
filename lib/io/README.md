@@ -18,6 +18,8 @@ const BufferedWriter = io.BufferedWriter;
 const PrefixReader = io.PrefixReader;
 const readFull = io.readFull;
 const readAll = io.readAll;
+const copy = io.copy;
+const copyBuf = io.copyBuf;
 const writeAll = io.writeAll;
 ```
 
@@ -28,6 +30,8 @@ Today `lib/io` exports:
 - `io.PrefixReader`
 - `io.readFull`
 - `io.readAll`
+- `io.copy`
+- `io.copyBuf`
 - `io.writeAll`
 
 ## Design rule

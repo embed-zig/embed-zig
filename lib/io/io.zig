@@ -51,6 +51,48 @@ pub fn readAll(comptime Reader: type, reader: *Reader, allocator: embed.mem.Allo
     return bytes.toOwnedSlice(allocator);
 }
 
+/// Copies from `src` into `dst` until EOF, where EOF may be signaled by either
+/// a zero-length read or `error.EndOfStream`.
+pub fn copy(
+    comptime Writer: type,
+    comptime Reader: type,
+    writer: *Writer,
+    reader: *Reader,
+    allocator: embed.mem.Allocator,
+) !u64 {
+    const buf = try allocator.alloc(u8, read_chunk_len);
+    defer allocator.free(buf);
+
+    return copyBuf(Writer, Reader, writer, reader, buf);
+}
+
+/// Copies from `src` into `dst` using the caller-provided scratch buffer.
+///
+/// `buf` must be non-empty.
+pub fn copyBuf(
+    comptime Writer: type,
+    comptime Reader: type,
+    writer: *Writer,
+    reader: *Reader,
+    buf: []u8,
+) !u64 {
+    embed.debug.assert(buf.len > 0);
+
+    var copied: u64 = 0;
+    while (true) {
+        const n = reader.read(buf) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return err,
+        };
+        if (n == 0) break;
+
+        try writeAll(Writer, writer, buf[0..n]);
+        copied += @intCast(n);
+    }
+
+    return copied;
+}
+
 pub fn PrefixReader(comptime Reader: type) type {
     return struct {
         reader: Reader,
@@ -218,6 +260,170 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try readFull(Reader, &reader, &buf);
 
             try lib.testing.expectEqualStrings("hello", &buf);
+        }
+
+        fn copyTransfersWholeStream(allocator: lib.mem.Allocator) !void {
+            const Reader = struct {
+                payload: []const u8 = "hello world",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(@as(usize, 3), @min(buf.len, remaining.len));
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+            const Writer = struct {
+                out: []u8,
+                pos: usize = 0,
+
+                fn write(self: *@This(), buf: []const u8) !usize {
+                    const n = @min(@as(usize, 2), buf.len);
+                    @memcpy(self.out[self.pos..][0..n], buf[0..n]);
+                    self.pos += n;
+                    return n;
+                }
+            };
+
+            var reader = Reader{};
+            var storage: [16]u8 = undefined;
+            var writer = Writer{ .out = &storage };
+            const copied = try copy(Writer, Reader, &writer, &reader, allocator);
+            const copied_len: usize = @intCast(copied);
+
+            try lib.testing.expectEqual(@as(u64, 11), copied);
+            try lib.testing.expectEqualStrings("hello world", storage[0..copied_len]);
+        }
+
+        fn copyTreatsEndOfStreamAsSuccessfulEof(allocator: lib.mem.Allocator) !void {
+            const Reader = struct {
+                payload: []const u8 = "hello",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    if (self.offset >= self.payload.len) return error.EndOfStream;
+
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(@as(usize, 2), @min(buf.len, remaining.len));
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+            const Writer = struct {
+                out: []u8,
+                pos: usize = 0,
+
+                fn write(self: *@This(), buf: []const u8) !usize {
+                    @memcpy(self.out[self.pos..][0..buf.len], buf);
+                    self.pos += buf.len;
+                    return buf.len;
+                }
+            };
+
+            var reader = Reader{};
+            var storage: [8]u8 = undefined;
+            var writer = Writer{ .out = &storage };
+            const copied = try copy(Writer, Reader, &writer, &reader, allocator);
+            const copied_len: usize = @intCast(copied);
+
+            try lib.testing.expectEqual(@as(u64, 5), copied);
+            try lib.testing.expectEqualStrings("hello", storage[0..copied_len]);
+        }
+
+        fn copyTreatsZeroLengthReadAsSuccessfulEof(allocator: lib.mem.Allocator) !void {
+            const Reader = struct {
+                payload: []const u8 = "hello",
+                offset: usize = 0,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    if (self.offset >= self.payload.len) return 0;
+
+                    const remaining = self.payload[self.offset..];
+                    const n = @min(@as(usize, 2), @min(buf.len, remaining.len));
+                    @memcpy(buf[0..n], remaining[0..n]);
+                    self.offset += n;
+                    return n;
+                }
+            };
+            const Writer = struct {
+                out: []u8,
+                pos: usize = 0,
+
+                fn write(self: *@This(), buf: []const u8) !usize {
+                    @memcpy(self.out[self.pos..][0..buf.len], buf);
+                    self.pos += buf.len;
+                    return buf.len;
+                }
+            };
+
+            var reader = Reader{};
+            var storage: [8]u8 = undefined;
+            var writer = Writer{ .out = &storage };
+            const copied = try copy(Writer, Reader, &writer, &reader, allocator);
+            const copied_len: usize = @intCast(copied);
+
+            try lib.testing.expectEqual(@as(u64, 5), copied);
+            try lib.testing.expectEqualStrings("hello", storage[0..copied_len]);
+        }
+
+        fn copyBufPropagatesReadError() !void {
+            const Reader = struct {
+                called: bool = false,
+
+                fn read(self: *@This(), buf: []u8) anyerror!usize {
+                    _ = buf;
+                    if (!self.called) {
+                        self.called = true;
+                        return 2;
+                    }
+                    return error.ConnectionReset;
+                }
+            };
+            const Writer = struct {
+                out: []u8,
+                pos: usize = 0,
+
+                fn write(self: *@This(), buf: []const u8) !usize {
+                    @memcpy(self.out[self.pos..][0..buf.len], buf);
+                    self.pos += buf.len;
+                    return buf.len;
+                }
+            };
+
+            var reader = Reader{};
+            var storage: [4]u8 = undefined;
+            var writer = Writer{ .out = &storage };
+            var scratch: [2]u8 = "ok".*;
+
+            try lib.testing.expectError(error.ConnectionReset, copyBuf(Writer, Reader, &writer, &reader, &scratch));
+            try lib.testing.expectEqualStrings("ok", storage[0..2]);
+        }
+
+        fn copyBufPropagatesWriteError() !void {
+            const Reader = struct {
+                fn read(_: *@This(), buf: []u8) anyerror!usize {
+                    @memcpy(buf[0..2], "ok");
+                    return 2;
+                }
+            };
+            const Writer = struct {
+                calls: usize = 0,
+
+                fn write(self: *@This(), buf: []const u8) !usize {
+                    _ = buf;
+                    self.calls += 1;
+                    return if (self.calls == 1) 1 else error.BrokenPipe;
+                }
+            };
+
+            var reader = Reader{};
+            var writer = Writer{};
+            var scratch: [2]u8 = undefined;
+
+            try lib.testing.expectError(error.BrokenPipe, copyBuf(Writer, Reader, &writer, &reader, &scratch));
         }
 
         fn writeAllWritesFullPayload() !void {
@@ -516,6 +722,26 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 return false;
             };
             TestCase.readFullFillsDestinationBuffer() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.copyTransfersWholeStream(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.copyTreatsEndOfStreamAsSuccessfulEof(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.copyTreatsZeroLengthReadAsSuccessfulEof(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.copyBufPropagatesReadError() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.copyBufPropagatesWriteError() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
