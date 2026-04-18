@@ -5,10 +5,12 @@
 //! the underlying node; those APIs must not deinit it.
 
 const embed = @import("embed");
+const binding_link = @import("BindingLink.zig");
 
 const Context = @This();
 
 pub const DoublyLinkedList = embed.DoublyLinkedList;
+pub const BindingLink = binding_link;
 
 ptr: *anyopaque,
 vtable: *const VTable,
@@ -19,6 +21,7 @@ pub const TreeLink = struct {
     ctx: Context = undefined,
     parent: ?Context = null,
     children: DoublyLinkedList = .{},
+    binding: ?BindingLink = null,
     node: DoublyLinkedList.Node = .{},
 
     pub fn fromNode(n: *DoublyLinkedList.Node) *TreeLink {
@@ -49,6 +52,10 @@ pub const VTable = struct {
 
 pub const Canceled = error.Canceled;
 pub const DeadlineExceeded = error.DeadlineExceeded;
+pub const StateError = error{
+    Canceled,
+    DeadlineExceeded,
+};
 
 fn TypeIdHolder(comptime T: type) type {
     return struct {
@@ -79,6 +86,12 @@ pub fn wait(self: Context, timeout_ns: ?i64) ?anyerror {
     return self.vtable.waitFn(self.ptr, timeout_ns);
 }
 
+pub fn checkState(self: Context) StateError!void {
+    const cause = self.err() orelse return;
+    if (cause == error.DeadlineExceeded) return error.DeadlineExceeded;
+    return error.Canceled;
+}
+
 pub fn cancel(self: Context) void {
     self.vtable.cancelFn(self.ptr);
 }
@@ -88,6 +101,7 @@ pub fn cancelWithCause(self: Context, cause: anyerror) void {
 }
 
 pub fn deinit(self: Context) void {
+    self.bindLink(null) catch unreachable;
     self.vtable.deinitFn(self.ptr);
 }
 
@@ -95,6 +109,37 @@ pub fn deinit(self: Context) void {
 pub fn value(self: Context, comptime T: type, key: *const Key(T)) ?T {
     const raw = self.vtable.valueFn(self.ptr, @ptrCast(key)) orelse return null;
     return @as(*const T, @ptrCast(@alignCast(raw))).*;
+}
+
+pub fn bindLink(self: Context, binding: ?BindingLink) error{AlreadyBound}!void {
+    var old_binding: ?BindingLink = null;
+    var canceled_cause: ?anyerror = null;
+
+    self.vtable.lockFn(self.ptr);
+    const tree_link = self.vtable.treeFn(self.ptr);
+    if (binding == null) {
+        old_binding = tree_link.binding;
+        tree_link.binding = null;
+    } else if (tree_link.binding != null) {
+        self.vtable.unlockFn(self.ptr);
+        return error.AlreadyBound;
+    } else if (self.vtable.errNoLockFn(self.ptr)) |cause| {
+        canceled_cause = cause;
+    } else {
+        tree_link.binding = binding;
+    }
+    self.vtable.unlockFn(self.ptr);
+
+    if (old_binding) |old| old.deactivate();
+    if (canceled_cause) |cause| binding.?.fire(cause);
+}
+
+pub fn fdLink(comptime lib: type, fd: *lib.posix.socket_t) BindingLink {
+    return BindingLink.fdLink(lib, fd);
+}
+
+pub fn bindFd(self: Context, comptime lib: type, fd: *lib.posix.socket_t) error{AlreadyBound}!void {
+    return self.bindLink(BindingLink.fdLink(lib, fd));
 }
 
 pub fn as(self: Context, comptime T: type) error{TypeMismatch}!*T {

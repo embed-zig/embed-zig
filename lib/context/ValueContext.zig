@@ -1,12 +1,14 @@
 //! ValueContext — attaches a typed key-value pair to the context chain.
 //!
-//! Delegates err() / deadline() / wait() to parent and adds one layer to the
-//! value lookup chain. `cancel()` / `cancelWithCause()` are no-ops for the
-//! value node itself; it does not add its own cancellation state.
+//! Preserves the parent-linked value lookup chain and does not expose public
+//! cancellation of its own. Parent cancellation still propagates through the
+//! value node, is cached locally so err()/wait() stay stable after reparenting,
+//! and continues onward to descendants. Deadline lookup still delegates to the
+//! parent chain.
 //!
 //! Usage:
 //!   const request_id_key: Context.Key(u64) = .{};
-//!   var ctx = try ValueContext(lib, u64).init(allocator, parent, &request_id_key, 42);
+//!   var ctx = try make(lib, u64).init(allocator, parent, &request_id_key, 42);
 //!   defer ctx.deinit();
 //!   const id = ctx.value(u64, &request_id_key);  // returns 42
 
@@ -14,13 +16,18 @@ const Context = @import("Context.zig");
 const internal = @import("internal.zig");
 const Allocator = @import("embed").mem.Allocator;
 
-pub fn ValueContext(comptime lib: type, comptime T: type) type {
+pub fn make(comptime lib: type, comptime T: type) type {
+    const Mutex = lib.Thread.Mutex;
+    const Condition = lib.Thread.Condition;
     const RwLock = lib.Thread.RwLock;
 
     return struct {
         allocator: Allocator,
         tree: Context.TreeLink = .{},
         tree_rw: *RwLock,
+        mu: Mutex = .{},
+        cond: Condition = .{},
+        cause: ?anyerror = null,
         key: *const anyopaque,
         val_storage: T,
 
@@ -40,11 +47,30 @@ pub fn ValueContext(comptime lib: type, comptime T: type) type {
                 .val_storage = val,
             };
             internal.attachChild(parent, ctx);
+            if (parent.err()) |cause| {
+                self.markCanceled(cause);
+            }
             return ctx;
+        }
+
+        fn markCanceled(self: *Self, cause: anyerror) void {
+            self.mu.lock();
+            if (self.cause != null) {
+                self.mu.unlock();
+                return;
+            }
+            self.cause = cause;
+            self.mu.unlock();
+
+            self.cond.broadcast();
+            internal.cancelChildrenWithCause(self.tree.ctx, cause);
         }
 
         fn errNoLockImpl(ptr: *anyopaque) ?anyerror {
             const self: *Self = @ptrCast(@alignCast(ptr));
+            self.mu.lock();
+            defer self.mu.unlock();
+            if (self.cause) |cause| return cause;
             const parent = self.tree.parent orelse return null;
             return internal.errNoLock(parent);
         }
@@ -85,30 +111,30 @@ pub fn ValueContext(comptime lib: type, comptime T: type) type {
             return valueNoLockImpl(ptr, key);
         }
 
+        pub fn wait(self: *Self, timeout_ns: ?i64) ?anyerror {
+            self.mu.lock();
+            defer self.mu.unlock();
+
+            if (timeout_ns) |ns| {
+                const deadline_ns = lib.time.nanoTimestamp() + @as(i128, ns);
+                while (self.cause == null) {
+                    const remaining_ns = deadline_ns - lib.time.nanoTimestamp();
+                    if (remaining_ns <= 0) return null;
+
+                    self.cond.timedWait(&self.mu, @intCast(@min(remaining_ns, internal.max_wait_ns_i128))) catch {};
+                }
+                return self.cause;
+            }
+
+            while (self.cause == null) {
+                self.cond.wait(&self.mu);
+            }
+            return self.cause.?;
+        }
+
         fn waitImpl(ptr: *anyopaque, timeout_ns: ?i64) ?anyerror {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            const deadline_ns: ?i128 = if (timeout_ns) |ns| lib.time.nanoTimestamp() + @as(i128, ns) else null;
-
-            while (true) {
-                const slice_ns: i64 = blk: {
-                    const quantum_ns = 10 * lib.time.ns_per_ms;
-                    if (deadline_ns) |deadline| {
-                        const remaining_ns = deadline - lib.time.nanoTimestamp();
-                        if (remaining_ns <= 0) return null;
-                        break :blk @intCast(@min(remaining_ns, quantum_ns));
-                    }
-                    break :blk quantum_ns;
-                };
-
-                self.tree_rw.lockShared();
-                const parent = self.tree.parent orelse {
-                    self.tree_rw.unlockShared();
-                    return null;
-                };
-                const cause = parent.wait(slice_ns);
-                self.tree_rw.unlockShared();
-                if (cause) |err| return err;
-            }
+            return self.wait(timeout_ns);
         }
 
         fn cancelImpl(ptr: *anyopaque) void {
@@ -119,7 +145,9 @@ pub fn ValueContext(comptime lib: type, comptime T: type) type {
 
         fn propagateCancelWithCauseImpl(ptr: *anyopaque, cause: anyerror) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            internal.cancelChildrenWithCause(self.tree.ctx, cause);
+            self.tree_rw.lockShared();
+            defer self.tree_rw.unlockShared();
+            self.markCanceled(cause);
         }
 
         fn deinitImpl(ptr: *anyopaque) void {

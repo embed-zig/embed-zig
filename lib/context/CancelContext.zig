@@ -4,9 +4,7 @@ const Context = @import("Context.zig");
 const internal = @import("internal.zig");
 const Allocator = @import("embed").mem.Allocator;
 
-const max_wait_ns_i128 = @as(i128, @intCast((@as(u128, 1) << 64) - 1));
-
-pub fn CancelContext(comptime lib: type) type {
+pub fn make(comptime lib: type) type {
     const Mutex = lib.Thread.Mutex;
     const Condition = lib.Thread.Condition;
     const RwLock = lib.Thread.RwLock;
@@ -68,7 +66,7 @@ pub fn CancelContext(comptime lib: type) type {
                     const remaining_ns = deadline_ns - lib.time.nanoTimestamp();
                     if (remaining_ns <= 0) return null;
 
-                    self.cond.timedWait(&self.mu, @intCast(@min(remaining_ns, max_wait_ns_i128))) catch {};
+                    self.cond.timedWait(&self.mu, @intCast(@min(remaining_ns, internal.max_wait_ns_i128))) catch {};
                 }
                 return self.cause;
             }

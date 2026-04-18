@@ -34,9 +34,14 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
                     try waitAlreadyCanceledReturnsExistingCauseCase(lib, case_allocator);
                 }
             }.run));
-            t.run("delegates_through_value_context", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+            t.run("value_context_wakes_on_parent_cancel", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
                 fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try waitDelegatesThroughValueContextCase(lib, case_allocator);
+                    try waitValueContextWakesOnParentCancelCase(lib, case_allocator);
+                }
+            }.run));
+            t.run("value_context_timeout_does_not_call_parent_wait", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
+                    try waitValueContextTimeoutDoesNotCallParentWaitCase(lib, case_allocator);
                 }
             }.run));
             t.run("deadline_context_returns_deadline_exceeded", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
@@ -62,6 +67,113 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
         var runner: Runner = .{};
     };
     return testing_mod.TestRunner.make(Runner).new(&Holder.runner);
+}
+
+fn WaitForbiddenParentType(comptime lib: type) type {
+    return struct {
+        tree: Context.TreeLink = .{},
+        tree_rw: lib.Thread.RwLock = .{},
+        wait_called: bool = false,
+
+        const Self = @This();
+
+        fn context(self: *Self, allocator: lib.mem.Allocator) Context {
+            const ctx = Context.init(self, &vtable, allocator);
+            self.tree.ctx = ctx;
+            return ctx;
+        }
+
+        fn errFn(_: *anyopaque) ?anyerror {
+            return null;
+        }
+
+        fn errNoLockFn(_: *anyopaque) ?anyerror {
+            return null;
+        }
+
+        fn deadlineFn(_: *anyopaque) ?i128 {
+            return null;
+        }
+
+        fn deadlineNoLockFn(_: *anyopaque) ?i128 {
+            return null;
+        }
+
+        fn valueFn(_: *anyopaque, _: *const anyopaque) ?*const anyopaque {
+            return null;
+        }
+
+        fn valueNoLockFn(_: *anyopaque, _: *const anyopaque) ?*const anyopaque {
+            return null;
+        }
+
+        fn waitFn(ptr: *anyopaque, _: ?i64) ?anyerror {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            self.wait_called = true;
+            return error.Unexpected;
+        }
+
+        fn cancelFn(_: *anyopaque) void {}
+
+        fn cancelWithCauseFn(_: *anyopaque, _: anyerror) void {}
+
+        fn propagateCancelWithCauseFn(_: *anyopaque, _: anyerror) void {}
+
+        fn deinitFn(_: *anyopaque) void {}
+
+        fn treeFn(ptr: *anyopaque) *Context.TreeLink {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            return &self.tree;
+        }
+
+        fn treeLockFn(ptr: *anyopaque) *anyopaque {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            return @ptrCast(&self.tree_rw);
+        }
+
+        fn reparentFn(_: *anyopaque, _: ?Context) void {}
+
+        fn lockSharedFn(ptr: *anyopaque) void {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            self.tree_rw.lockShared();
+        }
+
+        fn unlockSharedFn(ptr: *anyopaque) void {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            self.tree_rw.unlockShared();
+        }
+
+        fn lockFn(ptr: *anyopaque) void {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            self.tree_rw.lock();
+        }
+
+        fn unlockFn(ptr: *anyopaque) void {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            self.tree_rw.unlock();
+        }
+
+        const vtable: Context.VTable = .{
+            .errFn = errFn,
+            .errNoLockFn = errNoLockFn,
+            .deadlineFn = deadlineFn,
+            .deadlineNoLockFn = deadlineNoLockFn,
+            .valueFn = valueFn,
+            .valueNoLockFn = valueNoLockFn,
+            .waitFn = waitFn,
+            .cancelFn = cancelFn,
+            .cancelWithCauseFn = cancelWithCauseFn,
+            .propagateCancelWithCauseFn = propagateCancelWithCauseFn,
+            .deinitFn = deinitFn,
+            .treeFn = treeFn,
+            .treeLockFn = treeLockFn,
+            .reparentFn = reparentFn,
+            .lockSharedFn = lockSharedFn,
+            .unlockSharedFn = unlockSharedFn,
+            .lockFn = lockFn,
+            .unlockFn = unlockFn,
+        };
+    };
 }
 
 fn waitAfterCancelReturnsCauseCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
@@ -124,7 +236,7 @@ fn waitAlreadyCanceledReturnsExistingCauseCase(comptime lib: type, allocator: li
     if (cause != error.TimedOut) return error.WaitAlreadyCanceledWrongCause;
 }
 
-fn waitDelegatesThroughValueContextCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
+fn waitValueContextWakesOnParentCancelCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
     const CtxApi = context_root.make(lib);
     var ctx_ns = try CtxApi.init(allocator);
     defer ctx_ns.deinit();
@@ -135,9 +247,38 @@ fn waitDelegatesThroughValueContextCase(comptime lib: type, allocator: lib.mem.A
     defer cc.deinit();
     var ctx = try ctx_ns.withValue(u64, cc, &key, 42);
     defer ctx.deinit();
+
+    const t = try lib.Thread.spawn(.{}, struct {
+        fn work(c: *Context) void {
+            const cause = c.wait(null);
+            lib.debug.assert(cause != null);
+            lib.debug.assert(cause.? == error.Canceled);
+        }
+    }.work, .{&ctx});
+
+    lib.Thread.sleep(5 * lib.time.ns_per_ms);
     cc.cancel();
-    const cause = ctx.wait(100 * lib.time.ns_per_ms) orelse return error.WaitThroughValueMissing;
+    t.join();
+
+    const cause = ctx.err() orelse return error.WaitThroughValueMissing;
     if (cause != error.Canceled) return error.WaitThroughValueWrongCause;
+}
+
+fn waitValueContextTimeoutDoesNotCallParentWaitCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
+    const CtxApi = context_root.make(lib);
+    var ctx_ns = try CtxApi.init(allocator);
+    defer ctx_ns.deinit();
+
+    const Parent = WaitForbiddenParentType(lib);
+    var parent_impl: Parent = .{};
+    const parent = parent_impl.context(allocator);
+
+    var key: Context.Key(u64) = .{};
+    var ctx = try ctx_ns.withValue(u64, parent, &key, 42);
+    defer ctx.deinit();
+
+    if (ctx.wait(20 * lib.time.ns_per_ms) != null) return error.ValueWaitTimeoutShouldReturnNull;
+    if (parent_impl.wait_called) return error.ValueWaitShouldNotCallParentWait;
 }
 
 fn waitDeadlineContextReturnsDeadlineExceededCase(comptime lib: type, allocator: lib.mem.Allocator) !void {

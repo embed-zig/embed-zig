@@ -7,18 +7,24 @@
 const context_mod = @import("context");
 const AddrPort = @import("../netip/AddrPort.zig");
 const sockaddr_mod = @import("SockAddr.zig");
+const wake_mod = @import("Wake.zig");
+
+const Context = context_mod.Context;
 
 pub fn Packet(comptime lib: type) type {
     const posix = lib.posix;
     const SockAddr = sockaddr_mod.SockAddr(lib);
+    const Wake = wake_mod.make(lib);
 
     return struct {
         fd: posix.socket_t,
+        wake: Wake,
         closed: bool = false,
         read_deadline_ms: ?i64 = null,
         write_deadline_ms: ?i64 = null,
 
         const Self = @This();
+        const ContextStateError = Context.StateError;
         const context_poll_quantum_ms: i64 = 25;
         const nonblock_flag: usize = @as(usize, 1) << @bitOffsetOf(posix.O, "NONBLOCK");
         const max_poll_timeout_ms: i64 = 2_147_483_647;
@@ -29,8 +35,8 @@ pub fn Packet(comptime lib: type) type {
             addr_len: posix.socklen_t,
         };
 
-        pub const InitError = posix.SocketError || posix.FcntlError;
-        pub const AdoptError = posix.FcntlError;
+        pub const InitError = posix.SocketError || AdoptError;
+        pub const AdoptError = posix.FcntlError || Wake.InitError;
         pub const ConnectError = error{
             Closed,
             Canceled,
@@ -54,11 +60,6 @@ pub fn Packet(comptime lib: type) type {
             TimedOut,
         } || SockAddr.EncodeError || posix.SendToError || posix.PollError;
 
-        const ContextStateError = error{
-            Canceled,
-            DeadlineExceeded,
-        };
-
         pub fn initSocket(family: u32) InitError!Self {
             const packet_type: u32 = posix.SOCK.DGRAM;
             const fd = try posix.socket(family, packet_type, 0);
@@ -68,17 +69,24 @@ pub fn Packet(comptime lib: type) type {
 
         pub fn adopt(fd: posix.socket_t) AdoptError!Self {
             try setNonBlocking(fd);
-            return .{ .fd = fd };
+            var wake = try Wake.init();
+            errdefer wake.deinit();
+            return .{
+                .fd = fd,
+                .wake = wake,
+            };
         }
 
         pub fn deinit(self: *Self) void {
             self.close();
+            self.wake.deinit();
         }
 
         pub fn close(self: *Self) void {
             if (self.closed) return;
-            posix.close(self.fd);
             self.closed = true;
+            self.wake.signal();
+            posix.close(self.fd);
         }
 
         pub fn connect(self: *Self, addr: AddrPort) ConnectError!void {
@@ -97,7 +105,7 @@ pub fn Packet(comptime lib: type) type {
 
         pub fn connectContext(self: *Self, ctx: context_mod.Context, addr: AddrPort) ConnectError!void {
             if (self.closed) return error.Closed;
-            try checkContext(ctx);
+            try ctx.checkState();
             const encoded = try SockAddr.encode(addr);
             var pending = false;
 
@@ -203,59 +211,156 @@ pub fn Packet(comptime lib: type) type {
         }
 
         fn waitForRead(self: *Self) ReadError!void {
-            try waitForIo(self.fd, posix.POLL.IN | posix.POLL.HUP | posix.POLL.ERR, self.read_deadline_ms);
+            try self.waitForIo(posix.POLL.IN | posix.POLL.HUP | posix.POLL.ERR, self.read_deadline_ms);
         }
 
         fn waitForWrite(self: *Self) WriteError!void {
-            try waitForIo(self.fd, posix.POLL.OUT | posix.POLL.HUP | posix.POLL.ERR, self.write_deadline_ms);
+            try self.waitForIo(posix.POLL.OUT | posix.POLL.HUP | posix.POLL.ERR, self.write_deadline_ms);
         }
 
-        fn waitForConnect(self: *Self, ctx: ?context_mod.Context) ConnectError!void {
-            var poll_fds = [_]posix.pollfd{.{
-                .fd = self.fd,
-                .events = posix.POLL.OUT | posix.POLL.ERR | posix.POLL.HUP,
-                .revents = 0,
-            }};
-
-            while (true) {
-                poll_fds[0].revents = 0;
-                const timeout_ms = if (ctx) |c| try contextPollTimeout(c) else -1;
-                const ready = posix.poll(poll_fds[0..], timeout_ms) catch |err| {
-                    if (errorNameEquals(err, "Interrupted")) continue;
-                    return err;
-                };
-                if (ready == 0) {
-                    if (ctx) |c| {
-                        try checkContext(c);
-                        continue;
-                    }
-                    continue;
-                }
-
-                var err_code: i32 = 0;
-                try posix.getsockopt(self.fd, posix.SOL.SOCKET, posix.SO.ERROR, bytesOf(&err_code));
-                if (err_code == 0) return;
-                return connectErrorFromCode(err_code);
+        fn waitForConnect(self: *Self, ctx: ?Context) ConnectError!void {
+            const events = posix.POLL.OUT | posix.POLL.ERR | posix.POLL.HUP;
+            if (ctx) |c| {
+                try self.waitForIoNoDeadlineContext(events, c);
+            } else {
+                try self.waitForIoNoDeadline(events);
             }
+
+            var err_code: i32 = 0;
+            try posix.getsockopt(self.fd, posix.SOL.SOCKET, posix.SO.ERROR, bytesOf(&err_code));
+            if (err_code == 0) return;
+            return connectErrorFromCode(err_code);
         }
 
-        fn waitForIo(fd: posix.socket_t, events: anytype, deadline_ms: ?i64) (error{TimedOut} || posix.PollError)!void {
-            var poll_fds = [_]posix.pollfd{.{
-                .fd = fd,
-                .events = events,
-                .revents = 0,
-            }};
+        fn waitForIo(self: *Self, events: anytype, deadline_ms: ?i64) (error{ Closed, TimedOut } || posix.PollError)!void {
+            var poll_fds = self.makePollFds(events);
 
             while (true) {
                 poll_fds[0].revents = 0;
+                poll_fds[1].revents = 0;
                 const timeout_ms = timeoutFromDeadline(deadline_ms);
                 const ready = posix.poll(poll_fds[0..], timeout_ms) catch |err| {
                     if (errorNameEquals(err, "Interrupted")) continue;
                     return err;
                 };
                 if (ready == 0) return error.TimedOut;
+                if (poll_fds[0].revents != 0) {
+                    if (self.closed) return error.Closed;
+                    return;
+                }
+                if (poll_fds[1].revents != 0) {
+                    self.wake.drain();
+                    if (self.closed) return error.Closed;
+                    continue;
+                }
                 return;
             }
+        }
+
+        fn waitForIoNoDeadline(self: *Self, events: anytype) (error{Closed} || posix.PollError)!void {
+            var poll_fds = self.makePollFds(events);
+
+            while (true) {
+                poll_fds[0].revents = 0;
+                poll_fds[1].revents = 0;
+                const ready = posix.poll(poll_fds[0..], -1) catch |err| {
+                    if (errorNameEquals(err, "Interrupted")) continue;
+                    return err;
+                };
+                if (ready == 0) continue;
+                if (poll_fds[0].revents != 0) {
+                    if (self.closed) return error.Closed;
+                    return;
+                }
+                if (poll_fds[1].revents != 0) {
+                    self.wake.drain();
+                    if (self.closed) return error.Closed;
+                    continue;
+                }
+                return;
+            }
+        }
+
+        fn waitForIoNoDeadlineContext(
+            self: *Self,
+            events: anytype,
+            ctx: Context,
+        ) (error{Closed} || ContextStateError || posix.PollError)!void {
+            ctx.bindFd(lib, &self.wake.send_fd) catch return self.waitForIoNoDeadlineContextFallback(events, ctx);
+            defer {
+                ctx.bindLink(null) catch unreachable;
+                if (!self.closed and ctx.err() != null) self.wake.drain();
+            }
+
+            var poll_fds = self.makePollFds(events);
+
+            while (true) {
+                poll_fds[0].revents = 0;
+                poll_fds[1].revents = 0;
+                const ready = posix.poll(poll_fds[0..], -1) catch |err| {
+                    if (errorNameEquals(err, "Interrupted")) continue;
+                    return err;
+                };
+                if (ready == 0) continue;
+                if (poll_fds[0].revents != 0) {
+                    if (self.closed) return error.Closed;
+                    return;
+                }
+                if (poll_fds[1].revents != 0) {
+                    self.wake.drain();
+                    if (self.closed) return error.Closed;
+                    try ctx.checkState();
+                    continue;
+                }
+            }
+        }
+
+        fn waitForIoNoDeadlineContextFallback(
+            self: *Self,
+            events: anytype,
+            ctx: Context,
+        ) (error{Closed} || ContextStateError || posix.PollError)!void {
+            var poll_fds = self.makePollFds(events);
+
+            while (true) {
+                poll_fds[0].revents = 0;
+                poll_fds[1].revents = 0;
+                const timeout_ms = try contextPollTimeout(ctx);
+                const ready = posix.poll(poll_fds[0..], timeout_ms) catch |err| {
+                    if (errorNameEquals(err, "Interrupted")) continue;
+                    return err;
+                };
+                if (ready == 0) {
+                    try ctx.checkState();
+                    continue;
+                }
+                if (poll_fds[0].revents != 0) {
+                    if (self.closed) return error.Closed;
+                    return;
+                }
+                if (poll_fds[1].revents != 0) {
+                    self.wake.drain();
+                    if (self.closed) return error.Closed;
+                    try ctx.checkState();
+                    continue;
+                }
+                return;
+            }
+        }
+
+        fn makePollFds(self: *Self, events: anytype) [2]posix.pollfd {
+            return .{
+                .{
+                    .fd = self.fd,
+                    .events = events,
+                    .revents = 0,
+                },
+                .{
+                    .fd = self.wake.recv_fd,
+                    .events = posix.POLL.IN,
+                    .revents = 0,
+                },
+            };
         }
 
         fn timeoutFromDeadline(deadline_ms: ?i64) i32 {
@@ -266,8 +371,8 @@ pub fn Packet(comptime lib: type) type {
             return @intCast(@min(remaining, max_poll_timeout_ms));
         }
 
-        fn contextPollTimeout(ctx: context_mod.Context) ContextStateError!i32 {
-            try checkContext(ctx);
+        fn contextPollTimeout(ctx: Context) ContextStateError!i32 {
+            try ctx.checkState();
 
             if (ctx.deadline()) |deadline_ns| {
                 const remaining = @divFloor(deadline_ns - lib.time.nanoTimestamp(), lib.time.ns_per_ms);
@@ -276,12 +381,6 @@ pub fn Packet(comptime lib: type) type {
             }
 
             return @intCast(context_poll_quantum_ms);
-        }
-
-        fn checkContext(ctx: context_mod.Context) ContextStateError!void {
-            const cause = ctx.err() orelse return;
-            if (cause == error.DeadlineExceeded) return error.DeadlineExceeded;
-            return error.Canceled;
         }
 
         fn setNonBlocking(fd: posix.socket_t) posix.FcntlError!void {

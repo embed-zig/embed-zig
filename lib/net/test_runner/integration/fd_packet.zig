@@ -11,6 +11,7 @@ const packet_connect_context_canceled_before_start = @import("fd_packet/packet_c
 const packet_connect_context_deadline_exceeded_before_start = @import("fd_packet/packet_connect_context_deadline_exceeded_before_start.zig");
 const packet_connect_context_canceled_during_connect = @import("fd_packet/packet_connect_context_canceled_during_connect.zig");
 const packet_connect_context_deadline_exceeded_during_connect = @import("fd_packet/packet_connect_context_deadline_exceeded_during_connect.zig");
+const packet_close_unblocks_blocked_read = @import("fd_packet/packet_close_unblocks_blocked_read.zig");
 const packet_preserves_datagram_boundaries = @import("fd_packet/packet_preserves_datagram_boundaries.zig");
 const packet_read_deadline_times_out = @import("fd_packet/packet_read_deadline_times_out.zig");
 const packet_read_deadline_clear_allows_later_read = @import("fd_packet/packet_read_deadline_clear_allows_later_read.zig");
@@ -38,6 +39,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             t.run("packetConnectContextDeadlineExceededBeforeStart", packet_connect_context_deadline_exceeded_before_start.make(lib));
             t.run("packetConnectContextCanceledDuringConnect", packet_connect_context_canceled_during_connect.make(lib));
             t.run("packetConnectContextDeadlineExceededDuringConnect", packet_connect_context_deadline_exceeded_during_connect.make(lib));
+            t.run("packetCloseUnblocksBlockedRead", packet_close_unblocks_blocked_read.make(lib));
             t.run("packetPreservesDatagramBoundaries", packet_preserves_datagram_boundaries.make(lib));
             t.run("packetReadDeadlineTimesOut", packet_read_deadline_times_out.make(lib));
             t.run("packetReadDeadlineClearAllowsLaterRead", packet_read_deadline_clear_allows_later_read.make(lib));

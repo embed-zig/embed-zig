@@ -29,6 +29,9 @@ deadline semantics.
   - `lib/net/test_runner/integration/fd_packet.zig`
 - Non-blocking connect, `connectContext(...)`, deadline storage, timeout
   accounting, and non-blocking read/write wait loops are implemented.
+- Each netfd now owns a wake-fd pair used for close signaling. Context-aware
+  waits reuse that same wake fd through `context.bindFd(...)` in the common
+  case instead of creating a temporary context node.
 - Public `net` integration coverage was added after migration so the higher
   wrappers continue to match fd-layer error and timeout semantics.
 
@@ -54,7 +57,8 @@ deadline semantics.
 
 The intended semantic direction is closer to Go's `netFD` /
 `internal/poll.FD` than to blocking `recv` / `send` wrappers, but implemented
-with explicit synchronous polling rather than a global runtime poller.
+with explicit synchronous polling plus per-netfd wake sockets rather than with a
+global runtime poller.
 
 ## Current Preconditions
 
@@ -96,6 +100,7 @@ The main internal entry points are:
 - `lib/net/fd/Stream.zig`
 - `lib/net/fd/Packet.zig`
 - `lib/net/fd/Listener.zig`
+- `lib/net/fd/Wake.zig`
 - `lib/net/fd/SockAddr.zig`
 
 The current implementation keeps stream, packet, and listener logic small and
@@ -157,6 +162,13 @@ goes in progress, completion must be verified with
   such as `TcpConn`, `tls`, and `http` can surface request cancellation while
   blocked in I/O
 
+For those context-aware waits, each netfd already owns a close-wake fd. fd
+temporarily binds the caller's `Context` to that same wake fd through
+`ctx.bindFd(...)` and polls both the target fd and the netfd wake fd. When the
+context is canceled, that wake fd becomes readable and the blocked `poll(...)`
+returns immediately. The older short-timeout context poll loop is kept only as a
+fallback path when the context is already bound to some other wake fd.
+
 At the public `net.Conn` boundary, stream-side context cancellation and
 deadline expiry are still collapsed into `error.TimedOut`, because
 `lib/net/Conn.zig` intentionally keeps a small shared error surface. Higher
@@ -185,6 +197,7 @@ The fd layer should continue to keep the following areas covered:
 - already-canceled and already-expired `connectContext(...)`
 - in-flight `connectContext(...)` cancel and deadline behavior
 - non-blocking read/write wait loops
+- blocked read / accept wakeup on close
 - read and write deadline behavior
 - operation-after-close behavior
 - idempotent `close()`

@@ -1,5 +1,7 @@
 const Context = @import("Context.zig");
 
+pub const max_wait_ns_i128 = @as(i128, @intCast((@as(u128, 1) << 64) - 1));
+
 pub fn tree(ctx: Context) *Context.TreeLink {
     return ctx.vtable.treeFn(ctx.ptr);
 }
@@ -60,6 +62,10 @@ pub fn cancelChildren(ctx: Context) void {
 pub fn cancelChildrenWithCause(ctx: Context, cause: anyerror) void {
     lockShared(ctx);
     defer unlockShared(ctx);
+
+    if (tree(ctx).binding) |binding| {
+        binding.fire(cause);
+    }
 
     var it = tree(ctx).children.first;
     while (it) |n| {

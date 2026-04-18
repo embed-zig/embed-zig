@@ -31,6 +31,10 @@
 //!   // Timeout (relative nanoseconds):
 //!   var tc = try context.withTimeout(bg, 5 * lib.time.ns_per_ms);
 //!   defer tc.deinit();
+//!
+//!   // Bind a wake fd to an existing context:
+//!   var wake_fd = some_posix_socket;
+//!   try cancel_ctx.bindFd(lib, &wake_fd);
 
 const embed = @import("embed");
 pub const Context = @import("context/Context.zig");
@@ -150,10 +154,10 @@ pub fn make(comptime lib: type) type {
         shared: *Shared,
 
         const Self = @This();
-        pub const CancelContext = cancel_context.CancelContext(lib);
-        pub const DeadlineContext = deadline_context.DeadlineContext(lib);
+        pub const CancelContext = cancel_context.make(lib);
+        pub const DeadlineContext = deadline_context.make(lib);
         pub fn ValueContext(comptime T: type) type {
-            return value_context.ValueContext(lib, T);
+            return value_context.make(lib, T);
         }
 
         pub fn init(allocator: lib.mem.Allocator) lib.mem.Allocator.Error!Self {
@@ -172,6 +176,7 @@ pub fn make(comptime lib: type) type {
             const has_children = self.shared.background_impl.tree.children.first != null;
             self.shared.background_impl.tree_rw.unlock();
             if (has_children) @panic("context root deinit with active child");
+            self.shared.background_ctx.deinit();
             allocator.destroy(self.shared);
             self.* = undefined;
         }

@@ -1,21 +1,24 @@
 const sockaddr_mod = @import("SockAddr.zig");
 const stream_mod = @import("Stream.zig");
+const wake_mod = @import("Wake.zig");
 
 pub fn Listener(comptime lib: type) type {
     const posix = lib.posix;
     const Addr = @import("../netip/AddrPort.zig");
     const SockAddr = sockaddr_mod.SockAddr(lib);
     const Stream = stream_mod.Stream(lib);
+    const Wake = wake_mod.make(lib);
 
     return struct {
         fd: posix.socket_t,
+        wake: Wake,
         closed: bool = false,
         listening: bool = false,
 
         const Self = @This();
         const nonblock_flag: usize = @as(usize, 1) << @bitOffsetOf(posix.O, "NONBLOCK");
 
-        pub const InitError = Stream.InitError || SockAddr.EncodeError || posix.BindError || posix.SetSockOptError;
+        pub const InitError = Stream.InitError || SockAddr.EncodeError || posix.BindError || posix.SetSockOptError || Wake.InitError;
         pub const ListenError = error{Closed} || posix.ListenError;
         pub const AcceptError = error{ Closed, SocketNotListening } || posix.AcceptError || posix.PollError || Stream.AdoptError;
         pub const PortError = error{ Closed, Unexpected } || posix.GetSockNameError;
@@ -25,6 +28,8 @@ pub fn Listener(comptime lib: type) type {
             const fd = try posix.socket(encoded.family, posix.SOCK.STREAM, 0);
             errdefer posix.close(fd);
             try setNonBlocking(fd);
+            var wake = try Wake.init();
+            errdefer wake.deinit();
 
             if (reuse_addr) {
                 const enable: [4]u8 = @bitCast(@as(i32, 1));
@@ -32,17 +37,23 @@ pub fn Listener(comptime lib: type) type {
             }
 
             try posix.bind(fd, @ptrCast(&encoded.storage), encoded.len);
-            return .{ .fd = fd };
+            return .{
+                .fd = fd,
+                .wake = wake,
+            };
         }
 
         pub fn deinit(self: *Self) void {
-            self.closed = true;
-            posix.close(self.fd);
+            self.close();
+            self.wake.deinit();
         }
 
         pub fn close(self: *Self) void {
             if (self.closed) return;
             self.closed = true;
+            self.listening = false;
+            self.wake.signal();
+            posix.close(self.fd);
         }
 
         pub fn listen(self: *Self, backlog: u31) ListenError!void {
@@ -88,26 +99,45 @@ pub fn Listener(comptime lib: type) type {
             };
         }
 
-        fn waitForAccept(self: *Self) (error{Closed, SocketNotListening} || posix.PollError)!void {
+        fn waitForAccept(self: *Self) (error{ Closed, SocketNotListening } || posix.PollError)!void {
             if (self.closed) return error.Closed;
             if (!self.listening) return error.SocketNotListening;
 
-            var poll_fds = [_]posix.pollfd{.{
-                .fd = self.fd,
-                .events = posix.POLL.IN | posix.POLL.HUP | posix.POLL.ERR,
-                .revents = 0,
-            }};
+            var poll_fds = [_]posix.pollfd{
+                .{
+                    .fd = self.fd,
+                    .events = posix.POLL.IN | posix.POLL.HUP | posix.POLL.ERR,
+                    .revents = 0,
+                },
+                .{
+                    .fd = self.wake.recv_fd,
+                    .events = posix.POLL.IN,
+                    .revents = 0,
+                },
+            };
 
             while (true) {
                 if (self.closed) return error.Closed;
                 if (!self.listening) return error.SocketNotListening;
 
                 poll_fds[0].revents = 0;
-                const ready = posix.poll(poll_fds[0..], 50) catch |err| {
+                poll_fds[1].revents = 0;
+                const ready = posix.poll(poll_fds[0..], -1) catch |err| {
                     if (errorNameEquals(err, "Interrupted")) continue;
                     return err;
                 };
                 if (ready == 0) continue;
+                if (poll_fds[0].revents != 0) {
+                    if (self.closed) return error.Closed;
+                    if (!self.listening) return error.SocketNotListening;
+                    return;
+                }
+                if (poll_fds[1].revents != 0) {
+                    self.wake.drain();
+                    if (self.closed) return error.Closed;
+                    if (!self.listening) return error.SocketNotListening;
+                    continue;
+                }
                 return;
             }
         }

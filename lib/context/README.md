@@ -7,7 +7,8 @@
 - request-scoped values
 
 The public entrypoint is `make(lib)`, where `lib` supplies the platform-facing
-pieces (`lib.Thread`, `lib.time`, `lib.mem`, and `lib.debug` when needed).
+pieces (`lib.Thread`, `lib.time`, and `lib.mem`). `bindFd(...)` additionally
+uses `lib.posix` when a caller wants cancellation to signal a borrowed wake fd.
 
 ## Quick start
 
@@ -73,10 +74,13 @@ Derived contexts inherit the parent's allocator:
 var cc = try context.withCancel(bg);
 var dc = try context.withDeadline(bg, lib.time.milliTimestamp() + 1000);
 var tc = try context.withTimeout(bg, 1000);
+var wake_fd = some_posix_socket;
+try cc.bindFd(lib, &wake_fd);
 var vc = try context.withValue(u64, cc, &request_id_key, 42);
 ```
 
-All of these return `Context` handles directly.
+The `with*` helpers return `Context` handles directly. `bindFd(...)` borrows a
+caller-owned fd slot by pointer and stores one binding value on that context.
 
 ## Core operations
 
@@ -87,7 +91,13 @@ All of these return `Context` handles directly.
 - `wait(timeout_ns)` blocks until cancel/deadline or timeout
 - `cancel()` marks the node canceled with `error.Canceled`
 - `cancelWithCause(err)` marks the node canceled with a custom cause
+- `checkState()` maps the current cancellation cause to `error.Canceled` or
+  `error.DeadlineExceeded`
 - `deinit()` detaches the node from the tree and frees its implementation
+- `bindLink(link)` stores one erased binding value on the context
+- `fdLink(lib, &fd)` builds an erased binding value for a borrowed wake-fd slot
+- `bindFd(lib, &fd)` registers a cancellation wakeup that writes one byte to the
+  provided caller-owned fd slot
 - `value(T, key)` performs typed lookup through the parent chain
 - `as(T)` downcasts to a concrete implementation when tests/internal code need it
 
@@ -135,15 +145,32 @@ error instead of silently disabling the deadline.
 - values are matched by key address identity
 - lookups prefer the nearest matching value
 - `cancel()` / `cancelWithCause()` are no-ops on the value node itself
-- cancellation and wait behavior delegate through the parent chain
+- deadline lookup delegates through the parent chain
+- parent cancellation still propagates through the value node and wakes its waiters directly
+
+### BindingLink / bindFd
+
+`ctx.bindFd(lib, &fd)` attaches a cancellation side effect to an existing
+context. When that context observes its first cancellation cause:
+
+- the bound fd is written once, so an external `poll(...)` can wake up
+- only one active bound fd is allowed per context at a time
+- the binding fires before descendant propagation
+- the borrowed fd slot stays owned by the caller
+
+This is useful when some other subsystem already owns the wake fd and only wants
+the context tree to signal it on cancellation.
 
 ## Lifecycle contract
 
 Derived contexts are owning handles. The creator that calls `withCancel`,
-`withDeadline`, `withTimeout`, or `withValue` is responsible for eventually
-calling `deinit()` on that returned handle.
+`withDeadline`, `withTimeout`, or `withValue` is
+responsible for eventually calling `deinit()` on that returned handle.
 
 `cancel()` only changes cancellation state. It does not free memory.
+
+`bindFd(...)` borrows a caller-owned fd slot. Rebinding or clearing that slot is
+done through `bindLink(...)` on the context itself.
 
 `deinit()`:
 
@@ -193,6 +220,7 @@ The test runner covers:
 
 - basic cancellation and custom causes
 - propagation through cancel, deadline, and value nodes
+- bound-fd wakeups, immediate fire, detach, and ordering
 - spurious wake handling in timed waits
 - deadline timer startup failure behavior
 - lifecycle rules such as reparent-on-deinit and root deinit's empty-tree

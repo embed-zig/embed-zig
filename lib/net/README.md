@@ -83,6 +83,7 @@ lib/
       Stream.zig       Internal non-blocking stream socket wrapper
       Packet.zig       Internal non-blocking datagram socket wrapper
       Listener.zig     Internal non-blocking listen/accept wrapper
+      Wake.zig         Internal close/context wake-fd helper
       SockAddr.zig     AddrPort <-> sockaddr bridge
     netip/
       Addr.zig         IP address value type
@@ -143,6 +144,10 @@ Internally, stream and packet sockets now run through `lib/net/fd` as the
 shared non-blocking substrate. Public callers still work with `Dialer`,
 `TcpConn`, `TcpListener`, `UdpConn`, `Conn`, `Listener`, and `PacketConn`;
 the fd layer remains an internal implementation detail.
+
+Context-aware stream waits and `connectContext(...)` now reuse each netfd's own
+wake fd: `close()` signals that fd directly, and `ctx.bindFd(...)` temporarily
+binds the same wake path for context cancellation in the common case.
 
 Regression coverage is split between unit topic aggregators under
 `lib/net/test_runner/unit/` and deterministic local integration aggregators

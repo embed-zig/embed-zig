@@ -10,6 +10,8 @@ const stream_connect_context_deadline_exceeded_before_start = @import("fd_stream
 const stream_connect_context_canceled_during_connect = @import("fd_stream/stream_connect_context_canceled_during_connect.zig");
 const stream_connect_context_deadline_exceeded_during_connect = @import("fd_stream/stream_connect_context_deadline_exceeded_during_connect.zig");
 const stream_connect_refused_keeps_specific_error = @import("fd_stream/stream_connect_refused_keeps_specific_error.zig");
+const listener_close_unblocks_blocked_accept = @import("fd_stream/listener_close_unblocks_blocked_accept.zig");
+const stream_close_unblocks_blocked_read = @import("fd_stream/stream_close_unblocks_blocked_read.zig");
 const stream_read_waits_until_readable = @import("fd_stream/stream_read_waits_until_readable.zig");
 const stream_write_waits_until_writable = @import("fd_stream/stream_write_waits_until_writable.zig");
 const stream_full_duplex_concurrent_streaming = @import("fd_stream/stream_full_duplex_concurrent_streaming.zig");
@@ -42,6 +44,8 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             t.run("streamConnectContextCanceledDuringConnect", stream_connect_context_canceled_during_connect.make(lib));
             t.run("streamConnectContextDeadlineExceededDuringConnect", stream_connect_context_deadline_exceeded_during_connect.make(lib));
             t.run("streamConnectRefusedKeepsSpecificError", stream_connect_refused_keeps_specific_error.make(lib));
+            t.run("listenerCloseUnblocksBlockedAccept", listener_close_unblocks_blocked_accept.make(lib));
+            t.run("streamCloseUnblocksBlockedRead", stream_close_unblocks_blocked_read.make(lib));
             t.run("streamReadWaitsUntilReadable", stream_read_waits_until_readable.make(lib));
             t.run("streamWriteWaitsUntilWritable", stream_write_waits_until_writable.make(lib));
             t.run("streamFullDuplexConcurrentStreaming", stream_full_duplex_concurrent_streaming.make(lib));

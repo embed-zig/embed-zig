@@ -6,6 +6,7 @@ const sockaddr_mod = @import("../../../fd/SockAddr.zig");
 const tcp_test_utils = @import("../tcp/test_utils.zig");
 
 pub const skipIfConnectDidNotPend = tcp_test_utils.skipIfConnectDidNotPend;
+pub const ReadyCounter = tcp_test_utils.ReadyCounter;
 
 pub fn Harness(comptime lib: type) type {
     const Packet = fd_mod.Packet(lib);

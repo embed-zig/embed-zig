@@ -34,9 +34,14 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
                     try valueNearestValueShadowsParentCase(lib, case_allocator);
                 }
             }.run));
-            t.run("err_delegates_to_parent", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
+            t.run("err_tracks_parent_cancellation", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
                 fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try valueErrDelegatesToParentCase(lib, case_allocator);
+                    try valueErrTracksParentCancellationCase(lib, case_allocator);
+                }
+            }.run));
+            t.run("child_of_canceled_parent_starts_canceled", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
+                    try valueChildOfCanceledParentStartsCanceledCase(lib, case_allocator);
                 }
             }.run));
             t.run("cancel_propagates_through_value_node", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
@@ -52,6 +57,11 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             t.run("cancel_methods_are_noop_on_value_node", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
                 fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
                     try valueCancelMethodsAreNoopOnValueNodeCase(lib, case_allocator);
+                }
+            }.run));
+            t.run("keeps_cause_after_parent_deinit", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
+                    try valueKeepsCauseAfterParentDeinitCase(lib, case_allocator);
                 }
             }.run));
             return t.wait();
@@ -128,7 +138,7 @@ fn valueNearestValueShadowsParentCase(comptime lib: type, allocator: lib.mem.All
     if (val != 2) return error.ShadowingWrongValue;
 }
 
-fn valueErrDelegatesToParentCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
+fn valueErrTracksParentCancellationCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
     const CtxApi = context_root.make(lib);
     var ctx_ns = try CtxApi.init(allocator);
     defer ctx_ns.deinit();
@@ -143,6 +153,27 @@ fn valueErrDelegatesToParentCase(comptime lib: type, allocator: lib.mem.Allocato
     cc.cancelWithCause(error.TimedOut);
     const e = ctx.err() orelse return error.ValueErrAfterCancelMissing;
     if (e != error.TimedOut) return error.ValueErrAfterCancelWrong;
+}
+
+fn valueChildOfCanceledParentStartsCanceledCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
+    const CtxApi = context_root.make(lib);
+    var ctx_ns = try CtxApi.init(allocator);
+    defer ctx_ns.deinit();
+
+    var key: Context.Key(u64) = .{};
+    const bg = ctx_ns.background();
+    var parent_cc = try ctx_ns.withCancel(bg);
+    defer parent_cc.deinit();
+    parent_cc.cancelWithCause(error.TimedOut);
+
+    var ctx = try ctx_ns.withValue(u64, parent_cc, &key, 42);
+    defer ctx.deinit();
+
+    const err = ctx.err() orelse return error.ValueChildOfCanceledParentShouldStartCanceled;
+    if (err != error.TimedOut) return error.ValueChildOfCanceledParentWrongCause;
+
+    const cause = ctx.wait(20 * lib.time.ns_per_ms) orelse return error.ValueChildOfCanceledParentWaitMissing;
+    if (cause != error.TimedOut) return error.ValueChildOfCanceledParentWaitWrongCause;
 }
 
 fn valueCancelPropagatesThroughValueNodeCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
@@ -211,4 +242,25 @@ fn valueCancelMethodsAreNoopOnValueNodeCase(comptime lib: type, allocator: lib.m
     parent_cc.cancelWithCause(error.TimedOut);
     const child_err = child_cc.err() orelse return error.ParentCancelShouldStillPropagateAfterValueCancel;
     if (child_err != error.TimedOut) return error.ParentCancelAfterValueCancelWrongCause;
+}
+
+fn valueKeepsCauseAfterParentDeinitCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
+    const CtxApi = context_root.make(lib);
+    var ctx_ns = try CtxApi.init(allocator);
+    defer ctx_ns.deinit();
+
+    var key: Context.Key(u64) = .{};
+    const bg = ctx_ns.background();
+    var parent_cc = try ctx_ns.withCancel(bg);
+    var ctx = try ctx_ns.withValue(u64, parent_cc, &key, 42);
+    defer ctx.deinit();
+
+    parent_cc.cancelWithCause(error.TimedOut);
+    const before = ctx.err() orelse return error.ValueCauseBeforeParentDeinitMissing;
+    if (before != error.TimedOut) return error.ValueCauseBeforeParentDeinitWrong;
+
+    parent_cc.deinit();
+
+    const after = ctx.err() orelse return error.ValueCauseAfterParentDeinitMissing;
+    if (after != error.TimedOut) return error.ValueCauseAfterParentDeinitWrong;
 }

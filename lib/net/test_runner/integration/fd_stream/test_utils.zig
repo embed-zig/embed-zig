@@ -9,6 +9,7 @@ const tcp_test_utils = @import("../tcp/test_utils.zig");
 // Re-export for case bodies (same semantics as TCP integration).
 pub const fillPattern = tcp_test_utils.fillPattern;
 pub const skipIfConnectDidNotPend = tcp_test_utils.skipIfConnectDidNotPend;
+pub const ReadyCounter = tcp_test_utils.ReadyCounter;
 
 pub fn Harness(comptime lib: type) type {
     const Stream = fd_mod.Stream(lib);

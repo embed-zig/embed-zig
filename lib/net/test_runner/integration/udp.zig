@@ -19,7 +19,9 @@ const bound_port6_rejects_ipv4_sockets = @import("udp/bound_port6_rejects_ipv4_s
 const read_timeout = @import("udp/read_timeout.zig");
 const dial_context = @import("udp/dial_context.zig");
 const conn_zero_length_read_does_not_consume_datagram = @import("udp/conn_zero_length_read_does_not_consume_datagram.zig");
+const conn_close_unblocks_blocked_read = @import("udp/conn_close_unblocks_blocked_read.zig");
 const packet_conn_zero_length_read_does_not_consume_datagram = @import("udp/packet_conn_zero_length_read_does_not_consume_datagram.zig");
+const packet_conn_close_unblocks_blocked_read = @import("udp/packet_conn_close_unblocks_blocked_read.zig");
 const dial_context_canceled_before_start = @import("udp/dial_context_canceled_before_start.zig");
 const dial_context_deadline_exceeded_before_start = @import("udp/dial_context_deadline_exceeded_before_start.zig");
 const dial_context_canceled_during_connect = @import("udp/dial_context_canceled_during_connect.zig");
@@ -49,7 +51,9 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             t.run("read_timeout", read_timeout.make(lib));
             t.run("dial_context", dial_context.make(lib));
             t.run("conn_zero_length_read_does_not_consume_datagram", conn_zero_length_read_does_not_consume_datagram.make(lib));
+            t.run("conn_close_unblocks_blocked_read", conn_close_unblocks_blocked_read.make(lib));
             t.run("packet_conn_zero_length_read_does_not_consume_datagram", packet_conn_zero_length_read_does_not_consume_datagram.make(lib));
+            t.run("packet_conn_close_unblocks_blocked_read", packet_conn_close_unblocks_blocked_read.make(lib));
             t.run("dial_context_canceled_before_start", dial_context_canceled_before_start.make(lib));
             t.run("dial_context_deadline_exceeded_before_start", dial_context_deadline_exceeded_before_start.make(lib));
             t.run("dial_context_canceled_during_connect", dial_context_canceled_during_connect.make(lib));
