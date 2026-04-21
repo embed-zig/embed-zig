@@ -1,5 +1,9 @@
 const testing_api = @import("testing");
 const builtin = @import("builtin");
+const Component = @import("../spec/Component.zig");
+const JsonParser = @import("../spec/JsonParser.zig");
+const Spec = @import("../Spec.zig");
+const UserStory = @import("../spec/UserStory.zig");
 
 pub const assembler = @import("unit/assembler.zig");
 pub const button = @import("unit/button.zig");
@@ -31,6 +35,10 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
 
             t.parallel();
             t.run("assembler", assembler.make(lib, Channel));
+            t.run("Spec", Spec.TestRunner(lib));
+            t.run("spec/JsonParser", JsonParser.TestRunner(lib));
+            t.run("spec/Component", Component.TestRunner(lib));
+            t.run("spec/UserStory", UserStory.TestRunner(lib));
             t.run("button", button.make(lib));
             t.run("bt", bt.make(lib));
             t.run("event", event.make(lib));

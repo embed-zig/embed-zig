@@ -10,7 +10,7 @@
 //!
 //! 用法示例：
 //! ```
-//! const runner = @import("sync/test_runner/integration/channel.zig").make(lib, @import("sync").Channel(platform.Channel));
+//! const runner = @import("sync/test_runner/integration/channel.zig").make(lib, @import("sync").Channel(lib, platform.ChannelFactory));
 //! t.run("sync/channel", runner);
 //! ```
 //!

@@ -198,6 +198,7 @@ pub fn Transport(comptime lib: type) type {
             pool_generation: usize = 0,
             reusable: bool = false,
             released_conn: bool = false,
+            read_context_active: bool = false,
 
             const ChunkedState = struct {
                 remaining_in_chunk: usize = 0,
@@ -229,6 +230,7 @@ pub fn Transport(comptime lib: type) type {
                 // Wait for any request-body writer to stop before discarding the shared
                 // connection; otherwise chunked/fixed body senders can race into BADF.
                 self.finishRequestBody() catch {};
+                self.clearReadContext();
                 if (self.owns_conn) {
                     if (self.transport) |transport| {
                         transport.discardConn(self.conn, self.pool_key);
@@ -357,6 +359,7 @@ pub fn Transport(comptime lib: type) type {
                 if (!self.reusable or self.released_conn or !self.owns_conn) return;
                 const transport = self.transport orelse return;
 
+                self.clearReadContext();
                 transport.releaseConn(self.conn, self.pool_key, self.pool_generation);
                 self.owns_conn = false;
                 self.released_conn = true;
@@ -371,8 +374,6 @@ pub fn Transport(comptime lib: type) type {
             }
 
             fn streamRead(self: *BodyState, buf: []u8) anyerror!usize {
-                const active = self.pushIoContext();
-                defer self.popIoContext(active);
                 return self.buffered.ioReader().readSliceShort(buf) catch |err| switch (err) {
                     error.ReadFailed => return self.buffered.err() orelse error.Unexpected,
                     else => return err,
@@ -380,8 +381,6 @@ pub fn Transport(comptime lib: type) type {
             }
 
             fn streamReadLine(self: *BodyState, buf: []u8) anyerror![]const u8 {
-                const active = self.pushIoContext();
-                defer self.popIoContext(active);
                 const raw = self.buffered.ioReader().takeDelimiterInclusive('\n') catch |err| switch (err) {
                     error.ReadFailed => return self.buffered.err() orelse error.Unexpected,
                     else => return err,
@@ -394,8 +393,6 @@ pub fn Transport(comptime lib: type) type {
             }
 
             fn streamExpectCrlf(self: *BodyState) anyerror!void {
-                const active = self.pushIoContext();
-                defer self.popIoContext(active);
                 if (try self.readBufferedByteNoContext() != '\r') return error.InvalidResponse;
                 if (try self.readBufferedByteNoContext() != '\n') return error.InvalidResponse;
             }
@@ -418,34 +415,22 @@ pub fn Transport(comptime lib: type) type {
                 return one[0];
             }
 
-            fn pushIoContext(self: *BodyState) bool {
-                const ctx = self.ctx orelse return false;
+            fn clearReadContext(self: *BodyState) void {
+                if (!self.read_context_active) return;
+                self.read_context_active = false;
                 if (self.conn.as(TcpConn)) |tcp_conn| {
-                    tcp_conn.pushIoContext(ctx);
-                    return true;
-                } else |_| {}
-                if (self.conn.as(Tls.Conn)) |tls_conn| {
-                    tls_conn.pushIoContext(ctx);
-                    return true;
-                } else |_| {}
-                return false;
-            }
-
-            fn popIoContext(self: *BodyState, active: bool) void {
-                if (!active) return;
-                if (self.conn.as(TcpConn)) |tcp_conn| {
-                    tcp_conn.popIoContext();
+                    tcp_conn.setReadContext(null) catch unreachable;
                     return;
                 } else |_| {}
                 if (self.conn.as(Tls.Conn)) |tls_conn| {
-                    tls_conn.popIoContext();
+                    tls_conn.setReadContext(null) catch unreachable;
                 } else |_| {}
             }
 
             fn contextTimeoutError(self: *BodyState) anyerror {
                 if (self.ctx) |ctx| {
                     if (ctx.err()) |err| return err;
-                    if (ctx.deadline() != null) return error.DeadlineExceeded;
+                    if (contextDeadlineExceeded(ctx)) return error.DeadlineExceeded;
                 }
                 return error.TimedOut;
             }
@@ -480,6 +465,7 @@ pub fn Transport(comptime lib: type) type {
             result: ?anyerror = null,
             continue_state: ContinueState = .send,
             expect_continue_timeout_ms: u32 = 0,
+            write_context_active: bool = false,
 
             const ContinueState = enum {
                 send,
@@ -498,6 +484,7 @@ pub fn Transport(comptime lib: type) type {
                 content_length: usize,
                 wait_for_continue: bool,
                 expect_continue_timeout_ms: u32,
+                write_context_active: bool,
             ) RoundTripper.RoundTripError!*RequestBodyState {
                 const state = try allocator.create(RequestBodyState);
                 errdefer allocator.destroy(state);
@@ -517,6 +504,7 @@ pub fn Transport(comptime lib: type) type {
                     .content_length = content_length,
                     .continue_state = if (wait_for_continue and expect_continue_timeout_ms != 0) .wait else .send,
                     .expect_continue_timeout_ms = expect_continue_timeout_ms,
+                    .write_context_active = write_context_active,
                 };
                 state.thread = Thread.spawn(transport.options.spawn_config, run, .{state}) catch {
                     state.closeBody();
@@ -535,6 +523,7 @@ pub fn Transport(comptime lib: type) type {
                 }
                 self.mu.unlock();
                 self.closeBody();
+                self.conn.close();
             }
 
             fn closeBody(self: *RequestBodyState) void {
@@ -547,11 +536,13 @@ pub fn Transport(comptime lib: type) type {
 
             fn finish(self: *RequestBodyState) ?anyerror {
                 const thread = self.takeThread() orelse {
+                    self.clearWriteContext();
                     self.mu.lock();
                     defer self.mu.unlock();
                     return self.result;
                 };
                 thread.join();
+                self.clearWriteContext();
                 self.mu.lock();
                 defer self.mu.unlock();
                 return self.result;
@@ -566,6 +557,18 @@ pub fn Transport(comptime lib: type) type {
             fn freeIoBuf(self: *RequestBodyState) void {
                 self.allocator.free(self.io_buf);
                 self.io_buf = &.{};
+            }
+
+            fn clearWriteContext(self: *RequestBodyState) void {
+                if (!self.write_context_active) return;
+                self.write_context_active = false;
+                if (self.conn.as(TcpConn)) |tcp_conn| {
+                    tcp_conn.setWriteContext(null) catch unreachable;
+                    return;
+                } else |_| {}
+                if (self.conn.as(Tls.Conn)) |tls_conn| {
+                    tls_conn.setWriteContext(null) catch unreachable;
+                } else |_| {}
             }
 
             fn takeThread(self: *RequestBodyState) ?Thread {
@@ -610,16 +613,44 @@ pub fn Transport(comptime lib: type) type {
                 self.mu.lock();
                 defer self.mu.unlock();
 
-                if (self.continue_state != .wait) {
-                    return self.continue_state != .skip and !self.abort_requested;
-                }
+                if (self.continue_state != .wait) return self.continue_state != .skip and !self.abort_requested;
 
-                const timeout_ns = @as(u64, self.expect_continue_timeout_ms) * lib.time.ns_per_ms;
-                self.continue_cond.timedWait(&self.mu, timeout_ns) catch |err| switch (err) {
-                    error.Timeout => {
-                        if (self.continue_state == .wait) self.continue_state = .send;
-                    },
-                };
+                const wait_quantum_ns = 5 * lib.time.ns_per_ms;
+                const continue_deadline_ns = lib.time.nanoTimestamp() +
+                    @as(i128, self.expect_continue_timeout_ms) * lib.time.ns_per_ms;
+
+                while (self.continue_state == .wait and !self.abort_requested) {
+                    if (self.req.context()) |ctx| {
+                        if (ctx.err()) |err| {
+                            self.continue_state = .skip;
+                            self.result = err;
+                            return false;
+                        }
+                    }
+
+                    const now_ns = lib.time.nanoTimestamp();
+                    if (now_ns >= continue_deadline_ns) {
+                        self.continue_state = .send;
+                        break;
+                    }
+
+                    var wait_ns: i128 = @min(continue_deadline_ns - now_ns, wait_quantum_ns);
+                    if (self.req.context()) |ctx| {
+                        if (ctx.deadline()) |ctx_deadline_ns| {
+                            const ctx_remaining_ns = ctx_deadline_ns - now_ns;
+                            if (ctx_remaining_ns <= 0) {
+                                self.continue_state = .skip;
+                                self.result = error.DeadlineExceeded;
+                                return false;
+                            }
+                            wait_ns = @min(wait_ns, ctx_remaining_ns);
+                        }
+                    }
+
+                    self.continue_cond.timedWait(&self.mu, @intCast(@max(wait_ns, 1))) catch |err| switch (err) {
+                        error.Timeout => {},
+                    };
+                }
 
                 return self.continue_state != .skip and !self.abort_requested;
             }
@@ -756,6 +787,8 @@ pub fn Transport(comptime lib: type) type {
 
             try self.applyTimeouts(lease.conn.?, req);
             var conn_writer = lease.conn.?;
+            var write_ctx_active = try self.setConnWriteContext(conn_writer, req.context());
+            defer self.clearConnWriteContext(conn_writer, write_ctx_active);
             var buffered_writer = try BufferedConnWriter.initAlloc(&conn_writer, req.allocator, self.options.body_io_buf_len);
             var buffered_writer_transferred = false;
             defer if (!buffered_writer_transferred) buffered_writer.deinit();
@@ -765,10 +798,7 @@ pub fn Transport(comptime lib: type) type {
 
             defer if (request_body_state) |state| {
                 state.requestAbort();
-                // Wait for the request-body writer to observe cancellation before
-                // closing the shared connection, otherwise concurrent send() may hit BADF.
                 _ = state.finish();
-                if (lease.conn) |active_conn| active_conn.close();
                 state.destroy();
             };
 
@@ -784,7 +814,9 @@ pub fn Transport(comptime lib: type) type {
                     content_length,
                     wait_for_continue,
                     self.options.expect_continue_timeout_ms,
+                    write_ctx_active,
                 );
+                write_ctx_active = false;
                 buffered_writer_transferred = true;
             }
 
@@ -951,8 +983,10 @@ pub fn Transport(comptime lib: type) type {
 
             const handshake_started_ms = lib.time.milliTimestamp();
             const typed = tls_conn.as(Tls.Conn) catch return error.Unexpected;
-            const handshake_ctx_active = self.pushConnIoContext(tls_conn, req.context());
-            defer self.popConnIoContext(tls_conn, handshake_ctx_active);
+            const handshake_read_ctx_active = try self.setConnReadContext(tls_conn, req.context());
+            defer self.clearConnReadContext(tls_conn, handshake_read_ctx_active);
+            const handshake_write_ctx_active = try self.setConnWriteContext(tls_conn, req.context());
+            defer self.clearConnWriteContext(tls_conn, handshake_write_ctx_active);
             typed.handshake() catch |err| return switch (err) {
                 error.RecordIoFailed => self.mapTlsHandshakeIoError(req, handshake_timeout_ms, handshake_started_ms),
                 else => err,
@@ -968,6 +1002,8 @@ pub fn Transport(comptime lib: type) type {
                 errdefer proxy_conn.deinit();
                 try self.applyTimeouts(proxy_conn, req);
                 var proxy_conn_writer = proxy_conn;
+                const write_ctx_active = try self.setConnWriteContext(proxy_conn_writer, req.context());
+                defer self.clearConnWriteContext(proxy_conn_writer, write_ctx_active);
                 var buffered_writer = try BufferedConnWriter.initAlloc(&proxy_conn_writer, req.allocator, self.options.body_io_buf_len);
                 defer buffered_writer.deinit();
                 try self.writeConnectRequest(&buffered_writer, proxy_conn_writer, req, proxy, route.target_port);
@@ -991,8 +1027,10 @@ pub fn Transport(comptime lib: type) type {
 
             const handshake_started_ms = lib.time.milliTimestamp();
             const typed = tls_conn.as(Tls.Conn) catch return error.Unexpected;
-            const handshake_ctx_active = self.pushConnIoContext(tls_conn, req.context());
-            defer self.popConnIoContext(tls_conn, handshake_ctx_active);
+            const handshake_read_ctx_active = try self.setConnReadContext(tls_conn, req.context());
+            defer self.clearConnReadContext(tls_conn, handshake_read_ctx_active);
+            const handshake_write_ctx_active = try self.setConnWriteContext(tls_conn, req.context());
+            defer self.clearConnWriteContext(tls_conn, handshake_write_ctx_active);
             typed.handshake() catch |err| return switch (err) {
                 error.RecordIoFailed => self.mapTlsHandshakeIoError(req, handshake_timeout_ms, handshake_started_ms),
                 else => err,
@@ -1007,29 +1045,55 @@ pub fn Transport(comptime lib: type) type {
             conn.setWriteTimeout(remaining);
         }
 
-        fn pushConnIoContext(self: *Self, conn: Conn, ctx: ?Context) bool {
+        fn setConnReadContext(self: *Self, conn: Conn, ctx: ?Context) RoundTripper.RoundTripError!bool {
             _ = self;
             const active_ctx = ctx orelse return false;
             if (conn.as(TcpConn)) |tcp_conn| {
-                tcp_conn.pushIoContext(active_ctx);
+                try tcp_conn.setReadContext(active_ctx);
                 return true;
             } else |_| {}
             if (conn.as(Tls.Conn)) |tls_conn| {
-                tls_conn.pushIoContext(active_ctx);
+                try tls_conn.setReadContext(active_ctx);
                 return true;
             } else |_| {}
             return false;
         }
 
-        fn popConnIoContext(self: *Self, conn: Conn, active: bool) void {
+        fn clearConnReadContext(self: *Self, conn: Conn, active: bool) void {
             _ = self;
             if (!active) return;
             if (conn.as(TcpConn)) |tcp_conn| {
-                tcp_conn.popIoContext();
+                tcp_conn.setReadContext(null) catch unreachable;
                 return;
             } else |_| {}
             if (conn.as(Tls.Conn)) |tls_conn| {
-                tls_conn.popIoContext();
+                tls_conn.setReadContext(null) catch unreachable;
+            } else |_| {}
+        }
+
+        fn setConnWriteContext(self: *Self, conn: Conn, ctx: ?Context) RoundTripper.RoundTripError!bool {
+            _ = self;
+            const active_ctx = ctx orelse return false;
+            if (conn.as(TcpConn)) |tcp_conn| {
+                try tcp_conn.setWriteContext(active_ctx);
+                return true;
+            } else |_| {}
+            if (conn.as(Tls.Conn)) |tls_conn| {
+                try tls_conn.setWriteContext(active_ctx);
+                return true;
+            } else |_| {}
+            return false;
+        }
+
+        fn clearConnWriteContext(self: *Self, conn: Conn, active: bool) void {
+            _ = self;
+            if (!active) return;
+            if (conn.as(TcpConn)) |tcp_conn| {
+                tcp_conn.setWriteContext(null) catch unreachable;
+                return;
+            } else |_| {}
+            if (conn.as(Tls.Conn)) |tls_conn| {
+                tls_conn.setWriteContext(null) catch unreachable;
             } else |_| {}
         }
 
@@ -1124,6 +1188,8 @@ pub fn Transport(comptime lib: type) type {
 
         fn writeRequest(self: *Self, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
             var conn_writer = conn;
+            const write_ctx_active = try self.setConnWriteContext(conn_writer, req.context());
+            defer self.clearConnWriteContext(conn_writer, write_ctx_active);
             var buffered_writer = try BufferedConnWriter.initAlloc(&conn_writer, req.allocator, self.options.body_io_buf_len);
             defer buffered_writer.deinit();
             try self.writeRequestHead(&buffered_writer, conn_writer, req);
@@ -1215,14 +1281,12 @@ pub fn Transport(comptime lib: type) type {
         }
 
         fn writeAllBuffered(self: *Self, buffered: *BufferedConnWriter, conn: Conn, req: *const Request, buf: []const u8) RoundTripper.RoundTripError!void {
-            const io_ctx_active = self.pushConnIoContext(conn, req.context());
-            defer self.popConnIoContext(conn, io_ctx_active);
+            _ = conn;
             buffered.ioWriter().writeAll(buf) catch return self.mapBufferedWriteError(buffered, req);
         }
 
         fn flushBufferedWriter(self: *Self, buffered: *BufferedConnWriter, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
-            const io_ctx_active = self.pushConnIoContext(conn, req.context());
-            defer self.popConnIoContext(conn, io_ctx_active);
+            _ = conn;
             buffered.flush() catch return self.mapBufferedWriteError(buffered, req);
         }
 
@@ -1238,8 +1302,7 @@ pub fn Transport(comptime lib: type) type {
             req: *const Request,
             parts: []const []const u8,
         ) RoundTripper.RoundTripError!void {
-            const io_ctx_active = self.pushConnIoContext(conn, req.context());
-            defer self.popConnIoContext(conn, io_ctx_active);
+            _ = conn;
             writer.writeLineParts(parts) catch |err| switch (err) {
                 error.InvalidLine => return error.InvalidHeader,
                 error.WriteFailed => return self.mapBufferedWriteError(buffered, req),
@@ -1277,10 +1340,15 @@ pub fn Transport(comptime lib: type) type {
             var remaining = content_length;
             var reader = body;
             while (remaining != 0) {
+                try self.checkRequestSendContext(req);
                 const n = try reader.read(buf[0..@min(buf.len, remaining)]);
                 if (n == 0) return error.InvalidResponse;
+                try self.checkRequestSendContext(req);
                 try self.writeAllBuffered(buffered, conn, req, buf[0..n]);
-                if (flush_each_chunk) try self.flushBufferedWriter(buffered, conn, req);
+                if (flush_each_chunk) {
+                    try self.flushBufferedWriter(buffered, conn, req);
+                    try self.checkRequestSendContext(req);
+                }
                 remaining -= n;
             }
         }
@@ -1301,20 +1369,29 @@ pub fn Transport(comptime lib: type) type {
             var total_written: usize = 0;
 
             while (true) {
+                try self.checkRequestSendContext(req);
                 const n = try reader.read(buf);
                 if (n == 0) break;
                 if (n > self.options.max_body_bytes -| total_written) return error.BodyTooLarge;
                 total_written += n;
+                try self.checkRequestSendContext(req);
 
                 const size_line = std.fmt.bufPrint(&size_buf, "{x}\r\n", .{n}) catch return error.Unexpected;
                 try self.writeAllBuffered(buffered, conn, req, size_line);
                 try self.writeAllBuffered(buffered, conn, req, buf[0..n]);
                 try self.writeAllBuffered(buffered, conn, req, "\r\n");
-                if (flush_each_chunk) try self.flushBufferedWriter(buffered, conn, req);
+                if (flush_each_chunk) {
+                    try self.flushBufferedWriter(buffered, conn, req);
+                    try self.checkRequestSendContext(req);
+                }
             }
 
+            try self.checkRequestSendContext(req);
             try self.writeAllBuffered(buffered, conn, req, "0\r\n\r\n");
-            if (flush_each_chunk) try self.flushBufferedWriter(buffered, conn, req);
+            if (flush_each_chunk) {
+                try self.flushBufferedWriter(buffered, conn, req);
+                try self.checkRequestSendContext(req);
+            }
         }
 
         fn requestTarget(_: *Self, allocator: Allocator, req: *const Request) Allocator.Error![]u8 {
@@ -1413,26 +1490,27 @@ pub fn Transport(comptime lib: type) type {
         ) RoundTripper.RoundTripError!Response {
             const allocator = req.allocator;
             var conn_reader = lease.conn orelse unreachable;
+            var read_ctx_active = try self.setConnReadContext(conn_reader, req.context());
+            defer self.clearConnReadContext(conn_reader, read_ctx_active);
             var buffered = try BufferedConnReader.initAlloc(&conn_reader, allocator, self.options.max_header_bytes);
             var buffered_transferred = false;
             defer if (!buffered_transferred) buffered.deinit();
             var informational_responses: usize = 0;
 
             while (true) {
-                const head_storage = blk: {
-                    const head_ctx_active = self.pushConnIoContext(conn_reader, req.context());
-                    defer self.popConnIoContext(conn_reader, head_ctx_active);
-                    break :blk self.readResponseHead(&buffered, allocator);
-                } catch |err| return switch (err) {
-                    error.EndOfStream => if (lease.reused) error.ServerClosedIdle else error.InvalidResponse,
-                    error.StreamTooLong, error.BufferTooSmall => error.BufferTooSmall,
-                    error.ReadFailed => switch (buffered.err() orelse error.Unexpected) {
-                        error.TimedOut => self.contextTimeoutError(req),
-                        error.ConnectionReset => error.ConnectionReset,
-                        error.ConnectionRefused => error.ConnectionRefused,
+                const head_storage = self.readResponseHead(&buffered, allocator) catch |err| {
+                    const fallback: RoundTripper.RoundTripError = switch (err) {
+                        error.EndOfStream => if (lease.reused) error.ServerClosedIdle else error.InvalidResponse,
+                        error.StreamTooLong, error.BufferTooSmall => error.BufferTooSmall,
+                        error.ReadFailed => switch (buffered.err() orelse error.Unexpected) {
+                            error.TimedOut => self.contextTimeoutError(req),
+                            error.ConnectionReset => error.ConnectionReset,
+                            error.ConnectionRefused => error.ConnectionRefused,
+                            else => error.Unexpected,
+                        },
                         else => error.Unexpected,
-                    },
-                    else => error.Unexpected,
+                    };
+                    return self.preferRequestBodyResult(request_body_state.*, fallback);
                 };
 
                 var parsed_state: ResponseState = .{
@@ -1493,7 +1571,9 @@ pub fn Transport(comptime lib: type) type {
                     .pool_key = lease.pool_key,
                     .pool_generation = lease.pool_generation,
                     .reusable = !skipped_waiting_request_body and lease.reusable and self.responseCanReuseConnection(req, parsed),
+                    .read_context_active = read_ctx_active,
                 };
+                read_ctx_active = false;
                 body_state.buffered.rd = &body_state.conn;
                 buffered_transferred = true;
                 errdefer {
@@ -1750,16 +1830,14 @@ pub fn Transport(comptime lib: type) type {
         fn readConnectResponse(self: *Self, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
             const allocator = req.allocator;
             var conn_reader = conn;
+            const read_ctx_active = try self.setConnReadContext(conn_reader, req.context());
+            defer self.clearConnReadContext(conn_reader, read_ctx_active);
             var buffered = try BufferedConnReader.initAlloc(&conn_reader, allocator, self.options.max_header_bytes);
             defer buffered.deinit();
             var informational_responses: usize = 0;
 
             while (true) {
-                const head_storage = blk: {
-                    const head_ctx_active = self.pushConnIoContext(conn_reader, req.context());
-                    defer self.popConnIoContext(conn_reader, head_ctx_active);
-                    break :blk self.readResponseHead(&buffered, allocator);
-                } catch |err| return switch (err) {
+                const head_storage = self.readResponseHead(&buffered, allocator) catch |err| return switch (err) {
                     error.EndOfStream => error.ProxyConnectFailed,
                     error.StreamTooLong, error.BufferTooSmall => error.BufferTooSmall,
                     error.ReadFailed => switch (buffered.err() orelse error.Unexpected) {
@@ -2036,9 +2114,7 @@ pub fn Transport(comptime lib: type) type {
         fn contextTimeoutError(_: *Self, req: *const Request) RoundTripper.RoundTripError {
             if (req.context()) |ctx| {
                 if (ctx.err()) |err| return err;
-                if (ctx.deadline()) |deadline| {
-                    if (lib.time.nanoTimestamp() + context_timeout_grace_ns >= deadline) return error.DeadlineExceeded;
-                }
+                if (contextDeadlineExceeded(ctx)) return error.DeadlineExceeded;
             }
             return error.TimedOut;
         }
@@ -2066,9 +2142,55 @@ pub fn Transport(comptime lib: type) type {
             _ = self;
             if (req.context()) |ctx| {
                 if (ctx.err()) |err| return err;
-                if (ctx.deadline() != null) return error.DeadlineExceeded;
+                if (contextDeadlineExceeded(ctx)) return error.DeadlineExceeded;
             }
             return error.TimedOut;
+        }
+
+        fn checkRequestSendContext(self: *Self, req: *const Request) RoundTripper.RoundTripError!void {
+            _ = self;
+            if (req.context()) |ctx| {
+                if (ctx.err()) |err| return err;
+                if (contextDeadlineExceeded(ctx)) return error.DeadlineExceeded;
+            }
+        }
+
+        fn preferRequestBodyResult(
+            self: *Self,
+            request_body_state: ?*RequestBodyState,
+            fallback: RoundTripper.RoundTripError,
+        ) RoundTripper.RoundTripError {
+            _ = self;
+            const writer = request_body_state orelse return fallback;
+            writer.requestAbort();
+            if (writer.finish()) |request_body_err| {
+                switch (request_body_err) {
+                    error.Canceled,
+                    error.DeadlineExceeded,
+                    error.TimedOut,
+                    => return request_body_err,
+                    else => {},
+                }
+            }
+            if (writer.req.context()) |ctx| {
+                if (ctx.err()) |ctx_err| {
+                    switch (ctx_err) {
+                        error.Canceled,
+                        error.DeadlineExceeded,
+                        => return ctx_err,
+                        else => {},
+                    }
+                }
+                if (contextDeadlineExceeded(ctx)) return error.DeadlineExceeded;
+            }
+            return fallback;
+        }
+
+        fn contextDeadlineExceeded(ctx: Context) bool {
+            if (ctx.deadline()) |deadline| {
+                return lib.time.nanoTimestamp() + context_timeout_grace_ns >= deadline;
+            }
+            return false;
         }
     };
 }
@@ -2680,6 +2802,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     payload.len,
                     false,
                     transport.options.expect_continue_timeout_ms,
+                    false,
                 );
                 var request_body_state: ?*HttpTransport.RequestBodyState = writer;
                 var lease: HttpTransport.ConnLease = .{ .conn = conn };
@@ -2793,6 +2916,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     1,
                     false,
                     transport.options.expect_continue_timeout_ms,
+                    false,
                 );
 
                 mock_conn.mu.lock();
@@ -2822,8 +2946,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 source.mu.unlock();
 
                 mock_conn.mu.lock();
-                try testing.expect(!mock_conn.closed);
-                try testing.expect(!mock_conn.close_before_write_finished);
+                try testing.expect(mock_conn.closed);
+                try testing.expect(mock_conn.close_before_write_finished);
                 mock_conn.allow_write_return = true;
                 mock_conn.cond.broadcast();
                 while (!mock_conn.write_finished) mock_conn.cond.wait(&mock_conn.mu);
@@ -2835,7 +2959,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 try testing.expect(source.closed);
                 try testing.expect(mock_conn.closed);
                 try testing.expect(mock_conn.deinited);
-                try testing.expect(!mock_conn.close_before_write_finished);
+                try testing.expect(mock_conn.close_before_write_finished);
             }
 
             {
@@ -3108,6 +3232,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     5,
                     true,
                     1000,
+                    false,
                 );
                 defer writer.destroy();
 
@@ -3188,6 +3313,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     5,
                     true,
                     10,
+                    false,
                 );
                 defer writer.destroy();
 

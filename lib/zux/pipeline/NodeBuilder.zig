@@ -6,7 +6,6 @@ const Emitter = @import("Emitter.zig");
 const Message = @import("Message.zig");
 const Node = @import("Node.zig");
 
-const EnumLiteral = @Type(.enum_literal);
 const route_count = @typeInfo(Message.Kind).@"enum".fields.len;
 const ValidationError = error{
     UnterminatedSwitch,
@@ -40,7 +39,7 @@ pub fn Builder(comptime options: BuilderOptions) type {
         const Self = @This();
 
         const Op = union(enum) {
-            node: EnumLiteral,
+            node: []const u8,
             begin_switch: void,
             route: Message.Kind,
             end_switch: void,
@@ -54,7 +53,7 @@ pub fn Builder(comptime options: BuilderOptions) type {
         ops: [max_ops]Op = undefined,
         len: usize = 0,
 
-        tags: [max_ops]EnumLiteral = undefined,
+        tags: [max_ops][]const u8 = undefined,
         tag_len: usize = 0,
         switch_count: usize = 0,
 
@@ -65,11 +64,12 @@ pub fn Builder(comptime options: BuilderOptions) type {
             return .{};
         }
 
-        pub fn node(self: *Self, comptime tag: EnumLiteral) void {
-            self.ensureCanAppendItem("node");
-            self.append(.{ .node = tag });
+        pub fn addNode(self: *Self, comptime tag: anytype) void {
+            const tag_name = labelText(tag);
+            self.ensureCanAppendItem("addNode");
+            self.append(.{ .node = tag_name });
             self.markCurrentCaseHasItem();
-            self.appendUniqueTag(tag);
+            self.appendUniqueTag(tag_name);
         }
 
         pub fn beginSwitch(self: *Self) void {
@@ -80,10 +80,10 @@ pub fn Builder(comptime options: BuilderOptions) type {
             self.pushSwitchFrame();
         }
 
-        pub fn case(self: *Self, comptime kind: Message.Kind) void {
-            const frame = self.requireOpenSwitch("case");
+        pub fn addCase(self: *Self, comptime kind: Message.Kind) void {
+            const frame = self.requireOpenSwitch("addCase");
             if (frame.seen_case and !frame.case_has_item) {
-                @compileError("zux.pipeline.NodeBuilder.Builder.case cannot follow an empty case body");
+                @compileError("zux.pipeline.NodeBuilder.Builder.addCase cannot follow an empty case body");
             }
             frame.seen_case = true;
             frame.case_has_item = false;
@@ -157,9 +157,9 @@ pub fn Builder(comptime options: BuilderOptions) type {
             self.len += 1;
         }
 
-        fn appendUniqueTag(self: *Self, comptime tag: EnumLiteral) void {
+        fn appendUniqueTag(self: *Self, comptime tag: []const u8) void {
             inline for (0..self.tag_len) |i| {
-                if (self.tags[i] == tag) return;
+                if (comptimeEql(self.tags[i], tag)) return;
             }
             self.tags[self.tag_len] = tag;
             self.tag_len += 1;
@@ -193,7 +193,7 @@ pub fn Builder(comptime options: BuilderOptions) type {
             if (self.currentFrame()) |frame| {
                 if (!frame.seen_case) {
                     @compileError(
-                        "zux.pipeline.NodeBuilder.Builder." ++ action ++ " requires calling case(...) first",
+                        "zux.pipeline.NodeBuilder.Builder." ++ action ++ " requires calling addCase(...) first",
                     );
                 }
             }
@@ -209,7 +209,7 @@ fn validationErrorMessage(err: ValidationError) []const u8 {
         error.UnexpectedCaseMarker => "zux.pipeline.NodeBuilder encountered an unexpected case marker",
         error.UnexpectedSwitchTerminator => "zux.pipeline.NodeBuilder encountered an unexpected switch terminator",
         error.SwitchBodyEmpty => "zux.pipeline.NodeBuilder switch body cannot be empty",
-        error.SwitchExpectedCase => "zux.pipeline.NodeBuilder switch expected case(...) markers",
+        error.SwitchExpectedCase => "zux.pipeline.NodeBuilder switch expected addCase(...) markers",
         error.DuplicateCase => "zux.pipeline.NodeBuilder switch cannot define the same case twice",
         error.EmptyCase => "zux.pipeline.NodeBuilder switch case cannot be empty",
         error.NoCasesInSwitch => "zux.pipeline.NodeBuilder switch requires at least one case",
@@ -337,7 +337,7 @@ fn makeConfig(comptime builder: anytype) type {
     inline for (0..builder.tag_len) |i| {
         const tag = builder.tags[i];
         fields[i] = .{
-            .name = @tagName(tag),
+            .name = sentinelName(tag),
             .type = Node,
             .default_value_ptr = null,
             .is_comptime = false,
@@ -413,12 +413,41 @@ fn buildItemRange(
     };
 }
 
-fn buildTag(comptime tag: EnumLiteral, config: anytype, downstream: ?Emitter) Node {
-    var node = @field(config.*, @tagName(tag));
+fn buildTag(comptime tag: []const u8, config: anytype, downstream: ?Emitter) Node {
+    var node = @field(config.*, tag);
     if (downstream) |out| {
         node.bindOutput(out);
     }
     return node;
+}
+
+fn comptimeEql(comptime a: []const u8, comptime b: []const u8) bool {
+    if (a.len != b.len) return false;
+    inline for (a, 0..) |ch, i| {
+        if (ch != b[i]) return false;
+    }
+    return true;
+}
+
+fn labelText(comptime raw_label: anytype) []const u8 {
+    return switch (@typeInfo(@TypeOf(raw_label))) {
+        .enum_literal => @tagName(raw_label),
+        .pointer => |ptr| switch (ptr.size) {
+            .slice => raw_label,
+            .one => switch (@typeInfo(ptr.child)) {
+                .array => raw_label[0..],
+                else => @compileError("zux.pipeline.NodeBuilder label must be enum_literal or []const u8"),
+            },
+            else => @compileError("zux.pipeline.NodeBuilder label must be enum_literal or []const u8"),
+        },
+        .array => raw_label[0..],
+        else => @compileError("zux.pipeline.NodeBuilder label must be enum_literal or []const u8"),
+    };
+}
+
+fn sentinelName(comptime text: []const u8) [:0]const u8 {
+    const terminated = text ++ "\x00";
+    return terminated[0..text.len :0];
 }
 
 fn buildSwitchRange(
@@ -443,7 +472,7 @@ fn buildSwitchRange(
     inline while (i < end - 1) {
         const kind = switch (builder.ops[i]) {
             .route => |route_kind| route_kind,
-            else => @compileError("zux.pipeline.NodeBuilder switch expected case(...) markers"),
+            else => @compileError("zux.pipeline.NodeBuilder switch expected addCase(...) markers"),
         };
 
         const kind_index = @intFromEnum(kind);
@@ -493,7 +522,7 @@ fn nextItemEnd(comptime builder: anytype, comptime start: usize, comptime limit:
     return switch (builder.ops[start]) {
         .node => start + 1,
         .begin_switch => findMatchingSwitchEnd(builder, start, limit),
-        .route => @compileError("zux.pipeline.NodeBuilder sequence cannot start with case(...)"),
+        .route => @compileError("zux.pipeline.NodeBuilder sequence cannot start with addCase(...)"),
         .end_switch => @compileError("zux.pipeline.NodeBuilder sequence cannot start with endSwitch()"),
     };
 }
@@ -544,15 +573,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         fn buildReturnsRootNode(testing: anytype) !void {
             const Built = comptime blk: {
                 var builder = Builder(.{ .max_ops = 16 }).init();
-                builder.node(.a);
+                builder.addNode(.a);
                 builder.beginSwitch();
-                builder.case(.button_gesture);
-                builder.node(.b);
-                builder.node(.c);
-                builder.case(.raw_single_button);
-                builder.node(.d);
+                builder.addCase(.button_gesture);
+                builder.addNode(.b);
+                builder.addNode(.c);
+                builder.addCase(.raw_single_button);
+                builder.addNode(.d);
                 builder.endSwitch();
-                builder.node(.e);
+                builder.addNode(.e);
                 break :blk builder.make();
             };
 
@@ -694,8 +723,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const result = comptime blk: {
                 var builder = Builder(.{}).init();
                 builder.beginSwitch();
-                builder.case(.button_gesture);
-                builder.node(.a);
+                builder.addCase(.button_gesture);
+                builder.addNode(.a);
                 break :blk builder.validate();
             };
 
@@ -706,10 +735,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const result = comptime blk: {
                 var builder = Builder(.{}).init();
                 builder.beginSwitch();
-                builder.case(.button_gesture);
-                builder.node(.a);
-                builder.case(.button_gesture);
-                builder.node(.b);
+                builder.addCase(.button_gesture);
+                builder.addNode(.a);
+                builder.addCase(.button_gesture);
+                builder.addNode(.b);
                 builder.endSwitch();
                 break :blk builder.validate();
             };
@@ -720,17 +749,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         fn buildHandlesNestedSwitches(testing: anytype) !void {
             const Built = comptime blk: {
                 var builder = Builder(.{}).init();
-                builder.node(.a);
+                builder.addNode(.a);
                 builder.beginSwitch();
-                builder.case(.button_gesture);
+                builder.addCase(.button_gesture);
                 builder.beginSwitch();
-                builder.case(.button_gesture);
-                builder.node(.b);
+                builder.addCase(.button_gesture);
+                builder.addNode(.b);
                 builder.endSwitch();
-                builder.case(.raw_single_button);
-                builder.node(.d);
+                builder.addCase(.raw_single_button);
+                builder.addNode(.d);
                 builder.endSwitch();
-                builder.node(.e);
+                builder.addNode(.e);
                 break :blk builder.make();
             };
 

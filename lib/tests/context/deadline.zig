@@ -75,6 +75,11 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
                     try deadlineReparentedChildKeepsOwnDeadlineCase(lib, case_allocator);
                 }
             }.run));
+            t.run("parent_cancel_does_not_reenter_shared_lock_under_pending_writer", testing_mod.TestRunner.fromFn(lib, 64 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
+                    try deadlineParentCancelDoesNotReenterSharedLockUnderPendingWriterCase(lib, case_allocator);
+                }
+            }.run));
             return t.wait();
         }
 
@@ -315,4 +320,35 @@ fn deadlineReparentedChildKeepsOwnDeadlineCase(comptime lib: type, allocator: li
     if (child.err() != null) return error.ReparentedDeadlineChildShouldNotUseOldDeadline;
 
     child.cancel();
+}
+
+fn deadlineParentCancelDoesNotReenterSharedLockUnderPendingWriterCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
+    const TrackingThread = test_utils.SharedLockTrackingThreadType(lib);
+    const FakeLib = struct {
+        pub const Thread = TrackingThread;
+        pub const time = lib.time;
+        pub const mem = lib.mem;
+        pub const DoublyLinkedList = lib.DoublyLinkedList;
+    };
+    const FakeCtxApi = context_root.make(FakeLib);
+    var fake_ctx_ns = try FakeCtxApi.init(allocator);
+    defer fake_ctx_ns.deinit();
+
+    const bg = fake_ctx_ns.background();
+    var parent = try fake_ctx_ns.withCancel(bg);
+    defer parent.deinit();
+    var child = try fake_ctx_ns.withDeadline(parent, lib.time.nanoTimestamp() + 60000 * lib.time.ns_per_ms);
+    defer child.deinit();
+
+    const root_lock: *TrackingThread.RwLock = @ptrCast(@alignCast(parent.vtable.treeLockFn(parent.ptr)));
+    root_lock.armPendingWriterForTest();
+    defer root_lock.clearPendingWriterForTest();
+
+    parent.cancel();
+
+    if (root_lock.nested_shared_while_writer_pending) {
+        return error.DeadlinePropagationShouldNotReenterSharedLockUnderPendingWriter;
+    }
+    const child_err = child.err() orelse return error.DeadlineChildShouldObserveParentCancel;
+    if (child_err != error.Canceled) return error.DeadlineChildShouldObserveCanceledCause;
 }

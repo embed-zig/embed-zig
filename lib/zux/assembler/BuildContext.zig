@@ -33,6 +33,18 @@ pub fn make(comptime input: anytype) blk: {
     if (!@hasField(Input, "node_builder")) {
         @compileError("zux.assembler.BuildContext.make requires .node_builder");
     }
+    if (!@hasField(Input, "render_bindings")) {
+        @compileError("zux.assembler.BuildContext.make requires .render_bindings");
+    }
+    if (!@hasField(Input, "render_count")) {
+        @compileError("zux.assembler.BuildContext.make requires .render_count");
+    }
+    if (!@hasField(Input, "reducer_bindings")) {
+        @compileError("zux.assembler.BuildContext.make requires .reducer_bindings");
+    }
+    if (!@hasField(Input, "reducer_count")) {
+        @compileError("zux.assembler.BuildContext.make requires .reducer_count");
+    }
     if (!@hasField(Input, "channel")) {
         @compileError("zux.assembler.BuildContext.make requires .channel");
     }
@@ -48,6 +60,10 @@ pub fn make(comptime input: anytype) blk: {
         selection_registry: @TypeOf(@field(input, "selection_registry")),
         store_builder: @TypeOf(@field(input, "store_builder")),
         node_builder: @TypeOf(@field(input, "node_builder")),
+        render_bindings: @TypeOf(@field(input, "render_bindings")),
+        render_count: @TypeOf(@field(input, "render_count")),
+        reducer_bindings: @TypeOf(@field(input, "reducer_bindings")),
+        reducer_count: @TypeOf(@field(input, "reducer_count")),
         channel: @TypeOf(@field(input, "channel")),
     };
 } {
@@ -62,6 +78,10 @@ pub fn make(comptime input: anytype) blk: {
         .selection_registry = @field(input, "selection_registry"),
         .store_builder = @field(input, "store_builder"),
         .node_builder = @field(input, "node_builder"),
+        .render_bindings = @field(input, "render_bindings"),
+        .render_count = @field(input, "render_count"),
+        .reducer_bindings = @field(input, "reducer_bindings"),
+        .reducer_count = @field(input, "reducer_count"),
         .channel = @field(input, "channel"),
     };
 }

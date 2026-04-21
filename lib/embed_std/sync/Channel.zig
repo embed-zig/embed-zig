@@ -3,13 +3,15 @@
 const sync_mod = @import("sync");
 const channel = sync_mod.channel;
 
-pub fn ChannelFactory(comptime lib: type) fn (type) type {
-    return struct {
-        fn factory(comptime T: type) type {
-            return Channel(lib, T);
-        }
-    }.factory;
-}
+pub const ChannelFactory: channel.FactoryType = struct {
+    fn factory(comptime lib: type) channel.ChannelType {
+        return struct {
+            fn factory(comptime T: type) type {
+                return Channel(lib, T);
+            }
+        }.factory;
+    }
+}.factory;
 
 fn Channel(comptime lib: type, comptime T: type) type {
     return struct {

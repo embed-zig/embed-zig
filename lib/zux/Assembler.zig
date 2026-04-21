@@ -21,6 +21,27 @@ const registry_router = @import("assembler/registry/router.zig");
 const registry_selection = @import("assembler/registry/selection.zig");
 const registry_unique = @import("assembler/registry/unique.zig");
 
+pub const ReducerFnFactory = @TypeOf(struct {
+    fn factory(
+        comptime Stores: type,
+        comptime MessageType: type,
+        comptime EmitterType: type,
+    ) Store.Reducer.ReducerFnType(Stores, MessageType, EmitterType) {
+        unreachable;
+    }
+}.factory);
+pub const RenderFnFactory = @TypeOf(struct {
+    fn factory(comptime ZuxApp: type, comptime path: []const u8) *const fn (*ZuxApp) anyerror!void {
+        _ = path;
+        unreachable;
+    }
+}.factory);
+pub const FlowTypeFactory = @TypeOf(struct {
+    fn factory() type {
+        unreachable;
+    }
+}.factory);
+
 pub fn make(
     comptime lib: type,
     comptime config: Config,
@@ -28,6 +49,17 @@ pub fn make(
 ) type {
     const StoreBuilderType = Store.Builder(config.store);
     const NodeBuilderType = NodeBuilder.Builder(config.node);
+    const ReducerFactoryType = ReducerFnFactory;
+    const max_render_bindings = config.max_handles;
+    const RenderBinding = struct {
+        path: []const u8,
+        AdapterType: type,
+    };
+    const ReducerBinding = struct {
+        label: []const u8,
+        name: []const u8,
+        factory: ReducerFactoryType,
+    };
     const AdcButtonRegistryType = registry_adc_button.make(config.max_adc_buttons);
     const FlowRegistryType = registry_flow.make(config.max_flows);
     const GpioButtonRegistryType = registry_gpio_button.make(config.max_gpio_buttons);
@@ -58,6 +90,10 @@ pub fn make(
         overlay_registry: OverlayRegistryType,
         router_registry: RouterRegistryType,
         selection_registry: SelectionRegistryType,
+        render_bindings: [max_render_bindings]RenderBinding = undefined,
+        render_count: usize = 0,
+        reducer_bindings: [config.max_reducers]ReducerBinding = undefined,
+        reducer_count: usize = 0,
 
         pub const Lib = lib;
         pub const Config = config;
@@ -90,9 +126,53 @@ pub fn make(
             self.store_builder.setState(path, labels);
         }
 
+        pub fn addRender(
+            self: *Self,
+            comptime path: []const u8,
+            comptime factory: RenderFnFactory,
+        ) void {
+            const normalized_path = validateRenderPath(path);
+            if (self.render_count >= self.render_bindings.len) {
+                @compileError("zux.Assembler.addRender exceeded max_handles");
+            }
+
+            self.render_bindings[self.render_count] = .{
+                .path = normalized_path,
+                .AdapterType = makeRenderAdapter(normalized_path, factory),
+            };
+            self.render_count += 1;
+        }
+
+        pub fn addReducer(
+            self: *Self,
+            comptime label: anytype,
+            comptime factory: ReducerFactoryType,
+        ) void {
+            const label_name = validateReducerLabel(label);
+
+            if (nodeBuilderHasTag(self.node_builder, label_name)) {
+                @compileError(
+                    "zux.Assembler.addReducer label '" ++ label_name ++ "' is already used by node_builder; reducer nodes are wired automatically",
+                );
+            }
+            if (self.reducer_count >= self.reducer_bindings.len) {
+                @compileError("zux.Assembler.addReducer exceeded max_reducers");
+            }
+            if (hasReducerLabel(self, label_name)) {
+                @compileError("zux.Assembler.addReducer duplicate reducer label '" ++ label_name ++ "'");
+            }
+
+            self.reducer_bindings[self.reducer_count] = .{
+                .label = label_name,
+                .name = label_name,
+                .factory = factory,
+            };
+            self.reducer_count += 1;
+        }
+
         pub fn addGroupedButton(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
             comptime button_count: usize,
         ) void {
@@ -102,7 +182,7 @@ pub fn make(
 
         pub fn addSingleButton(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -111,7 +191,7 @@ pub fn make(
 
         pub fn addImu(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -120,7 +200,7 @@ pub fn make(
 
         pub fn addLedStrip(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
             comptime pixel_count: usize,
         ) void {
@@ -130,7 +210,7 @@ pub fn make(
 
         pub fn addModem(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -139,7 +219,7 @@ pub fn make(
 
         pub fn addNfc(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -148,7 +228,7 @@ pub fn make(
 
         pub fn addWifiSta(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -157,7 +237,7 @@ pub fn make(
 
         pub fn addWifiAp(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -166,7 +246,7 @@ pub fn make(
 
         pub fn addRouter(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
             comptime initial_item: route.Router.Item,
         ) void {
@@ -177,7 +257,7 @@ pub fn make(
 
         pub fn addFlow(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
             comptime FlowType: type,
         ) void {
@@ -187,7 +267,7 @@ pub fn make(
 
         pub fn addOverlay(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
             comptime initial_state: overlay.State,
         ) void {
@@ -198,7 +278,7 @@ pub fn make(
 
         pub fn addSelection(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
             comptime initial_state: selection.State,
         ) void {
@@ -241,31 +321,44 @@ pub fn make(
                 .selection_registry = self.selection_registry,
                 .store_builder = self.store_builder,
                 .node_builder = self.node_builder,
+                .render_bindings = self.render_bindings,
+                .render_count = self.render_count,
+                .reducer_bindings = self.reducer_bindings,
+                .reducer_count = self.reducer_count,
                 .channel = Channel,
             }));
         }
 
-        pub fn node(self: *Self, comptime tag: @Type(.enum_literal)) void {
-            self.node_builder.node(tag);
+        pub fn addNode(self: *Self, comptime tag: anytype) void {
+            self.node_builder.addNode(tag);
         }
 
         pub fn beginSwitch(self: *Self) void {
             self.node_builder.beginSwitch();
         }
 
-        pub fn case(self: *Self, comptime kind: @import("pipeline/Message.zig").Kind) void {
-            self.node_builder.case(kind);
+        pub fn addCase(self: *Self, comptime kind: @import("pipeline/Message.zig").Kind) void {
+            self.node_builder.addCase(kind);
         }
 
         pub fn endSwitch(self: *Self) void {
             self.node_builder.endSwitch();
         }
 
+        pub fn node(self: *Self, comptime tag: anytype) void {
+            self.addNode(tag);
+        }
+
+        pub fn case(self: *Self, comptime kind: @import("pipeline/Message.zig").Kind) void {
+            self.addCase(kind);
+        }
+
         fn ensureComponentUnique(
             self: *Self,
-            comptime label: @Type(.enum_literal),
+            comptime label: anytype,
             comptime id: u32,
         ) void {
+            const label_name = registry_unique.labelText(label);
             registry_unique.ensureUniqueAcross(
                 .{
                     self.adc_button_registry,
@@ -281,11 +374,118 @@ pub fn make(
                     self.router_registry,
                     self.selection_registry,
                 },
-                label,
+                label_name,
                 id,
                 "zux.Assembler duplicate component label",
                 "zux.Assembler duplicate component id",
             );
+        }
+
+        fn validateReducerLabel(comptime label: anytype) []const u8 {
+            const label_name = registry_unique.labelText(label);
+            if (label_name.len == 0) {
+                @compileError("zux.Assembler.addReducer labels must not be empty");
+            }
+            return label_name;
+        }
+
+        fn hasReducerLabel(self: *Self, comptime label: []const u8) bool {
+            inline for (0..self.reducer_count) |i| {
+                if (comptimeEql(self.reducer_bindings[i].label, label)) return true;
+            }
+            return false;
+        }
+
+        fn nodeBuilderHasTag(node_builder: NodeBuilderType, comptime label: []const u8) bool {
+            inline for (0..node_builder.tag_len) |i| {
+                if (comptimeEql(node_builder.tags[i], label)) return true;
+            }
+            return false;
+        }
+
+        fn validateRenderPath(comptime path: []const u8) []const u8 {
+            if (path.len == 0) {
+                @compileError("zux.Assembler.addRender paths must not be empty");
+            }
+            if (path[0] == '/' or path[path.len - 1] == '/') {
+                @compileError("zux.Assembler.addRender paths must not start or end with '/'");
+            }
+
+            comptime var segment_start: usize = 0;
+            inline for (path, 0..) |ch, idx| {
+                if (ch == '.') {
+                    @compileError("zux.Assembler.addRender paths must use '/' separators instead of '.'");
+                }
+                if (ch == '/') {
+                    if (idx == segment_start) {
+                        @compileError("zux.Assembler.addRender paths must not contain empty segments");
+                    }
+                    segment_start = idx + 1;
+                }
+            }
+
+            if (segment_start == path.len) {
+                @compileError("zux.Assembler.addRender paths must not contain empty segments");
+            }
+            return path;
+        }
+
+        fn comptimeEql(comptime a: []const u8, comptime b: []const u8) bool {
+            if (a.len != b.len) return false;
+            inline for (a, 0..) |ch, idx| {
+                if (ch != b[idx]) return false;
+            }
+            return true;
+        }
+
+        fn makeRenderAdapter(comptime path: []const u8, comptime factory: RenderFnFactory) type {
+            return struct {
+                const render_path = path;
+                const render_factory = factory;
+
+                pub fn makeSubscriber(comptime App: type, comptime Runtime: type, runtime: *Runtime) Store.Subscriber {
+                    const gen = struct {
+                        fn notifyFn(ctx: *anyopaque, notification: Store.Subscriber.Notification) void {
+                            _ = notification;
+
+                            const runtime_ptr: *Runtime = @ptrCast(@alignCast(ctx));
+                            var app: App = undefined;
+                            if (!@hasField(App, "runtime")) {
+                                @compileError("zux.Assembler.addRender app adapter requires App.runtime");
+                            }
+                            @field(app, "runtime") = runtime_ptr;
+                            if (@hasField(App, "started")) {
+                                @field(app, "started") = true;
+                            }
+                            if (@hasField(App, "closed")) {
+                                @field(app, "closed") = false;
+                            }
+                            if (@hasField(App, "last_event")) {
+                                @field(app, "last_event") = null;
+                            }
+                            if (@hasField(App, "last_grouped_button_ids")) {
+                                const Ids = @FieldType(App, "last_grouped_button_ids");
+                                @field(app, "last_grouped_button_ids") = [_]?u32{null} ** @typeInfo(Ids).array.len;
+                            }
+
+                            const render_fn = render_factory(App, render_path);
+                            render_fn(&app) catch |err| {
+                                @panic(@errorName(err));
+                            };
+                        }
+
+                        const vtable = Store.Subscriber.VTable{
+                            .notify = notifyFn,
+                        };
+                    };
+
+                    return .{
+                        .ctx = runtime,
+                        .vtable = &gen.vtable,
+                    };
+                }
+
+            };
         }
     };
 }

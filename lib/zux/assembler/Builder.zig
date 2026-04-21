@@ -1,5 +1,9 @@
 const embed = @import("embed");
 const builtin = embed.builtin;
+const drivers = @import("drivers");
+const ledstrip = @import("ledstrip");
+const modem_api = drivers;
+
 const App = @import("../App.zig");
 const button = @import("../component/button.zig");
 const component_imu = @import("../component/Imu.zig");
@@ -18,9 +22,6 @@ const Poller = @import("../pipeline/Poller.zig");
 const Pipeline = @import("../pipeline/Pipeline.zig");
 const store = @import("../Store.zig");
 const build_config = @import("BuildConfig.zig");
-const drivers = @import("drivers");
-const ledstrip = @import("ledstrip");
-const modem_api = @import("drivers");
 
 const root = @This();
 
@@ -230,6 +231,8 @@ pub fn build(builder: root, comptime context: anytype) type {
     const overlay_count = registryPeriphLen(overlay_registry);
     const router_count = registryPeriphLen(router_registry);
     const selection_count = registryPeriphLen(selection_registry);
+    const configured_render_count = context.render_count;
+    const configured_reducer_count = context.reducer_count;
     const has_button_runtime = (adc_count + gpio_count) > 0;
     const has_imu_runtime = imu_count > 0;
     const has_ledstrip_runtime = ledstrip_count > 0;
@@ -284,7 +287,6 @@ pub fn build(builder: root, comptime context: anytype) type {
     const periph_ids = makePeriphIdTable(context.registries);
     const periph_kinds = makePeriphKindTable(context.registries);
     const runtime_poller_config: Poller.Config = context.assembler_config.poller;
-
     const SingleButtonPoller = button.SinglePoller.make(context.lib);
     const GroupedButtonPoller = button.GroupedPoller.make(context.lib);
     const ImuPollerType = component_imu.Poller.make(context.lib);
@@ -603,6 +605,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             .selection = selection_registry,
         };
         pub const InitConfig = GeneratedInitConfig;
+        pub const StartConfig = App.StartConfig;
         pub const Store = StoreType;
         pub const Root = BuiltRoot;
         pub const Label = AppLabel;
@@ -614,6 +617,19 @@ pub fn build(builder: root, comptime context: anytype) type {
         pub const poller_count: usize = runtime_poller_count;
         pub const pixel_count: usize = ledstrip_pixel_count;
         pub const FrameType = ledstrip.Frame.make(pixel_count);
+
+        pub fn LedStrip(comptime label: PeriphLabel) type {
+            inline for (0..ledstrip_count) |i| {
+                const periph = ledstrip_registry.periphs[i];
+                if (label == @field(PeriphLabel, periphLabel(periph))) {
+                    return struct {
+                        pub const pixel_count: usize = periph.pixel_count;
+                        pub const FrameType = ledstrip.Frame.make(@This().pixel_count);
+                    };
+                }
+            }
+            @compileError("zux app has no led strip for label '" ++ @tagName(label) ++ "'");
+        }
 
         pub fn FlowEdgeLabel(comptime label: FlowLabel) type {
             return flowTypeForLabel(label).EdgeLabel;
@@ -655,6 +671,8 @@ pub fn build(builder: root, comptime context: anytype) type {
             overlay_store_reducer: if (has_overlay_runtime) StoreReducerType else void,
             route_store_reducer: if (has_router_runtime) StoreReducerType else void,
             selection_store_reducer: if (has_selection_runtime) StoreReducerType else void,
+            configured_reducers: [configured_reducer_count]StoreReducerType = undefined,
+            render_subscribers: [configured_render_count]@import("../Store.zig").Subscriber = undefined,
             store_tick: StoreTickNode,
             root_config: BuiltRoot.Config,
             root: Node,
@@ -668,6 +686,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             pub fn init(init_config: InitConfig) !*Runtime {
                 const runtime = try init_config.allocator.create(Runtime);
                 errdefer init_config.allocator.destroy(runtime);
+                var subscribed_render_count: usize = 0;
 
                 runtime.allocator = init_config.allocator;
                 runtime.single_buttons = initSingleButtonInstances(init_config);
@@ -682,8 +701,19 @@ pub fn build(builder: root, comptime context: anytype) type {
                 const stores = try initStoreValues(init_config.allocator);
                 runtime.store = try StoreType.init(init_config.allocator, stores);
                 errdefer {
+                    inline for (0..configured_render_count) |i| {
+                        if (i >= subscribed_render_count) break;
+                        const binding = context.render_bindings[i];
+                        _ = runtime.store.unsubscribePath(binding.path, &runtime.render_subscribers[i]);
+                    }
                     runtime.store.deinit();
                     deinitStoreValues(&runtime.store.stores);
+                }
+                inline for (0..configured_render_count) |i| {
+                    const binding = context.render_bindings[i];
+                    runtime.render_subscribers[i] = binding.AdapterType.makeSubscriber(Self, Runtime, runtime);
+                    try runtime.store.subscribePath(binding.path, &runtime.render_subscribers[i]);
+                    subscribed_render_count = i + 1;
                 }
 
                 if (has_button_runtime) {
@@ -765,6 +795,13 @@ pub fn build(builder: root, comptime context: anytype) type {
                         SelectionStoreReducerFn.reduce,
                     );
                 }
+                inline for (0..configured_reducer_count) |i| {
+                    const binding = context.reducer_bindings[i];
+                    runtime.configured_reducers[i] = StoreReducerType.init(
+                        &runtime.store.stores,
+                        binding.factory(StoreType.Stores, Message, Emitter),
+                    );
+                }
                 runtime.store_tick = .{
                     .store = &runtime.store,
                 };
@@ -830,6 +867,10 @@ pub fn build(builder: root, comptime context: anytype) type {
                 }
                 if (has_wifi_sta_runtime) {
                     runtime.wifi_sta_reducer.deinit();
+                }
+                inline for (0..configured_render_count) |i| {
+                    const binding = context.render_bindings[i];
+                    _ = runtime.store.unsubscribePath(binding.path, &runtime.render_subscribers[i]);
                 }
 
                 runtime.store.deinit();
@@ -922,6 +963,10 @@ pub fn build(builder: root, comptime context: anytype) type {
                 if (has_selection_runtime) {
                     config._zux_selection_store_reducer = runtime.selection_store_reducer.node();
                 }
+                inline for (0..configured_reducer_count) |i| {
+                    const binding = context.reducer_bindings[i];
+                    @field(config, binding.name) = runtime.configured_reducers[i].node();
+                }
                 config._zux_store_tick = runtime.store_tick.node();
 
                 if (has_user_root_config) {
@@ -933,8 +978,9 @@ pub fn build(builder: root, comptime context: anytype) type {
 
             fn copyUserRootConfig(dst: *BuiltRoot.Config, user_root_config: UserRoot.Config) void {
                 inline for (@typeInfo(UserRoot.Config).@"struct".fields) |field| {
-                    if (comptimeEql(field.name, "__branches")) continue;
-                    @field(dst.*, field.name) = @field(user_root_config, field.name);
+                    if (!comptimeEql(field.name, "__branches")) {
+                        @field(dst.*, field.name) = @field(user_root_config, field.name);
+                    }
                 }
             }
 
@@ -1075,9 +1121,14 @@ pub fn build(builder: root, comptime context: anytype) type {
                                 return button.Reducer.reduce(&@field(stores, periphLabel(periph)), message, emit);
                             }
                         }
-                        return 0;
+                        try emit.emit(message);
+                        return 1;
                     },
-                    else => return 0,
+                    else => {
+                        if (message.body == .tick) return 0;
+                        try emit.emit(message);
+                        return 1;
+                    },
                 }
             }
         };
@@ -1088,7 +1139,11 @@ pub fn build(builder: root, comptime context: anytype) type {
                     .raw_imu_accel => |raw_imu_accel| raw_imu_accel.source_id,
                     .raw_imu_gyro => |raw_imu_gyro| raw_imu_gyro.source_id,
                     .imu_motion => |imu_motion| imu_motion.source_id,
-                    else => return 0,
+                    else => {
+                        if (message.body == .tick) return 0;
+                        try emit.emit(message);
+                        return 1;
+                    },
                 };
 
                 inline for (0..imu_count) |i| {
@@ -1101,7 +1156,8 @@ pub fn build(builder: root, comptime context: anytype) type {
                         );
                     }
                 }
-                return 0;
+                try emit.emit(message);
+                return 1;
             }
         };
 
@@ -1120,7 +1176,8 @@ pub fn build(builder: root, comptime context: anytype) type {
                                 return LedStripReducerType.reduce(&@field(stores, periphLabel(periph)), message, emit);
                             }
                         }
-                        return 0;
+                        try emit.emit(message);
+                        return 1;
                     },
                     .tick => {
                         var changed_count: usize = 0;
@@ -1134,7 +1191,11 @@ pub fn build(builder: root, comptime context: anytype) type {
                         }
                         return changed_count;
                     },
-                    else => return 0,
+                    else => {
+                        if (message.body == .tick) return 0;
+                        try emit.emit(message);
+                        return 1;
+                    },
                 }
             }
         };
@@ -1156,9 +1217,14 @@ pub fn build(builder: root, comptime context: anytype) type {
                                 );
                             }
                         }
-                        return 0;
+                        try emit.emit(message);
+                        return 1;
                     },
-                    else => return 0,
+                    else => {
+                        if (message.body == .tick) return 0;
+                        try emit.emit(message);
+                        return 1;
+                    },
                 }
             }
         };
@@ -1182,9 +1248,14 @@ pub fn build(builder: root, comptime context: anytype) type {
                                 );
                             }
                         }
-                        return 0;
+                        try emit.emit(message);
+                        return 1;
                     },
-                    else => return 0,
+                    else => {
+                        if (message.body == .tick) return 0;
+                        try emit.emit(message);
+                        return 1;
+                    },
                 }
             }
         };
@@ -1210,9 +1281,14 @@ pub fn build(builder: root, comptime context: anytype) type {
                                 );
                             }
                         }
-                        return 0;
+                        try emit.emit(message);
+                        return 1;
                     },
-                    else => return 0,
+                    else => {
+                        if (message.body == .tick) return 0;
+                        try emit.emit(message);
+                        return 1;
+                    },
                 }
             }
         };
@@ -1238,23 +1314,31 @@ pub fn build(builder: root, comptime context: anytype) type {
                                 );
                             }
                         }
-                        return 0;
+                        try emit.emit(message);
+                        return 1;
                     },
-                    else => return 0,
+                    else => {
+                        try emit.emit(message);
+                        return 1;
+                    },
                 }
             }
         };
 
         runtime: *Runtime,
         started: bool = false,
+        manual_ticker: bool = false,
         closed: bool = false,
         last_event: ?Message.Event = null,
         last_grouped_button_ids: [periph_ids.len]?u32 = [_]?u32{null} ** periph_ids.len,
 
         pub fn init(init_config: InitConfig) !Self {
-            return .{
+            const self: Self = .{
                 .runtime = try Runtime.init(init_config),
             };
+            errdefer Runtime.deinit(self.runtime);
+
+            return self;
         }
 
         pub fn deinit(self: *Self) void {
@@ -1265,8 +1349,22 @@ pub fn build(builder: root, comptime context: anytype) type {
             self.last_event = null;
         }
 
-        pub fn start(self: *Self) !void {
+        pub fn start(self: *Self, start_config: StartConfig) !void {
             if (self.started or self.closed) return error.InvalidState;
+
+            if (start_config.ticker) |ticker| switch (ticker) {
+                .manual => {
+                    self.manual_ticker = true;
+                    self.started = true;
+                    return;
+                },
+                .interval_ms => |interval_ms| {
+                    if (interval_ms == 0) return error.InvalidStartConfig;
+                    self.runtime.pipeline.tick_interval_ns = @as(u64, interval_ms) * Lib.time.ns_per_ms;
+                },
+            } else {
+                self.runtime.pipeline.tick_interval_ns = runtime_pipeline_config.tick_interval_ns;
+            }
 
             try self.runtime.pipeline.start();
             errdefer {
@@ -1274,8 +1372,12 @@ pub fn build(builder: root, comptime context: anytype) type {
                 self.runtime.pipeline.wait();
             }
 
+            const poller_config = switch (start_config.poller) {
+                .default => runtime_poller_config,
+                .config => |config| config,
+            };
             inline for (0..runtime_poller_count) |i| {
-                self.runtime.pollers[i].start(runtime_poller_config) catch |err| {
+                self.runtime.pollers[i].start(poller_config) catch |err| {
                     inline for (0..i) |started_idx| {
                         self.runtime.pollers[started_idx].stop();
                     }
@@ -1306,29 +1408,43 @@ pub fn build(builder: root, comptime context: anytype) type {
         pub fn stop(self: *Self) !void {
             if (!self.started) return error.InvalidState;
 
-            if (has_modem_runtime) {
-                inline for (0..modem_count) |i| {
-                    const periph = modem_registry.periphs[i];
-                    const label_name = comptime periphLabel(periph);
-                    self.runtime.modem_event_hooks[i].detach(@field(self.runtime.modems, label_name));
+            if (!self.manual_ticker) {
+                if (has_modem_runtime) {
+                    inline for (0..modem_count) |i| {
+                        const periph = modem_registry.periphs[i];
+                        const label_name = comptime periphLabel(periph);
+                        self.runtime.modem_event_hooks[i].detach(@field(self.runtime.modems, label_name));
+                    }
                 }
-            }
-            if (has_nfc_runtime) {
-                inline for (0..nfc_count) |i| {
-                    const periph = nfc_registry.periphs[i];
-                    const label_name = comptime periphLabel(periph);
-                    self.runtime.nfc_event_hooks[i].detach(@field(self.runtime.nfcs, label_name));
+                if (has_nfc_runtime) {
+                    inline for (0..nfc_count) |i| {
+                        const periph = nfc_registry.periphs[i];
+                        const label_name = comptime periphLabel(periph);
+                        self.runtime.nfc_event_hooks[i].detach(@field(self.runtime.nfcs, label_name));
+                    }
                 }
+                inline for (&self.runtime.pollers) |*poller| {
+                    poller.stop();
+                }
+                self.runtime.pipeline.stop();
+                self.runtime.pipeline.wait();
             }
-            inline for (&self.runtime.pollers) |*poller| {
-                poller.stop();
-            }
-            self.runtime.pipeline.stop();
-            self.runtime.pipeline.wait();
 
             self.runtime.commitStores();
             self.started = false;
+            self.manual_ticker = false;
             self.closed = true;
+        }
+
+        pub fn dispatch(self: *Self, message: Message) !void {
+            if (!self.started) return error.NotStarted;
+
+            self.last_event = message.body;
+            if (self.manual_ticker) {
+                _ = try self.runtime.root.process(message);
+                return;
+            }
+            try self.runtime.pipeline.inject(message);
         }
 
         pub fn press_single_button(self: *Self, label: PeriphLabel) !void {
@@ -1939,9 +2055,11 @@ pub fn build(builder: root, comptime context: anytype) type {
         }
 
         fn emitBody(self: *Self, body: Message.Event) !void {
-            if (!self.started) return error.NotStarted;
-            self.last_event = body;
-            try self.runtime.pipeline.emit(body);
+            try self.dispatch(.{
+                .origin = .manual,
+                .timestamp_ns = Lib.time.nanoTimestamp(),
+                .body = body,
+            });
         }
 
         fn periphId(label: PeriphLabel) u32 {
@@ -2097,52 +2215,61 @@ fn makeRuntimeNodeBuilder(comptime context: anytype) @TypeOf(context.node_builde
     var builder = NodeBuilderType.init();
 
     if (buttonPollerCount(context.registries) > 0) {
-        builder.node(._zux_button_detector);
-        builder.node(._zux_button_store_reducer);
+        builder.addNode(._zux_button_detector);
+        builder.addNode(._zux_button_store_reducer);
     }
     if (registryPeriphLen(context.registries.imu) > 0) {
-        builder.node(._zux_imu_detector);
-        builder.node(._zux_imu_store_reducer);
+        builder.addNode(._zux_imu_detector);
+        builder.addNode(._zux_imu_store_reducer);
     }
     if (registryPeriphLen(context.registries.ledstrip) > 0) {
-        builder.node(._zux_ledstrip_store_reducer);
+        builder.addNode(._zux_ledstrip_store_reducer);
     }
     if (registryPeriphLen(context.registries.modem) > 0) {
-        builder.node(._zux_modem_store_reducer);
+        builder.addNode(._zux_modem_store_reducer);
     }
     if (registryPeriphLen(context.registries.nfc) > 0) {
-        builder.node(._zux_nfc_store_reducer);
+        builder.addNode(._zux_nfc_store_reducer);
     }
     if (registryPeriphLen(context.registries.wifi_sta) > 0) {
-        builder.node(._zux_wifi_sta_store_reducer);
+        builder.addNode(._zux_wifi_sta_store_reducer);
     }
     if (registryPeriphLen(context.registries.wifi_ap) > 0) {
-        builder.node(._zux_wifi_ap_store_reducer);
+        builder.addNode(._zux_wifi_ap_store_reducer);
     }
 
     if (registryPeriphLen(context.flow_registry) > 0) {
-        builder.node(._zux_flow_store_reducer);
+        builder.addNode(._zux_flow_store_reducer);
     }
     if (registryPeriphLen(context.overlay_registry) > 0) {
-        builder.node(._zux_overlay_store_reducer);
+        builder.addNode(._zux_overlay_store_reducer);
     }
     if (registryPeriphLen(context.router_registry) > 0) {
-        builder.node(._zux_route_store_reducer);
+        builder.addNode(._zux_route_store_reducer);
     }
     if (registryPeriphLen(context.selection_registry) > 0) {
-        builder.node(._zux_selection_store_reducer);
+        builder.addNode(._zux_selection_store_reducer);
+    }
+    inline for (0..context.reducer_count) |i| {
+        const binding = context.reducer_bindings[i];
+        if (nodeBuilderHasTag(context.node_builder, binding.label)) {
+            @compileError(
+                "zux.assembler.Builder.build reducer label '" ++ binding.name ++ "' is already present in node_builder; reducer nodes are wired automatically",
+            );
+        }
+        builder.addNode(binding.label);
     }
 
     inline for (0..context.node_builder.len) |i| {
         switch (context.node_builder.ops[i]) {
-            .node => |tag| builder.node(tag),
+            .node => |tag| builder.addNode(tag),
             .begin_switch => builder.beginSwitch(),
-            .route => |kind| builder.case(kind),
+            .route => |kind| builder.addCase(kind),
             .end_switch => builder.endSwitch(),
         }
     }
 
-    builder.node(._zux_store_tick);
+    builder.addNode(._zux_store_tick);
 
     return builder;
 }
@@ -2258,6 +2385,13 @@ fn totalPollerCount(comptime registries: anytype) usize {
 
 fn buttonPollerCount(comptime registries: anytype) usize {
     return registryPeriphLen(registries.gpio_button) + registryPeriphLen(registries.adc_button);
+}
+
+fn nodeBuilderHasTag(comptime builder: anytype, comptime tag: []const u8) bool {
+    inline for (0..builder.tag_len) |i| {
+        if (comptimeEql(builder.tags[i], tag)) return true;
+    }
+    return false;
 }
 
 fn registryPeriphLen(comptime registry: anytype) usize {

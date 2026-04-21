@@ -91,9 +91,12 @@ pub fn Harness(comptime lib: type) type {
         }
 
         pub fn writeAllContext(stream: *Stream, ctx: context_mod.Context, data: []const u8) !void {
+            try stream.setWriteContext(ctx);
+            defer stream.setWriteContext(null) catch unreachable;
+
             var offset: usize = 0;
             while (offset < data.len) {
-                offset += try stream.writeContext(ctx, data[offset..]);
+                offset += try stream.write(data[offset..]);
             }
         }
 

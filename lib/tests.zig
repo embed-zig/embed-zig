@@ -16,6 +16,7 @@ const zux = @import("zux");
 pub const test_runner = struct {
     pub const embed = @import("tests/embed.zig");
     pub const context = @import("tests/context.zig");
+    pub const testing_startup_probe = @import("tests/testing_startup_probe.zig");
 };
 
 test "testing/unit/std" {
@@ -35,6 +36,26 @@ test "testing/unit/embed_std" {
     defer t.deinit();
 
     t.run("testing/unit/embed_std", testing.test_runner.unit.make(embed_std.std));
+    if (!t.wait()) return error.TestFailed;
+}
+
+test "testing/unit/startup_probe/std" {
+    std.testing.log_level = .info;
+
+    var t = testing.T.new(std, .testing);
+    defer t.deinit();
+
+    t.run("testing/unit/startup_probe/std", test_runner.testing_startup_probe.make(std));
+    if (!t.wait()) return error.TestFailed;
+}
+
+test "testing/unit/startup_probe/embed_std" {
+    std.testing.log_level = .info;
+
+    var t = testing.T.new(embed_std.std, .testing);
+    defer t.deinit();
+
+    t.run("testing/unit/startup_probe/embed_std", test_runner.testing_startup_probe.make(embed_std.std));
     if (!t.wait()) return error.TestFailed;
 }
 

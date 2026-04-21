@@ -1,0 +1,945 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "led strip flash sequence",
+    "description": "flashes the shared strip from white to red to black and back while checking each visible step",
+    "steps": [
+      {
+        "inputs": [
+          {
+            "ledstrip_set_pixels": {
+              "source_id": 11,
+              "pixels": [
+                {
+                  "r": 255,
+                  "g": 255,
+                  "b": 255
+                }
+              ],
+              "brightness": 255
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 255,
+              "total_frames": 1,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 255,
+                    "g": 255,
+                    "b": 255
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ledstrip_flash": {
+              "source_id": 11,
+              "pixels": [
+                {
+                  "r": 255,
+                  "g": 0,
+                  "b": 0
+                }
+              ],
+              "brightness": 128,
+              "duration_ns": 8000000,
+              "interval_ns": 8000000
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 223,
+                    "g": 223,
+                    "b": 223
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 191,
+                    "g": 191,
+                    "b": 191
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 159,
+                    "g": 159,
+                    "b": 159
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 128,
+                    "g": 127,
+                    "b": 127
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 128,
+                    "g": 95,
+                    "b": 95
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 128,
+                    "g": 63,
+                    "b": 63
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 128,
+                    "g": 31,
+                    "b": 31
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 128,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 10
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 112,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 96,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 80,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 64,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 48,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 32,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 16,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 10
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 16,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 32,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 48,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 64,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 80,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 96,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 112,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1000000,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "strip",
+            "state": {
+              "brightness": 128,
+              "total_frames": 2,
+              "current": {
+                "pixels": [
+                  {
+                    "r": 128,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  },
+                  {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

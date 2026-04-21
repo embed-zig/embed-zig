@@ -39,6 +39,9 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     const peer = try Harness.accept(listener.fd);
                     defer posix.close(peer);
 
+                    try stream.setReadContext(ctx);
+                    defer stream.setReadContext(null) catch unreachable;
+
                     const cancel_thread = try Thread.spawn(.{}, struct {
                         fn run(cancel_ctx: context_mod.Context, comptime thread_lib: type) void {
                             thread_lib.Thread.sleep(30 * thread_lib.time.ns_per_ms);
@@ -48,7 +51,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     defer cancel_thread.join();
 
                     var buf: [16]u8 = undefined;
-                    try testing.expectError(error.Canceled, stream.readContext(ctx, &buf));
+                    try testing.expectError(error.Canceled, stream.read(&buf));
                 }
             };
             Body.call(allocator) catch |err| {

@@ -232,14 +232,14 @@ pub fn Conn(comptime lib: type) type {
             self.inner.setWriteTimeout(ms);
         }
 
-        pub fn pushIoContext(self: *Self, ctx: context_mod.Context) void {
+        pub fn setReadContext(self: *Self, ctx: ?context_mod.Context) Allocator.Error!void {
             const tcp_conn = self.inner.as(TcpConn) catch return;
-            tcp_conn.pushIoContext(ctx);
+            try tcp_conn.setReadContext(ctx);
         }
 
-        pub fn popIoContext(self: *Self) void {
+        pub fn setWriteContext(self: *Self, ctx: ?context_mod.Context) Allocator.Error!void {
             const tcp_conn = self.inner.as(TcpConn) catch return;
-            tcp_conn.popIoContext();
+            try tcp_conn.setWriteContext(ctx);
         }
 
         fn readPending(self: *Self, buf: []u8) usize {

@@ -434,7 +434,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     onRequest: ?*const fn (?*anyopaque, *const bt.Peripheral.Request, *bt.Peripheral.ResponseWriter) void = null,
                     onSubscription: ?*const fn (?*anyopaque, Subscription) void = null,
                 };
-                const ChannelFactoryImpl = sync.Channel(Dummy.Channel);
+                const ChannelFactoryImpl = sync.channel.make(Dummy.Channel);
 
                 pub fn ChannelFactory(comptime T: type) type {
                     return ChannelFactoryImpl(T);

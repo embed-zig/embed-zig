@@ -1,6 +1,7 @@
 const embed = @import("embed");
 const builtin = embed.builtin;
 const testing_api = @import("testing");
+const StoreSubscriber = @import("Subscriber.zig");
 const StoreState = @import("State.zig");
 const StoreTypes = @import("Stores.zig");
 
@@ -132,6 +133,10 @@ pub fn Builder(comptime options: BuilderOptions) type {
                     OutOfMemory,
                     InvalidPath,
                 };
+                pub const SubscribePathError = error{
+                    OutOfMemory,
+                    InvalidPath,
+                };
 
                 allocator: Allocator,
                 stores: Stores,
@@ -168,6 +173,22 @@ pub fn Builder(comptime options: BuilderOptions) type {
 
                 pub fn unhandle(self_store: *Generated, comptime path: []const u8, handler: HandlerFn) bool {
                     return StoreState.unhandlePath(path, self_store.state, handler);
+                }
+
+                pub fn subscribePath(
+                    self_store: *Generated,
+                    comptime path: []const u8,
+                    subscriber: *StoreSubscriber,
+                ) SubscribePathError!void {
+                    try StoreState.subscribePath(path, self_store.allocator, self_store.state, subscriber);
+                }
+
+                pub fn unsubscribePath(
+                    self_store: *Generated,
+                    comptime path: []const u8,
+                    subscriber: *StoreSubscriber,
+                ) bool {
+                    return StoreState.unsubscribePath(path, self_store.state, subscriber);
                 }
 
                 pub fn tick(self_store: *Generated) void {

@@ -17,3 +17,4 @@ pub const Object = StoreObject;
 pub const Stores = StoreStores;
 pub const State = StoreState;
 pub const Reducer = StoreReducer;
+pub const ReducerFn = StoreReducer;

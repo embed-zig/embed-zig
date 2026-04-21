@@ -101,9 +101,9 @@ caller-owned fd slot by pointer and stores one binding value on that context.
 - `value(T, key)` performs typed lookup through the parent chain
 - `as(T)` downcasts to a concrete implementation when tests/internal code need it
 
-Recursive cancellation walks take shared locks as they descend, so the injected
-`lib.Thread.RwLock` must allow nested shared-reader acquisition on the same
-thread.
+Recursive cancellation walks hold one shared lock across the full downward
+propagation pass, so the injected `lib.Thread.RwLock` does not need same-thread
+nested shared-reader support for child traversal.
 
 ## Node types
 

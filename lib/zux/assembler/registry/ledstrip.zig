@@ -1,14 +1,12 @@
 const ledstrip = @import("ledstrip");
 const registry_unique = @import("unique.zig");
 
-const EnumLiteral = @Type(.enum_literal);
-
 pub fn make(comptime max_led_strips: usize) type {
     return struct {
         const Self = @This();
 
         pub const Periph = struct {
-            label: EnumLiteral,
+            label: []const u8,
             id: u32,
             pixel_count: usize,
             control_type: type,
@@ -23,7 +21,7 @@ pub fn make(comptime max_led_strips: usize) type {
 
         pub fn add(
             self: *Self,
-            comptime label: EnumLiteral,
+            comptime label: anytype,
             comptime id: u32,
             comptime pixel_count: usize,
         ) void {
@@ -33,17 +31,18 @@ pub fn make(comptime max_led_strips: usize) type {
             if (self.len >= max_led_strips) {
                 @compileError("zux.Assembler exceeded max_led_strips");
             }
+            const label_name = registry_unique.labelText(label);
             registry_unique.ensureUnique(
                 self.periphs,
                 self.len,
-                label,
+                label_name,
                 id,
                 "zux.Assembler.addLedStrip duplicate label",
                 "zux.Assembler.addLedStrip duplicate id",
             );
 
             self.periphs[self.len] = .{
-                .label = label,
+                .label = label_name,
                 .id = id,
                 .pixel_count = pixel_count,
                 .control_type = ledstrip.LedStrip,

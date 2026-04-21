@@ -1,14 +1,12 @@
 const drivers = @import("drivers");
 const registry_unique = @import("unique.zig");
 
-const EnumLiteral = @Type(.enum_literal);
-
 pub fn make(comptime max_adc_buttons: usize) type {
     return struct {
         const Self = @This();
 
         pub const Periph = struct {
-            label: EnumLiteral,
+            label: []const u8,
             id: u32,
             button_count: usize,
             control_type: type,
@@ -23,7 +21,7 @@ pub fn make(comptime max_adc_buttons: usize) type {
 
         pub fn add(
             self: *Self,
-            comptime label: EnumLiteral,
+            comptime label: anytype,
             comptime id: u32,
             comptime button_count: usize,
         ) void {
@@ -34,17 +32,18 @@ pub fn make(comptime max_adc_buttons: usize) type {
             if (self.len >= max_adc_buttons) {
                 @compileError("zux.Assembler exceeded max_adc_buttons");
             }
+            const label_name = registry_unique.labelText(label);
             registry_unique.ensureUnique(
                 self.periphs,
                 self.len,
-                label,
+                label_name,
                 id,
                 "zux.Assembler.addGroupedButton duplicate label",
                 "zux.Assembler.addGroupedButton duplicate id",
             );
 
             self.periphs[self.len] = .{
-                .label = label,
+                .label = label_name,
                 .id = id,
                 .button_count = button_count,
                 .control_type = drivers.button.Grouped,

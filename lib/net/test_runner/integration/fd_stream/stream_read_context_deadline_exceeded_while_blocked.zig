@@ -38,8 +38,11 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     const peer = try Harness.accept(listener.fd);
                     defer posix.close(peer);
 
+                    try stream.setReadContext(ctx);
+                    defer stream.setReadContext(null) catch unreachable;
+
                     var buf: [16]u8 = undefined;
-                    try testing.expectError(error.DeadlineExceeded, stream.readContext(ctx, &buf));
+                    try testing.expectError(error.DeadlineExceeded, stream.read(&buf));
                 }
             };
             Body.call(allocator) catch |err| {

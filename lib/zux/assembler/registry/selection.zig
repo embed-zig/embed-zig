@@ -1,14 +1,12 @@
 const selection = @import("../../component/ui/selection.zig");
 const registry_unique = @import("unique.zig");
 
-const EnumLiteral = @Type(.enum_literal);
-
 pub fn make(comptime max_selections: usize) type {
     return struct {
         const Self = @This();
 
         pub const Selection = struct {
-            label: EnumLiteral,
+            label: []const u8,
             id: u32,
             initial_state: selection.State,
         };
@@ -22,24 +20,25 @@ pub fn make(comptime max_selections: usize) type {
 
         pub fn add(
             self: *Self,
-            comptime label: EnumLiteral,
+            comptime label: anytype,
             comptime id: u32,
             comptime initial_state: selection.State,
         ) void {
             if (self.len >= max_selections) {
                 @compileError("zux.Assembler exceeded max_selections");
             }
+            const label_name = registry_unique.labelText(label);
             registry_unique.ensureUnique(
                 self.periphs,
                 self.len,
-                label,
+                label_name,
                 id,
                 "zux.Assembler.addSelection duplicate label",
                 "zux.Assembler.addSelection duplicate id",
             );
 
             self.periphs[self.len] = .{
-                .label = label,
+                .label = label_name,
                 .id = id,
                 .initial_state = initial_state,
             };

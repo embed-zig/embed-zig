@@ -1,0 +1,218 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "loading overlay sequence",
+    "description": "shows, updates, hides, and re-shows the loading overlay while checking visible state",
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "loading",
+            "state": {
+              "visible": false,
+              "name": "",
+              "blocking": false
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_overlay_show": {
+              "source_id": 71,
+              "name": "loading",
+              "blocking": true
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "loading",
+            "state": {
+              "visible": true,
+              "name": "loading",
+              "blocking": true
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_overlay_show": {
+              "source_id": 71,
+              "name": "loading",
+              "blocking": true
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "loading",
+            "state": {
+              "visible": true,
+              "name": "loading",
+              "blocking": true
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_overlay_set_blocking": {
+              "source_id": 71,
+              "value": false
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "loading",
+            "state": {
+              "visible": true,
+              "name": "loading",
+              "blocking": false
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_overlay_set_name": {
+              "source_id": 71,
+              "name": "popup"
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "loading",
+            "state": {
+              "visible": true,
+              "name": "popup",
+              "blocking": false
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_overlay_hide": {
+              "source_id": 71
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "loading",
+            "state": {
+              "visible": false,
+              "name": "popup",
+              "blocking": false
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_overlay_hide": {
+              "source_id": 71
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "loading",
+            "state": {
+              "visible": false,
+              "name": "popup",
+              "blocking": false
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_overlay_show": {
+              "source_id": 71,
+              "name": "toast",
+              "blocking": false
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "loading",
+            "state": {
+              "visible": true,
+              "name": "toast",
+              "blocking": false
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

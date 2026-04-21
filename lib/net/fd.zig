@@ -4,9 +4,14 @@
 //! while the new stream/packet implementation is validated in isolation.
 
 const testing_api = @import("testing");
+const netfd_mod = @import("fd/netfd.zig");
 const stream_mod = @import("fd/Stream.zig");
 const packet_mod = @import("fd/Packet.zig");
 const listener_mod = @import("fd/Listener.zig");
+
+pub fn NetFd(comptime lib: type) type {
+    return netfd_mod.make(lib);
+}
 
 pub fn Stream(comptime lib: type) type {
     return stream_mod.Stream(lib);
@@ -31,6 +36,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
             _ = @import("fd/SockAddr.zig");
             _ = @import("fd/Listener.zig");
+            _ = @import("fd/netfd.zig");
             _ = @import("fd/Stream.zig");
             _ = @import("fd/Packet.zig");
             _ = @import("test_runner/integration/fd_stream.zig");

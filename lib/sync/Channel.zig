@@ -2,7 +2,7 @@
 //!
 //! Usage:
 //!   const sync = @import("sync");
-//!   const Channel = sync.Channel(platform.Channel);
+//!   const Channel = sync.Channel(lib, platform.ChannelFactory);
 //!   const IntChan = Channel(u32);
 //!   var ch = try IntChan.make(allocator, 16);
 //!   defer ch.deinit();
@@ -20,9 +20,24 @@ pub fn RecvResult(comptime T: type) type {
     return struct { value: T, ok: bool };
 }
 
+pub const ChannelType = @TypeOf(struct {
+    fn impl(comptime T: type) type {
+        _ = T;
+        unreachable;
+    }
+}.impl);
+
+pub const FactoryType = @TypeOf(struct {
+    fn factory(comptime lib: type) ChannelType {
+        _ = lib;
+        unreachable;
+    }
+}.factory);
+
 /// Construct a sealed Channel type factory from a platform Impl.
 ///
-/// Impl must be: fn(type) type
+/// Impl must be: `ChannelType`
+/// A higher-order platform factory should be: `FactoryType`
 /// The returned factory produces a type for a given T that must provide:
 ///   fn init(Allocator, usize) !Ch
 ///   fn deinit(*Ch) void
@@ -31,7 +46,7 @@ pub fn RecvResult(comptime T: type) type {
 ///   fn sendTimeout(*Ch, T, u32) anyerror!SendResult()
 ///   fn recv(*Ch) anyerror!RecvResult(T)
 ///   fn recvTimeout(*Ch, u32) anyerror!RecvResult(T)
-pub fn make(comptime impl: fn (type) type) fn (type) type {
+pub fn make(comptime impl: ChannelType) ChannelType {
     return struct {
         fn factory(comptime T: type) type {
             const Ch = impl(T);
@@ -86,7 +101,7 @@ pub fn make(comptime impl: fn (type) type) fn (type) type {
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const TestCase = struct {
         fn run() !void {
-            const FakeChannelFactory = struct {
+            const FakeChannelFactory: ChannelType = struct {
                 fn make(comptime T: type) type {
                     return struct {
                         slot: ?T = null,
@@ -132,9 +147,20 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     };
                 }
             }.make;
+            const FakePlatformFactory: FactoryType = struct {
+                fn make(comptime platform_lib: type) ChannelType {
+                    _ = platform_lib;
+                    return FakeChannelFactory;
+                }
+            }.make;
 
-            const Channel = make(FakeChannelFactory);
-            const U32Channel = Channel(u32);
+            comptime {
+                _ = @as(ChannelType, FakeChannelFactory);
+                _ = @as(FactoryType, FakePlatformFactory);
+            }
+
+            const BoundChannel = make(FakeChannelFactory);
+            const U32Channel = BoundChannel(u32);
 
             var ch = try U32Channel.make(lib.testing.allocator, 7);
             defer ch.deinit();

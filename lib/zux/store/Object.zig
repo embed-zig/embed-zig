@@ -1,13 +1,13 @@
 const testing_api = @import("testing");
 const Subscriber = @import("Subscriber.zig");
 
-pub fn make(comptime lib: type, comptime T: type, comptime label: @Type(.enum_literal)) type {
+pub fn make(comptime lib: type, comptime T: type, comptime label: anytype) type {
     const Allocator = lib.mem.Allocator;
     const AtomicU64 = lib.atomic.Value(u64);
     const SubscriberList = lib.ArrayList(*Subscriber);
     const Mutex = lib.Thread.Mutex;
     const RwLock = lib.Thread.RwLock;
-    const label_name = @tagName(label);
+    const label_name = labelText(label);
 
     return struct {
         const Self = @This();
@@ -79,6 +79,23 @@ pub fn make(comptime lib: type, comptime T: type, comptime label: @Type(.enum_li
             return self.released;
         }
 
+        pub fn eql(self: *Self, expected: anytype) bool {
+            const actual = self.get();
+            const ExpectedType = @TypeOf(expected);
+            if (ExpectedType == T) {
+                return !diffValue(T, actual, expected);
+            }
+
+            switch (@typeInfo(T)) {
+                .@"struct" => {
+                    var expected_state: T = .{};
+                    patchValue(&expected_state, expected);
+                    return !diffValue(T, actual, expected_state);
+                },
+                else => @compileError("zux.store.Object.eql expects " ++ @typeName(T) ++ " for non-struct state"),
+            }
+        }
+
         pub fn tick(self: *Self) void {
             const tick_count = self.tick_count.fetchAdd(1, .acq_rel) + 1;
             self.running_mu.lock();
@@ -147,6 +164,22 @@ pub fn make(comptime lib: type, comptime T: type, comptime label: @Type(.enum_li
 
             return false;
         }
+    };
+}
+
+fn labelText(comptime raw_label: anytype) []const u8 {
+    return switch (@typeInfo(@TypeOf(raw_label))) {
+        .enum_literal => @tagName(raw_label),
+        .pointer => |ptr| switch (ptr.size) {
+            .slice => raw_label,
+            .one => switch (@typeInfo(ptr.child)) {
+                .array => raw_label[0..],
+                else => @compileError("zux.store.Object.make label must be enum_literal or []const u8"),
+            },
+            else => @compileError("zux.store.Object.make label must be enum_literal or []const u8"),
+        },
+        .array => raw_label[0..],
+        else => @compileError("zux.store.Object.make label must be enum_literal or []const u8"),
     };
 }
 
@@ -237,10 +270,7 @@ fn patchValue(dst: anytype, src: anytype) void {
                     }
                 },
                 else => {
-                    if (Dst != Src) {
-                        @compileError("zux.StoreObject.patch type mismatch: cannot patch " ++ @typeName(Dst) ++ " with " ++ @typeName(Src));
-                    }
-                    dst.* = src;
+                    assignPatchedValue(dst, src);
                 },
             }
         },
@@ -253,12 +283,52 @@ fn patchValue(dst: anytype, src: anytype) void {
         },
 
         else => {
-            if (Dst != Src) {
-                @compileError("zux.StoreObject.patch type mismatch: cannot patch " ++ @typeName(Dst) ++ " with " ++ @typeName(Src));
-            }
-            dst.* = src;
+            assignPatchedValue(dst, src);
         },
     }
+}
+
+fn assignPatchedValue(dst: anytype, src: anytype) void {
+    const DstPtr = @TypeOf(dst);
+    const ptr_info = @typeInfo(DstPtr);
+    if (ptr_info != .pointer or ptr_info.pointer.size != .one) {
+        @compileError("zux.StoreObject.assignPatchedValue expects a single-item destination pointer");
+    }
+
+    const Dst = ptr_info.pointer.child;
+    const Src = @TypeOf(src);
+
+    if (Dst == Src) {
+        dst.* = src;
+        return;
+    }
+
+    switch (@typeInfo(Dst)) {
+        .int => switch (@typeInfo(Src)) {
+            .comptime_int => {
+                dst.* = @as(Dst, src);
+                return;
+            },
+            else => {},
+        },
+        .float => switch (@typeInfo(Src)) {
+            .comptime_float, .comptime_int => {
+                dst.* = @as(Dst, src);
+                return;
+            },
+            else => {},
+        },
+        .@"enum" => switch (@typeInfo(Src)) {
+            .enum_literal => {
+                dst.* = @as(Dst, src);
+                return;
+            },
+            else => {},
+        },
+        else => {},
+    }
+
+    @compileError("zux.StoreObject.patch type mismatch: cannot patch " ++ @typeName(Dst) ++ " with " ++ @typeName(Src));
 }
 
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
@@ -348,6 +418,34 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             state.tick();
             try testing.expectEqual(@as(u32, 2), state.get().count);
             try testing.expect(state.get().enabled);
+        }
+
+        fn eql_reads_released_state(testing: anytype, allocator: lib.mem.Allocator) !void {
+            const S = make(StoreLib, struct {
+                count: u32 = 0,
+                enabled: bool = false,
+            }, .test_eql);
+
+            var state = S.init(allocator, .{});
+            defer state.deinit();
+
+            try testing.expect(state.eql(.{}));
+            try testing.expect(!state.eql(.{
+                .count = 1,
+            }));
+
+            state.set(.{
+                .count = 1,
+                .enabled = true,
+            });
+
+            try testing.expect(state.eql(.{}));
+
+            state.tick();
+            try testing.expect(state.eql(.{
+                .count = 1,
+                .enabled = true,
+            }));
         }
 
         fn invoke_mutates_running_then_tick_publishes(testing: anytype, allocator: lib.mem.Allocator) !void {
@@ -589,6 +687,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 return false;
             };
             TestCase.set_write_then_tick(testing, allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.eql_reads_released_state(testing, allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

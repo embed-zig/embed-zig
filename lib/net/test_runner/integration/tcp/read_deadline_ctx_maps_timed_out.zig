@@ -39,12 +39,12 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     defer ac.deinit();
 
                     const accepted = try ac.as(Net.TcpConn);
-                    accepted.pushIoContext(io_ctx);
+                    try accepted.setReadContext(io_ctx);
 
                     var buf: [16]u8 = undefined;
                     try lib.testing.expectError(error.TimedOut, ac.read(&buf));
 
-                    accepted.popIoContext();
+                    try accepted.setReadContext(null);
                     try io.writeAll(@TypeOf(cc), &cc, "ok");
                     try io.readFull(@TypeOf(ac), &ac, buf[0..2]);
                     try lib.testing.expectEqualStrings("ok", buf[0..2]);

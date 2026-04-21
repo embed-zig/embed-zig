@@ -20,6 +20,7 @@ deadline semantics.
   `getsockopt`, and `SO.ERROR`.
 - The core internal files are in place:
   - `lib/net/fd.zig`
+  - `lib/net/fd/netfd.zig`
   - `lib/net/fd/Stream.zig`
   - `lib/net/fd/Packet.zig`
   - `lib/net/fd/Listener.zig`
@@ -97,6 +98,7 @@ These contract surfaces are covered by
 The main internal entry points are:
 
 - `lib/net/fd.zig`
+- `lib/net/fd/netfd.zig`
 - `lib/net/fd/Stream.zig`
 - `lib/net/fd/Packet.zig`
 - `lib/net/fd/Listener.zig`

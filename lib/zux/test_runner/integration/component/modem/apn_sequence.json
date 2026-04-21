@@ -1,0 +1,108 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "modem apn sequence",
+    "description": "updates the modem apn field across multiple values while preserving the rest of the modem state",
+    "steps": [
+      {
+        "inputs": [
+          {
+            "modem_data_apn_changed": {
+              "source_id": 51,
+              "apn_end": 8,
+              "apn_buf": "internet"
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "unknown",
+              "registration": "offline",
+              "packet": "detached",
+              "apn_end": 8,
+              "apn_buf": "internet",
+              "signal": null
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "modem_data_apn_changed": {
+              "source_id": 51,
+              "apn_end": 3,
+              "apn_buf": "iot"
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "unknown",
+              "registration": "offline",
+              "packet": "detached",
+              "apn_end": 3,
+              "apn_buf": "iot",
+              "signal": null
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "modem_data_apn_changed": {
+              "source_id": 51,
+              "apn_end": 0,
+              "apn_buf": ""
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "unknown",
+              "registration": "offline",
+              "packet": "detached",
+              "apn_end": 0,
+              "apn_buf": "",
+              "signal": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

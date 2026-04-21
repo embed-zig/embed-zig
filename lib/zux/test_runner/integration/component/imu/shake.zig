@@ -47,7 +47,7 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             };
             defer _ = app.store.unhandle("io/imu", Self.onImu);
 
-            app.start() catch |err| {
+            app.start(.{}) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

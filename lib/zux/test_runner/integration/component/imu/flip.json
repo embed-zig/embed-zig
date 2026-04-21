@@ -1,0 +1,64 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "imu flip sequence",
+    "description": "sets flip motion and clears it with the next accel sample",
+    "steps": [
+      {
+        "inputs": [
+          {
+            "imu_motion": {
+              "source_id": 17,
+              "motion": {
+                "flip": {
+                  "from": "up",
+                  "to": "down"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": "flip"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": -1.0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

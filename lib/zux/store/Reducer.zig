@@ -3,6 +3,20 @@ const Emitter = @import("../pipeline/Emitter.zig");
 const Message = @import("../pipeline/Message.zig");
 const Node = @import("../pipeline/Node.zig");
 
+pub fn ReducerFnType(comptime Stores: type, comptime MessageType: type, comptime EmitterType: type) type {
+    return *const fn (stores: *Stores, message: MessageType, emit: EmitterType) anyerror!usize;
+}
+
+pub const ReducerFnFactory = @TypeOf(struct {
+    fn factory(
+        comptime Stores: type,
+        comptime MessageType: type,
+        comptime EmitterType: type,
+    ) ReducerFnType(Stores, MessageType, EmitterType) {
+        unreachable;
+    }
+}.factory);
+
 pub fn make(comptime Store: type) type {
     return struct {
         stores: *Store.Stores,
@@ -13,7 +27,7 @@ pub fn make(comptime Store: type) type {
 
         pub const StoreType = Store;
         pub const Stores = Store.Stores;
-        pub const ReducerFn = *const fn (stores: *Stores, message: Message, emit: Emitter) anyerror!usize;
+        pub const ReducerFn = ReducerFnType(Store.Stores, Message, Emitter);
 
         pub fn init(stores: *Stores, reducer: ReducerFn) Self {
             return .{

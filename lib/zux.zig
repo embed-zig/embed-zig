@@ -1,29 +1,32 @@
-pub const store = @import("zux/Store.zig");
-pub const Assembler = @import("zux/Assembler.zig");
-pub const App = @import("zux/App.zig");
-pub const component = @import("zux/component.zig");
-pub const bt = component.bt;
-pub const ble = bt;
-pub const button = component.button;
-pub const ledstrip = component.ledstrip;
-pub const imu = component.imu;
-pub const modem = component.modem;
-pub const nfc = component.nfc;
-pub const wifi = component.wifi;
-pub const netstack = @import("zux/NetStack.zig");
-pub const event = @import("zux/event.zig");
+const sync = @import("sync");
+
+const Assembler = @import("zux/Assembler.zig");
+const Config = @import("zux/assembler/Config.zig");
+
+pub const Store = @import("zux/Store.zig");
+pub const ReducerFnType = Store.Reducer.ReducerFnType;
 pub const pipeline = struct {
     pub const Message = @import("zux/pipeline/Message.zig");
-    pub const Emitter = @import("zux/pipeline/Emitter.zig");
-    pub const Node = @import("zux/pipeline/Node.zig");
-    pub const Poller = @import("zux/pipeline/Poller.zig");
-    pub const NodeBuilder = @import("zux/pipeline/NodeBuilder.zig");
-    pub const BranchNode = @import("zux/pipeline/BranchNode.zig");
-    pub const Pipeline = @import("zux/pipeline/Pipeline.zig");
 };
+
+pub const events = struct {
+    pub const button = @import("zux/component/button/state.zig");
+};
+
+pub const spec = struct {
+    pub const Component = @import("zux/spec/Component.zig");
+    pub const UserStory = @import("zux/spec/UserStory.zig");
+};
+
+pub fn assemble(
+    comptime lib: type,
+    comptime config: Config,
+    comptime Channel: sync.channel.ChannelType,
+) type {
+    return Assembler.make(lib, config, Channel);
+}
+
 pub const test_runner = struct {
     pub const unit = @import("zux/test_runner/unit.zig");
     pub const integration = @import("zux/test_runner/integration.zig");
 };
-pub const Subscriber = store.Subscriber;
-pub const StoreObject = store.Object;

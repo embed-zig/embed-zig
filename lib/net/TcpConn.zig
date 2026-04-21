@@ -19,9 +19,6 @@ pub fn TcpConn(comptime lib: type) type {
         closed: bool = false,
         read_timeout_ms: ?u32 = null,
         write_timeout_ms: ?u32 = null,
-        io_context_mu: lib.Thread.Mutex = .{},
-        io_context: ?context_mod.Context = null,
-        io_context_users: usize = 0,
 
         const Self = @This();
 
@@ -29,7 +26,7 @@ pub fn TcpConn(comptime lib: type) type {
             if (self.closed) return error.EndOfStream;
             if (buf.len == 0) return 0;
             self.applyReadTimeout();
-            const n = self.readWithActiveContext(buf) catch |err| return switch (err) {
+            const n = self.stream.read(buf) catch |err| return switch (err) {
                 error.Closed => error.EndOfStream,
                 error.Canceled => error.TimedOut,
                 error.DeadlineExceeded => error.TimedOut,
@@ -45,7 +42,7 @@ pub fn TcpConn(comptime lib: type) type {
         pub fn write(self: *Self, buf: []const u8) Conn.WriteError!usize {
             if (self.closed) return error.BrokenPipe;
             self.applyWriteTimeout();
-            return self.writeWithActiveContext(buf) catch |err| return switch (err) {
+            return self.stream.write(buf) catch |err| return switch (err) {
                 error.Closed => error.BrokenPipe,
                 error.Canceled => error.TimedOut,
                 error.DeadlineExceeded => error.TimedOut,
@@ -60,38 +57,33 @@ pub fn TcpConn(comptime lib: type) type {
         pub fn close(self: *Self) void {
             if (!self.closed) {
                 self.closed = true;
+                self.stream.clearContexts();
                 self.stream.shutdown(.both) catch {};
             }
         }
 
         pub fn deinit(self: *Self) void {
             self.close();
-            if (!self.stream.closed) self.stream.close();
-            const a = self.allocator;
-            a.destroy(self);
+            self.stream.deinit();
+            self.allocator.destroy(self);
         }
 
         pub fn setReadTimeout(self: *Self, ms: ?u32) void {
             self.read_timeout_ms = ms;
+            self.applyReadTimeout();
         }
 
         pub fn setWriteTimeout(self: *Self, ms: ?u32) void {
             self.write_timeout_ms = ms;
+            self.applyWriteTimeout();
         }
 
-        pub fn pushIoContext(self: *Self, ctx: context_mod.Context) void {
-            self.io_context_mu.lock();
-            defer self.io_context_mu.unlock();
-            self.io_context = ctx;
-            self.io_context_users += 1;
+        pub fn setReadContext(self: *Self, ctx: ?context_mod.Context) Allocator.Error!void {
+            try self.stream.setReadContext(ctx);
         }
 
-        pub fn popIoContext(self: *Self) void {
-            self.io_context_mu.lock();
-            defer self.io_context_mu.unlock();
-            if (self.io_context_users == 0) return;
-            self.io_context_users -= 1;
-            if (self.io_context_users == 0) self.io_context = null;
+        pub fn setWriteContext(self: *Self, ctx: ?context_mod.Context) Allocator.Error!void {
+            try self.stream.setWriteContext(ctx);
         }
 
         fn applyReadTimeout(self: *Self) void {
@@ -105,23 +97,6 @@ pub fn TcpConn(comptime lib: type) type {
         fn timeoutToDeadline(ms: ?u32) ?i64 {
             const timeout_ms = ms orelse return null;
             return lib.time.milliTimestamp() + timeout_ms;
-        }
-
-        fn activeIoContext(self: *Self) ?context_mod.Context {
-            self.io_context_mu.lock();
-            defer self.io_context_mu.unlock();
-            if (self.io_context_users == 0) return null;
-            return self.io_context;
-        }
-
-        fn readWithActiveContext(self: *Self, buf: []u8) (fd_mod.Stream(lib).ReadContextError)!usize {
-            if (self.activeIoContext()) |ctx| return self.stream.readContext(ctx, buf);
-            return self.stream.read(buf);
-        }
-
-        fn writeWithActiveContext(self: *Self, buf: []const u8) (fd_mod.Stream(lib).WriteContextError)!usize {
-            if (self.activeIoContext()) |ctx| return self.stream.writeContext(ctx, buf);
-            return self.stream.write(buf);
         }
 
         pub fn initFromStream(allocator: Allocator, stream: Stream) Allocator.Error!Conn {

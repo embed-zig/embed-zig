@@ -118,18 +118,18 @@ pub fn make(comptime lib: type) type {
             self.mu.unlock();
 
             if (should_cancel) {
-                self.tree_rw.lockShared();
-                defer self.tree_rw.unlockShared();
                 self.markCanceled(Context.DeadlineExceeded);
             }
         }
 
-        fn stopTimer(self: *Self) void {
+        fn signalTimerStop(self: *Self) void {
             self.timer_mu.lock();
             self.timer_canceled = true;
             self.timer_mu.unlock();
             self.timer_cond.signal();
+        }
 
+        fn joinTimer(self: *Self) void {
             if (self.timer_thread) |t| {
                 t.join();
                 self.timer_thread = null;
@@ -137,16 +137,27 @@ pub fn make(comptime lib: type) type {
         }
 
         fn markCanceled(self: *Self, cause: anyerror) void {
+            self.tree_rw.lockShared();
+            defer self.tree_rw.unlockShared();
+            self.propagateCanceledLocked(cause);
+        }
+
+        fn propagateCanceledLocked(self: *Self, cause: anyerror) void {
+            if (!self.markCanceledLocal(cause)) return;
+            internal.cancelChildrenWithCauseNoLock(self.tree.ctx, cause);
+        }
+
+        fn markCanceledLocal(self: *Self, cause: anyerror) bool {
             self.mu.lock();
             if (self.cause != null) {
                 self.mu.unlock();
-                return;
+                return false;
             }
             self.cause = cause;
             self.mu.unlock();
 
             self.cond.broadcast();
-            internal.cancelChildrenWithCause(self.tree.ctx, cause);
+            return true;
         }
 
         pub fn wait(self: *Self, timeout_ns: ?i64) ?anyerror {
@@ -213,31 +224,26 @@ pub fn make(comptime lib: type) type {
 
         fn cancelImpl(ptr: *anyopaque) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            self.tree_rw.lockShared();
-            defer self.tree_rw.unlockShared();
-            self.stopTimer();
+            self.signalTimerStop();
             self.markCanceled(Context.Canceled);
         }
 
         fn cancelWithCauseImpl(ptr: *anyopaque, cause: anyerror) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            self.tree_rw.lockShared();
-            defer self.tree_rw.unlockShared();
-            self.stopTimer();
+            self.signalTimerStop();
             self.markCanceled(cause);
         }
 
         fn propagateCancelWithCauseImpl(ptr: *anyopaque, cause: anyerror) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            self.tree_rw.lockShared();
-            defer self.tree_rw.unlockShared();
-            self.stopTimer();
-            self.markCanceled(cause);
+            self.signalTimerStop();
+            self.propagateCanceledLocked(cause);
         }
 
         fn deinitImpl(ptr: *anyopaque) void {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            self.stopTimer();
+            self.signalTimerStop();
+            self.joinTimer();
             internal.detachAndReparentChildren(self.tree.ctx);
             self.allocator.destroy(self);
         }

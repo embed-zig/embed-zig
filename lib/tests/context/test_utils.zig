@@ -639,3 +639,104 @@ pub fn CountingJoinThreadType(comptime lib: type) type {
         }
     };
 }
+
+pub fn SharedLockTrackingThreadType(comptime lib: type) type {
+    return struct {
+        pub const SpawnConfig = lib.Thread.SpawnConfig;
+        pub const SpawnError = lib.Thread.SpawnError;
+        pub const YieldError = lib.Thread.YieldError;
+        pub const CpuCountError = lib.Thread.CpuCountError;
+        pub const SetNameError = lib.Thread.SetNameError;
+        pub const GetNameError = lib.Thread.GetNameError;
+        pub const max_name_len = lib.Thread.max_name_len;
+        pub const Id = lib.Thread.Id;
+        pub const Mutex = lib.Thread.Mutex;
+        pub const Condition = lib.Thread.Condition;
+        pub const RwLock = struct {
+            impl: lib.Thread.RwLock = .{},
+            mu: lib.Thread.Mutex = .{},
+            shared_depth: usize = 0,
+            writer_pending_for_test: bool = false,
+            nested_shared_while_writer_pending: bool = false,
+
+            const RwLockSelf = @This();
+
+            pub fn armPendingWriterForTest(self: *RwLockSelf) void {
+                self.mu.lock();
+                self.writer_pending_for_test = true;
+                self.mu.unlock();
+            }
+
+            pub fn clearPendingWriterForTest(self: *RwLockSelf) void {
+                self.mu.lock();
+                self.writer_pending_for_test = false;
+                self.mu.unlock();
+            }
+
+            pub fn lockShared(self: *RwLockSelf) void {
+                self.mu.lock();
+                if (self.shared_depth > 0 and self.writer_pending_for_test) {
+                    self.nested_shared_while_writer_pending = true;
+                }
+                self.shared_depth += 1;
+                self.mu.unlock();
+                self.impl.lockShared();
+            }
+
+            pub fn unlockShared(self: *RwLockSelf) void {
+                self.impl.unlockShared();
+                self.mu.lock();
+                self.shared_depth -= 1;
+                self.mu.unlock();
+            }
+
+            pub fn lock(self: *RwLockSelf) void {
+                self.impl.lock();
+            }
+
+            pub fn unlock(self: *RwLockSelf) void {
+                self.impl.unlock();
+            }
+        };
+
+        const Self = @This();
+
+        impl: lib.Thread = undefined,
+
+        pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) SpawnError!Self {
+            return .{ .impl = try lib.Thread.spawn(config, f, args) };
+        }
+
+        pub fn join(self: Self) void {
+            self.impl.join();
+        }
+
+        pub fn detach(self: Self) void {
+            self.impl.detach();
+        }
+
+        pub fn yield() YieldError!void {
+            return lib.Thread.yield();
+        }
+
+        pub fn sleep(ns: u64) void {
+            lib.Thread.sleep(ns);
+        }
+
+        pub fn getCpuCount() CpuCountError!usize {
+            return lib.Thread.getCpuCount();
+        }
+
+        pub fn getCurrentId() Id {
+            return lib.Thread.getCurrentId();
+        }
+
+        pub fn setName(name: []const u8) SetNameError!void {
+            return lib.Thread.setName(name);
+        }
+
+        pub fn getName(buf: *[max_name_len:0]u8) GetNameError!?[]const u8 {
+            return lib.Thread.getName(buf);
+        }
+    };
+}

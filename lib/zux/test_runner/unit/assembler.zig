@@ -1,6 +1,9 @@
 const testing_api = @import("testing");
 
 const Assembler = @import("../../Assembler.zig");
+const Store = @import("../../Store.zig");
+const Emitter = @import("../../pipeline/Emitter.zig");
+const Message = @import("../../pipeline/Message.zig");
 const registry_unique = @import("../../assembler/registry/unique.zig");
 const overlay = @import("../../component/ui/overlay.zig");
 const route = @import("../../component/ui/route.zig");
@@ -60,6 +63,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expectEqual(@as(usize, 8), assembler.store_builder.store_bindings.len);
                     try testing.expectEqual(@as(usize, 32), assembler.store_builder.state_bindings.len);
                     try testing.expectEqual(@as(usize, 24), assembler.node_builder.ops.len);
+                    try testing.expectEqual(AssemblerType.Config.max_reducers, assembler.reducer_bindings.len);
                     try testing.expectEqual(@as(usize, 4), assembler.adc_button_registry.periphs.len);
                     try testing.expectEqual(@as(usize, 6), assembler.gpio_button_registry.periphs.len);
                     try testing.expectEqual(@as(usize, 2), assembler.imu_registry.periphs.len);
@@ -86,22 +90,40 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expectEqual(@as(usize, 0), assembler.overlay_registry.len);
                     try testing.expectEqual(@as(usize, 0), assembler.router_registry.len);
                     try testing.expectEqual(@as(usize, 0), assembler.selection_registry.len);
+                    try testing.expectEqual(@as(usize, 0), assembler.reducer_count);
                 }
 
                 fn reexports_store_and_node_builder_methods() !void {
                     const embed_std = @import("embed_std");
 
                     const WifiStore = struct { enabled: bool = false };
+                    const ReducerFactory = struct {
+                        fn factory(
+                            comptime StoresType: type,
+                            comptime MessageType: type,
+                            comptime EmitterType: type,
+                        ) Store.Reducer.ReducerFnType(StoresType, MessageType, EmitterType) {
+                            return struct {
+                                fn reduce(stores: *StoresType, message: MessageType, emit: EmitterType) !usize {
+                                    _ = stores;
+                                    _ = message;
+                                    _ = emit;
+                                    return 0;
+                                }
+                            }.reduce;
+                        }
+                    }.factory;
 
                     const assembler = comptime blk: {
                         const AssemblerType = Assembler.make(embed_std.std, .{}, Channel);
                         var next = AssemblerType.init();
                         next.setStore(.wifi, WifiStore);
                         next.setState("ui/home", .{.wifi});
-                        next.node(.root);
+                        next.addReducer(.wifi_reducer, ReducerFactory);
+                        next.addNode(.root);
                         next.beginSwitch();
-                        next.case(.tick);
-                        next.node(.tick_node);
+                        next.addCase(.tick);
+                        next.addNode(.tick_node);
                         next.endSwitch();
                         break :blk next;
                     };
@@ -111,9 +133,188 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expectEqual(@as(usize, 2), assembler.node_builder.tag_len);
                     try testing.expectEqual(@as(usize, 1), assembler.node_builder.switch_count);
                     try testing.expectEqual(@as(usize, 5), assembler.node_builder.len);
+                    try testing.expectEqual(@as(usize, 1), assembler.reducer_count);
+                    try testing.expect(embed_std.std.mem.eql(u8, "wifi_reducer", assembler.reducer_bindings[0].name));
                     try testing.expectEqual(@as(usize, 0), assembler.adc_button_registry.len);
                     try testing.expectEqual(@as(usize, 0), assembler.gpio_button_registry.len);
                     try testing.expectEqual(@as(usize, 0), assembler.ledstrip_registry.len);
+                }
+
+                fn build_auto_wires_configured_reducers() !void {
+                    const embed_std = @import("embed_std");
+                    const CounterState = struct {
+                        ticks: usize = 0,
+                    };
+                    const CounterStore = Store.Object.make(embed_std.std, CounterState, .counter);
+                    const CounterReducerFactory = struct {
+                        fn factory(
+                            comptime StoresType: type,
+                            comptime MessageType: type,
+                            comptime EmitterType: type,
+                        ) Store.Reducer.ReducerFnType(StoresType, MessageType, EmitterType) {
+                            return struct {
+                                fn reduce(stores: *StoresType, message: MessageType, emit: EmitterType) !usize {
+                                    _ = emit;
+                                    switch (message.body) {
+                                        .tick => {
+                                            stores.counter.invoke({}, struct {
+                                                fn apply(state: *CounterState, _: void) void {
+                                                    state.ticks += 1;
+                                                }
+                                            }.apply);
+                                            return 1;
+                                        },
+                                        else => return 0,
+                                    }
+                                }
+                            }.reduce;
+                        }
+                    }.factory;
+
+                    const Built = comptime blk: {
+                        const AssemblerType = Assembler.make(embed_std.std, .{
+                            .max_reducers = 2,
+                        }, Channel);
+                        var next = AssemblerType.init();
+                        next.setStore(.counter, CounterStore);
+                        next.addReducer(.counter, CounterReducerFactory);
+                        const BuildConfig = next.BuildConfig();
+                        const build_config: BuildConfig = .{};
+                        break :blk next.build(build_config);
+                    };
+
+                    try testing.expect(@hasField(Built.Root.Config, "counter"));
+
+                    var app = try Built.init(.{
+                        .allocator = testing.allocator,
+                    });
+                    defer app.deinit();
+
+                    try testing.expectEqual(@as(usize, 0), app.store.stores.counter.get().ticks);
+                    _ = try app.impl.runtime.root.process(.{
+                        .origin = .manual,
+                        .timestamp_ns = 0,
+                        .body = .{
+                            .tick = .{
+                                .seq = 1,
+                            },
+                        },
+                    });
+                    try testing.expectEqual(@as(usize, 1), app.store.stores.counter.get().ticks);
+                }
+
+                fn manual_start_disables_auto_ticks_and_dispatch_processes_messages() !void {
+                    const embed_std = @import("embed_std");
+                    const CounterState = struct {
+                        ticks: usize = 0,
+                        pressed: bool = false,
+                    };
+                    const CounterStore = Store.Object.make(embed_std.std, CounterState, .counter);
+                    const CounterReducerFactory = struct {
+                        fn factory(
+                            comptime StoresType: type,
+                            comptime MessageType: type,
+                            comptime EmitterType: type,
+                        ) Store.Reducer.ReducerFnType(StoresType, MessageType, EmitterType) {
+                            return struct {
+                                fn reduce(stores: *StoresType, message: MessageType, emit: EmitterType) !usize {
+                                    _ = emit;
+                                    switch (message.body) {
+                                        .tick => {
+                                            stores.counter.invoke({}, struct {
+                                                fn apply(state: *CounterState, _: void) void {
+                                                    state.ticks += 1;
+                                                }
+                                            }.apply);
+                                            return 1;
+                                        },
+                                        .raw_single_button => |button| {
+                                            stores.counter.invoke(button.pressed, struct {
+                                                fn apply(state: *CounterState, pressed: bool) void {
+                                                    state.pressed = pressed;
+                                                }
+                                            }.apply);
+                                            return 1;
+                                        },
+                                        else => return 0,
+                                    }
+                                }
+                            }.reduce;
+                        }
+                    }.factory;
+
+                    const Built = comptime blk: {
+                        const AssemblerType = Assembler.make(embed_std.std, .{
+                            .max_reducers = 1,
+                        }, Channel);
+                        var next = AssemblerType.init();
+                        next.setStore(.counter, CounterStore);
+                        next.addReducer(.counter, CounterReducerFactory);
+                        const BuildConfig = next.BuildConfig();
+                        const build_config: BuildConfig = .{};
+                        break :blk next.build(build_config);
+                    };
+
+                    var app = try Built.init(.{
+                        .allocator = testing.allocator,
+                    });
+                    defer app.deinit();
+
+                    try app.start(.{ .ticker = .manual });
+                    embed_std.std.Thread.sleep(3 * embed_std.std.time.ns_per_ms);
+                    try testing.expectEqual(@as(usize, 0), app.store.stores.counter.get().ticks);
+
+                    try app.dispatch(.{
+                        .origin = .timer,
+                        .timestamp_ns = 0,
+                        .body = .{
+                            .tick = .{
+                                .seq = 1,
+                            },
+                        },
+                    });
+                    try testing.expectEqual(@as(usize, 1), app.store.stores.counter.get().ticks);
+
+                    try app.dispatch(.{
+                        .origin = .manual,
+                        .timestamp_ns = 0,
+                        .body = .{
+                            .raw_single_button = .{
+                                .source_id = 7,
+                                .pressed = true,
+                            },
+                        },
+                    });
+                    switch (app.impl.last_event.?) {
+                        .raw_single_button => |event_value| {
+                            try testing.expectEqual(@as(u32, 7), event_value.source_id);
+                            try testing.expect(event_value.pressed);
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+
+                    try app.dispatch(.{
+                        .origin = .timer,
+                        .timestamp_ns = 1,
+                        .body = .{
+                            .tick = .{
+                                .seq = 2,
+                            },
+                        },
+                    });
+                    try testing.expectEqual(@as(usize, 2), app.store.stores.counter.get().ticks);
+                    try testing.expect(app.store.stores.counter.get().pressed);
+
+                    try app.stop();
+                    try testing.expectError(error.NotStarted, app.dispatch(.{
+                        .origin = .timer,
+                        .timestamp_ns = 0,
+                        .body = .{
+                            .tick = .{
+                                .seq = 2,
+                            },
+                        },
+                    }));
                 }
 
                 fn add_grouped_button_records_registry_entry() !void {
@@ -327,7 +528,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     var app = try Built.init(.{
                         .allocator = testing.allocator,
                     });
-                    try app.start();
+                    try app.start(.{});
                     try app.stop();
                     app.deinit();
                 }
@@ -370,7 +571,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     });
                     defer app.deinit();
 
-                    try app.start();
+                    try app.start(.{});
                     defer app.stop() catch {};
 
                     try app.push_route(.nav_a, .{ .screen_id = 8 });
@@ -566,6 +767,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expect(@hasDecl(Built, "next_selection"));
                     try testing.expectEqual(@as(usize, 1), Built.poller_count);
                     try testing.expectEqual(@as(usize, 4), Built.pixel_count);
+                    try testing.expectEqual(@as(usize, 4), Built.LedStrip(.strip).pixel_count);
+                    try testing.expectEqual(@as(usize, 4), Built.LedStrip(.strip).FrameType.pixel_count);
                     try testing.expectEqual(@as(u64, 7 * embed_std.std.time.ns_per_ms), Built.ImplType.pipeline_config.tick_interval_ns);
                     if (@hasField(@TypeOf(Built.ImplType.pipeline_config.spawn_config), "stack_size")) {
                         try testing.expectEqual(
@@ -631,7 +834,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                         .buttons = drivers.button.Grouped.init(MockGrouped, &mock_grouped),
                         .strip = dummy_strip.handle(),
                     });
-                    try app.start();
+                    try app.start(.{});
                     try testing.expectEqual(@as(u32, 5), app.router(.nav).currentPage());
                     const moves = try app.available_moves(.pairing, testing.allocator);
                     defer testing.allocator.free(moves);
@@ -743,6 +946,66 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expectError(error.NotStarted, app.release_grouped_button(.buttons));
                     app.deinit();
                 }
+
+                fn render_subscriber_runs_on_store_commit() !void {
+                    const embed_std = @import("embed_std");
+                    const CounterStore = Store.Object.make(embed_std.std, struct {
+                        value: u32 = 0,
+                    }, .counter);
+                    const RenderNamespace = struct {
+                        var call_count: usize = 0;
+                        var last_value: u32 = 0;
+
+                        fn factory(comptime Built: type, comptime path: []const u8) *const fn (*Built) anyerror!void {
+                            _ = path;
+
+                            return struct {
+                                fn render(app: *Built) !void {
+                                    call_count += 1;
+                                    last_value = app.runtime.store.stores.counter.get().value;
+                                }
+                            }.render;
+                        }
+                    };
+                    const RenderFactory = RenderNamespace.factory;
+
+                    const Built = comptime blk: {
+                        const AssemblerType = Assembler.make(embed_std.std, .{
+                            .max_handles = 1,
+                            .store = .{
+                                .max_stores = 1,
+                                .max_state_nodes = 4,
+                                .max_store_refs = 4,
+                                .max_depth = 4,
+                            },
+                        }, Channel);
+                        var next = AssemblerType.init();
+                        next.setStore(.counter, CounterStore);
+                        next.setState("ui", .{.counter});
+                        next.addRender("ui", RenderFactory);
+                        const BuildConfig = next.BuildConfig();
+                        const build_config: BuildConfig = .{};
+                        break :blk next.build(build_config);
+                    };
+
+                    RenderNamespace.call_count = 0;
+                    RenderNamespace.last_value = 0;
+
+                    var app = try Built.init(.{
+                        .allocator = testing.allocator,
+                    });
+                    defer app.deinit();
+
+                    app.impl.runtime.store.stores.counter.patch(.{
+                        .value = 7,
+                    });
+                    try testing.expectEqual(@as(usize, 0), RenderNamespace.call_count);
+
+                    app.impl.runtime.store.stores.counter.tick();
+
+                    try testing.expectEqual(@as(usize, 1), RenderNamespace.call_count);
+                    try testing.expectEqual(@as(u32, 7), RenderNamespace.last_value);
+                }
             };
 
             TestCase.make_uses_store_and_node_builder_config() catch |err| {
@@ -750,6 +1013,14 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 return false;
             };
             TestCase.reexports_store_and_node_builder_methods() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.build_auto_wires_configured_reducers() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.manual_start_disables_auto_ticks_and_dispatch_processes_messages() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -790,6 +1061,10 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 return false;
             };
             TestCase.build_returns_app_methods() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.render_subscriber_runs_on_store_commit() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

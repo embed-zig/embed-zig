@@ -18,6 +18,8 @@ const dial_ctx_deadline_exceeded_before_start = @import("tcp/dial_ctx_deadline_e
 const dial_ctx_canceled_during_connect = @import("tcp/dial_ctx_canceled_during_connect.zig");
 const dial_ctx_deadline_exceeded_during_connect = @import("tcp/dial_ctx_deadline_exceeded_during_connect.zig");
 const read_canceled_ctx_maps_timed_out = @import("tcp/read_canceled_ctx_maps_timed_out.zig");
+const close_releases_context_bindings = @import("tcp/close_releases_context_bindings.zig");
+const read_context_clear_while_blocked_allows_read_to_continue = @import("tcp/read_context_clear_while_blocked_allows_read_to_continue.zig");
 const read_deadline_ctx_maps_timed_out = @import("tcp/read_deadline_ctx_maps_timed_out.zig");
 const read_timeout = @import("tcp/read_timeout.zig");
 const read_full = @import("tcp/read_full.zig");
@@ -49,6 +51,8 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             t.run("dial_ctx_canceled_during_connect", dial_ctx_canceled_during_connect.make(lib));
             t.run("dial_ctx_deadline_exceeded_during_connect", dial_ctx_deadline_exceeded_during_connect.make(lib));
             t.run("read_canceled_ctx_maps_timed_out", read_canceled_ctx_maps_timed_out.make(lib));
+            t.run("close_releases_context_bindings", close_releases_context_bindings.make(lib));
+            t.run("read_context_clear_while_blocked_allows_read_to_continue", read_context_clear_while_blocked_allows_read_to_continue.make(lib));
             t.run("read_deadline_ctx_maps_timed_out", read_deadline_ctx_maps_timed_out.make(lib));
             t.run("read_timeout", read_timeout.make(lib));
             t.run("read_full", read_full.make(lib));

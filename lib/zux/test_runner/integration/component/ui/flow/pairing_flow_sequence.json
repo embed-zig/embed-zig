@@ -1,0 +1,187 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "pairing flow sequence",
+    "description": "drives the pairing flow through forward, reverse, found, and reset transitions",
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "pairing",
+            "state": {
+              "node": "idle",
+              "negative": null
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_flow_move": {
+              "source_id": 61,
+              "direction": "forward",
+              "edge_id": 0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "pairing",
+            "state": {
+              "node": "searching",
+              "negative": null
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_flow_move": {
+              "source_id": 61,
+              "direction": "reverse",
+              "edge_id": 1
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "pairing",
+            "state": {
+              "node": "searching",
+              "negative": {
+                "direction": "reverse",
+                "edge": "reenter"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_flow_move": {
+              "source_id": 61,
+              "direction": "forward",
+              "edge_id": 2
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "pairing",
+            "state": {
+              "node": "done",
+              "negative": null
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_flow_reset": {
+              "source_id": 61
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "pairing",
+            "state": {
+              "node": "idle",
+              "negative": null
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_flow_reset": {
+              "source_id": 61
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "pairing",
+            "state": {
+              "node": "idle",
+              "negative": null
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_flow_move": {
+              "source_id": 61,
+              "direction": "forward",
+              "edge_id": 1
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "pairing",
+            "state": {
+              "node": "confirming",
+              "negative": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

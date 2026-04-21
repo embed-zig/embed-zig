@@ -7,8 +7,7 @@ const udp = @import("integration/udp.zig");
 const tls = @import("integration/tls.zig");
 const http_client = @import("integration/http_client.zig");
 const http_server = @import("integration/http_server.zig");
-const http_transport_local = @import("integration/http_transport_local.zig");
-const http_transport_layer01 = @import("integration/http_transport_layer01.zig");
+const http_transport = @import("integration/http_transport.zig");
 const https_transport = @import("integration/https_transport.zig");
 const cmux = @import("integration/cmux.zig");
 const resolver_local = @import("integration/resolver_local.zig");
@@ -33,8 +32,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             t.run("cmux_http_tcp", cmux.make(lib));
             t.run("http_client", http_client.make(lib));
             t.run("http_server", http_server.make(lib));
-            t.run("http_transport_local", http_transport_local.make(lib));
-            t.run("http_transport_layer01", http_transport_layer01.make(lib));
+            t.run("http_transport", http_transport.make(lib));
             t.run("https_transport", https_transport.make(lib));
             return t.wait();
         }

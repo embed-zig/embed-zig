@@ -4,6 +4,7 @@ const Channel = @import("../Channel.zig");
 const Pool = @import("../Pool.zig");
 const Racer = @import("../Racer.zig");
 const Timer = @import("../Timer.zig");
+const WakeFd = @import("../WakeFd.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
@@ -21,6 +22,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             t.run("Pool", Pool.TestRunner(lib));
             t.run("Racer", Racer.TestRunner(lib));
             t.run("Timer", Timer.TestRunner(lib));
+            t.run("WakeFd", WakeFd.TestRunner(lib));
             return t.wait();
         }
 

@@ -6,28 +6,24 @@
 
 const context_mod = @import("context");
 const AddrPort = @import("../netip/AddrPort.zig");
+const netfd_mod = @import("netfd.zig");
 const sockaddr_mod = @import("SockAddr.zig");
-const wake_mod = @import("Wake.zig");
 
 const Context = context_mod.Context;
 
 pub fn Packet(comptime lib: type) type {
     const posix = lib.posix;
+    const Allocator = lib.mem.Allocator;
+    const NetFd = netfd_mod.make(lib);
     const SockAddr = sockaddr_mod.SockAddr(lib);
-    const Wake = wake_mod.make(lib);
 
     return struct {
         fd: posix.socket_t,
-        wake: Wake,
+        netfd: NetFd,
         closed: bool = false,
-        read_deadline_ms: ?i64 = null,
-        write_deadline_ms: ?i64 = null,
 
         const Self = @This();
-        const ContextStateError = Context.StateError;
-        const context_poll_quantum_ms: i64 = 25;
         const nonblock_flag: usize = @as(usize, 1) << @bitOffsetOf(posix.O, "NONBLOCK");
-        const max_poll_timeout_ms: i64 = 2_147_483_647;
 
         pub const ReadFromResult = struct {
             bytes_read: usize,
@@ -36,13 +32,13 @@ pub fn Packet(comptime lib: type) type {
         };
 
         pub const InitError = posix.SocketError || AdoptError;
-        pub const AdoptError = posix.FcntlError || Wake.InitError;
+        pub const AdoptError = posix.FcntlError || NetFd.InitError;
         pub const ConnectError = error{
             Closed,
             Canceled,
             DeadlineExceeded,
             ConnectFailed,
-        } || SockAddr.EncodeError || posix.ConnectError || posix.PollError || posix.GetSockOptError;
+        } || Allocator.Error || SockAddr.EncodeError || posix.ConnectError || posix.PollError || posix.GetSockOptError;
         pub const ReadError = error{
             Closed,
             TimedOut,
@@ -69,23 +65,25 @@ pub fn Packet(comptime lib: type) type {
 
         pub fn adopt(fd: posix.socket_t) AdoptError!Self {
             try setNonBlocking(fd);
-            var wake = try Wake.init();
-            errdefer wake.deinit();
+            var netfd = try NetFd.init();
+            errdefer netfd.deinit();
+
             return .{
                 .fd = fd,
-                .wake = wake,
+                .netfd = netfd,
             };
         }
 
         pub fn deinit(self: *Self) void {
             self.close();
-            self.wake.deinit();
+            self.netfd.deinit();
         }
 
         pub fn close(self: *Self) void {
             if (self.closed) return;
             self.closed = true;
-            self.wake.signal();
+            self.netfd.clearContexts();
+            self.netfd.signalAll();
             posix.close(self.fd);
         }
 
@@ -100,12 +98,23 @@ pub fn Packet(comptime lib: type) type {
             };
 
             if (!pending) return;
-            return self.waitForConnect(null);
+            self.netfd.waitConnect(self.fd, &self.closed) catch |err| return switch (err) {
+                error.TimedOut => error.ConnectionTimedOut,
+                error.Closed => error.Closed,
+                error.Canceled => unreachable,
+                error.DeadlineExceeded => unreachable,
+                error.NetworkSubsystemFailed => error.NetworkSubsystemFailed,
+                error.SystemResources => error.SystemResources,
+                error.Unexpected => error.Unexpected,
+            };
+            try self.finishConnect();
         }
 
         pub fn connectContext(self: *Self, ctx: context_mod.Context, addr: AddrPort) ConnectError!void {
             if (self.closed) return error.Closed;
-            try ctx.checkState();
+            try self.netfd.setWriteContext(ctx);
+            defer self.netfd.setWriteContext(null) catch unreachable;
+            try self.netfd.checkWriteContextState();
             const encoded = try SockAddr.encode(addr);
             var pending = false;
 
@@ -115,7 +124,17 @@ pub fn Packet(comptime lib: type) type {
             };
 
             if (!pending) return;
-            return self.waitForConnect(ctx);
+            self.netfd.waitConnect(self.fd, &self.closed) catch |err| return switch (err) {
+                error.TimedOut => error.ConnectionTimedOut,
+                error.Closed => error.Closed,
+                error.Canceled => error.Canceled,
+                error.DeadlineExceeded => error.DeadlineExceeded,
+                error.NetworkSubsystemFailed => error.NetworkSubsystemFailed,
+                error.SystemResources => error.SystemResources,
+                error.Unexpected => error.Unexpected,
+            };
+            try self.netfd.checkWriteContextState();
+            try self.finishConnect();
         }
 
         pub fn read(self: *Self, buf: []u8) ReadError!usize {
@@ -124,7 +143,14 @@ pub fn Packet(comptime lib: type) type {
             while (true) {
                 const n = posix.recv(self.fd, buf, 0) catch |err| switch (err) {
                     error.WouldBlock => {
-                        try self.waitForRead();
+                        self.netfd.waitReadable(self.fd, &self.closed) catch |wait_err| switch (wait_err) {
+                            error.Closed => return error.Closed,
+                            error.TimedOut => return error.TimedOut,
+                            error.Canceled, error.DeadlineExceeded => unreachable,
+                            error.NetworkSubsystemFailed => return error.NetworkSubsystemFailed,
+                            error.SystemResources => return error.SystemResources,
+                            error.Unexpected => return error.Unexpected,
+                        };
                         continue;
                     },
                     else => return err,
@@ -139,7 +165,14 @@ pub fn Packet(comptime lib: type) type {
             while (true) {
                 const n = posix.send(self.fd, buf, 0) catch |err| switch (err) {
                     error.WouldBlock => {
-                        try self.waitForWrite();
+                        self.netfd.waitWritable(self.fd, &self.closed) catch |wait_err| switch (wait_err) {
+                            error.Closed => return error.Closed,
+                            error.TimedOut => return error.TimedOut,
+                            error.Canceled, error.DeadlineExceeded => unreachable,
+                            error.NetworkSubsystemFailed => return error.NetworkSubsystemFailed,
+                            error.SystemResources => return error.SystemResources,
+                            error.Unexpected => return error.Unexpected,
+                        };
                         continue;
                     },
                     else => return err,
@@ -165,7 +198,14 @@ pub fn Packet(comptime lib: type) type {
                     &result.addr_len,
                 ) catch |err| switch (err) {
                     error.WouldBlock => {
-                        try self.waitForRead();
+                        self.netfd.waitReadable(self.fd, &self.closed) catch |wait_err| switch (wait_err) {
+                            error.Closed => return error.Closed,
+                            error.TimedOut => return error.TimedOut,
+                            error.Canceled, error.DeadlineExceeded => unreachable,
+                            error.NetworkSubsystemFailed => return error.NetworkSubsystemFailed,
+                            error.SystemResources => return error.SystemResources,
+                            error.Unexpected => return error.Unexpected,
+                        };
                         continue;
                     },
                     else => return err,
@@ -188,7 +228,14 @@ pub fn Packet(comptime lib: type) type {
                     encoded.len,
                 ) catch |err| switch (err) {
                     error.WouldBlock => {
-                        try self.waitForWrite();
+                        self.netfd.waitWritable(self.fd, &self.closed) catch |wait_err| switch (wait_err) {
+                            error.Closed => return error.Closed,
+                            error.TimedOut => return error.TimedOut,
+                            error.Canceled, error.DeadlineExceeded => unreachable,
+                            error.NetworkSubsystemFailed => return error.NetworkSubsystemFailed,
+                            error.SystemResources => return error.SystemResources,
+                            error.Unexpected => return error.Unexpected,
+                        };
                         continue;
                     },
                     else => return err,
@@ -198,189 +245,23 @@ pub fn Packet(comptime lib: type) type {
         }
 
         pub fn setReadDeadline(self: *Self, deadline_ms: ?i64) void {
-            self.read_deadline_ms = deadline_ms;
+            self.netfd.setReadDeadline(deadline_ms);
         }
 
         pub fn setWriteDeadline(self: *Self, deadline_ms: ?i64) void {
-            self.write_deadline_ms = deadline_ms;
+            self.netfd.setWriteDeadline(deadline_ms);
         }
 
         pub fn setDeadline(self: *Self, deadline_ms: ?i64) void {
-            self.read_deadline_ms = deadline_ms;
-            self.write_deadline_ms = deadline_ms;
+            self.netfd.setReadDeadline(deadline_ms);
+            self.netfd.setWriteDeadline(deadline_ms);
         }
 
-        fn waitForRead(self: *Self) ReadError!void {
-            try self.waitForIo(posix.POLL.IN | posix.POLL.HUP | posix.POLL.ERR, self.read_deadline_ms);
-        }
-
-        fn waitForWrite(self: *Self) WriteError!void {
-            try self.waitForIo(posix.POLL.OUT | posix.POLL.HUP | posix.POLL.ERR, self.write_deadline_ms);
-        }
-
-        fn waitForConnect(self: *Self, ctx: ?Context) ConnectError!void {
-            const events = posix.POLL.OUT | posix.POLL.ERR | posix.POLL.HUP;
-            if (ctx) |c| {
-                try self.waitForIoNoDeadlineContext(events, c);
-            } else {
-                try self.waitForIoNoDeadline(events);
-            }
-
+        fn finishConnect(self: *Self) ConnectError!void {
             var err_code: i32 = 0;
             try posix.getsockopt(self.fd, posix.SOL.SOCKET, posix.SO.ERROR, bytesOf(&err_code));
             if (err_code == 0) return;
             return connectErrorFromCode(err_code);
-        }
-
-        fn waitForIo(self: *Self, events: anytype, deadline_ms: ?i64) (error{ Closed, TimedOut } || posix.PollError)!void {
-            var poll_fds = self.makePollFds(events);
-
-            while (true) {
-                poll_fds[0].revents = 0;
-                poll_fds[1].revents = 0;
-                const timeout_ms = timeoutFromDeadline(deadline_ms);
-                const ready = posix.poll(poll_fds[0..], timeout_ms) catch |err| {
-                    if (errorNameEquals(err, "Interrupted")) continue;
-                    return err;
-                };
-                if (ready == 0) return error.TimedOut;
-                if (poll_fds[0].revents != 0) {
-                    if (self.closed) return error.Closed;
-                    return;
-                }
-                if (poll_fds[1].revents != 0) {
-                    self.wake.drain();
-                    if (self.closed) return error.Closed;
-                    continue;
-                }
-                return;
-            }
-        }
-
-        fn waitForIoNoDeadline(self: *Self, events: anytype) (error{Closed} || posix.PollError)!void {
-            var poll_fds = self.makePollFds(events);
-
-            while (true) {
-                poll_fds[0].revents = 0;
-                poll_fds[1].revents = 0;
-                const ready = posix.poll(poll_fds[0..], -1) catch |err| {
-                    if (errorNameEquals(err, "Interrupted")) continue;
-                    return err;
-                };
-                if (ready == 0) continue;
-                if (poll_fds[0].revents != 0) {
-                    if (self.closed) return error.Closed;
-                    return;
-                }
-                if (poll_fds[1].revents != 0) {
-                    self.wake.drain();
-                    if (self.closed) return error.Closed;
-                    continue;
-                }
-                return;
-            }
-        }
-
-        fn waitForIoNoDeadlineContext(
-            self: *Self,
-            events: anytype,
-            ctx: Context,
-        ) (error{Closed} || ContextStateError || posix.PollError)!void {
-            ctx.bindFd(lib, &self.wake.send_fd) catch return self.waitForIoNoDeadlineContextFallback(events, ctx);
-            defer {
-                ctx.bindLink(null) catch unreachable;
-                if (!self.closed and ctx.err() != null) self.wake.drain();
-            }
-
-            var poll_fds = self.makePollFds(events);
-
-            while (true) {
-                poll_fds[0].revents = 0;
-                poll_fds[1].revents = 0;
-                const ready = posix.poll(poll_fds[0..], -1) catch |err| {
-                    if (errorNameEquals(err, "Interrupted")) continue;
-                    return err;
-                };
-                if (ready == 0) continue;
-                if (poll_fds[0].revents != 0) {
-                    if (self.closed) return error.Closed;
-                    return;
-                }
-                if (poll_fds[1].revents != 0) {
-                    self.wake.drain();
-                    if (self.closed) return error.Closed;
-                    try ctx.checkState();
-                    continue;
-                }
-            }
-        }
-
-        fn waitForIoNoDeadlineContextFallback(
-            self: *Self,
-            events: anytype,
-            ctx: Context,
-        ) (error{Closed} || ContextStateError || posix.PollError)!void {
-            var poll_fds = self.makePollFds(events);
-
-            while (true) {
-                poll_fds[0].revents = 0;
-                poll_fds[1].revents = 0;
-                const timeout_ms = try contextPollTimeout(ctx);
-                const ready = posix.poll(poll_fds[0..], timeout_ms) catch |err| {
-                    if (errorNameEquals(err, "Interrupted")) continue;
-                    return err;
-                };
-                if (ready == 0) {
-                    try ctx.checkState();
-                    continue;
-                }
-                if (poll_fds[0].revents != 0) {
-                    if (self.closed) return error.Closed;
-                    return;
-                }
-                if (poll_fds[1].revents != 0) {
-                    self.wake.drain();
-                    if (self.closed) return error.Closed;
-                    try ctx.checkState();
-                    continue;
-                }
-                return;
-            }
-        }
-
-        fn makePollFds(self: *Self, events: anytype) [2]posix.pollfd {
-            return .{
-                .{
-                    .fd = self.fd,
-                    .events = events,
-                    .revents = 0,
-                },
-                .{
-                    .fd = self.wake.recv_fd,
-                    .events = posix.POLL.IN,
-                    .revents = 0,
-                },
-            };
-        }
-
-        fn timeoutFromDeadline(deadline_ms: ?i64) i32 {
-            const deadline = deadline_ms orelse return -1;
-            const now = lib.time.milliTimestamp();
-            const remaining = deadline - now;
-            if (remaining <= 0) return 0;
-            return @intCast(@min(remaining, max_poll_timeout_ms));
-        }
-
-        fn contextPollTimeout(ctx: Context) ContextStateError!i32 {
-            try ctx.checkState();
-
-            if (ctx.deadline()) |deadline_ns| {
-                const remaining = @divFloor(deadline_ns - lib.time.nanoTimestamp(), lib.time.ns_per_ms);
-                if (remaining <= 0) return error.DeadlineExceeded;
-                return @intCast(@min(remaining, context_poll_quantum_ms));
-            }
-
-            return @intCast(context_poll_quantum_ms);
         }
 
         fn setNonBlocking(fd: posix.socket_t) posix.FcntlError!void {
@@ -389,7 +270,6 @@ pub fn Packet(comptime lib: type) type {
             _ = try posix.fcntl(fd, posix.F.SETFL, flags | nonblock_flag);
         }
 
-        // Keep SO_ERROR-based completion aligned with the blocking connect error surface.
         fn connectErrorFromCode(code: i32) ConnectError {
             if (code == @intFromEnum(posix.E.ACCES)) return error.AccessDenied;
             if (code == @intFromEnum(posix.E.PERM)) return error.PermissionDenied;
@@ -397,8 +277,6 @@ pub fn Packet(comptime lib: type) type {
             if (code == @intFromEnum(posix.E.ADDRNOTAVAIL)) return error.AddressNotAvailable;
             if (code == @intFromEnum(posix.E.AFNOSUPPORT)) return error.AddressFamilyNotSupported;
             if (code == @intFromEnum(posix.E.CONNREFUSED)) return error.ConnectionRefused;
-            // lwIP reports a refused non-blocking connect as SO_ERROR=ECONNRESET
-            // on some local-loopback paths. Normalize it to ConnectionRefused.
             if (code == @intFromEnum(posix.E.CONNRESET)) return error.ConnectionRefused;
             if (code == @intFromEnum(posix.E.HOSTUNREACH)) return error.NetworkUnreachable;
             if (code == @intFromEnum(posix.E.NETUNREACH)) return error.NetworkUnreachable;
@@ -416,15 +294,6 @@ pub fn Packet(comptime lib: type) type {
             const T = info.pointer.child;
             const raw: [*]u8 = @ptrCast(ptr);
             return raw[0..@sizeOf(T)];
-        }
-
-        fn errorNameEquals(err: anyerror, comptime expected: []const u8) bool {
-            const name = @errorName(err);
-            if (name.len != expected.len) return false;
-            inline for (expected, 0..) |byte, i| {
-                if (name[i] != byte) return false;
-            }
-            return true;
         }
     };
 }

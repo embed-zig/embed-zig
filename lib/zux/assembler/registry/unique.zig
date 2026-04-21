@@ -1,13 +1,12 @@
-const EnumLiteral = @Type(.enum_literal);
-
 pub fn isUnique(
     comptime periphs: anytype,
     comptime len: usize,
-    comptime label: EnumLiteral,
+    comptime label: anytype,
     comptime id: u32,
 ) bool {
+    const label_name = labelText(label);
     inline for (0..len) |i| {
-        if (labelEql(periphs[i].label, label)) return false;
+        if (labelEql(periphs[i].label, label_name)) return false;
         if (periphs[i].id == id) return false;
     }
     return true;
@@ -15,7 +14,7 @@ pub fn isUnique(
 
 pub fn isUniqueAcross(
     comptime registries: anytype,
-    comptime label: EnumLiteral,
+    comptime label: anytype,
     comptime id: u32,
 ) bool {
     inline for (registries) |registry| {
@@ -27,13 +26,14 @@ pub fn isUniqueAcross(
 pub fn ensureUnique(
     comptime periphs: anytype,
     comptime len: usize,
-    comptime label: EnumLiteral,
+    comptime label: anytype,
     comptime id: u32,
     comptime duplicate_label_message: []const u8,
     comptime duplicate_id_message: []const u8,
 ) void {
+    const label_name = labelText(label);
     inline for (0..len) |i| {
-        if (labelEql(periphs[i].label, label)) {
+        if (labelEql(periphs[i].label, label_name)) {
             @compileError(duplicate_label_message);
         }
         if (periphs[i].id == id) {
@@ -44,7 +44,7 @@ pub fn ensureUnique(
 
 pub fn ensureUniqueAcross(
     comptime registries: anytype,
-    comptime label: EnumLiteral,
+    comptime label: anytype,
     comptime id: u32,
     comptime duplicate_label_message: []const u8,
     comptime duplicate_id_message: []const u8,
@@ -61,12 +61,26 @@ pub fn ensureUniqueAcross(
     }
 }
 
-fn labelEql(comptime a: EnumLiteral, comptime b: EnumLiteral) bool {
-    const a_name = @tagName(a);
-    const b_name = @tagName(b);
-    if (a_name.len != b_name.len) return false;
-    inline for (a_name, 0..) |ch, i| {
-        if (ch != b_name[i]) return false;
+pub fn labelText(comptime raw_label: anytype) []const u8 {
+    return switch (@typeInfo(@TypeOf(raw_label))) {
+        .enum_literal => @tagName(raw_label),
+        .pointer => |ptr| switch (ptr.size) {
+            .slice => raw_label,
+            .one => switch (@typeInfo(ptr.child)) {
+                .array => raw_label[0..],
+                else => @compileError("zux.assembler.registry label must be enum_literal or []const u8"),
+            },
+            else => @compileError("zux.assembler.registry label must be enum_literal or []const u8"),
+        },
+        .array => raw_label[0..],
+        else => @compileError("zux.assembler.registry label must be enum_literal or []const u8"),
+    };
+}
+
+fn labelEql(a: []const u8, b: []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, 0..) |ch, i| {
+        if (ch != b[i]) return false;
     }
     return true;
 }

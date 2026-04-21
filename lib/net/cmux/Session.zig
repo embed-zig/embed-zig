@@ -6,6 +6,7 @@ const frame = @import("frame.zig");
 pub fn make(comptime lib: type) type {
     const Allocator = lib.mem.Allocator;
     const Thread = lib.Thread;
+    const cmux_log = lib.log.scoped(.net_cmux);
 
     return struct {
         allocator: Allocator,
@@ -51,6 +52,14 @@ pub fn make(comptime lib: type) type {
             Unexpected,
         };
 
+        pub const ChannelPhase = enum {
+            opening,
+            open,
+            closing_local,
+            closed,
+            rejected,
+        };
+
         pub const ChannelState = struct {
             allocator: Allocator,
             dlci: u8,
@@ -59,9 +68,7 @@ pub fn make(comptime lib: type) type {
             rx: lib.ArrayList(u8) = .{},
             refs: usize = 1,
             registered: bool = true,
-            open: bool = false,
-            rejected: bool = false,
-            closed: bool = false,
+            phase: ChannelPhase = .opening,
             queued_for_accept: bool = false,
             read_timeout_ms: ?u32 = null,
             write_timeout_ms: ?u32 = null,
@@ -141,23 +148,49 @@ pub fn make(comptime lib: type) type {
             if (!control.isValidUserDlci(dlci)) return error.InvalidDLCI;
             try self.waitForSessionReady();
 
-            self.mutex.lock();
-            if (self.closed) {
-                self.mutex.unlock();
-                return error.Closed;
-            }
-            if (self.channels[dlci] != null) {
-                self.mutex.unlock();
-                return error.AlreadyOpen;
-            }
+            const channel = while (true) {
+                self.mutex.lock();
+                if (self.closed) {
+                    self.mutex.unlock();
+                    return error.Closed;
+                }
+                if (self.channels[dlci]) |existing| {
+                    existing.mutex.lock();
+                    switch (existing.phase) {
+                        .closing_local => {
+                            existing.refs += 1;
+                            existing.mutex.unlock();
+                            self.mutex.unlock();
 
-            const channel = self.createChannelLocked(@intCast(dlci)) catch |err| {
+                            existing.mutex.lock();
+                            while (existing.phase == .closing_local and existing.registered) {
+                                existing.cond.wait(&existing.mutex);
+                            }
+                            existing.mutex.unlock();
+                            self.releaseChannel(existing);
+                            continue;
+                        },
+                        .opening, .open => {
+                            existing.mutex.unlock();
+                            self.mutex.unlock();
+                            return error.AlreadyOpen;
+                        },
+                        .closed, .rejected => {
+                            existing.mutex.unlock();
+                            self.mutex.unlock();
+                            continue;
+                        },
+                    }
+                }
+
+                const created = self.createChannelLocked(@intCast(dlci)) catch |err| {
+                    self.mutex.unlock();
+                    return err;
+                };
+                self.retainChannel(created);
                 self.mutex.unlock();
-                return err;
+                break created;
             };
-            channel.open = false;
-            self.retainChannel(channel);
-            self.mutex.unlock();
 
             defer self.releaseChannel(channel);
             errdefer self.closeChannel(channel);
@@ -180,7 +213,7 @@ pub fn make(comptime lib: type) type {
                 const channel = self.accept_queue.swapRemove(0);
                 channel.mutex.lock();
                 channel.queued_for_accept = false;
-                const usable = !channel.closed;
+                const usable = channel.phase == .open;
                 channel.mutex.unlock();
                 if (usable) return channel;
                 self.releaseChannel(channel);
@@ -214,7 +247,7 @@ pub fn make(comptime lib: type) type {
             channel.mutex.lock();
             defer channel.mutex.unlock();
 
-            while (availableRx(channel) == 0 and !channel.closed) {
+            while (availableRx(channel) == 0 and channel.phase == .open) {
                 if (channel.read_timeout_ms) |timeout_ms| {
                     channel.cond.timedWait(&channel.mutex, timeout_ms * lib.time.ns_per_ms) catch return error.TimedOut;
                 } else {
@@ -222,7 +255,7 @@ pub fn make(comptime lib: type) type {
                 }
             }
 
-            if (availableRx(channel) == 0 and channel.closed) return error.EndOfStream;
+            if (availableRx(channel) == 0 and channel.phase != .open) return error.EndOfStream;
 
             const rx = channel.rx.items[0..availableRx(channel)];
             const n = @min(buf.len, rx.len);
@@ -240,11 +273,11 @@ pub fn make(comptime lib: type) type {
             if (buf.len == 0) return 0;
 
             channel.mutex.lock();
-            const closed = channel.closed or !channel.open;
+            const writable = channel.phase == .open;
             const write_timeout_ms = channel.write_timeout_ms;
             channel.mutex.unlock();
 
-            if (closed) return error.BrokenPipe;
+            if (!writable) return error.BrokenPipe;
 
             var written: usize = 0;
             while (written < buf.len) {
@@ -267,20 +300,22 @@ pub fn make(comptime lib: type) type {
         }
 
         pub fn closeChannel(self: *Self, channel: *ChannelState) void {
-            var should_unregister = false;
+            var should_send_disc = false;
 
             channel.mutex.lock();
-            if (!channel.closed) {
-                channel.closed = true;
-                channel.cond.broadcast();
-                should_unregister = channel.registered;
+            switch (channel.phase) {
+                .opening, .open => {
+                    channel.phase = .closing_local;
+                    channel.cond.broadcast();
+                    should_send_disc = channel.registered;
+                },
+                .closing_local, .closed, .rejected => {},
             }
             channel.mutex.unlock();
 
-            if (!should_unregister) return;
+            if (!should_send_disc) return;
 
             self.sendControl(channel.dlci, .disc) catch {};
-            self.unregisterChannel(channel);
         }
 
         pub fn setChannelReadTimeout(self: *Self, channel: *ChannelState, ms: ?u32) void {
@@ -341,11 +376,15 @@ pub fn make(comptime lib: type) type {
             _ = self;
             channel.mutex.lock();
             defer channel.mutex.unlock();
-            while (!channel.open and !channel.rejected and !channel.closed) {
+            while (channel.phase == .opening) {
                 channel.cond.wait(&channel.mutex);
             }
-            if (channel.rejected) return error.Rejected;
-            if (!channel.open) return error.Closed;
+            switch (channel.phase) {
+                .open => return,
+                .rejected => return error.Rejected,
+                .closing_local, .closed => return error.Closed,
+                .opening => unreachable,
+            }
         }
 
         fn sendControl(self: *Self, dlci: u8, frame_type: control.FrameType) NetConn.WriteError!void {
@@ -460,8 +499,22 @@ pub fn make(comptime lib: type) type {
                     if (self.beginClose()) self.bearer.close();
                 },
                 .dm => self.failSession(),
-                .uih => {},
+                .uih => self.handleSessionControl(incoming.info),
             }
+        }
+
+        fn handleSessionControl(self: *Self, info: []const u8) void {
+            _ = self;
+            if (info.len == 0) {
+                cmux_log.err("ignored empty control-channel UIH", .{});
+                return;
+            }
+
+            const command = info[0];
+            cmux_log.err(
+                "ignored unsupported control-channel command {s} raw=0x{x:0>2} len={d}",
+                .{ controlCommandName(command), command, info.len },
+            );
         }
 
         fn handleOpenRequest(self: *Self, dlci: u8) !void {
@@ -474,33 +527,24 @@ pub fn make(comptime lib: type) type {
             }
 
             if (self.channels[dlci]) |existing| {
-                existing.mutex.lock();
-                const is_closed = existing.closed;
-                existing.mutex.unlock();
-                if (!is_closed) {
-                    self.mutex.unlock();
-                    try self.sendControl(dlci, .dm);
-                    return;
-                }
+                _ = existing;
+                self.mutex.unlock();
+                try self.sendControl(dlci, .dm);
+                return;
             }
 
-            const channel = if (self.channels[dlci]) |existing|
-                existing
-            else
-                self.createChannelLocked(dlci) catch |err| {
-                    self.mutex.unlock();
-                    return err;
-                };
+            const channel = self.createChannelLocked(dlci) catch |err| {
+                self.mutex.unlock();
+                return err;
+            };
 
             channel.mutex.lock();
             channel.rx.clearRetainingCapacity();
-            channel.open = true;
-            channel.rejected = false;
-            channel.closed = false;
+            channel.phase = .open;
             if (!channel.queued_for_accept) {
                 if (self.accept_queue.items.len < self.options.max_accept_queue) {
                     self.accept_queue.append(self.allocator, channel) catch |err| {
-                        channel.closed = true;
+                        channel.phase = .closed;
                         queue_err = err;
                     };
                     if (queue_err == null) {
@@ -508,11 +552,11 @@ pub fn make(comptime lib: type) type {
                         channel.refs += 1;
                     }
                 } else {
-                    channel.closed = true;
+                    channel.phase = .closed;
                 }
             }
             channel.cond.broadcast();
-            const accepted = !channel.closed;
+            const accepted = channel.phase == .open;
             channel.mutex.unlock();
 
             self.mutex.unlock();
@@ -533,10 +577,19 @@ pub fn make(comptime lib: type) type {
 
         fn handleOpenAck(self: *Self, dlci: u8) void {
             const channel = self.lookupChannel(dlci) orelse return;
+            var should_unregister = false;
             channel.mutex.lock();
-            channel.open = true;
+            switch (channel.phase) {
+                .opening => channel.phase = .open,
+                .closing_local => {
+                    channel.phase = .closed;
+                    should_unregister = true;
+                },
+                .open, .closed, .rejected => {},
+            }
             channel.cond.broadcast();
             channel.mutex.unlock();
+            if (should_unregister) self.unregisterChannel(channel);
         }
 
         fn handleDisc(self: *Self, dlci: u8) !void {
@@ -546,7 +599,7 @@ pub fn make(comptime lib: type) type {
             };
 
             channel.mutex.lock();
-            channel.closed = true;
+            channel.phase = .closed;
             channel.cond.broadcast();
             channel.mutex.unlock();
 
@@ -557,8 +610,7 @@ pub fn make(comptime lib: type) type {
         fn handleReject(self: *Self, dlci: u8) void {
             const channel = self.lookupChannel(dlci) orelse return;
             channel.mutex.lock();
-            channel.rejected = true;
-            channel.closed = true;
+            channel.phase = .rejected;
             channel.cond.broadcast();
             channel.mutex.unlock();
             self.unregisterChannel(channel);
@@ -568,7 +620,7 @@ pub fn make(comptime lib: type) type {
             const channel = self.lookupChannel(dlci) orelse return;
             channel.mutex.lock();
             defer channel.mutex.unlock();
-            if (channel.closed) return;
+            if (channel.phase != .open) return;
             const next_len, const overflow = @addWithOverflow(channel.rx.items.len, info.len);
             if (overflow != 0 or next_len > self.options.read_buffer_size) return error.FrameTooLarge;
             try channel.rx.appendSlice(self.allocator, info);
@@ -601,6 +653,7 @@ pub fn make(comptime lib: type) type {
                 self.channels[channel.dlci] = null;
                 channel.mutex.lock();
                 channel.registered = false;
+                channel.cond.broadcast();
                 channel.mutex.unlock();
                 release_count += 1;
             }
@@ -616,6 +669,7 @@ pub fn make(comptime lib: type) type {
                 _ = self.accept_queue.swapRemove(i);
                 channel.mutex.lock();
                 channel.queued_for_accept = false;
+                channel.cond.broadcast();
                 channel.mutex.unlock();
                 release_count += 1;
             }
@@ -636,7 +690,9 @@ pub fn make(comptime lib: type) type {
             for (self.channels) |maybe_channel| {
                 if (maybe_channel) |channel| {
                     channel.mutex.lock();
-                    channel.closed = true;
+                    if (channel.phase != .closed and channel.phase != .rejected) {
+                        channel.phase = .closed;
+                    }
                     channel.cond.broadcast();
                     channel.mutex.unlock();
                 }
@@ -654,6 +710,17 @@ pub fn make(comptime lib: type) type {
 
         fn availableRx(channel: *ChannelState) usize {
             return channel.rx.items.len;
+        }
+
+        fn controlCommandName(command: u8) []const u8 {
+            return switch (command & ~@as(u8, 0x02)) {
+                0x11 => "NSC",
+                0x21 => "TEST",
+                0x81 => "PN",
+                0xC1 => "CLD",
+                0xE1 => "MSC",
+                else => "unknown",
+            };
         }
     };
 }

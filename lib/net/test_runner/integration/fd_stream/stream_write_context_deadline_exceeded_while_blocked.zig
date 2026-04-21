@@ -22,6 +22,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     const Harness = test_utils.Harness(lib);
                     const Stream = fd_mod.Stream(lib);
                     const posix = lib.posix;
+                    const Thread = lib.Thread;
                     const testing = lib.testing;
                     var ctx_api = try Context.init(a);
                     defer ctx_api.deinit();
@@ -43,6 +44,15 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     const payload = try a.alloc(u8, 512 * 1024);
                     defer a.free(payload);
                     @memset(payload, 'd');
+
+                    const release_thread = try Thread.spawn(.{}, struct {
+                        fn run(fd: posix.socket_t, comptime thread_lib: type) void {
+                            var buf: [8192]u8 = undefined;
+                            thread_lib.Thread.sleep(80 * thread_lib.time.ns_per_ms);
+                            _ = thread_lib.posix.recv(fd, &buf, 0) catch {};
+                        }
+                    }.run, .{ peer, lib });
+                    defer release_thread.join();
 
                     try testing.expectError(error.DeadlineExceeded, Harness.writeAllContext(&stream, ctx, payload));
                 }

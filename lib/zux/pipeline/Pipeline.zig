@@ -66,6 +66,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type, comptime confi
         receivers: ReceiverList = .empty,
 
         stopping: BoolAtomic = BoolAtomic.init(false),
+        tick_interval_ns: u64 = config.tick_interval_ns,
         tick_seq: u64 = 0,
 
         pub fn init(allocator: Allocator) !Self {
@@ -73,6 +74,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type, comptime confi
                 .allocator = allocator,
                 .outbound = null,
                 .inbox = try MessageChannel.make(allocator, default_capacity),
+                .tick_interval_ns = config.tick_interval_ns,
             };
         }
 
@@ -242,7 +244,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type, comptime confi
 
         fn tickLoop(self: *Self) !void {
             while (!self.stopping.load(.acquire)) {
-                Worker.sleep(config.tick_interval_ns);
+                Worker.sleep(self.tick_interval_ns);
                 if (self.stopping.load(.acquire)) return;
 
                 self.tick() catch |err| {

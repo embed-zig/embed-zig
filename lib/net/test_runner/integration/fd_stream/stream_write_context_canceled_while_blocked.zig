@@ -53,6 +53,15 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     }.run, .{ ctx, lib });
                     defer cancel_thread.join();
 
+                    const release_thread = try Thread.spawn(.{}, struct {
+                        fn run(fd: posix.socket_t, comptime thread_lib: type) void {
+                            var buf: [8192]u8 = undefined;
+                            thread_lib.Thread.sleep(80 * thread_lib.time.ns_per_ms);
+                            _ = thread_lib.posix.recv(fd, &buf, 0) catch {};
+                        }
+                    }.run, .{ peer, lib });
+                    defer release_thread.join();
+
                     try testing.expectError(error.Canceled, Harness.writeAllContext(&stream, ctx, payload));
                 }
             };

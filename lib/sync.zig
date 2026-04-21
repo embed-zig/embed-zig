@@ -3,7 +3,7 @@
 //! Usage:
 //!   const sync = @import("sync");
 //!   const U32Racer = sync.Racer(lib, u32);
-//!   const Channel = sync.Channel(platform.Channel);
+//!   const Channel = sync.Channel(lib, platform.ChannelFactory);
 //!   const IntChan = Channel(u32);
 //!   const TimerImpl = sync.Timer.make(lib);
 //!   const BytesPool = sync.Pool.make(lib, [256]u8);
@@ -21,9 +21,10 @@ pub const channel = @import("sync/Channel.zig");
 const racer_mod = @import("sync/Racer.zig");
 pub const Pool = @import("sync/Pool.zig");
 pub const Timer = @import("sync/Timer.zig");
+pub const WakeFd = @import("sync/WakeFd.zig");
 
-pub fn Channel(comptime impl: fn (type) type) fn (type) type {
-    return channel.make(impl);
+pub fn Channel(comptime lib: type, comptime factory: channel.FactoryType) channel.ChannelType {
+    return channel.make(factory(lib));
 }
 
 pub fn Racer(comptime lib: type, comptime T: type) type {

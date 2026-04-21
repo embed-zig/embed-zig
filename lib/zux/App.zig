@@ -3,6 +3,29 @@ const ledstrip = @import("ledstrip");
 const modem_api = @import("drivers");
 const flow_event = @import("component/ui/flow/event.zig");
 const route = @import("component/ui/route.zig");
+const event_mod = @import("event.zig");
+const EmitterType = @import("pipeline/Emitter.zig");
+const MessageType = @import("pipeline/Message.zig");
+const NodeType = @import("pipeline/Node.zig");
+const Poller = @import("pipeline/Poller.zig");
+const SubscriberType = @import("store/Subscriber.zig");
+
+const root = @This();
+
+pub const Ticker = union(enum) {
+    interval_ms: u16,
+    manual,
+};
+
+pub const PollerStart = union(enum) {
+    default,
+    config: Poller.Config,
+};
+
+pub const StartConfig = struct {
+    ticker: ?Ticker = .{ .interval_ms = 10 },
+    poller: PollerStart = .default,
+};
 
 pub fn make(comptime Impl: type) type {
     const impl_periph_label = blk: {
@@ -88,6 +111,9 @@ pub fn make(comptime Impl: type) type {
         }
         if (!@hasDecl(Impl, "stop")) {
             @compileError("zux.App.make requires Impl.stop");
+        }
+        if (!@hasDecl(Impl, "dispatch")) {
+            @compileError("zux.App.make requires Impl.dispatch");
         }
         if (!@hasDecl(Impl, "press_single_button")) {
             @compileError("zux.App.make requires Impl.press_single_button");
@@ -267,8 +293,9 @@ pub fn make(comptime Impl: type) type {
 
         _ = @as(*const fn (impl_init_config) anyerror!Impl, &Impl.init);
         _ = @as(*const fn (*Impl) void, &Impl.deinit);
-        _ = @as(*const fn (*Impl) anyerror!void, &Impl.start);
+        _ = @as(*const fn (*Impl, root.StartConfig) anyerror!void, &Impl.start);
         _ = @as(*const fn (*Impl) anyerror!void, &Impl.stop);
+        _ = @as(*const fn (*Impl, MessageType) anyerror!void, &Impl.dispatch);
         _ = @as(*const fn (*Impl, impl_periph_label) anyerror!void, &Impl.press_single_button);
         _ = @as(*const fn (*Impl, impl_periph_label) anyerror!void, &Impl.release_single_button);
         _ = @as(*const fn (*Impl, impl_periph_label, u32) anyerror!void, &Impl.press_grouped_button);
@@ -357,6 +384,7 @@ pub fn make(comptime Impl: type) type {
 
         pub const ImplType = Impl;
         pub const InitConfig = impl_init_config;
+        pub const StartConfig = root.StartConfig;
         pub const Lib = impl_lib;
         pub const Config = if (@hasDecl(Impl, "Config")) Impl.Config else void;
         pub const BuildConfig = if (@hasDecl(Impl, "BuildConfig")) Impl.BuildConfig else void;
@@ -379,6 +407,15 @@ pub fn make(comptime Impl: type) type {
         pub const poller_count = if (@hasDecl(Impl, "poller_count")) Impl.poller_count else 0;
         pub const pixel_count = impl_pixel_count;
         pub const FrameType = impl_frame_type;
+        pub const Event = if (@hasDecl(Impl, "Event")) Impl.Event else event_mod.Event;
+        pub const Message = if (@hasDecl(Impl, "Message")) Impl.Message else MessageType;
+        pub const Emitter = if (@hasDecl(Impl, "Emitter")) Impl.Emitter else EmitterType;
+        pub const Node = if (@hasDecl(Impl, "Node")) Impl.Node else NodeType;
+        pub const Subscriber = if (@hasDecl(Impl, "Subscriber")) Impl.Subscriber else SubscriberType;
+
+        pub fn LedStrip(comptime label: PeriphLabel) type {
+            return Impl.LedStrip(label);
+        }
 
         pub fn FlowEdgeLabel(comptime label: FlowLabel) type {
             return Impl.FlowEdgeLabel(label);
@@ -400,12 +437,16 @@ pub fn make(comptime Impl: type) type {
             self.impl.deinit();
         }
 
-        pub fn start(self: *Self) !void {
-            try self.impl.start();
+        pub fn start(self: *Self, config: root.StartConfig) !void {
+            try self.impl.start(config);
         }
 
         pub fn stop(self: *Self) !void {
             try self.impl.stop();
+        }
+
+        pub fn dispatch(self: *Self, message: Message) !void {
+            try self.impl.dispatch(message);
         }
 
         pub fn press_single_button(self: *Self, label: PeriphLabel) !void {

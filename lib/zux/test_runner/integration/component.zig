@@ -1,15 +1,65 @@
 const testing_api = @import("testing");
+const Builder = @import("../../spec/Builder.zig");
+const bt = @import("component/bt.zig");
+const ui_flow = @import("../../component/ui/flow.zig");
+const imu = @import("component/imu.zig");
 
-pub const bt = @import("component/bt.zig");
-pub const button = @import("component/button.zig");
-pub const imu = @import("component/imu.zig");
-pub const led_strip = @import("component/led_strip.zig");
-pub const modem = @import("component/modem.zig");
-pub const nfc = @import("component/nfc.zig");
-pub const wifi = @import("component/wifi.zig");
-pub const ui = @import("component/ui.zig");
+const PairingFlow = blk: {
+    var builder = ui_flow.Builder.init();
+    builder.addNode(.idle);
+    builder.addNode(.searching);
+    builder.addNode(.confirming);
+    builder.addNode(.done);
+    builder.setInitial(.idle);
+    builder.addEdge(.idle, .searching, .start);
+    builder.addEdge(.idle, .confirming, .reenter);
+    builder.addEdge(.searching, .done, .found);
+    builder.addEdge(.confirming, .done, .confirm);
+    break :blk builder.build();
+};
 
 pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
+    const SpecType = comptime blk: {
+        @setEvalBranchQuota(2_000_000);
+        var builder = Builder.init();
+        builder.addSpecSlices(&.{
+            @embedFile("board.json"),
+            @embedFile("component/button/single_button_click_sequence.json"),
+            @embedFile("component/button/single_button_long_press_sequence.json"),
+            @embedFile("component/button/grouped_button_click_sequence.json"),
+            @embedFile("component/button/grouped_button_long_press_sequence.json"),
+            @embedFile("component/led_strip/animated_sequence.json"),
+            @embedFile("component/led_strip/flash_sequence.json"),
+            @embedFile("component/led_strip/pingpong_sequence.json"),
+            @embedFile("component/led_strip/rotate_sequence.json"),
+            @embedFile("component/modem/attach_sequence.json"),
+            @embedFile("component/modem/signal_sequence.json"),
+            @embedFile("component/modem/apn_sequence.json"),
+            @embedFile("component/modem/call_sequence.json"),
+            @embedFile("component/modem/sms_sequence.json"),
+            @embedFile("component/modem/gnss_sequence.json"),
+            @embedFile("component/modem/mixed_sequence.json"),
+            @embedFile("component/nfc/found_read_sequence.json"),
+            @embedFile("component/wifi/sta_sequence.json"),
+            @embedFile("component/wifi/ap_sequence.json"),
+            @embedFile("component/ui/flow/pairing_flow_sequence.json"),
+            @embedFile("component/ui/overlay/loading_overlay_sequence.json"),
+            @embedFile("component/ui/selection/menu_selection_sequence.json"),
+            @embedFile("component/ui/route/route_sequence.json"),
+        });
+        break :blk builder.build();
+    };
+
+    const story_runner = comptime blk: {
+        var spec = SpecType.init();
+        spec.setFlow("pairing", PairingFlow);
+            break :blk spec.testRunner(lib, .{
+                .pipeline = .{
+                    .tick_interval_ns = lib.time.ns_per_ms,
+                },
+            }, Channel);
+    };
+
     const Runner = struct {
         pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
@@ -21,13 +71,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
             _ = allocator;
 
             t.run("bt", bt.make(lib, Channel));
-            t.run("button", button.make(lib, Channel));
+            t.run("stories", story_runner);
             t.run("imu", imu.make(lib, Channel));
-            t.run("led_strip", led_strip.make(lib, Channel));
-            t.run("modem", modem.make(lib, Channel));
-            t.run("nfc", nfc.make(lib, Channel));
-            t.run("wifi", wifi.make(lib, Channel));
-            t.run("ui", ui.make(lib, Channel));
             return t.wait();
         }
 

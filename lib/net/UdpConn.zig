@@ -215,10 +215,12 @@ pub fn UdpConn(comptime lib: type) type {
 
         pub fn setReadTimeout(self: *Self, ms: ?u32) void {
             self.read_timeout_ms = ms;
+            self.applyReadTimeout();
         }
 
         pub fn setWriteTimeout(self: *Self, ms: ?u32) void {
             self.write_timeout_ms = ms;
+            self.applyWriteTimeout();
         }
 
         pub fn boundPort(self: *const Self) !u16 {

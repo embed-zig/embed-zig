@@ -84,7 +84,9 @@ fn concurrentRequests(comptime lib: type, alloc: lib.mem.Allocator) !void {
         }
     };
 
-    try http_harness.withCmuxHttpServer(lib, alloc, Body.run);
+    try http_harness.withCmuxHttpServerOptions(lib, alloc, http_harness.HarnessOptions(lib){
+        .max_accept_queue = 9,
+    }, Body.run);
 }
 
 pub fn make(comptime lib: type) testing_api.TestRunner {

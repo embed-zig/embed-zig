@@ -5,6 +5,15 @@ pub const stream_read_chunk_bytes: usize = 256;
 pub const stream_write_total_bytes: usize = 400;
 pub const stream_write_chunk_bytes: usize = 100;
 
+pub fn HarnessOptions(comptime lib: type) type {
+    _ = lib;
+    return struct {
+        max_accept_queue: usize = 8,
+        read_buffer_size: usize = 1024,
+        write_buffer_size: usize = 1024,
+    };
+}
+
 pub fn dialHttpChannel(
     comptime lib: type,
     cmux: *net_mod.make(lib).Cmux,
@@ -16,6 +25,15 @@ pub fn dialHttpChannel(
 pub fn withCmuxHttpServer(
     comptime lib: type,
     alloc: lib.mem.Allocator,
+    body: *const fn (*net_mod.make(lib).Cmux, lib.mem.Allocator) anyerror!void,
+) !void {
+    return withCmuxHttpServerOptions(lib, alloc, .{}, body);
+}
+
+pub fn withCmuxHttpServerOptions(
+    comptime lib: type,
+    alloc: lib.mem.Allocator,
+    harness_options: HarnessOptions(lib),
     body: *const fn (*net_mod.make(lib).Cmux, lib.mem.Allocator) anyerror!void,
 ) !void {
     const net = net_mod.make(lib);
@@ -39,10 +57,11 @@ pub fn withCmuxHttpServer(
             shared_ptr: *serverShared(lib),
             ready_ptr: *gate(lib),
             spawn_cfg: lib.Thread.SpawnConfig,
+            harness_options_arg: HarnessOptions(lib),
         ) void {
-            serverThreadMain(lib, alloc2, ln, shared_ptr, ready_ptr, spawn_cfg);
+            serverThreadMain(lib, alloc2, ln, shared_ptr, ready_ptr, spawn_cfg, harness_options_arg);
         }
-    }.exec, .{ alloc, tcp_listener, &shared, &ready, test_spawn_config });
+    }.exec, .{ alloc, tcp_listener, &shared, &ready, test_spawn_config, harness_options });
     defer {
         tcp_listener.close();
         server_thread.join();
@@ -58,7 +77,12 @@ pub fn withCmuxHttpServer(
         return err;
     }
 
-    var client_cmux = try net.Cmux.init(alloc, client_tcp, .{ .role = .initiator });
+    var client_cmux = try net.Cmux.init(alloc, client_tcp, .{
+        .role = .initiator,
+        .max_accept_queue = harness_options.max_accept_queue,
+        .read_buffer_size = harness_options.read_buffer_size,
+        .write_buffer_size = harness_options.write_buffer_size,
+    });
     defer client_cmux.deinit();
 
     try body(client_cmux, alloc);
@@ -121,6 +145,7 @@ fn serverThreadMain(
     shared: *serverShared(lib),
     ready: *gate(lib),
     test_spawn_config: lib.Thread.SpawnConfig,
+    harness_options: HarnessOptions(lib),
 ) void {
     const net = net_mod.make(lib);
     const http = net.http;
@@ -134,7 +159,12 @@ fn serverThreadMain(
         return;
     };
 
-    var cmux = cmux_type.init(alloc, tcp_bearer, .{ .role = .responder }) catch |err| {
+    var cmux = cmux_type.init(alloc, tcp_bearer, .{
+        .role = .responder,
+        .max_accept_queue = harness_options.max_accept_queue,
+        .read_buffer_size = harness_options.read_buffer_size,
+        .write_buffer_size = harness_options.write_buffer_size,
+    }) catch |err| {
         shared.mutex.lock();
         shared.serve_err = err;
         shared.mutex.unlock();

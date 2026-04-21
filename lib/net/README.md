@@ -83,6 +83,7 @@ lib/
       Stream.zig       Internal non-blocking stream socket wrapper
       Packet.zig       Internal non-blocking datagram socket wrapper
       Listener.zig     Internal non-blocking listen/accept wrapper
+      netfd.zig        Shared read/write/connect wake+deadline wait state
       Wake.zig         Internal close/context wake-fd helper
       SockAddr.zig     AddrPort <-> sockaddr bridge
     netip/
@@ -158,7 +159,7 @@ under `lib/net/test_runner/integration/`, all wired from `lib/tests.zig`.
 - `lib/net.zig` exports only `net.test_runner.unit` and `net.test_runner.integration`.
 - `lib/tests.zig` wires `net/unit/std`, `net/unit/embed_std`, `net/integration/std`, and `net/integration/embed_std`.
 - `lib/net/test_runner/unit.zig` fans out into topic suites such as `netip`, `http`, `textproto`, `cmux`, `resolver`, `tls`, `fd`, and `core`.
-- `lib/net/test_runner/integration.zig` fans out into deterministic local runners such as `fd_stream`, `tcp`, `resolver_local`, `cmux_http_tcp`, `http_transport_local`, and `http_transport_layer01`.
+- `lib/net/test_runner/integration.zig` fans out into deterministic local runners such as `fd_stream`, `tcp`, `resolver_local`, `cmux_http_tcp`, `http_transport`, and `https_transport`.
 - Host-only or optional public-network helpers live under `lib/net/test_runner/integration/compat/` and `integration/public/` and are not wired from `integration.zig`; examples include `integration/compat/tls_std_compat.zig`, `integration/public/tls_dial.zig`, and `integration/public/resolver_dns.zig`.
 
 ## net (root)

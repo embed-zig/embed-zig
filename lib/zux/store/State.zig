@@ -9,11 +9,12 @@ pub fn make(comptime lib: type, comptime state_config: anytype, comptime Handler
         @compileError("zux.store.Builder.make expects configured state nodes to be struct literals");
     }
 
-    const ArrayList = lib.ArrayList(HandlerFn);
+    const HandlerList = lib.ArrayList(HandlerFn);
+    const SubscriberList = lib.ArrayList(*Subscriber);
     const NodeSubscriber = makeNodeSubscriber(lib);
     const fields_info = info.@"struct".fields;
 
-    comptime var field_count: usize = 5;
+    comptime var field_count: usize = 7;
     inline for (fields_info) |field| {
         if (comptimeEql(field.name, "stores")) continue;
         field_count += 1;
@@ -29,34 +30,48 @@ pub fn make(comptime lib: type, comptime state_config: anytype, comptime Handler
     };
     fields[1] = .{
         .name = "handlers",
-        .type = ArrayList,
+        .type = HandlerList,
         .default_value_ptr = null,
         .is_comptime = false,
-        .alignment = @alignOf(ArrayList),
+        .alignment = @alignOf(HandlerList),
     };
     fields[2] = .{
+        .name = "subscribers",
+        .type = SubscriberList,
+        .default_value_ptr = null,
+        .is_comptime = false,
+        .alignment = @alignOf(SubscriberList),
+    };
+    fields[3] = .{
         .name = "subscriber_impl",
         .type = NodeSubscriber,
         .default_value_ptr = null,
         .is_comptime = false,
         .alignment = @alignOf(NodeSubscriber),
     };
-    fields[3] = .{
+    fields[4] = .{
         .name = "subscriber",
         .type = Subscriber,
         .default_value_ptr = null,
         .is_comptime = false,
         .alignment = @alignOf(Subscriber),
     };
-    fields[4] = .{
+    fields[5] = .{
         .name = "ticking",
         .type = bool,
         .default_value_ptr = null,
         .is_comptime = false,
         .alignment = @alignOf(bool),
     };
+    fields[6] = .{
+        .name = "notifying",
+        .type = bool,
+        .default_value_ptr = null,
+        .is_comptime = false,
+        .alignment = @alignOf(bool),
+    };
 
-    comptime var i: usize = 5;
+    comptime var i: usize = 7;
     inline for (fields_info) |field| {
         if (comptimeEql(field.name, "stores")) continue;
 
@@ -110,6 +125,19 @@ pub fn unhandlePath(comptime path: []const u8, state: anytype, handler: anytype)
     return unhandleStatePath(path, state, handler);
 }
 
+pub fn subscribePath(
+    comptime path: []const u8,
+    allocator: anytype,
+    state: anytype,
+    subscriber: *Subscriber,
+) error{ OutOfMemory, InvalidPath }!void {
+    try subscribeStatePath(path, allocator, state, subscriber);
+}
+
+pub fn unsubscribePath(comptime path: []const u8, state: anytype, subscriber: *Subscriber) bool {
+    return unsubscribeStatePath(path, state, subscriber);
+}
+
 pub fn tick(comptime State: type, state: *State, stores: anytype) void {
     tickState(State, state, stores);
 }
@@ -120,11 +148,14 @@ fn makeNodeSubscriber(comptime lib: type) type {
     return struct {
         dirty: *AtomicBool,
         parent: ?*@This() = null,
+        subscribers: *lib.ArrayList(*Subscriber),
+        notifying: *bool,
 
-        pub fn notify(self: *@This(), _: Subscriber.Notification) void {
+        pub fn notify(self: *@This(), notification: Subscriber.Notification) void {
             var current: ?*@This() = self;
             while (current) |node| : (current = node.parent) {
                 node.dirty.store(true, .release);
+                notifyNodeSubscribers(node, notification);
             }
         }
     };
@@ -141,9 +172,11 @@ fn comptimeEql(comptime a: []const u8, comptime b: []const u8) bool {
 fn isMetaField(comptime name: []const u8) bool {
     return comptimeEql(name, "dirty") or
         comptimeEql(name, "handlers") or
+        comptimeEql(name, "subscribers") or
         comptimeEql(name, "subscriber_impl") or
         comptimeEql(name, "subscriber") or
-        comptimeEql(name, "ticking");
+        comptimeEql(name, "ticking") or
+        comptimeEql(name, "notifying");
 }
 
 fn initState(
@@ -157,12 +190,16 @@ fn initState(
 
     state.dirty = AtomicBool.init(false);
     state.handlers = .empty;
+    state.subscribers = .empty;
     state.subscriber_impl = .{
         .dirty = &state.dirty,
         .parent = parent,
+        .subscribers = &state.subscribers,
+        .notifying = &state.notifying,
     };
     state.subscriber = Subscriber.init(&state.subscriber_impl);
     state.ticking = false;
+    state.notifying = false;
 
     inline for (fields) |field| {
         if (comptime isMetaField(field.name)) {
@@ -177,6 +214,7 @@ fn deinitState(comptime lib: type, comptime State: type, allocator: lib.mem.Allo
     const fields = @typeInfo(State).@"struct".fields;
 
     state.handlers.deinit(allocator);
+    state.subscribers.deinit(allocator);
 
     inline for (fields) |field| {
         if (comptime isMetaField(field.name)) {
@@ -451,6 +489,70 @@ fn unhandleStatePath(comptime path: []const u8, state: anytype, handler: anytype
     return unhandleStatePath(part.tail, &@field(state.*, part.head), handler);
 }
 
+fn subscribeStatePath(
+    comptime path: []const u8,
+    allocator: anytype,
+    state: anytype,
+    subscriber: *Subscriber,
+) error{ OutOfMemory, InvalidPath }!void {
+    const normalized = comptime trimPath(path);
+    if (normalized.len == 0) {
+        if (state.notifying) {
+            @panic("zux.store.State.subscribePath cannot mutate subscribers during notification");
+        }
+        for (state.subscribers.items) |existing| {
+            if (existing == subscriber) return;
+        }
+        try state.subscribers.append(allocator, subscriber);
+        return;
+    }
+
+    const part = comptime splitPathHead(normalized);
+    const State = @TypeOf(state.*);
+    if (!@hasField(State, part.head) or comptime isMetaField(part.head)) {
+        return error.InvalidPath;
+    }
+
+    try subscribeStatePath(part.tail, allocator, &@field(state.*, part.head), subscriber);
+}
+
+fn unsubscribeStatePath(comptime path: []const u8, state: anytype, subscriber: *Subscriber) bool {
+    const normalized = comptime trimPath(path);
+    if (normalized.len == 0) {
+        if (state.notifying) {
+            @panic("zux.store.State.unsubscribePath cannot mutate subscribers during notification");
+        }
+        for (state.subscribers.items, 0..) |existing, i| {
+            if (existing != subscriber) continue;
+            _ = state.subscribers.orderedRemove(i);
+            return true;
+        }
+        return false;
+    }
+
+    const part = comptime splitPathHead(normalized);
+    const State = @TypeOf(state.*);
+    if (!@hasField(State, part.head) or comptime isMetaField(part.head)) {
+        return false;
+    }
+
+    return unsubscribeStatePath(part.tail, &@field(state.*, part.head), subscriber);
+}
+
+fn notifyNodeSubscribers(node: anytype, notification: Subscriber.Notification) void {
+    if (node.notifying.*) {
+        @panic("zux.store.State node subscribers cannot reenter notification on the same state node");
+    }
+
+    node.notifying.* = true;
+    const subscribers = node.subscribers.items;
+    defer node.notifying.* = false;
+
+    for (subscribers) |subscriber| {
+        subscriber.notify(notification);
+    }
+}
+
 fn trimPath(comptime path: []const u8) []const u8 {
     var start: usize = 0;
     while (start < path.len and path[start] == '/') : (start += 1) {}
@@ -483,7 +585,6 @@ fn splitPathHead(comptime path: []const u8) struct {
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const TestCase = struct {
         fn builds_tree_shape(testing: anytype, _: lib.mem.Allocator) !void {
-            const HandlerFn = *const fn (stores: *struct {}) void;
             const StoreLib = struct {
                 pub const builtin = lib.builtin;
                 pub const atomic = lib.atomic;
@@ -500,12 +601,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 .device = .{
                     .stores = &.{.wifi},
                 },
-            }, HandlerFn);
+            }, *const fn (*struct {}) void);
 
             try testing.expect(@hasField(StateTy, "dirty"));
             try testing.expect(@hasField(StateTy, "handlers"));
+            try testing.expect(@hasField(StateTy, "subscribers"));
             try testing.expect(@hasField(StateTy, "subscriber_impl"));
             try testing.expect(@hasField(StateTy, "subscriber"));
+            try testing.expect(@hasField(StateTy, "ticking"));
+            try testing.expect(@hasField(StateTy, "notifying"));
             try testing.expect(@hasField(StateTy, "ui"));
             try testing.expect(@hasField(StateTy, "device"));
             try testing.expect(!@hasField(StateTy, "stores"));
@@ -513,10 +617,72 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const Ui = @FieldType(StateTy, "ui");
             try testing.expect(@hasField(Ui, "dirty"));
             try testing.expect(@hasField(Ui, "handlers"));
+            try testing.expect(@hasField(Ui, "subscribers"));
             try testing.expect(@hasField(Ui, "subscriber_impl"));
             try testing.expect(@hasField(Ui, "subscriber"));
+            try testing.expect(@hasField(Ui, "ticking"));
+            try testing.expect(@hasField(Ui, "notifying"));
             try testing.expect(@hasField(Ui, "home"));
             try testing.expect(!@hasField(Ui, "stores"));
+        }
+
+        fn subscribers_notify_immediately(testing: anytype, allocator: lib.mem.Allocator) !void {
+            const StoreLib = struct {
+                pub const builtin = lib.builtin;
+                pub const atomic = lib.atomic;
+                pub const ArrayList = lib.ArrayList;
+                pub const mem = lib.mem;
+            };
+            const StateTy = make(StoreLib, .{
+                .ui = .{
+                    .stores = &.{.wifi},
+                    .home = .{
+                        .stores = &.{.wifi},
+                    },
+                },
+            }, *const fn (*struct {}) void);
+            const Impl = struct {
+                count: usize = 0,
+                last_label: []const u8 = "",
+                last_tick_count: u64 = 0,
+
+                pub fn notify(self: *@This(), notification: Subscriber.Notification) void {
+                    self.count += 1;
+                    self.last_label = notification.label;
+                    self.last_tick_count = notification.tick_count;
+                }
+            };
+
+            var state: StateTy = undefined;
+            init(StoreLib, StateTy, &state);
+            defer deinit(StoreLib, StateTy, allocator, &state);
+
+            var ui_impl = Impl{};
+            var ui_subscriber = Subscriber.init(&ui_impl);
+            try subscribePath("ui", allocator, &state, &ui_subscriber);
+
+            var home_impl = Impl{};
+            var home_subscriber = Subscriber.init(&home_impl);
+            try subscribePath("ui/home", allocator, &state, &home_subscriber);
+
+            state.ui.home.subscriber.notify(.{
+                .label = "wifi",
+                .tick_count = 3,
+            });
+
+            try testing.expectEqual(@as(usize, 1), home_impl.count);
+            try testing.expectEqual(@as(usize, 1), ui_impl.count);
+            try testing.expectEqualStrings("wifi", home_impl.last_label);
+            try testing.expectEqual(@as(u64, 3), ui_impl.last_tick_count);
+
+            try testing.expect(unsubscribePath("ui/home", &state, &home_subscriber));
+            state.ui.home.subscriber.notify(.{
+                .label = "wifi",
+                .tick_count = 4,
+            });
+
+            try testing.expectEqual(@as(usize, 1), home_impl.count);
+            try testing.expectEqual(@as(usize, 2), ui_impl.count);
         }
     };
 
@@ -531,6 +697,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const testing = lib.testing;
 
             TestCase.builds_tree_shape(testing, allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.subscribers_notify_immediately(testing, allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
