@@ -1,7 +1,7 @@
 //! `audio/ogg/Packet.zig` owns the pure Zig rewrite of upstream `ogg_packet`
 //! plus the clear behavior needed by encode/decode paths.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 
 const Self = @This();
@@ -13,7 +13,7 @@ pub const Options = struct {
     packetno: i64 = 0,
 };
 
-allocator: ?embed.mem.Allocator = null,
+allocator: ?stdz.mem.Allocator = null,
 packet: []const u8 = &.{},
 bos: bool = false,
 eos: bool = false,
@@ -33,10 +33,10 @@ pub fn initBorrowed(packet: []const u8, options: Options) Self {
 }
 
 pub fn initOwned(
-    allocator: embed.mem.Allocator,
+    allocator: stdz.mem.Allocator,
     packet: []const u8,
     options: Options,
-) embed.mem.Allocator.Error!Self {
+) stdz.mem.Allocator.Error!Self {
     const owned_packet = try allocator.dupe(u8, packet);
     return .{
         .allocator = allocator,

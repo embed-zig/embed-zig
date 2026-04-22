@@ -8,7 +8,7 @@ This package should be designed as the value-address foundation for
 embed-zig's networking stack, with API names, behavior, and edge cases kept as
 close to Go as Zig reasonably allows.
 
-The existing `embed.net.Address` family is socket-oriented:
+The existing `stdz.net.Address` family is socket-oriented:
 
 - it mirrors OS socket address layout
 - it carries a port
@@ -24,7 +24,7 @@ The existing `embed.net.Address` family is socket-oriented:
 
 In short:
 
-- use `embed.net.Address` at the OS / socket boundary
+- use `stdz.net.Address` at the OS / socket boundary
 - use `netip` in logic, config, routing, filtering, CIDR, and map keys
 
 ## Goals
@@ -36,8 +36,8 @@ In short:
    formatting into caller-provided buffers.
 3. Keep the package independent from `comptime lib`.
    Like `net/url`, this should be a pure utility package.
-4. Interoperate cleanly with existing `embed.net.Address`,
-   `embed.net.Ip4Address`, and `embed.net.Ip6Address` at the boundary.
+4. Interoperate cleanly with existing `stdz.net.Address`,
+   `stdz.net.Ip4Address`, and `stdz.net.Ip6Address` at the boundary.
 5. Be usable in `comptime` where practical.
 
 ## Non-goals
@@ -50,9 +50,9 @@ At least for the first phase, `netip` is not trying to be:
 - a stringly typed zone-name package
 - a wrapper around `std.net`
 
-## Why not reuse `embed.net.Address`?
+## Why not reuse `stdz.net.Address`?
 
-`embed.net.Address` is the right boundary type for networking syscalls, but it
+`stdz.net.Address` is the right boundary type for networking syscalls, but it
 has several properties that make it awkward for general-purpose IP logic:
 
 - port is always part of the representation
@@ -239,11 +239,11 @@ Likely intentional differences:
 This package should make conversions explicit and cheap:
 
 ```zig
-pub fn fromAddress(addr: embed.net.Address) AddrPort;
-pub fn toAddress(self: AddrPort) embed.net.Address;
+pub fn fromAddress(addr: stdz.net.Address) AddrPort;
+pub fn toAddress(self: AddrPort) stdz.net.Address;
 
-pub fn fromIp4Address(addr: embed.net.Ip4Address) Addr;
-pub fn fromIp6Address(addr: embed.net.Ip6Address) Addr;
+pub fn fromIp4Address(addr: stdz.net.Ip4Address) Addr;
+pub fn fromIp6Address(addr: stdz.net.Ip6Address) Addr;
 ```
 
 Important rule:
@@ -307,7 +307,7 @@ Ship the core value types:
 - parse / format
 - comparisons
 - classification helpers
-- conversions to/from `embed.net.Address`
+- conversions to/from `stdz.net.Address`
 
 ### Phase 2
 
@@ -333,7 +333,7 @@ The package should have three layers of tests:
 1. Pure parsing/formatting examples.
 2. Table-driven behavior parity tests against Go `net/netip`
    semantics and documented edge cases.
-3. Conversion roundtrip tests with `embed.net.Address`.
+3. Conversion roundtrip tests with `stdz.net.Address`.
 
 Key invariants:
 
@@ -369,7 +369,7 @@ if (lan.contains(addr)) {
 
 `netip` should become the pure value layer for IP logic in embed-zig:
 
-- `embed.net.Address` stays the syscall/socket boundary type
+- `stdz.net.Address` stays the syscall/socket boundary type
 - `netip` becomes the address math / prefix / config / comparison layer
 - the package should follow Go `net/netip` first, not `std.net`
 

@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const motion = @import("motion");
 
 const Context = @import("../../event/Context.zig");
@@ -11,24 +11,24 @@ const testing_api = @import("testing");
 
 const Reducer = @This();
 
-allocator: embed.mem.Allocator,
-detectors: embed.AutoHashMap(u32, motion.GestureDetector),
+allocator: stdz.mem.Allocator,
+detectors: stdz.AutoHashMap(u32, motion.GestureDetector),
 thresholds: motion.Thresholds,
 out: ?Emitter = null,
 
 pub fn init(
-    allocator: embed.mem.Allocator,
+    allocator: stdz.mem.Allocator,
     thresholds: motion.Thresholds,
 ) Reducer {
     return .{
         .allocator = allocator,
-        .detectors = embed.AutoHashMap(u32, motion.GestureDetector).init(allocator),
+        .detectors = stdz.AutoHashMap(u32, motion.GestureDetector).init(allocator),
         .thresholds = thresholds,
         .out = null,
     };
 }
 
-pub fn initDefault(allocator: embed.mem.Allocator) Reducer {
+pub fn initDefault(allocator: stdz.mem.Allocator) Reducer {
     return init(allocator, motion.Thresholds.default);
 }
 
@@ -176,10 +176,10 @@ fn forward(self: *Reducer, message: Message) !usize {
 fn timestampMs(timestamp_ns: i128) u64 {
     if (timestamp_ns <= 0) return 0;
 
-    const ns_per_ms: i128 = embed.time.ns_per_ms;
+    const ns_per_ms: i128 = stdz.time.ns_per_ms;
     const timestamp_ms = @divTrunc(timestamp_ns, ns_per_ms);
-    const max_u64_ms: i128 = @intCast(embed.math.maxInt(u64));
-    if (timestamp_ms >= max_u64_ms) return embed.math.maxInt(u64);
+    const max_u64_ms: i128 = @intCast(stdz.math.maxInt(u64));
+    if (timestamp_ms >= max_u64_ms) return stdz.math.maxInt(u64);
     return @intCast(timestamp_ms);
 }
 

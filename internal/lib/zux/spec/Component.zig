@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 const ui_overlay = @import("../component/ui/overlay.zig");
 const route = @import("../component/ui/route.zig");
@@ -72,19 +72,19 @@ pub fn parseSliceWithKindPath(
 }
 
 pub fn parseAllocSlice(
-    allocator: embed.mem.Allocator,
+    allocator: stdz.mem.Allocator,
     source: []const u8,
 ) !Component {
     return parseAllocSliceWithKindPath(allocator, "", source);
 }
 
 pub fn parseAllocSliceWithKindPath(
-    allocator: embed.mem.Allocator,
+    allocator: stdz.mem.Allocator,
     comptime kind_path: []const u8,
     source: []const u8,
 ) !Component {
-    var parsed_value = try embed.json.parseFromSlice(
-        embed.json.Value,
+    var parsed_value = try stdz.json.parseFromSlice(
+        stdz.json.Value,
         allocator,
         source,
         .{},
@@ -98,7 +98,7 @@ pub fn parseAllocSliceWithKindPath(
     return try parseJsonValue(allocator, parsed_value.value);
 }
 
-pub fn deinit(self: *Component, allocator: embed.mem.Allocator) void {
+pub fn deinit(self: *Component, allocator: stdz.mem.Allocator) void {
     allocator.free(self.label);
     freeRuntimeKind(self.kind, allocator);
 }
@@ -154,8 +154,8 @@ fn parseFromParser(parser: *JsonParser) Component {
 }
 
 pub fn parseJsonValue(
-    allocator: embed.mem.Allocator,
-    value: embed.json.Value,
+    allocator: stdz.mem.Allocator,
+    value: stdz.json.Value,
 ) !Component {
     if (@inComptime()) {
         const object = expectObjectComptime(
@@ -192,9 +192,9 @@ pub fn parseJsonValue(
 
     var iterator = object.iterator();
     while (iterator.next()) |entry| {
-        if (!embed.mem.eql(u8, entry.key_ptr.*, "label") and
-            !embed.mem.eql(u8, entry.key_ptr.*, "id") and
-            !embed.mem.eql(u8, entry.key_ptr.*, "kind"))
+        if (!stdz.mem.eql(u8, entry.key_ptr.*, "label") and
+            !stdz.mem.eql(u8, entry.key_ptr.*, "id") and
+            !stdz.mem.eql(u8, entry.key_ptr.*, "kind"))
         {
             return error.UnknownComponentField;
         }
@@ -226,9 +226,9 @@ pub fn parseJsonValue(
 }
 
 pub fn parseJsonValueWithKindPath(
-    allocator: embed.mem.Allocator,
+    allocator: stdz.mem.Allocator,
     comptime kind_path: []const u8,
-    value: embed.json.Value,
+    value: stdz.json.Value,
 ) !Component {
     const object = switch (value) {
         .object => |object| object,
@@ -262,7 +262,7 @@ pub fn parseJsonValueWithKindPath(
     };
 }
 
-fn freeRuntimeKind(kind: Kind, allocator: embed.mem.Allocator) void {
+fn freeRuntimeKind(kind: Kind, allocator: stdz.mem.Allocator) void {
     switch (kind) {
         .flow => |flow| allocator.free(flow.type_name),
         else => {},
@@ -270,8 +270,8 @@ fn freeRuntimeKind(kind: Kind, allocator: embed.mem.Allocator) void {
 }
 
 fn parseKindValue(
-    allocator: embed.mem.Allocator,
-    value: embed.json.Value,
+    allocator: stdz.mem.Allocator,
+    value: stdz.json.Value,
 ) !Kind {
     const object = switch (value) {
         .object => |object| object,
@@ -282,8 +282,8 @@ fn parseKindValue(
     const entry = iterator.next() orelse return error.ExpectedComponentKindObject;
     if (iterator.next() != null) return error.InvalidComponentKindObject;
 
-    if (embed.mem.eql(u8, entry.key_ptr.*, "grouped_button")) {
-        var payload = try embed.json.parseFromValue(
+    if (stdz.mem.eql(u8, entry.key_ptr.*, "grouped_button")) {
+        var payload = try stdz.json.parseFromValue(
             struct { button_count: usize },
             allocator,
             entry.value_ptr.*,
@@ -296,16 +296,16 @@ fn parseKindValue(
             },
         };
     }
-    if (embed.mem.eql(u8, entry.key_ptr.*, "single_button")) {
+    if (stdz.mem.eql(u8, entry.key_ptr.*, "single_button")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .single_button = {} };
     }
-    if (embed.mem.eql(u8, entry.key_ptr.*, "imu")) {
+    if (stdz.mem.eql(u8, entry.key_ptr.*, "imu")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .imu = {} };
     }
-    if (embed.mem.eql(u8, entry.key_ptr.*, "led_strip")) {
-        var payload = try embed.json.parseFromValue(
+    if (stdz.mem.eql(u8, entry.key_ptr.*, "led_strip")) {
+        var payload = try stdz.json.parseFromValue(
             struct { pixel_count: usize },
             allocator,
             entry.value_ptr.*,
@@ -318,24 +318,24 @@ fn parseKindValue(
             },
         };
     }
-    if (embed.mem.eql(u8, entry.key_ptr.*, "modem")) {
+    if (stdz.mem.eql(u8, entry.key_ptr.*, "modem")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .modem = {} };
     }
-    if (embed.mem.eql(u8, entry.key_ptr.*, "nfc")) {
+    if (stdz.mem.eql(u8, entry.key_ptr.*, "nfc")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .nfc = {} };
     }
-    if (embed.mem.eql(u8, entry.key_ptr.*, "wifi_sta")) {
+    if (stdz.mem.eql(u8, entry.key_ptr.*, "wifi_sta")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .wifi_sta = {} };
     }
-    if (embed.mem.eql(u8, entry.key_ptr.*, "wifi_ap")) {
+    if (stdz.mem.eql(u8, entry.key_ptr.*, "wifi_ap")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .wifi_ap = {} };
     }
-    if (embed.mem.eql(u8, entry.key_ptr.*, "router")) {
-        var payload = try embed.json.parseFromValue(
+    if (stdz.mem.eql(u8, entry.key_ptr.*, "router")) {
+        var payload = try stdz.json.parseFromValue(
             struct { initial_item: route.Router.Item },
             allocator,
             entry.value_ptr.*,
@@ -348,7 +348,7 @@ fn parseKindValue(
             },
         };
     }
-    if (embed.mem.eql(u8, entry.key_ptr.*, "flow")) {
+    if (stdz.mem.eql(u8, entry.key_ptr.*, "flow")) {
         const payload = switch (entry.value_ptr.*) {
             .object => |payload| payload,
             else => return error.ExpectedFlowComponentObject,
@@ -367,8 +367,8 @@ fn parseKindValue(
             },
         };
     }
-    if (embed.mem.eql(u8, entry.key_ptr.*, "overlay")) {
-        var payload = try embed.json.parseFromValue(
+    if (stdz.mem.eql(u8, entry.key_ptr.*, "overlay")) {
+        var payload = try stdz.json.parseFromValue(
             struct { initial_state: ui_overlay.State },
             allocator,
             entry.value_ptr.*,
@@ -381,8 +381,8 @@ fn parseKindValue(
             },
         };
     }
-    if (embed.mem.eql(u8, entry.key_ptr.*, "selection")) {
-        var payload = try embed.json.parseFromValue(
+    if (stdz.mem.eql(u8, entry.key_ptr.*, "selection")) {
+        var payload = try stdz.json.parseFromValue(
             struct { initial_state: ui_selection.State },
             allocator,
             entry.value_ptr.*,
@@ -399,7 +399,7 @@ fn parseKindValue(
     return error.UnknownComponentKind;
 }
 
-fn expectEmptyPayload(value: embed.json.Value) !void {
+fn expectEmptyPayload(value: stdz.json.Value) !void {
     switch (value) {
         .null => return,
         .object => |object| {
@@ -643,11 +643,11 @@ fn parsePathKindSlice(comptime kind_path: []const u8, comptime source: []const u
 }
 
 fn parsePathKindValue(
-    allocator: embed.mem.Allocator,
+    allocator: stdz.mem.Allocator,
     comptime kind_path: []const u8,
-    object: embed.json.ObjectMap,
+    object: stdz.json.ObjectMap,
 ) !Kind {
-    if (embed.mem.eql(u8, kind_path, "button/grouped")) {
+    if (stdz.mem.eql(u8, kind_path, "button/grouped")) {
         return .{
             .grouped_button = .{
                 .button_count = try parseRequiredUsizeFieldValue(
@@ -659,13 +659,13 @@ fn parsePathKindValue(
             },
         };
     }
-    if (embed.mem.eql(u8, kind_path, "button/single")) {
+    if (stdz.mem.eql(u8, kind_path, "button/single")) {
         return .{ .single_button = {} };
     }
-    if (embed.mem.eql(u8, kind_path, "imu")) {
+    if (stdz.mem.eql(u8, kind_path, "imu")) {
         return .{ .imu = {} };
     }
-    if (embed.mem.eql(u8, kind_path, "led_strip")) {
+    if (stdz.mem.eql(u8, kind_path, "led_strip")) {
         return .{
             .led_strip = .{
                 .pixel_count = try parseRequiredUsizeFieldValue(
@@ -677,21 +677,21 @@ fn parsePathKindValue(
             },
         };
     }
-    if (embed.mem.eql(u8, kind_path, "modem")) {
+    if (stdz.mem.eql(u8, kind_path, "modem")) {
         return .{ .modem = {} };
     }
-    if (embed.mem.eql(u8, kind_path, "nfc")) {
+    if (stdz.mem.eql(u8, kind_path, "nfc")) {
         return .{ .nfc = {} };
     }
-    if (embed.mem.eql(u8, kind_path, "wifi/sta")) {
+    if (stdz.mem.eql(u8, kind_path, "wifi/sta")) {
         return .{ .wifi_sta = {} };
     }
-    if (embed.mem.eql(u8, kind_path, "wifi/ap")) {
+    if (stdz.mem.eql(u8, kind_path, "wifi/ap")) {
         return .{ .wifi_ap = {} };
     }
-    if (embed.mem.eql(u8, kind_path, "ui/route")) {
+    if (stdz.mem.eql(u8, kind_path, "ui/route")) {
         const initial_item_value = object.get("initial_item") orelse return error.MissingRouterInitialItem;
-        var payload = try embed.json.parseFromValue(route.Router.Item, allocator, initial_item_value, .{});
+        var payload = try stdz.json.parseFromValue(route.Router.Item, allocator, initial_item_value, .{});
         defer payload.deinit();
         return .{
             .router = .{
@@ -699,7 +699,7 @@ fn parsePathKindValue(
             },
         };
     }
-    if (embed.mem.eql(u8, kind_path, "ui/flow")) {
+    if (stdz.mem.eql(u8, kind_path, "ui/flow")) {
         return .{
             .flow = .{
                 .type_name = try parseRequiredAlternativeStringFieldValue(
@@ -714,9 +714,9 @@ fn parsePathKindValue(
             },
         };
     }
-    if (embed.mem.eql(u8, kind_path, "ui/overlay")) {
+    if (stdz.mem.eql(u8, kind_path, "ui/overlay")) {
         const initial_state_value = object.get("initial_state") orelse return error.MissingOverlayInitialState;
-        var payload = try embed.json.parseFromValue(
+        var payload = try stdz.json.parseFromValue(
             ui_overlay.State,
             allocator,
             initial_state_value,
@@ -729,9 +729,9 @@ fn parsePathKindValue(
             },
         };
     }
-    if (embed.mem.eql(u8, kind_path, "ui/selection")) {
+    if (stdz.mem.eql(u8, kind_path, "ui/selection")) {
         const initial_state_value = object.get("initial_state") orelse return error.MissingSelectionInitialState;
-        var payload = try embed.json.parseFromValue(
+        var payload = try stdz.json.parseFromValue(
             ui_selection.State,
             allocator,
             initial_state_value,
@@ -970,8 +970,8 @@ fn parseRequiredValueFieldFromObjectSlice(
 }
 
 fn parseRequiredNonEmptyStringFieldValue(
-    allocator: embed.mem.Allocator,
-    object: embed.json.ObjectMap,
+    allocator: stdz.mem.Allocator,
+    object: stdz.json.ObjectMap,
     field_name: []const u8,
     missing_err: anyerror,
     expected_err: anyerror,
@@ -988,7 +988,7 @@ fn parseRequiredNonEmptyStringFieldValue(
 }
 
 fn parseRequiredU32FieldValue(
-    object: embed.json.ObjectMap,
+    object: stdz.json.ObjectMap,
     field_name: []const u8,
     missing_err: anyerror,
     expected_err: anyerror,
@@ -1004,7 +1004,7 @@ fn parseRequiredU32FieldValue(
 }
 
 fn parseRequiredUsizeFieldValue(
-    object: embed.json.ObjectMap,
+    object: stdz.json.ObjectMap,
     field_name: []const u8,
     missing_err: anyerror,
     expected_err: anyerror,
@@ -1020,8 +1020,8 @@ fn parseRequiredUsizeFieldValue(
 }
 
 fn parseRequiredAlternativeStringFieldValue(
-    allocator: embed.mem.Allocator,
-    object: embed.json.ObjectMap,
+    allocator: stdz.mem.Allocator,
+    object: stdz.json.ObjectMap,
     first_name: []const u8,
     second_name: []const u8,
     missing_err: anyerror,
@@ -1089,7 +1089,7 @@ fn expectEmptyPayloadSlice(
     parser.finish();
 }
 
-fn parseKindValueComptime(comptime value: embed.json.Value) Kind {
+fn parseKindValueComptime(comptime value: stdz.json.Value) Kind {
     const object = expectObjectComptime(
         value,
         "zux.spec.Component.parseJsonValue component kind",
@@ -1239,7 +1239,7 @@ fn parseKindValueComptime(comptime value: embed.json.Value) Kind {
     @compileError("zux.spec.Component.parseJsonValue encountered an unknown component kind");
 }
 
-fn parseRouterItemComptime(comptime value: embed.json.Value) route.Router.Item {
+fn parseRouterItemComptime(comptime value: stdz.json.Value) route.Router.Item {
     const object = expectObjectComptime(
         value,
         "zux.spec.Component.parseJsonValue router initial_item",
@@ -1277,7 +1277,7 @@ fn parseRouterItemComptime(comptime value: embed.json.Value) route.Router.Item {
     return item;
 }
 
-fn parseOverlayStateComptime(comptime value: embed.json.Value) ui_overlay.State {
+fn parseOverlayStateComptime(comptime value: stdz.json.Value) ui_overlay.State {
     const object = expectObjectComptime(
         value,
         "zux.spec.Component.parseJsonValue overlay initial_state",
@@ -1314,7 +1314,7 @@ fn parseOverlayStateComptime(comptime value: embed.json.Value) ui_overlay.State 
     return state;
 }
 
-fn parseSelectionStateComptime(comptime value: embed.json.Value) ui_selection.State {
+fn parseSelectionStateComptime(comptime value: stdz.json.Value) ui_selection.State {
     const object = expectObjectComptime(
         value,
         "zux.spec.Component.parseJsonValue selection initial_state",
@@ -1348,9 +1348,9 @@ fn parseSelectionStateComptime(comptime value: embed.json.Value) ui_selection.St
 }
 
 fn expectObjectComptime(
-    comptime value: embed.json.Value,
+    comptime value: stdz.json.Value,
     comptime context: []const u8,
-) embed.json.ObjectMap {
+) stdz.json.ObjectMap {
     return switch (value) {
         .object => |object| object,
         else => @compileError(context ++ " must be a JSON object"),
@@ -1358,7 +1358,7 @@ fn expectObjectComptime(
 }
 
 fn expectEmptyPayloadComptime(
-    comptime value: embed.json.Value,
+    comptime value: stdz.json.Value,
     comptime context: []const u8,
 ) void {
     switch (value) {
@@ -1373,7 +1373,7 @@ fn expectEmptyPayloadComptime(
 }
 
 fn parseRequiredU32FieldComptime(
-    comptime object: embed.json.ObjectMap,
+    comptime object: stdz.json.ObjectMap,
     comptime field_name: []const u8,
     comptime context: []const u8,
 ) u32 {
@@ -1384,7 +1384,7 @@ fn parseRequiredU32FieldComptime(
 }
 
 fn parseRequiredUsizeFieldComptime(
-    comptime object: embed.json.ObjectMap,
+    comptime object: stdz.json.ObjectMap,
     comptime field_name: []const u8,
     comptime context: []const u8,
 ) usize {
@@ -1395,7 +1395,7 @@ fn parseRequiredUsizeFieldComptime(
 }
 
 fn parseNonEmptyStringFieldComptime(
-    comptime object: embed.json.ObjectMap,
+    comptime object: stdz.json.ObjectMap,
     comptime field_name: []const u8,
     comptime context: []const u8,
 ) []const u8 {
@@ -1406,7 +1406,7 @@ fn parseNonEmptyStringFieldComptime(
 }
 
 fn parseStringValueComptime(
-    comptime value: embed.json.Value,
+    comptime value: stdz.json.Value,
     comptime context: []const u8,
 ) []const u8 {
     return switch (value) {
@@ -1416,7 +1416,7 @@ fn parseStringValueComptime(
 }
 
 fn parseNonEmptyStringValueComptime(
-    comptime value: embed.json.Value,
+    comptime value: stdz.json.Value,
     comptime context: []const u8,
 ) []const u8 {
     const text = parseStringValueComptime(value, context);
@@ -1427,7 +1427,7 @@ fn parseNonEmptyStringValueComptime(
 }
 
 fn parseU32ValueComptime(
-    comptime value: embed.json.Value,
+    comptime value: stdz.json.Value,
     comptime context: []const u8,
 ) u32 {
     const int_value = switch (value) {
@@ -1441,7 +1441,7 @@ fn parseU32ValueComptime(
 }
 
 fn parseUsizeValueComptime(
-    comptime value: embed.json.Value,
+    comptime value: stdz.json.Value,
     comptime context: []const u8,
 ) usize {
     const int_value = switch (value) {
@@ -1455,7 +1455,7 @@ fn parseUsizeValueComptime(
 }
 
 fn parseBoolValueComptime(
-    comptime value: embed.json.Value,
+    comptime value: stdz.json.Value,
     comptime context: []const u8,
 ) bool {
     return switch (value) {

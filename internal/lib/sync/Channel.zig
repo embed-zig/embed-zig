@@ -9,7 +9,7 @@
 //!   try ch.send(42);
 //!   const result = try ch.recv();
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 
 pub fn SendResult() type {
@@ -58,7 +58,7 @@ pub fn make(comptime impl: ChannelType) ChannelType {
                 _ = @as(*const fn (*Ch, u32) anyerror!RecvResult(T), &Ch.recvTimeout);
                 _ = @as(*const fn (*Ch) void, &Ch.close);
                 _ = @as(*const fn (*Ch) void, &Ch.deinit);
-                _ = @as(*const fn (embed.mem.Allocator, usize) anyerror!Ch, &Ch.init);
+                _ = @as(*const fn (stdz.mem.Allocator, usize) anyerror!Ch, &Ch.init);
             }
 
             return struct {
@@ -66,7 +66,7 @@ pub fn make(comptime impl: ChannelType) ChannelType {
 
                 const Self = @This();
 
-                pub fn make(allocator: embed.mem.Allocator, capacity: usize) !Self {
+                pub fn make(allocator: stdz.mem.Allocator, capacity: usize) !Self {
                     return .{ .ch = try Ch.init(allocator, capacity) };
                 }
 
@@ -109,7 +109,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         init_capacity: usize = 0,
                         last_send_timeout_ms: ?u32 = null,
 
-                        pub fn init(allocator: embed.mem.Allocator, capacity: usize) !@This() {
+                        pub fn init(allocator: stdz.mem.Allocator, capacity: usize) !@This() {
                             _ = allocator;
                             return .{ .init_capacity = capacity };
                         }

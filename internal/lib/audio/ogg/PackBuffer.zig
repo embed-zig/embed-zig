@@ -1,7 +1,7 @@
 //! `audio/ogg/PackBuffer.zig` owns the pure Zig rewrite of upstream
 //! `oggpack_buffer` and the `oggpack_*` / `oggpackB_*` bit-packing routines.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 
 const Self = @This();
@@ -26,7 +26,7 @@ const masks_msb_tail = [9]u8{
     0x00, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe, 0xff,
 };
 
-allocator: ?embed.mem.Allocator = null,
+allocator: ?stdz.mem.Allocator = null,
 buffer: ?[]u8 = null,
 storage: usize = 0,
 end_byte: usize = 0,
@@ -34,9 +34,9 @@ end_bit: u8 = 0,
 owns_buffer: bool = false,
 valid: bool = false,
 
-pub const InitWriteError = embed.mem.Allocator.Error;
+pub const InitWriteError = stdz.mem.Allocator.Error;
 
-pub const WriteError = embed.mem.Allocator.Error || error{
+pub const WriteError = stdz.mem.Allocator.Error || error{
     InvalidState,
     InvalidBitCount,
     Overflow,
@@ -47,7 +47,7 @@ pub const AccessError = error{
     InvalidBitCount,
 };
 
-pub fn initWrite(allocator: embed.mem.Allocator) InitWriteError!Self {
+pub fn initWrite(allocator: stdz.mem.Allocator) InitWriteError!Self {
     const buffer = try allocator.alloc(u8, buffer_increment);
     @memset(buffer, 0);
     return .{

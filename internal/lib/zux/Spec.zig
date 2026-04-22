@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
 const testing_api = @import("testing");
@@ -343,7 +343,7 @@ pub fn make(comptime spec_doc: anytype) type {
 
         fn reducerIndex(comptime label: []const u8) usize {
             inline for (reducers, 0..) |reducer, i| {
-                if (embed.mem.eql(u8, reducer.label, label)) return i;
+                if (stdz.mem.eql(u8, reducer.label, label)) return i;
             }
 
             @compileError("zux.Spec.setReducer received a label '" ++ label ++ "' that is not declared in the spec doc reducer list");
@@ -351,7 +351,7 @@ pub fn make(comptime spec_doc: anytype) type {
 
         fn componentIndex(comptime label: []const u8) usize {
             inline for (components, 0..) |component, i| {
-                if (embed.mem.eql(u8, component.label, label)) return i;
+                if (stdz.mem.eql(u8, component.label, label)) return i;
             }
 
             @compileError("zux.Spec received a component label '" ++ label ++ "' that is not declared in the spec doc component list");
@@ -367,7 +367,7 @@ pub fn make(comptime spec_doc: anytype) type {
 
         fn renderIndex(comptime label: []const u8) usize {
             inline for (renders, 0..) |render_spec, i| {
-                if (embed.mem.eql(u8, render_spec.label, label)) return i;
+                if (stdz.mem.eql(u8, render_spec.label, label)) return i;
             }
 
             @compileError("zux.Spec.setRender received a label '" ++ label ++ "' that is not declared in the spec doc render list");
@@ -432,7 +432,7 @@ pub fn make(comptime spec_doc: anytype) type {
 
         fn componentForLabel(comptime label: []const u8) ComponentSpec {
             inline for (components) |component| {
-                if (embed.mem.eql(u8, component.label, label)) return component;
+                if (stdz.mem.eql(u8, component.label, label)) return component;
             }
 
             @compileError("zux.Spec.testRunner could not find component label '" ++ label ++ "'");
@@ -1084,7 +1084,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const TestChannelImpl = struct {
                 fn factory(comptime T: type) type {
                     return struct {
-                        pub fn init(_: embed.mem.Allocator, _: usize) !@This() {
+                        pub fn init(_: stdz.mem.Allocator, _: usize) !@This() {
                             return .{};
                         }
 

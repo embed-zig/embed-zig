@@ -14,9 +14,9 @@ pub fn create(
 }
 
 pub fn link(b: *std.Build) void {
-    const embed = b.modules.get("embed") orelse @panic("ledstrip requires embed");
+    const stdz = b.modules.get("stdz") orelse @panic("ledstrip requires stdz");
     const testing = b.modules.get("testing") orelse @panic("ledstrip requires testing");
     const mod = b.modules.get("ledstrip") orelse @panic("ledstrip module missing");
-    mod.addImport("embed", embed);
+    mod.addImport("stdz", stdz);
     mod.addImport("testing", testing);
 }

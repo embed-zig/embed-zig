@@ -7,7 +7,7 @@
 //! On hardware these would run on two different boards/processes.
 //! For local tests, a mock HCI system can run both in one process.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const Central = @import("../Central.zig");
 const Peripheral = @import("../Peripheral.zig");
 const testing_api = @import("testing");
@@ -30,12 +30,12 @@ pub fn makeCentral(comptime lib: type, host: anytype) testing_api.TestRunner {
     const Runner = struct {
         host: HostPtr,
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = allocator;
             const c = self.host.central();
             c.start() catch |err| {
@@ -51,7 +51,7 @@ pub fn makeCentral(comptime lib: type, host: anytype) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }
@@ -69,12 +69,12 @@ pub fn makePeripheral(comptime lib: type, host: anytype) testing_api.TestRunner 
     const Runner = struct {
         host: HostPtr,
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = allocator;
             const p = self.host.peripheral();
             p.start() catch |err| {
@@ -90,7 +90,7 @@ pub fn makePeripheral(comptime lib: type, host: anytype) testing_api.TestRunner 
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }

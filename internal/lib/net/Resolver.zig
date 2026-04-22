@@ -1,7 +1,7 @@
 //! Resolver — pure-Zig DNS resolver (Go's net.Resolver).
 //!
 //! Builds and parses DNS wire-format packets (RFC 1035) directly.
-//! No libc getaddrinfo, fully portable across embed platforms.
+//! No libc getaddrinfo, fully portable across stdz platforms.
 //! Resolver owns its allocator-backed state and any in-flight lookups; call
 //! deinit() to wait for outstanding racers/workers to finish cleanup.
 //!

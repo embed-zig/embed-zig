@@ -29,8 +29,8 @@ present.
 Import via the `net` package:
 
 ```zig
-const embed = @import("embed").make(platform);
-const net = @import("net").make(embed);
+const stdz = @import("stdz").make(platform);
+const net = @import("net").make(stdz);
 ```
 
 ## Client
@@ -110,10 +110,10 @@ Important scope boundary:
 ### Example
 
 ```zig
-const embed = @import("embed").make(platform);
-const net = @import("net").make(embed);
+const stdz = @import("stdz").make(platform);
+const net = @import("net").make(stdz);
 
-var server = try net.http.Server.init(embed.testing.allocator, .{});
+var server = try net.http.Server.init(stdz.testing.allocator, .{});
 defer server.deinit();
 
 try server.handleFunc("/hello", struct {
@@ -124,7 +124,7 @@ try server.handleFunc("/hello", struct {
 }.run);
 
 var listener = try net.listen(
-    embed.testing.allocator,
+    stdz.testing.allocator,
     .{ .address = @import("net").netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 8080) },
 );
 defer listener.deinit();
@@ -166,14 +166,14 @@ Important scope boundary:
 ### Example
 
 ```zig
-const embed = @import("embed").make(platform);
-const net = @import("net").make(embed);
+const stdz = @import("stdz").make(platform);
+const net = @import("net").make(stdz);
 
-var transport = try net.http.Transport.init(embed.testing.allocator, .{});
+var transport = try net.http.Transport.init(stdz.testing.allocator, .{});
 defer transport.deinit();
 
 var req = try net.http.Request.init(
-    embed.testing.allocator,
+    stdz.testing.allocator,
     "GET",
     "https://example.com/",
 );
@@ -183,7 +183,7 @@ defer resp.deinit();
 const body = resp.body() orelse return error.MissingBody;
 var buf: [1024]u8 = undefined;
 const n = try body.read(&buf);
-embed.log.info("status={} body={s}", .{ resp.status_code, buf[0..n] });
+stdz.log.info("status={} body={s}", .{ resp.status_code, buf[0..n] });
 ```
 
 ### Key Options
@@ -208,7 +208,7 @@ Common `Transport.Options` knobs:
 Notes:
 
 - `max_header_bytes` currently defaults to `32 KiB`. This is an intentional
-  embed-side policy, tighter than Go's larger effective zero-value default.
+  stdz-side policy, tighter than Go's larger effective zero-value default.
 - request framing headers remain transport-owned: conflicting caller-supplied
   `Content-Length` / `Transfer-Encoding` values are rejected instead of being
   serialized alongside a different body framing strategy.

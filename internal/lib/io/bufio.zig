@@ -1,16 +1,16 @@
-//! bufio — buffered I/O adapters over `embed.Io`.
+//! bufio — buffered I/O adapters over `stdz.Io`.
 //!
 //! `BufferedReader(Reader)` follows the usual concrete-reader adapter style:
 //! construct a concrete adapter value first, then borrow its `Io.Reader`
 //! interface via `ioReader()`.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
-const Io = embed.Io;
+const Io = stdz.Io;
 
 pub fn BufferedReader(comptime Reader: type) type {
     return struct {
-        buffer_allocator: ?embed.mem.Allocator = null,
+        buffer_allocator: ?stdz.mem.Allocator = null,
         rd: *Reader,
         read_err: ?anyerror = null,
         interface: Io.Reader,
@@ -32,14 +32,14 @@ pub fn BufferedReader(comptime Reader: type) type {
 
         /// `buf` must be non-empty.
         pub fn init(rd: *Reader, buf: []u8) Self {
-            embed.debug.assert(buf.len > 0);
+            stdz.debug.assert(buf.len > 0);
             return .{
                 .rd = rd,
                 .interface = initInterface(buf),
             };
         }
 
-        pub fn initAlloc(rd: *Reader, allocator: embed.mem.Allocator, bufsize: usize) embed.mem.Allocator.Error!Self {
+        pub fn initAlloc(rd: *Reader, allocator: stdz.mem.Allocator, bufsize: usize) stdz.mem.Allocator.Error!Self {
             const buffer = try allocator.alloc(u8, @max(@as(usize, 1), bufsize));
             return .{
                 .buffer_allocator = allocator,
@@ -92,7 +92,7 @@ pub fn BufferedReader(comptime Reader: type) type {
             try ensureTailCapacity(self, r);
 
             const dest = r.buffer[r.end..];
-            embed.debug.assert(dest.len > 0);
+            stdz.debug.assert(dest.len > 0);
 
             const n = readInto(self, dest) catch |read_err| switch (read_err) {
                 error.EndOfStream => return error.EndOfStream,
@@ -143,7 +143,7 @@ pub fn BufferedReader(comptime Reader: type) type {
                 return;
             }
 
-            embed.debug.assert(r.buffer.len >= capacity);
+            stdz.debug.assert(r.buffer.len >= capacity);
         }
 
         fn ensureManagedCapacity(self: *Self, r: *Io.Reader, capacity: usize) Io.Reader.Error!void {
@@ -200,14 +200,14 @@ pub fn BufferedReader(comptime Reader: type) type {
             if (@hasDecl(Reader, "readSliceShort")) {
                 return reader.readSliceShort(buf);
             }
-            @compileError("io.BufferedReader requires a reader with read([]u8)!usize or embed.Io.Reader-compatible readSliceShort([]u8).");
+            @compileError("io.BufferedReader requires a reader with read([]u8)!usize or stdz.Io.Reader-compatible readSliceShort([]u8).");
         }
     };
 }
 
 pub fn BufferedWriter(comptime Writer: type) type {
     return struct {
-        buffer_allocator: ?embed.mem.Allocator = null,
+        buffer_allocator: ?stdz.mem.Allocator = null,
         wr: *Writer,
         write_err: ?anyerror = null,
         interface: Io.Writer,
@@ -226,14 +226,14 @@ pub fn BufferedWriter(comptime Writer: type) type {
 
         /// `buf` must be non-empty.
         pub fn init(wr: *Writer, buf: []u8) Self {
-            embed.debug.assert(buf.len > 0);
+            stdz.debug.assert(buf.len > 0);
             return .{
                 .wr = wr,
                 .interface = initInterface(buf),
             };
         }
 
-        pub fn initAlloc(wr: *Writer, allocator: embed.mem.Allocator, bufsize: usize) embed.mem.Allocator.Error!Self {
+        pub fn initAlloc(wr: *Writer, allocator: stdz.mem.Allocator, bufsize: usize) stdz.mem.Allocator.Error!Self {
             const buffer = try allocator.alloc(u8, @max(@as(usize, 1), bufsize));
             return .{
                 .buffer_allocator = allocator,
@@ -265,7 +265,7 @@ pub fn BufferedWriter(comptime Writer: type) type {
 
         fn drain(w: *Io.Writer, data: []const []const u8, splat: usize) Io.Writer.Error!usize {
             const self: *Self = @alignCast(@fieldParentPtr("interface", w));
-            embed.debug.assert(data.len > 0);
+            stdz.debug.assert(data.len > 0);
 
             try flushBuffered(self, w);
 
@@ -377,7 +377,7 @@ pub fn BufferedWriter(comptime Writer: type) type {
             if (@hasDecl(Writer, "write")) {
                 return writer.write(buf);
             }
-            @compileError("io.BufferedWriter requires a writer with write([]const u8)!usize or embed.Io.Writer-compatible write([]const u8).");
+            @compileError("io.BufferedWriter requires a writer with write([]const u8)!usize or stdz.Io.Writer-compatible write([]const u8).");
         }
 
         fn flushSome(writer: *Writer) anyerror!void {

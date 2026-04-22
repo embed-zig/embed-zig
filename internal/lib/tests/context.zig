@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_mod = @import("testing");
 
 pub const background = @import("context/background.zig");
@@ -14,12 +14,12 @@ pub const wait = @import("context/wait.zig");
 
 pub fn make(comptime lib: type) testing_mod.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_mod.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_mod.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -36,7 +36,7 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

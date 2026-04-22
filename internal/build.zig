@@ -1,7 +1,7 @@
 const std = @import("std");
 const build_tests = @import("build/tests.zig");
 
-const lib_embed = @import("build/lib/embed.zig");
+const lib_stdz = @import("build/lib/stdz.zig");
 const lib_testing = @import("build/lib/testing.zig");
 const lib_context = @import("build/lib/context.zig");
 const lib_sync = @import("build/lib/sync.zig");
@@ -20,7 +20,7 @@ const lib_zux = @import("build/lib/zux.zig");
 const Packages = struct {};
 
 const Libraries = struct {
-    pub const embed = lib_embed;
+    pub const stdz = lib_stdz;
     pub const testing = lib_testing;
     pub const context = lib_context;
     pub const sync = lib_sync;

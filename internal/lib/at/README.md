@@ -22,7 +22,7 @@ deadlines). `**lib/at/Transport` adds `flushRx`** and is not identical to
 3. **Session / command API** — Send a command, collect lines until a terminal
   (`OK`, `ERROR`, …) with timeouts; extensible for project-specific URCs
    (unsolicited lines).
-4. **embed alignment** — Runtime primitives via injected `embed` / `lib`
+4. **stdz alignment** — Runtime primitives via injected `stdz` / `lib`
   namespace where needed; avoid direct `std` in non-test library code per
    `AGENTS.md`.
 
@@ -169,7 +169,7 @@ Any backend that exposes a **reliable ordered byte stream** with read/write
 (and optional deadlines) is valid — including **USB CDC-ACM**. Implement a
 `Transport` adapter for your USB stack; `lib/at` stays agnostic.
 
-### embed injection
+### stdz injection
 
 - Use `comptime lib: type` on factories (e.g. `Dte(lib, line_buf_cap)`), with
 `comptime` validation of required `lib.time` symbols (`milliTimestamp` /

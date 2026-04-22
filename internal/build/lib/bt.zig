@@ -14,12 +14,12 @@ pub fn create(
 }
 
 pub fn link(b: *std.Build) void {
-    const embed = b.modules.get("embed") orelse @panic("bt requires embed");
+    const stdz = b.modules.get("stdz") orelse @panic("bt requires stdz");
     const embed_std = b.modules.get("embed_std") orelse @panic("bt requires embed_std");
     const sync = b.modules.get("sync") orelse @panic("bt requires sync");
     const testing = b.modules.get("testing") orelse @panic("bt requires testing");
     const mod = b.modules.get("bt") orelse @panic("bt module missing");
-    mod.addImport("embed", embed);
+    mod.addImport("stdz", stdz);
     mod.addImport("embed_std", embed_std);
     mod.addImport("sync", sync);
     mod.addImport("testing", testing);

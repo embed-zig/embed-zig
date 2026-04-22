@@ -3,11 +3,11 @@
 //! Parsing is zero-allocation: the returned slices point into the input text,
 //! and the caller provides storage for parsed parameters.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 
-const ascii = embed.ascii;
-const mem = embed.mem;
+const ascii = stdz.ascii;
+const mem = stdz.mem;
 
 const MediaType = @This();
 

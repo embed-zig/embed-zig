@@ -1,7 +1,7 @@
 # lib/net — Go-style networking for embed-zig
 
-High-level networking package built on top of `embed`. Takes a comptime
-`lib` (the result of `embed.make(platform)`) and provides Go-style
+High-level networking package built on top of `stdz`. Takes a comptime
+`lib` (the result of `stdz.make(platform)`) and provides Go-style
 networking primitives.
 
 ## Table of Contents
@@ -28,7 +28,7 @@ networking primitives.
 ## Design principles
 
 1. **Comptime `lib` injection.** Every module takes `comptime lib: type`
-   (the sealed embed namespace) and builds types from `lib.posix`,
+   (the sealed stdz namespace) and builds types from `lib.posix`,
    `lib.Thread`, `lib.time`, etc. No global state, no runtime dispatch.
 
 2. **Contract-based composition.** `Conn` is the universal byte stream
@@ -49,11 +49,11 @@ networking primitives.
 ## Dependency
 
 ```zig
-const embed = @import("embed").make(platform);
-const net = @import("net").make(embed);
+const stdz = @import("stdz").make(platform);
+const net = @import("net").make(stdz);
 ```
 
-`lib/net` depends on the sealed `embed` namespace for:
+`lib/net` depends on the sealed `stdz` namespace for:
 - `lib.posix` — socket, bind, listen, accept, connect, send, recv, sendto, recvfrom, poll, fcntl, getsockopt, close
 - `lib.Thread` — synchronization and worker threads used by TLS, resolver, and runners
 - `lib.time` — deadlines and timeout accounting
@@ -136,7 +136,7 @@ lib/
 ├──────────────────────────────────────────────────────┤
 │ sibling helpers: netip / Resolver / url / stack     │
 ├──────────────────────────────────────────────────────┤
-│ lib (embed.make)                                     │
+│ lib (stdz.make)                                     │
 │ posix / Thread / time                                │
 └──────────────────────────────────────────────────────┘
 ```
@@ -352,11 +352,11 @@ All fields are slices into the input string.
 
 Pure-Zig DNS resolver (Go's `net.Resolver`). Builds and parses DNS
 wire-format packets (RFC 1035) directly — no libc `getaddrinfo`,
-no CGO, fully portable across embed platforms.
+no CGO, fully portable across stdz platforms.
 
 ### Design decisions
 
-| Aspect                  | Zig std (`getAddressList`)            | embed `net.Resolver`                        |
+| Aspect                  | Zig std (`getAddressList`)            | stdz `net.Resolver`                        |
 |-------------------------|---------------------------------------|---------------------------------------------|
 | Server config           | Parse `/etc/resolv.conf` (Linux only) | Explicit `[]const Server` with per-server protocol  |
 | Concurrency             | Single-threaded poll loop             | One detached task per server via `sync.Racer` |
@@ -477,8 +477,8 @@ Key properties:
 ### Usage
 
 ```zig
-const embed = @import("embed").make(platform);
-const net = @import("net").make(embed);
+const stdz = @import("stdz").make(platform);
+const net = @import("net").make(stdz);
 const Addr = net.netip.Addr;
 const AddrPort = net.netip.AddrPort;
 
@@ -537,17 +537,17 @@ Highlights:
 - Public-network Aliyun test coverage in `lib/net/test_runner/integration/public/ntp.zig`
 
 ```zig
-const embed = @import("embed").make(platform);
-const net = @import("net").make(embed);
+const stdz = @import("stdz").make(platform);
+const net = @import("net").make(stdz);
 
-var client = try net.ntp.Client.init(embed.testing.allocator, .{
+var client = try net.ntp.Client.init(stdz.testing.allocator, .{
     .servers = &.{net.ntp.Servers.aliyun},
     .timeout_ms = 5000,
 });
 defer client.deinit();
 
-const resp = try client.query(embed.time.milliTimestamp());
-const current_time_ms = try client.getTime(embed.time.milliTimestamp());
+const resp = try client.query(stdz.time.milliTimestamp());
+const current_time_ms = try client.getTime(stdz.time.milliTimestamp());
 _ = resp;
 _ = current_time_ms;
 ```
@@ -682,18 +682,18 @@ Planned, but not landed in the current tree yet.
 ### TCP echo server
 
 ```zig
-const embed = @import("embed").make(platform);
-const net = @import("net").make(embed);
+const stdz = @import("stdz").make(platform);
+const net = @import("net").make(stdz);
 const Addr = net.netip.AddrPort;
 
-var ln = try net.listen(embed.testing.allocator, .{
+var ln = try net.listen(stdz.testing.allocator, .{
     .address = Addr.from4(.{ 0, 0, 0, 0 }, 9000),
 });
 defer ln.deinit();
 
 while (true) {
     var conn = try ln.accept();
-    _ = try embed.Thread.spawn(.{}, struct {
+    _ = try stdz.Thread.spawn(.{}, struct {
         fn handle(c: *net.Conn) void {
             defer c.deinit();
             var buf: [1024]u8 = undefined;
@@ -710,18 +710,18 @@ while (true) {
 ### HTTP GET
 
 ```zig
-const embed = @import("embed").make(platform);
-const net = @import("net").make(embed);
+const stdz = @import("stdz").make(platform);
+const net = @import("net").make(stdz);
 
-var transport = try net.http.Transport.init(embed.testing.allocator, .{});
+var transport = try net.http.Transport.init(stdz.testing.allocator, .{});
 defer transport.deinit();
 
-var req = try net.http.Request.init(embed.testing.allocator, "GET", "http://example.com/");
+var req = try net.http.Request.init(stdz.testing.allocator, "GET", "http://example.com/");
 var body_buf: [1024]u8 = undefined;
 var resp = try transport.roundTrip(&req);
 defer resp.deinit();
 
 const body = resp.body() orelse return error.MissingBody;
 const n = try body.read(&body_buf);
-embed.log.info("status={} body={s}", .{ resp.status_code, body_buf[0..n] });
+stdz.log.info("status={} body={s}", .{ resp.status_code, body_buf[0..n] });
 ```

@@ -5,7 +5,7 @@
 //! intentionally explicit about buffered-I/O ownership and zero-allocation-first
 //! parsing.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const io = @import("io");
 
 pub fn Reader(comptime Buffered: type) type {
@@ -16,7 +16,7 @@ pub fn Reader(comptime Buffered: type) type {
         config: Config = .{},
 
         const Self = @This();
-        const Io = embed.Io;
+        const Io = stdz.Io;
 
         pub const Config = struct {
             default_line_ending: LineEnding = .lf_or_crlf,
@@ -575,7 +575,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn readerInitShapes(allocator: lib.mem.Allocator) !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             {
                 var src = Io.Reader.fixed("PING a\r\n");
@@ -622,7 +622,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn takeLineTrimsCrlf() !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("PING a\r\n");
             var backing: [32]u8 = undefined;
@@ -638,7 +638,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn takeLineTrimsLf() !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("PING a\n");
             var backing: [32]u8 = undefined;
@@ -654,7 +654,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn takeLineTrimAsciiSpace() !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("  PING a \t\r\n");
             var backing: [32]u8 = undefined;
@@ -669,7 +669,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeLineRejectsLfWhenCrlfOnly() !void {
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("PING a\n");
             var backing: [32]u8 = undefined;
@@ -684,7 +684,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn takeLineGrowsAcrossShortThenLongLine(allocator: lib.mem.Allocator) !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
             const long_body = [_]u8{'A'} ** 600;
             const input = "AT\r\n" ++ long_body ++ "\r\nOK\r\n";
 
@@ -710,7 +710,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn takeContinuedLineReturnsRawFoldedBlock() !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("hello\r\n world\r\n\tzig \t\r\nnext\r\n");
             var backing: [64]u8 = undefined;
@@ -729,7 +729,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn takeHeaderBlockCollectsCrlfLines() !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("Host: example.com\r\nUser-Agent: zig\r\n\r\nNEXT\r\n");
             var backing: [96]u8 = undefined;
@@ -748,7 +748,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn takeHeaderBlockAllowsEmptySection() !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("\r\nNEXT\r\n");
             var backing: [32]u8 = undefined;
@@ -763,7 +763,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeHeaderBlockRejectsLfWhenCrlfOnly() !void {
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("Host: example.com\n\n");
             var backing: [48]u8 = undefined;
@@ -777,7 +777,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeHeaderBlockMaxRejectsOversizedManagedSection(allocator: lib.mem.Allocator) !void {
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("Host: example.com\r\n\r\n");
             const BufferedReader = io.BufferedReader(@TypeOf(src));
@@ -792,12 +792,12 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn takeLineGroupStopsOnTerminalLine() !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             const Ctx = struct {
                 count: usize = 0,
                 fn isTerminal(_: ?*anyopaque, line: []const u8) bool {
-                    return embed.mem.eql(u8, line, "OK");
+                    return stdz.mem.eql(u8, line, "OK");
                 }
                 fn onInfo(ctx: ?*anyopaque, line: []const u8) void {
                     const self: *@This() = @ptrCast(@alignCast(ctx.?));
@@ -832,11 +832,11 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeLineGroupRespectsNonTerminalLimit() !void {
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             const Cb = struct {
                 fn isTerminal(_: ?*anyopaque, line: []const u8) bool {
-                    return embed.mem.eql(u8, line, "OK");
+                    return stdz.mem.eql(u8, line, "OK");
                 }
             };
 
@@ -856,7 +856,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn takeCodeLineParsesSingleLine() !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("220 smtp.example\r\n");
             var backing: [64]u8 = undefined;
@@ -872,7 +872,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeCodeLineRejectsUnexpectedCode() !void {
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("421 unavailable\r\n");
             var backing: [64]u8 = undefined;
@@ -886,7 +886,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeCodeLineRejectsMultilineForm() !void {
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("220-smtp.example\r\n");
             var backing: [64]u8 = undefined;
@@ -901,7 +901,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn takeResponseParsesSingleLine() !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("250 ok\r\n");
             var backing: [64]u8 = undefined;
@@ -919,7 +919,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn takeResponseParsesMultilineBlock() !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("250-first line\r\nsecond line\r\n250 third line\r\n");
             var backing: [128]u8 = undefined;
@@ -936,7 +936,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeResponseRejectsUnexpectedCode() !void {
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("550 denied\r\n");
             var backing: [64]u8 = undefined;
@@ -950,7 +950,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeResponseRespectsMaxLines() !void {
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("250-first\r\nsecond\r\n250 third\r\n");
             var backing: [128]u8 = undefined;
@@ -967,7 +967,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
         fn dotReaderUnstuffsAndLeavesFollowingLine() !void {
             const testing = lib.testing;
-            const Io = embed.Io;
+            const Io = stdz.Io;
 
             var src = Io.Reader.fixed("alpha\r\n..beta\r\n.\r\nNEXT\r\n");
             var backing: [128]u8 = undefined;

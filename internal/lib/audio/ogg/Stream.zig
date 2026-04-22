@@ -1,7 +1,7 @@
 //! `audio/ogg/Stream.zig` owns the pure Zig rewrite of upstream
 //! `ogg_stream_state` plus encode/decode page and packet flow.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const Page = @import("Page.zig");
 const Packet = @import("Packet.zig");
 const testing_api = @import("testing");
@@ -22,7 +22,7 @@ pub const PacketResult = union(enum) {
     packet: Packet,
 };
 
-pub const Error = embed.mem.Allocator.Error || error{
+pub const Error = stdz.mem.Allocator.Error || error{
     InvalidState,
     Overflow,
     SerialMismatch,
@@ -30,7 +30,7 @@ pub const Error = embed.mem.Allocator.Error || error{
     InvalidPage,
 };
 
-allocator: ?embed.mem.Allocator = null,
+allocator: ?stdz.mem.Allocator = null,
 body_data: ?[]u8 = null,
 body_fill: usize = 0,
 body_returned: usize = 0,
@@ -51,7 +51,7 @@ pageno: i64 = 0,
 packetno: i64 = 0,
 granulepos: i64 = 0,
 
-pub fn init(allocator: embed.mem.Allocator, serialno: u32) Error!Self {
+pub fn init(allocator: stdz.mem.Allocator, serialno: u32) Error!Self {
     return .{
         .allocator = allocator,
         .body_data = try allocator.alloc(u8, initial_body_storage),

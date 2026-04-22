@@ -1,5 +1,5 @@
-const embed = @import("embed");
-const builtin = embed.builtin;
+const stdz = @import("stdz");
+const builtin = stdz.builtin;
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
 const modem_api = @import("drivers");

@@ -1,6 +1,6 @@
 # lib/bt — Bluetooth for embed-zig
 
-Portable Bluetooth package built on top of `embed`. Provides a unified
+Portable Bluetooth package built on top of `stdz`. Provides a unified
 BLE API that works across different backends — from bare-metal HCI host
 stacks to OS-level APIs like Apple CoreBluetooth and Android BLE.
 
@@ -46,7 +46,7 @@ is planned as a future addition under the same package.
    Android BLE — is invisible to the application.
 
 2. **Comptime `lib` injection.** Modules that need platform primitives
-   take `comptime lib: type` (the sealed embed namespace) for
+   take `comptime lib: type` (the sealed stdz namespace) for
    `lib.Thread`, `lib.time`, `lib.mem`, etc. No global state.
 
 3. **VTable transport for HCI.** The built-in HCI host stack uses a
@@ -70,11 +70,11 @@ is planned as a future addition under the same package.
 ## Dependency
 
 ```zig
-const embed = @import("embed").make(platform);
+const stdz = @import("stdz").make(platform);
 const bt = @import("bt");
 ```
 
-`lib/bt` depends on the sealed `embed` namespace for:
+`lib/bt` depends on the sealed `stdz` namespace for:
 - `lib.Thread` — Mutex, background host task
 - `lib.time` — timeouts, connection supervision
 - `lib.mem` — Allocator
@@ -202,7 +202,7 @@ lib/bt/
 │       Platform provides: H4, H5, USB, SDIO, ...  │          │
 │              │                                    │          │
 ├──────────────┴────────────────────────────────────┘──────────┤
-│                    lib (embed.make)                           │
+│                    lib (stdz.make)                           │
 │              Thread / time / mem / atomic                     │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -346,7 +346,7 @@ HCI coordinator, runs the event loop, and binds one shared controller
 instance to both Central and Peripheral adapters:
 
 ```zig
-const Host = bt.HciHost(embed, platform.Channel);
+const Host = bt.HciHost(stdz, platform.Channel);
 var host = try Host.init(allocator, transport, .{
     .spawn_config = .{ .name = "bt-hci-rx" },
 });
@@ -649,7 +649,7 @@ Each platform provides a concrete implementation of `Central` and/or
 **Bare-metal (HCI)** — use the built-in host stack:
 
 ```zig
-const Host = bt.HciHost(embed, platform.Channel);
+const Host = bt.HciHost(stdz, platform.Channel);
 
 var h4 = platform.H4Uart.init(&uart);
 var transport = bt.Transport.init(&h4);
@@ -688,7 +688,7 @@ try central.startScanning(.{ .active = true });
 ### Portable BLE scanner
 
 ```zig
-const embed = @import("embed").make(platform);
+const stdz = @import("stdz").make(platform);
 const bt = @import("bt");
 
 fn runScanner(central: bt.Central) !void {
@@ -710,7 +710,7 @@ fn runScanner(central: bt.Central) !void {
 ### GATT peripheral (Heart Rate)
 
 ```zig
-const embed = @import("embed").make(platform);
+const stdz = @import("stdz").make(platform);
 const bt = @import("bt");
 
 fn runHeartRate(peripheral: bt.Peripheral) !void {

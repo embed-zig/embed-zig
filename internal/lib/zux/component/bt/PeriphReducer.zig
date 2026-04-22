@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const bt = @import("bt");
 const bt_event = @import("event.zig");
 const bt_state = @import("state.zig");
@@ -9,7 +9,7 @@ const testing_api = @import("testing");
 const PeriphReducer = @This();
 const PeriphState = bt_state.Periph;
 
-connections: embed.AutoHashMap(u16, Connection),
+connections: stdz.AutoHashMap(u16, Connection),
 
 const Connection = struct {
     peer_addr: [bt_event.addr_len]u8,
@@ -20,9 +20,9 @@ const Connection = struct {
     mtu: ?u16 = null,
 };
 
-pub fn init(allocator: embed.mem.Allocator) PeriphReducer {
+pub fn init(allocator: stdz.mem.Allocator) PeriphReducer {
     return .{
-        .connections = embed.AutoHashMap(u16, Connection).init(allocator),
+        .connections = stdz.AutoHashMap(u16, Connection).init(allocator),
     };
 }
 
@@ -133,7 +133,7 @@ pub fn deinit(self: *PeriphReducer) void {
 }
 
 fn syncConnectionSummary(state: *PeriphState, self: *PeriphReducer) void {
-    const max_count: usize = embed.math.maxInt(u16);
+    const max_count: usize = stdz.math.maxInt(u16);
     state.connected_count = @intCast(@min(self.connections.count(), max_count));
 }
 

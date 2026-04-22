@@ -139,7 +139,7 @@
 //!  45. 快速连续 close + recv 不 panic、不 hang
 //!  46. 快速连续 close + send 不 panic、不 hang
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 
 // 无缓冲 channel（U1–U12）
@@ -227,12 +227,12 @@ const buffered_recv_empty_after_drain = @import("channel/buffered_recv_empty_aft
 
 pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -299,7 +299,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }

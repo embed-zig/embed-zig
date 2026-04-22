@@ -115,6 +115,10 @@ pub fn create(
         const mod = b.modules.get(decl.name) orelse @panic("test dependency missing");
         test_mod.addImport(decl.name, mod);
     }
+    if (b.modules.get("stdz")) |stdz_mod| {
+        // Keep legacy test imports working while `stdz` fronts the runtime layer.
+        test_mod.addImport("stdz", stdz_mod);
+    }
 
     inline for (@typeInfo(Libraries).@"struct".decls) |decl| {
         const mod_name = decl.name;

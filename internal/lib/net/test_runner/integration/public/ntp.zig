@@ -8,18 +8,18 @@
 //!   t.run("net/ntp", runner);
 
 const context_mod = @import("context");
-const embed = @import("embed");
+const stdz = @import("stdz");
 const net_mod = @import("../../../../net.zig");
 const testing_api = @import("testing");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
             runImpl(lib, t, allocator) catch |err| {
                 t.logErrorf("ntp runner failed: {}", .{err});
@@ -28,7 +28,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }

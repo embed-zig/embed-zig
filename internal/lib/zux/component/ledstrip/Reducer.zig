@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const ledstrip = @import("ledstrip");
 const Message = @import("../../pipeline/Message.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
@@ -44,7 +44,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
                     state.total_frames = 1;
                     state.interval_ns = 0;
                     state.duration_ns = 0;
-                    state.rest_started_seq = embed.math.maxInt(u64);
+                    state.rest_started_seq = stdz.math.maxInt(u64);
                     state.brightness = event.brightness;
 
                     if (event.duration == 0) {
@@ -64,7 +64,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
                     state.total_frames = 1;
                     state.interval_ns = 0;
                     state.duration_ns = 0;
-                    state.rest_started_seq = embed.math.maxInt(u64);
+                    state.rest_started_seq = stdz.math.maxInt(u64);
                     state.brightness = event.brightness;
                     state.current = target;
                     state.step_amount = 255;
@@ -82,7 +82,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
                     state.brightness = event.brightness;
                     state.interval_ns = event.interval_ns;
                     state.duration_ns = event.duration_ns;
-                    state.rest_started_seq = embed.math.maxInt(u64);
+                    state.rest_started_seq = stdz.math.maxInt(u64);
                     state.step_amount = computeStepAmount(
                         state.current,
                         targetForFrame(state, 0),
@@ -102,7 +102,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
                     state.brightness = event.brightness;
                     state.interval_ns = event.interval_ns;
                     state.duration_ns = event.duration_ns;
-                    state.rest_started_seq = embed.math.maxInt(u64);
+                    state.rest_started_seq = stdz.math.maxInt(u64);
                     state.step_amount = computeStepAmount(
                         state.current,
                         targetForFrame(state, 0),
@@ -123,7 +123,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
                     state.brightness = event.brightness;
                     state.interval_ns = event.interval_ns;
                     state.duration_ns = event.duration_ns;
-                    state.rest_started_seq = embed.math.maxInt(u64);
+                    state.rest_started_seq = stdz.math.maxInt(u64);
                     state.step_amount = computeStepAmount(
                         state.current,
                         targetForFrame(state, 0),
@@ -148,13 +148,13 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
             const changed = ledstrip.Transition.stepFrame(n, &state.current, target, state.step_amount);
 
             if (changed) {
-                state.rest_started_seq = embed.math.maxInt(u64);
+                state.rest_started_seq = stdz.math.maxInt(u64);
                 return true;
             }
 
             const need = intervalHoldTicks(state.interval_ns);
 
-            if (state.rest_started_seq == embed.math.maxInt(u64)) {
+            if (state.rest_started_seq == stdz.math.maxInt(u64)) {
                 state.rest_started_seq = seq;
                 if (need == 0) {
                     advanceToNextFrame(state);
@@ -172,7 +172,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
         }
 
         fn advanceToNextFrame(state: *State) void {
-            state.rest_started_seq = embed.math.maxInt(u64);
+            state.rest_started_seq = stdz.math.maxInt(u64);
             state.current_frame = (state.current_frame + 1) % state.total_frames;
             state.step_amount = computeStepAmount(
                 state.current,
@@ -221,13 +221,13 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
         fn durationToTransitionTicks(duration_ns: u64) u32 {
             if (duration_ns == 0) return 1;
             const ticks = (duration_ns + tick_interval_ns - 1) / tick_interval_ns;
-            return @max(1, @as(u32, @intCast(@min(ticks, @as(u64, embed.math.maxInt(u32))))));
+            return @max(1, @as(u32, @intCast(@min(ticks, @as(u64, stdz.math.maxInt(u32))))));
         }
 
         fn intervalHoldTicks(interval_ns: u64) u32 {
             if (interval_ns == 0) return 0;
             const ticks = (interval_ns + tick_interval_ns - 1) / tick_interval_ns;
-            return @as(u32, @intCast(@min(ticks, @as(u64, embed.math.maxInt(u32)))));
+            return @as(u32, @intCast(@min(ticks, @as(u64, stdz.math.maxInt(u32)))));
         }
 
         fn computeStepAmount(current: FrameType, target: FrameType, duration_ticks: u32) u8 {

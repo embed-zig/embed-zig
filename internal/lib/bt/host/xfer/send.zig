@@ -8,7 +8,7 @@
 //! - `deinit()` to release session resources
 //! - `connHandle()`, `serviceUuid()`, and `charUuid()` for handler context
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const att = @import("../att.zig");
 const Chunk = @import("Chunk.zig");
 const testing_api = @import("testing");
@@ -23,7 +23,7 @@ pub const Config = struct {
 
 pub const DataFn = *const fn (
     ctx: ?*anyopaque,
-    allocator: embed.mem.Allocator,
+    allocator: stdz.mem.Allocator,
     conn_handle: u16,
     service_uuid: u16,
     char_uuid: u16,
@@ -31,7 +31,7 @@ pub const DataFn = *const fn (
 
 pub fn send(
     comptime lib: type,
-    allocator: embed.mem.Allocator,
+    allocator: stdz.mem.Allocator,
     transport: anytype,
     data_ctx: ?*anyopaque,
     dataFn: DataFn,
@@ -150,7 +150,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 &invalid_transport,
                 null,
                 struct {
-                    fn dataFn(_: ?*anyopaque, _: embed.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
+                    fn dataFn(_: ?*anyopaque, _: stdz.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
                         return error.ShouldNotRun;
                     }
                 }.dataFn,
@@ -198,7 +198,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 &oversized_transport,
                 null,
                 struct {
-                    fn dataFn(_: ?*anyopaque, _: embed.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
+                    fn dataFn(_: ?*anyopaque, _: stdz.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
                         return error.ShouldNotRun;
                     }
                 }.dataFn,
@@ -248,7 +248,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 &empty_transport,
                 null,
                 struct {
-                    fn dataFn(_: ?*anyopaque, _: embed.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
+                    fn dataFn(_: ?*anyopaque, _: stdz.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
                         return &.{};
                     }
                 }.dataFn,
@@ -259,12 +259,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -275,7 +275,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

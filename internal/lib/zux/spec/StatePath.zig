@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const JsonParser = @import("JsonParser.zig");
 const StatePath = @This();
 
@@ -17,11 +17,11 @@ pub fn parseSlice(comptime source: []const u8) StatePath {
 }
 
 pub fn parseAllocSlice(
-    allocator: embed.mem.Allocator,
+    allocator: stdz.mem.Allocator,
     source: []const u8,
 ) !StatePath {
-    var parsed_value = try embed.json.parseFromSlice(
-        embed.json.Value,
+    var parsed_value = try stdz.json.parseFromSlice(
+        stdz.json.Value,
         allocator,
         source,
         .{},
@@ -31,7 +31,7 @@ pub fn parseAllocSlice(
     return try parseJsonValue(allocator, parsed_value.value);
 }
 
-pub fn deinit(self: *StatePath, allocator: embed.mem.Allocator) void {
+pub fn deinit(self: *StatePath, allocator: stdz.mem.Allocator) void {
     allocator.free(self.path);
     for (self.labels) |label| {
         allocator.free(label);
@@ -109,8 +109,8 @@ fn parseLabelSlices(comptime source: []const u8) []const []const u8 {
 }
 
 pub fn parseJsonValue(
-    allocator: embed.mem.Allocator,
-    value: embed.json.Value,
+    allocator: stdz.mem.Allocator,
+    value: stdz.json.Value,
 ) !StatePath {
     if (@inComptime()) {
         const object = switch (value) {
@@ -148,8 +148,8 @@ pub fn parseJsonValue(
 
     var iterator = object.iterator();
     while (iterator.next()) |entry| {
-        if (!embed.mem.eql(u8, entry.key_ptr.*, "path") and
-            !embed.mem.eql(u8, entry.key_ptr.*, "labels"))
+        if (!stdz.mem.eql(u8, entry.key_ptr.*, "path") and
+            !stdz.mem.eql(u8, entry.key_ptr.*, "labels"))
         {
             return error.UnknownStatePathField;
         }
@@ -214,8 +214,8 @@ fn validatePathComptime(comptime path: []const u8) void {
 }
 
 fn parseLabelsValue(
-    allocator: embed.mem.Allocator,
-    value: embed.json.Value,
+    allocator: stdz.mem.Allocator,
+    value: stdz.json.Value,
 ) ![]const []const u8 {
     const array = switch (value) {
         .array => |array| array,
@@ -238,7 +238,7 @@ fn parseLabelsValue(
     return labels;
 }
 
-fn parseLabelsValueComptime(comptime value: embed.json.Value) []const []const u8 {
+fn parseLabelsValueComptime(comptime value: stdz.json.Value) []const []const u8 {
     const array = switch (value) {
         .array => |array| array,
         else => @compileError("zux.spec.StatePath.parseJsonValue `labels` must be a JSON array"),

@@ -4,18 +4,18 @@
 //! responsible for calling `deinit()`. Passing a Context to other APIs borrows
 //! the underlying node; those APIs must not deinit it.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const binding_link = @import("BindingLink.zig");
 
 const Context = @This();
 
-pub const DoublyLinkedList = embed.DoublyLinkedList;
+pub const DoublyLinkedList = stdz.DoublyLinkedList;
 pub const BindingLink = binding_link;
 
 ptr: *anyopaque,
 vtable: *const VTable,
 type_id: *const anyopaque = typeId(UnknownContext),
-allocator: embed.mem.Allocator,
+allocator: stdz.mem.Allocator,
 
 pub const TreeLink = struct {
     ctx: Context = undefined,
@@ -147,7 +147,7 @@ pub fn as(self: Context, comptime T: type) error{TypeMismatch}!*T {
     return error.TypeMismatch;
 }
 
-pub fn init(pointer: anytype, vtable: *const VTable, allocator: embed.mem.Allocator) Context {
+pub fn init(pointer: anytype, vtable: *const VTable, allocator: stdz.mem.Allocator) Context {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);
     if (info != .pointer or info.pointer.size != .one)

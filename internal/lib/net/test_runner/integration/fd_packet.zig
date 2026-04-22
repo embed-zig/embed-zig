@@ -1,6 +1,6 @@
 //! fd packet test runner — validates the internal non-blocking packet layer.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 
 const packet_ipv4_loopback = @import("fd_packet/packet_ipv4_loopback.zig");
@@ -21,7 +21,7 @@ const packet_close_is_idempotent = @import("fd_packet/packet_close_is_idempotent
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
@@ -49,7 +49,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }

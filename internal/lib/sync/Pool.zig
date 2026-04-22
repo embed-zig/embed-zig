@@ -5,7 +5,7 @@
 //! Callers can either fetch typed pointers with `getTyped()` / `putTyped()` or
 //! use the erased wrapper when type information is managed externally.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 
 const Pool = @This();
@@ -70,7 +70,7 @@ pub fn init(pointer: anytype) Pool {
 
 pub fn make(comptime lib: type, comptime T: type) type {
     return struct {
-        allocator: embed.mem.Allocator,
+        allocator: stdz.mem.Allocator,
         new_fn: ?New,
         new_ctx: ?*anyopaque,
         mutex: lib.Thread.Mutex = .{},
@@ -85,10 +85,10 @@ pub fn make(comptime lib: type, comptime T: type) type {
             item: T = undefined,
         };
 
-        pub const New = *const fn (ctx: ?*anyopaque, allocator: embed.mem.Allocator) ?T;
+        pub const New = *const fn (ctx: ?*anyopaque, allocator: stdz.mem.Allocator) ?T;
 
         pub fn init(
-            allocator: embed.mem.Allocator,
+            allocator: stdz.mem.Allocator,
             new_fn: ?New,
             new_ctx: ?*anyopaque,
         ) Self {
@@ -165,12 +165,12 @@ pub fn make(comptime lib: type, comptime T: type) type {
 
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -197,7 +197,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -246,7 +246,7 @@ fn newCase(comptime lib: type) !void {
         allocator_ptr: usize = 0,
     };
     const Hooks = struct {
-        fn newItem(ctx: ?*anyopaque, allocator: embed.mem.Allocator) ?Item {
+        fn newItem(ctx: ?*anyopaque, allocator: stdz.mem.Allocator) ?Item {
             const state: *State = @ptrCast(@alignCast(ctx.?));
             state.allocator_ptr = @intFromPtr(allocator.ptr);
             const value = state.next_value;
@@ -293,7 +293,7 @@ fn newReturnsNullCase(comptime lib: type) !void {
     };
     const TypedPool = Pool.make(lib, Item);
     const Hooks = struct {
-        fn newItem(_: ?*anyopaque, _: embed.mem.Allocator) ?Item {
+        fn newItem(_: ?*anyopaque, _: stdz.mem.Allocator) ?Item {
             return null;
         }
     };
@@ -312,7 +312,7 @@ fn erasedWrapperCase(comptime lib: type) !void {
     };
     const TypedPool = Pool.make(lib, Item);
     const Hooks = struct {
-        fn newItem(_: ?*anyopaque, _: embed.mem.Allocator) ?Item {
+        fn newItem(_: ?*anyopaque, _: stdz.mem.Allocator) ?Item {
             return .{};
         }
     };

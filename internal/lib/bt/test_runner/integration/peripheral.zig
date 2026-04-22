@@ -3,19 +3,19 @@
 //! Tests lifecycle, handler registration, advertising with various configs,
 //! event hooks, and error conditions. Does NOT require a paired Central.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const bt = @import("../../../bt.zig");
 const Peripheral = @import("../../Peripheral.zig");
 const testing_api = @import("testing");
 
 pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -33,7 +33,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -52,12 +52,12 @@ pub fn makeWithHost(comptime lib: type, host: anytype) testing_api.TestRunner {
     const Runner = struct {
         host: HostPtr,
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = allocator;
             const p = self.host.peripheral();
             p.start() catch |err| {
@@ -73,7 +73,7 @@ pub fn makeWithHost(comptime lib: type, host: anytype) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }

@@ -3,7 +3,7 @@
 //! This file establishes the public shape of `net.textproto.Writer` while
 //! keeping buffering ownership in `lib/io`.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const io = @import("io");
 
 pub fn Writer(comptime Buffered: type) type {
@@ -14,7 +14,7 @@ pub fn Writer(comptime Buffered: type) type {
         config: Config = .{},
 
         const Self = @This();
-        const Io = embed.Io;
+        const Io = stdz.Io;
 
         pub const Config = struct {};
 
@@ -127,7 +127,7 @@ pub fn Writer(comptime Buffered: type) type {
     };
 }
 
-fn writeByte(writer: *embed.Io.Writer, byte: u8) embed.Io.Writer.Error!void {
+fn writeByte(writer: *stdz.Io.Writer, byte: u8) stdz.Io.Writer.Error!void {
     const buf = [1]u8{byte};
     try writer.writeAll(&buf);
 }

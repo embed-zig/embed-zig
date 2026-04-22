@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const JsonParser = @import("JsonParser.zig");
 const Reducer = @This();
 
@@ -17,11 +17,11 @@ pub fn parseSlice(comptime source: []const u8) Reducer {
 }
 
 pub fn parseAllocSlice(
-    allocator: embed.mem.Allocator,
+    allocator: stdz.mem.Allocator,
     source: []const u8,
 ) !Reducer {
-    var parsed_value = try embed.json.parseFromSlice(
-        embed.json.Value,
+    var parsed_value = try stdz.json.parseFromSlice(
+        stdz.json.Value,
         allocator,
         source,
         .{},
@@ -31,7 +31,7 @@ pub fn parseAllocSlice(
     return try parseJsonValue(allocator, parsed_value.value);
 }
 
-pub fn deinit(self: *Reducer, allocator: embed.mem.Allocator) void {
+pub fn deinit(self: *Reducer, allocator: stdz.mem.Allocator) void {
     allocator.free(self.label);
     allocator.free(self.reducer_fn_name);
 }
@@ -83,8 +83,8 @@ fn parseFromParser(parser: *JsonParser) Reducer {
 }
 
 pub fn parseJsonValue(
-    allocator: embed.mem.Allocator,
-    value: embed.json.Value,
+    allocator: stdz.mem.Allocator,
+    value: stdz.json.Value,
 ) !Reducer {
     if (@inComptime()) {
         const object = switch (value) {
@@ -131,9 +131,9 @@ pub fn parseJsonValue(
 
     var iterator = object.iterator();
     while (iterator.next()) |entry| {
-        if (!embed.mem.eql(u8, entry.key_ptr.*, "label") and
-            !embed.mem.eql(u8, entry.key_ptr.*, "reducer_fn_name") and
-            !embed.mem.eql(u8, entry.key_ptr.*, "fn_name"))
+        if (!stdz.mem.eql(u8, entry.key_ptr.*, "label") and
+            !stdz.mem.eql(u8, entry.key_ptr.*, "reducer_fn_name") and
+            !stdz.mem.eql(u8, entry.key_ptr.*, "fn_name"))
         {
             return error.UnknownReducerField;
         }

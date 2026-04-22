@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const motion = @import("motion");
 const Context = @import("../../event/Context.zig");
 const button_event = @import("event.zig");
@@ -22,16 +22,16 @@ const Key = struct {
 pub const default_long_press_ns: u64 = ClickDetector.default_long_press_ns;
 pub const default_multi_click_window_ns: u64 = ClickDetector.default_multi_click_window_ns;
 
-allocator: embed.mem.Allocator,
-states: embed.AutoHashMap(Key, ClickDetector),
+allocator: stdz.mem.Allocator,
+states: stdz.AutoHashMap(Key, ClickDetector),
 out: ?Emitter = null,
 long_press_ns: u64 = default_long_press_ns,
 multi_click_window_ns: u64 = default_multi_click_window_ns,
 
-pub fn init(allocator: embed.mem.Allocator) Reducer {
+pub fn init(allocator: stdz.mem.Allocator) Reducer {
     return .{
         .allocator = allocator,
-        .states = embed.AutoHashMap(Key, ClickDetector).init(allocator),
+        .states = stdz.AutoHashMap(Key, ClickDetector).init(allocator),
         .out = null,
         .long_press_ns = default_long_press_ns,
         .multi_click_window_ns = default_multi_click_window_ns,

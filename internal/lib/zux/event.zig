@@ -1,5 +1,5 @@
-const embed = @import("embed");
-const builtin = embed.builtin;
+const stdz = @import("stdz");
+const builtin = stdz.builtin;
 
 pub const Context = @import("event/Context.zig");
 pub const EventReceiver = @import("event/EventReceiver.zig");
@@ -37,7 +37,7 @@ pub fn make(comptime Events: anytype) type {
 
     const KindType = @Type(.{
         .@"enum" = .{
-            .tag_type = if (count == 0) u0 else embed.math.IntFittingRange(0, count - 1),
+            .tag_type = if (count == 0) u0 else stdz.math.IntFittingRange(0, count - 1),
             .fields = &enum_fields,
             .decls = &.{},
             .is_exhaustive = true,

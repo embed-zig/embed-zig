@@ -8,7 +8,7 @@
 //!   t.run("net/resolver_local", runner);
 
 const std = @import("std");
-const embed = @import("embed");
+const stdz = @import("stdz");
 const io = @import("io");
 const testing_api = @import("testing");
 const net_mod = @import("../../../net.zig");
@@ -21,12 +21,12 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
     const Cases = Suite(lib);
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -54,7 +54,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }

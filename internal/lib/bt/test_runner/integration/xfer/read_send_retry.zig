@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 const harness_mod = @import("harness.zig");
 const read_mod = @import("../../../host/xfer/read.zig");
@@ -52,7 +52,7 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
 
         fn dataFn(
             _: ?*anyopaque,
-            payload_allocator: embed.mem.Allocator,
+            payload_allocator: stdz.mem.Allocator,
             conn_handle: u16,
             service_uuid: u16,
             char_uuid: u16,

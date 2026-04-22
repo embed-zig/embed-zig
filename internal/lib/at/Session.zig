@@ -195,7 +195,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const testing = std.testing;
 
             const Lib = struct {
-                pub const mem = @import("embed").mem;
+                pub const mem = @import("stdz").mem;
                 pub const time = struct {
                     pub fn milliTimestamp() i64 {
                         return std.time.milliTimestamp();
@@ -249,7 +249,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const testing = std.testing;
 
             const Lib = struct {
-                pub const mem = @import("embed").mem;
+                pub const mem = @import("stdz").mem;
                 pub const time = struct {
                     pub fn milliTimestamp() i64 {
                         return std.time.milliTimestamp();
@@ -291,7 +291,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const testing = std.testing;
 
             const Lib = struct {
-                pub const mem = @import("embed").mem;
+                pub const mem = @import("stdz").mem;
                 pub const time = struct {
                     pub fn milliTimestamp() i64 {
                         return std.time.milliTimestamp();

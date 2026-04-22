@@ -4,7 +4,7 @@
 //! introspection and hook registration. Callers can disable scan probing
 //! explicitly when they need a non-invasive surface-only check.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 const wifi = @import("../../../wifi.zig");
 
@@ -26,12 +26,12 @@ pub fn makeWithOptions(comptime lib: type, device: anytype, options: Options) te
         device: DevicePtr,
         options: Options,
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = allocator;
             runSurface(lib, self.device, self.options) catch |err| {
                 t.logFatal(@errorName(err));
@@ -40,7 +40,7 @@ pub fn makeWithOptions(comptime lib: type, device: anytype, options: Options) te
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }
@@ -185,12 +185,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -201,7 +201,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

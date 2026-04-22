@@ -1,6 +1,6 @@
 //! Chunk — BLE xfer chunk encoding and bitmask utilities.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 
 /// Maximum number of chunks supported by the 12-bit header fields.
@@ -56,11 +56,11 @@ pub const Header = struct {
 };
 
 pub fn isReadStartMagic(data: []const u8) bool {
-    return data.len >= read_start_magic.len and embed.mem.eql(u8, data[0..read_start_magic.len], &read_start_magic);
+    return data.len >= read_start_magic.len and stdz.mem.eql(u8, data[0..read_start_magic.len], &read_start_magic);
 }
 
 pub fn isWriteStartMagic(data: []const u8) bool {
-    return data.len >= write_start_magic.len and embed.mem.eql(u8, data[0..write_start_magic.len], &write_start_magic);
+    return data.len >= write_start_magic.len and stdz.mem.eql(u8, data[0..write_start_magic.len], &write_start_magic);
 }
 
 pub fn isAck(data: []const u8) bool {

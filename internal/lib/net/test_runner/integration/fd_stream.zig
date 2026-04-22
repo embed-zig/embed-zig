@@ -1,6 +1,6 @@
 //! fd stream test runner — validates the internal non-blocking stream layer.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 
 const stream_connect_loopback = @import("fd_stream/stream_connect_loopback.zig");
@@ -27,7 +27,7 @@ const stream_close_is_idempotent = @import("fd_stream/stream_close_is_idempotent
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
@@ -61,7 +61,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }

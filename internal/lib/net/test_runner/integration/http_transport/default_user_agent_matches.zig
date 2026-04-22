@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const io = @import("io");
 const testing_api = @import("testing");
 const net_mod = @import("../../../../net.zig");
@@ -8,9 +8,9 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
     const Utils = test_utils.make(lib);
 
     const Runner = struct {
-        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
+        spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
@@ -38,7 +38,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                                 var req_buf: [4096]u8 = undefined;
                                 const req_head = try Utils.readRequestHead(conn, &req_buf);
                                 try testing.expect(Utils.hasRequestLine(req_head, "GET /user-agent-default HTTP/1.1"));
-                                try testing.expectEqualStrings("embed-zig-http-client/1.0", Utils.headerValue(req_head, Http.Header.user_agent) orelse "");
+                                try testing.expectEqualStrings("stdz-zig-http-client/1.0", Utils.headerValue(req_head, Http.Header.user_agent) orelse "");
                                 io.writeAll(@TypeOf(c), &c, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok") catch {};
                             }
                         }.run,
@@ -70,7 +70,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

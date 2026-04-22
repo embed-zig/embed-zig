@@ -1,7 +1,7 @@
 //! **Host-only** DTE smoke over a **real serial device** (POSIX: macOS / Linux).
 //!
 //! Uses **`std`**-shaped `lib` (host). Invoked from **`test_runner/integration.zig`**, not re-exported
-//! from `lib/at.zig`'s `test_runner` namespace, so normal `at` imports stay embed-only.
+//! from `lib/at.zig`'s `test_runner` namespace, so normal `at` imports stay stdz-only.
 //!
 //! ## Topology
 //!

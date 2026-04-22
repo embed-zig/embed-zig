@@ -1,7 +1,7 @@
 //! `audio/ogg/Sync.zig` owns the pure Zig rewrite of upstream
 //! `ogg_sync_state` buffer management and page sync logic.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const crc = @import("crc.zig");
 const Page = @import("Page.zig");
 const Packet = @import("Packet.zig");
@@ -12,7 +12,7 @@ const Self = @This();
 
 const page_header_limit = Page.minimum_header_len + 255;
 
-pub const Error = embed.mem.Allocator.Error || error{
+pub const Error = stdz.mem.Allocator.Error || error{
     InvalidState,
     Overflow,
     InvalidWrite,
@@ -30,7 +30,7 @@ pub const PageOutResult = union(enum) {
     page: Page,
 };
 
-allocator: ?embed.mem.Allocator = null,
+allocator: ?stdz.mem.Allocator = null,
 data: ?[]u8 = null,
 fill: usize = 0,
 returned: usize = 0,
@@ -40,7 +40,7 @@ headerbytes: usize = 0,
 bodybytes: usize = 0,
 initialized: bool = false,
 
-pub fn init(allocator: embed.mem.Allocator) Self {
+pub fn init(allocator: stdz.mem.Allocator) Self {
     return .{
         .allocator = allocator,
         .initialized = true,

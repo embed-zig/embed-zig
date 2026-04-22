@@ -40,7 +40,7 @@ pub fn Transport(comptime lib: type) type {
     const TcpConn = tcp_conn_mod.TcpConn(lib);
     const Tls = tls_mod.make(lib);
     const Thread = lib.Thread;
-    const default_user_agent = "embed-zig-http-client/1.0";
+    const default_user_agent = "stdz-zig-http-client/1.0";
     const default_max_header_bytes = 32 * 1024;
     const unlimited_body_bytes = std.math.maxInt(usize);
     const default_body_io_buf_len = 1024;

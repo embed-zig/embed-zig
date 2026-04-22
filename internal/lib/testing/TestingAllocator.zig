@@ -2,9 +2,9 @@
 //! capture peak concurrent live usage.
 
 const builtin = @import("builtin");
-const embed = @import("embed");
-const atomic = embed.atomic;
-const mem = embed.mem;
+const stdz = @import("stdz");
+const atomic = stdz.atomic;
+const mem = stdz.mem;
 const T = @import("T.zig");
 const TestRunnerApi = @import("TestRunner.zig");
 

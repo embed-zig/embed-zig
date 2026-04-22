@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const wifi_event = @import("event.zig");
 const wifi_state = @import("state.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
@@ -10,16 +10,16 @@ const ApState = wifi_state.Ap;
 const MacAddr = wifi_event.MacAddr;
 const Addr = wifi_event.Addr;
 
-clients: embed.AutoHashMap(MacAddr, ClientRecord),
+clients: stdz.AutoHashMap(MacAddr, ClientRecord),
 
 const ClientRecord = struct {
     ip: ?Addr = null,
     aid: u16 = 0,
 };
 
-pub fn init(allocator: embed.mem.Allocator) ApReducer {
+pub fn init(allocator: stdz.mem.Allocator) ApReducer {
     return .{
-        .clients = embed.AutoHashMap(MacAddr, ClientRecord).init(allocator),
+        .clients = stdz.AutoHashMap(MacAddr, ClientRecord).init(allocator),
     };
 }
 
@@ -164,7 +164,7 @@ pub fn deinit(self: *ApReducer) void {
 }
 
 fn syncClientSummary(state: *ApState, self: *ApReducer) void {
-    const max_count: usize = embed.math.maxInt(u16);
+    const max_count: usize = stdz.math.maxInt(u16);
     state.client_count = @intCast(@min(self.clients.count(), max_count));
 }
 

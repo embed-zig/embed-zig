@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const net_mod = @import("../../../../net.zig");
 const sockaddr_mod = @import("../../../fd/SockAddr.zig");
 const test_utils = @import("../tcp/test_utils.zig");
@@ -6,9 +6,9 @@ const testing_api = @import("testing");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
     const Runner = struct {
-        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
+        spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
@@ -90,7 +90,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

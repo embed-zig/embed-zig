@@ -44,7 +44,7 @@ pub const Context = struct {
     ptr: *anyopaque,
     vtable: *const VTable,
     type_id: *const anyopaque,
-    allocator: embed.mem.Allocator,
+    allocator: stdz.mem.Allocator,
 };
 ```
 

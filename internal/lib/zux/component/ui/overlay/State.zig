@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const State = @This();
 
 pub const max_name_len: usize = 64;
@@ -23,7 +23,7 @@ pub fn setName(self: *State, next_name: []const u8) Error!bool {
 }
 
 pub fn setNameFields(self: *State, fields: NameFields) bool {
-    if (self.name_len == fields.name_len and embed.mem.eql(u8, self.name[0..], fields.name[0..])) return false;
+    if (self.name_len == fields.name_len and stdz.mem.eql(u8, self.name[0..], fields.name[0..])) return false;
     self.name = fields.name;
     self.name_len = fields.name_len;
     return true;

@@ -14,7 +14,7 @@ const audio = @import("audio");
 const zux = @import("zux");
 
 pub const test_runner = struct {
-    pub const embed = @import("tests/embed.zig");
+    pub const stdz = @import("tests/stdz.zig");
     pub const context = @import("tests/context.zig");
     pub const testing_startup_probe = @import("tests/testing_startup_probe.zig");
 };
@@ -411,25 +411,25 @@ test "sync/integration/embed_std" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "embed/unit/std" {
+test "stdz/unit/std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(std, .embed);
+    var t = testing.T.new(std, .stdz);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
-    t.run("embed/unit/std", test_runner.embed.make(std));
+    t.run("stdz/unit/std", test_runner.stdz.make(std));
     if (!t.wait()) return error.TestFailed;
 }
 
-test "embed/unit/embed_std" {
+test "stdz/unit/embed_std" {
     std.testing.log_level = .info;
 
-    var t = testing.T.new(embed_std.std, .embed);
+    var t = testing.T.new(embed_std.std, .stdz);
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
 
-    t.run("embed/unit/embed_std", test_runner.embed.make(embed_std.std));
+    t.run("stdz/unit/embed_std", test_runner.stdz.make(embed_std.std));
     if (!t.wait()) return error.TestFailed;
 }
 

@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const default_cache_namespace = "embed-zig-git-repo";
+pub const default_cache_namespace = "stdz-zig-git-repo";
 
 pub const AddGitRepoOptions = struct {
     git_repo: []const u8,

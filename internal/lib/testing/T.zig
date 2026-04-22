@@ -1,7 +1,7 @@
 //! testing.T — type-erased test handle with vtable-backed behavior.
 
 const builtin = @import("builtin");
-const embed_mod = @import("embed");
+const stdz_mod = @import("stdz");
 const context_mod = @import("context");
 const Context = context_mod.Context;
 const TestRunnerHandle = @import("TestRunner.zig");
@@ -21,7 +21,7 @@ const padding_spaces =
 
 ptr: *anyopaque,
 vtable: *const VTable,
-allocator: embed_mod.mem.Allocator,
+allocator: stdz_mod.mem.Allocator,
 ctx: Context,
 test_name: []const u8,
 relative_started_ns: u64,
@@ -48,7 +48,7 @@ pub const VTable = struct {
 
 const InitOptions = struct {
     ptr: *anyopaque,
-    allocator: embed_mod.mem.Allocator,
+    allocator: stdz_mod.mem.Allocator,
     context: Context,
     relative_started_ns: u64 = 0,
     vtable: *const VTable,
@@ -89,7 +89,7 @@ pub fn logFatal(self: *Self, message: []const u8) void {
 }
 
 pub fn logFatalf(self: *Self, comptime format: []const u8, args: anytype) void {
-    const message = embed_mod.fmt.allocPrint(self.allocator, format, args) catch {
+    const message = stdz_mod.fmt.allocPrint(self.allocator, format, args) catch {
         self.logFatal("logFatalf format failed");
         return;
     };
@@ -106,7 +106,7 @@ pub fn logInfo(self: Self, message: []const u8) void {
 }
 
 pub fn logInfof(self: Self, comptime format: []const u8, args: anytype) void {
-    const message = embed_mod.fmt.allocPrint(self.allocator, format, args) catch {
+    const message = stdz_mod.fmt.allocPrint(self.allocator, format, args) catch {
         self.logInfo("logInfof format failed");
         return;
     };
@@ -119,7 +119,7 @@ pub fn logError(self: *Self, message: []const u8) void {
 }
 
 pub fn logErrorf(self: *Self, comptime format: []const u8, args: anytype) void {
-    const message = embed_mod.fmt.allocPrint(self.allocator, format, args) catch {
+    const message = stdz_mod.fmt.allocPrint(self.allocator, format, args) catch {
         self.logError("logErrorf format failed");
         return;
     };
@@ -159,7 +159,7 @@ fn formatMemoryUsage(buf: []u8, bytes: usize) []const u8 {
     const units = [_][]const u8{ "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB" };
 
     if (bytes < 1024) {
-        return embed_mod.fmt.bufPrint(buf, "{d} B", .{bytes}) catch unreachable;
+        return stdz_mod.fmt.bufPrint(buf, "{d} B", .{bytes}) catch unreachable;
     }
 
     const bytes_u128: u128 = bytes;
@@ -182,7 +182,7 @@ fn formatMemoryUsage(buf: []u8, bytes: usize) []const u8 {
         }
     }
 
-    return embed_mod.fmt.bufPrint(buf, "{d}.{d:0>3} {s}", .{ whole, frac, units[unit_idx] }) catch unreachable;
+    return stdz_mod.fmt.bufPrint(buf, "{d}.{d:0>3} {s}", .{ whole, frac, units[unit_idx] }) catch unreachable;
 }
 
 fn structuredLabelPadding(label: []const u8) []const u8 {
@@ -228,8 +228,8 @@ pub fn new(comptime lib: type, comptime scope: @Type(.enum_literal)) Self {
         };
 
         fn projectSpawnConfig(
-            runner_config: embed_mod.Thread.SpawnConfig,
-            allocator: embed_mod.mem.Allocator,
+            runner_config: stdz_mod.Thread.SpawnConfig,
+            allocator: stdz_mod.mem.Allocator,
         ) lib.Thread.SpawnConfig {
             var config: lib.Thread.SpawnConfig = .{
                 .allocator = runner_config.allocator orelse allocator,
@@ -789,7 +789,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
         }
         fn testContextCancelLogs() !void {
             const std = @import("std");
-            const embed = @import("embed");
+            const stdz = @import("stdz");
 
             const Support = struct {
                 var entries: std.ArrayListUnmanaged([]u8) = .{};
@@ -911,8 +911,8 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const TestLib = struct {
-                pub const mem = embed.mem;
-                pub const fmt = embed.fmt;
+                pub const mem = stdz.mem;
+                pub const fmt = stdz.fmt;
                 pub const Thread = TestThread;
                 pub const log = CapturingLog;
                 pub fn ArrayList(comptime T: type) type {
@@ -939,18 +939,18 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
                     const Runner = struct {
                         memory_limit: ?usize,
 
-                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
                             _ = self;
                             var arg_byte: u8 = 0;
                             return run_fn(t, allocator, @ptrCast(&arg_byte));
                         }
 
-                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
                             _ = allocator;
                             std.testing.allocator.destroy(self);
                         }
@@ -963,7 +963,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ChildTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     TestLib.Thread.sleep(40 * TestLib.time.ns_per_ms);
@@ -974,11 +974,11 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const NestedTimeoutTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     t.run("leaf", TaskRunner.make(struct {
-                        fn runLeaf(leaf: *Self, alloc: embed_mod.mem.Allocator, leaf_args: *anyopaque) bool {
+                        fn runLeaf(leaf: *Self, alloc: stdz_mod.mem.Allocator, leaf_args: *anyopaque) bool {
                             _ = alloc;
                             _ = leaf_args;
                             TestLib.Thread.sleep(300 * TestLib.time.ns_per_ms);
@@ -993,7 +993,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ParallelFastTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = t;
                     _ = allocator;
                     _ = args;
@@ -1006,7 +1006,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ParallelSlowTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     Support.waitForStage(1);
@@ -1018,7 +1018,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ComplexLeafOkTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = t;
                     _ = allocator;
                     _ = args;
@@ -1028,7 +1028,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ComplexLeafErrTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     TestLib.Thread.sleep(20 * TestLib.time.ns_per_ms);
@@ -1038,7 +1038,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ComplexFastTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = t;
                     _ = allocator;
                     _ = args;
@@ -1051,7 +1051,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ComplexSlowTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     Support.waitForStage(1);
@@ -1063,7 +1063,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ComplexDeepFatalTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     TestLib.Thread.sleep(40 * TestLib.time.ns_per_ms);
@@ -1074,7 +1074,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ComplexNestedTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     t.run("deep", TaskRunner.make(ComplexDeepFatalTask.run, null));
@@ -1083,7 +1083,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ComplexSuiteTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     t.run("leaf_ok", TaskRunner.make(ComplexLeafOkTask.run, null));
@@ -1104,18 +1104,18 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
                     const Runner = struct {
                         memory_limit: ?usize,
 
-                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
                             _ = self;
                             var arg_byte: u8 = 0;
                             return run_fn(t, allocator, @ptrCast(&arg_byte));
                         }
 
-                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
                             _ = allocator;
                             std.testing.allocator.destroy(self);
                         }
@@ -1327,7 +1327,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
         }
         fn testTimeout() !void {
             const std = @import("std");
-            const embed = @import("embed");
+            const stdz = @import("stdz");
 
             const Support = struct {
                 var entries: std.ArrayListUnmanaged([]u8) = .{};
@@ -1450,8 +1450,8 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const TestLib = struct {
-                pub const mem = embed.mem;
-                pub const fmt = embed.fmt;
+                pub const mem = stdz.mem;
+                pub const fmt = stdz.fmt;
                 pub const Thread = TestThread;
                 pub const log = CapturingLog;
                 pub fn ArrayList(comptime Elem: type) type {
@@ -1478,18 +1478,18 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
                     const Runner = struct {
                         memory_limit: ?usize,
 
-                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
                             _ = self;
                             var arg_byte: u8 = 0;
                             return run_fn(t, allocator, @ptrCast(&arg_byte));
                         }
 
-                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
                             _ = allocator;
                             std.testing.allocator.destroy(self);
                         }
@@ -1506,7 +1506,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             const branch_timeout_ns: i64 = 30 * TestLib.time.ns_per_ms;
 
             const ImmediateTimeoutTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     const deadline = t.context().deadline() orelse {
@@ -1531,7 +1531,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const NestedLeafFastTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     const deadline = t.context().deadline() orelse {
@@ -1552,7 +1552,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const NestedLeafSlowTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     const deadline = t.context().deadline() orelse {
@@ -1578,7 +1578,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const NestedTimeoutTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     const inherited = t.context().deadline() orelse {
@@ -1614,7 +1614,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ParallelFastTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     const deadline = t.context().deadline() orelse {
@@ -1636,7 +1636,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ParallelSlowTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     Support.waitForStage(1);
@@ -1663,7 +1663,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ComplexTimeoutSuiteTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     const inherited = t.context().deadline() orelse {
@@ -1684,7 +1684,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ScopedTimedLeafTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     const deadline = t.context().deadline() orelse {
@@ -1710,7 +1710,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ScopedTimedBranchTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     if (t.context().deadline() != null) {
@@ -1732,7 +1732,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ScopedPlainBranchTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     if (t.context().deadline() != null) {
@@ -1749,7 +1749,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const ScopedTimeoutSuiteTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = allocator;
                     _ = args;
                     t.run("timed_branch", TaskRunner.make(ScopedTimedBranchTask.run, null));
@@ -1763,18 +1763,18 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
                     const Runner = struct {
                         memory_limit: ?usize,
 
-                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
                             _ = self;
                             var arg_byte: u8 = 0;
                             return run_fn(t, allocator, @ptrCast(&arg_byte));
                         }
 
-                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
                             _ = allocator;
                             std.testing.allocator.destroy(self);
                         }
@@ -1943,7 +1943,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
         }
         fn testMemoryLimit() !void {
             const std = @import("std");
-            const embed = @import("embed");
+            const stdz = @import("stdz");
 
             const Support = struct {
                 var entries: std.ArrayListUnmanaged([]u8) = .{};
@@ -2055,8 +2055,8 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const TestLib = struct {
-                pub const mem = embed.mem;
-                pub const fmt = embed.fmt;
+                pub const mem = stdz.mem;
+                pub const fmt = stdz.fmt;
                 pub const Thread = TestThread;
                 pub const log = CapturingLog;
                 pub fn ArrayList(comptime Elem: type) type {
@@ -2083,18 +2083,18 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
                     const Runner = struct {
                         memory_limit: ?usize,
 
-                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
                             _ = self;
                             var arg_byte: u8 = 0;
                             return run_fn(t, allocator, @ptrCast(&arg_byte));
                         }
 
-                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
                             _ = allocator;
                             std.testing.allocator.destroy(self);
                         }
@@ -2107,7 +2107,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const MemoryLimitFailTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = args;
                     const bytes = allocator.alloc(u8, 64) catch {
                         t.logError("memory limit hit");
@@ -2119,7 +2119,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const MemoryLimitOkTask = struct {
-                fn run(t: *Self, allocator: embed_mod.mem.Allocator, args: *anyopaque) bool {
+                fn run(t: *Self, allocator: stdz_mod.mem.Allocator, args: *anyopaque) bool {
                     _ = t;
                     _ = args;
                     const bytes = allocator.alloc(u8, 16) catch return false;
@@ -2134,18 +2134,18 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
                     const Runner = struct {
                         memory_limit: ?usize,
 
-                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
                             _ = self;
                             var arg_byte: u8 = 0;
                             return run_fn(t, allocator, @ptrCast(&arg_byte));
                         }
 
-                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
                             _ = allocator;
                             std.testing.allocator.destroy(self);
                         }
@@ -2274,7 +2274,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
         }
         fn testPeakMemoryUsesTreePeak() !void {
             const std = @import("std");
-            const embed = @import("embed");
+            const stdz = @import("stdz");
 
             const Support = struct {
                 var entries: std.ArrayListUnmanaged([]u8) = .{};
@@ -2375,8 +2375,8 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const TestLib = struct {
-                pub const mem = embed.mem;
-                pub const fmt = embed.fmt;
+                pub const mem = stdz.mem;
+                pub const fmt = stdz.fmt;
                 pub const Thread = TestThread;
                 pub const log = CapturingLog;
 
@@ -2404,17 +2404,17 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             const TaskRunner = struct {
                 fn make(comptime run_fn: anytype) TestRunnerHandle {
                     const Runner = struct {
-                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
                             _ = self;
                             return run_fn(t, allocator);
                         }
 
-                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
                             _ = allocator;
                             std.testing.allocator.destroy(self);
                         }
@@ -2427,7 +2427,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const LeafTask = struct {
-                fn run(t: *Self, allocator: embed.mem.Allocator) bool {
+                fn run(t: *Self, allocator: stdz.mem.Allocator) bool {
                     _ = t;
                     const bytes = allocator.alloc(u8, 384) catch return false;
                     defer allocator.free(bytes);
@@ -2436,7 +2436,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const SuiteTask = struct {
-                fn run(t: *Self, allocator: embed.mem.Allocator) bool {
+                fn run(t: *Self, allocator: stdz.mem.Allocator) bool {
                     _ = allocator;
                     t.run("child_a", TaskRunner.make(LeafTask.run));
                     t.run("child_b", TaskRunner.make(LeafTask.run));
@@ -2521,21 +2521,21 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
         }
         fn testSubtestStartFailureCleanup() !void {
             const std = @import("std");
-            const embed = @import("embed");
+            const stdz = @import("stdz");
 
             const FailNthAllocator = struct {
-                backing: embed.mem.Allocator,
+                backing: stdz.mem.Allocator,
                 alloc_index: usize = 0,
                 fail_at_alloc_index: ?usize = null,
 
-                fn allocator(self: *@This()) embed.mem.Allocator {
+                fn allocator(self: *@This()) stdz.mem.Allocator {
                     return .{
                         .ptr = self,
                         .vtable = &vtable,
                     };
                 }
 
-                fn alloc(ptr: *anyopaque, len: usize, alignment: embed.mem.Alignment, ret_addr: usize) ?[*]u8 {
+                fn alloc(ptr: *anyopaque, len: usize, alignment: stdz.mem.Alignment, ret_addr: usize) ?[*]u8 {
                     const self: *@This() = @ptrCast(@alignCast(ptr));
                     defer self.alloc_index += 1;
                     if (self.fail_at_alloc_index) |fail_at| {
@@ -2544,22 +2544,22 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
                     return self.backing.rawAlloc(len, alignment, ret_addr);
                 }
 
-                fn resize(ptr: *anyopaque, memory: []u8, alignment: embed.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+                fn resize(ptr: *anyopaque, memory: []u8, alignment: stdz.mem.Alignment, new_len: usize, ret_addr: usize) bool {
                     const self: *@This() = @ptrCast(@alignCast(ptr));
                     return self.backing.rawResize(memory, alignment, new_len, ret_addr);
                 }
 
-                fn remap(ptr: *anyopaque, memory: []u8, alignment: embed.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+                fn remap(ptr: *anyopaque, memory: []u8, alignment: stdz.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
                     const self: *@This() = @ptrCast(@alignCast(ptr));
                     return self.backing.rawRemap(memory, alignment, new_len, ret_addr);
                 }
 
-                fn free(ptr: *anyopaque, memory: []u8, alignment: embed.mem.Alignment, ret_addr: usize) void {
+                fn free(ptr: *anyopaque, memory: []u8, alignment: stdz.mem.Alignment, ret_addr: usize) void {
                     const self: *@This() = @ptrCast(@alignCast(ptr));
                     self.backing.rawFree(memory, alignment, ret_addr);
                 }
 
-                const vtable: embed.mem.Allocator.VTable = .{
+                const vtable: stdz.mem.Allocator.VTable = .{
                     .alloc = alloc,
                     .resize = resize,
                     .remap = remap,
@@ -2683,8 +2683,8 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const TestLib = struct {
-                pub const mem = embed.mem;
-                pub const fmt = embed.fmt;
+                pub const mem = stdz.mem;
+                pub const fmt = stdz.fmt;
                 pub const Thread = TestThread;
                 pub const log = CapturingLog;
 
@@ -2693,7 +2693,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
                 }
 
                 pub const testing = struct {
-                    pub var allocator: embed.mem.Allocator = undefined;
+                    pub var allocator: stdz.mem.Allocator = undefined;
                 };
 
                 pub const time = struct {
@@ -2712,12 +2712,12 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             const Helper = struct {
                 fn makeTrackedRunner() TestRunnerHandle {
                     const Runner = struct {
-                        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: embed.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
                             _ = self;
                             _ = t;
                             _ = allocator;
@@ -2725,7 +2725,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
                             return true;
                         }
 
-                        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
                             _ = allocator;
                             Support.runner_deinit_hits += 1;
                             std.testing.allocator.destroy(self);
@@ -2826,19 +2826,19 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             };
 
             const Runner = struct {
-                pub fn init(self: *@This(), allocator: embed_mod.mem.Allocator) !void {
+                pub fn init(self: *@This(), allocator: stdz_mod.mem.Allocator) !void {
                     _ = self;
                     _ = allocator;
                 }
 
-                pub fn run(self: *@This(), t: *Self, allocator: embed_mod.mem.Allocator) bool {
+                pub fn run(self: *@This(), t: *Self, allocator: stdz_mod.mem.Allocator) bool {
                     _ = self;
                     _ = t;
                     _ = allocator;
                     return true;
                 }
 
-                pub fn deinit(self: *@This(), allocator: embed_mod.mem.Allocator) void {
+                pub fn deinit(self: *@This(), allocator: stdz_mod.mem.Allocator) void {
                     _ = self;
                     _ = allocator;
                 }

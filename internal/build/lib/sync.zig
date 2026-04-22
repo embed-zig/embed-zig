@@ -15,10 +15,10 @@ pub fn create(
 
 pub fn link(b: *std.Build) void {
     const context = b.modules.get("context") orelse @panic("sync requires context");
-    const embed = b.modules.get("embed") orelse @panic("sync requires embed");
+    const stdz = b.modules.get("stdz") orelse @panic("sync requires stdz");
     const testing = b.modules.get("testing") orelse @panic("sync requires testing");
     const mod = b.modules.get("sync") orelse @panic("sync module missing");
     mod.addImport("context", context);
-    mod.addImport("embed", embed);
+    mod.addImport("stdz", stdz);
     mod.addImport("testing", testing);
 }

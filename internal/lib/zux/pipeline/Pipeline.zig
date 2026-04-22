@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const EventReceiver = @import("../event.zig").EventReceiver;
 const Emitter = @import("Emitter.zig");
 const Message = @import("Message.zig");
@@ -8,7 +8,7 @@ const testing_api = @import("testing");
 
 pub fn Config(comptime lib: type) type {
     return struct {
-        tick_interval_ns: u64 = 10 * embed.time.ns_per_ms,
+        tick_interval_ns: u64 = 10 * stdz.time.ns_per_ms,
         spawn_config: lib.Thread.SpawnConfig = .{},
     };
 }

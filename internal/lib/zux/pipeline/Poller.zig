@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const Emitter = @import("Emitter.zig");
 const testing_api = @import("testing");
 
@@ -19,11 +19,11 @@ fn typeId(comptime T: type) *const anyopaque {
     return @ptrCast(&TypeIdHolder(T).id);
 }
 
-pub const default_poll_interval_ns: u64 = 10 * embed.time.ns_per_ms;
+pub const default_poll_interval_ns: u64 = 10 * stdz.time.ns_per_ms;
 
 pub const Config = struct {
     poll_interval_ns: u64 = default_poll_interval_ns,
-    spawn_config: embed.Thread.SpawnConfig = .{},
+    spawn_config: stdz.Thread.SpawnConfig = .{},
 };
 
 pub const VTable = struct {

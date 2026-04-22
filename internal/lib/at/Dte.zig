@@ -7,7 +7,7 @@
 const SessionMod = @import("Session.zig");
 const Transport = @import("Transport.zig");
 
-/// Build a DTE handle type for injected `lib` (e.g. `embed` / board namespace) and max line length
+/// Build a DTE handle type for injected `lib` (e.g. `stdz` / board namespace) and max line length
 /// `line_cap` (must match how you size `Session` / `LineReader` elsewhere).
 pub fn make(comptime lib: type, comptime line_cap: usize) type {
     comptime {
@@ -62,7 +62,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const testing = std.testing;
 
             const Lib = struct {
-                pub const mem = @import("embed").mem;
+                pub const mem = @import("stdz").mem;
                 pub const time = struct {
                     pub fn milliTimestamp() i64 {
                         return std.time.milliTimestamp();

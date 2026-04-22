@@ -1,6 +1,6 @@
 //! ledstrip.LedStrip — type-erased LED strip adapter bundle.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const Color = @import("Color.zig");
 const testing_api = @import("testing");
 
@@ -77,7 +77,7 @@ pub fn make(comptime Impl: type) type {
     }
 
     const Ctx = struct {
-        allocator: embed.mem.Allocator,
+        allocator: stdz.mem.Allocator,
         impl: Impl,
 
         pub fn deinit(self: *@This()) void {

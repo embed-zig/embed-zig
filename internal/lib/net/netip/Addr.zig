@@ -1,9 +1,9 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 
-const debug = embed.debug;
-const fmt = embed.fmt;
-const math = embed.math;
-const mem = embed.mem;
+const debug = stdz.debug;
+const fmt = stdz.fmt;
+const math = stdz.math;
+const mem = stdz.mem;
 const testing_api = @import("testing");
 
 const Addr = @This();

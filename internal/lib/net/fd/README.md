@@ -15,7 +15,7 @@ deadline semantics.
 - The fd migration is landed. `Dialer`, `TcpConn`, and `UdpConn` now treat
   `lib/net/fd` as the active host-side foundation rather than as a parallel
   rewrite.
-- The host-side `embed.posix` contract already exposes the primitives the fd
+- The host-side `stdz.posix` contract already exposes the primitives the fd
   layer depends on: `fcntl`, `F.GETFL`, `F.SETFL`, `O.NONBLOCK`, `poll`,
   `getsockopt`, and `SO.ERROR`.
 - The core internal files are in place:
@@ -63,7 +63,7 @@ global runtime poller.
 
 ## Current Preconditions
 
-The fd layer assumes that the host-side `embed.posix` contract exposes:
+The fd layer assumes that the host-side `stdz.posix` contract exposes:
 
 - `fcntl`
 - `F.GETFL`
@@ -74,7 +74,7 @@ The fd layer assumes that the host-side `embed.posix` contract exposes:
 - `SO.ERROR`
 
 These contract surfaces are covered by
-`lib/embed/test_runner/std/posix.zig`.
+`lib/stdz/test_runner/std/posix.zig`.
 
 ## Scope Rules
 
@@ -89,7 +89,7 @@ These contract surfaces are covered by
 - Do not rely on socket-level read/write timeout options inside fd for host
   paths. The fd layer owns its wait loops and deadline behavior directly.
 - Keep allocator use explicit, and keep host / lwIP portability in mind through
-  the existing `embed.posix` abstraction boundary.
+  the existing `stdz.posix` abstraction boundary.
 
 ## Design
 

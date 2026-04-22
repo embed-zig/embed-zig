@@ -1,4 +1,4 @@
-//! net — Go-style networking for embed-zig.
+//! net — Go-style networking for stdz-zig.
 //!
 //! Usage:
 //!   const net = @import("net").make(lib);

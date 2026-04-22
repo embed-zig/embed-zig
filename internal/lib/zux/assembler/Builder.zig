@@ -1,5 +1,5 @@
-const embed = @import("embed");
-const builtin = embed.builtin;
+const stdz = @import("stdz");
+const builtin = stdz.builtin;
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
 const modem_api = drivers;
@@ -2430,7 +2430,7 @@ fn makeLabelEnum(comptime registries: anytype) type {
 
     return @Type(.{
         .@"enum" = .{
-            .tag_type = if (total_len == 0) u0 else embed.math.IntFittingRange(0, total_len - 1),
+            .tag_type = if (total_len == 0) u0 else stdz.math.IntFittingRange(0, total_len - 1),
             .fields = &fields,
             .decls = &.{},
             .is_exhaustive = true,
@@ -2460,7 +2460,7 @@ fn makeSingleRegistryLabelEnum(comptime registry: anytype) type {
 
     return @Type(.{
         .@"enum" = .{
-            .tag_type = if (total_len == 0) u0 else embed.math.IntFittingRange(0, total_len - 1),
+            .tag_type = if (total_len == 0) u0 else stdz.math.IntFittingRange(0, total_len - 1),
             .fields = &fields,
             .decls = &.{},
             .is_exhaustive = true,

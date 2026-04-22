@@ -36,7 +36,7 @@
 //!   var wake_fd = some_posix_socket;
 //!   try cancel_ctx.bindFd(lib, &wake_fd);
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 pub const Context = @import("context/Context.zig");
 const cancel_context = @import("context/CancelContext.zig");
 const deadline_context = @import("context/DeadlineContext.zig");
@@ -79,7 +79,7 @@ pub fn make(comptime lib: type) type {
                 lib.Thread.sleep(@intCast(ns));
                 return null;
             }
-            while (true) lib.Thread.sleep(embed.math.maxInt(u64));
+            while (true) lib.Thread.sleep(stdz.math.maxInt(u64));
         }
 
         fn cancelFn(_: *anyopaque) void {}

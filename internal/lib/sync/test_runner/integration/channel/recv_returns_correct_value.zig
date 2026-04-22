@@ -1,13 +1,13 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 const suite_mod = @import("suite.zig");
 
 pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
     const Suite = suite_mod.Suite(lib, Channel);
     const Runner = struct {
-        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 98304 },
+        spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 98304 },
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
@@ -21,7 +21,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }

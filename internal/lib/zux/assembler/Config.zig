@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const stdz = @import("stdz");
 const NodeBuilder = @import("../pipeline/NodeBuilder.zig");
 const Poller = @import("../pipeline/Poller.zig");
 const Store = @import("../Store.zig");
@@ -8,8 +8,8 @@ const root = @This();
 store: Store.BuilderOptions = .{},
 node: NodeBuilder.BuilderOptions = .{},
 pipeline: struct {
-    tick_interval_ns: u64 = 10 * embed.time.ns_per_ms,
-    spawn_config: embed.Thread.SpawnConfig = .{},
+    tick_interval_ns: u64 = 10 * stdz.time.ns_per_ms,
+    spawn_config: stdz.Thread.SpawnConfig = .{},
 } = .{},
 poller: Poller.Config = .{},
 max_adc_buttons: usize = 16,

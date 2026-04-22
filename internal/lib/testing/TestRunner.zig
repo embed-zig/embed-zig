@@ -7,7 +7,7 @@
 //! `spawn_config.stack_size` for that worker (callers choose an explicit size per case).
 
 const builtin = @import("builtin");
-const embed = @import("embed");
+const stdz = @import("stdz");
 const Self = @This();
 const T = @import("T.zig");
 
@@ -15,18 +15,18 @@ var default_ctx_byte: u8 = 0;
 
 ctx: *anyopaque,
 vtable: *const VTable,
-spawn_config: embed.Thread.SpawnConfig = .{},
+spawn_config: stdz.Thread.SpawnConfig = .{},
 memory_limit: ?usize = null,
 
 pub const VTable = struct {
-    runFn: *const fn (*Self, *T, embed.mem.Allocator) bool,
-    deinitFn: *const fn (Self, embed.mem.Allocator) void = noopDeinit,
+    runFn: *const fn (*Self, *T, stdz.mem.Allocator) bool,
+    deinitFn: *const fn (Self, stdz.mem.Allocator) void = noopDeinit,
 };
 
 const Options = struct {
     ctx: *anyopaque = defaultCtx(),
     vtable: *const VTable,
-    spawn_config: embed.Thread.SpawnConfig = .{},
+    spawn_config: stdz.Thread.SpawnConfig = .{},
     memory_limit: ?usize = null,
 };
 
@@ -39,19 +39,19 @@ fn init(options: Options) Self {
     };
 }
 
-pub fn run(self: *Self, t: *T, allocator: embed.mem.Allocator) bool {
+pub fn run(self: *Self, t: *T, allocator: stdz.mem.Allocator) bool {
     return self.vtable.runFn(self, t, allocator);
 }
 
-pub fn deinit(self: Self, allocator: embed.mem.Allocator) void {
+pub fn deinit(self: Self, allocator: stdz.mem.Allocator) void {
     self.vtable.deinitFn(self, allocator);
 }
 
 pub fn make(comptime RunnerType: type) type {
     comptime {
-        _ = @as(*const fn (*RunnerType, embed.mem.Allocator) anyerror!void, RunnerType.init);
-        _ = @as(*const fn (*RunnerType, *T, embed.mem.Allocator) bool, RunnerType.run);
-        _ = @as(*const fn (*RunnerType, embed.mem.Allocator) void, RunnerType.deinit);
+        _ = @as(*const fn (*RunnerType, stdz.mem.Allocator) anyerror!void, RunnerType.init);
+        _ = @as(*const fn (*RunnerType, *T, stdz.mem.Allocator) bool, RunnerType.run);
+        _ = @as(*const fn (*RunnerType, stdz.mem.Allocator) void, RunnerType.deinit);
     }
     return struct {
         pub fn new(ctx: *RunnerType) Self {
@@ -61,7 +61,7 @@ pub fn make(comptime RunnerType: type) type {
                     .deinitFn = @This().deinit,
                 };
 
-                fn run(runner: *Self, t: *T, allocator: embed.mem.Allocator) bool {
+                fn run(runner: *Self, t: *T, allocator: stdz.mem.Allocator) bool {
                     const typed_ctx: *RunnerType = @ptrCast(@alignCast(runner.ctx));
                     RunnerType.init(typed_ctx, allocator) catch |err| {
                         t.logErrorf("runner init failed: {}", .{err});
@@ -70,7 +70,7 @@ pub fn make(comptime RunnerType: type) type {
                     return RunnerType.run(typed_ctx, t, allocator);
                 }
 
-                fn deinit(runner: Self, allocator: embed.mem.Allocator) void {
+                fn deinit(runner: Self, allocator: stdz.mem.Allocator) void {
                     const typed_ctx: *RunnerType = @ptrCast(@alignCast(runner.ctx));
                     RunnerType.deinit(typed_ctx, allocator);
                 }
@@ -92,14 +92,14 @@ pub fn fromFn(
     comptime run_fn: *const fn (t: *T, allocator: lib.mem.Allocator) anyerror!void,
 ) Self {
     const Runner = struct {
-        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = stack_size },
+        spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = stack_size },
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *T, allocator: stdz.mem.Allocator) bool {
             _ = self;
 
             run_fn(t, allocator) catch |err| {
@@ -109,7 +109,7 @@ pub fn fromFn(
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -125,7 +125,7 @@ fn defaultCtx() *anyopaque {
     return @ptrCast(&default_ctx_byte);
 }
 
-fn noopDeinit(_: Self, _: embed.mem.Allocator) void {}
+fn noopDeinit(_: Self, _: stdz.mem.Allocator) void {}
 
 pub fn TestRunner(comptime lib: type) Self {
     if (builtin.target.os.tag == .freestanding) {
@@ -135,14 +135,14 @@ pub fn TestRunner(comptime lib: type) Self {
                 _ = allocator;
             }
 
-            pub fn run(self: *@This(), t: *T, allocator: embed.mem.Allocator) bool {
+            pub fn run(self: *@This(), t: *T, allocator: stdz.mem.Allocator) bool {
                 _ = self;
                 _ = t;
                 _ = allocator;
                 return true;
             }
 
-            pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+            pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
                 _ = self;
                 _ = allocator;
             }
@@ -165,7 +165,7 @@ pub fn TestRunner(comptime lib: type) Self {
             };
 
             const Helper = struct {
-                fn run(runner: *Self, t: *T, allocator: embed.mem.Allocator) bool {
+                fn run(runner: *Self, t: *T, allocator: stdz.mem.Allocator) bool {
                     const state: *RunnerState = @ptrCast(@alignCast(runner.ctx));
                     _ = t;
                     state.run_hits += 1;
@@ -173,7 +173,7 @@ pub fn TestRunner(comptime lib: type) Self {
                     return true;
                 }
 
-                fn deinit(runner: Self, allocator: embed.mem.Allocator) void {
+                fn deinit(runner: Self, allocator: stdz.mem.Allocator) void {
                     const state: *RunnerState = @ptrCast(@alignCast(runner.ctx));
                     _ = allocator;
                     state.deinit_hits += 1;
@@ -213,19 +213,19 @@ pub fn TestRunner(comptime lib: type) Self {
                 seed: usize,
                 init_allocator_ptr: usize,
                 deinit_hits: usize = 0,
-                spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 4096 },
+                spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 4096 },
                 memory_limit: ?usize = 21,
 
-                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
                     self.init_allocator_ptr = @intFromPtr(allocator.ptr);
                 }
 
-                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
                     _ = allocator;
                     self.deinit_hits += 1;
                 }
 
-                pub fn run(self: *@This(), test_handle: *T, allocator: embed.mem.Allocator) bool {
+                pub fn run(self: *@This(), test_handle: *T, allocator: stdz.mem.Allocator) bool {
                     _ = test_handle;
                     return self.seed == 5 and self.init_allocator_ptr == @intFromPtr(allocator.ptr);
                 }
@@ -257,17 +257,17 @@ pub fn TestRunner(comptime lib: type) Self {
             const OwnedArgs = struct {
                 deinit_hits: usize = 0,
 
-                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
                     _ = self;
                     _ = allocator;
                 }
 
-                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
                     _ = allocator;
                     self.deinit_hits += 1;
                 }
 
-                pub fn run(self: *@This(), test_handle: *T, allocator: embed.mem.Allocator) bool {
+                pub fn run(self: *@This(), test_handle: *T, allocator: stdz.mem.Allocator) bool {
                     _ = self;
                     _ = test_handle;
                     _ = allocator;
@@ -340,8 +340,8 @@ pub fn TestRunner(comptime lib: type) Self {
             };
 
             const TestLib = struct {
-                pub const mem = embed.mem;
-                pub const fmt = embed.fmt;
+                pub const mem = stdz.mem;
+                pub const fmt = stdz.fmt;
                 pub const Thread = std.Thread;
                 pub const log = CapturingLog;
                 pub fn ArrayList(comptime Elem: type) type {
@@ -367,18 +367,18 @@ pub fn TestRunner(comptime lib: type) Self {
                 run_hits: usize = 0,
                 deinit_hits: usize = 0,
 
-                pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+                pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
                     _ = self;
                     _ = allocator;
                     return error.InitFailed;
                 }
 
-                pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+                pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
                     _ = allocator;
                     self.deinit_hits += 1;
                 }
 
-                pub fn run(self: *@This(), test_handle: *T, allocator: embed.mem.Allocator) bool {
+                pub fn run(self: *@This(), test_handle: *T, allocator: stdz.mem.Allocator) bool {
                     _ = test_handle;
                     _ = allocator;
                     self.run_hits += 1;

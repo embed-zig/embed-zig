@@ -1,6 +1,6 @@
 //! TLS std-compat tests — host-only interoperability coverage.
 //!
-//! These tests validate interoperability between `embed-zig` TLS server paths
+//! These tests validate interoperability between `stdz-zig` TLS server paths
 //! and `std.crypto.tls.Client`. They are intentionally separate from the
 //! embedded-friendly TLS runner because they depend on Zig stdlib TLS and host
 //! networking APIs.
@@ -9,7 +9,7 @@
 //! `net/compat_tests/std` block.
 
 const std = @import("std");
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 const net_mod = @import("../../../../net.zig");
 const sockaddr_mod = @import("../../../fd/SockAddr.zig");
@@ -19,14 +19,14 @@ const AddrPort = net_mod.netip.AddrPort;
 
 pub fn make() testing_api.TestRunner {
     const Runner = struct {
-        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
+        spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
             runImpl(std, t, allocator) catch |err| {
                 t.logErrorf("tls_std_compat runner failed: {}", .{err});
@@ -35,7 +35,7 @@ pub fn make() testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
             std.testing.allocator.destroy(self);
         }

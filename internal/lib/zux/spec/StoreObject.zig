@@ -1,5 +1,5 @@
-const embed = @import("embed");
-const builtin = embed.builtin;
+const stdz = @import("stdz");
+const builtin = stdz.builtin;
 const testing_api = @import("testing");
 const JsonParser = @import("JsonParser.zig");
 const StoreObject = @This();

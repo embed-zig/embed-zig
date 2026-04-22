@@ -13,21 +13,21 @@
 //!   );
 //!   t.run("net/resolver_dns", runner);
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const net_mod = @import("../../../../net.zig");
 const resolver_mod = @import("../../../Resolver.zig");
 const testing_api = @import("testing");
 
 pub fn make(comptime lib: type, comptime ips: []const []const u8, comptime server_name: []const u8) testing_api.TestRunner {
     const Runner = struct {
-        spawn_config: embed.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
+        spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
             runImpl(lib, t, allocator, ips, server_name) catch |err| {
                 t.logErrorf("resolver_dns runner failed: {}", .{err});
@@ -36,7 +36,7 @@ pub fn make(comptime lib: type, comptime ips: []const []const u8, comptime serve
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }

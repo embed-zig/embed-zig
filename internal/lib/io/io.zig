@@ -4,7 +4,7 @@
 //! `read` method. Runtime subsystem-specific contracts should continue to live
 //! with the subsystem itself.
 
-const embed = @import("embed");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 const read_chunk_len = 1024;
 
@@ -32,8 +32,8 @@ pub fn writeAll(comptime Writer: type, writer: *Writer, buf: []const u8) !void {
 
 /// Reads until EOF, where EOF may be signaled by either a zero-length read or
 /// `error.EndOfStream`.
-pub fn readAll(comptime Reader: type, reader: *Reader, allocator: embed.mem.Allocator) ![]u8 {
-    var bytes = try embed.ArrayList(u8).initCapacity(allocator, 0);
+pub fn readAll(comptime Reader: type, reader: *Reader, allocator: stdz.mem.Allocator) ![]u8 {
+    var bytes = try stdz.ArrayList(u8).initCapacity(allocator, 0);
     errdefer bytes.deinit(allocator);
 
     const buf = try allocator.alloc(u8, read_chunk_len);
@@ -58,7 +58,7 @@ pub fn copy(
     comptime Reader: type,
     writer: *Writer,
     reader: *Reader,
-    allocator: embed.mem.Allocator,
+    allocator: stdz.mem.Allocator,
 ) !u64 {
     const buf = try allocator.alloc(u8, read_chunk_len);
     defer allocator.free(buf);
@@ -76,7 +76,7 @@ pub fn copyBuf(
     reader: *Reader,
     buf: []u8,
 ) !u64 {
-    embed.debug.assert(buf.len > 0);
+    stdz.debug.assert(buf.len > 0);
 
     var copied: u64 = 0;
     while (true) {

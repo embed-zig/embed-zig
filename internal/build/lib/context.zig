@@ -14,7 +14,7 @@ pub fn create(
 }
 
 pub fn link(b: *std.Build) void {
-    const embed = b.modules.get("embed") orelse @panic("context requires embed");
+    const stdz = b.modules.get("stdz") orelse @panic("context requires stdz");
     const mod = b.modules.get("context") orelse @panic("context module missing");
-    mod.addImport("embed", embed);
+    mod.addImport("stdz", stdz);
 }

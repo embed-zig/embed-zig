@@ -14,7 +14,7 @@ pub fn create(
 }
 
 pub fn link(b: *std.Build) void {
-    const embed = b.modules.get("embed") orelse @panic("zux requires embed");
+    const stdz = b.modules.get("stdz") orelse @panic("zux requires stdz");
     const motion = b.modules.get("motion") orelse @panic("zux requires motion");
     const net = b.modules.get("net") orelse @panic("zux requires net");
     const sync = b.modules.get("sync") orelse @panic("zux requires sync");
@@ -24,7 +24,7 @@ pub fn link(b: *std.Build) void {
     const embed_std = b.modules.get("embed_std") orelse @panic("zux requires embed_std");
     const testing = b.modules.get("testing") orelse @panic("zux requires testing");
     const mod = b.modules.get("zux") orelse @panic("zux module missing");
-    mod.addImport("embed", embed);
+    mod.addImport("stdz", stdz);
     mod.addImport("motion", motion);
     mod.addImport("net", net);
     mod.addImport("sync", sync);

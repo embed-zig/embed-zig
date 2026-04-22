@@ -2,7 +2,7 @@
 
 const Context = @import("Context.zig");
 const internal = @import("internal.zig");
-const Allocator = @import("embed").mem.Allocator;
+const Allocator = @import("stdz").mem.Allocator;
 
 pub fn make(comptime lib: type) type {
     const Mutex = lib.Thread.Mutex;
