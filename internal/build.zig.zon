@@ -1,0 +1,12 @@
+.{
+    .name = .embed_zig,
+    .version = "1.0.3",
+    .fingerprint = 0x3e50a1e0fc32b0a6,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "build/",
+        "lib/",
+        "pkg/",
+    },
+}

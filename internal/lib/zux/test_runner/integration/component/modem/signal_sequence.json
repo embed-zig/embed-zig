@@ -1,0 +1,126 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "modem signal sequence",
+    "description": "updates signal strength across lte, lte-m, and nr5g reports",
+    "steps": [
+      {
+        "inputs": [
+          {
+            "modem_network_signal_changed": {
+              "source_id": 51,
+              "signal": {
+                "rssi_dbm": -89,
+                "ber": 7,
+                "rat": "lte"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "unknown",
+              "registration": "offline",
+              "packet": "detached",
+              "signal": {
+                "rssi_dbm": -89,
+                "ber": 7,
+                "rat": "lte"
+              },
+              "apn_end": 0
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "modem_network_signal_changed": {
+              "source_id": 51,
+              "signal": {
+                "rssi_dbm": -74,
+                "ber": 3,
+                "rat": "lte_m"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "unknown",
+              "registration": "offline",
+              "packet": "detached",
+              "signal": {
+                "rssi_dbm": -74,
+                "ber": 3,
+                "rat": "lte_m"
+              },
+              "apn_end": 0
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "modem_network_signal_changed": {
+              "source_id": 51,
+              "signal": {
+                "rssi_dbm": -61,
+                "ber": null,
+                "rat": "nr5g"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "unknown",
+              "registration": "offline",
+              "packet": "detached",
+              "signal": {
+                "rssi_dbm": -61,
+                "ber": null,
+                "rat": "nr5g"
+              },
+              "apn_end": 0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

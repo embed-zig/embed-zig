@@ -1,0 +1,224 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "route sequence",
+    "description": "pushes, replaces, transitions, and pops the route while checking store-visible state",
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "route",
+            "state": {
+              "current_page": 1,
+              "transitioning": false,
+              "version": 0
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_route_push": {
+              "source_id": 91,
+              "item": {
+                "screen_id": 2,
+                "arg0": 7
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "route",
+            "state": {
+              "current_page": 2,
+              "transitioning": false,
+              "version": 1
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_route_replace": {
+              "source_id": 91,
+              "item": {
+                "screen_id": 3,
+                "arg1": 9
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "route",
+            "state": {
+              "current_page": 3,
+              "transitioning": false,
+              "version": 2
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_route_set_transitioning": {
+              "source_id": 91,
+              "value": true
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "route",
+            "state": {
+              "current_page": 3,
+              "transitioning": true,
+              "version": 3
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_route_push": {
+              "source_id": 91,
+              "item": {
+                "screen_id": 4,
+                "flags": 1
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "route",
+            "state": {
+              "current_page": 4,
+              "transitioning": true,
+              "version": 4
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_route_pop": {
+              "source_id": 91
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "route",
+            "state": {
+              "current_page": 3,
+              "transitioning": true,
+              "version": 5
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_route_pop_to_root": {
+              "source_id": 91
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "route",
+            "state": {
+              "current_page": 1,
+              "transitioning": true,
+              "version": 6
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "ui_route_set_transitioning": {
+              "source_id": 91,
+              "value": false
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "route",
+            "state": {
+              "current_page": 1,
+              "transitioning": false,
+              "version": 7
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

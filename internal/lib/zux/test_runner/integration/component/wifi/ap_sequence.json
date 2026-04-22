@@ -1,0 +1,437 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "wifi ap sequence",
+    "description": "starts the ap, tracks client and lease updates, and verifies the final stop state",
+    "steps": [
+      {
+        "inputs": [
+          {
+            "wifi_ap_started": {
+              "source_id": 41,
+              "ssid_end": 6,
+              "ssid_buf": "esp-ap",
+              "channel": 11,
+              "security": "wpa2"
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "ap",
+            "state": {
+              "source_id": 41,
+              "ssid_end": 6,
+              "ssid_buf": "esp-ap",
+              "channel": 11,
+              "active": true,
+              "client_count": 0
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "wifi_ap_client_joined": {
+              "source_id": 41,
+              "client_mac": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "client_ip": null,
+              "aid": 3
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "ap",
+            "state": {
+              "source_id": 41,
+              "ssid_end": 6,
+              "ssid_buf": "esp-ap",
+              "channel": 11,
+              "active": true,
+              "client_count": 1,
+              "last_client_mac": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "last_client_ip": null,
+              "last_client_aid": 3
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "wifi_ap_lease_granted": {
+              "source_id": 41,
+              "client_mac": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "client_ip": {
+                "bytes": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  192,
+                  168,
+                  4,
+                  10
+                ],
+                "kind": "v4"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "ap",
+            "state": {
+              "source_id": 41,
+              "ssid_end": 6,
+              "ssid_buf": "esp-ap",
+              "channel": 11,
+              "client_count": 1,
+              "last_client_mac": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "last_client_ip": {
+                "bytes": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  192,
+                  168,
+                  4,
+                  10
+                ],
+                "kind": "v4"
+              },
+              "last_client_aid": 3
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "wifi_ap_client_joined": {
+              "source_id": 41,
+              "client_mac": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1
+              ],
+              "client_ip": {
+                "bytes": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  192,
+                  168,
+                  4,
+                  11
+                ],
+                "kind": "v4"
+              },
+              "aid": 4
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "ap",
+            "state": {
+              "source_id": 41,
+              "ssid_end": 6,
+              "ssid_buf": "esp-ap",
+              "channel": 11,
+              "client_count": 2,
+              "last_client_mac": [
+                6,
+                5,
+                4,
+                3,
+                2,
+                1
+              ],
+              "last_client_ip": {
+                "bytes": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  192,
+                  168,
+                  4,
+                  11
+                ],
+                "kind": "v4"
+              },
+              "last_client_aid": 4
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "wifi_ap_lease_released": {
+              "source_id": 41,
+              "client_mac": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "client_ip": {
+                "bytes": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  192,
+                  168,
+                  4,
+                  10
+                ],
+                "kind": "v4"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "ap",
+            "state": {
+              "source_id": 41,
+              "ssid_end": 6,
+              "ssid_buf": "esp-ap",
+              "channel": 11,
+              "client_count": 2,
+              "last_client_mac": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "last_client_ip": {
+                "bytes": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  192,
+                  168,
+                  4,
+                  10
+                ],
+                "kind": "v4"
+              },
+              "last_client_aid": 4
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "wifi_ap_client_left": {
+              "source_id": 41,
+              "client_mac": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "client_ip": null,
+              "aid": 3
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "ap",
+            "state": {
+              "source_id": 41,
+              "ssid_end": 6,
+              "ssid_buf": "esp-ap",
+              "channel": 11,
+              "client_count": 1,
+              "last_client_mac": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6
+              ],
+              "last_client_ip": null,
+              "last_client_aid": 3
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "wifi_ap_stopped": {
+              "source_id": 41
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "ap",
+            "state": {
+              "source_id": 41,
+              "ssid_end": 6,
+              "ssid_buf": "esp-ap",
+              "channel": 11,
+              "active": false,
+              "client_count": 0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

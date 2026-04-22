@@ -1,0 +1,303 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "modem mixed sequence",
+    "description": "interleaves signal, attach, apn, and packet events while checking the combined store state",
+    "steps": [
+      {
+        "inputs": [
+          {
+            "modem_network_signal_changed": {
+              "source_id": 51,
+              "signal": {
+                "rssi_dbm": -83,
+                "ber": 6,
+                "rat": "lte"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "unknown",
+              "registration": "offline",
+              "packet": "detached",
+              "signal": {
+                "rssi_dbm": -83,
+                "ber": 6,
+                "rat": "lte"
+              },
+              "apn_end": 0
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "modem_sim_state_changed": {
+              "source_id": 51,
+              "sim": "ready"
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "ready",
+              "registration": "offline",
+              "packet": "detached",
+              "signal": {
+                "rssi_dbm": -83,
+                "ber": 6,
+                "rat": "lte"
+              },
+              "apn_end": 0
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "modem_network_registration_changed": {
+              "source_id": 51,
+              "registration": "searching"
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "ready",
+              "registration": "searching",
+              "packet": "detached",
+              "signal": {
+                "rssi_dbm": -83,
+                "ber": 6,
+                "rat": "lte"
+              },
+              "apn_end": 0
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "modem_data_apn_changed": {
+              "source_id": 51,
+              "apn_end": 14,
+              "apn_buf": "bootstrap.prod"
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "ready",
+              "registration": "searching",
+              "packet": "detached",
+              "signal": {
+                "rssi_dbm": -83,
+                "ber": 6,
+                "rat": "lte"
+              },
+              "apn_end": 14,
+              "apn_buf": "bootstrap.prod"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "modem_data_packet_state_changed": {
+              "source_id": 51,
+              "packet": "attaching"
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "ready",
+              "registration": "searching",
+              "packet": "attaching",
+              "signal": {
+                "rssi_dbm": -83,
+                "ber": 6,
+                "rat": "lte"
+              },
+              "apn_end": 14,
+              "apn_buf": "bootstrap.prod"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "modem_network_registration_changed": {
+              "source_id": 51,
+              "registration": "home"
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "ready",
+              "registration": "home",
+              "packet": "attaching",
+              "signal": {
+                "rssi_dbm": -83,
+                "ber": 6,
+                "rat": "lte"
+              },
+              "apn_end": 14,
+              "apn_buf": "bootstrap.prod"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "modem_network_signal_changed": {
+              "source_id": 51,
+              "signal": {
+                "rssi_dbm": -67,
+                "ber": 1,
+                "rat": "lte_m"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "ready",
+              "registration": "home",
+              "packet": "attaching",
+              "signal": {
+                "rssi_dbm": -67,
+                "ber": 1,
+                "rat": "lte_m"
+              },
+              "apn_end": 14,
+              "apn_buf": "bootstrap.prod"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "modem_data_packet_state_changed": {
+              "source_id": 51,
+              "packet": "connected"
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        }
+      },
+      {
+        "outputs": [
+          {
+            "label": "cell",
+            "state": {
+              "source_id": 51,
+              "sim": "ready",
+              "registration": "home",
+              "packet": "connected",
+              "signal": {
+                "rssi_dbm": -67,
+                "ber": 1,
+                "rat": "lte_m"
+              },
+              "apn_end": 14,
+              "apn_buf": "bootstrap.prod"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

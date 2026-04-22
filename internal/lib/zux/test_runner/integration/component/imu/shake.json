@@ -1,0 +1,119 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "imu shake sequence",
+    "description": "sets shake motion twice and clears it with a follow-up accel sample each time",
+    "steps": [
+      {
+        "inputs": [
+          {
+            "imu_motion": {
+              "source_id": 17,
+              "motion": {
+                "shake": {
+                  "magnitude": 2.5,
+                  "duration_ms": 120
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": "shake"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "imu_motion": {
+              "source_id": 17,
+              "motion": {
+                "shake": {
+                  "magnitude": 2.3,
+                  "duration_ms": 110
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": "shake"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

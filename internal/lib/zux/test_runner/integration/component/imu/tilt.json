@@ -1,0 +1,64 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "imu tilt sequence",
+    "description": "sets tilt motion and clears it with the next accel sample",
+    "steps": [
+      {
+        "inputs": [
+          {
+            "imu_motion": {
+              "source_id": 17,
+              "motion": {
+                "tilt": {
+                  "roll": 30.0,
+                  "pitch": 0.0
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": "tilt"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.5,
+              "y": 0.0,
+              "z": 0.866
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 1,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
