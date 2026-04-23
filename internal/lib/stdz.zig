@@ -83,7 +83,7 @@ pub const BitStack = collections.BitStack;
 pub fn make(comptime Impl: type) type {
     comptime {
         if (!@hasDecl(Impl, "atomic")) {
-            @compileError("stdz.make requires Impl.atomic; std-backed runtimes must re-export embed_std.stdz.atomic");
+            @compileError("stdz.make requires Impl.atomic; std-backed runtimes must re-export the stdz atomic surface");
         }
     }
 

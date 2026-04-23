@@ -29,5 +29,11 @@ pub fn build(b: *std.Build) void {
     embed_mod.addImport("zux", internal_dep.module("zux"));
     b.modules.put("embed", embed_mod) catch @panic("OOM");
 
-    b.modules.put("embed_std", internal_dep.module("embed_std")) catch @panic("OOM");
+    const embed_std_mod = b.createModule(.{
+        .root_source_file = b.path("lib/embed_std.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    embed_std_mod.addImport("embed_std_internal", internal_dep.module("embed_std"));
+    b.modules.put("embed_std", embed_std_mod) catch @panic("OOM");
 }

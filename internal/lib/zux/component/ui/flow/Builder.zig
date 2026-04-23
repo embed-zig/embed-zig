@@ -6,7 +6,6 @@ const StateTemplate = @import("State.zig");
 const flow_event = @import("event.zig");
 
 const Builder = @This();
-const EnumLiteral = @Type(.enum_literal);
 
 pub const Edge = struct {
     from: []const u8,
@@ -23,22 +22,23 @@ pub fn init() Builder {
     return .{};
 }
 
-pub fn addNode(self: *Builder, comptime node: EnumLiteral) void {
-    const node_name = @tagName(node);
+pub fn addNode(self: *Builder, comptime node_name: []const u8) void {
     if (containsText(self.nodes, node_name)) {
         @compileError("zux.component.ui.flow.Builder duplicate node");
     }
     self.nodes = self.nodes ++ &[_][]const u8{node_name};
 }
 
-pub fn setInitial(self: *Builder, comptime node: EnumLiteral) void {
-    self.initial_node = @tagName(node);
+pub fn setInitial(self: *Builder, comptime node_name: []const u8) void {
+    self.initial_node = node_name;
 }
 
-pub fn addEdge(self: *Builder, comptime from: EnumLiteral, comptime to: EnumLiteral, comptime edge_label: EnumLiteral) void {
-    const from_name = @tagName(from);
-    const to_name = @tagName(to);
-    const edge_name = @tagName(edge_label);
+pub fn addEdge(
+    self: *Builder,
+    comptime from_name: []const u8,
+    comptime to_name: []const u8,
+    comptime edge_name: []const u8,
+) void {
     self.edges = self.edges ++ &[_]Edge{.{
         .from = from_name,
         .to = to_name,

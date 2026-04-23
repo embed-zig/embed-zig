@@ -64,7 +64,16 @@
       "spec": {
         "label": "pairing",
         "id": 61,
-        "type_name": "PairingFlow"
+        "flow": {
+          "initial": "idle",
+          "nodes": ["idle", "searching", "confirming", "done"],
+          "edges": [
+            { "from": "idle", "to": "searching", "event": "start" },
+            { "from": "idle", "to": "confirming", "event": "reenter" },
+            { "from": "searching", "to": "done", "event": "found" },
+            { "from": "confirming", "to": "done", "event": "confirm" }
+          ]
+        }
       }
     },
     {

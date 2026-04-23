@@ -196,25 +196,25 @@ pub fn make(
 pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const LinearFlow = comptime blk: {
         var builder = Builder.init();
-        builder.addNode(.idle);
-        builder.addNode(.searching);
-        builder.addNode(.paired);
-        builder.setInitial(.idle);
-        builder.addEdge(.idle, .searching, .start);
-        builder.addEdge(.searching, .paired, .found);
+        builder.addNode("idle");
+        builder.addNode("searching");
+        builder.addNode("paired");
+        builder.setInitial("idle");
+        builder.addEdge("idle", "searching", "start");
+        builder.addEdge("searching", "paired", "found");
         break :blk builder.build();
     };
     const BranchFlow = comptime blk: {
         var builder = Builder.init();
-        builder.addNode(.idle);
-        builder.addNode(.manual);
-        builder.addNode(.auto);
-        builder.addNode(.done);
-        builder.setInitial(.idle);
-        builder.addEdge(.idle, .manual, .choose_manual);
-        builder.addEdge(.idle, .auto, .choose_auto);
-        builder.addEdge(.manual, .done, .finish_manual);
-        builder.addEdge(.auto, .done, .finish_auto);
+        builder.addNode("idle");
+        builder.addNode("manual");
+        builder.addNode("auto");
+        builder.addNode("done");
+        builder.setInitial("idle");
+        builder.addEdge("idle", "manual", "choose_manual");
+        builder.addEdge("idle", "auto", "choose_auto");
+        builder.addEdge("manual", "done", "finish_manual");
+        builder.addEdge("auto", "done", "finish_auto");
         break :blk builder.build();
     };
 

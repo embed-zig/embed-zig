@@ -307,6 +307,29 @@ test "net/integration/embed_std" {
     if (!t.wait()) return error.TestFailed;
 }
 
+test "net/integration2/std" {
+    std.testing.log_level = .info;
+
+    var t = testing.T.new(std, .net);
+    defer t.deinit();
+    t.timeout(20 * std.time.ns_per_s);
+
+    const Net2 = net.make2(std, embed_std.net_impl.impl);
+    t.run("net/integration2/std", net.test_runner.integration.make2(Net2));
+    if (!t.wait()) return error.TestFailed;
+}
+
+test "net/integration2/embed_std" {
+    std.testing.log_level = .info;
+
+    var t = testing.T.new(embed_std.std, .net);
+    defer t.deinit();
+    t.timeout(20 * embed_std.std.time.ns_per_s);
+
+    t.run("net/integration2/embed_std", net.test_runner.integration.make2(embed_std.net));
+    if (!t.wait()) return error.TestFailed;
+}
+
 test "at/unit/std" {
     std.testing.log_level = .info;
 

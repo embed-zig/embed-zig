@@ -352,6 +352,7 @@ pub fn TestRunner(comptime lib: type) Self {
                 };
                 pub const time = struct {
                     pub const ns_per_ms = std.time.ns_per_ms;
+                    pub const Instant = std.time.Instant;
 
                     pub fn nanoTimestamp() i128 {
                         return std.time.nanoTimestamp();

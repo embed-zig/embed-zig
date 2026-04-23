@@ -23,6 +23,7 @@
 pub const Conn = @import("net/Conn.zig");
 pub const Listener = @import("net/Listener.zig");
 pub const PacketConn = @import("net/PacketConn.zig");
+pub const runtime = @import("net/runtime.zig");
 pub const netip = @import("net/netip.zig");
 pub const stack = @import("net/stack.zig");
 pub const url = @import("net/url.zig");
@@ -95,6 +96,13 @@ pub fn make(comptime lib: type) type {
             try posix.bind(fd, @ptrCast(&encoded.storage), encoded.len);
             return UC.initPacket(opts.allocator, fd);
         }
+    };
+}
+
+pub fn make2(comptime lib: type, comptime impl: type) type {
+    _ = lib;
+    return struct {
+        pub const Runtime = runtime.make(impl);
     };
 }
 

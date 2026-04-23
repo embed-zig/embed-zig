@@ -236,6 +236,32 @@ Suggested responsibilities:
 - `input/Callback.zig` - push adapters
 - `input/State.zig` - pull adapters
 
+## Current Board Spec
+
+The staged integration fixtures currently model board specs as tagged entries:
+
+```json
+{
+  "kind": "Component/ui/flow",
+  "spec": {
+    "label": "pairing",
+    "id": 61,
+    "flow": {
+      "initial": "idle",
+      "nodes": ["idle", "searching", "confirming", "done"],
+      "edges": [
+        { "from": "idle", "to": "searching", "event": "start" }
+      ]
+    }
+  }
+}
+```
+
+For `Component/ui/flow`, the `spec` object now carries a nested `flow` object.
+That `flow` object requires `initial`, `nodes`, and `edges`; `initial` must name
+one of the declared nodes, and every edge `from` / `to` must reference a known
+node.
+
 ## Naming
 
 The name `zux` is intentionally short and project-specific.

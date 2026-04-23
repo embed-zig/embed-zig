@@ -136,15 +136,12 @@ pub fn make(comptime spec_doc: anytype) type {
     const reducers_doc = if (@hasField(SpecDocType, "reducers")) spec_doc.reducers else &.{};
     const renders_doc = if (@hasField(SpecDocType, "renders")) spec_doc.renders else &.{};
     const user_stories_doc = if (@hasField(SpecDocType, "user_stories")) spec_doc.user_stories else &.{};
-    const component_count = components_doc.len;
     const reducer_count = reducers_doc.len;
     const render_count = renders_doc.len;
 
     return struct {
         const Self = @This();
 
-        flow_hooks: [component_count]?Assembler.FlowTypeFactory =
-            [_]?Assembler.FlowTypeFactory{null} ** component_count,
         reducer_hooks: [reducer_count]?Assembler.ReducerFnFactory =
             [_]?Assembler.ReducerFnFactory{null} ** reducer_count,
         render_hooks: [render_count]?Assembler.RenderFnFactory =
@@ -168,15 +165,6 @@ pub fn make(comptime spec_doc: anytype) type {
         ) void {
             const idx = reducerIndex(label);
             self.reducer_hooks[idx] = factory;
-        }
-
-        pub fn setFlow(
-            self: *Self,
-            comptime label: []const u8,
-            comptime FlowType: type,
-        ) void {
-            const idx = flowIndex(label);
-            self.flow_hooks[idx] = makeFlowTypeFactory(FlowType);
         }
 
         pub fn setRender(
@@ -245,15 +233,7 @@ pub fn make(comptime spec_doc: anytype) type {
                             next.addRouter(label, component.id, router_component.initial_item);
                         },
                         .flow => |flow_component| {
-                            const flow_factory = self.flow_hooks[componentIndex(label)] orelse
-                                @compileError(
-                                    "zux.Spec.assembler missing flow implementation for label '" ++
-                                        label ++
-                                        "' (flow type_name '" ++
-                                        flow_component.type_name ++
-                                        "'); call spec.setFlow(\"" ++ label ++ "\", ...)",
-                                );
-                            next.addFlow(label, component.id, flow_factory());
+                            next.addFlow(label, component.id, flow_component.makeType());
                         },
                         .overlay => |overlay_component| {
                             next.addOverlay(label, component.id, overlay_component.initial_state);
@@ -357,28 +337,12 @@ pub fn make(comptime spec_doc: anytype) type {
             @compileError("zux.Spec received a component label '" ++ label ++ "' that is not declared in the spec doc component list");
         }
 
-        fn flowIndex(comptime label: []const u8) usize {
-            const idx = componentIndex(label);
-            switch (components[idx].kind) {
-                .flow => return idx,
-                else => @compileError("zux.Spec.setFlow received a label '" ++ label ++ "' that is not declared as a flow component"),
-            }
-        }
-
         fn renderIndex(comptime label: []const u8) usize {
             inline for (renders, 0..) |render_spec, i| {
                 if (stdz.mem.eql(u8, render_spec.label, label)) return i;
             }
 
             @compileError("zux.Spec.setRender received a label '" ++ label ++ "' that is not declared in the spec doc render list");
-        }
-
-        fn makeFlowTypeFactory(comptime FlowType: type) Assembler.FlowTypeFactory {
-            return struct {
-                fn factory() type {
-                    return FlowType;
-                }
-            }.factory;
         }
 
         fn makeTestBuildConfig(comptime BuildConfig: type) BuildConfig {
@@ -835,17 +799,6 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     }.factory;
 
     const TestCase = struct {
-        const PairingFlow = blk: {
-            const ui_flow = @import("component/ui/flow.zig");
-
-            var builder = ui_flow.Builder.init();
-            builder.addNode(.idle);
-            builder.addNode(.done);
-            builder.setInitial(.idle);
-            builder.addEdge(.idle, .done, .confirm);
-            break :blk builder.build();
-        };
-
         fn parse_slice_dispatches_fragment_kinds(testing: anytype, _: lib.mem.Allocator) !void {
             const parsed = comptime parseSlice(
                 \\{
@@ -1053,7 +1006,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         .id = 31,
                         .kind = .{
                             .flow = .{
-                                .type_name = "PairingFlow",
+                                .initial = "idle",
+                                .nodes = &.{ "idle", "searching" },
+                                .edges = &.{
+                                    .{
+                                        .from = "idle",
+                                        .to = "searching",
+                                        .event = "start",
+                                    },
+                                },
                             },
                         },
                     },
@@ -1062,7 +1023,6 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             const assembled = comptime blk: {
                 var spec = SpecType.init();
-                spec.setFlow("pairing", PairingFlow);
                 break :blk spec.assembler(lib, .{
                     .max_flows = 1,
                     .store = .{

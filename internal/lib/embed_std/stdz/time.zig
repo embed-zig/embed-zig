@@ -2,6 +2,8 @@
 
 const std = @import("std");
 
+pub const Instant = std.time.Instant;
+
 pub fn milliTimestamp() i64 {
     return std.time.milliTimestamp();
 }

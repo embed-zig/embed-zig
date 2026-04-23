@@ -1,10 +1,35 @@
 const stdz = @import("stdz");
 const testing_api = @import("testing");
+const ui_flow = @import("../component/ui/flow.zig");
 const ui_overlay = @import("../component/ui/overlay.zig");
 const route = @import("../component/ui/route.zig");
 const ui_selection = @import("../component/ui/selection.zig");
 const JsonParser = @import("JsonParser.zig");
 const Component = @This();
+
+pub const FlowEdge = struct {
+    from: []const u8,
+    to: []const u8,
+    event: []const u8,
+};
+
+pub const FlowSpec = struct {
+    initial: []const u8,
+    nodes: []const []const u8,
+    edges: []const FlowEdge,
+
+    pub fn makeType(comptime self: FlowSpec) type {
+        var builder = ui_flow.Builder.init();
+        inline for (self.nodes) |node_name| {
+            builder.addNode(node_name);
+        }
+        builder.setInitial(self.initial);
+        inline for (self.edges) |edge| {
+            builder.addEdge(edge.from, edge.to, edge.event);
+        }
+        return builder.build();
+    }
+};
 
 pub const Kind = union(enum) {
     grouped_button: struct {
@@ -22,9 +47,7 @@ pub const Kind = union(enum) {
     router: struct {
         initial_item: route.Router.Item,
     },
-    flow: struct {
-        type_name: []const u8,
-    },
+    flow: FlowSpec,
     overlay: struct {
         initial_state: ui_overlay.State,
     },
@@ -264,9 +287,15 @@ pub fn parseJsonValueWithKindPath(
 
 fn freeRuntimeKind(kind: Kind, allocator: stdz.mem.Allocator) void {
     switch (kind) {
-        .flow => |flow| allocator.free(flow.type_name),
+        .flow => |flow| freeRuntimeFlow(flow, allocator),
         else => {},
     }
+}
+
+fn freeRuntimeFlow(flow: FlowSpec, allocator: stdz.mem.Allocator) void {
+    allocator.free(flow.initial);
+    freeRuntimeFlowNodes(flow.nodes, allocator);
+    freeRuntimeFlowEdges(flow.edges, allocator);
 }
 
 fn parseKindValue(
@@ -349,22 +378,12 @@ fn parseKindValue(
         };
     }
     if (stdz.mem.eql(u8, entry.key_ptr.*, "flow")) {
-        const payload = switch (entry.value_ptr.*) {
-            .object => |payload| payload,
-            else => return error.ExpectedFlowComponentObject,
-        };
-        const type_name_value = payload.get("type_name") orelse payload.get("type") orelse return error.MissingFlowTypeName;
-        const type_name = switch (type_name_value) {
-            .string => |text| blk: {
-                if (text.len == 0) return error.EmptyFlowTypeName;
-                break :blk try allocator.dupe(u8, text);
-            },
-            else => return error.ExpectedFlowTypeNameString,
-        };
         return .{
-            .flow = .{
-                .type_name = type_name,
-            },
+            .flow = try parseFlowPayloadValue(
+                allocator,
+                entry.value_ptr.*,
+                "zux.spec.Component.parseJsonValue flow payload",
+            ),
         };
     }
     if (stdz.mem.eql(u8, entry.key_ptr.*, "overlay")) {
@@ -397,6 +416,518 @@ fn parseKindValue(
     }
 
     return error.UnknownComponentKind;
+}
+
+fn parseFlowPayloadValue(
+    allocator: stdz.mem.Allocator,
+    value: stdz.json.Value,
+    comptime context: []const u8,
+) !FlowSpec {
+    const object = switch (value) {
+        .object => |object| object,
+        else => return error.ExpectedFlowSpecObject,
+    };
+    var iterator = object.iterator();
+    while (iterator.next()) |entry| {
+        if (!stdz.mem.eql(u8, entry.key_ptr.*, "initial") and
+            !stdz.mem.eql(u8, entry.key_ptr.*, "nodes") and
+            !stdz.mem.eql(u8, entry.key_ptr.*, "edges"))
+        {
+            return error.UnknownFlowField;
+        }
+    }
+
+    const initial = try parseRequiredNonEmptyStringFieldValue(
+        allocator,
+        object,
+        "initial",
+        error.MissingFlowInitial,
+        error.ExpectedFlowInitialString,
+        error.EmptyFlowInitial,
+    );
+    errdefer allocator.free(initial);
+
+    const nodes = try parseFlowNodesValue(
+        allocator,
+        object.get("nodes") orelse return error.MissingFlowNodes,
+    );
+    errdefer freeRuntimeFlowNodes(nodes, allocator);
+
+    const edges = try parseFlowEdgesValue(
+        allocator,
+        object.get("edges") orelse return error.MissingFlowEdges,
+    );
+    errdefer freeRuntimeFlowEdges(edges, allocator);
+
+    try validateRuntimeFlow(initial, nodes, edges, context);
+    return .{
+        .initial = initial,
+        .nodes = nodes,
+        .edges = edges,
+    };
+}
+
+fn parseFlowNodesValue(
+    allocator: stdz.mem.Allocator,
+    value: stdz.json.Value,
+) ![]const []const u8 {
+    const array = switch (value) {
+        .array => |array| array,
+        else => return error.ExpectedFlowNodesArray,
+    };
+
+    const nodes = try allocator.alloc([]const u8, array.items.len);
+    errdefer allocator.free(nodes);
+    for (array.items, 0..) |item, i| {
+        nodes[i] = switch (item) {
+            .string => |text| blk: {
+                if (text.len == 0) return error.EmptyFlowNode;
+                break :blk try allocator.dupe(u8, text);
+            },
+            else => return error.ExpectedFlowNodeString,
+        };
+        errdefer for (nodes[0 .. i + 1]) |node_name| allocator.free(node_name);
+    }
+
+    return nodes;
+}
+
+fn parseFlowEdgesValue(
+    allocator: stdz.mem.Allocator,
+    value: stdz.json.Value,
+) ![]const FlowEdge {
+    const array = switch (value) {
+        .array => |array| array,
+        else => return error.ExpectedFlowEdgesArray,
+    };
+
+    const edges = try allocator.alloc(FlowEdge, array.items.len);
+    errdefer allocator.free(edges);
+    for (array.items, 0..) |item, i| {
+        edges[i] = try parseFlowEdgeValue(allocator, item);
+        errdefer for (edges[0 .. i + 1]) |edge| {
+            allocator.free(edge.from);
+            allocator.free(edge.to);
+            allocator.free(edge.event);
+        };
+    }
+
+    return edges;
+}
+
+fn parseFlowEdgeValue(
+    allocator: stdz.mem.Allocator,
+    value: stdz.json.Value,
+) !FlowEdge {
+    const object = switch (value) {
+        .object => |object| object,
+        else => return error.ExpectedFlowEdgeObject,
+    };
+    var iterator = object.iterator();
+    while (iterator.next()) |entry| {
+        if (!stdz.mem.eql(u8, entry.key_ptr.*, "from") and
+            !stdz.mem.eql(u8, entry.key_ptr.*, "to") and
+            !stdz.mem.eql(u8, entry.key_ptr.*, "event"))
+        {
+            return error.UnknownFlowEdgeField;
+        }
+    }
+
+    const from = try parseRequiredNonEmptyStringFieldValue(
+        allocator,
+        object,
+        "from",
+        error.MissingFlowEdgeFrom,
+        error.ExpectedFlowEdgeFromString,
+        error.EmptyFlowEdgeFrom,
+    );
+    errdefer allocator.free(from);
+
+    const to = try parseRequiredNonEmptyStringFieldValue(
+        allocator,
+        object,
+        "to",
+        error.MissingFlowEdgeTo,
+        error.ExpectedFlowEdgeToString,
+        error.EmptyFlowEdgeTo,
+    );
+    errdefer allocator.free(to);
+
+    const event = try parseRequiredNonEmptyStringFieldValue(
+        allocator,
+        object,
+        "event",
+        error.MissingFlowEdgeEvent,
+        error.ExpectedFlowEdgeEventString,
+        error.EmptyFlowEdgeEvent,
+    );
+    errdefer allocator.free(event);
+
+    return .{
+        .from = from,
+        .to = to,
+        .event = event,
+    };
+}
+
+fn parseFlowPayloadSlice(
+    comptime source: []const u8,
+    comptime context: []const u8,
+) FlowSpec {
+    var parser = JsonParser.init(source);
+    parser.expectByte('{');
+
+    var initial: ?[]const u8 = null;
+    var nodes: ?[]const []const u8 = null;
+    var edges: ?[]const FlowEdge = null;
+
+    if (parser.consumeByte('}')) {
+        @compileError(context ++ " requires `initial`, `nodes`, and `edges` fields");
+    }
+
+    while (true) {
+        const key = parser.parseString();
+        parser.expectByte(':');
+        const value_source = parser.parseValueSlice();
+        if (comptimeEql(key, "initial")) {
+            if (initial != null) {
+                @compileError(context ++ " contains duplicate `initial` field");
+            }
+            initial = parseRequiredStringValueSlice(
+                value_source,
+                context ++ " `initial`",
+            );
+        } else if (comptimeEql(key, "nodes")) {
+            if (nodes != null) {
+                @compileError(context ++ " contains duplicate `nodes` field");
+            }
+            nodes = parseFlowNodesSlice(value_source, context ++ " `nodes`");
+        } else if (comptimeEql(key, "edges")) {
+            if (edges != null) {
+                @compileError(context ++ " contains duplicate `edges` field");
+            }
+            edges = parseFlowEdgesSlice(value_source, context ++ " `edges`");
+        } else {
+            @compileError(context ++ " only supports `initial`, `nodes`, and `edges` fields");
+        }
+
+        if (parser.consumeByte(',')) continue;
+        parser.expectByte('}');
+        break;
+    }
+    parser.finish();
+
+    const flow = FlowSpec{
+        .initial = initial orelse @compileError(context ++ " requires `initial`"),
+        .nodes = nodes orelse @compileError(context ++ " requires `nodes`"),
+        .edges = edges orelse @compileError(context ++ " requires `edges`"),
+    };
+    validateFlowComptime(flow, context);
+    return flow;
+}
+
+fn parseRequiredStringValueSlice(
+    comptime source: []const u8,
+    comptime context: []const u8,
+) []const u8 {
+    var parser = JsonParser.init(source);
+    const result = parser.parseString();
+    parser.finish();
+    if (result.len == 0) {
+        @compileError(context ++ " must not be empty");
+    }
+    return result;
+}
+
+fn parseFlowNodesSlice(
+    comptime source: []const u8,
+    comptime context: []const u8,
+) []const []const u8 {
+    var parser = JsonParser.init(source);
+    parser.expectByte('[');
+
+    var nodes: []const []const u8 = &.{};
+    if (!parser.consumeByte(']')) {
+        while (true) {
+            const node_name = parser.parseString();
+            if (node_name.len == 0) {
+                @compileError(context ++ " entries must not be empty");
+            }
+            nodes = nodes ++ &[_][]const u8{node_name};
+            if (parser.consumeByte(',')) continue;
+            parser.expectByte(']');
+            break;
+        }
+    }
+    parser.finish();
+    return nodes;
+}
+
+fn parseFlowEdgesSlice(
+    comptime source: []const u8,
+    comptime context: []const u8,
+) []const FlowEdge {
+    var parser = JsonParser.init(source);
+    parser.expectByte('[');
+
+    var edges: []const FlowEdge = &.{};
+    if (!parser.consumeByte(']')) {
+        while (true) {
+            edges = edges ++ &[_]FlowEdge{parseFlowEdgeSlice(
+                parser.parseValueSlice(),
+                context ++ " entry",
+            )};
+            if (parser.consumeByte(',')) continue;
+            parser.expectByte(']');
+            break;
+        }
+    }
+    parser.finish();
+    return edges;
+}
+
+fn parseFlowEdgeSlice(
+    comptime source: []const u8,
+    comptime context: []const u8,
+) FlowEdge {
+    var parser = JsonParser.init(source);
+    parser.expectByte('{');
+
+    var from: ?[]const u8 = null;
+    var to: ?[]const u8 = null;
+    var event: ?[]const u8 = null;
+
+    if (parser.consumeByte('}')) {
+        @compileError(context ++ " requires `from`, `to`, and `event` fields");
+    }
+
+    while (true) {
+        const key = parser.parseString();
+        parser.expectByte(':');
+        if (comptimeEql(key, "from")) {
+            if (from != null) {
+                @compileError(context ++ " contains duplicate `from` field");
+            }
+            from = parser.parseString();
+            if (from.?.len == 0) {
+                @compileError(context ++ " `from` must not be empty");
+            }
+        } else if (comptimeEql(key, "to")) {
+            if (to != null) {
+                @compileError(context ++ " contains duplicate `to` field");
+            }
+            to = parser.parseString();
+            if (to.?.len == 0) {
+                @compileError(context ++ " `to` must not be empty");
+            }
+        } else if (comptimeEql(key, "event")) {
+            if (event != null) {
+                @compileError(context ++ " contains duplicate `event` field");
+            }
+            event = parser.parseString();
+            if (event.?.len == 0) {
+                @compileError(context ++ " `event` must not be empty");
+            }
+        } else {
+            _ = parser.parseValueSlice();
+            @compileError(context ++ " only supports `from`, `to`, and `event` fields");
+        }
+
+        if (parser.consumeByte(',')) continue;
+        parser.expectByte('}');
+        break;
+    }
+    parser.finish();
+
+    return .{
+        .from = from orelse @compileError(context ++ " requires `from`"),
+        .to = to orelse @compileError(context ++ " requires `to`"),
+        .event = event orelse @compileError(context ++ " requires `event`"),
+    };
+}
+
+fn parseFlowPayloadComptime(
+    comptime value: stdz.json.Value,
+    comptime context: []const u8,
+) FlowSpec {
+    const object = expectObjectComptime(value, context);
+    var iterator = object.iterator();
+    while (iterator.next()) |entry| {
+        const field_name = entry.key_ptr.*;
+        if (!comptimeEql(field_name, "initial") and
+            !comptimeEql(field_name, "nodes") and
+            !comptimeEql(field_name, "edges"))
+        {
+            @compileError(context ++ " only supports `initial`, `nodes`, and `edges` fields");
+        }
+    }
+
+    const flow = FlowSpec{
+        .initial = parseNonEmptyStringValueComptime(
+            object.get("initial") orelse
+                @compileError(context ++ " requires an `initial` field"),
+            context ++ " `initial`",
+        ),
+        .nodes = parseFlowNodesComptime(
+            object.get("nodes") orelse
+                @compileError(context ++ " requires a `nodes` field"),
+            context ++ " `nodes`",
+        ),
+        .edges = parseFlowEdgesComptime(
+            object.get("edges") orelse
+                @compileError(context ++ " requires an `edges` field"),
+            context ++ " `edges`",
+        ),
+    };
+    validateFlowComptime(flow, context);
+    return flow;
+}
+
+fn parseFlowNodesComptime(
+    comptime value: stdz.json.Value,
+    comptime context: []const u8,
+) []const []const u8 {
+    const array = switch (value) {
+        .array => |array| array,
+        else => @compileError(context ++ " must be a JSON array"),
+    };
+
+    var nodes: [array.items.len][]const u8 = undefined;
+    inline for (array.items, 0..) |item, i| {
+        nodes[i] = parseNonEmptyStringValueComptime(item, context ++ " entry");
+    }
+    return nodes[0..];
+}
+
+fn parseFlowEdgesComptime(
+    comptime value: stdz.json.Value,
+    comptime context: []const u8,
+) []const FlowEdge {
+    const array = switch (value) {
+        .array => |array| array,
+        else => @compileError(context ++ " must be a JSON array"),
+    };
+
+    var edges: [array.items.len]FlowEdge = undefined;
+    inline for (array.items, 0..) |item, i| {
+        edges[i] = parseFlowEdgeComptime(item, context ++ " entry");
+    }
+    return edges[0..];
+}
+
+fn parseFlowEdgeComptime(
+    comptime value: stdz.json.Value,
+    comptime context: []const u8,
+) FlowEdge {
+    const object = expectObjectComptime(value, context);
+    var iterator = object.iterator();
+    while (iterator.next()) |entry| {
+        const field_name = entry.key_ptr.*;
+        if (!comptimeEql(field_name, "from") and
+            !comptimeEql(field_name, "to") and
+            !comptimeEql(field_name, "event"))
+        {
+            @compileError(context ++ " only supports `from`, `to`, and `event` fields");
+        }
+    }
+
+    return .{
+        .from = parseNonEmptyStringValueComptime(
+            object.get("from") orelse
+                @compileError(context ++ " requires a `from` field"),
+            context ++ " `from`",
+        ),
+        .to = parseNonEmptyStringValueComptime(
+            object.get("to") orelse
+                @compileError(context ++ " requires a `to` field"),
+            context ++ " `to`",
+        ),
+        .event = parseNonEmptyStringValueComptime(
+            object.get("event") orelse
+                @compileError(context ++ " requires an `event` field"),
+            context ++ " `event`",
+        ),
+    };
+}
+
+fn validateRuntimeFlow(
+    initial: []const u8,
+    nodes: []const []const u8,
+    edges: []const FlowEdge,
+    comptime _: []const u8,
+) !void {
+    if (nodes.len == 0) return error.EmptyFlowNodes;
+    if (!containsText(nodes, initial)) return error.FlowInitialNotInNodes;
+    if (hasDuplicateText(nodes)) return error.DuplicateFlowNode;
+    if (!allFlowEdgeFromKnown(nodes, edges)) return error.FlowEdgeUnknownFrom;
+    if (!allFlowEdgeToKnown(nodes, edges)) return error.FlowEdgeUnknownTo;
+}
+
+fn validateFlowComptime(
+    comptime flow: FlowSpec,
+    comptime context: []const u8,
+) void {
+    if (flow.nodes.len == 0) {
+        @compileError(context ++ " `nodes` must not be empty");
+    }
+    if (!containsText(flow.nodes, flow.initial)) {
+        @compileError(context ++ " `initial` must exist in `nodes`");
+    }
+    if (hasDuplicateText(flow.nodes)) {
+        @compileError(context ++ " contains duplicate node labels");
+    }
+    if (!allFlowEdgeFromKnown(flow.nodes, flow.edges)) {
+        @compileError(context ++ " edge `from` must exist in `nodes`");
+    }
+    if (!allFlowEdgeToKnown(flow.nodes, flow.edges)) {
+        @compileError(context ++ " edge `to` must exist in `nodes`");
+    }
+}
+
+fn freeRuntimeFlowNodes(nodes: []const []const u8, allocator: stdz.mem.Allocator) void {
+    for (nodes) |node_name| {
+        allocator.free(node_name);
+    }
+    allocator.free(nodes);
+}
+
+fn freeRuntimeFlowEdges(edges: []const FlowEdge, allocator: stdz.mem.Allocator) void {
+    for (edges) |edge| {
+        allocator.free(edge.from);
+        allocator.free(edge.to);
+        allocator.free(edge.event);
+    }
+    allocator.free(edges);
+}
+
+fn containsText(haystack: []const []const u8, needle: []const u8) bool {
+    for (haystack) |candidate| {
+        if (stdz.mem.eql(u8, candidate, needle)) return true;
+    }
+    return false;
+}
+
+fn hasDuplicateText(haystack: []const []const u8) bool {
+    for (haystack, 0..) |candidate, i| {
+        for (haystack[0..i]) |existing| {
+            if (stdz.mem.eql(u8, candidate, existing)) return true;
+        }
+    }
+    return false;
+}
+
+fn allFlowEdgeFromKnown(nodes: []const []const u8, edges: []const FlowEdge) bool {
+    for (edges) |edge| {
+        if (!containsText(nodes, edge.from)) return false;
+    }
+    return true;
+}
+
+fn allFlowEdgeToKnown(nodes: []const []const u8, edges: []const FlowEdge) bool {
+    for (edges) |edge| {
+        if (!containsText(nodes, edge.to)) return false;
+    }
+    return true;
 }
 
 fn expectEmptyPayload(value: stdz.json.Value) !void {
@@ -505,16 +1036,7 @@ fn parseKindSlice(comptime source: []const u8) Kind {
         };
     }
     if (comptimeEql(kind_name, "flow")) {
-        return .{
-            .flow = .{
-                .type_name = parseRequiredAlternativeStringFieldFromObjectSlice(
-                    payload_source,
-                    "type_name",
-                    "type",
-                    "zux.spec.Component.parseSlice flow payload",
-                ),
-            },
-        };
+        return .{ .flow = parseFlowPayloadSlice(payload_source, "zux.spec.Component.parseSlice flow payload") };
     }
     if (comptimeEql(kind_name, "overlay")) {
         return .{
@@ -602,14 +1124,14 @@ fn parsePathKindSlice(comptime kind_path: []const u8, comptime source: []const u
     }
     if (comptimeEql(kind_path, "ui/flow")) {
         return .{
-            .flow = .{
-                .type_name = parseRequiredAlternativeStringFieldFromObjectSlice(
+            .flow = parseFlowPayloadSlice(
+                parseRequiredValueFieldFromObjectSlice(
                     source,
-                    "type_name",
-                    "type",
+                    "flow",
                     "zux.spec.Component.parseSlice Component/ui/flow",
                 ),
-            },
+                "zux.spec.Component.parseSlice Component/ui/flow `flow`",
+            ),
         };
     }
     if (comptimeEql(kind_path, "ui/overlay")) {
@@ -701,17 +1223,11 @@ fn parsePathKindValue(
     }
     if (stdz.mem.eql(u8, kind_path, "ui/flow")) {
         return .{
-            .flow = .{
-                .type_name = try parseRequiredAlternativeStringFieldValue(
-                    allocator,
-                    object,
-                    "type_name",
-                    "type",
-                    error.MissingFlowTypeName,
-                    error.ExpectedFlowTypeNameString,
-                    error.EmptyFlowTypeName,
-                ),
-            },
+            .flow = try parseFlowPayloadValue(
+                allocator,
+                object.get("flow") orelse return error.MissingFlowSpec,
+                "zux.spec.Component.parseJsonValue Component/ui/flow `flow`",
+            ),
         };
     }
     if (stdz.mem.eql(u8, kind_path, "ui/overlay")) {
@@ -1192,19 +1708,11 @@ fn parseKindValueComptime(comptime value: stdz.json.Value) Kind {
         };
     }
     if (comptimeEql(kind_name, "flow")) {
-        const payload_object = expectObjectComptime(
-            payload,
-            "zux.spec.Component.parseJsonValue flow payload",
-        );
         return .{
-            .flow = .{
-                .type_name = parseNonEmptyStringValueComptime(
-                    payload_object.get("type_name") orelse
-                        payload_object.get("type") orelse
-                        @compileError("zux.spec.Component.parseJsonValue flow payload requires a `type_name` or `type` field"),
-                    "zux.spec.Component.parseJsonValue flow payload `type_name`",
-                ),
-            },
+            .flow = parseFlowPayloadComptime(
+                payload,
+                "zux.spec.Component.parseJsonValue flow payload",
+            ),
         };
     }
     if (comptimeEql(kind_name, "overlay")) {
@@ -1498,7 +2006,16 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 \\{
                 \\  "label": "pairing",
                 \\  "id": 31,
-                \\  "type_name": "PairingFlow"
+                \\  "flow": {
+                \\    "initial": "idle",
+                \\    "nodes": ["idle", "searching", "confirming", "done"],
+                \\    "edges": [
+                \\      { "from": "idle", "to": "searching", "event": "start" },
+                \\      { "from": "idle", "to": "confirming", "event": "reenter" },
+                \\      { "from": "searching", "to": "done", "event": "found" },
+                \\      { "from": "confirming", "to": "done", "event": "confirm" }
+                \\    ]
+                \\  }
                 \\}
             ;
 
@@ -1508,7 +2025,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try testing.expectEqualStrings("pairing", parsed.label);
             try testing.expectEqual(@as(u32, 31), parsed.id);
             switch (parsed.kind) {
-                .flow => |flow_component| try testing.expectEqualStrings("PairingFlow", flow_component.type_name),
+                .flow => |flow_component| {
+                    try testing.expectEqualStrings("idle", flow_component.initial);
+                    try testing.expectEqual(@as(usize, 4), flow_component.nodes.len);
+                    try testing.expectEqual(@as(usize, 4), flow_component.edges.len);
+                    try testing.expectEqualStrings("confirming", flow_component.nodes[2]);
+                    try testing.expectEqualStrings("searching", flow_component.edges[0].to);
+                    try testing.expectEqualStrings("reenter", flow_component.edges[1].event);
+                },
                 else => return error.ExpectedFlowComponent,
             }
         }

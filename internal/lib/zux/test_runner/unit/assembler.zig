@@ -12,10 +12,10 @@ const ui_flow = @import("../../component/ui/flow.zig");
 
 const PairingFlow = blk: {
     var builder = ui_flow.Builder.init();
-    builder.addNode(.idle);
-    builder.addNode(.searching);
-    builder.setInitial(.idle);
-    builder.addEdge(.idle, .searching, .start);
+    builder.addNode("idle");
+    builder.addNode("searching");
+    builder.setInitial("idle");
+    builder.addEdge("idle", "searching", "start");
     break :blk builder.build();
 };
 

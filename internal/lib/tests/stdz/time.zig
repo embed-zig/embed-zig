@@ -12,6 +12,13 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
+            t.run("instant_stores_boot_relative_time", testing_mod.TestRunner.fromFn(lib, 16 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+                    _ = tt;
+                    _ = sub_allocator;
+                    try instantStoresBootRelativeTimeCase(lib);
+                }
+            }.run));
             t.run("timer_clamps_backward_jumps", testing_mod.TestRunner.fromFn(lib, 16 * 1024, struct {
                 fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
                     _ = tt;
@@ -54,6 +61,53 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
     return testing_mod.TestRunner.make(Runner).new(runner);
 }
 
+fn instantStoresBootRelativeTimeCase(comptime lib: type) !void {
+    const std = @import("std");
+    const TimeApi = @import("stdz").time;
+    const start_ns = 123 * TimeApi.ns_per_ms;
+    const end_ns = 130 * TimeApi.ns_per_ms;
+
+    const Impl = struct {
+        pub var index: usize = 0;
+        pub const samples = [_]i128{ start_ns, end_ns };
+
+        pub fn milliTimestamp() i64 {
+            return 0;
+        }
+
+        pub fn nanoTimestamp() i128 {
+            defer index += 1;
+            return samples[index];
+        }
+
+        pub const Instant = struct {
+            timestamp: i128,
+
+            pub fn now() error{Unsupported}!Instant {
+                return .{ .timestamp = nanoTimestamp() };
+            }
+
+            pub fn order(self: Instant, other: Instant) @import("std").math.Order {
+                return @import("std").math.order(self.timestamp, other.timestamp);
+            }
+
+            pub fn since(self: Instant, earlier: Instant) u64 {
+                return @intCast(self.timestamp - earlier.timestamp);
+            }
+        };
+    };
+
+    const time = TimeApi.make(Impl);
+    Impl.index = 0;
+
+    const boot_at_start = try time.Instant.now();
+    const boot_at_end = try time.Instant.now();
+
+    try lib.testing.expectEqual(@as(u64, 7 * TimeApi.ns_per_ms), boot_at_end.since(boot_at_start));
+    try lib.testing.expectEqual(std.math.Order.lt, boot_at_start.order(boot_at_end));
+    try lib.testing.expectEqual(std.math.Order.eq, boot_at_start.order(.{ .timestamp = start_ns }));
+}
+
 fn timerClampsBackwardJumpsCase(comptime lib: type) !void {
     const TimeApi = @import("stdz").time;
 
@@ -69,6 +123,22 @@ fn timerClampsBackwardJumpsCase(comptime lib: type) !void {
             defer index += 1;
             return samples[index];
         }
+
+        pub const Instant = struct {
+            timestamp: i128,
+
+            pub fn now() error{Unsupported}!Instant {
+                return .{ .timestamp = nanoTimestamp() };
+            }
+
+            pub fn order(self: Instant, other: Instant) @import("std").math.Order {
+                return @import("std").math.order(self.timestamp, other.timestamp);
+            }
+
+            pub fn since(self: Instant, earlier: Instant) u64 {
+                return @intCast(self.timestamp - earlier.timestamp);
+            }
+        };
     };
 
     const time = TimeApi.make(Impl);
@@ -98,6 +168,22 @@ fn timerSaturatesElapsedToU64MaxCase(comptime lib: type) !void {
             defer index += 1;
             return samples[index];
         }
+
+        pub const Instant = struct {
+            timestamp: i128,
+
+            pub fn now() error{Unsupported}!Instant {
+                return .{ .timestamp = nanoTimestamp() };
+            }
+
+            pub fn order(self: Instant, other: Instant) @import("std").math.Order {
+                return @import("std").math.order(self.timestamp, other.timestamp);
+            }
+
+            pub fn since(self: Instant, earlier: Instant) u64 {
+                return @intCast(self.timestamp - earlier.timestamp);
+            }
+        };
     };
 
     const time = TimeApi.make(Impl);
@@ -126,6 +212,22 @@ fn timerHandlesI128DeltaOverflowCase(comptime lib: type) !void {
             defer index += 1;
             return samples[index];
         }
+
+        pub const Instant = struct {
+            timestamp: i128,
+
+            pub fn now() error{Unsupported}!Instant {
+                return .{ .timestamp = nanoTimestamp() };
+            }
+
+            pub fn order(self: Instant, other: Instant) std.math.Order {
+                return std.math.order(self.timestamp, other.timestamp);
+            }
+
+            pub fn since(self: Instant, earlier: Instant) u64 {
+                return @intCast(self.timestamp - earlier.timestamp);
+            }
+        };
     };
 
     const time = TimeApi.make(Impl);
@@ -149,6 +251,15 @@ fn realClockCase(comptime lib: type) !void {
     const ns2 = lib.time.nanoTimestamp();
     const elapsed_ns = ns2 - ns1;
     if (elapsed_ns <= 0) return error.NanoTimestampNonMonotonic;
+
+    {
+        const boot_at_start = try lib.time.Instant.now();
+        lib.Thread.sleep(1_000_000);
+        const boot_at_end = try lib.time.Instant.now();
+        const since_boot = boot_at_end.since(boot_at_start);
+        if (since_boot == 0) return error.InstantSinceNonPositive;
+        if (boot_at_start.order(boot_at_end) != .lt) return error.InstantOrderUnexpected;
+    }
 
     {
         var timer = try lib.time.Timer.start();

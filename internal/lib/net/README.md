@@ -158,8 +158,10 @@ under `lib/net/test_runner/integration/`, all wired from `lib/tests.zig`.
 
 - `lib/net.zig` exports only `net.test_runner.unit` and `net.test_runner.integration`.
 - `lib/tests.zig` wires `net/unit/std`, `net/unit/embed_std`, `net/integration/std`, and `net/integration/embed_std`.
+- `lib/tests.zig` also wires `net/integration2/std` and `net/integration2/embed_std` through `net.test_runner.integration.make2(...)` for direct `Runtime` coverage.
 - `lib/net/test_runner/unit.zig` fans out into topic suites such as `netip`, `http`, `textproto`, `cmux`, `resolver`, `tls`, `fd`, and `core`.
 - `lib/net/test_runner/integration.zig` fans out into deterministic local runners such as `fd_stream`, `tcp`, `resolver_local`, `cmux_http_tcp`, `http_transport`, and `https_transport`.
+- `lib/net/test_runner/integration/runtime.zig` is the focused `net.make2(...).Runtime` integration slice used by those `integration2/*` entries.
 - Host-only or optional public-network helpers live under `lib/net/test_runner/integration/compat/` and `integration/public/` and are not wired from `integration.zig`; examples include `integration/compat/tls_std_compat.zig`, `integration/public/tls_dial.zig`, and `integration/public/resolver_dns.zig`.
 
 ## net (root)

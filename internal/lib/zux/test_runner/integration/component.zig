@@ -1,22 +1,7 @@
 const testing_api = @import("testing");
 const Builder = @import("../../spec/Builder.zig");
 const bt = @import("component/bt.zig");
-const ui_flow = @import("../../component/ui/flow.zig");
 const imu = @import("component/imu.zig");
-
-const PairingFlow = blk: {
-    var builder = ui_flow.Builder.init();
-    builder.addNode(.idle);
-    builder.addNode(.searching);
-    builder.addNode(.confirming);
-    builder.addNode(.done);
-    builder.setInitial(.idle);
-    builder.addEdge(.idle, .searching, .start);
-    builder.addEdge(.idle, .confirming, .reenter);
-    builder.addEdge(.searching, .done, .found);
-    builder.addEdge(.confirming, .done, .confirm);
-    break :blk builder.build();
-};
 
 pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
     const SpecType = comptime blk: {
@@ -52,12 +37,11 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
 
     const story_runner = comptime blk: {
         var spec = SpecType.init();
-        spec.setFlow("pairing", PairingFlow);
-            break :blk spec.testRunner(lib, .{
-                .pipeline = .{
-                    .tick_interval_ns = lib.time.ns_per_ms,
-                },
-            }, Channel);
+        break :blk spec.testRunner(lib, .{
+            .pipeline = .{
+                .tick_interval_ns = lib.time.ns_per_ms,
+            },
+        }, Channel);
     };
 
     const Runner = struct {

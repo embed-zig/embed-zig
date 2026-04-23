@@ -197,6 +197,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const Lib = struct {
                 pub const mem = @import("stdz").mem;
                 pub const time = struct {
+                    pub const Instant = std.time.Instant;
+
                     pub fn milliTimestamp() i64 {
                         return std.time.milliTimestamp();
                     }
@@ -251,6 +253,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const Lib = struct {
                 pub const mem = @import("stdz").mem;
                 pub const time = struct {
+                    pub const Instant = std.time.Instant;
+
                     pub fn milliTimestamp() i64 {
                         return std.time.milliTimestamp();
                     }
@@ -293,6 +297,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const Lib = struct {
                 pub const mem = @import("stdz").mem;
                 pub const time = struct {
+                    pub const Instant = std.time.Instant;
+
                     pub fn milliTimestamp() i64 {
                         return std.time.milliTimestamp();
                     }
