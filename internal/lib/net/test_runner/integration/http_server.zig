@@ -1,22 +1,20 @@
 //! HTTP server runner — integration coverage for `http.Server`.
 
-const stdz = @import("stdz");
 const io = @import("io");
 const context_mod = @import("context");
 const fixtures = @import("../../tls/test_fixtures.zig");
-const net_mod = @import("../../../net.zig");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
-    const Cases = Suite(lib);
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+    const Cases = Suite(lib, net);
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -38,7 +36,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }
@@ -49,8 +47,8 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
     return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-fn Suite(comptime lib: type) type {
-    const Net = net_mod.make(lib);
+fn Suite(comptime lib: type, comptime net: type) type {
+    const Net = net;
     const Http = Net.http;
     const Thread = lib.Thread;
     return struct {
@@ -59,21 +57,21 @@ fn Suite(comptime lib: type) type {
         const expectEqualStrings = lib.testing.expectEqualStrings;
         const expectError = lib.testing.expectError;
 
-        fn addr4(port: u16) net_mod.netip.AddrPort {
-            return net_mod.netip.AddrPort.from4(.{ 127, 0, 0, 1 }, port);
+        fn addr4(port: u16) net.netip.AddrPort {
+            return net.netip.AddrPort.from4(.{ 127, 0, 0, 1 }, port);
         }
 
         const ServerRun = struct {
             allocator: lib.mem.Allocator,
-            listener: net_mod.Listener,
+            listener: net.Listener,
             port: u16,
             server_err: *?anyerror,
             thread: Thread,
 
             fn stop(self: *@This(), server: anytype) !void {
                 defer self.allocator.destroy(self.server_err);
-                self.listener.close();
                 server.close();
+                self.listener.close();
                 self.thread.join();
                 defer self.listener.deinit();
                 if (self.server_err.*) |err| {
@@ -127,13 +125,13 @@ fn Suite(comptime lib: type) type {
         };
 
         const WrappedListener = struct {
-            inner: net_mod.Listener,
+            inner: net.Listener,
 
-            pub fn listen(self: *@This()) net_mod.Listener.ListenError!void {
+            pub fn listen(self: *@This()) net.Listener.ListenError!void {
                 try self.inner.listen();
             }
 
-            pub fn accept(self: *@This()) net_mod.Listener.AcceptError!net_mod.Conn {
+            pub fn accept(self: *@This()) net.Listener.AcceptError!net.Conn {
                 return self.inner.accept();
             }
 
@@ -830,11 +828,11 @@ fn Suite(comptime lib: type) type {
 
             const inner = try Net.listen(allocator, .{ .address = addr4(0) });
             var wrapped = WrappedListener{ .inner = inner };
-            const listener = net_mod.Listener.init(&wrapped);
+            const listener = net.Listener.init(&wrapped);
             const port = try listenerPort(inner, Net);
             var server_err: ?anyerror = null;
             var thread = try Thread.spawn(server_spawn_config, struct {
-                fn exec(s: *Http.Server, ln: net_mod.Listener, err: *?anyerror) void {
+                fn exec(s: *Http.Server, ln: net.Listener, err: *?anyerror) void {
                     s.serve(ln) catch |serve_err| {
                         err.* = serve_err;
                     };
@@ -873,7 +871,7 @@ fn Suite(comptime lib: type) type {
                 .thread = undefined,
             };
             run.thread = try Thread.spawn(server_spawn_config, struct {
-                fn exec(s: *Http.Server, ln: net_mod.Listener, err: *?anyerror) void {
+                fn exec(s: *Http.Server, ln: net.Listener, err: *?anyerror) void {
                     s.serve(ln) catch |serve_err| {
                         err.* = serve_err;
                     };
@@ -897,7 +895,7 @@ fn Suite(comptime lib: type) type {
                 .thread = undefined,
             };
             run.thread = try Thread.spawn(server_spawn_config, struct {
-                fn exec(s: *Http.Server, ln: net_mod.Listener, err: *?anyerror) void {
+                fn exec(s: *Http.Server, ln: net.Listener, err: *?anyerror) void {
                     s.serve(ln) catch |serve_err| {
                         err.* = serve_err;
                     };
@@ -928,7 +926,7 @@ fn Suite(comptime lib: type) type {
             request_method: ?[]const u8 = null,
         };
 
-        fn readRawResponse(allocator: lib.mem.Allocator, conn: net_mod.Conn, options: ReadRawResponseOptions) !RawResponse {
+        fn readRawResponse(allocator: lib.mem.Allocator, conn: net.Conn, options: ReadRawResponseOptions) !RawResponse {
             var c = conn;
             var bytes = try lib.ArrayList(u8).initCapacity(allocator, 0);
             defer bytes.deinit(allocator);
@@ -972,7 +970,7 @@ fn Suite(comptime lib: type) type {
             };
         }
 
-        fn readFixedBody(allocator: lib.mem.Allocator, conn: net_mod.Conn, prefix: []const u8, total_len: usize) ![]u8 {
+        fn readFixedBody(allocator: lib.mem.Allocator, conn: net.Conn, prefix: []const u8, total_len: usize) ![]u8 {
             var bytes = try lib.ArrayList(u8).initCapacity(allocator, total_len);
             errdefer bytes.deinit(allocator);
             try bytes.appendSlice(allocator, prefix[0..@min(prefix.len, total_len)]);
@@ -987,8 +985,8 @@ fn Suite(comptime lib: type) type {
             return bytes.toOwnedSlice(allocator);
         }
 
-        fn readChunkedBody(allocator: lib.mem.Allocator, conn: net_mod.Conn, prefix: []const u8) ![]u8 {
-            var stream = io.PrefixReader(net_mod.Conn).init(conn, prefix);
+        fn readChunkedBody(allocator: lib.mem.Allocator, conn: net.Conn, prefix: []const u8) ![]u8 {
+            var stream = io.PrefixReader(net.Conn).init(conn, prefix);
             var body = lib.ArrayList(u8){};
             defer body.deinit(allocator);
             var line_buf: [128]u8 = undefined;
@@ -1065,12 +1063,12 @@ fn Suite(comptime lib: type) type {
             return bytes.toOwnedSlice(allocator);
         }
 
-        fn listenerPort(ln: net_mod.Listener, comptime NetNs: type) !u16 {
+        fn listenerPort(ln: net.Listener, comptime NetNs: type) !u16 {
             const listener = try ln.as(NetNs.TcpListener);
             return listener.port();
         }
 
-        fn tlsListenerPort(ln: net_mod.Listener, comptime NetNs: type) !u16 {
+        fn tlsListenerPort(ln: net.Listener, comptime NetNs: type) !u16 {
             const tls_listener = try ln.as(NetNs.tls.Listener);
             const tcp_impl = try tls_listener.inner.as(NetNs.TcpListener);
             return tcp_impl.port();

@@ -1,13 +1,12 @@
 //! Shared harness and IO helpers for HTTPS transport integration cases.
 
 const io = @import("io");
-const net_mod = @import("../../../../net.zig");
 const fixtures_mod = @import("../../../tls/test_fixtures.zig");
 
-pub fn make(comptime lib: type) type {
-    const NetNs = net_mod.make(lib);
+pub fn make(comptime lib: type, comptime net: type) type {
+    const NetNs = net;
     const HttpNs = NetNs.http;
-    const AddrPort = net_mod.netip.AddrPort;
+    const AddrPort = net.netip.AddrPort;
     const Thread = lib.Thread;
 
     return struct {
@@ -78,24 +77,24 @@ pub fn make(comptime lib: type) type {
             return config;
         }
 
-        pub fn tcpListenerPort(ln: net_mod.Listener, comptime NetApi: type) !u16 {
+        pub fn tcpListenerPort(ln: net.Listener, comptime NetApi: type) !u16 {
             _ = NetApi;
             const listener = try ln.as(NetNs.TcpListener);
             return listener.port();
         }
 
-        pub fn tlsListenerPort(ln: net_mod.Listener, comptime NetApi: type) !u16 {
+        pub fn tlsListenerPort(ln: net.Listener, comptime NetApi: type) !u16 {
             _ = NetApi;
             const tls_listener = try ln.as(NetNs.tls.Listener);
             const tcp_impl = try tls_listener.inner.as(NetNs.TcpListener);
             return tcp_impl.port();
         }
 
-        pub fn bridgeTunnel(client: net_mod.Conn, upstream: net_mod.Conn) !void {
+        pub fn bridgeTunnel(client: net.Conn, upstream: net.Conn) !void {
             var slot = BridgeErrorSlot{};
             var stop = BridgeStopFlag{};
             const upstream_thread = try Thread.spawn(test_spawn_config, struct {
-                fn run(src: net_mod.Conn, dst: net_mod.Conn, err_slot: *BridgeErrorSlot, stop_flag: *BridgeStopFlag) void {
+                fn run(src: net.Conn, dst: net.Conn, err_slot: *BridgeErrorSlot, stop_flag: *BridgeStopFlag) void {
                     bridgeOneWay(src, dst, err_slot, stop_flag);
                 }
             }.run, .{ client, upstream, &slot, &stop });
@@ -106,7 +105,7 @@ pub fn make(comptime lib: type) type {
             if (slot.load()) |err| return err;
         }
 
-        fn bridgeOneWay(src: net_mod.Conn, dst: net_mod.Conn, err_slot: *BridgeErrorSlot, stop_flag: *BridgeStopFlag) void {
+        fn bridgeOneWay(src: net.Conn, dst: net.Conn, err_slot: *BridgeErrorSlot, stop_flag: *BridgeStopFlag) void {
             var reader = src;
             var writer = dst;
             reader.setReadTimeout(250);
@@ -150,7 +149,7 @@ pub fn make(comptime lib: type) type {
             }
         }
 
-        pub fn serveKeepAliveRequest(conn: net_mod.Conn, expected_request_line: []const u8, body: []const u8, close_conn: bool) !bool {
+        pub fn serveKeepAliveRequest(conn: net.Conn, expected_request_line: []const u8, body: []const u8, close_conn: bool) !bool {
             var c = conn;
             var req_buf: [4096]u8 = undefined;
             const req_head = try readRequestHead(conn, &req_buf);
@@ -168,7 +167,7 @@ pub fn make(comptime lib: type) type {
             return true;
         }
 
-        pub fn readRequestHead(conn: net_mod.Conn, buf: *[4096]u8) ![]const u8 {
+        pub fn readRequestHead(conn: net.Conn, buf: *[4096]u8) ![]const u8 {
             var filled: usize = 0;
             while (filled < buf.len) {
                 const n = try conn.read(buf[filled..]);

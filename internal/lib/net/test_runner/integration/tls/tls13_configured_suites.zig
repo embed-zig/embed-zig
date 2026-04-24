@@ -1,9 +1,8 @@
 const stdz = @import("stdz");
 const testing_api = @import("testing");
-const net_mod = @import("../../../../net.zig");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
@@ -16,7 +15,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             const Body = struct {
                 fn call(a: lib.mem.Allocator) !void {
-                    const Net = net_mod.make(lib);
+                    const Net = net;
                     for ([_]Net.tls.CipherSuite{
                         .TLS_AES_128_GCM_SHA256,
                         .TLS_AES_256_GCM_SHA384,

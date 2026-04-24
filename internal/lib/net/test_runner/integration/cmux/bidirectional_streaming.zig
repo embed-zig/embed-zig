@@ -1,6 +1,5 @@
 const io = @import("io");
 const testing_api = @import("testing");
-const net_mod = @import("../../../../net.zig");
 const http_harness = @import("test_utils/http_harness.zig");
 const raw_http = @import("test_utils/raw_http.zig");
 
@@ -17,15 +16,14 @@ fn parseStreamWriteResult(comptime lib: type, body: []const u8) !struct { bytes:
 
 // This case proves request-streaming and response-streaming over CMUX channels.
 // It intentionally uses separate DLCIs instead of claiming one-request duplex HTTP semantics.
-fn bidirectionalStreaming(comptime lib: type, alloc: lib.mem.Allocator) !void {
-    const net = net_mod.make(lib);
+fn bidirectionalStreaming(comptime lib: type, comptime net: type, alloc: lib.mem.Allocator) !void {
     const testing = lib.testing;
     const thread = lib.Thread;
 
     const Body = struct {
         fn run(cmux: *net.Cmux, a: lib.mem.Allocator) !void {
             {
-                var conn = try http_harness.dialHttpChannel(lib, cmux, 50);
+                var conn = try http_harness.dialHttpChannel(lib, net, cmux, 50);
                 defer conn.deinit();
 
                 var content_length_buf: [16]u8 = undefined;
@@ -47,11 +45,11 @@ fn bidirectionalStreaming(comptime lib: type, alloc: lib.mem.Allocator) !void {
                 var chunk: [http_harness.stream_write_chunk_bytes]u8 = undefined;
                 for (0..http_harness.stream_write_total_bytes / http_harness.stream_write_chunk_bytes) |i| {
                     @memset(chunk[0..], @as(u8, @intCast('0' + i)));
-                    try io.writeAll(net_mod.Conn, &conn, chunk[0..]);
+                    try io.writeAll(net.Conn, &conn, chunk[0..]);
                     thread.sleep(5 * lib.time.ns_per_ms);
                 }
 
-                const resp = try raw_http.readRawResponse(lib, a, conn);
+                const resp = try raw_http.readRawResponse(lib, net, a, conn);
                 defer a.free(resp.head);
                 defer a.free(resp.body);
 
@@ -62,14 +60,14 @@ fn bidirectionalStreaming(comptime lib: type, alloc: lib.mem.Allocator) !void {
             }
 
             {
-                var conn = try http_harness.dialHttpChannel(lib, cmux, 51);
+                var conn = try http_harness.dialHttpChannel(lib, net, cmux, 51);
                 defer conn.deinit();
 
                 try raw_http.writeRawRequest(lib, a, &conn, .{
                     .target = "/stream/read",
                 });
 
-                const resp = try raw_http.readRawResponse(lib, a, conn);
+                const resp = try raw_http.readRawResponse(lib, net, a, conn);
                 defer a.free(resp.head);
                 defer a.free(resp.body);
 
@@ -80,13 +78,13 @@ fn bidirectionalStreaming(comptime lib: type, alloc: lib.mem.Allocator) !void {
         }
     };
 
-    try http_harness.withCmuxHttpServer(lib, alloc, Body.run);
+    try http_harness.withCmuxHttpServer(lib, net, alloc, Body.run);
 }
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     return testing_api.TestRunner.fromFn(lib, 1024 * 1024, struct {
         fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            try bidirectionalStreaming(lib, allocator);
+            try bidirectionalStreaming(lib, net, allocator);
         }
     }.run);
 }

@@ -2,11 +2,10 @@ const stdz = @import("stdz");
 const context_mod = @import("context");
 const io = @import("io");
 const testing_api = @import("testing");
-const net_mod = @import("../../../../net.zig");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
-    const Utils = test_utils.make(lib);
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(lib, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
@@ -68,7 +67,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     try Utils.withServerState(testing.allocator, 
                         State{},
                         struct {
-                            fn run(conn: net_mod.Conn, _: *State) !void {
+                            fn run(conn: net.Conn, _: *State) !void {
                                 var c = conn;
                                 var req_buf: [4096]u8 = undefined;
                                 const req_head = try Utils.readRequestHead(conn, &req_buf);

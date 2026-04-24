@@ -16,23 +16,22 @@
 //!   8. deinit() waits for all outstanding lookups to finish cleanup
 
 const std = @import("std");
+const context_mod = @import("context");
+const sync = @import("sync");
 const Conn = @import("Conn.zig");
 const dialer = @import("Dialer.zig");
 const http_mod = @import("http.zig");
 const netip = @import("netip.zig");
+const runtime_mod = @import("runtime.zig");
 const tls_mod = @import("tls.zig");
-const context_mod = @import("context");
-const sync = @import("sync");
-const testing_api = @import("testing");
 
-pub fn Resolver(comptime lib: type) type {
-    const posix = lib.posix;
+pub fn Resolver(comptime lib: type, comptime net: type) type {
     const Addr = netip.Addr;
     const AddrPort = netip.AddrPort;
     const ContextApi = context_mod.make(lib);
-    const Dialer = dialer.Dialer(lib);
-    const Http = http_mod.make(lib);
-    const Tls = tls_mod.make(lib);
+    const Dialer = dialer.Dialer(lib, net);
+    const Http = http_mod.make(lib, net);
+    const Tls = tls_mod.make(lib, net);
     const Atomic = lib.atomic.Value;
     const mem = lib.mem;
     const Allocator = mem.Allocator;
@@ -181,8 +180,7 @@ pub fn Resolver(comptime lib: type) type {
             NoServerConfigured,
             Closed,
             OutOfMemory,
-        } || posix.SocketError || posix.SendToError || posix.RecvFromError ||
-            posix.ConnectError || posix.SendError || posix.SetSockOptError ||
+        } || runtime_mod.SocketError || runtime_mod.SetSockOptError ||
             Thread.SpawnError;
 
         pub fn init(allocator: Allocator, options: Options) Allocator.Error!Self {
@@ -1086,53 +1084,54 @@ pub fn Resolver(comptime lib: type) type {
     };
 }
 
-fn writeResolverTestU16(buf: *[512]u8, pos: *usize, value: u16) void {
-    buf[pos.*] = @truncate(value >> 8);
-    buf[pos.* + 1] = @truncate(value);
-    pos.* += 2;
-}
-
-fn readResolverTestU16(bytes: []const u8) u16 {
-    return @as(u16, bytes[0]) << 8 | bytes[1];
-}
-
-fn buildResolverTestAResponse(comptime R: type, req: []const u8, flags: u16, qdcount: u16, out: *[512]u8) !usize {
-    if (req.len < 12) return error.InvalidResponse;
-
-    var pos: usize = 0;
-    writeResolverTestU16(out, &pos, readResolverTestU16(req[0..2]));
-    writeResolverTestU16(out, &pos, flags);
-    writeResolverTestU16(out, &pos, qdcount);
-    writeResolverTestU16(out, &pos, 1);
-    writeResolverTestU16(out, &pos, 0);
-    writeResolverTestU16(out, &pos, 0);
-
-    const question = req[12..];
-    if (pos + question.len + 16 > out.len) return error.InvalidResponse;
-    @memcpy(out[pos..][0..question.len], question);
-    pos += question.len;
-
-    out[pos] = 0xC0;
-    out[pos + 1] = 0x0C;
-    pos += 2;
-    writeResolverTestU16(out, &pos, R.QTYPE_A);
-    writeResolverTestU16(out, &pos, R.QCLASS_IN);
-    out[pos] = 0;
-    out[pos + 1] = 0;
-    out[pos + 2] = 0x01;
-    out[pos + 3] = 0x2C;
-    pos += 4;
-    writeResolverTestU16(out, &pos, 4);
-    @memcpy(out[pos..][0..4], &[_]u8{ 1, 2, 3, 4 });
-    pos += 4;
-    return pos;
-}
-
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
+    const testing_api = @import("testing");
     return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
+        fn writeResolverTestU16(buf: *[512]u8, pos: *usize, value: u16) void {
+            buf[pos.*] = @truncate(value >> 8);
+            buf[pos.* + 1] = @truncate(value);
+            pos.* += 2;
+        }
+
+        fn readResolverTestU16(bytes: []const u8) u16 {
+            return @as(u16, bytes[0]) << 8 | bytes[1];
+        }
+
+        fn buildResolverTestAResponse(comptime R: type, req: []const u8, flags: u16, qdcount: u16, out: *[512]u8) !usize {
+            if (req.len < 12) return error.InvalidResponse;
+
+            var pos: usize = 0;
+            writeResolverTestU16(out, &pos, readResolverTestU16(req[0..2]));
+            writeResolverTestU16(out, &pos, flags);
+            writeResolverTestU16(out, &pos, qdcount);
+            writeResolverTestU16(out, &pos, 1);
+            writeResolverTestU16(out, &pos, 0);
+            writeResolverTestU16(out, &pos, 0);
+
+            const question = req[12..];
+            if (pos + question.len + 16 > out.len) return error.InvalidResponse;
+            @memcpy(out[pos..][0..question.len], question);
+            pos += question.len;
+
+            out[pos] = 0xC0;
+            out[pos + 1] = 0x0C;
+            pos += 2;
+            writeResolverTestU16(out, &pos, R.QTYPE_A);
+            writeResolverTestU16(out, &pos, R.QCLASS_IN);
+            out[pos] = 0;
+            out[pos + 1] = 0;
+            out[pos + 2] = 0x01;
+            out[pos + 3] = 0x2C;
+            pos += 4;
+            writeResolverTestU16(out, &pos, 4);
+            @memcpy(out[pos..][0..4], &[_]u8{ 1, 2, 3, 4 });
+            pos += 4;
+            return pos;
+        }
+
         fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
             const testing = lib.testing;
-            const R = Resolver(lib);
+            const R = Resolver(lib, net);
 
             {
                 var req_buf: [512]u8 = undefined;

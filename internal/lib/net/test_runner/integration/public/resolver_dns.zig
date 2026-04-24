@@ -8,17 +8,17 @@
 //! Usage:
 //!   const runner = @import("net/test_runner/integration/public/resolver_dns.zig").make(
 //!       lib,
+//!       net,
 //!       &.{ "223.5.5.5", "223.6.6.6" },
 //!       "dns.alidns.com",
 //!   );
 //!   t.run("net/resolver_dns", runner);
 
 const stdz = @import("stdz");
-const net_mod = @import("../../../../net.zig");
 const resolver_mod = @import("../../../Resolver.zig");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type, comptime ips: []const []const u8, comptime server_name: []const u8) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type, comptime ips: []const []const u8, comptime server_name: []const u8) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
@@ -29,7 +29,7 @@ pub fn make(comptime lib: type, comptime ips: []const []const u8, comptime serve
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
-            runImpl(lib, t, allocator, ips, server_name) catch |err| {
+            runImpl(lib, net, t, allocator, ips, server_name) catch |err| {
                 t.logErrorf("resolver_dns runner failed: {}", .{err});
                 return false;
             };
@@ -49,14 +49,15 @@ pub fn make(comptime lib: type, comptime ips: []const []const u8, comptime serve
 
 fn runImpl(
     comptime lib: type,
+    comptime net: type,
     t: *testing_api.T,
     alloc: lib.mem.Allocator,
     comptime ips: []const []const u8,
     comptime server_name: []const u8,
 ) !void {
     _ = t;
-    const R = resolver_mod.Resolver(lib);
-    const Addr = net_mod.netip.Addr;
+    const R = resolver_mod.Resolver(lib, net);
+    const Addr = net.netip.Addr;
     const testing = struct {
         pub var allocator: lib.mem.Allocator = undefined;
         pub const expect = lib.testing.expect;

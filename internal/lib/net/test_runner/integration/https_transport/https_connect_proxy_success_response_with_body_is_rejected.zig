@@ -1,11 +1,10 @@
 const stdz = @import("stdz");
 const io = @import("io");
-const net_mod = @import("../../../../net.zig");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
-    const Utils = test_utils.make(lib);
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make(lib, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 3 * 1024 * 1024 },
@@ -68,7 +67,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     defer testing.allocator.free(proxy_raw_url);
                     var options = Utils.tlsTransportOptions();
                     options.https_proxy = .{
-                        .url = try net_mod.url.parse(proxy_raw_url),
+                        .url = try net.url.parse(proxy_raw_url),
                     };
                     var transport = try Http.Transport.init(testing.allocator, options);
                     defer transport.deinit();

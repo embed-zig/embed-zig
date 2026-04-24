@@ -10,6 +10,11 @@
 //!   // raw I/O
 //!   _ = try conn.write("hello");
 //!   const n = try conn.read(&buf);
+//!
+//! Concurrency note:
+//! implementations may support one blocked reader and one blocked writer at the
+//! same time, but concurrent operations in the same direction are not part of
+//! the shared Conn contract.
 
 const Conn = @This();
 

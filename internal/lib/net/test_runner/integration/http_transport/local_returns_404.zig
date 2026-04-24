@@ -2,8 +2,8 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
-    const Utils = test_utils.make(lib);
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(lib, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },

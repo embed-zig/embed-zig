@@ -1,9 +1,8 @@
 const stdz = @import("stdz");
 const testing_api = @import("testing");
-const net_mod = @import("../../../../net.zig");
 const tcp_test_utils = @import("../tcp/test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
@@ -16,7 +15,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             const Body = struct {
                 fn call(a: lib.mem.Allocator) !void {
-                    const Net = net_mod.make(lib);
+                    const Net = net;
                     var inner = try Net.listen(a, .{
                         .address = tcp_test_utils.addr4(.{ 127, 0, 0, 1 }, 0),
                     });

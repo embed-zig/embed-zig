@@ -20,7 +20,7 @@ const NetListener = @import("Listener.zig");
 const tcp_listener = @import("TcpListener.zig");
 const Context = @import("context").Context;
 
-pub fn make(comptime lib: type) type {
+pub fn make(comptime lib: type, comptime net: type) type {
     const C = common.make(lib);
     const A = alert.make(lib);
     const E = extensions.make(lib);
@@ -28,12 +28,12 @@ pub fn make(comptime lib: type) type {
     const R = record.make(lib);
     const CH = client_handshake.make(lib);
     const SH = server_handshake.make(lib);
-    const TC = conn_impl.Conn(lib);
-    const SC = server_conn_impl.ServerConn(lib);
-    const TL = listener_impl.Listener(lib);
-    const TlsDialer = dialer_impl.Dialer(lib);
-    const NTL = tcp_listener.TcpListener(lib);
-    const NetDialer = @import("Dialer.zig").Dialer(lib);
+    const TC = conn_impl.Conn(lib, net);
+    const SC = server_conn_impl.ServerConn(lib, net);
+    const TL = listener_impl.Listener(lib, net);
+    const TlsDialer = dialer_impl.Dialer(lib, net);
+    const NTL = tcp_listener.TcpListener(lib, net);
+    const NetDialer = @import("Dialer.zig").Dialer(lib, net);
 
     return struct {
         pub const ProtocolVersion = C.ProtocolVersion;
@@ -177,4 +177,248 @@ pub fn make(comptime lib: type) type {
             return ln;
         }
     };
+}
+
+pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
+    const testing_api = @import("testing");
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(_: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = allocator;
+
+            t.run("alert", alert.TestRunner(lib));
+            t.run("common", common.TestRunner(lib));
+            t.run("extensions", extensions.TestRunner(lib));
+            t.run("kdf", kdf.TestRunner(lib));
+            t.run("record", record.TestRunner(lib));
+            t.run("client_handshake", client_handshake.TestRunner(lib));
+            t.run("server_handshake", server_handshake.TestRunner(lib));
+            t.run("make2_conn_context", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
+                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+                    const net_root = @import("../net.zig");
+                    const ContextApi = @import("context").make(lib);
+                    const runtime_mod = net_root.runtime;
+                    const FakeRuntimeImpl = struct {
+                        pub const Tcp = struct {
+                            closed: bool = false,
+
+                            pub fn close(self: *@This()) void {
+                                self.closed = true;
+                            }
+
+                            pub fn deinit(self: *@This()) void {
+                                _ = self;
+                            }
+
+                            pub fn shutdown(self: *@This(), how: runtime_mod.ShutdownHow) runtime_mod.SocketError!void {
+                                _ = self;
+                                _ = how;
+                            }
+
+                            pub fn signal(self: *@This(), ev: runtime_mod.SignalEvent) void {
+                                _ = self;
+                                _ = ev;
+                            }
+
+                            pub fn bind(self: *@This(), addr: net_root.netip.AddrPort) runtime_mod.SocketError!void {
+                                _ = self;
+                                _ = addr;
+                            }
+
+                            pub fn listen(self: *@This(), backlog: u31) runtime_mod.SocketError!void {
+                                _ = self;
+                                _ = backlog;
+                            }
+
+                            pub fn accept(self: *@This(), remote: ?*net_root.netip.AddrPort) runtime_mod.SocketError!Tcp {
+                                _ = self;
+                                _ = remote;
+                                return error.Unexpected;
+                            }
+
+                            pub fn connect(self: *@This(), addr: net_root.netip.AddrPort) runtime_mod.SocketError!void {
+                                _ = self;
+                                _ = addr;
+                            }
+
+                            pub fn finishConnect(self: *@This()) runtime_mod.SocketError!void {
+                                _ = self;
+                            }
+
+                            pub fn recv(self: *@This(), buf: []u8) runtime_mod.SocketError!usize {
+                                _ = self;
+                                _ = buf;
+                                return error.Unexpected;
+                            }
+
+                            pub fn send(self: *@This(), buf: []const u8) runtime_mod.SocketError!usize {
+                                _ = self;
+                                _ = buf;
+                                return error.Unexpected;
+                            }
+
+                            pub fn localAddr(self: *@This()) runtime_mod.SocketError!net_root.netip.AddrPort {
+                                _ = self;
+                                return net_root.netip.AddrPort.from4(.{ 0, 0, 0, 0 }, 0);
+                            }
+
+                            pub fn remoteAddr(self: *@This()) runtime_mod.SocketError!net_root.netip.AddrPort {
+                                _ = self;
+                                return net_root.netip.AddrPort.from4(.{ 0, 0, 0, 0 }, 0);
+                            }
+
+                            pub fn setOpt(self: *@This(), opt: runtime_mod.TcpOption) runtime_mod.SetSockOptError!void {
+                                _ = self;
+                                _ = opt;
+                            }
+
+                            pub fn poll(self: *@This(), want: runtime_mod.PollEvents, timeout_ms: ?u32) runtime_mod.PollError!runtime_mod.PollEvents {
+                                _ = self;
+                                _ = want;
+                                _ = timeout_ms;
+                                return error.Unexpected;
+                            }
+                        };
+
+                        pub const Udp = struct {
+                            closed: bool = false,
+
+                            pub fn close(self: *@This()) void {
+                                self.closed = true;
+                            }
+
+                            pub fn deinit(self: *@This()) void {
+                                _ = self;
+                            }
+
+                            pub fn signal(self: *@This(), ev: runtime_mod.SignalEvent) void {
+                                _ = self;
+                                _ = ev;
+                            }
+
+                            pub fn bind(self: *@This(), addr: net_root.netip.AddrPort) runtime_mod.SocketError!void {
+                                _ = self;
+                                _ = addr;
+                            }
+
+                            pub fn connect(self: *@This(), addr: net_root.netip.AddrPort) runtime_mod.SocketError!void {
+                                _ = self;
+                                _ = addr;
+                            }
+
+                            pub fn finishConnect(self: *@This()) runtime_mod.SocketError!void {
+                                _ = self;
+                            }
+
+                            pub fn recv(self: *@This(), buf: []u8) runtime_mod.SocketError!usize {
+                                _ = self;
+                                _ = buf;
+                                return error.Unexpected;
+                            }
+
+                            pub fn recvFrom(self: *@This(), buf: []u8, src: ?*net_root.netip.AddrPort) runtime_mod.SocketError!usize {
+                                _ = self;
+                                _ = buf;
+                                _ = src;
+                                return error.Unexpected;
+                            }
+
+                            pub fn send(self: *@This(), buf: []const u8) runtime_mod.SocketError!usize {
+                                _ = self;
+                                _ = buf;
+                                return error.Unexpected;
+                            }
+
+                            pub fn sendTo(self: *@This(), buf: []const u8, dst: net_root.netip.AddrPort) runtime_mod.SocketError!usize {
+                                _ = self;
+                                _ = buf;
+                                _ = dst;
+                                return error.Unexpected;
+                            }
+
+                            pub fn localAddr(self: *@This()) runtime_mod.SocketError!net_root.netip.AddrPort {
+                                _ = self;
+                                return net_root.netip.AddrPort.from4(.{ 0, 0, 0, 0 }, 0);
+                            }
+
+                            pub fn remoteAddr(self: *@This()) runtime_mod.SocketError!net_root.netip.AddrPort {
+                                _ = self;
+                                return net_root.netip.AddrPort.from4(.{ 0, 0, 0, 0 }, 0);
+                            }
+
+                            pub fn setOpt(self: *@This(), opt: runtime_mod.UdpOption) runtime_mod.SetSockOptError!void {
+                                _ = self;
+                                _ = opt;
+                            }
+
+                            pub fn poll(self: *@This(), want: runtime_mod.PollEvents, timeout_ms: ?u32) runtime_mod.PollError!runtime_mod.PollEvents {
+                                _ = self;
+                                _ = want;
+                                _ = timeout_ms;
+                                return error.Unexpected;
+                            }
+                        };
+
+                        pub fn tcp(domain: runtime_mod.Domain) runtime_mod.CreateError!Tcp {
+                            _ = domain;
+                            return .{};
+                        }
+
+                        pub fn udp(domain: runtime_mod.Domain) runtime_mod.CreateError!Udp {
+                            _ = domain;
+                            return .{};
+                        }
+                    };
+                    const FakeNet = net_root.make2(lib, FakeRuntimeImpl);
+
+                    var ctx_api = try ContextApi.init(case_allocator);
+                    defer ctx_api.deinit();
+
+                    var io_ctx = try ctx_api.withCancel(ctx_api.background());
+                    defer io_ctx.deinit();
+
+                    const socket = try FakeNet.Runtime.tcp(.inet);
+                    var inner = try FakeNet.TcpConn.initFromSocket(case_allocator, socket);
+                    errdefer inner.deinit();
+
+                    var tls_conn = try FakeNet.tls.client(case_allocator, inner, .{
+                        .server_name = "example.com",
+                        .insecure_skip_verify = true,
+                    });
+                    defer tls_conn.deinit();
+
+                    const typed_tls = try tls_conn.as(FakeNet.tls.Conn);
+                    const typed_tcp = try typed_tls.inner.as(FakeNet.TcpConn);
+
+                    try typed_tls.setReadContext(io_ctx);
+                    try typed_tls.setWriteContext(io_ctx);
+                    try lib.testing.expect(typed_tcp.read_ctx != null);
+                    try lib.testing.expect(typed_tcp.write_ctx != null);
+
+                    try typed_tls.setReadContext(null);
+                    try typed_tls.setWriteContext(null);
+                    try lib.testing.expect(typed_tcp.read_ctx == null);
+                    try lib.testing.expect(typed_tcp.write_ctx == null);
+                }
+            }.run));
+            t.run("Conn", conn_impl.TestRunner(lib, net));
+            t.run("ServerConn", server_conn_impl.TestRunner(lib, net));
+            return t.wait();
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

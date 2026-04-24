@@ -1,6 +1,8 @@
 const NetConn = @import("../Conn.zig");
+const root = @This();
 
-pub fn ServerConn(comptime lib: type) type {
+pub fn ServerConn(comptime lib: type, comptime net: type) type {
+    _ = net;
     const common = @import("common.zig").make(lib);
     const alert = @import("alert.zig").make(lib);
     const kdf = @import("kdf.zig").make(lib);
@@ -463,14 +465,14 @@ pub fn ServerConn(comptime lib: type) type {
         }
     };
 }
-const testing_api = @import("testing");
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
+    const testing_api = @import("testing");
     return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
         fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
             const testing = lib.testing;
             {
-                const ServerConnType = ServerConn(lib);
+                const ServerConnType = root.ServerConn(lib, net);
                 const record = @import("record.zig").make(lib);
                 const fixtures = @import("test_fixtures.zig");
                 
@@ -514,7 +516,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ServerConnType = ServerConn(lib);
+                const ServerConnType = root.ServerConn(lib, net);
                 const fixtures = @import("test_fixtures.zig");
                 
                 const RawConn = struct {
@@ -546,7 +548,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ServerConnType = ServerConn(lib);
+                const ServerConnType = root.ServerConn(lib, net);
                 const fixtures = @import("test_fixtures.zig");
                 
                 const Helper = struct {
@@ -590,7 +592,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ServerConnType = ServerConn(lib);
+                const ServerConnType = root.ServerConn(lib, net);
                 const C = @import("common.zig").make(lib);
                 const R = @import("record.zig").make(lib);
                 const fixtures = @import("test_fixtures.zig");
@@ -672,7 +674,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ServerConnType = ServerConn(lib);
+                const ServerConnType = root.ServerConn(lib, net);
                 const common = @import("common.zig").make(lib);
                 const fixtures = @import("test_fixtures.zig");
                 
@@ -738,7 +740,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ServerConnType = ServerConn(lib);
+                const ServerConnType = root.ServerConn(lib, net);
                 const common = @import("common.zig").make(lib);
                 const fixtures = @import("test_fixtures.zig");
                 
@@ -789,7 +791,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ServerConnType = ServerConn(lib);
+                const ServerConnType = root.ServerConn(lib, net);
                 const fixtures = @import("test_fixtures.zig");
                 
                 const RawConn = struct {
@@ -830,7 +832,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ServerConnType = ServerConn(lib);
+                const ServerConnType = root.ServerConn(lib, net);
                 const fixtures = @import("test_fixtures.zig");
                 
                 const RawConn = struct {
@@ -868,7 +870,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ServerConnType = ServerConn(lib);
+                const ServerConnType = root.ServerConn(lib, net);
                 const CH = @import("client_handshake.zig").make(lib);
                 const SH = @import("server_handshake.zig").make(lib);
                 const fixtures = @import("test_fixtures.zig");
@@ -916,7 +918,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ServerConnType = ServerConn(lib);
+                const ServerConnType = root.ServerConn(lib, net);
                 const C = @import("common.zig").make(lib);
                 const SH = @import("server_handshake.zig").make(lib);
                 const fixtures = @import("test_fixtures.zig");

@@ -1,9 +1,8 @@
 const stdz = @import("stdz");
 const testing_api = @import("testing");
-const net = @import("../../../../net.zig");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -16,7 +15,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             const Body = struct {
                 fn call(a: lib.mem.Allocator) !void {
-                    const Net = net.make(lib);
+                    const Net = net;
                     const OneShotAllocator = test_utils.OneShotAllocatorType(lib);
 
                     var oom_alloc = OneShotAllocator{ .backing = a };

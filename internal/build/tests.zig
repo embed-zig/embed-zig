@@ -119,6 +119,9 @@ pub fn create(
         // Keep legacy test imports working while `stdz` fronts the runtime layer.
         test_mod.addImport("stdz", stdz_mod);
     }
+    if (b.modules.get("runtime_posix")) |runtime_posix_mod| {
+        test_mod.addImport("runtime_posix", runtime_posix_mod);
+    }
 
     inline for (@typeInfo(Libraries).@"struct".decls) |decl| {
         const mod_name = decl.name;
@@ -126,11 +129,17 @@ pub fn create(
         for (test_types) |test_type| {
             const module_step = getStep(steps.items, b.fmt("test-{s}-{s}", .{ test_type.label, mod_name }));
             const parent_step = getStep(steps.items, test_type.parent_name);
-
-            const compile_test = b.addTest(.{
-                .root_module = test_mod,
-                .filters = &.{b.fmt("{s}/{s}/", .{ mod_name, test_type.label })},
-            });
+            const default_filter = b.fmt("{s}/{s}/", .{ mod_name, test_type.label });
+            const compile_test = if (std.mem.eql(u8, mod_name, "net") and std.mem.eql(u8, test_type.label, "integration"))
+                b.addTest(.{
+                    .root_module = test_mod,
+                    .filters = &.{ default_filter, "net/integration2/" },
+                })
+            else
+                b.addTest(.{
+                    .root_module = test_mod,
+                    .filters = &.{default_filter},
+                });
             const run_test = b.addRunArtifact(compile_test);
             run_test.setName(b.fmt("{s}:{s}", .{ mod_name, test_type.label }));
             parent_step.dependOn(&run_test.step);

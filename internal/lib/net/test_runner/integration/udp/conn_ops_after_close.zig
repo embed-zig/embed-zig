@@ -1,10 +1,8 @@
 const stdz = @import("stdz");
 const testing_api = @import("testing");
-const net_mod = @import("../../../../net.zig");
-const sockaddr_mod = @import("../../../fd/SockAddr.zig");
 const test_utils = @import("../tcp/test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -17,16 +15,14 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             const Body = struct {
                 fn call(a: lib.mem.Allocator) !void {
-                    const Net = net_mod.make(lib);
-                    const posix = lib.posix;
-                    const SockAddr = sockaddr_mod.SockAddr(lib);
+                    var pc = try net.listenPacket(.{
+                        .allocator = a,
+                        .address = test_utils.addr4(.{ 127, 0, 0, 1 }, 0),
+                    });
+                    defer pc.deinit();
+                    const port = try (try pc.as(net.UdpConn)).boundPort();
 
-                    const fd = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
-                    errdefer posix.close(fd);
-                    const bind_sockaddr = try SockAddr.encode(test_utils.addr4(.{ 127, 0, 0, 1 }, 0));
-                    try posix.bind(fd, @ptrCast(&bind_sockaddr.storage), bind_sockaddr.len);
-
-                    var c = try Net.UdpConn.init(a, fd);
+                    var c = try net.dial(a, .udp, test_utils.addr4(.{ 127, 0, 0, 1 }, port));
                     defer c.deinit();
                     c.close();
 

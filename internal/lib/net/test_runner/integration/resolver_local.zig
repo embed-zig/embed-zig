@@ -4,29 +4,28 @@
 //! public network access and can be invoked directly from platform runners.
 //!
 //! Usage:
-//!   const runner = @import("net/test_runner/integration/resolver_local.zig").make(lib);
+//!   const runner = @import("net/test_runner/integration/resolver_local.zig").make(lib, net);
 //!   t.run("net/resolver_local", runner);
 
 const std = @import("std");
-const stdz = @import("stdz");
 const io = @import("io");
 const testing_api = @import("testing");
 const net_mod = @import("../../../net.zig");
 const context_mod = @import("context");
-const resolver_mod = @import("../../Resolver.zig");
 const fixtures = @import("../../tls/test_fixtures.zig");
+const spy_runtime_mod = @import("../test_utils/spy_runtime.zig");
 const Conn = net_mod.Conn;
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
-    const Cases = Suite(lib);
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+    const Cases = Suite(lib, net);
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -39,6 +38,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             t.run("lookup_host_resolves_via_tls_server", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Cases.lookupHostResolvesViaTlsServer));
             t.run("lookup_host_rejects_tls_server_without_config", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Cases.lookupHostRejectsTlsServerWithoutConfig));
             t.run("lookup_host_resolves_via_doh_server", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Cases.lookupHostResolvesViaDohServer));
+            t.run("lookup_host_resolves_via_doh_server_with_custom_runtime", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Cases.lookupHostResolvesViaDohServerWithCustomRuntime));
             t.run("lookup_host_rejects_doh_response_with_mismatched_id", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Cases.lookupHostRejectsDohResponseWithMismatchedId));
             t.run("lookup_host_rejects_doh_server_without_config", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Cases.lookupHostRejectsDohServerWithoutConfig));
             t.run("lookup_host_returns_partial_udp_dual_stack_result", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Cases.lookupHostReturnsPartialUdpDualStackResult));
@@ -54,7 +54,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }
@@ -65,12 +65,12 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
     return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-fn Suite(comptime lib: type) type {
-    const R = resolver_mod.Resolver(lib);
-    const Net = net_mod.make(lib);
-    const Addr = net_mod.netip.Addr;
-    const AddrPort = net_mod.netip.AddrPort;
-    const PacketConn = net_mod.PacketConn;
+fn Suite(comptime lib: type, comptime net: type) type {
+    const R = net.Resolver;
+    const Net = net;
+    const Addr = net.netip.Addr;
+    const AddrPort = net.netip.AddrPort;
+    const PacketConn = net.PacketConn;
     return struct {
         const expect = lib.testing.expect;
         const expectEqual = lib.testing.expectEqual;
@@ -104,6 +104,12 @@ fn Suite(comptime lib: type) type {
             var owned = options;
             owned.spawn_config = .{ .stack_size = worker_stack };
             return R.init(allocator, owned);
+        }
+
+        fn initResolverFor(comptime ResolverType: type, allocator: lib.mem.Allocator, worker_stack: usize, options: ResolverType.Options) !ResolverType {
+            var owned = options;
+            owned.spawn_config = .{ .stack_size = worker_stack };
+            return ResolverType.init(allocator, owned);
         }
 
         fn optionsDefaults(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
@@ -145,7 +151,7 @@ fn Suite(comptime lib: type) type {
 
                     var resp_buf: [512]u8 = undefined;
                     const resp_len = buildErrorResponse(R, req_buf[0..req.bytes_read], 3, &resp_buf) catch return;
-                    _ = server_pc.writeTo(resp_buf[0..resp_len], @ptrCast(&req.addr), req.addr_len) catch {};
+                    _ = server_pc.writeTo(resp_buf[0..resp_len], req.addr) catch {};
                 }
             }.run, .{negative_pc});
             defer negative_thread.join();
@@ -167,7 +173,7 @@ fn Suite(comptime lib: type) type {
 
                     var resp_buf: [512]u8 = undefined;
                     const resp_len = buildAResponse(R, req_buf[0..req.bytes_read], ip, &resp_buf) catch return;
-                    _ = server_pc.writeTo(resp_buf[0..resp_len], @ptrCast(&req.addr), req.addr_len) catch {};
+                    _ = server_pc.writeTo(resp_buf[0..resp_len], req.addr) catch {};
                 }
             }.run, .{ positive_pc, [4]u8{ 11, 22, 33, 44 } });
             defer positive_thread.join();
@@ -207,7 +213,7 @@ fn Suite(comptime lib: type) type {
 
                     var resp_buf: [512]u8 = undefined;
                     const resp_len = buildErrorResponse(R, req_buf[0..req.bytes_read], 3, &resp_buf) catch return;
-                    _ = server_pc.writeTo(resp_buf[0..resp_len], @ptrCast(&req.addr), req.addr_len) catch {};
+                    _ = server_pc.writeTo(resp_buf[0..resp_len], req.addr) catch {};
                 }
             }.run, .{pc});
             defer server_thread.join();
@@ -241,7 +247,7 @@ fn Suite(comptime lib: type) type {
 
                     var resp_buf: [512]u8 = undefined;
                     const resp_len = buildEmptySuccessResponse(R, req_buf[0..req.bytes_read], &resp_buf) catch return;
-                    _ = server_pc.writeTo(resp_buf[0..resp_len], @ptrCast(&req.addr), req.addr_len) catch {};
+                    _ = server_pc.writeTo(resp_buf[0..resp_len], req.addr) catch {};
                 }
             }.run, .{pc});
             defer server_thread.join();
@@ -428,6 +434,75 @@ fn Suite(comptime lib: type) type {
             try expectEqual([4]u8{ 61, 62, 63, 64 }, ip);
         }
 
+        fn lookupHostResolvesViaDohServerWithCustomRuntime(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const worker_stack: usize = 1024 * 1024;
+            const SpyImpl = spy_runtime_mod.make(lib, net.Runtime);
+            const SpyNet = net_mod.make2(lib, SpyImpl);
+            const SpyResolver = SpyNet.Resolver;
+
+            var listener = try Net.tls.listen(allocator, .{
+                .address = addr4(0),
+            }, .{
+                .certificates = &.{.{
+                    .chain = &.{fixtures.self_signed_cert_der[0..]},
+                    .private_key = .{ .ecdsa_p256_sha256 = fixtures.self_signed_key_scalar },
+                }},
+                .min_version = .tls_1_3,
+                .max_version = .tls_1_3,
+            });
+            defer listener.deinit();
+
+            const port = try tlsListenerPort(listener, Net);
+            const listener_impl = try listener.as(Net.tls.Listener);
+            var server_thread = try lib.Thread.spawn(threadSpawn(worker_stack), struct {
+                fn run(ln: *Net.tls.Listener, ip: [4]u8) void {
+                    var conn = ln.accept() catch return;
+                    defer conn.deinit();
+
+                    const tls_conn = conn.as(Net.tls.ServerConn) catch return;
+                    tls_conn.handshake() catch return;
+
+                    var head_buf: [2048]u8 = undefined;
+                    var body_buf: [512]u8 = undefined;
+                    const req = readHttpRequest(conn, &head_buf, &body_buf) catch return;
+                    if (!std.mem.eql(u8, req.method, "POST")) return;
+                    if (!std.mem.eql(u8, req.path, "/dns-query")) return;
+
+                    var dns_buf: [512]u8 = undefined;
+                    const dns_len = buildAResponse(SpyResolver, req.body, ip, &dns_buf) catch return;
+                    writeHttpDnsResponse(conn, 200, dns_buf[0..dns_len]) catch return;
+                }
+            }.run, .{ listener_impl, [4]u8{ 71, 72, 73, 74 } });
+            defer server_thread.join();
+
+            SpyImpl.reset();
+
+            var resolver = try initResolverFor(SpyResolver, allocator, worker_stack, .{
+                .servers = &.{.{
+                    .addr = addr4(port),
+                    .protocol = .doh,
+                    .tls_config = .{
+                        .server_name = "example.com",
+                        .verification = .self_signed,
+                        .min_version = .tls_1_3,
+                        .max_version = .tls_1_3,
+                    },
+                    .doh_path = "/dns-query",
+                }},
+                .mode = .ipv4_only,
+                .timeout_ms = 1000,
+                .attempts = 1,
+            });
+            defer resolver.deinit();
+
+            var addrs: [4]Addr = undefined;
+            const count = try resolver.lookupHost("doh-custom-runtime.test", &addrs);
+            try expectEqual(@as(usize, 1), count);
+            const ip = addrs[0].as4().?;
+            try expectEqual([4]u8{ 71, 72, 73, 74 }, ip);
+            try expect(SpyImpl.tcpCreateCount() != 0);
+        }
+
         fn lookupHostRejectsDohResponseWithMismatchedId(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             const worker_stack: usize = 1024 * 1024;
             var listener = try Net.tls.listen(allocator, .{
@@ -527,7 +602,7 @@ fn Suite(comptime lib: type) type {
                             R.QTYPE_AAAA => buildEmptySuccessResponse(R, req_pkt, &resp_buf) catch return,
                             else => return,
                         };
-                        _ = server_pc.writeTo(resp_buf[0..resp_len], @ptrCast(&req.addr), req.addr_len) catch {};
+                        _ = server_pc.writeTo(resp_buf[0..resp_len], req.addr) catch {};
                     }
                 }
             }.run, .{ pc, [4]u8{ 21, 22, 23, 24 } });
@@ -573,7 +648,7 @@ fn Suite(comptime lib: type) type {
                             R.QTYPE_AAAA => buildErrorResponse(R, req_pkt, 2, &resp_buf) catch return,
                             else => return,
                         };
-                        _ = server_pc.writeTo(resp_buf[0..resp_len], @ptrCast(&req.addr), req.addr_len) catch {};
+                        _ = server_pc.writeTo(resp_buf[0..resp_len], req.addr) catch {};
                     }
                 }
             }.run, .{ pc, [4]u8{ 25, 26, 27, 28 } });
@@ -619,7 +694,7 @@ fn Suite(comptime lib: type) type {
                             R.QTYPE_AAAA => buildEmptySuccessResponse(R, req_pkt, &resp_buf) catch return,
                             else => return,
                         };
-                        _ = server_pc.writeTo(resp_buf[0..resp_len], @ptrCast(&req.addr), req.addr_len) catch {};
+                        _ = server_pc.writeTo(resp_buf[0..resp_len], req.addr) catch {};
                     }
                 }
             }.run, .{pc});
@@ -658,7 +733,7 @@ fn Suite(comptime lib: type) type {
 
                     var resp_buf: [512]u8 = undefined;
                     const resp_len = buildAResponse(R, req_buf[0..req.bytes_read], ip, &resp_buf) catch return;
-                    _ = server_pc.writeTo(resp_buf[0..resp_len], @ptrCast(&req.addr), req.addr_len) catch {};
+                    _ = server_pc.writeTo(resp_buf[0..resp_len], req.addr) catch {};
                 }
             }.run, .{ pc, [4]u8{ 41, 42, 43, 44 } });
             defer server_thread.join();
@@ -752,7 +827,7 @@ fn Suite(comptime lib: type) type {
             const BoolAtomic = lib.atomic.Value(bool);
 
             const SlowServer = struct {
-                listener: net_mod.Listener,
+                listener: net.Listener,
                 client_hello_received: BoolAtomic = BoolAtomic.init(false),
                 release: BoolAtomic = BoolAtomic.init(false),
             };
@@ -807,7 +882,7 @@ fn Suite(comptime lib: type) type {
 
                     var resp_buf: [512]u8 = undefined;
                     const resp_len = buildAResponse(R, req_buf[0..req.bytes_read], ip, &resp_buf) catch return;
-                    _ = pc.writeTo(resp_buf[0..resp_len], @ptrCast(&req.addr), req.addr_len) catch {};
+                    _ = pc.writeTo(resp_buf[0..resp_len], req.addr) catch {};
                 }
             }.run, .{ fast_pc, &slow_server.client_hello_received, [4]u8{ 10, 20, 30, 40 } });
             errdefer fast_thread.join();
@@ -965,7 +1040,7 @@ fn Suite(comptime lib: type) type {
             const BoolAtomic = lib.atomic.Value(bool);
 
             const SlowServer = struct {
-                listener: net_mod.Listener,
+                listener: net.Listener,
                 accepted: BoolAtomic = BoolAtomic.init(false),
                 release: BoolAtomic = BoolAtomic.init(false),
             };

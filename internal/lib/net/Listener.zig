@@ -35,24 +35,11 @@ pub const ListenError = anyerror;
 
 pub const AcceptError = error{
     Closed,
-    BlockedByFirewall,
     ConnectionAborted,
     ConnectionResetByPeer,
-    DeadLock,
-    FileDescriptorNotASocket,
-    FileBusy,
-    Locked,
-    LockedRegionLimitExceeded,
-    NetworkSubsystemFailed,
-    OperationNotSupported,
     OutOfMemory,
     PermissionDenied,
-    ProcessFdQuotaExceeded,
-    ProtocolFailure,
     SocketNotListening,
-    SystemFdQuotaExceeded,
-    SystemResources,
-    WouldBlock,
     Unexpected,
 };
 

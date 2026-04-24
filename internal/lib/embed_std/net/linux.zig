@@ -102,13 +102,12 @@ fn setNonBlocking(fd: posix.socket_t) !void {
 fn setNoSigPipe(_: posix.socket_t) void {}
 
 fn matchesWant(got: runtime.PollEvents, want: runtime.PollEvents) bool {
-    if (want.read and !got.read) return false;
-    if (want.write and !got.write) return false;
-    if (want.failed and !got.failed) return false;
-    if (want.hup and !got.hup) return false;
-    if (want.read_interrupt and !got.read_interrupt) return false;
-    if (want.write_interrupt and !got.write_interrupt) return false;
-    return true;
+    return (want.read and got.read) or
+        (want.write and got.write) or
+        (want.failed and got.failed) or
+        (want.hup and got.hup) or
+        (want.read_interrupt and got.read_interrupt) or
+        (want.write_interrupt and got.write_interrupt);
 }
 
 fn remainingTimeoutMs(started: std.time.Instant, total_ms: u32) runtime.PollError!u32 {
@@ -170,10 +169,20 @@ fn OpCommon(comptime Self: type) type {
 
         fn signalCommon(self: *Self, ev: runtime.SignalEvent) void {
             switch (ev) {
-                .read_interrupt => self.read_interrupt = true,
-                .write_interrupt => self.write_interrupt = true,
+                .read_interrupt => @atomicStore(bool, &self.read_interrupt, true, .release),
+                .write_interrupt => @atomicStore(bool, &self.write_interrupt, true, .release),
             }
             self.triggerWake();
+        }
+
+        fn takeReadInterrupt(self: *Self, want: runtime.PollEvents) bool {
+            if (!want.read_interrupt) return false;
+            return @atomicRmw(bool, &self.read_interrupt, .Xchg, false, .acq_rel);
+        }
+
+        fn takeWriteInterrupt(self: *Self, want: runtime.PollEvents) bool {
+            if (!want.write_interrupt) return false;
+            return @atomicRmw(bool, &self.write_interrupt, .Xchg, false, .acq_rel);
         }
 
         fn pollCommon(self: *Self, want: runtime.PollEvents, timeout_ms: ?u32) runtime.PollError!runtime.PollEvents {
@@ -186,8 +195,8 @@ fn OpCommon(comptime Self: type) type {
 
             poll_loop: while (true) {
                 var out = runtime.PollEvents{
-                    .read_interrupt = self.read_interrupt,
-                    .write_interrupt = self.write_interrupt,
+                    .read_interrupt = takeReadInterrupt(self, want),
+                    .write_interrupt = takeWriteInterrupt(self, want),
                 };
                 if (matchesWant(out, want)) return out;
 
@@ -204,8 +213,8 @@ fn OpCommon(comptime Self: type) type {
                     const revents = ev.events;
                     if (ev.data.fd == self.wakefd) {
                         drainWake(self);
-                        if (self.read_interrupt) out.read_interrupt = true;
-                        if (self.write_interrupt) out.write_interrupt = true;
+                        if (takeReadInterrupt(self, want)) out.read_interrupt = true;
+                        if (takeWriteInterrupt(self, want)) out.write_interrupt = true;
                         continue;
                     }
 
@@ -241,8 +250,8 @@ pub const Tcp = struct {
     pub fn close(self: *Tcp) void {
         if (self.closed) return;
         self.closed = true;
-        self.read_interrupt = true;
-        self.write_interrupt = true;
+        @atomicStore(bool, &self.read_interrupt, true, .release);
+        @atomicStore(bool, &self.write_interrupt, true, .release);
         self.triggerWake();
 
         if (self.sock != -1) {
@@ -398,8 +407,8 @@ pub const Udp = struct {
     pub fn close(self: *Udp) void {
         if (self.closed) return;
         self.closed = true;
-        self.read_interrupt = true;
-        self.write_interrupt = true;
+        @atomicStore(bool, &self.read_interrupt, true, .release);
+        @atomicStore(bool, &self.write_interrupt, true, .release);
         self.triggerWake();
 
         if (self.sock != -1) {

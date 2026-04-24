@@ -1,9 +1,8 @@
 const stdz = @import("stdz");
-const net_mod = @import("../../../../net.zig");
 const test_utils = @import("../tcp/test_utils.zig");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -17,7 +16,6 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
 
             const Body = struct {
                 fn call(a: lib.mem.Allocator) !void {
-                    const Net = net_mod.make(lib);
                     const ReadyCounter = test_utils.ReadyCounter(lib);
                     const Thread = lib.Thread;
 
@@ -38,7 +36,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                         }
                     };
 
-                    var pc = try Net.listenPacket(.{
+                    var pc = try net.listenPacket(.{
                         .allocator = a,
                         .address = test_utils.addr4(.{ 127, 0, 0, 1 }, 0),
                     });
@@ -47,7 +45,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     var error_slot = ErrorSlot{};
                     var ready = ReadyCounter.init(1);
                     const read_thread = try Thread.spawn(.{}, struct {
-                        fn run(pc_value: net_mod.PacketConn, ready_counter: *ReadyCounter, slot: *ErrorSlot) void {
+                        fn run(pc_value: net.PacketConn, ready_counter: *ReadyCounter, slot: *ErrorSlot) void {
                             var buf: [16]u8 = undefined;
                             ready_counter.markReady();
                             _ = pc_value.readFrom(&buf) catch |err| {

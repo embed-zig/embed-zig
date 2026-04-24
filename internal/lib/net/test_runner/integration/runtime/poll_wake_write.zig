@@ -1,29 +1,31 @@
 const std = @import("std");
-const stdz = @import("stdz");
 const testing_api = @import("testing");
 
-pub fn make(comptime Net2: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             const Body = struct {
-                fn signalWriteLater(sock: *Net2.Runtime.Tcp) void {
+                fn signalWriteLater(sock: *net.Runtime.Tcp) void {
                     std.Thread.sleep(20 * std.time.ns_per_ms);
                     sock.signal(.write_interrupt);
                 }
 
                 fn call() !void {
-                    const Runtime = Net2.Runtime;
+                    const Runtime = net.Runtime;
 
                     var tcp = try Runtime.tcp(.inet);
-                    defer tcp.close();
+                    defer {
+                        tcp.close();
+                        tcp.deinit();
+                    }
 
                     var signal_thread = try std.Thread.spawn(.{}, signalWriteLater, .{&tcp});
                     defer signal_thread.join();
@@ -31,8 +33,7 @@ pub fn make(comptime Net2: type) testing_api.TestRunner {
                     const first = try tcp.poll(.{ .write_interrupt = true }, 100);
                     try std.testing.expect(first.write_interrupt);
 
-                    const second = try tcp.poll(.{ .write_interrupt = true }, 0);
-                    try std.testing.expect(second.write_interrupt);
+                    try std.testing.expectError(error.TimedOut, tcp.poll(.{ .write_interrupt = true }, 0));
                 }
             };
 
@@ -43,7 +44,7 @@ pub fn make(comptime Net2: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

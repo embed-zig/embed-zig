@@ -4,10 +4,10 @@ const net_dialer_mod = @import("../Dialer.zig");
 const netip = @import("../netip.zig");
 const conn_impl = @import("Conn.zig");
 
-pub fn Dialer(comptime lib: type) type {
+pub fn Dialer(comptime lib: type, comptime net: type) type {
     const AddrPort = netip.AddrPort;
-    const NetDialer = net_dialer_mod.Dialer(lib);
-    const TC = conn_impl.Conn(lib);
+    const NetDialer = net_dialer_mod.Dialer(lib, net);
+    const TC = conn_impl.Conn(lib, net);
 
     return struct {
         net_dialer: NetDialer,

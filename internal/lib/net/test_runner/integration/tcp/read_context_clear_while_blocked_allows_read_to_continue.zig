@@ -2,10 +2,9 @@ const stdz = @import("stdz");
 const context_mod = @import("context");
 const io = @import("io");
 const testing_api = @import("testing");
-const net = @import("../../../../net.zig");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -17,8 +16,18 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
         pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             const Body = struct {
+                fn waitUntilReadWaiting(conn: *net.TcpConn, comptime thread_lib: type) void {
+                    while (true) {
+                        conn.read_mu.lock();
+                        const waiting = conn.read_waiting;
+                        conn.read_mu.unlock();
+                        if (waiting) return;
+                        thread_lib.Thread.sleep(thread_lib.time.ns_per_ms);
+                    }
+                }
+
                 fn call(a: lib.mem.Allocator) !void {
-                    const Net = net.make(lib);
+                    const Net = net;
                     const Context = context_mod.make(lib);
                     const Thread = lib.Thread;
                     const ReadyCounter = test_utils.ReadyCounter(lib);
@@ -85,10 +94,10 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     var read_thread = try Thread.spawn(.{}, Worker.read, .{&read_ctx});
 
                     read_ready.waitUntilReady();
-                    Thread.sleep(10 * lib.time.ns_per_ms);
+                    waitUntilReadWaiting(accepted, lib);
 
-                    // Clearing the side context should wake the blocked read and let it
-                    // continue under the latest side configuration rather than the old deadline.
+                    // Clearing the side context should let the blocked read continue
+                    // under the latest side configuration rather than fail under the old deadline.
                     try accepted.setReadContext(null);
 
                     var write_ctx = WriteCtx{ .conn = cc };

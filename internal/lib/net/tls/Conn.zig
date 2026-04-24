@@ -1,7 +1,8 @@
 const NetConn = @import("../Conn.zig");
 const context_mod = @import("context");
+const root = @This();
 
-pub fn Conn(comptime lib: type) type {
+pub fn Conn(comptime lib: type, comptime net: type) type {
     const common = @import("common.zig").make(lib);
     const alert = @import("alert.zig").make(lib);
     const kdf = @import("kdf.zig").make(lib);
@@ -9,7 +10,7 @@ pub fn Conn(comptime lib: type) type {
     const client_handshake = @import("client_handshake.zig").make(lib);
     const Allocator = lib.mem.Allocator;
     const Mutex = lib.Thread.Mutex;
-    const TcpConn = @import("../TcpConn.zig").TcpConn(lib);
+    const TcpConn = @import("../TcpConn.zig").TcpConn(lib, net);
     const BundleRescanReturn = @typeInfo(@TypeOf(lib.crypto.Certificate.Bundle.rescan)).@"fn".return_type.?;
     const BundleRescanError = @typeInfo(BundleRescanReturn).error_union.error_set;
 
@@ -565,14 +566,14 @@ pub fn Conn(comptime lib: type) type {
     };
 }
 
-const testing_api = @import("testing");
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
+    const testing_api = @import("testing");
     return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
         fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
             const testing = lib.testing;
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 const C = @import("common.zig").make(lib);
                 const E = @import("extensions.zig").make(lib);
                 const K = @import("kdf.zig").make(lib);
@@ -794,7 +795,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 const CH = @import("client_handshake.zig").make(lib);
                 const R = @import("record.zig").make(lib);
                 
@@ -836,7 +837,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 
                 const RawConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -865,7 +866,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 
                 const RawConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -893,7 +894,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 const CH = @import("client_handshake.zig").make(lib);
                 
                 const Helper = struct {
@@ -935,7 +936,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 const CH = @import("client_handshake.zig").make(lib);
                 const C = @import("common.zig").make(lib);
                 const R = @import("record.zig").make(lib);
@@ -1015,7 +1016,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 const common = @import("common.zig").make(lib);
                 
                 const Helper = struct {
@@ -1079,7 +1080,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 const common = @import("common.zig").make(lib);
                 
                 const RawConn = struct {
@@ -1127,7 +1128,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 
                 const RawConn = struct {
                     write_calls: usize = 0,
@@ -1166,7 +1167,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 
                 const RawConn = struct {
                     write_calls: usize = 0,
@@ -1202,7 +1203,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 
                 const RawConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -1230,7 +1231,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 const C = @import("common.zig").make(lib);
                 const E = @import("extensions.zig").make(lib);
                 const CH = @import("client_handshake.zig").make(lib);
@@ -1304,7 +1305,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ConnType = Conn(lib);
+                const ConnType = root.Conn(lib, net);
                 const CH = @import("client_handshake.zig").make(lib);
                 const C = @import("common.zig").make(lib);
                 

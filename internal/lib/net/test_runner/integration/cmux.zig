@@ -5,17 +5,17 @@ const close_reopen_different_dlci = @import("cmux/close_reopen_different_dlci.zi
 const close_reopen_reuse_dlci = @import("cmux/close_reopen_reuse_dlci.zig");
 const concurrent_requests = @import("cmux/concurrent_requests.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(_: *@This(), _: lib.mem.Allocator) !void {}
 
         pub fn run(_: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = allocator;
 
-            t.run("concurrentRequests", concurrent_requests.make(lib));
-            t.run("bidirectionalStreaming", bidirectional_streaming.make(lib));
-            t.run("closeReopenDifferentDlci", close_reopen_different_dlci.make(lib));
-            t.run("closeReopenReuseDlci", close_reopen_reuse_dlci.make(lib));
+            t.run("concurrentRequests", concurrent_requests.make(lib, net));
+            t.run("bidirectionalStreaming", bidirectional_streaming.make(lib, net));
+            t.run("closeReopenDifferentDlci", close_reopen_different_dlci.make(lib, net));
+            t.run("closeReopenReuseDlci", close_reopen_reuse_dlci.make(lib, net));
             return t.wait();
         }
 

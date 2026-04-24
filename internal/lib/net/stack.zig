@@ -6,3 +6,7 @@
 
 pub const Link = @import("stack/Link.zig");
 pub const Stack = @import("stack/Stack.zig");
+
+pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
+    return Stack.TestRunner(lib);
+}

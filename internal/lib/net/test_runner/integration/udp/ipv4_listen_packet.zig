@@ -1,10 +1,8 @@
 const stdz = @import("stdz");
 const testing_api = @import("testing");
-const net_mod = @import("../../../../net.zig");
-const sockaddr_mod = @import("../../../fd/SockAddr.zig");
 const test_utils = @import("../tcp/test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -17,20 +15,16 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             const Body = struct {
                 fn call(a: lib.mem.Allocator) !void {
-                    const Net = net_mod.make(lib);
-                    const SockAddr = sockaddr_mod.SockAddr(lib);
-
-                    var pc = try Net.listenPacket(.{
+                    var pc = try net.listenPacket(.{
                         .allocator = a,
                         .address = test_utils.addr4(.{ 127, 0, 0, 1 }, 0),
                     });
                     defer pc.deinit();
 
-                    const udp_impl = try pc.as(Net.UdpConn);
+                    const udp_impl = try pc.as(net.UdpConn);
                     const port = try udp_impl.boundPort();
                     const dest = test_utils.addr4(.{ 127, 0, 0, 1 }, port);
-                    const dest_sockaddr = try SockAddr.encode(dest);
-                    _ = try pc.writeTo("hello listenPacket", @ptrCast(&dest_sockaddr.storage), dest_sockaddr.len);
+                    _ = try pc.writeTo("hello listenPacket", dest);
 
                     var buf: [64]u8 = undefined;
                     const result = try pc.readFrom(&buf);

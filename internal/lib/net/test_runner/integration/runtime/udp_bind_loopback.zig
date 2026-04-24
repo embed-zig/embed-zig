@@ -1,16 +1,14 @@
 const std = @import("std");
-const stdz = @import("stdz");
 const testing_api = @import("testing");
-const net = @import("../../../../net.zig");
 
-pub fn make(comptime Net2: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -27,7 +25,7 @@ pub fn make(comptime Net2: type) testing_api.TestRunner {
                     try std.testing.expectEqualSlices(u8, &a16, &b16);
                 }
 
-                fn sendToWait(sock: *Net2.Runtime.Udp, buf: []const u8, dst: net.netip.AddrPort) !usize {
+                fn sendToWait(sock: *net.Runtime.Udp, buf: []const u8, dst: net.netip.AddrPort) !usize {
                     while (true) {
                         return sock.sendTo(buf, dst) catch |err| switch (err) {
                             error.WouldBlock => {
@@ -39,7 +37,7 @@ pub fn make(comptime Net2: type) testing_api.TestRunner {
                     }
                 }
 
-                fn recvFromWait(sock: *Net2.Runtime.Udp, buf: []u8, src: *net.netip.AddrPort) !usize {
+                fn recvFromWait(sock: *net.Runtime.Udp, buf: []u8, src: *net.netip.AddrPort) !usize {
                     while (true) {
                         return sock.recvFrom(buf, src) catch |err| switch (err) {
                             error.WouldBlock => {
@@ -52,10 +50,13 @@ pub fn make(comptime Net2: type) testing_api.TestRunner {
                 }
 
                 fn call() !void {
-                    const Runtime = Net2.Runtime;
+                    const Runtime = net.Runtime;
 
                     var server = try Runtime.udp(.inet);
-                    defer server.close();
+                    defer {
+                        server.close();
+                        server.deinit();
+                    }
 
                     try server.setOpt(.{ .socket = .{ .reuse_addr = true } });
                     try server.bind(net.netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 0));
@@ -65,7 +66,10 @@ pub fn make(comptime Net2: type) testing_api.TestRunner {
                     try std.testing.expect(server_addr.port() != 0);
 
                     var client = try Runtime.udp(.inet);
-                    defer client.close();
+                    defer {
+                        client.close();
+                        client.deinit();
+                    }
 
                     try client.setOpt(.{ .socket = .{ .reuse_addr = true } });
                     try client.bind(net.netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 0));
@@ -102,7 +106,7 @@ pub fn make(comptime Net2: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

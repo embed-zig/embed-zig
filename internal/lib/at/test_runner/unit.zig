@@ -1,11 +1,11 @@
 const testing_api = @import("testing");
 const builtin = @import("builtin");
 
-pub const Transport = @import("unit/Transport.zig");
-pub const LineReader = @import("unit/LineReader.zig");
-pub const Session = @import("unit/Session.zig");
-pub const Dte = @import("unit/Dte.zig");
-pub const Dce = @import("unit/Dce.zig");
+pub const Transport = @import("../Transport.zig");
+pub const LineReader = @import("../LineReader.zig");
+pub const Session = @import("../Session.zig");
+pub const Dte = @import("../Dte.zig");
+pub const Dce = @import("../Dce.zig");
 pub const dte_loopback = @import("test_utils/dte_loopback.zig");
 
 pub fn make(comptime lib: type) testing_api.TestRunner {
@@ -24,11 +24,11 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             }
 
             t.parallel();
-            t.run("Transport", Transport.make(lib));
-            t.run("LineReader", LineReader.make(lib));
-            t.run("Session", Session.make(lib));
-            t.run("Dte", Dte.make(lib));
-            t.run("Dce", Dce.make(lib));
+            t.run("Transport", Transport.TestRunner(lib));
+            t.run("LineReader", LineReader.TestRunner(lib));
+            t.run("Session", Session.TestRunner(lib));
+            t.run("Dte", Dte.TestRunner(lib));
+            t.run("Dce", Dce.TestRunner(lib));
             t.run("dte_loopback", dte_loopback.make(lib, 64));
             return t.wait();
         }

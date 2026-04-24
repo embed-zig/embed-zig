@@ -2,9 +2,9 @@ const NetConn = @import("../Conn.zig");
 const NetListener = @import("../Listener.zig");
 const server_conn_impl = @import("ServerConn.zig");
 
-pub fn Listener(comptime lib: type) type {
+pub fn Listener(comptime lib: type, comptime net: type) type {
     const Allocator = lib.mem.Allocator;
-    const SC = server_conn_impl.ServerConn(lib);
+    const SC = server_conn_impl.ServerConn(lib, net);
 
     return struct {
         pub const Config = SC.Config;

@@ -7,7 +7,6 @@
 //! application from `Request.context()`.
 
 const std = @import("std");
-const testing_api = @import("testing");
 
 const io = @import("io");
 const dialer_mod = @import("../Dialer.zig");
@@ -31,14 +30,14 @@ const BufferedConnWriter = io.BufferedWriter(Conn);
 const TextprotoReader = textproto_reader_mod.Reader(BufferedConnReader);
 const TextprotoWriter = textproto_writer_mod.Writer(BufferedConnWriter);
 
-pub fn Transport(comptime lib: type) type {
+pub fn Transport(comptime lib: type, comptime net: type) type {
     const Allocator = lib.mem.Allocator;
     const Addr = netip.AddrPort;
     const IpAddr = netip.Addr;
-    const Dialer = dialer_mod.Dialer(lib);
-    const Resolver = resolver_mod.Resolver(lib);
-    const TcpConn = tcp_conn_mod.TcpConn(lib);
-    const Tls = tls_mod.make(lib);
+    const Dialer = dialer_mod.Dialer(lib, net);
+    const Resolver = resolver_mod.Resolver(lib, net);
+    const TcpConn = tcp_conn_mod.TcpConn(lib, net);
+    const Tls = tls_mod.make(lib, net);
     const Thread = lib.Thread;
     const default_user_agent = "stdz-zig-http-client/1.0";
     const default_max_header_bytes = 32 * 1024;
@@ -2395,11 +2394,12 @@ fn responseMustBeBodyless(req: *const Request, status_code: u16) bool {
     return status_code == 204 or status_code == 304;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
+    const testing_api = @import("testing");
     return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
         fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             const testing = lib.testing;
-            const HttpTransport = Transport(lib);
+            const HttpTransport = Transport(lib, net);
             {
                 var transport = try HttpTransport.init(allocator, .{
                     .max_header_bytes = 0,

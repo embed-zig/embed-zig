@@ -50,7 +50,8 @@ networking primitives.
 
 ```zig
 const stdz = @import("stdz").make(platform);
-const net = @import("net").make(stdz);
+const runtime_posix = @import("runtime_posix");
+const net = @import("net").make2(stdz, runtime_posix.make(stdz));
 ```
 
 `lib/net` depends on the sealed `stdz` namespace for:
@@ -63,29 +64,24 @@ const net = @import("net").make(stdz);
 
 ```zig
 lib/
-  net.zig              Root; make(lib) entry point, Conn, Listener, PacketConn, Dial, Listen
+  net.zig              Root; make2(lib, impl) entry point, Conn, Listener, PacketConn, Dial, Listen
   net/
     Conn.zig           Type-erased byte stream interface (Go's net.Conn)
     Listener.zig       Type-erased stream listener interface (Go's net.Listener)
     Cmux.zig           CMUX session facade over one bearer Conn
     PacketConn.zig     Type-erased datagram interface (Go's net.PacketConn)
     Dialer.zig         Configurable network dialer (Go's net.Dialer)
-    TcpConn.zig        Conn over TCP socket fd (Go's net.TCPConn)
-    UdpConn.zig        PacketConn + Conn over UDP socket fd (Go's net.UDPConn)
+    TcpConn.zig        Conn over a runtime TCP socket (Go's net.TCPConn)
+    UdpConn.zig        PacketConn + Conn over a runtime UDP socket (Go's net.UDPConn)
     TcpListener.zig    Listener for TCP (Go's net.TCPListener)
+    runtime.zig        Runtime socket contract used by Net2
+    runtime_posix.zig  POSIX-backed host runtime implementation
+    Wake.zig           Internal wake helper for runtime-backed polling
     cmux/
       Conn.zig         Logical channel wrapper adapted to net.Conn
       Session.zig      CMUX session engine over a bearer net.Conn
       frame.zig        Basic-mode frame encode/decode helpers
       control.zig      Minimal CMUX control-plane constants/helpers
-    fd.zig             Internal fd-layer namespace and fd-local test runners
-    fd/
-      Stream.zig       Internal non-blocking stream socket wrapper
-      Packet.zig       Internal non-blocking datagram socket wrapper
-      Listener.zig     Internal non-blocking listen/accept wrapper
-      netfd.zig        Shared read/write/connect wake+deadline wait state
-      Wake.zig         Internal close/context wake-fd helper
-      SockAddr.zig     AddrPort <-> sockaddr bridge
     netip/
       Addr.zig         IP address value type
       AddrPort.zig     IP address + port value type
@@ -131,8 +127,8 @@ lib/
 │ TcpConn / TcpListener   │ UdpConn                    │
 │ Dialer / listen         │ listenPacket               │
 ├──────────────────────────────────────────────────────┤
-│ internal fd layer (not exported through make(lib))  │
-│ fd.Stream / fd.Packet / fd.Listener / fd.SockAddr   │
+│ runtime-backed transport substrate                  │
+│ Runtime / runtime_posix / Wake                      │
 ├──────────────────────────────────────────────────────┤
 │ sibling helpers: netip / Resolver / url / stack     │
 ├──────────────────────────────────────────────────────┤
@@ -141,27 +137,31 @@ lib/
 └──────────────────────────────────────────────────────┘
 ```
 
-Internally, stream and packet sockets now run through `lib/net/fd` as the
-shared non-blocking substrate. Public callers still work with `Dialer`,
-`TcpConn`, `TcpListener`, `UdpConn`, `Conn`, `Listener`, and `PacketConn`;
-the fd layer remains an internal implementation detail.
+Internally, `Net2` binds the public transport types to a concrete runtime
+implementation through `make2(lib, impl)`. The default host path uses
+`runtime_posix`, while public callers still work with `Dialer`, `TcpConn`,
+`TcpListener`, `UdpConn`, `Conn`, `Listener`, and `PacketConn`.
 
-Context-aware stream waits and `connectContext(...)` now reuse each netfd's own
-wake fd: `close()` signals that fd directly, and `ctx.bindFd(...)` temporarily
-binds the same wake path for context cancellation in the common case.
+Context-aware stream waits and `connectContext(...)` now reuse each runtime
+socket's own wake primitive: `close()` signals that primitive directly, and
+polling stays inside the `runtime` implementation instead of a separate `fd`
+package.
 
-Regression coverage is split between unit topic aggregators under
-`lib/net/test_runner/unit/` and deterministic local integration aggregators
+Regression coverage is split between file-local unit `TestRunner`s aggregated by
+`lib/net/test_runner/unit.zig` and deterministic local integration aggregators
 under `lib/net/test_runner/integration/`, all wired from `lib/tests.zig`.
 
 ## Test layout
 
 - `lib/net.zig` exports only `net.test_runner.unit` and `net.test_runner.integration`.
-- `lib/tests.zig` wires `net/unit/std`, `net/unit/embed_std`, `net/integration/std`, and `net/integration/embed_std`.
-- `lib/tests.zig` also wires `net/integration2/std` and `net/integration2/embed_std` through `net.test_runner.integration.make2(...)` for direct `Runtime` coverage.
-- `lib/net/test_runner/unit.zig` fans out into topic suites such as `netip`, `http`, `textproto`, `cmux`, `resolver`, `tls`, `fd`, and `core`.
-- `lib/net/test_runner/integration.zig` fans out into deterministic local runners such as `fd_stream`, `tcp`, `resolver_local`, `cmux_http_tcp`, `http_transport`, and `https_transport`.
-- `lib/net/test_runner/integration/runtime.zig` is the focused `net.make2(...).Runtime` integration slice used by those `integration2/*` entries.
+- `lib/tests.zig` wires the std-backed `net/unit/std` and `net/integration/std` suites through `net.test_runner.*.make2(std, runtime_posix)`.
+- `lib/tests.zig` also wires `net/integration/runtime_posix/std` through `net.test_runner.integration.runtime.make2(std, runtime_posix)` so the host `runtime_posix` wake and poll contract stays covered directly.
+- `lib/tests.zig` wires the `net/unit/embed_std` and `net/integration/embed_std` suites through `net.test_runner.*.make2(embed_std.std, runtime_embed_std)` so the full higher-level stack exercises `embed_std.net_impl.impl`.
+- `lib/tests.zig` also wires `net/integration2/*` through `net.test_runner.integration.runtime.make2(lib, runtime_embed_std)` so the focused direct-`Runtime` slice still exercises `embed_std.net_impl.impl` in isolation.
+- `internal/build/tests.zig` includes both `net/integration/*` and `net/integration2/*` in the `test-integration-net` matrix.
+- `lib/net/test_runner/unit.zig` aggregates source-file `TestRunner`s and topic namespaces such as `netip`, `http`, `textproto`, `cmux`, `resolver`, `tls`, and `core`.
+- `lib/net/test_runner/integration.zig` fans out into deterministic local runners such as `tcp`, `udp`, `resolver_local`, `cmux`, `http_server`, `http_transport`, and `https_transport`.
+- `lib/net/test_runner/integration/runtime.zig` is the focused `net.make2(...).Runtime` integration slice shared by `net/integration/runtime_posix/*` and `net/integration2/*`.
 - Host-only or optional public-network helpers live under `lib/net/test_runner/integration/compat/` and `integration/public/` and are not wired from `integration.zig`; examples include `integration/compat/tls_std_compat.zig`, `integration/public/tls_dial.zig`, and `integration/public/resolver_dns.zig`.
 
 ## net (root)
@@ -189,7 +189,7 @@ pub const ReadError = error{ EndOfStream, ShortRead, ConnectionReset, Connection
 pub const WriteError = error{ ConnectionRefused, ConnectionReset, BrokenPipe, TimedOut, Unexpected };
 ```
 
-Concrete implementations: **TcpConn** (TCP socket fd), **UdpConn** (connected UDP), **tls.Conn** (TLS client), **tls.ServerConn** (TLS server).
+Concrete implementations: **TcpConn** (runtime-backed TCP), **UdpConn** (connected UDP), **tls.Conn** (TLS client), **tls.ServerConn** (TLS server).
 
 ### Listener
 
@@ -242,19 +242,16 @@ type_id: *const anyopaque,
 
 pub const VTable = struct {
     readFrom: *const fn (ptr: *anyopaque, buf: []u8) ReadFromError!ReadFromResult,
-    writeTo: *const fn (ptr: *anyopaque, buf: []const u8, addr: [*]const u8, addr_len: u32) WriteToError!usize,
+    writeTo: *const fn (ptr: *anyopaque, buf: []const u8, addr: net.netip.AddrPort) WriteToError!usize,
     close: *const fn (ptr: *anyopaque) void,
     deinit: *const fn (ptr: *anyopaque) void,
     setReadTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
     setWriteTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
 };
 
-pub const AddrStorage = [128]u8;
-
 pub const ReadFromResult = struct {
     bytes_read: usize,
-    addr: AddrStorage,
-    addr_len: u32,
+    addr: net.netip.AddrPort,
 };
 
 pub const ReadFromError = error{ ConnectionReset, Closed, ConnectionRefused, TimedOut, Unexpected };
@@ -262,7 +259,7 @@ pub const WriteToError = error{ Closed, MessageTooLong, NetworkUnreachable, Acce
 
 pub fn as(self: PacketConn, comptime T: type) error{TypeMismatch}!*T { ... }
 pub fn readFrom(self: PacketConn, buf: []u8) ReadFromError!ReadFromResult { ... }
-pub fn writeTo(self: PacketConn, buf: []const u8, addr: [*]const u8, addr_len: u32) WriteToError!usize { ... }
+pub fn writeTo(self: PacketConn, buf: []const u8, addr: net.netip.AddrPort) WriteToError!usize { ... }
 pub fn close(self: PacketConn) void { ... }
 pub fn deinit(self: PacketConn) void { ... }
 
@@ -272,21 +269,11 @@ pub fn init(pointer: anytype) PacketConn { ... }
 
 Concrete implementation: **UdpConn**.
 
-**UdpConn** — wraps a UDP socket fd into a PacketConn:
+**UdpConn** — wraps a runtime UDP socket into `PacketConn` / `Conn`:
 
 ```zig
 // UdpConn.zig
-pub fn UdpConn(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
-
-    return struct {
-        /// Connected UDP -> Conn (read/write after connect).
-        pub fn init(allocator: Allocator, fd: posix.socket_t) Allocator.Error!Conn { ... }
-
-        /// Unconnected UDP -> PacketConn (readFrom/writeTo).
-        pub fn initPacket(allocator: Allocator, fd: posix.socket_t) Allocator.Error!PacketConn { ... }
-    };
-}
+pub fn UdpConn(comptime lib: type, comptime net: type) type { ... }
 ```
 
 ### Dial / Listen
@@ -321,10 +308,10 @@ const result = try pc.readFrom(&buf);
 const data = buf[0..result.bytes_read];
 
 // Send a response back to the sender:
-_ = try pc.writeTo("reply", @ptrCast(&result.addr), result.addr_len);
+_ = try pc.writeTo("reply", result.addr);
 ```
 
-Also exposed as `net.listenPacket` in `Make`:
+Also exposed as `net.listenPacket` in the `make2(...)` namespace:
 
 ```zig
 pub fn listenPacket(opts: ListenPacketOptions) !PacketConn {
@@ -480,7 +467,8 @@ Key properties:
 
 ```zig
 const stdz = @import("stdz").make(platform);
-const net = @import("net").make(stdz);
+const runtime_posix = @import("runtime_posix");
+const net = @import("net").make2(stdz, runtime_posix.make(stdz));
 const Addr = net.netip.Addr;
 const AddrPort = net.netip.AddrPort;
 
@@ -540,7 +528,8 @@ Highlights:
 
 ```zig
 const stdz = @import("stdz").make(platform);
-const net = @import("net").make(stdz);
+const runtime_posix = @import("runtime_posix");
+const net = @import("net").make2(stdz, runtime_posix.make(stdz));
 
 var client = try net.ntp.Client.init(stdz.testing.allocator, .{
     .servers = &.{net.ntp.Servers.aliyun},
@@ -685,7 +674,8 @@ Planned, but not landed in the current tree yet.
 
 ```zig
 const stdz = @import("stdz").make(platform);
-const net = @import("net").make(stdz);
+const runtime_posix = @import("runtime_posix");
+const net = @import("net").make2(stdz, runtime_posix.make(stdz));
 const Addr = net.netip.AddrPort;
 
 var ln = try net.listen(stdz.testing.allocator, .{
@@ -713,7 +703,8 @@ while (true) {
 
 ```zig
 const stdz = @import("stdz").make(platform);
-const net = @import("net").make(stdz);
+const runtime_posix = @import("runtime_posix");
+const net = @import("net").make2(stdz, runtime_posix.make(stdz));
 
 var transport = try net.http.Transport.init(stdz.testing.allocator, .{});
 defer transport.deinit();

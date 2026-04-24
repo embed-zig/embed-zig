@@ -1,10 +1,9 @@
 const stdz = @import("stdz");
 const context_mod = @import("context");
 const testing_api = @import("testing");
-const net_mod = @import("../../../../net.zig");
 const test_utils = @import("../tcp/test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -17,7 +16,6 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             const Body = struct {
                 fn call(a: lib.mem.Allocator) !void {
-                    const Net = net_mod.make(lib);
                     const Context = context_mod.make(lib);
 
                     var ctx_api = try Context.init(a);
@@ -26,7 +24,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     var deadline_ctx = try ctx_api.withDeadline(ctx_api.background(), lib.time.nanoTimestamp() + 40 * lib.time.ns_per_ms);
                     defer deadline_ctx.deinit();
 
-                    const d = Net.Dialer.init(a, .{});
+                    const d = net.Dialer.init(a, .{});
                     var conn = d.dialContext(deadline_ctx, .udp, test_utils.addr4(.{ 203, 0, 113, 1 }, 9)) catch |err| switch (err) {
                         error.DeadlineExceeded => return,
                         else => return test_utils.skipIfConnectDidNotPend(err),

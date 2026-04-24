@@ -1,12 +1,11 @@
 //! Shared harness and IO helpers for HTTP transport integration cases.
 
 const io = @import("io");
-const net_mod = @import("../../../../net.zig");
 
-pub fn make(comptime lib: type) type {
-    const NetNs = net_mod.make(lib);
+pub fn make2(comptime lib: type, comptime net: type) type {
+    const NetNs = net;
     const HttpNs = NetNs.http;
-    const AddrPort = net_mod.netip.AddrPort;
+    const AddrPort = net.netip.AddrPort;
 
     return struct {
         pub const Http = HttpNs;
@@ -24,7 +23,7 @@ pub fn make(comptime lib: type) type {
             return AddrPort.from4(.{ 127, 0, 0, 1 }, port);
         }
 
-        pub fn listenerPort(ln: net_mod.Listener, comptime NetApi: type) !u16 {
+        pub fn listenerPort(ln: net.Listener, comptime NetApi: type) !u16 {
             const typed = try ln.as(NetApi.TcpListener);
             return typed.port();
         }
@@ -288,7 +287,7 @@ pub fn make(comptime lib: type) type {
             if (server_result) |err| return err;
         }
 
-        pub fn readRequestHead(conn: net_mod.Conn, buf: *[4096]u8) ![]const u8 {
+        pub fn readRequestHead(conn: net.Conn, buf: *[4096]u8) ![]const u8 {
             var filled: usize = 0;
             while (filled < buf.len) {
                 const n = try conn.read(buf[filled..]);
@@ -304,7 +303,7 @@ pub fn make(comptime lib: type) type {
             return lib.mem.eql(u8, req_head[0..line_end], expected);
         }
 
-        pub fn requestBodyMatches(conn: net_mod.Conn, req_head: []const u8, expected: []const u8) bool {
+        pub fn requestBodyMatches(conn: net.Conn, req_head: []const u8, expected: []const u8) bool {
             var c = conn;
             const head_end = lib.mem.indexOf(u8, req_head, "\r\n\r\n") orelse return false;
             const content_length_value = headerValue(req_head[0..head_end], Http.Header.content_length) orelse return false;
@@ -371,7 +370,7 @@ pub fn make(comptime lib: type) type {
 
         pub fn readUntilTerminator(
             allocator: lib.mem.Allocator,
-            conn: net_mod.Conn,
+            conn: net.Conn,
             prefix: []const u8,
             terminator: []const u8,
         ) ![]u8 {
@@ -392,7 +391,7 @@ pub fn make(comptime lib: type) type {
             }
         }
 
-        pub fn readExpectedBytes(conn: net_mod.Conn, prefix: []const u8, out: []u8) !void {
+        pub fn readExpectedBytes(conn: net.Conn, prefix: []const u8, out: []u8) !void {
             if (prefix.len > out.len) return error.TestUnexpectedResult;
             @memcpy(out[0..prefix.len], prefix);
             if (prefix.len == out.len) return;
@@ -584,7 +583,7 @@ pub fn make(comptime lib: type) type {
             return spec.reuse_wait_timeout_ms;
         }
 
-        fn serveKeepAliveRequest(conn: net_mod.Conn, expected_request_line: []const u8, body: []const u8, close_conn: bool) !bool {
+        fn serveKeepAliveRequest(conn: net.Conn, expected_request_line: []const u8, body: []const u8, close_conn: bool) !bool {
             var c = conn;
             var req_buf: [4096]u8 = undefined;
             const req_head = try readRequestHead(conn, &req_buf);

@@ -11,13 +11,12 @@
 const std = @import("std");
 const stdz = @import("stdz");
 const testing_api = @import("testing");
-const net_mod = @import("../../../../net.zig");
-const sockaddr_mod = @import("../../../fd/SockAddr.zig");
+const net_root = @import("../../../net.zig");
 const fixtures = @import("../../../tls/test_fixtures.zig");
 const kdf_mod = @import("../../../tls/kdf.zig");
-const AddrPort = net_mod.netip.AddrPort;
+const AddrPort = net_root.netip.AddrPort;
 
-pub fn make() testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
@@ -28,7 +27,7 @@ pub fn make() testing_api.TestRunner {
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
-            runImpl(std, t, allocator) catch |err| {
+            runImpl(lib, net, t, allocator) catch |err| {
                 t.logErrorf("tls_std_compat runner failed: {}", .{err});
                 return false;
             };
@@ -37,18 +36,17 @@ pub fn make() testing_api.TestRunner {
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            std.testing.allocator.destroy(self);
+            lib.testing.allocator.destroy(self);
         }
     };
 
-    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !void {
+fn runImpl(comptime lib: type, comptime Net: type, t: *testing_api.T, alloc: lib.mem.Allocator) !void {
     _ = t;
-    const Net = net_mod.make(lib);
     try kdfMatchesStdTlsHelpers();
     try serverInteroperatesWithStdTlsClient(Net, alloc);
     try serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(Net, alloc);
@@ -240,7 +238,7 @@ fn serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(comptime Net: 
     }
 }
 
-fn readAll(conn: net_mod.Conn, buf: []u8) !void {
+fn readAll(conn: net_root.Conn, buf: []u8) !void {
     var filled: usize = 0;
     while (filled < buf.len) {
         const n = try conn.read(buf[filled..]);
@@ -249,7 +247,7 @@ fn readAll(conn: net_mod.Conn, buf: []u8) !void {
     }
 }
 
-fn writeAll(conn: net_mod.Conn, buf: []const u8) !void {
+fn writeAll(conn: net_root.Conn, buf: []const u8) !void {
     var written: usize = 0;
     while (written < buf.len) {
         const n = try conn.write(buf[written..]);
@@ -259,10 +257,77 @@ fn writeAll(conn: net_mod.Conn, buf: []const u8) !void {
 }
 
 fn tcpConnectStream(addr: AddrPort) !std.net.Stream {
-    const SockAddr = sockaddr_mod.SockAddr(std);
-    const encoded = try SockAddr.encode(addr);
-    const fd = try std.posix.socket(encoded.family, std.posix.SOCK.STREAM, 0);
+    const encoded = try encodeSockAddr(addr);
+    const fd = try std.posix.socket(socketFamily(addr), std.posix.SOCK.STREAM, 0);
     errdefer std.posix.close(fd);
     try std.posix.connect(fd, @ptrCast(&encoded.storage), encoded.len);
     return .{ .handle = fd };
+}
+
+const EncodedSockAddr = struct {
+    storage: std.posix.sockaddr.storage,
+    len: std.posix.socklen_t,
+};
+
+fn encodeSockAddr(addr_port: AddrPort) !EncodedSockAddr {
+    var storage: std.posix.sockaddr.storage = undefined;
+    zeroStorage(&storage);
+
+    const ip = addr_port.addr();
+    if (ip.is4()) {
+        const sa: *std.posix.sockaddr.in = @ptrCast(@alignCast(&storage));
+        sa.* = .{
+            .port = std.mem.nativeToBig(u16, addr_port.port()),
+            .addr = @as(*align(1) const u32, @ptrCast(&ip.as4().?)).*,
+        };
+        return .{
+            .storage = storage,
+            .len = @sizeOf(std.posix.sockaddr.in),
+        };
+    }
+
+    if (ip.is6()) {
+        const sa: *std.posix.sockaddr.in6 = @ptrCast(@alignCast(&storage));
+        sa.* = .{
+            .port = std.mem.nativeToBig(u16, addr_port.port()),
+            .flowinfo = 0,
+            .addr = ip.as16().?,
+            .scope_id = try parseScopeId(ip),
+        };
+        return .{
+            .storage = storage,
+            .len = @sizeOf(std.posix.sockaddr.in6),
+        };
+    }
+
+    return error.InvalidAddress;
+}
+
+fn socketFamily(addr_port: AddrPort) u32 {
+    return if (addr_port.addr().is4()) std.posix.AF.INET else std.posix.AF.INET6;
+}
+
+fn zeroStorage(storage: *std.posix.sockaddr.storage) void {
+    const bytes: *[@sizeOf(std.posix.sockaddr.storage)]u8 = @ptrCast(storage);
+    @memset(bytes, 0);
+}
+
+fn parseScopeId(addr: net_root.netip.Addr) !u32 {
+    const zone = addr.zone[0..addr.zone_len];
+    if (zone.len == 0) return 0;
+
+    var scope_id: u32 = 0;
+    for (zone) |c| {
+        if (c < '0' or c > '9') return error.InvalidScopeId;
+        scope_id = mulAddU32(scope_id, 10, c - '0') catch return error.InvalidScopeId;
+    }
+    return scope_id;
+}
+
+fn mulAddU32(base: u32, factor: u32, addend: u32) error{Overflow}!u32 {
+    const mul = @mulWithOverflow(base, factor);
+    if (mul[1] != 0) return error.Overflow;
+    const sum = @addWithOverflow(mul[0], addend);
+    if (sum[1] != 0) return error.Overflow;
+    return sum[0];
 }

@@ -10,8 +10,18 @@ const drivers = @import("drivers");
 const mime = @import("mime");
 const motion = @import("motion");
 const net = @import("net");
+const runtime_posix = @import("runtime_posix");
 const audio = @import("audio");
 const zux = @import("zux");
+
+// The focused Runtime slice intentionally exercises the embed_std backend in
+// both std and embed_std lib environments.
+const runtime_embed_std = struct {
+    pub fn make(comptime lib: type) type {
+        _ = lib;
+        return embed_std.net_impl.impl;
+    }
+};
 
 pub const test_runner = struct {
     pub const stdz = @import("tests/stdz.zig");
@@ -271,7 +281,7 @@ test "net/unit/std" {
     var t = testing.T.new(std, .net);
     defer t.deinit();
 
-    t.run("net/unit/std", net.test_runner.unit.make(std));
+    t.run("net/unit/std", net.test_runner.unit.make2(std, runtime_posix));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -281,7 +291,7 @@ test "net/unit/embed_std" {
     var t = testing.T.new(embed_std.std, .net);
     defer t.deinit();
 
-    t.run("net/unit/embed_std", net.test_runner.unit.make(embed_std.std));
+    t.run("net/unit/embed_std", net.test_runner.unit.make2(embed_std.std, runtime_embed_std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -292,7 +302,18 @@ test "net/integration/std" {
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
-    t.run("net/integration/std", net.test_runner.integration.make(std));
+    t.run("net/integration/std", net.test_runner.integration.make2(std, runtime_posix));
+    if (!t.wait()) return error.TestFailed;
+}
+
+test "net/integration/runtime_posix/std" {
+    std.testing.log_level = .info;
+
+    var t = testing.T.new(std, .net);
+    defer t.deinit();
+    t.timeout(20 * std.time.ns_per_s);
+
+    t.run("net/integration/runtime_posix/std", net.test_runner.integration.runtime.make2(std, runtime_posix));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -303,7 +324,7 @@ test "net/integration/embed_std" {
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
 
-    t.run("net/integration/embed_std", net.test_runner.integration.make(embed_std.std));
+    t.run("net/integration/embed_std", net.test_runner.integration.make2(embed_std.std, runtime_embed_std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -314,8 +335,7 @@ test "net/integration2/std" {
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
-    const Net2 = net.make2(std, embed_std.net_impl.impl);
-    t.run("net/integration2/std", net.test_runner.integration.make2(Net2));
+    t.run("net/integration2/std", net.test_runner.integration.runtime.make2(std, runtime_embed_std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -326,7 +346,7 @@ test "net/integration2/embed_std" {
     defer t.deinit();
     t.timeout(20 * embed_std.std.time.ns_per_s);
 
-    t.run("net/integration2/embed_std", net.test_runner.integration.make2(embed_std.net));
+    t.run("net/integration2/embed_std", net.test_runner.integration.runtime.make2(embed_std.std, runtime_embed_std));
     if (!t.wait()) return error.TestFailed;
 }
 

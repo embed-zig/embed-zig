@@ -1,5 +1,5 @@
 const io = @import("io");
-const net_mod = @import("../../../../../net.zig");
+const Conn = @import("../../../../Conn.zig");
 
 pub const RequestHeader = struct {
     name: []const u8,
@@ -21,7 +21,7 @@ pub const RawResponse = struct {
 pub fn writeRawRequest(
     comptime lib: type,
     alloc: lib.mem.Allocator,
-    conn: *net_mod.Conn,
+    conn: *Conn,
     request: Request,
 ) !void {
     var bytes = lib.ArrayList(u8){};
@@ -66,15 +66,16 @@ pub fn writeRawRequest(
 
     try bytes.appendSlice(alloc, "\r\n");
     try bytes.appendSlice(alloc, request.body);
-    try io.writeAll(net_mod.Conn, conn, bytes.items);
+    try io.writeAll(Conn, conn, bytes.items);
 }
 
 pub fn readRawResponse(
     comptime lib: type,
+    comptime net: type,
     alloc: lib.mem.Allocator,
-    conn: net_mod.Conn,
+    conn: net.Conn,
 ) !RawResponse {
-    const http_ns = net_mod.make(lib).http;
+    const http_ns = net.http;
     var c = conn;
     var bytes = try lib.ArrayList(u8).initCapacity(alloc, 0);
     defer bytes.deinit(alloc);
@@ -157,7 +158,7 @@ pub fn headerValue(
     return null;
 }
 
-pub fn expectConnClosed(comptime lib: type, conn: net_mod.Conn) !void {
+pub fn expectConnClosed(comptime lib: type, conn: Conn) !void {
     const testing = lib.testing;
     var c = conn;
     c.setReadTimeout(20);
@@ -185,7 +186,7 @@ pub fn expectConnClosed(comptime lib: type, conn: net_mod.Conn) !void {
 fn readFixedBody(
     comptime lib: type,
     alloc: lib.mem.Allocator,
-    conn: net_mod.Conn,
+    conn: Conn,
     prefix: []const u8,
     total_len: usize,
 ) ![]u8 {
@@ -206,10 +207,10 @@ fn readFixedBody(
 fn readChunkedBody(
     comptime lib: type,
     alloc: lib.mem.Allocator,
-    conn: net_mod.Conn,
+    conn: Conn,
     prefix: []const u8,
 ) ![]u8 {
-    var stream = io.PrefixReader(net_mod.Conn).init(conn, prefix);
+    var stream = io.PrefixReader(Conn).init(conn, prefix);
     var body = lib.ArrayList(u8){};
     defer body.deinit(alloc);
     var line_buf: [128]u8 = undefined;
@@ -233,7 +234,7 @@ fn readChunkedBody(
 fn readToEof(
     comptime lib: type,
     alloc: lib.mem.Allocator,
-    conn: net_mod.Conn,
+    conn: Conn,
     prefix: []const u8,
 ) ![]u8 {
     var out = lib.ArrayList(u8){};

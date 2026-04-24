@@ -1,11 +1,10 @@
 const stdz = @import("stdz");
 const io = @import("io");
 const testing_api = @import("testing");
-const net_mod = @import("../../../../net.zig");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
-    const Utils = test_utils.make(lib);
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(lib, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
@@ -75,7 +74,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     var server_result: ?anyerror = null;
 
                     var server_thread = try lib.Thread.spawn(.{}, struct {
-                        fn writePathResponse(conn: net_mod.Conn, req_head: []const u8) !void {
+                        fn writePathResponse(conn: net.Conn, req_head: []const u8) !void {
                             var c = conn;
                             const body = if (Utils.hasRequestLine(req_head, "GET /idle-per-host-1 HTTP/1.1"))
                                 "one"
@@ -98,7 +97,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                             try io.writeAll(@TypeOf(c), &c, body);
                         }
 
-                        fn serveConn(conn: net_mod.Conn, result: *?anyerror) void {
+                        fn serveConn(conn: net.Conn, result: *?anyerror) void {
                             var owned = conn;
                             defer owned.deinit();
 
@@ -160,7 +159,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                                     return;
                                 };
                                 handler_threads[handler_count] = lib.Thread.spawn(.{}, struct {
-                                    fn runConn(owned_conn: net_mod.Conn, run_result: *?anyerror) void {
+                                    fn runConn(owned_conn: net.Conn, run_result: *?anyerror) void {
                                         serveConn(owned_conn, run_result);
                                     }
                                 }.runConn, .{ conn, result }) catch |err| {

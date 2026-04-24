@@ -18,7 +18,7 @@ const https_connect_proxy_connection_is_reused = @import("https_transport/https_
 const direct_https_without_proxy_bypasses_connect_proxy = @import("https_transport/direct_https_without_proxy_bypasses_connect_proxy.zig");
 const tls_handshake_timeout_exceeded = @import("https_transport/tls_handshake_timeout_exceeded.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
@@ -28,21 +28,21 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
         pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            t.run("self_signed_round_trip", self_signed_round_trip.make(lib));
-            t.run("idle_connection_is_reused", idle_connection_is_reused.make(lib));
-            t.run("response_header_timeout_exceeded", response_header_timeout_exceeded.make(lib));
-            t.run("max_conns_per_host_waiter_reuses_returned_idle_conn", max_conns_per_host_waiter_reuses_returned_idle_conn.make(lib));
-            t.run("http2_alternate_transport_handles_negotiated_h2", http2_alternate_transport_handles_negotiated_h2.make(lib));
-            t.run("http2_alternate_transport_is_opt_in", http2_alternate_transport_is_opt_in.make(lib));
-            t.run("response_body_read_canceled_by_context", response_body_read_canceled_by_context.make(lib));
-            t.run("https_round_trip_via_connect_proxy", https_round_trip_via_connect_proxy.make(lib));
-            t.run("https_connect_proxy_informational_then_tunnel_succeeds", https_connect_proxy_informational_then_tunnel_succeeds.make(lib));
-            t.run("https_connect_proxy_success_response_with_body_is_rejected", https_connect_proxy_success_response_with_body_is_rejected.make(lib));
-            t.run("https_connect_proxy_success_response_with_chunked_body_is_rejected", https_connect_proxy_success_response_with_chunked_body_is_rejected.make(lib));
-            t.run("https_connect_proxy_auth_connection_is_reused", https_connect_proxy_auth_connection_is_reused.make(lib));
-            t.run("https_connect_proxy_connection_is_reused", https_connect_proxy_connection_is_reused.make(lib));
-            t.run("direct_https_without_proxy_bypasses_connect_proxy", direct_https_without_proxy_bypasses_connect_proxy.make(lib));
-            t.run("tls_handshake_timeout_exceeded", tls_handshake_timeout_exceeded.make(lib));
+            t.run("self_signed_round_trip", self_signed_round_trip.make(lib, net));
+            t.run("idle_connection_is_reused", idle_connection_is_reused.make(lib, net));
+            t.run("response_header_timeout_exceeded", response_header_timeout_exceeded.make(lib, net));
+            t.run("max_conns_per_host_waiter_reuses_returned_idle_conn", max_conns_per_host_waiter_reuses_returned_idle_conn.make(lib, net));
+            t.run("http2_alternate_transport_handles_negotiated_h2", http2_alternate_transport_handles_negotiated_h2.make(lib, net));
+            t.run("http2_alternate_transport_is_opt_in", http2_alternate_transport_is_opt_in.make(lib, net));
+            t.run("response_body_read_canceled_by_context", response_body_read_canceled_by_context.make(lib, net));
+            t.run("https_round_trip_via_connect_proxy", https_round_trip_via_connect_proxy.make(lib, net));
+            t.run("https_connect_proxy_informational_then_tunnel_succeeds", https_connect_proxy_informational_then_tunnel_succeeds.make(lib, net));
+            t.run("https_connect_proxy_success_response_with_body_is_rejected", https_connect_proxy_success_response_with_body_is_rejected.make(lib, net));
+            t.run("https_connect_proxy_success_response_with_chunked_body_is_rejected", https_connect_proxy_success_response_with_chunked_body_is_rejected.make(lib, net));
+            t.run("https_connect_proxy_auth_connection_is_reused", https_connect_proxy_auth_connection_is_reused.make(lib, net));
+            t.run("https_connect_proxy_connection_is_reused", https_connect_proxy_connection_is_reused.make(lib, net));
+            t.run("direct_https_without_proxy_bypasses_connect_proxy", direct_https_without_proxy_bypasses_connect_proxy.make(lib, net));
+            t.run("tls_handshake_timeout_exceeded", tls_handshake_timeout_exceeded.make(lib, net));
             return t.wait();
         }
 

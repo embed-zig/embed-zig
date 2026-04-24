@@ -26,12 +26,12 @@ pub fn generateNonce(comptime lib: type) i64 {
     return wire_mod.generateNonce(lib);
 }
 
-pub fn Client(comptime lib: type) type {
-    return client_mod.Client(lib, root);
+pub fn Client(comptime lib: type, comptime net: type) type {
+    return client_mod.Client(lib, net, root);
 }
 
-pub fn make(comptime lib: type) type {
-    const C = Client(lib);
+pub fn make(comptime lib: type, comptime net: type) type {
+    const C = Client(lib, net);
     return struct {
         pub const types = types_mod;
         pub const wire = wire_mod;
@@ -54,4 +54,35 @@ pub fn make(comptime lib: type) type {
             return root.generateNonce(lib);
         }
     };
+}
+
+pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
+    const testing_api = @import("testing");
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            t.parallel();
+            t.run("wire", wire_mod.TestRunner(lib));
+            t.run("client", client_mod.TestRunner(lib, net, root));
+            return t.wait();
+        }
+
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }

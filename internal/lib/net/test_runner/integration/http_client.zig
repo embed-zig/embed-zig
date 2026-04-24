@@ -1,14 +1,13 @@
 //! HTTP client local runner — local HTTP client coverage.
 
-const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("http_transport/test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
-    const Utils = test_utils.make(lib);
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(lib, net);
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
@@ -216,7 +215,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

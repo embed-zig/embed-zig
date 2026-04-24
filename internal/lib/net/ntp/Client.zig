@@ -1,18 +1,14 @@
 const std = @import("std");
 const context_mod = @import("context");
 const sync = @import("sync");
-const net_mod = @import("../../net.zig");
-const fd_mod = @import("../fd.zig");
-const sockaddr_mod = @import("../fd/SockAddr.zig");
 
-pub fn Client(comptime lib: type, comptime ntp: type) type {
-    const Net = net_mod.make(lib);
-    const Addr = net_mod.netip.AddrPort;
-    const IpAddr = net_mod.netip.Addr;
+pub fn Client(comptime lib: type, comptime net: type, comptime ntp: type) type {
+    const Net = net;
+    const Addr = net.netip.AddrPort;
+    const IpAddr = net.netip.Addr;
     const Allocator = lib.mem.Allocator;
-    const SockAddr = sockaddr_mod.SockAddr(lib);
     const Thread = lib.Thread;
-    const PacketConn = net_mod.PacketConn;
+    const PacketConn = net.PacketConn;
     const WorkerRacer = sync.Racer(lib, ntp.Response);
 
     return struct {
@@ -250,8 +246,7 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
 
             const write_timeout_ms = initialWriteTimeoutMs(ctx, self.options.timeout_ms);
             pc.setWriteTimeout(write_timeout_ms);
-            const encoded = SockAddr.encode(server.addr) catch return error.SendFailed;
-            const sent = pc.writeTo(request[0..], @ptrCast(&encoded.storage), encoded.len) catch return error.SendFailed;
+            const sent = pc.writeTo(request[0..], server.addr) catch return error.SendFailed;
             if (sent != request.len) return error.SendFailed;
 
             const started_ms = lib.time.milliTimestamp();
@@ -294,8 +289,7 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
             const expected_origin = ntp.unixMsToNtp(origin_time_ms);
 
             pc.setWriteTimeout(if (self.options.timeout_ms == 0) 1 else self.options.timeout_ms);
-            const encoded = SockAddr.encode(server.addr) catch return error.SendFailed;
-            const sent = pc.writeTo(request[0..], @ptrCast(&encoded.storage), encoded.len) catch return error.SendFailed;
+            const sent = pc.writeTo(request[0..], server.addr) catch return error.SendFailed;
             if (sent != request.len) return error.SendFailed;
 
             const started_ms = lib.time.milliTimestamp();
@@ -338,10 +332,8 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
         }
 
         fn addrMatches(result: PacketConn.ReadFromResult, expected: Addr) bool {
-            const encoded = SockAddr.encode(expected) catch return false;
-            const expected_len = encoded.len;
-            if (result.addr_len != expected_len) return false;
-            return std.mem.eql(u8, result.addr[0..expected_len], std.mem.asBytes(&encoded.storage)[0..expected_len]);
+            return result.addr.port() == expected.port() and
+                net.netip.Addr.compare(result.addr.addr(), expected.addr()) == .eq;
         }
 
         fn initialWriteTimeoutMs(ctx: context_mod.Context, timeout_ms: u32) ?u32 {
@@ -443,4 +435,134 @@ pub fn Client(comptime lib: type, comptime ntp: type) type {
             return config;
         }
     };
+}
+
+pub fn TestRunner(comptime lib: type, comptime net: type, comptime ntp: type) @import("testing").TestRunner {
+    _ = net;
+
+    const testing_api = @import("testing");
+    const PacketConnApi = @import("../PacketConn.zig");
+    const netip_mod = @import("../netip.zig");
+    const wire_mod = @import("wire.zig");
+    const AddrPort = netip_mod.AddrPort;
+
+    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
+        const FakePacketConn = struct {
+            response_addr: AddrPort = AddrPort.from4(.{ 127, 0, 0, 1 }, ntp.NTP_PORT),
+            response_len: usize = 0,
+            response_buf: [48]u8 = [_]u8{0} ** 48,
+            write_to_addr: ?AddrPort = null,
+            write_timeout_ms: ?u32 = null,
+            read_timeout_ms: ?u32 = null,
+            close_calls: usize = 0,
+            deinit_calls: usize = 0,
+
+            pub fn readFrom(conn: *FakePacketConn, buf: []u8) PacketConnApi.ReadFromError!PacketConnApi.ReadFromResult {
+                const n = @min(buf.len, conn.response_len);
+                @memcpy(buf[0..n], conn.response_buf[0..n]);
+                return .{
+                    .bytes_read = n,
+                    .addr = conn.response_addr,
+                };
+            }
+
+            pub fn writeTo(conn: *FakePacketConn, buf: []const u8, addr: AddrPort) PacketConnApi.WriteToError!usize {
+                conn.write_to_addr = addr;
+                return buf.len;
+            }
+
+            pub fn close(conn: *FakePacketConn) void {
+                conn.close_calls += 1;
+            }
+
+            pub fn deinit(conn: *FakePacketConn) void {
+                conn.deinit_calls += 1;
+            }
+
+            pub fn setReadTimeout(conn: *FakePacketConn, ms: ?u32) void {
+                conn.read_timeout_ms = ms;
+            }
+
+            pub fn setWriteTimeout(conn: *FakePacketConn, ms: ?u32) void {
+                conn.write_timeout_ms = ms;
+            }
+        };
+
+        const FakeState = struct {
+            var active_conn: ?*FakePacketConn = null;
+            var opened_addr: ?AddrPort = null;
+        };
+
+        const FakeNet = struct {
+            pub const PacketConn = PacketConnApi;
+            pub const netip = netip_mod;
+
+            pub fn listenPacket(opts: anytype) !PacketConn {
+                FakeState.opened_addr = opts.address;
+                const conn = FakeState.active_conn orelse unreachable;
+                return PacketConnApi.init(conn);
+            }
+        };
+
+        const ClientApi = Client(lib, FakeNet, ntp);
+
+        fn buildResponse(origin_ms: i64, receive_ms: i64, transmit_ms: i64, stratum: u8) [48]u8 {
+            var buf: [48]u8 = [_]u8{0} ** 48;
+            buf[0] = 0b00_100_100;
+            buf[1] = stratum;
+            wire_mod.writeTimestamp(buf[24..32], wire_mod.unixMsToNtp(origin_ms));
+            wire_mod.writeTimestamp(buf[32..40], wire_mod.unixMsToNtp(receive_ms));
+            wire_mod.writeTimestamp(buf[40..48], wire_mod.unixMsToNtp(transmit_ms));
+            return buf;
+        }
+
+        fn expectAddrPortEqual(testing: anytype, actual: AddrPort, expected: AddrPort) !void {
+            try testing.expectEqual(expected.port(), actual.port());
+            try testing.expect(netip_mod.Addr.compare(actual.addr(), expected.addr()) == .eq);
+        }
+
+        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const origin_ms: i64 = 1_706_012_096_000;
+            const server = ClientApi.Server.init(AddrPort.from4(.{ 203, 107, 6, 88 }, ntp.NTP_PORT));
+
+            var client = try ClientApi.init(allocator, .{
+                .servers = &.{server},
+                .timeout_ms = 250,
+            });
+            defer client.deinit();
+
+            var good_conn = FakePacketConn{
+                .response_addr = server.addr,
+                .response_len = 48,
+                .response_buf = buildResponse(origin_ms, origin_ms + 12, origin_ms + 20, 2),
+            };
+            FakeState.active_conn = &good_conn;
+            FakeState.opened_addr = null;
+
+            const resp = try client.queryServer(server, origin_ms);
+            try testing.expectEqual(@as(u8, 2), resp.stratum);
+            try testing.expect(@abs(resp.receive_time_ms - (origin_ms + 12)) <= 1);
+            try testing.expect(@abs(resp.transmit_time_ms - (origin_ms + 20)) <= 1);
+            try expectAddrPortEqual(testing, good_conn.write_to_addr.?, server.addr);
+            try expectAddrPortEqual(testing, FakeState.opened_addr.?, AddrPort.from4(.{ 0, 0, 0, 0 }, 0));
+            try testing.expect(good_conn.write_timeout_ms != null);
+            try testing.expect(good_conn.read_timeout_ms != null);
+            try testing.expectEqual(@as(usize, 1), good_conn.close_calls);
+            try testing.expectEqual(@as(usize, 1), good_conn.deinit_calls);
+
+            var bad_conn = FakePacketConn{
+                .response_addr = AddrPort.from4(.{ 1, 1, 1, 1 }, ntp.NTP_PORT),
+                .response_len = 48,
+                .response_buf = buildResponse(origin_ms, origin_ms + 12, origin_ms + 20, 2),
+            };
+            FakeState.active_conn = &bad_conn;
+            FakeState.opened_addr = null;
+
+            try testing.expectError(error.SourceMismatch, client.queryServer(server, origin_ms));
+            try expectAddrPortEqual(testing, bad_conn.write_to_addr.?, server.addr);
+            try testing.expectEqual(@as(usize, 1), bad_conn.close_calls);
+            try testing.expectEqual(@as(usize, 1), bad_conn.deinit_calls);
+        }
+    }.run);
 }

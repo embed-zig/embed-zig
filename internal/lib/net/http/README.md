@@ -30,7 +30,8 @@ Import via the `net` package:
 
 ```zig
 const stdz = @import("stdz").make(platform);
-const net = @import("net").make(stdz);
+const runtime_posix = @import("runtime_posix");
+const net = @import("net").make2(stdz, runtime_posix.make(stdz));
 ```
 
 ## Client
@@ -111,7 +112,8 @@ Important scope boundary:
 
 ```zig
 const stdz = @import("stdz").make(platform);
-const net = @import("net").make(stdz);
+const runtime_posix = @import("runtime_posix");
+const net = @import("net").make2(stdz, runtime_posix.make(stdz));
 
 var server = try net.http.Server.init(stdz.testing.allocator, .{});
 defer server.deinit();
@@ -167,7 +169,8 @@ Important scope boundary:
 
 ```zig
 const stdz = @import("stdz").make(platform);
-const net = @import("net").make(stdz);
+const runtime_posix = @import("runtime_posix");
+const net = @import("net").make2(stdz, runtime_posix.make(stdz));
 
 var transport = try net.http.Transport.init(stdz.testing.allocator, .{});
 defer transport.deinit();

@@ -103,16 +103,16 @@ fn setNonBlocking(fd: posix.socket_t) !void {
 }
 
 fn setNoSigPipe(fd: posix.socket_t) void {
-    const enable: std.c.int = 1;
-    posix.setsockopt(fd, posix.SOL.SOCKET, posix.SO.NOSIGPIPE, std.mem.asBytes(&enable)) catch {};
+    const enable: [4]u8 = @bitCast(@as(i32, 1));
+    posix.setsockopt(fd, posix.SOL.SOCKET, posix.SO.NOSIGPIPE, &enable) catch {};
 }
 
 fn wakeUserEvent(ident: usize) posix.Kevent {
     return .{
         .ident = ident,
         .filter = system.EVFILT.USER,
-        .flags = EV.ADD | NOTE.TRIGGER,
-        .fflags = 0,
+        .flags = 0,
+        .fflags = NOTE.TRIGGER,
         .data = 0,
         .udata = 0,
     };
@@ -120,18 +120,50 @@ fn wakeUserEvent(ident: usize) posix.Kevent {
 
 fn OpCommon(comptime Self: type) type {
     return struct {
-        fn userIdent(self: *const Self) usize {
-            return @intFromPtr(self);
+        fn socketIdent(self: *const Self) usize {
+            return self.socket_ident;
+        }
+
+        fn readWakeIdent(self: *const Self) usize {
+            return self.read_wake_ident;
+        }
+
+        fn writeWakeIdent(self: *const Self) usize {
+            return self.write_wake_ident;
+        }
+
+        fn isClosed(self: *const Self) bool {
+            return @atomicLoad(u8, &self.closed, .acquire) != 0;
+        }
+
+        fn hasReadInterrupt(self: *const Self) bool {
+            return @atomicLoad(u8, &self.read_interrupt, .acquire) != 0;
+        }
+
+        fn hasWriteInterrupt(self: *const Self) bool {
+            return @atomicLoad(u8, &self.write_interrupt, .acquire) != 0;
+        }
+
+        fn takeReadInterrupt(self: *Self, want: runtime.PollEvents) bool {
+            if (!want.read_interrupt) return false;
+            return @atomicRmw(u8, &self.read_interrupt, .Xchg, 0, .acq_rel) != 0;
+        }
+
+        fn takeWriteInterrupt(self: *Self, want: runtime.PollEvents) bool {
+            if (!want.write_interrupt) return false;
+            return @atomicRmw(u8, &self.write_interrupt, .Xchg, 0, .acq_rel) != 0;
         }
 
         fn initKq(self: *Self) !void {
             self.kq = try posix.kqueue();
+            self.socket_ident = @as(usize, @intCast(self.sock));
+            const wake_base = socketIdent(self) << 1;
+            self.read_wake_ident = wake_base | 1;
+            self.write_wake_ident = wake_base | 2;
 
-            const ident = userIdent(self);
-
-            const user_add = [2]posix.Kevent{
+            const adds = [4]posix.Kevent{
                 .{
-                    .ident = ident,
+                    .ident = readWakeIdent(self),
                     .filter = system.EVFILT.USER,
                     .flags = EV.ADD | EV.CLEAR,
                     .fflags = NOTE.FFNOP,
@@ -139,25 +171,31 @@ fn OpCommon(comptime Self: type) type {
                     .udata = 0,
                 },
                 .{
-                    .ident = self.sock,
+                    .ident = writeWakeIdent(self),
+                    .filter = system.EVFILT.USER,
+                    .flags = EV.ADD | EV.CLEAR,
+                    .fflags = NOTE.FFNOP,
+                    .data = 0,
+                    .udata = 0,
+                },
+                .{
+                    .ident = socketIdent(self),
                     .filter = system.EVFILT.READ,
                     .flags = EV.ADD | EV.CLEAR,
                     .fflags = 0,
                     .data = 0,
                     .udata = 0,
                 },
+                .{
+                    .ident = socketIdent(self),
+                    .filter = system.EVFILT.WRITE,
+                    .flags = EV.ADD | EV.CLEAR,
+                    .fflags = 0,
+                    .data = 0,
+                    .udata = 0,
+                },
             };
-            _ = try posix.kevent(self.kq, &user_add, &.{}, null);
-
-            const write_add = posix.Kevent{
-                .ident = self.sock,
-                .filter = system.EVFILT.WRITE,
-                .flags = EV.ADD | EV.CLEAR,
-                .fflags = 0,
-                .data = 0,
-                .udata = 0,
-            };
-            _ = try posix.kevent(self.kq, &.{write_add}, &.{}, null);
+            _ = try posix.kevent(self.kq, &adds, &.{}, null);
         }
 
         fn deinitKq(self: *Self) void {
@@ -167,47 +205,61 @@ fn OpCommon(comptime Self: type) type {
             }
         }
 
-        fn triggerWake(self: *Self) void {
+        fn triggerWake(self: *Self, ident: usize) void {
             if (self.kq == -1) return;
-            const ev = wakeUserEvent(self.userIdent());
-            posix.kevent(self.kq, &.{ev}, &.{}, null) catch {};
+            const ev = wakeUserEvent(ident);
+            _ = posix.kevent(self.kq, &.{ev}, &.{}, null) catch {};
+        }
+
+        fn triggerReadWake(self: *Self) void {
+            triggerWake(self, readWakeIdent(self));
+        }
+
+        fn triggerWriteWake(self: *Self) void {
+            triggerWake(self, writeWakeIdent(self));
         }
 
         fn signalCommon(self: *Self, ev: runtime.SignalEvent) void {
+            if (isClosed(self)) return;
             switch (ev) {
                 .read_interrupt => {
-                    self.read_interrupt = true;
-                    self.triggerWake();
+                    @atomicStore(u8, &self.read_interrupt, 1, .release);
+                    self.triggerReadWake();
                 },
                 .write_interrupt => {
-                    self.write_interrupt = true;
-                    self.triggerWake();
+                    @atomicStore(u8, &self.write_interrupt, 1, .release);
+                    self.triggerWriteWake();
                 },
             }
         }
 
         fn pollCommon(self: *Self, want: runtime.PollEvents, timeout_ms: ?u32) runtime.PollError!runtime.PollEvents {
-            if (self.closed) return error.Closed;
+            if (isClosed(self)) return error.Closed;
             if (self.kq == -1) return error.Unexpected;
+            const started_ms = if (timeout_ms != null) std.time.milliTimestamp() else 0;
 
-            var ts: posix.timespec = undefined;
-            const timeout_ptr: ?*const posix.timespec = blk: {
-                const t = timeout_ms orelse break :blk null;
-                if (t == 0) break :blk &.{ .sec = 0, .nsec = 0 };
-                ts = .{
-                    .sec = @as(isize, @intCast(@divFloor(t, 1000))),
-                    .nsec = @as(isize, @intCast(@as(u64, @mod(t, 1000)) * std.time.ns_per_ms)),
+            while (true) {
+                if (isClosed(self)) return error.Closed;
+
+                var out = runtime.PollEvents{
+                    .read_interrupt = takeReadInterrupt(self, want),
+                    .write_interrupt = takeWriteInterrupt(self, want),
                 };
-                break :blk &ts;
-            };
+                if (hasAnyWantedEvent(out, want)) return out;
 
-            var out = runtime.PollEvents{};
-
-            poll_loop: while (true) {
-                if (self.closed) return error.Closed;
+                var ts: posix.timespec = undefined;
+                const timeout_ptr: ?*const posix.timespec = blk: {
+                    const t = timeout_ms orelse break :blk null;
+                    const remaining_ms = remainingTimeoutMs(started_ms, t);
+                    ts = .{
+                        .sec = @as(isize, @intCast(@divFloor(remaining_ms, 1000))),
+                        .nsec = @as(isize, @intCast(@as(u64, @mod(remaining_ms, 1000)) * std.time.ns_per_ms)),
+                    };
+                    break :blk &ts;
+                };
 
                 var evs: [8]posix.Kevent = undefined;
-                const n = try posix.kevent(self.kq, &.{}, &evs, timeout_ptr);
+                const n = posix.kevent(self.kq, &.{}, &evs, timeout_ptr) catch return error.Unexpected;
 
                 if (n == 0) {
                     if (timeout_ms != null) return error.TimedOut;
@@ -215,13 +267,25 @@ fn OpCommon(comptime Self: type) type {
                 }
 
                 for (evs[0..n]) |kev| {
-                    if (kev.ident == self.userIdent() and kev.filter == system.EVFILT.USER) {
-                        if (self.read_interrupt) out.read_interrupt = true;
-                        if (self.write_interrupt) out.write_interrupt = true;
+                    if (kev.filter == system.EVFILT.USER and kev.ident == readWakeIdent(self)) {
+                        if (want.read_interrupt) {
+                            if (takeReadInterrupt(self, want)) out.read_interrupt = true;
+                        } else if (hasReadInterrupt(self)) {
+                            self.triggerReadWake();
+                        }
                         continue;
                     }
 
-                    if (kev.ident == @as(usize, @intCast(self.sock))) {
+                    if (kev.filter == system.EVFILT.USER and kev.ident == writeWakeIdent(self)) {
+                        if (want.write_interrupt) {
+                            if (takeWriteInterrupt(self, want)) out.write_interrupt = true;
+                        } else if (hasWriteInterrupt(self)) {
+                            self.triggerWriteWake();
+                        }
+                        continue;
+                    }
+
+                    if (kev.ident == socketIdent(self)) {
                         if (kev.filter == system.EVFILT.READ) {
                             if ((kev.flags & EV.ERROR) != 0) {
                                 out.failed = true;
@@ -239,14 +303,11 @@ fn OpCommon(comptime Self: type) type {
                     }
                 }
 
-                if (want.read and !out.read) continue :poll_loop;
-                if (want.write and !out.write) continue :poll_loop;
-                if (want.failed and !out.failed) continue :poll_loop;
-                if (want.hup and !out.hup) continue :poll_loop;
-                if (want.read_interrupt and !out.read_interrupt) continue :poll_loop;
-                if (want.write_interrupt and !out.write_interrupt) continue :poll_loop;
+                if (hasAnyWantedEvent(out, want)) return out;
 
-                return out;
+                if (timeout_ms) |t| {
+                    if (remainingTimeoutMs(started_ms, t) == 0) return error.TimedOut;
+                }
             }
         }
     };
@@ -255,33 +316,40 @@ fn OpCommon(comptime Self: type) type {
 pub const Tcp = struct {
     sock: posix.socket_t = -1,
     kq: posix.fd_t = -1,
-    closed: bool = false,
+    socket_ident: usize = 0,
+    read_wake_ident: usize = 0,
+    write_wake_ident: usize = 0,
+    closed: u8 = 0,
 
-    read_interrupt: bool = false,
-    write_interrupt: bool = false,
+    read_interrupt: u8 = 0,
+    write_interrupt: u8 = 0,
 
     const tcp_ops = OpCommon(Tcp);
 
     pub fn close(self: *Tcp) void {
-        if (self.closed) return;
-        self.closed = true;
-        self.read_interrupt = true;
-        self.write_interrupt = true;
-        self.triggerWake();
+        if (@cmpxchgStrong(u8, &self.closed, 0, 1, .acq_rel, .acquire) != null) return;
+        @atomicStore(u8, &self.read_interrupt, 1, .release);
+        @atomicStore(u8, &self.write_interrupt, 1, .release);
+        self.triggerReadWake();
+        self.triggerWriteWake();
 
         if (self.sock != -1) {
             posix.close(self.sock);
             self.sock = -1;
         }
+    }
+
+    pub fn deinit(self: *Tcp) void {
+        self.close();
         self.deinitKq();
     }
 
     pub fn shutdown(self: *Tcp, how: runtime.ShutdownHow) runtime.SocketError!void {
-        if (self.closed) return error.Closed;
+        if (tcp_ops.isClosed(self)) return error.Closed;
         const posix_how: posix.ShutdownHow = switch (how) {
-            .read => .RECV,
-            .write => .SEND,
-            .both => .BOTH,
+            .read => .recv,
+            .write => .send,
+            .both => .both,
         };
         posix.shutdown(self.sock, posix_how) catch |err| return switch (err) {
             error.SocketNotConnected => error.NotConnected,
@@ -290,66 +358,35 @@ pub const Tcp = struct {
     }
 
     pub fn signal(self: *Tcp, ev: runtime.SignalEvent) void {
-        if (self.closed) return;
+        if (tcp_ops.isClosed(self)) return;
         tcp_ops.signalCommon(self, ev);
     }
 
     pub fn bind(self: *Tcp, ap: netip.AddrPort) runtime.SocketError!void {
-        if (self.closed) return error.Closed;
+        if (tcp_ops.isClosed(self)) return error.Closed;
         const enc = encodeSockAddr(ap) catch |err| return encodeErrorToSocket(err);
-        posix.bind(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| return switch (err) {
-            error.AccessDenied => error.AccessDenied,
-            error.AddressFamilyNotSupported => error.Unexpected,
-            error.AddressInUse => error.AddressInUse,
-            error.AddressNotAvailable => error.AddressNotAvailable,
-            error.AlreadyBound => error.Unexpected,
-            error.BadFileDescriptor => error.Unexpected,
-            error.FileDescriptorNotASocket => error.Unexpected,
-            error.InvalidCharacter => error.Unexpected,
-            error.NameTooLong => error.Unexpected,
-            error.FileNotFound => error.Unexpected,
-            error.NotDir => error.Unexpected,
-            error.ReadOnlyFileSystem => error.Unexpected,
-            error.SystemResources => error.Unexpected,
-            error.Unexpected => error.Unexpected,
-        };
+        posix.bind(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| return socketError(err);
     }
 
     pub fn listen(self: *Tcp, backlog: u31) runtime.SocketError!void {
-        if (self.closed) return error.Closed;
-        posix.listen(self.sock, backlog) catch |err| return switch (err) {
-            error.AddressInUse => error.AddressInUse,
-            error.FileDescriptorNotASocket => error.Unexpected,
-            error.AlreadyConnected => error.AlreadyConnected,
-            error.SocketNotBound => error.Unexpected,
-            error.BadFileDescriptor => error.Unexpected,
-            error.FileBusy => error.Unexpected,
-            error.SystemResources => error.Unexpected,
-            error.Unexpected => error.Unexpected,
-        };
+        if (tcp_ops.isClosed(self)) return error.Closed;
+        posix.listen(self.sock, backlog) catch |err| return socketError(err);
     }
 
     pub fn accept(self: *Tcp, remote: ?*netip.AddrPort) runtime.SocketError!Tcp {
-        if (self.closed) return error.Closed;
+        if (tcp_ops.isClosed(self)) return error.Closed;
 
         var storage: posix.sockaddr.storage = undefined;
         var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
 
-        const new_fd = posix.accept(self.sock, @ptrCast(&storage), &len, 0) catch |err| switch (err) {
-            error.WouldBlock => return error.WouldBlock,
-            error.ConnectionAborted => error.ConnectionAborted,
-            error.ProcessFdQuotaExceeded,
-            error.SystemFdQuotaExceeded,
-            => error.Unexpected,
-            else => error.Unexpected,
-        };
+        const new_fd = posix.accept(self.sock, @ptrCast(&storage), &len, 0) catch |err| return socketError(err);
         errdefer posix.close(new_fd);
 
         setNonBlocking(new_fd) catch return error.Unexpected;
         setNoSigPipe(new_fd);
 
         var child: Tcp = .{ .sock = new_fd };
-        try child.initKq();
+        child.initKq() catch return error.Unexpected;
 
         if (remote) |out| {
             out.* = try sockaddrToAddrPort(&storage, len);
@@ -359,33 +396,17 @@ pub const Tcp = struct {
     }
 
     pub fn connect(self: *Tcp, ap: netip.AddrPort) runtime.SocketError!void {
-        if (self.closed) return error.Closed;
+        if (tcp_ops.isClosed(self)) return error.Closed;
         const enc = encodeSockAddr(ap) catch |err| return encodeErrorToSocket(err);
-        posix.connect(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| switch (err) {
-            error.WouldBlock, error.ConnectionPending => return,
-            error.AccessDenied => error.AccessDenied,
-            error.AddressFamilyNotSupported => error.Unexpected,
-            error.AddressInUse => error.AddressInUse,
-            error.AddressNotAvailable => error.AddressNotAvailable,
-            error.AlreadyConnected => error.AlreadyConnected,
-            error.BadFileDescriptor => error.Unexpected,
-            error.ConnectionRefused => error.ConnectionRefused,
-            error.ConnectionReset => error.ConnectionReset,
-            error.ConnectionTimedOut => error.TimedOut,
-            error.HostUnreachable => error.NetworkUnreachable,
-            error.NetUnreachable => error.NetworkUnreachable,
-            error.NetworkSubsystemFailed => error.Unexpected,
-            error.FileDescriptorNotASocket => error.Unexpected,
-            error.NotSocket => error.Unexpected,
-            error.ProtocolNotSupported => error.Unexpected,
-            error.WrongProtocolForSocket => error.Unexpected,
-            error.SystemResources => error.Unexpected,
-            error.Unexpected => error.Unexpected,
+        posix.connect(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| {
+            const mapped = socketError(err);
+            if (mapped == error.WouldBlock or mapped == error.ConnectionPending) return;
+            return mapped;
         };
     }
 
     pub fn finishConnect(self: *Tcp) runtime.SocketError!void {
-        if (self.closed) return error.Closed;
+        if (tcp_ops.isClosed(self)) return error.Closed;
 
         var err_code: i32 = 0;
         posix.getsockopt(self.sock, posix.SOL.SOCKET, posix.SO.ERROR, std.mem.asBytes(&err_code)) catch return error.Unexpected;
@@ -394,63 +415,38 @@ pub const Tcp = struct {
     }
 
     pub fn recv(self: *Tcp, buf: []u8) runtime.SocketError!usize {
-        if (self.closed) return error.Closed;
-        return posix.recv(self.sock, buf, 0) catch |err| return switch (err) {
-            error.WouldBlock => error.WouldBlock,
-            error.ConnectionReset => error.ConnectionReset,
-            error.ConnectionTimedOut => error.TimedOut,
-            error.MessageTooLong => error.MessageTooLong,
-            error.NotConnected => error.NotConnected,
-            error.BrokenPipe => error.BrokenPipe,
-            error.SystemResources => error.Unexpected,
-            error.SocketNotConnected => error.NotConnected,
-            error.Unexpected => error.Unexpected,
-        };
+        if (tcp_ops.isClosed(self)) return error.Closed;
+        return posix.recv(self.sock, buf, 0) catch |err| return socketError(err);
     }
 
     pub fn send(self: *Tcp, buf: []const u8) runtime.SocketError!usize {
-        if (self.closed) return error.Closed;
-        return posix.send(self.sock, buf, 0) catch |err| return switch (err) {
-            error.WouldBlock => error.WouldBlock,
-            error.AccessDenied => error.AccessDenied,
-            error.BrokenPipe => error.BrokenPipe,
-            error.ConnectionReset => error.ConnectionReset,
-            error.MessageTooLong => error.MessageTooLong,
-            error.NetworkUnreachable => error.NetworkUnreachable,
-            error.NotOpenForWriting => error.Unexpected,
-            error.Unexpected => error.Unexpected,
-            error.SystemResources => error.Unexpected,
-            error.SocketNotConnected => error.NotConnected,
-        };
+        if (tcp_ops.isClosed(self)) return error.Closed;
+        return posix.send(self.sock, buf, 0) catch |err| return socketError(err);
     }
 
     pub fn localAddr(self: *Tcp) runtime.SocketError!netip.AddrPort {
-        if (self.closed) return error.Closed;
+        if (tcp_ops.isClosed(self)) return error.Closed;
         var storage: posix.sockaddr.storage = undefined;
         var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
-        posix.getsockname(self.sock, @ptrCast(&storage), &len) catch return error.Unexpected;
+        posix.getsockname(self.sock, @ptrCast(&storage), &len) catch |err| return socketError(err);
         return sockaddrToAddrPort(&storage, len);
     }
 
     pub fn remoteAddr(self: *Tcp) runtime.SocketError!netip.AddrPort {
-        if (self.closed) return error.Closed;
+        if (tcp_ops.isClosed(self)) return error.Closed;
         var storage: posix.sockaddr.storage = undefined;
         var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
-        posix.getpeername(self.sock, @ptrCast(&storage), &len) catch |err| return switch (err) {
-            error.NotConnected => error.NotConnected,
-            else => error.Unexpected,
-        };
+        posix.getpeername(self.sock, @ptrCast(&storage), &len) catch |err| return socketError(err);
         return sockaddrToAddrPort(&storage, len);
     }
 
     pub fn setOpt(self: *Tcp, opt: runtime.TcpOption) runtime.SetSockOptError!void {
-        if (self.closed) return error.Closed;
+        if (tcp_ops.isClosed(self)) return error.Closed;
         switch (opt) {
             .socket => |s| try applySocketLevelOpt(self.sock, s),
             .tcp => |t| switch (t) {
                 .no_delay => |enabled| {
-                    const v: std.c.int = if (enabled) 1 else 0;
-                    posix.setsockopt(self.sock, posix.IPPROTO.TCP, posix.TCP.NODELAY, std.mem.asBytes(&v)) catch |err| return translateSetSockOptErr(err);
+                    try setSockOptBool(self.sock, posix.IPPROTO.TCP, posix.TCP.NODELAY, enabled);
                 },
             },
         }
@@ -460,8 +456,12 @@ pub const Tcp = struct {
         return tcp_ops.pollCommon(self, want, timeout_ms);
     }
 
-    fn triggerWake(self: *Tcp) void {
-        tcp_ops.triggerWake(self);
+    fn triggerReadWake(self: *Tcp) void {
+        tcp_ops.triggerReadWake(self);
+    }
+
+    fn triggerWriteWake(self: *Tcp) void {
+        tcp_ops.triggerWriteWake(self);
     }
 
     fn deinitKq(self: *Tcp) void {
@@ -476,76 +476,52 @@ pub const Tcp = struct {
 pub const Udp = struct {
     sock: posix.socket_t = -1,
     kq: posix.fd_t = -1,
-    closed: bool = false,
+    socket_ident: usize = 0,
+    read_wake_ident: usize = 0,
+    write_wake_ident: usize = 0,
+    closed: u8 = 0,
 
-    read_interrupt: bool = false,
-    write_interrupt: bool = false,
+    read_interrupt: u8 = 0,
+    write_interrupt: u8 = 0,
 
     const udp_ops = OpCommon(Udp);
 
     pub fn close(self: *Udp) void {
-        if (self.closed) return;
-        self.closed = true;
-        self.read_interrupt = true;
-        self.write_interrupt = true;
-        self.triggerWake();
+        if (@cmpxchgStrong(u8, &self.closed, 0, 1, .acq_rel, .acquire) != null) return;
+        @atomicStore(u8, &self.read_interrupt, 1, .release);
+        @atomicStore(u8, &self.write_interrupt, 1, .release);
+        self.triggerReadWake();
+        self.triggerWriteWake();
 
         if (self.sock != -1) {
             posix.close(self.sock);
             self.sock = -1;
         }
+    }
+
+    pub fn deinit(self: *Udp) void {
+        self.close();
         self.deinitKq();
     }
 
     pub fn signal(self: *Udp, ev: runtime.SignalEvent) void {
-        if (self.closed) return;
+        if (udp_ops.isClosed(self)) return;
         udp_ops.signalCommon(self, ev);
     }
 
     pub fn bind(self: *Udp, ap: netip.AddrPort) runtime.SocketError!void {
-        if (self.closed) return error.Closed;
+        if (udp_ops.isClosed(self)) return error.Closed;
         const enc = encodeSockAddr(ap) catch |err| return encodeErrorToSocket(err);
-        posix.bind(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| return switch (err) {
-            error.AccessDenied => error.AccessDenied,
-            error.AddressFamilyNotSupported => error.Unexpected,
-            error.AddressInUse => error.AddressInUse,
-            error.AddressNotAvailable => error.AddressNotAvailable,
-            error.AlreadyBound => error.Unexpected,
-            error.BadFileDescriptor => error.Unexpected,
-            error.FileDescriptorNotASocket => error.Unexpected,
-            error.InvalidCharacter => error.Unexpected,
-            error.NameTooLong => error.Unexpected,
-            error.FileNotFound => error.Unexpected,
-            error.NotDir => error.Unexpected,
-            error.ReadOnlyFileSystem => error.Unexpected,
-            error.SystemResources => error.Unexpected,
-            error.Unexpected => error.Unexpected,
-        };
+        posix.bind(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| return socketError(err);
     }
 
     pub fn connect(self: *Udp, ap: netip.AddrPort) runtime.SocketError!void {
-        if (self.closed) return error.Closed;
+        if (udp_ops.isClosed(self)) return error.Closed;
         const enc = encodeSockAddr(ap) catch |err| return encodeErrorToSocket(err);
-        posix.connect(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| switch (err) {
-            error.WouldBlock, error.ConnectionPending => return,
-            error.AccessDenied => error.AccessDenied,
-            error.AddressFamilyNotSupported => error.Unexpected,
-            error.AddressInUse => error.AddressInUse,
-            error.AddressNotAvailable => error.AddressNotAvailable,
-            error.AlreadyConnected => error.AlreadyConnected,
-            error.BadFileDescriptor => error.Unexpected,
-            error.ConnectionRefused => error.ConnectionRefused,
-            error.ConnectionReset => error.ConnectionReset,
-            error.ConnectionTimedOut => error.TimedOut,
-            error.HostUnreachable => error.NetworkUnreachable,
-            error.NetUnreachable => error.NetworkUnreachable,
-            error.NetworkSubsystemFailed => error.Unexpected,
-            error.FileDescriptorNotASocket => error.Unexpected,
-            error.NotSocket => error.Unexpected,
-            error.ProtocolNotSupported => error.Unexpected,
-            error.WrongProtocolForSocket => error.Unexpected,
-            error.SystemResources => error.Unexpected,
-            error.Unexpected => error.Unexpected,
+        posix.connect(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| {
+            const mapped = socketError(err);
+            if (mapped == error.WouldBlock or mapped == error.ConnectionPending) return;
+            return mapped;
         };
     }
 
@@ -555,108 +531,53 @@ pub const Udp = struct {
     }
 
     pub fn recv(self: *Udp, buf: []u8) runtime.SocketError!usize {
-        if (self.closed) return error.Closed;
-        return posix.recv(self.sock, buf, 0) catch |err| return switch (err) {
-            error.WouldBlock => error.WouldBlock,
-            error.ConnectionReset => error.ConnectionReset,
-            error.ConnectionTimedOut => error.TimedOut,
-            error.MessageTooLong => error.MessageTooLong,
-            error.NotConnected => error.NotConnected,
-            error.BrokenPipe => error.BrokenPipe,
-            error.SystemResources => error.Unexpected,
-            error.SocketNotConnected => error.NotConnected,
-            error.Unexpected => error.Unexpected,
-        };
+        if (udp_ops.isClosed(self)) return error.Closed;
+        return posix.recv(self.sock, buf, 0) catch |err| return socketError(err);
     }
 
     pub fn recvFrom(self: *Udp, buf: []u8, src: ?*netip.AddrPort) runtime.SocketError!usize {
-        if (self.closed) return error.Closed;
+        if (udp_ops.isClosed(self)) return error.Closed;
 
         if (src) |out| {
             var storage: posix.sockaddr.storage = undefined;
             var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
-            const n = posix.recvfrom(self.sock, buf, 0, @ptrCast(&storage), &len) catch |err| return switch (err) {
-                error.WouldBlock => error.WouldBlock,
-                error.ConnectionReset => error.ConnectionReset,
-                error.ConnectionTimedOut => error.TimedOut,
-                error.MessageTooLong => error.MessageTooLong,
-                error.NotConnected => error.NotConnected,
-                error.BrokenPipe => error.BrokenPipe,
-                error.SystemResources => error.Unexpected,
-                error.SocketNotConnected => error.NotConnected,
-                error.Unexpected => error.Unexpected,
-            };
+            const n = posix.recvfrom(self.sock, buf, 0, @ptrCast(&storage), &len) catch |err| return socketError(err);
             out.* = try sockaddrToAddrPort(&storage, len);
             return n;
         }
 
-        return posix.recv(self.sock, buf, 0) catch |err| return switch (err) {
-            error.WouldBlock => error.WouldBlock,
-            error.ConnectionReset => error.ConnectionReset,
-            error.ConnectionTimedOut => error.TimedOut,
-            error.MessageTooLong => error.MessageTooLong,
-            error.NotConnected => error.NotConnected,
-            error.BrokenPipe => error.BrokenPipe,
-            error.SystemResources => error.Unexpected,
-            error.SocketNotConnected => error.NotConnected,
-            error.Unexpected => error.Unexpected,
-        };
+        return posix.recv(self.sock, buf, 0) catch |err| return socketError(err);
     }
 
     pub fn send(self: *Udp, buf: []const u8) runtime.SocketError!usize {
-        if (self.closed) return error.Closed;
-        return posix.send(self.sock, buf, 0) catch |err| return switch (err) {
-            error.WouldBlock => error.WouldBlock,
-            error.AccessDenied => error.AccessDenied,
-            error.BrokenPipe => error.BrokenPipe,
-            error.ConnectionReset => error.ConnectionReset,
-            error.MessageTooLong => error.MessageTooLong,
-            error.NetworkUnreachable => error.NetworkUnreachable,
-            error.NotOpenForWriting => error.Unexpected,
-            error.Unexpected => error.Unexpected,
-            error.SystemResources => error.Unexpected,
-            error.SocketNotConnected => error.NotConnected,
-        };
+        if (udp_ops.isClosed(self)) return error.Closed;
+        return posix.send(self.sock, buf, 0) catch |err| return socketError(err);
     }
 
     pub fn sendTo(self: *Udp, buf: []const u8, dst: netip.AddrPort) runtime.SocketError!usize {
-        if (self.closed) return error.Closed;
+        if (udp_ops.isClosed(self)) return error.Closed;
         const enc = encodeSockAddr(dst) catch |err| return encodeErrorToSocket(err);
-        return posix.sendto(self.sock, buf, 0, @ptrCast(&enc.storage), enc.len) catch |err| return switch (err) {
-            error.WouldBlock => error.WouldBlock,
-            error.AccessDenied => error.AccessDenied,
-            error.BrokenPipe => error.BrokenPipe,
-            error.ConnectionReset => error.ConnectionReset,
-            error.MessageTooLong => error.MessageTooLong,
-            error.NetworkUnreachable => error.NetworkUnreachable,
-            error.NotOpenForWriting => error.Unexpected,
-            error.Unexpected => error.Unexpected,
-            error.SystemResources => error.Unexpected,
-            error.SocketNotConnected => error.NotConnected,
-        };
+        return posix.sendto(self.sock, buf, 0, @ptrCast(&enc.storage), enc.len) catch |err| return socketError(err);
     }
 
     pub fn localAddr(self: *Udp) runtime.SocketError!netip.AddrPort {
-        if (self.closed) return error.Closed;
+        if (udp_ops.isClosed(self)) return error.Closed;
         var storage: posix.sockaddr.storage = undefined;
         var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
-        posix.getsockname(self.sock, @ptrCast(&storage), &len) catch return error.Unexpected;
+        posix.getsockname(self.sock, @ptrCast(&storage), &len) catch |err| return socketError(err);
         return sockaddrToAddrPort(&storage, len);
     }
 
     pub fn remoteAddr(self: *Udp) runtime.SocketError!netip.AddrPort {
-        if (self.closed) return error.Closed;
+        if (udp_ops.isClosed(self)) return error.Closed;
         var storage: posix.sockaddr.storage = undefined;
         var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
-        posix.getpeername(self.sock, @ptrCast(&storage), &len) catch |err| return switch (err) {
-            error.NotConnected => error.NotConnected,
-            else => error.Unexpected,
-        };
+        posix.getpeername(self.sock, @ptrCast(&storage), &len) catch |err| return socketError(err);
         return sockaddrToAddrPort(&storage, len);
     }
 
     pub fn setOpt(self: *Udp, opt: runtime.UdpOption) runtime.SetSockOptError!void {
-        if (self.closed) return error.Closed;
+        if (udp_ops.isClosed(self)) return error.Closed;
         switch (opt) {
             .socket => |s| try applySocketLevelOpt(self.sock, s),
         }
@@ -666,8 +587,12 @@ pub const Udp = struct {
         return udp_ops.pollCommon(self, want, timeout_ms);
     }
 
-    fn triggerWake(self: *Udp) void {
-        udp_ops.triggerWake(self);
+    fn triggerReadWake(self: *Udp) void {
+        udp_ops.triggerReadWake(self);
+    }
+
+    fn triggerWriteWake(self: *Udp) void {
+        udp_ops.triggerWriteWake(self);
     }
 
     fn deinitKq(self: *Udp) void {
@@ -682,23 +607,20 @@ pub const Udp = struct {
 fn applySocketLevelOpt(sock: posix.socket_t, opt: runtime.SocketLevelOption) runtime.SetSockOptError!void {
     switch (opt) {
         .reuse_addr => |enabled| {
-            const v: std.c.int = if (enabled) 1 else 0;
-            posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.REUSEADDR, std.mem.asBytes(&v)) catch |err| return translateSetSockOptErr(err);
+            try setSockOptBool(sock, posix.SOL.SOCKET, posix.SO.REUSEADDR, enabled);
         },
         .reuse_port => |enabled| {
-            const v: std.c.int = if (enabled) 1 else 0;
-            posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.REUSEPORT, std.mem.asBytes(&v)) catch |err| return translateSetSockOptErr(err);
+            try setSockOptBool(sock, posix.SOL.SOCKET, posix.SO.REUSEPORT, enabled);
         },
         .broadcast => |enabled| {
-            const v: std.c.int = if (enabled) 1 else 0;
-            posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.BROADCAST, std.mem.asBytes(&v)) catch |err| return translateSetSockOptErr(err);
+            try setSockOptBool(sock, posix.SOL.SOCKET, posix.SO.BROADCAST, enabled);
         },
     }
 }
 
 fn sockaddrToAddrPort(storage: *const posix.sockaddr.storage, len: posix.socklen_t) !netip.AddrPort {
     if (len < @sizeOf(posix.sockaddr)) return error.Unexpected;
-    const family = std.mem.readIntNative(u16, std.mem.asBytes(&@as(*const posix.sockaddr, @ptrCast(storage)).family));
+    const family = @as(*const posix.sockaddr, @ptrCast(storage)).family;
 
     if (family == posix.AF.INET) {
         if (len < @sizeOf(posix.sockaddr.in)) return error.Unexpected;
@@ -718,12 +640,63 @@ fn sockaddrToAddrPort(storage: *const posix.sockaddr.storage, len: posix.socklen
     return error.Unexpected;
 }
 
-fn translateSetSockOptErr(err: posix.SetSockOptError) runtime.SetSockOptError {
+fn translateSetSockOptErr(err: anyerror) runtime.SetSockOptError {
     return switch (err) {
-        error.Closed => error.Closed,
         error.NotSupported, error.ProtocolNotSupported => error.Unsupported,
         else => error.Unexpected,
     };
+}
+
+fn setSockOptBool(fd: posix.socket_t, level: anytype, opt: anytype, enable: bool) runtime.SetSockOptError!void {
+    const value: [4]u8 = @bitCast(@as(i32, if (enable) 1 else 0));
+    posix.setsockopt(fd, level, opt, &value) catch |err| return translateSetSockOptErr(err);
+}
+
+fn socketError(err: anyerror) runtime.SocketError {
+    return switch (err) {
+        error.WouldBlock => error.WouldBlock,
+        error.AccessDenied, error.PermissionDenied => error.AccessDenied,
+        error.AddressInUse => error.AddressInUse,
+        error.AddressNotAvailable => error.AddressNotAvailable,
+        error.AlreadyConnected => error.AlreadyConnected,
+        error.ConnectionPending => error.ConnectionPending,
+        error.ConnectionAborted => error.ConnectionAborted,
+        error.ConnectionRefused => error.ConnectionRefused,
+        error.ConnectionReset,
+        error.ConnectionResetByPeer,
+        => error.ConnectionReset,
+        error.BrokenPipe => error.BrokenPipe,
+        error.MessageTooLong,
+        error.MessageTooBig,
+        => error.MessageTooLong,
+        error.NetworkUnreachable,
+        error.HostUnreachable,
+        error.NetUnreachable,
+        => error.NetworkUnreachable,
+        error.NotConnected,
+        error.SocketNotConnected,
+        => error.NotConnected,
+        error.ConnectionTimedOut,
+        error.TimedOut,
+        => error.TimedOut,
+        else => error.Unexpected,
+    };
+}
+
+fn remainingTimeoutMs(started_ms: i64, total_ms: u32) u32 {
+    const elapsed = std.time.milliTimestamp() - started_ms;
+    if (elapsed <= 0) return total_ms;
+    if (elapsed >= total_ms) return 0;
+    return total_ms - @as(u32, @intCast(elapsed));
+}
+
+fn hasAnyWantedEvent(got: runtime.PollEvents, want: runtime.PollEvents) bool {
+    return (want.read and got.read) or
+        (want.write and got.write) or
+        (want.failed and got.failed) or
+        (want.hup and got.hup) or
+        (want.read_interrupt and got.read_interrupt) or
+        (want.write_interrupt and got.write_interrupt);
 }
 
 fn soErrorToSocket(code: i32) runtime.SocketError {
@@ -735,7 +708,9 @@ fn soErrorToSocket(code: i32) runtime.SocketError {
         .ADDRNOTAVAIL => error.AddressNotAvailable,
         .AFNOSUPPORT => error.Unexpected,
         .CONNREFUSED => error.ConnectionRefused,
-        .CONNRESET => error.ConnectionReset,
+        // Match the shared host runtime contract for async-connect refusal via
+        // `SO_ERROR` on Darwin.
+        .CONNRESET => error.ConnectionRefused,
         .HOSTUNREACH => error.NetworkUnreachable,
         .NETUNREACH => error.NetworkUnreachable,
         .TIMEDOUT => error.TimedOut,

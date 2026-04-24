@@ -2,6 +2,7 @@ const NetConn = @import("Conn.zig");
 const NetListener = @import("Listener.zig");
 const ChannelConn = @import("cmux/Conn.zig");
 const control = @import("cmux/control.zig");
+const frame = @import("cmux/frame.zig");
 const Session = @import("cmux/Session.zig");
 
 pub fn Cmux(comptime lib: type) type {
@@ -443,6 +444,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
+            t.run("frame", frame.TestRunner(lib));
             t.run("dialRejectsZero", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
                 fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.dialRejectsZero(case_allocator);

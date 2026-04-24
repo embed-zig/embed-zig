@@ -4,8 +4,10 @@
 //! `TcpListener` wrappers. It exposes concrete runtime-managed `Tcp` and `Udp`
 //! objects with:
 //! - non-blocking socket operations
-//! - per-socket directional interrupt events for deadline / context / close wakeups
+//! - per-socket directional interrupt events for runtime/backend/close wakeups,
+//!   consumed once by `poll(...)`
 //! - per-socket `poll(...)`
+//! - explicit `close()` / `deinit()` lifecycle hooks
 //!
 //! It intentionally does not own:
 //! - `Context`
@@ -19,6 +21,10 @@ pub const Domain = enum(u8) {
     inet,
     inet6,
 };
+
+pub fn addrDomain(addr: netip.Addr) Domain {
+    return if (addr.is4()) .inet else .inet6;
+}
 
 pub const ShutdownHow = enum(u2) {
     read,
@@ -110,6 +116,7 @@ pub fn make(comptime Impl: type) type {
             _ = @as(*const fn (runtime.Domain) runtime.CreateError!Udp, &Impl.udp);
 
             _ = @as(*const fn (*Tcp) void, &Tcp.close);
+            _ = @as(*const fn (*Tcp) void, &Tcp.deinit);
             _ = @as(*const fn (*Tcp, runtime.ShutdownHow) runtime.SocketError!void, &Tcp.shutdown);
             _ = @as(*const fn (*Tcp, runtime.SignalEvent) void, &Tcp.signal);
             _ = @as(*const fn (*Tcp, netip.AddrPort) runtime.SocketError!void, &Tcp.bind);
@@ -125,6 +132,7 @@ pub fn make(comptime Impl: type) type {
             _ = @as(*const fn (*Tcp, runtime.PollEvents, ?u32) runtime.PollError!runtime.PollEvents, &Tcp.poll);
 
             _ = @as(*const fn (*Udp) void, &Udp.close);
+            _ = @as(*const fn (*Udp) void, &Udp.deinit);
             _ = @as(*const fn (*Udp, runtime.SignalEvent) void, &Udp.signal);
             _ = @as(*const fn (*Udp, netip.AddrPort) runtime.SocketError!void, &Udp.bind);
             _ = @as(*const fn (*Udp, netip.AddrPort) runtime.SocketError!void, &Udp.connect);

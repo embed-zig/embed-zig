@@ -1,6 +1,5 @@
 //! Small shared helpers for TCP integration cases (no `For(lib)` facade).
-
-const net = @import("../../../../net.zig");
+const net_mod = @import("../../../../net.zig");
 
 pub fn allocatorAlignment(comptime any_lib: type) type {
     const alloc_ptr_type = @TypeOf(any_lib.testing.allocator.vtable.alloc);
@@ -81,17 +80,17 @@ pub fn skipIfConnectDidNotPend(err: anyerror) anyerror!void {
     }
 }
 
-pub fn listenerPort(ln: net.Listener, comptime NetNs: type) !u16 {
-    const typed = try ln.as(NetNs.TcpListener);
+pub fn listenerPort(ln: net_mod.Listener, comptime net: type) !u16 {
+    const typed = try ln.as(net.TcpListener);
     return typed.port();
 }
 
-pub fn addr4(addr: [4]u8, port: u16) net.netip.AddrPort {
-    return net.netip.AddrPort.from4(addr, port);
+pub fn addr4(addr: [4]u8, port: u16) net_mod.netip.AddrPort {
+    return net_mod.netip.AddrPort.from4(addr, port);
 }
 
-pub fn addr6(text: []const u8, port: u16) !net.netip.AddrPort {
-    return net.netip.AddrPort.init(try net.netip.Addr.parse(text), port);
+pub fn addr6(text: []const u8, port: u16) !net_mod.netip.AddrPort {
+    return net_mod.netip.AddrPort.init(try net_mod.netip.Addr.parse(text), port);
 }
 
 pub fn StartGate(comptime lib: type) type {

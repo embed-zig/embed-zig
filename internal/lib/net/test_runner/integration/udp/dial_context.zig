@@ -1,10 +1,9 @@
 const stdz = @import("stdz");
 const context_mod = @import("context");
 const testing_api = @import("testing");
-const net_mod = @import("../../../../net.zig");
 const test_utils = @import("../tcp/test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -17,23 +16,22 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             const Body = struct {
                 fn call(a: lib.mem.Allocator) !void {
-                    const Net = net_mod.make(lib);
                     const Context = context_mod.make(lib);
 
                     var ctx_api = try Context.init(a);
                     defer ctx_api.deinit();
 
-                    var pc = try Net.listenPacket(.{
+                    var pc = try net.listenPacket(.{
                         .allocator = a,
                         .address = test_utils.addr4(.{ 127, 0, 0, 1 }, 0),
                     });
                     defer pc.deinit();
 
-                    const udp_impl = try pc.as(Net.UdpConn);
+                    const udp_impl = try pc.as(net.UdpConn);
                     const port = try udp_impl.boundPort();
                     const dest = test_utils.addr4(.{ 127, 0, 0, 1 }, port);
 
-                    var d = Net.Dialer.init(a, .{});
+                    var d = net.Dialer.init(a, .{});
                     var c = try d.dialContext(ctx_api.background(), .udp, dest);
                     defer c.deinit();
 
@@ -44,7 +42,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     const recv = try pc.readFrom(&buf);
                     try lib.testing.expectEqualStrings(msg, buf[0..recv.bytes_read]);
 
-                    _ = try pc.writeTo("ack", @ptrCast(&recv.addr), recv.addr_len);
+                    _ = try pc.writeTo("ack", recv.addr);
                     const ack_len = try c.read(buf[0..]);
                     try lib.testing.expectEqualStrings("ack", buf[0..ack_len]);
                 }

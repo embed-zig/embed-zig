@@ -1,10 +1,8 @@
 const stdz = @import("stdz");
-const net_mod = @import("../../../../net.zig");
-const sockaddr_mod = @import("../../../fd/SockAddr.zig");
 const test_utils = @import("../tcp/test_utils.zig");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -18,11 +16,8 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
 
             const Body = struct {
                 fn call(a: lib.mem.Allocator) !void {
-                    const Net = net_mod.make(lib);
                     const ReadyCounter = test_utils.ReadyCounter(lib);
                     const Thread = lib.Thread;
-                    const posix = lib.posix;
-                    const SockAddr = sockaddr_mod.SockAddr(lib);
 
                     const ErrorSlot = struct {
                         mutex: Thread.Mutex = .{},
@@ -41,29 +36,20 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                         }
                     };
 
-                    const server_fd = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
-                    defer posix.close(server_fd);
+                    var pc = try net.listenPacket(.{
+                        .allocator = a,
+                        .address = test_utils.addr4(.{ 127, 0, 0, 1 }, 0),
+                    });
+                    defer pc.deinit();
+                    const server_port = try (try pc.as(net.UdpConn)).boundPort();
 
-                    const bind_sockaddr = try SockAddr.encode(test_utils.addr4(.{ 127, 0, 0, 1 }, 0));
-                    try posix.bind(server_fd, @ptrCast(&bind_sockaddr.storage), bind_sockaddr.len);
-
-                    var bound: posix.sockaddr.in = undefined;
-                    var bound_len: posix.socklen_t = @sizeOf(posix.sockaddr.in);
-                    try posix.getsockname(server_fd, @ptrCast(&bound), &bound_len);
-                    const server_port = lib.mem.bigToNative(u16, bound.port);
-
-                    const client_fd = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
-                    errdefer posix.close(client_fd);
-                    const server_addr = try SockAddr.encode(test_utils.addr4(.{ 127, 0, 0, 1 }, server_port));
-                    try posix.connect(client_fd, @ptrCast(&server_addr.storage), server_addr.len);
-
-                    var conn = try Net.UdpConn.init(a, client_fd);
+                    var conn = try net.dial(a, .udp, test_utils.addr4(.{ 127, 0, 0, 1 }, server_port));
                     defer conn.deinit();
 
                     var error_slot = ErrorSlot{};
                     var ready = ReadyCounter.init(1);
                     const read_thread = try Thread.spawn(.{}, struct {
-                        fn run(conn_ptr: *Net.UdpConn, ready_counter: *ReadyCounter, slot: *ErrorSlot) void {
+                        fn run(conn_ptr: *net.UdpConn, ready_counter: *ReadyCounter, slot: *ErrorSlot) void {
                             var buf: [16]u8 = undefined;
                             ready_counter.markReady();
                             _ = conn_ptr.read(&buf) catch |err| {
@@ -73,7 +59,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                             };
                             slot.store(error.ExpectedUdpReadToWakeEndOfStream);
                         }
-                    }.run, .{ try conn.as(Net.UdpConn), &ready, &error_slot });
+                    }.run, .{ try conn.as(net.UdpConn), &ready, &error_slot });
 
                     ready.waitUntilReady();
                     conn.close();

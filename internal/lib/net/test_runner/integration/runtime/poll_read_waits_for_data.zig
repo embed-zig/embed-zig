@@ -1,26 +1,31 @@
 const std = @import("std");
-const stdz = @import("stdz");
 const testing_api = @import("testing");
-const net = @import("../../../../net.zig");
 
-pub fn make(comptime Net2: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             const Body = struct {
-                fn waitConnect(sock: *Net2.Runtime.Tcp) !void {
+                fn waitConnect(sock: *net.Runtime.Tcp) !void {
                     _ = try sock.poll(.{ .write = true, .failed = true, .hup = true, .write_interrupt = true }, 1000);
                     try sock.finishConnect();
                 }
 
-                fn waitAccept(listener: *Net2.Runtime.Tcp) !Net2.Runtime.Tcp {
+                fn startConnect(sock: *net.Runtime.Tcp, addr: net.netip.AddrPort) !void {
+                    sock.connect(addr) catch |err| switch (err) {
+                        error.ConnectionPending, error.WouldBlock => {},
+                        else => return err,
+                    };
+                }
+
+                fn waitAccept(listener: *net.Runtime.Tcp) !net.Runtime.Tcp {
                     while (true) {
                         return listener.accept(null) catch |err| switch (err) {
                             error.WouldBlock => {
@@ -32,16 +37,19 @@ pub fn make(comptime Net2: type) testing_api.TestRunner {
                     }
                 }
 
-                fn sendLater(sock: *Net2.Runtime.Tcp) void {
+                fn sendLater(sock: *net.Runtime.Tcp) void {
                     std.Thread.sleep(20 * std.time.ns_per_ms);
                     _ = sock.send("x") catch {};
                 }
 
                 fn call() !void {
-                    const Runtime = Net2.Runtime;
+                    const Runtime = net.Runtime;
 
                     var listener = try Runtime.tcp(.inet);
-                    defer listener.close();
+                    defer {
+                        listener.close();
+                        listener.deinit();
+                    }
 
                     try listener.setOpt(.{ .socket = .{ .reuse_addr = true } });
                     try listener.bind(net.netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 0));
@@ -50,18 +58,27 @@ pub fn make(comptime Net2: type) testing_api.TestRunner {
                     const listen_addr = try listener.localAddr();
 
                     var client = try Runtime.tcp(.inet);
-                    defer client.close();
-                    try client.connect(listen_addr);
+                    defer {
+                        client.close();
+                        client.deinit();
+                    }
+                    try startConnect(&client, listen_addr);
                     try waitConnect(&client);
 
                     var server = try waitAccept(&listener);
-                    defer server.close();
+                    defer {
+                        server.close();
+                        server.deinit();
+                    }
 
                     var sender = try std.Thread.spawn(.{}, sendLater, .{&client});
                     defer sender.join();
 
+                    const started_ms = std.time.milliTimestamp();
                     const ready = try server.poll(.{ .read = true }, 1000);
+                    const elapsed_ms = std.time.milliTimestamp() - started_ms;
                     try std.testing.expect(ready.read);
+                    try std.testing.expect(elapsed_ms >= 10);
 
                     var buf: [1]u8 = undefined;
                     const n = try server.recv(&buf);
@@ -77,7 +94,7 @@ pub fn make(comptime Net2: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

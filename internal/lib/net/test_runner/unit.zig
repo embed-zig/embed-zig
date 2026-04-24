@@ -1,22 +1,20 @@
-//! Aggregates `lib/net` unit `TestRunner`s. Each leaf module passes an explicit
-//! `stack_size` to `testing.TestRunner.fromFn` chosen for that module's stack depth
-//! (net unit workers on macOS needed about 3MiB worst-case when TLS/HTTP suites run).
+//! Aggregates `lib/net` unit `TestRunner`s directly from source files. Topic
+//! runners that still group multiple file-local tests live in the corresponding
+//! namespace source (for example `http.zig`, `tls.zig`, and `net.zig`).
 
 const testing_api = @import("testing");
+const net_root = @import("../../net.zig");
+const cmux_mod = @import("../Cmux.zig");
+const http_mod = @import("../http.zig");
+const netip_mod = @import("../netip.zig");
+const ntp_mod = @import("../ntp.zig");
+const resolver_mod = @import("../Resolver.zig");
+const stack_mod = @import("../stack.zig");
+const textproto_mod = @import("../textproto.zig");
+const tls_mod = @import("../tls.zig");
+const url_mod = @import("../url.zig");
 
-pub const netip = @import("unit/netip.zig");
-pub const url = @import("unit/url.zig");
-pub const http = @import("unit/http.zig");
-pub const textproto = @import("unit/textproto.zig");
-pub const cmux = @import("unit/cmux.zig");
-pub const ntp = @import("unit/ntp.zig");
-pub const stack = @import("unit/stack.zig");
-pub const resolver = @import("unit/resolver.zig");
-pub const tls = @import("unit/tls.zig");
-pub const fd = @import("unit/fd.zig");
-pub const core = @import("unit/core.zig");
-
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
@@ -28,17 +26,16 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
 
             t.parallel();
-            t.run("netip", netip.make(lib));
-            t.run("url", url.make(lib));
-            t.run("http", http.make(lib));
-            t.run("textproto", textproto.make(lib));
-            t.run("cmux", cmux.make(lib));
-            t.run("ntp", ntp.make(lib));
-            t.run("stack", stack.make(lib));
-            t.run("resolver", resolver.make(lib));
-            t.run("tls", tls.make(lib));
-            t.run("fd", fd.make(lib));
-            t.run("core", core.make(lib));
+            t.run("netip", netip_mod.TestRunner(lib));
+            t.run("url", url_mod.TestRunner(lib));
+            t.run("http", http_mod.TestRunner(lib, net));
+            t.run("textproto", textproto_mod.TestRunner(lib));
+            t.run("cmux", cmux_mod.TestRunner(lib));
+            t.run("ntp", ntp_mod.TestRunner(lib, net));
+            t.run("stack", stack_mod.TestRunner(lib));
+            t.run("resolver", resolver_mod.TestRunner(lib, net));
+            t.run("tls", tls_mod.TestRunner(lib, net));
+            t.run("core", net_root.TestRunner(lib, net));
             return t.wait();
         }
 

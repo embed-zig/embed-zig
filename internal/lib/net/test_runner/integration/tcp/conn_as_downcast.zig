@@ -1,9 +1,8 @@
 const stdz = @import("stdz");
 const testing_api = @import("testing");
-const net = @import("../../../../net.zig");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -16,9 +15,9 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = self;
             const Body = struct {
                 fn call(a: lib.mem.Allocator) !void {
-                    const Net = net.make(lib);
-                    const TcpConnType = @import("../../../TcpConn.zig").TcpConn(lib);
-                    const UdpConnType = @import("../../../UdpConn.zig").UdpConn(lib);
+                    const Net = net;
+                    const TcpConnType = @import("../../../TcpConn.zig").TcpConn(lib, net);
+                    const UdpConnType = @import("../../../UdpConn.zig").UdpConn(lib, net);
 
                     var ln = try Net.listen(a, .{ .address = test_utils.addr4(.{ 127, 0, 0, 1 }, 0) });
                     defer ln.deinit();
@@ -32,8 +31,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     defer ac.deinit();
 
                     const tcp_impl = try cc.as(TcpConnType);
-                    try lib.testing.expect(!tcp_impl.closed);
-                    try lib.testing.expect(tcp_impl.fd != 0);
+                    try lib.testing.expectEqual(@as(u8, 0), tcp_impl.closed);
 
                     try lib.testing.expectError(error.TypeMismatch, cc.as(UdpConnType));
                 }

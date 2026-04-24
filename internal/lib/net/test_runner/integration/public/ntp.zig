@@ -4,15 +4,14 @@
 //! environments with real network connectivity.
 //!
 //! Usage:
-//!   const runner = @import("net/test_runner/integration/public/ntp.zig").make(lib);
+//!   const runner = @import("net/test_runner/integration/public/ntp.zig").make(lib, net);
 //!   t.run("net/ntp", runner);
 
 const context_mod = @import("context");
 const stdz = @import("stdz");
-const net_mod = @import("../../../../net.zig");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -21,7 +20,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
-            runImpl(lib, t, allocator) catch |err| {
+            runImpl(lib, net, t, allocator) catch |err| {
                 t.logErrorf("ntp runner failed: {}", .{err});
                 return false;
             };
@@ -39,11 +38,10 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
     return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !void {
+fn runImpl(comptime lib: type, comptime Net: type, t: *testing_api.T, alloc: lib.mem.Allocator) !void {
     _ = t;
-    const Net = net_mod.make(lib);
     const Ntp = Net.ntp;
-    const AddrPort = net_mod.netip.AddrPort;
+    const AddrPort = Net.netip.AddrPort;
     const Thread = lib.Thread;
     const Context = context_mod.make(lib);
     const testing = struct {
@@ -236,7 +234,7 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             const port = try impl.boundPort();
             var request_seen = BoolAtomic.init(false);
             var server_thread = try Thread.spawn(.{}, struct {
-                fn run(server_pc: net_mod.PacketConn, seen: *BoolAtomic) void {
+                fn run(server_pc: Net.PacketConn, seen: *BoolAtomic) void {
                     var req_buf: [128]u8 = undefined;
                     _ = server_pc.readFrom(&req_buf) catch return;
                     seen.store(true, .release);
@@ -290,7 +288,7 @@ fn runImpl(comptime lib: type, t: *testing_api.T, alloc: lib.mem.Allocator) !voi
             const port = try impl.boundPort();
             var request_seen = BoolAtomic.init(false);
             var server_thread = try Thread.spawn(.{}, struct {
-                fn run(server_pc: net_mod.PacketConn, seen: *BoolAtomic) void {
+                fn run(server_pc: Net.PacketConn, seen: *BoolAtomic) void {
                     var req_buf: [128]u8 = undefined;
                     _ = server_pc.readFrom(&req_buf) catch return;
                     seen.store(true, .release);

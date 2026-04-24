@@ -5,14 +5,13 @@
 //! resolution and TLS `server_name`.
 //!
 //! Usage:
-//!   const runner = @import("net/test_runner/integration/public/tls_dial.zig").make(lib, "dns.alidns.com");
+//!   const runner = @import("net/test_runner/integration/public/tls_dial.zig").make(lib, net, "dns.alidns.com");
 //!   t.run("net/tls_dial", runner);
 
 const stdz = @import("stdz");
-const net_mod = @import("../../../../net.zig");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type, comptime host: []const u8) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type, comptime host: []const u8) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
@@ -23,7 +22,7 @@ pub fn make(comptime lib: type, comptime host: []const u8) testing_api.TestRunne
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
-            runImpl(lib, t, allocator, host) catch |err| {
+            runImpl(lib, net, t, allocator, host) catch |err| {
                 t.logErrorf("tls_dial runner failed: {}", .{err});
                 return false;
             };
@@ -43,14 +42,14 @@ pub fn make(comptime lib: type, comptime host: []const u8) testing_api.TestRunne
 
 fn runImpl(
     comptime lib: type,
+    comptime Net: type,
     t: *testing_api.T,
     alloc: lib.mem.Allocator,
     comptime host: []const u8,
 ) !void {
     _ = t;
-    const Net = net_mod.make(lib);
-    const Addr = net_mod.netip.Addr;
-    const AddrPort = net_mod.netip.AddrPort;
+    const Addr = Net.netip.Addr;
+    const AddrPort = Net.netip.AddrPort;
     const testing = struct {
         pub var allocator: lib.mem.Allocator = undefined;
         pub const expect = lib.testing.expect;

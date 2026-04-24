@@ -1,10 +1,8 @@
 const testing_api = @import("testing");
-const net_mod = @import("../../../../net.zig");
 const http_harness = @import("test_utils/http_harness.zig");
 const raw_http = @import("test_utils/raw_http.zig");
 
-fn concurrentRequests(comptime lib: type, alloc: lib.mem.Allocator) !void {
-    const net = net_mod.make(lib);
+fn concurrentRequests(comptime lib: type, comptime net: type, alloc: lib.mem.Allocator) !void {
     const testing = lib.testing;
     const thread = lib.Thread;
 
@@ -28,7 +26,7 @@ fn concurrentRequests(comptime lib: type, alloc: lib.mem.Allocator) !void {
                 }
 
                 fn run(self: *@This()) !void {
-                    var conn = try http_harness.dialHttpChannel(lib, self.cmux, self.dlci);
+                    var conn = try http_harness.dialHttpChannel(lib, net, self.cmux, self.dlci);
                     defer conn.deinit();
 
                     const target = try lib.fmt.allocPrint(
@@ -42,7 +40,7 @@ fn concurrentRequests(comptime lib: type, alloc: lib.mem.Allocator) !void {
                         .target = target,
                     });
 
-                    const resp = try raw_http.readRawResponse(lib, self.arena, conn);
+                    const resp = try raw_http.readRawResponse(lib, net, self.arena, conn);
                     defer self.arena.free(resp.head);
                     defer self.arena.free(resp.body);
 
@@ -84,15 +82,15 @@ fn concurrentRequests(comptime lib: type, alloc: lib.mem.Allocator) !void {
         }
     };
 
-    try http_harness.withCmuxHttpServerOptions(lib, alloc, http_harness.HarnessOptions(lib){
+    try http_harness.withCmuxHttpServerOptions(lib, net, alloc, http_harness.HarnessOptions(lib){
         .max_accept_queue = 9,
     }, Body.run);
 }
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
     return testing_api.TestRunner.fromFn(lib, 1024 * 1024, struct {
         fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            try concurrentRequests(lib, allocator);
+            try concurrentRequests(lib, net, allocator);
         }
     }.run);
 }

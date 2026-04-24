@@ -1,11 +1,10 @@
 const stdz = @import("stdz");
 const io = @import("io");
-const net_mod = @import("../../../../net.zig");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
-    const Utils = test_utils.make(lib);
+pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make(lib, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 3 * 1024 * 1024 },
@@ -81,7 +80,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
                     defer target_thread.join();
 
                     var proxy_state = ProxyProbeState{};
-                    var proxy_ln: net_mod.Listener = undefined;
+                    var proxy_ln: net.Listener = undefined;
                     var proxy_port: u16 = undefined;
                     var proxy_thread: Thread = undefined;
                     var proxy_cleaned = false;
