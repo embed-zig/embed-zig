@@ -15,6 +15,7 @@ const lib_audio = @import("build/lib/audio.zig");
 const lib_ledstrip = @import("build/lib/ledstrip.zig");
 const lib_embed_std = @import("build/lib/embed_std.zig");
 const lib_zux = @import("build/lib/zux.zig");
+const lib_runtime = @import("build/lib/runtime.zig");
 
 const Packages = struct {};
 
@@ -33,6 +34,7 @@ const Libraries = struct {
     pub const ledstrip = lib_ledstrip;
     pub const embed_std = lib_embed_std;
     pub const zux = lib_zux;
+    pub const runtime = lib_runtime;
 };
 
 pub fn build(b: *std.Build) void {

@@ -12,6 +12,7 @@ const net = @import("net");
 const runtime_posix = @import("runtime_posix");
 const audio = @import("audio");
 const zux = @import("zux");
+const runtime = @import("runtime");
 
 // The focused Runtime slice intentionally exercises the embed_std backend in
 // both std and embed_std lib environments.
@@ -190,6 +191,36 @@ test "zux/integration/embed_std" {
 
     t.run("zux/integration/embed_std", zux.test_runner.integration.make(embed_std.std, embed_std.sync.Channel));
     if (!t.wait()) return error.TestFailed;
+}
+
+test "runtime/unit/embed_std" {
+    const Runtime = runtime.make(.{
+        .stdz_impl = embed_std.stdz_impl,
+        .channel_factory = embed_std.sync.ChannelFactory,
+        .net_impl = embed_std.net_impl.impl,
+    });
+
+    _ = Runtime.std.mem.Allocator;
+    _ = Runtime.testing.T;
+    _ = Runtime.context.init;
+    _ = Runtime.sync.Channel(u8);
+    _ = Runtime.sync.Racer(u8);
+    _ = Runtime.io.readFull;
+    _ = Runtime.drivers.Gpio;
+    _ = Runtime.net.Dialer;
+    _ = Runtime.mime.MediaType;
+    _ = Runtime.bt.HciHost;
+    _ = Runtime.motion.Sample;
+    _ = Runtime.audio.Mixer;
+    _ = Runtime.ledstrip.Color;
+    _ = Runtime.zux.Store;
+
+    if (!runtime.isRuntime(Runtime)) return error.TestFailed;
+    if (runtime.isRuntime(struct {})) return error.TestFailed;
+    if (runtime.isRuntime(struct {
+        const FakeMarker = enum { runtime };
+        pub const runtime_marker: FakeMarker = .runtime;
+    })) return error.TestFailed;
 }
 
 test "bt/unit/std" {

@@ -26,6 +26,7 @@ pub fn build(b: *std.Build) void {
     embed_mod.addImport("audio", internal_dep.module("audio"));
     embed_mod.addImport("ledstrip", internal_dep.module("ledstrip"));
     embed_mod.addImport("zux", internal_dep.module("zux"));
+    embed_mod.addImport("runtime", internal_dep.module("runtime"));
     b.modules.put("embed", embed_mod) catch @panic("OOM");
 
     const embed_std_mod = b.createModule(.{
