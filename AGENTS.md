@@ -24,6 +24,5 @@ Before starting any development work, read the repository-wide conduct rules in 
 - Read `[internal/lib/bt/README.md](internal/lib/bt/README.md)` before editing the Bluetooth host stack, client/server, mocker, xfer, or bt tests.
 - Read `[internal/lib/embed_std/README.md](internal/lib/embed_std/README.md)` before editing the std-backed compatibility layer.
 - Read `[internal/lib/zux/README.md](internal/lib/zux/README.md)` before editing the `zux` module.
-- Read `[internal/lib/at/README.md](internal/lib/at/README.md)` before editing the AT session / transport stack or AT tests.
 - Read `[internal/lib/drivers/README.md](internal/lib/drivers/README.md)` before editing generic drivers or device-specific driver modules.
 

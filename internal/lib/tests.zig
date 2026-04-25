@@ -4,7 +4,6 @@ const testing = @import("testing");
 const bt = @import("bt");
 const sync = @import("sync");
 const io = @import("io");
-const at = @import("at");
 const ledstrip = @import("ledstrip");
 const drivers = @import("drivers");
 const mime = @import("mime");
@@ -347,48 +346,6 @@ test "net/integration2/embed_std" {
     t.timeout(20 * embed_std.std.time.ns_per_s);
 
     t.run("net/integration2/embed_std", net.test_runner.integration.runtime.make2(embed_std.std, runtime_embed_std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "at/unit/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .at);
-    defer t.deinit();
-
-    t.run("at/unit/std", at.test_runner.unit.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "at/unit/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .at);
-    defer t.deinit();
-
-    t.run("at/unit/embed_std", at.test_runner.unit.make(embed_std.std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "at/integration/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .at);
-    defer t.deinit();
-    t.timeout(30 * std.time.ns_per_s);
-
-    t.run("at/integration/std", at.test_runner.integration.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "at/integration/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .at);
-    defer t.deinit();
-    t.timeout(30 * embed_std.std.time.ns_per_s);
-
-    t.run("at/integration/embed_std", at.test_runner.integration.make(embed_std.std));
     if (!t.wait()) return error.TestFailed;
 }
 

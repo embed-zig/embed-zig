@@ -24,7 +24,6 @@ pub fn build(b: *std.Build) void {
     embed_mod.addImport("bt", internal_dep.module("bt"));
     embed_mod.addImport("motion", internal_dep.module("motion"));
     embed_mod.addImport("audio", internal_dep.module("audio"));
-    embed_mod.addImport("at", internal_dep.module("at"));
     embed_mod.addImport("ledstrip", internal_dep.module("ledstrip"));
     embed_mod.addImport("zux", internal_dep.module("zux"));
     b.modules.put("embed", embed_mod) catch @panic("OOM");
