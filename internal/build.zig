@@ -55,6 +55,7 @@ pub fn build(b: *std.Build) void {
     inline for (@typeInfo(Libraries).@"struct".decls) |decl| {
         @field(Libraries, decl.name).link(b);
     }
+
     inline for (@typeInfo(Packages).@"struct".decls) |decl| {
         if (b.modules.get(decl.name) != null) {
             @field(Packages, decl.name).link(b);

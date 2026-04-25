@@ -7,6 +7,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
     const embed_mod = b.createModule(.{
         .root_source_file = b.path("lib/embed.zig"),
@@ -36,4 +40,6 @@ pub fn build(b: *std.Build) void {
     });
     embed_std_mod.addImport("embed_std_internal", internal_dep.module("embed_std"));
     b.modules.put("embed_std", embed_std_mod) catch @panic("OOM");
+
+    b.modules.put("glib", glib_dep.module("glib")) catch @panic("OOM");
 }

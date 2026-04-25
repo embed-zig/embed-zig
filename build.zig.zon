@@ -6,10 +6,14 @@
         .internal = .{
             .path = "internal",
         },
+        .glib = .{
+            .path = "glib",
+        },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
+        "glib/",
         "lib/",
         "internal/",
         "pkg/",

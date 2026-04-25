@@ -5,13 +5,17 @@ pub fn create(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const mod = b.createModule(.{
-        .root_source_file = b.path("lib/net.zig"),
+        .root_source_file = glib_dep.path("lib/net.zig"),
         .target = target,
         .optimize = optimize,
     });
     const runtime_posix_mod = b.createModule(.{
-        .root_source_file = b.path("lib/net/runtime_posix.zig"),
+        .root_source_file = b.path("lib/runtime_posix.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -20,13 +24,13 @@ pub fn create(
 }
 
 pub fn link(b: *std.Build) void {
+    const mod = b.modules.get("net") orelse @panic("net module missing");
+    const runtime_posix_mod = b.modules.get("runtime_posix") orelse @panic("runtime_posix module missing");
     const stdz = b.modules.get("stdz") orelse @panic("net requires stdz");
     const sync = b.modules.get("sync") orelse @panic("net requires sync");
     const context = b.modules.get("context") orelse @panic("net requires context");
     const io = b.modules.get("io") orelse @panic("net requires io");
     const testing = b.modules.get("testing") orelse @panic("net requires testing");
-    const mod = b.modules.get("net") orelse @panic("net module missing");
-    const runtime_posix_mod = b.modules.get("runtime_posix") orelse @panic("runtime_posix module missing");
     mod.addImport("stdz", stdz);
     mod.addImport("sync", sync);
     mod.addImport("context", context);

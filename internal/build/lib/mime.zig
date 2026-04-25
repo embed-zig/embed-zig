@@ -5,8 +5,12 @@ pub fn create(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const mod = b.createModule(.{
-        .root_source_file = b.path("lib/mime.zig"),
+        .root_source_file = glib_dep.path("lib/mime.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -14,9 +18,9 @@ pub fn create(
 }
 
 pub fn link(b: *std.Build) void {
+    const mod = b.modules.get("mime") orelse @panic("mime module missing");
     const stdz = b.modules.get("stdz") orelse @panic("mime requires stdz");
     const testing = b.modules.get("testing") orelse @panic("mime requires testing");
-    const mod = b.modules.get("mime") orelse @panic("mime module missing");
     mod.addImport("stdz", stdz);
     mod.addImport("testing", testing);
 }

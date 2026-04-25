@@ -5,8 +5,12 @@ pub fn create(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const mod = b.createModule(.{
-        .root_source_file = b.path("lib/stdz.zig"),
+        .root_source_file = glib_dep.path("lib/stdz.zig"),
         .target = target,
         .optimize = optimize,
     });
