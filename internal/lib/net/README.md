@@ -85,7 +85,6 @@ lib/
     netip/
       Addr.zig         IP address value type
       AddrPort.zig     IP address + port value type
-    stack.zig          Network stack helpers
     url.zig            Zero-alloc URL parser (RFC 3986)
     Resolver.zig       Pure-Zig DNS resolver (RFC 1035, per-server racer)
     ntp.zig            UDP NTP client and wire helpers
@@ -130,7 +129,7 @@ lib/
 │ runtime-backed transport substrate                  │
 │ Runtime / runtime_posix / Wake                      │
 ├──────────────────────────────────────────────────────┤
-│ sibling helpers: netip / Resolver / url / stack     │
+│ sibling helpers: netip / Resolver / url             │
 ├──────────────────────────────────────────────────────┤
 │ lib (stdz.make)                                     │
 │ posix / Thread / time                                │

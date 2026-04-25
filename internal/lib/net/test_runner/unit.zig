@@ -9,7 +9,6 @@ const http_mod = @import("../http.zig");
 const netip_mod = @import("../netip.zig");
 const ntp_mod = @import("../ntp.zig");
 const resolver_mod = @import("../Resolver.zig");
-const stack_mod = @import("../stack.zig");
 const textproto_mod = @import("../textproto.zig");
 const tls_mod = @import("../tls.zig");
 const url_mod = @import("../url.zig");
@@ -32,7 +31,6 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             t.run("textproto", textproto_mod.TestRunner(lib));
             t.run("cmux", cmux_mod.TestRunner(lib));
             t.run("ntp", ntp_mod.TestRunner(lib, net));
-            t.run("stack", stack_mod.TestRunner(lib));
             t.run("resolver", resolver_mod.TestRunner(lib, net));
             t.run("tls", tls_mod.TestRunner(lib, net));
             t.run("core", net_root.TestRunner(lib, net));

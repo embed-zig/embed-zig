@@ -25,7 +25,6 @@ pub const Listener = @import("net/Listener.zig");
 pub const PacketConn = @import("net/PacketConn.zig");
 pub const runtime = @import("net/runtime.zig");
 pub const netip = @import("net/netip.zig");
-pub const stack = @import("net/stack.zig");
 pub const url = @import("net/url.zig");
 pub const http = @import("net/http.zig");
 pub const textproto = @import("net/textproto.zig");
@@ -59,7 +58,6 @@ pub fn make2(comptime lib: type, comptime impl: type) type {
         pub const TcpListener = tcp_listener.TcpListener(lib, @This());
         pub const UdpConn = udp_conn.UdpConn(lib, @This());
         pub const Resolver = resolver_mod.Resolver(lib, @This());
-        pub const stack = @import("net/stack.zig");
         pub const http = @import("net/http.zig").make(lib, @This());
         pub const textproto = @import("net/textproto.zig").make(lib);
         pub const Cmux = @import("net/Cmux.zig").Cmux(lib);
