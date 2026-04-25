@@ -2,7 +2,7 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
-const stdz_mod = @import("stdz");
+const stdz_mod = @import("glib").std;
 const stdz_thread = stdz_mod.Thread;
 const posix = std.posix;
 const windows = std.os.windows;

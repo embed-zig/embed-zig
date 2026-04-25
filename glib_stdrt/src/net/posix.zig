@@ -1,5 +1,5 @@
 const builtin = @import("builtin");
-const net_mod = @import("net");
+const net_mod = @import("glib").net;
 const runtime = net_mod.runtime;
 const Addr = net_mod.netip.Addr;
 const AddrPort = net_mod.netip.AddrPort;

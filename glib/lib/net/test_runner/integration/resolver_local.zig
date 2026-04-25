@@ -437,7 +437,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
         fn lookupHostResolvesViaDohServerWithCustomRuntime(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
             const worker_stack: usize = 1024 * 1024;
             const SpyImpl = spy_runtime_mod.make(lib, net.Runtime);
-            const SpyNet = net_mod.make2(lib, SpyImpl);
+            const SpyNet = net_mod.make(lib, SpyImpl);
             const SpyResolver = SpyNet.Resolver;
 
             var listener = try Net.tls.listen(allocator, .{

@@ -53,4 +53,4 @@ Keep it out of `lib/io` when it is:
 `lib/io` exports unit coverage through `io.test_runner.unit`.
 
 Implementation files that need unit tests export `TestRunner(comptime lib: type)`,
-and `lib/io/test_runner/unit.zig` composes those runners for `lib/test.zig`.
+and `lib/io/test_runner/unit.zig` composes those runners for `lib/tests.zig`.

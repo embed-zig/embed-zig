@@ -1,13 +1,10 @@
 const std = @import("std");
-const net_mod = @import("net");
+const net_mod = @import("glib").net;
 const runtime = net_mod.runtime;
 const netip = net_mod.netip;
 
 const posix = std.posix;
-const windows = std.os.windows;
-const ws2_32 = windows.ws2_32;
-
-const invalid_socket = ws2_32.INVALID_SOCKET;
+const linux = std.os.linux;
 
 const EncodeSockAddrError = error{
     InvalidAddress,
@@ -95,6 +92,13 @@ fn socketDomain(domain: runtime.Domain) u32 {
     };
 }
 
+fn setNonBlocking(fd: posix.socket_t) !void {
+    const flags = try posix.fcntl(fd, posix.F.GETFL, 0);
+    const nonblock_flag: usize = @as(usize, 1) << @bitOffsetOf(posix.O, "NONBLOCK");
+    if ((flags & nonblock_flag) != 0) return;
+    _ = try posix.fcntl(fd, posix.F.SETFL, flags | nonblock_flag);
+}
+
 fn setNoSigPipe(_: posix.socket_t) void {}
 
 fn matchesWant(got: runtime.PollEvents, want: runtime.PollEvents) bool {
@@ -113,79 +117,53 @@ fn remainingTimeoutMs(started: std.time.Instant, total_ms: u32) runtime.PollErro
     return total_ms - @as(u32, @intCast(elapsed_ms));
 }
 
-fn winsockError(err: ws2_32.WinsockError) runtime.SocketError {
-    return switch (err) {
-        .WSAEWOULDBLOCK => error.WouldBlock,
-        .WSAEACCES => error.AccessDenied,
-        .WSAEADDRINUSE => error.AddressInUse,
-        .WSAEADDRNOTAVAIL => error.AddressNotAvailable,
-        .WSAEISCONN => error.AlreadyConnected,
-        .WSAECONNABORTED => error.ConnectionAborted,
-        .WSAEALREADY, .WSAEINPROGRESS => error.ConnectionPending,
-        .WSAECONNREFUSED => error.ConnectionRefused,
-        .WSAECONNRESET => error.ConnectionReset,
-        .WSAETIMEDOUT => error.TimedOut,
-        .WSAEMSGSIZE => error.MessageTooLong,
-        .WSAEHOSTUNREACH, .WSAENETUNREACH => error.NetworkUnreachable,
-        .WSAENOTCONN => error.NotConnected,
-        .WSAESHUTDOWN => error.BrokenPipe,
-        else => error.Unexpected,
-    };
-}
-
-fn lastSocketError() runtime.SocketError {
-    return winsockError(ws2_32.WSAGetLastError());
-}
-
-fn lastSetSockOptError() runtime.SetSockOptError {
-    return switch (ws2_32.WSAGetLastError()) {
-        .WSAENOPROTOOPT => error.Unsupported,
-        .WSAENOTSOCK => error.Closed,
-        else => error.Unexpected,
-    };
-}
-
-fn closeEvent(h: ?windows.HANDLE) void {
-    if (h) |ev| {
-        _ = ws2_32.WSACloseEvent(ev);
-    }
-}
-
 fn OpCommon(comptime Self: type) type {
     return struct {
-        fn initEvents(self: *Self) !void {
-            try windows.callWSAStartup();
+        fn initPoll(self: *Self) !void {
+            self.epfd = try posix.epoll_create1(linux.EPOLL.CLOEXEC);
+            errdefer posix.close(self.epfd);
 
-            const sock_event = ws2_32.WSACreateEvent();
-            if (@intFromPtr(sock_event) == 0) return error.SystemResources;
-            errdefer closeEvent(sock_event);
+            self.wakefd = try posix.eventfd(0, linux.EFD.CLOEXEC | linux.EFD.NONBLOCK);
+            errdefer posix.close(self.wakefd);
 
-            const user_event = ws2_32.WSACreateEvent();
-            if (@intFromPtr(user_event) == 0) return error.SystemResources;
-            errdefer closeEvent(user_event);
+            var sock_ev = linux.epoll_event{
+                .events = linux.EPOLL.IN | linux.EPOLL.OUT | linux.EPOLL.ERR | linux.EPOLL.HUP | linux.EPOLL.RDHUP,
+                .data = .{ .fd = self.sock },
+            };
+            try posix.epoll_ctl(self.epfd, linux.EPOLL.CTL_ADD, self.sock, &sock_ev);
 
-            if (ws2_32.WSAEventSelect(
-                self.sock,
-                sock_event,
-                ws2_32.FD_READ | ws2_32.FD_WRITE | ws2_32.FD_ACCEPT | ws2_32.FD_CONNECT | ws2_32.FD_CLOSE,
-            ) == ws2_32.SOCKET_ERROR) {
-                return error.Unexpected;
-            }
-
-            self.sock_event = sock_event;
-            self.user_event = user_event;
+            var wake_ev = linux.epoll_event{
+                .events = linux.EPOLL.IN,
+                .data = .{ .fd = self.wakefd },
+            };
+            try posix.epoll_ctl(self.epfd, linux.EPOLL.CTL_ADD, self.wakefd, &wake_ev);
         }
 
-        fn deinitEvents(self: *Self) void {
-            closeEvent(self.sock_event);
-            closeEvent(self.user_event);
-            self.sock_event = null;
-            self.user_event = null;
+        fn deinitPoll(self: *Self) void {
+            if (self.wakefd != -1) {
+                posix.close(self.wakefd);
+                self.wakefd = -1;
+            }
+            if (self.epfd != -1) {
+                posix.close(self.epfd);
+                self.epfd = -1;
+            }
         }
 
         fn triggerWake(self: *Self) void {
-            if (self.user_event) |ev| {
-                _ = ws2_32.WSASetEvent(ev);
+            if (self.wakefd == -1) return;
+            var one: u64 = 1;
+            _ = posix.write(self.wakefd, std.mem.asBytes(&one)) catch {};
+        }
+
+        fn drainWake(self: *Self) void {
+            if (self.wakefd == -1) return;
+            while (true) {
+                var count: u64 = 0;
+                _ = posix.read(self.wakefd, std.mem.asBytes(&count)) catch |err| switch (err) {
+                    error.WouldBlock => return,
+                    else => return,
+                };
             }
         }
 
@@ -222,56 +200,30 @@ fn OpCommon(comptime Self: type) type {
                 };
                 if (matchesWant(out, want)) return out;
 
-                const timeout: u32 = if (timeout_ms) |ms|
-                    try remainingTimeoutMs(started.?, ms)
+                const timeout: i32 = if (timeout_ms) |ms|
+                    @intCast(try remainingTimeoutMs(started.?, ms))
                 else
-                    windows.INFINITE;
+                    -1;
 
-                var handles = [_]windows.HANDLE{ self.sock_event.?, self.user_event.? };
-                const rc = ws2_32.WSAWaitForMultipleEvents(
-                    @intCast(handles.len),
-                    &handles,
-                    windows.FALSE,
-                    timeout,
-                    windows.FALSE,
-                );
+                var evs: [8]linux.epoll_event = undefined;
+                const n = posix.epoll_wait(self.epfd, &evs, timeout);
+                if (n == 0) return error.TimedOut;
 
-                switch (rc) {
-                    windows.WAIT_TIMEOUT => return error.TimedOut,
-                    windows.WAIT_FAILED => return error.Unexpected,
-                    windows.WAIT_OBJECT_0 => {
-                        var evs: ws2_32.WSANETWORKEVENTS = undefined;
-                        if (ws2_32.WSAEnumNetworkEvents(self.sock, self.sock_event.?, &evs) == ws2_32.SOCKET_ERROR) {
-                            return error.Unexpected;
-                        }
-
-                        if ((evs.lNetworkEvents & ws2_32.FD_ACCEPT) != 0) {
-                            out.read = true;
-                            if (evs.iErrorCode[ws2_32.FD_ACCEPT_BIT] != 0) out.failed = true;
-                        }
-                        if ((evs.lNetworkEvents & ws2_32.FD_READ) != 0) {
-                            out.read = true;
-                            if (evs.iErrorCode[ws2_32.FD_READ_BIT] != 0) out.failed = true;
-                        }
-                        if ((evs.lNetworkEvents & ws2_32.FD_CONNECT) != 0) {
-                            out.write = true;
-                            if (evs.iErrorCode[ws2_32.FD_CONNECT_BIT] != 0) out.failed = true;
-                        }
-                        if ((evs.lNetworkEvents & ws2_32.FD_WRITE) != 0) {
-                            out.write = true;
-                            if (evs.iErrorCode[ws2_32.FD_WRITE_BIT] != 0) out.failed = true;
-                        }
-                        if ((evs.lNetworkEvents & ws2_32.FD_CLOSE) != 0) {
-                            out.hup = true;
-                            if (evs.iErrorCode[ws2_32.FD_CLOSE_BIT] != 0) out.failed = true;
-                        }
-                    },
-                    windows.WAIT_OBJECT_0 + 1 => {
-                        _ = ws2_32.WSAResetEvent(self.user_event.?);
+                for (evs[0..n]) |ev| {
+                    const revents = ev.events;
+                    if (ev.data.fd == self.wakefd) {
+                        drainWake(self);
                         if (takeReadInterrupt(self, want)) out.read_interrupt = true;
                         if (takeWriteInterrupt(self, want)) out.write_interrupt = true;
-                    },
-                    else => return error.Unexpected,
+                        continue;
+                    }
+
+                    if (ev.data.fd == self.sock) {
+                        if ((revents & linux.EPOLL.IN) != 0) out.read = true;
+                        if ((revents & linux.EPOLL.OUT) != 0) out.write = true;
+                        if ((revents & linux.EPOLL.ERR) != 0) out.failed = true;
+                        if ((revents & (linux.EPOLL.HUP | linux.EPOLL.RDHUP)) != 0) out.hup = true;
+                    }
                 }
 
                 if (matchesWant(out, want)) return out;
@@ -285,9 +237,9 @@ fn OpCommon(comptime Self: type) type {
 }
 
 pub const Tcp = struct {
-    sock: posix.socket_t = invalid_socket,
-    sock_event: ?windows.HANDLE = null,
-    user_event: ?windows.HANDLE = null,
+    sock: posix.socket_t = -1,
+    epfd: posix.fd_t = -1,
+    wakefd: posix.fd_t = -1,
     closed: bool = false,
 
     read_interrupt: bool = false,
@@ -302,23 +254,24 @@ pub const Tcp = struct {
         @atomicStore(bool, &self.write_interrupt, true, .release);
         self.triggerWake();
 
-        if (self.sock != invalid_socket) {
-            windows.closesocket(self.sock) catch {};
-            self.sock = invalid_socket;
+        if (self.sock != -1) {
+            posix.close(self.sock);
+            self.sock = -1;
         }
-        self.deinitEvents();
+        self.deinitPoll();
     }
 
     pub fn shutdown(self: *Tcp, how: runtime.ShutdownHow) runtime.SocketError!void {
         if (self.closed) return error.Closed;
-        const wsa_how: i32 = switch (how) {
-            .read => ws2_32.SD_RECEIVE,
-            .write => ws2_32.SD_SEND,
-            .both => ws2_32.SD_BOTH,
+        const posix_how: posix.ShutdownHow = switch (how) {
+            .read => .recv,
+            .write => .send,
+            .both => .both,
         };
-        if (ws2_32.shutdown(self.sock, wsa_how) == ws2_32.SOCKET_ERROR) {
-            return lastSocketError();
-        }
+        posix.shutdown(self.sock, posix_how) catch |err| return switch (err) {
+            error.SocketNotConnected => error.NotConnected,
+            else => error.Unexpected,
+        };
     }
 
     pub fn signal(self: *Tcp, ev: runtime.SignalEvent) void {
@@ -329,16 +282,12 @@ pub const Tcp = struct {
     pub fn bind(self: *Tcp, ap: netip.AddrPort) runtime.SocketError!void {
         if (self.closed) return error.Closed;
         const enc = encodeSockAddr(ap) catch |err| return encodeErrorToSocket(err);
-        if (windows.bind(self.sock, @ptrCast(&enc.storage), enc.len) == ws2_32.SOCKET_ERROR) {
-            return lastSocketError();
-        }
+        posix.bind(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| return socketErr(err);
     }
 
     pub fn listen(self: *Tcp, backlog: u31) runtime.SocketError!void {
         if (self.closed) return error.Closed;
-        if (windows.listen(self.sock, backlog) == ws2_32.SOCKET_ERROR) {
-            return lastSocketError();
-        }
+        posix.listen(self.sock, backlog) catch |err| return socketErr(err);
     }
 
     pub fn accept(self: *Tcp, remote: ?*netip.AddrPort) runtime.SocketError!Tcp {
@@ -347,15 +296,19 @@ pub const Tcp = struct {
         var storage: posix.sockaddr.storage = undefined;
         var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
 
-        const new_sock = windows.accept(self.sock, @ptrCast(&storage), &len);
-        if (new_sock == invalid_socket) return lastSocketError();
-        errdefer windows.closesocket(new_sock) catch {};
+        const new_fd = posix.accept(self.sock, @ptrCast(&storage), &len, 0) catch |err| return socketErr(err);
+        errdefer posix.close(new_fd);
 
-        setNoSigPipe(new_sock);
+        setNonBlocking(new_fd) catch return error.Unexpected;
+        setNoSigPipe(new_fd);
 
-        var child: Tcp = .{ .sock = new_sock };
-        child.initEvents() catch |err| return switch (err) {
-            error.SystemResources => error.Unexpected,
+        var child: Tcp = .{ .sock = new_fd };
+        child.initPoll() catch |err| return switch (err) {
+            error.ProcessFdQuotaExceeded,
+            error.SystemFdQuotaExceeded,
+            error.SystemResources,
+            error.UserResourceLimitReached,
+            => error.Unexpected,
             else => error.Unexpected,
         };
 
@@ -369,56 +322,45 @@ pub const Tcp = struct {
     pub fn connect(self: *Tcp, ap: netip.AddrPort) runtime.SocketError!void {
         if (self.closed) return error.Closed;
         const enc = encodeSockAddr(ap) catch |err| return encodeErrorToSocket(err);
-        if (ws2_32.connect(self.sock, @ptrCast(&enc.storage), @intCast(enc.len)) == ws2_32.SOCKET_ERROR) {
-            return switch (ws2_32.WSAGetLastError()) {
-                .WSAEWOULDBLOCK, .WSAEALREADY, .WSAEINPROGRESS => {},
-                else => |err| winsockError(err),
-            };
-        }
+        posix.connect(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| return switch (socketErr(err)) {
+            error.WouldBlock, error.ConnectionPending => {},
+            else => |e| return e,
+        };
     }
 
     pub fn finishConnect(self: *Tcp) runtime.SocketError!void {
         if (self.closed) return error.Closed;
 
         var err_code: i32 = 0;
-        var len: i32 = @sizeOf(i32);
-        if (ws2_32.getsockopt(self.sock, ws2_32.SOL.SOCKET, ws2_32.SO.ERROR, @ptrCast(&err_code), &len) == ws2_32.SOCKET_ERROR) {
-            return error.Unexpected;
-        }
+        posix.getsockopt(self.sock, posix.SOL.SOCKET, posix.SO.ERROR, std.mem.asBytes(&err_code)) catch return error.Unexpected;
         if (err_code == 0) return;
-        return winsockErrorToSocket(err_code);
+        return soErrorToSocket(err_code);
     }
 
     pub fn recv(self: *Tcp, buf: []u8) runtime.SocketError!usize {
         if (self.closed) return error.Closed;
-        const n = ws2_32.recv(self.sock, buf.ptr, @intCast(buf.len), 0);
-        if (n == ws2_32.SOCKET_ERROR) return lastSocketError();
-        return @intCast(n);
+        return posix.recv(self.sock, buf, 0) catch |err| return socketErr(err);
     }
 
     pub fn send(self: *Tcp, buf: []const u8) runtime.SocketError!usize {
         if (self.closed) return error.Closed;
-        const n = ws2_32.send(self.sock, buf.ptr, @intCast(buf.len), 0);
-        if (n == ws2_32.SOCKET_ERROR) return lastSocketError();
-        return @intCast(n);
+        return posix.send(self.sock, buf, 0) catch |err| return socketErr(err);
     }
 
     pub fn localAddr(self: *Tcp) runtime.SocketError!netip.AddrPort {
         if (self.closed) return error.Closed;
         var storage: posix.sockaddr.storage = undefined;
-        var len: i32 = @sizeOf(posix.sockaddr.storage);
-        if (ws2_32.getsockname(self.sock, @ptrCast(&storage), &len) == ws2_32.SOCKET_ERROR) return error.Unexpected;
-        return sockaddrToAddrPort(&storage, @intCast(len));
+        var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
+        posix.getsockname(self.sock, @ptrCast(&storage), &len) catch return error.Unexpected;
+        return sockaddrToAddrPort(&storage, len);
     }
 
     pub fn remoteAddr(self: *Tcp) runtime.SocketError!netip.AddrPort {
         if (self.closed) return error.Closed;
         var storage: posix.sockaddr.storage = undefined;
-        var len: i32 = @sizeOf(posix.sockaddr.storage);
-        if (ws2_32.getpeername(self.sock, @ptrCast(&storage), &len) == ws2_32.SOCKET_ERROR) {
-            return lastSocketError();
-        }
-        return sockaddrToAddrPort(&storage, @intCast(len));
+        var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
+        posix.getpeername(self.sock, @ptrCast(&storage), &len) catch |err| return addrQueryErr(err);
+        return sockaddrToAddrPort(&storage, len);
     }
 
     pub fn setOpt(self: *Tcp, opt: runtime.TcpOption) runtime.SetSockOptError!void {
@@ -428,9 +370,7 @@ pub const Tcp = struct {
             .tcp => |t| switch (t) {
                 .no_delay => |enabled| {
                     const v: i32 = if (enabled) 1 else 0;
-                    if (ws2_32.setsockopt(self.sock, ws2_32.IPPROTO.TCP, ws2_32.TCP.NODELAY, @ptrCast(&v), @sizeOf(i32)) == ws2_32.SOCKET_ERROR) {
-                        return lastSetSockOptError();
-                    }
+                    posix.setsockopt(self.sock, posix.IPPROTO.TCP, posix.TCP.NODELAY, std.mem.asBytes(&v)) catch |err| return translateSetSockOptErr(err);
                 },
             },
         }
@@ -444,19 +384,19 @@ pub const Tcp = struct {
         tcp_ops.triggerWake(self);
     }
 
-    fn deinitEvents(self: *Tcp) void {
-        tcp_ops.deinitEvents(self);
+    fn deinitPoll(self: *Tcp) void {
+        tcp_ops.deinitPoll(self);
     }
 
-    fn initEvents(self: *Tcp) !void {
-        try tcp_ops.initEvents(self);
+    fn initPoll(self: *Tcp) !void {
+        try tcp_ops.initPoll(self);
     }
 };
 
 pub const Udp = struct {
-    sock: posix.socket_t = invalid_socket,
-    sock_event: ?windows.HANDLE = null,
-    user_event: ?windows.HANDLE = null,
+    sock: posix.socket_t = -1,
+    epfd: posix.fd_t = -1,
+    wakefd: posix.fd_t = -1,
     closed: bool = false,
 
     read_interrupt: bool = false,
@@ -471,11 +411,11 @@ pub const Udp = struct {
         @atomicStore(bool, &self.write_interrupt, true, .release);
         self.triggerWake();
 
-        if (self.sock != invalid_socket) {
-            windows.closesocket(self.sock) catch {};
-            self.sock = invalid_socket;
+        if (self.sock != -1) {
+            posix.close(self.sock);
+            self.sock = -1;
         }
-        self.deinitEvents();
+        self.deinitPoll();
     }
 
     pub fn signal(self: *Udp, ev: runtime.SignalEvent) void {
@@ -486,20 +426,16 @@ pub const Udp = struct {
     pub fn bind(self: *Udp, ap: netip.AddrPort) runtime.SocketError!void {
         if (self.closed) return error.Closed;
         const enc = encodeSockAddr(ap) catch |err| return encodeErrorToSocket(err);
-        if (windows.bind(self.sock, @ptrCast(&enc.storage), enc.len) == ws2_32.SOCKET_ERROR) {
-            return lastSocketError();
-        }
+        posix.bind(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| return socketErr(err);
     }
 
     pub fn connect(self: *Udp, ap: netip.AddrPort) runtime.SocketError!void {
         if (self.closed) return error.Closed;
         const enc = encodeSockAddr(ap) catch |err| return encodeErrorToSocket(err);
-        if (ws2_32.connect(self.sock, @ptrCast(&enc.storage), @intCast(enc.len)) == ws2_32.SOCKET_ERROR) {
-            return switch (ws2_32.WSAGetLastError()) {
-                .WSAEWOULDBLOCK, .WSAEALREADY, .WSAEINPROGRESS => {},
-                else => |err| winsockError(err),
-            };
-        }
+        posix.connect(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| return switch (socketErr(err)) {
+            error.WouldBlock, error.ConnectionPending => {},
+            else => |e| return e,
+        };
     }
 
     pub fn finishConnect(self: *Udp) runtime.SocketError!void {
@@ -508,9 +444,7 @@ pub const Udp = struct {
 
     pub fn recv(self: *Udp, buf: []u8) runtime.SocketError!usize {
         if (self.closed) return error.Closed;
-        const n = ws2_32.recv(self.sock, buf.ptr, @intCast(buf.len), 0);
-        if (n == ws2_32.SOCKET_ERROR) return lastSocketError();
-        return @intCast(n);
+        return posix.recv(self.sock, buf, 0) catch |err| return socketErr(err);
     }
 
     pub fn recvFrom(self: *Udp, buf: []u8, src: ?*netip.AddrPort) runtime.SocketError!usize {
@@ -519,48 +453,39 @@ pub const Udp = struct {
         if (src) |out| {
             var storage: posix.sockaddr.storage = undefined;
             var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
-            const n = windows.recvfrom(self.sock, buf.ptr, buf.len, 0, @ptrCast(&storage), &len);
-            if (n == ws2_32.SOCKET_ERROR) return lastSocketError();
+            const n = posix.recvfrom(self.sock, buf, 0, @ptrCast(&storage), &len) catch |err| return socketErr(err);
             out.* = try sockaddrToAddrPort(&storage, len);
-            return @intCast(n);
+            return n;
         }
 
-        const n = ws2_32.recv(self.sock, buf.ptr, @intCast(buf.len), 0);
-        if (n == ws2_32.SOCKET_ERROR) return lastSocketError();
-        return @intCast(n);
+        return posix.recv(self.sock, buf, 0) catch |err| return socketErr(err);
     }
 
     pub fn send(self: *Udp, buf: []const u8) runtime.SocketError!usize {
         if (self.closed) return error.Closed;
-        const n = ws2_32.send(self.sock, buf.ptr, @intCast(buf.len), 0);
-        if (n == ws2_32.SOCKET_ERROR) return lastSocketError();
-        return @intCast(n);
+        return posix.send(self.sock, buf, 0) catch |err| return socketErr(err);
     }
 
     pub fn sendTo(self: *Udp, buf: []const u8, dst: netip.AddrPort) runtime.SocketError!usize {
         if (self.closed) return error.Closed;
         const enc = encodeSockAddr(dst) catch |err| return encodeErrorToSocket(err);
-        const n = windows.sendto(self.sock, buf.ptr, buf.len, 0, @ptrCast(&enc.storage), enc.len);
-        if (n == ws2_32.SOCKET_ERROR) return lastSocketError();
-        return @intCast(n);
+        return posix.sendto(self.sock, buf, 0, @ptrCast(&enc.storage), enc.len) catch |err| return socketErr(err);
     }
 
     pub fn localAddr(self: *Udp) runtime.SocketError!netip.AddrPort {
         if (self.closed) return error.Closed;
         var storage: posix.sockaddr.storage = undefined;
-        var len: i32 = @sizeOf(posix.sockaddr.storage);
-        if (ws2_32.getsockname(self.sock, @ptrCast(&storage), &len) == ws2_32.SOCKET_ERROR) return error.Unexpected;
-        return sockaddrToAddrPort(&storage, @intCast(len));
+        var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
+        posix.getsockname(self.sock, @ptrCast(&storage), &len) catch return error.Unexpected;
+        return sockaddrToAddrPort(&storage, len);
     }
 
     pub fn remoteAddr(self: *Udp) runtime.SocketError!netip.AddrPort {
         if (self.closed) return error.Closed;
         var storage: posix.sockaddr.storage = undefined;
-        var len: i32 = @sizeOf(posix.sockaddr.storage);
-        if (ws2_32.getpeername(self.sock, @ptrCast(&storage), &len) == ws2_32.SOCKET_ERROR) {
-            return lastSocketError();
-        }
-        return sockaddrToAddrPort(&storage, @intCast(len));
+        var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
+        posix.getpeername(self.sock, @ptrCast(&storage), &len) catch |err| return addrQueryErr(err);
+        return sockaddrToAddrPort(&storage, len);
     }
 
     pub fn setOpt(self: *Udp, opt: runtime.UdpOption) runtime.SetSockOptError!void {
@@ -578,12 +503,12 @@ pub const Udp = struct {
         udp_ops.triggerWake(self);
     }
 
-    fn deinitEvents(self: *Udp) void {
-        udp_ops.deinitEvents(self);
+    fn deinitPoll(self: *Udp) void {
+        udp_ops.deinitPoll(self);
     }
 
-    fn initEvents(self: *Udp) !void {
-        try udp_ops.initEvents(self);
+    fn initPoll(self: *Udp) !void {
+        try udp_ops.initPoll(self);
     }
 };
 
@@ -591,20 +516,15 @@ fn applySocketLevelOpt(sock: posix.socket_t, opt: runtime.SocketLevelOption) run
     switch (opt) {
         .reuse_addr => |enabled| {
             const v: i32 = if (enabled) 1 else 0;
-            if (ws2_32.setsockopt(sock, ws2_32.SOL.SOCKET, ws2_32.SO.REUSEADDR, @ptrCast(&v), @sizeOf(i32)) == ws2_32.SOCKET_ERROR) {
-                return lastSetSockOptError();
-            }
+            posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.REUSEADDR, std.mem.asBytes(&v)) catch |err| return translateSetSockOptErr(err);
         },
         .reuse_port => |enabled| {
-            if (!@hasDecl(posix.SO, "REUSEPORT")) return error.Unsupported;
-            _ = enabled;
-            return error.Unsupported;
+            const v: i32 = if (enabled) 1 else 0;
+            posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.REUSEPORT, std.mem.asBytes(&v)) catch |err| return translateSetSockOptErr(err);
         },
         .broadcast => |enabled| {
             const v: i32 = if (enabled) 1 else 0;
-            if (ws2_32.setsockopt(sock, ws2_32.SOL.SOCKET, ws2_32.SO.BROADCAST, @ptrCast(&v), @sizeOf(i32)) == ws2_32.SOCKET_ERROR) {
-                return lastSetSockOptError();
-            }
+            posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.BROADCAST, std.mem.asBytes(&v)) catch |err| return translateSetSockOptErr(err);
         },
     }
 }
@@ -631,28 +551,58 @@ fn sockaddrToAddrPort(storage: *const posix.sockaddr.storage, len: posix.socklen
     return error.Unexpected;
 }
 
-fn translateSetSockOptErr(err: posix.SetSockOptError) runtime.SetSockOptError {
+fn translateSetSockOptErr(err: anyerror) runtime.SetSockOptError {
     return switch (err) {
-        error.Closed => error.Closed,
-        error.NotSupported, error.ProtocolNotSupported => error.Unsupported,
+        error.NotSupported,
+        error.ProtocolNotSupported,
+        error.InvalidProtocolOption,
+        error.OperationNotSupported,
+        => error.Unsupported,
         else => error.Unexpected,
     };
 }
 
-fn winsockErrorToSocket(code: i32) runtime.SocketError {
-    const e = @as(ws2_32.WinsockError, @enumFromInt(@as(u16, @intCast(code))));
+fn socketErr(err: anyerror) runtime.SocketError {
+    return switch (err) {
+        error.WouldBlock => error.WouldBlock,
+        error.AccessDenied, error.PermissionDenied => error.AccessDenied,
+        error.AddressInUse => error.AddressInUse,
+        error.AddressNotAvailable => error.AddressNotAvailable,
+        error.AlreadyConnected => error.AlreadyConnected,
+        error.ConnectionAborted => error.ConnectionAborted,
+        error.ConnectionPending => error.ConnectionPending,
+        error.ConnectionRefused => error.ConnectionRefused,
+        error.ConnectionReset, error.ConnectionResetByPeer => error.ConnectionReset,
+        error.ConnectionTimedOut, error.TimedOut => error.TimedOut,
+        error.MessageTooLong, error.MessageTooBig => error.MessageTooLong,
+        error.NetworkUnreachable, error.HostUnreachable, error.NetUnreachable => error.NetworkUnreachable,
+        error.NotConnected, error.SocketNotConnected => error.NotConnected,
+        error.BrokenPipe => error.BrokenPipe,
+        else => error.Unexpected,
+    };
+}
+
+fn addrQueryErr(err: anyerror) runtime.SocketError {
+    return switch (err) {
+        error.NotConnected, error.SocketNotConnected => error.NotConnected,
+        else => error.Unexpected,
+    };
+}
+
+fn soErrorToSocket(code: i32) runtime.SocketError {
+    const e = @as(posix.E, @enumFromInt(code));
     return switch (e) {
-        .WSAEACCES => error.AccessDenied,
-        .WSAEADDRINUSE => error.AddressInUse,
-        .WSAEADDRNOTAVAIL => error.AddressNotAvailable,
-        .WSAECONNREFUSED => error.ConnectionRefused,
-        .WSAECONNRESET => error.ConnectionReset,
-        .WSAEHOSTUNREACH, .WSAENETUNREACH => error.NetworkUnreachable,
-        .WSAETIMEDOUT => error.TimedOut,
-        .WSAEISCONN => error.AlreadyConnected,
-        .WSAENOTCONN => error.NotConnected,
-        .WSAESHUTDOWN => error.BrokenPipe,
-        .WSAEMSGSIZE => error.MessageTooLong,
+        .ACCES, .PERM => error.AccessDenied,
+        .ADDRINUSE => error.AddressInUse,
+        .ADDRNOTAVAIL => error.AddressNotAvailable,
+        .CONNREFUSED => error.ConnectionRefused,
+        .CONNRESET => error.ConnectionReset,
+        .HOSTUNREACH, .NETUNREACH => error.NetworkUnreachable,
+        .TIMEDOUT => error.TimedOut,
+        .ISCONN => error.AlreadyConnected,
+        .NOTCONN => error.NotConnected,
+        .PIPE => error.BrokenPipe,
+        .MSGSIZE => error.MessageTooLong,
         else => error.Unexpected,
     };
 }
@@ -660,15 +610,20 @@ fn winsockErrorToSocket(code: i32) runtime.SocketError {
 pub fn tcp(domain: runtime.Domain) runtime.CreateError!Tcp {
     const family = socketDomain(domain);
     const sock = posix.socket(family, posix.SOCK.STREAM, 0) catch |err| return translateCreateErr(err);
-    errdefer windows.closesocket(sock) catch {};
+    errdefer posix.close(sock);
 
+    setNonBlocking(sock) catch return error.Unexpected;
     setNoSigPipe(sock);
 
     var s: Tcp = .{ .sock = sock };
-    s.initEvents() catch |err| {
-        s.deinitEvents();
+    s.initPoll() catch |err| {
+        s.deinitPoll();
         return switch (err) {
-            error.SystemResources => error.SystemResources,
+            error.ProcessFdQuotaExceeded,
+            error.SystemFdQuotaExceeded,
+            error.SystemResources,
+            error.UserResourceLimitReached,
+            => error.SystemResources,
             else => error.Unexpected,
         };
     };
@@ -679,15 +634,20 @@ pub fn tcp(domain: runtime.Domain) runtime.CreateError!Tcp {
 pub fn udp(domain: runtime.Domain) runtime.CreateError!Udp {
     const family = socketDomain(domain);
     const sock = posix.socket(family, posix.SOCK.DGRAM, 0) catch |err| return translateCreateErr(err);
-    errdefer windows.closesocket(sock) catch {};
+    errdefer posix.close(sock);
 
+    setNonBlocking(sock) catch return error.Unexpected;
     setNoSigPipe(sock);
 
     var s: Udp = .{ .sock = sock };
-    s.initEvents() catch |err| {
-        s.deinitEvents();
+    s.initPoll() catch |err| {
+        s.deinitPoll();
         return switch (err) {
-            error.SystemResources => error.SystemResources,
+            error.ProcessFdQuotaExceeded,
+            error.SystemFdQuotaExceeded,
+            error.SystemResources,
+            error.UserResourceLimitReached,
+            => error.SystemResources,
             else => error.Unexpected,
         };
     };

@@ -1,12 +1,12 @@
 const builtin = @import("builtin");
-const net_mod = @import("net");
+const net_mod = @import("glib").net;
 const runtime = net_mod.runtime;
 
 pub const impl = switch (builtin.target.os.tag) {
     .macos, .ios, .watchos, .tvos => @import("net/darwin.zig"),
     .linux => @import("net/linux.zig"),
     .windows => @import("net/windows.zig"),
-    else => @compileError("embed_std.net is not supported on this OS yet"),
+    else => @compileError("glib_stdrt.net is not supported on this OS yet"),
 };
 
 pub const api = runtime.make(impl);

@@ -1,7 +1,7 @@
-//! Runtime integration runner — low-level tests for `net.make2(...).Runtime`.
+//! Runtime integration runner — low-level tests for `net.make(...).Runtime`.
 //!
 //! Each sub-case lives under `integration/runtime/<case>.zig` and takes the
-//! already-instantiated `net` namespace from `net.make2(...)`.
+//! already-instantiated `net` namespace from `net.make(...)`.
 
 const testing_api = @import("testing");
 

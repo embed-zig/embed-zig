@@ -119,10 +119,6 @@ pub fn create(
         // Keep legacy test imports working while `stdz` fronts the runtime layer.
         test_mod.addImport("stdz", stdz_mod);
     }
-    if (b.modules.get("runtime_posix")) |runtime_posix_mod| {
-        test_mod.addImport("runtime_posix", runtime_posix_mod);
-    }
-
     inline for (@typeInfo(Libraries).@"struct".decls) |decl| {
         const mod_name = decl.name;
         const all_step = getStep(steps.items, b.fmt("test-all-{s}", .{mod_name}));

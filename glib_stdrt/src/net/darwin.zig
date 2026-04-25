@@ -1,5 +1,5 @@
 const std = @import("std");
-const net_mod = @import("net");
+const net_mod = @import("glib").net;
 const runtime = net_mod.runtime;
 const netip = net_mod.netip;
 

@@ -2,7 +2,7 @@
 
 const std = @import("std");
 const posix = std.posix;
-const stdz_mod = @import("stdz");
+const stdz_mod = @import("glib").std;
 const stdz_posix = stdz_mod.posix;
 
 pub const fd_t = posix.fd_t;

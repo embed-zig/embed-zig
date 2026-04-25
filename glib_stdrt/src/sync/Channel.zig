@@ -1,6 +1,6 @@
 //! Channel impl backed by lib thread primitives only.
 
-const sync_mod = @import("sync");
+const sync_mod = @import("glib").sync;
 const channel = sync_mod.channel;
 
 pub const ChannelFactory: channel.FactoryType = struct {

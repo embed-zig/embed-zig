@@ -1,7 +1,7 @@
 //! net — Go-style networking for stdz-zig.
 //!
 //! Usage:
-//!   const net = @import("net").make2(lib, impl);
+//!   const net = @import("net").make(lib, impl);
 //!   const Addr = net.netip.AddrPort;
 //!
 //!   // Quick dial (default options):
@@ -36,10 +36,8 @@ const tcp_listener = @import("net/TcpListener.zig");
 const dialer_mod = @import("net/Dialer.zig");
 const udp_conn = @import("net/UdpConn.zig");
 const resolver_mod = @import("net/Resolver.zig");
-const unit_runner = @import("net/test_runner/unit.zig");
-const integration_runner = @import("net/test_runner/integration.zig");
 
-pub fn make2(comptime lib: type, comptime impl: type) type {
+pub fn make(comptime lib: type, comptime impl: type) type {
     const Allocator = lib.mem.Allocator;
     const Addr = netip.AddrPort;
     const IpAddr = netip.Addr;
@@ -107,149 +105,8 @@ pub fn make2(comptime lib: type, comptime impl: type) type {
     };
 }
 
-fn testNet2(comptime lib: type, comptime runtime_impl: type) type {
-    return make2(lib, runtime_impl.make(lib));
-}
-
 pub const test_runner = struct {
-    pub const unit = struct {
-        pub fn make2(comptime lib: type, comptime runtime_impl: type) @TypeOf(unit_runner.make(lib, testNet2(lib, runtime_impl))) {
-            return unit_runner.make(lib, testNet2(lib, runtime_impl));
-        }
-    };
-
-    pub const integration = struct {
-        pub fn make2(comptime lib: type, comptime runtime_impl: type) @TypeOf(integration_runner.make(lib, testNet2(lib, runtime_impl))) {
-            return integration_runner.make(lib, testNet2(lib, runtime_impl));
-        }
-
-        pub const runtime = struct {
-            pub fn make2(comptime lib: type, comptime runtime_impl: type) @TypeOf(integration_runner.make2(lib, testNet2(lib, runtime_impl))) {
-                return integration_runner.make2(lib, testNet2(lib, runtime_impl));
-            }
-        };
-    };
+    pub const unit = @import("net/test_runner/unit.zig");
+    pub const integration = @import("net/test_runner/integration.zig");
 };
 
-pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-    const http_mod = @import("net/http.zig");
-    const tls_conn_mod = @import("net/tls/Conn.zig");
-    const tls_listener_mod = @import("net/tls/Listener.zig");
-    const tls_server_conn_mod = @import("net/tls/ServerConn.zig");
-
-    const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
-            _ = self;
-            _ = allocator;
-        }
-
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
-            _ = self;
-            _ = allocator;
-
-            t.run("make2_bindings", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
-                    try lib.testing.expect(net.Resolver == resolver_mod.Resolver(lib, net));
-                    try lib.testing.expect(net.http.Transport == http_mod.Transport(lib, net));
-                    try lib.testing.expect(net.tls.Conn == tls_conn_mod.Conn(lib, net));
-                    try lib.testing.expect(net.tls.ServerConn == tls_server_conn_mod.ServerConn(lib, net));
-                    try lib.testing.expect(net.tls.Listener == tls_listener_mod.Listener(lib, net));
-                }
-            }.run));
-            t.run("listenPacket_reuse_addr_unsupported", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, test_allocator: lib.mem.Allocator) !void {
-                    const FakeNet = make2(lib, struct {
-                        pub const Tcp = struct {
-                            pub fn close(_: *@This()) void {}
-                            pub fn deinit(_: *@This()) void {}
-                            pub fn shutdown(_: *@This(), _: runtime.ShutdownHow) runtime.SocketError!void {}
-                            pub fn signal(_: *@This(), _: runtime.SignalEvent) void {}
-                            pub fn bind(_: *@This(), _: netip.AddrPort) runtime.SocketError!void {}
-                            pub fn listen(_: *@This(), _: u31) runtime.SocketError!void {}
-                            pub fn accept(_: *@This(), _: ?*netip.AddrPort) runtime.SocketError!@This() {
-                                return error.Unexpected;
-                            }
-                            pub fn connect(_: *@This(), _: netip.AddrPort) runtime.SocketError!void {}
-                            pub fn finishConnect(_: *@This()) runtime.SocketError!void {}
-                            pub fn recv(_: *@This(), _: []u8) runtime.SocketError!usize {
-                                return error.Unexpected;
-                            }
-                            pub fn send(_: *@This(), _: []const u8) runtime.SocketError!usize {
-                                return error.Unexpected;
-                            }
-                            pub fn localAddr(_: *@This()) runtime.SocketError!netip.AddrPort {
-                                return netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 0);
-                            }
-                            pub fn remoteAddr(_: *@This()) runtime.SocketError!netip.AddrPort {
-                                return error.NotConnected;
-                            }
-                            pub fn setOpt(_: *@This(), _: runtime.TcpOption) runtime.SetSockOptError!void {}
-                            pub fn poll(_: *@This(), _: runtime.PollEvents, _: ?u32) runtime.PollError!runtime.PollEvents {
-                                return error.Unexpected;
-                            }
-                        };
-
-                        pub const Udp = struct {
-                            pub fn close(_: *@This()) void {}
-                            pub fn deinit(_: *@This()) void {}
-                            pub fn signal(_: *@This(), _: runtime.SignalEvent) void {}
-                            pub fn bind(_: *@This(), _: netip.AddrPort) runtime.SocketError!void {}
-                            pub fn connect(_: *@This(), _: netip.AddrPort) runtime.SocketError!void {}
-                            pub fn finishConnect(_: *@This()) runtime.SocketError!void {}
-                            pub fn recv(_: *@This(), _: []u8) runtime.SocketError!usize {
-                                return error.Unexpected;
-                            }
-                            pub fn recvFrom(_: *@This(), _: []u8, _: ?*netip.AddrPort) runtime.SocketError!usize {
-                                return error.Unexpected;
-                            }
-                            pub fn send(_: *@This(), _: []const u8) runtime.SocketError!usize {
-                                return error.Unexpected;
-                            }
-                            pub fn sendTo(_: *@This(), _: []const u8, _: netip.AddrPort) runtime.SocketError!usize {
-                                return error.Unexpected;
-                            }
-                            pub fn localAddr(_: *@This()) runtime.SocketError!netip.AddrPort {
-                                return netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 0);
-                            }
-                            pub fn remoteAddr(_: *@This()) runtime.SocketError!netip.AddrPort {
-                                return error.NotConnected;
-                            }
-                            pub fn setOpt(_: *@This(), _: runtime.UdpOption) runtime.SetSockOptError!void {
-                                return error.Unsupported;
-                            }
-                            pub fn poll(_: *@This(), _: runtime.PollEvents, _: ?u32) runtime.PollError!runtime.PollEvents {
-                                return error.Unexpected;
-                            }
-                        };
-
-                        pub fn tcp(_: runtime.Domain) runtime.CreateError!Tcp {
-                            return .{};
-                        }
-
-                        pub fn udp(_: runtime.Domain) runtime.CreateError!Udp {
-                            return .{};
-                        }
-                    });
-
-                    try lib.testing.expectError(error.Unsupported, FakeNet.listenPacket(.{
-                        .allocator = test_allocator,
-                        .address = netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 0),
-                    }));
-                }
-            }.run));
-            t.run("TcpListener", tcp_listener.TestRunner(lib, net));
-            return t.wait();
-        }
-
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
-            _ = self;
-            _ = allocator;
-        }
-    };
-
-    const Holder = struct {
-        var runner: Runner = .{};
-    };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
-}

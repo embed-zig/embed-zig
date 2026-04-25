@@ -6,6 +6,9 @@
         .glib = .{
             .path = "../glib",
         },
+        .glib_stdrt = .{
+            .path = "../glib_stdrt",
+        },
     },
     .paths = .{
         "build.zig",

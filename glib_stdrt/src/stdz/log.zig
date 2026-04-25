@@ -1,7 +1,7 @@
 //! Std-backed log impl.
 
 const std = @import("std");
-const stdz_mod = @import("stdz");
+const stdz_mod = @import("glib").std;
 const stdz_log = stdz_mod.log;
 
 pub fn write(

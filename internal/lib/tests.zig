@@ -2,92 +2,14 @@ const std = @import("std");
 const embed_std = @import("embed_std");
 const testing = @import("testing");
 const bt = @import("bt");
-const sync = @import("sync");
-const io = @import("io");
 const ledstrip = @import("ledstrip");
 const drivers = @import("drivers");
-const mime = @import("mime");
 const motion = @import("motion");
 const net = @import("net");
-const runtime_posix = @import("runtime_posix");
 const audio = @import("audio");
 const zux = @import("zux");
-const runtime = @import("runtime");
 
-// The focused Runtime slice intentionally exercises the embed_std backend in
-// both std and embed_std lib environments.
-const runtime_embed_std = struct {
-    pub fn make(comptime lib: type) type {
-        _ = lib;
-        return embed_std.net_impl.impl;
-    }
-};
-
-pub const test_runner = struct {
-    pub const stdz = @import("tests/stdz.zig");
-    pub const context = @import("tests/context.zig");
-    pub const testing_startup_probe = @import("tests/testing_startup_probe.zig");
-};
-
-test "testing/unit/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .testing);
-    defer t.deinit();
-
-    t.run("testing/unit/std", testing.test_runner.unit.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "testing/unit/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .testing);
-    defer t.deinit();
-
-    t.run("testing/unit/embed_std", testing.test_runner.unit.make(embed_std.std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "testing/unit/startup_probe/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .testing);
-    defer t.deinit();
-
-    t.run("testing/unit/startup_probe/std", test_runner.testing_startup_probe.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "testing/unit/startup_probe/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .testing);
-    defer t.deinit();
-
-    t.run("testing/unit/startup_probe/embed_std", test_runner.testing_startup_probe.make(embed_std.std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "mime/unit/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .mime);
-    defer t.deinit();
-
-    t.run("mime/unit/std", mime.test_runner.unit.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "mime/unit/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .mime);
-    defer t.deinit();
-
-    t.run("mime/unit/embed_std", mime.test_runner.unit.make(embed_std.std));
-    if (!t.wait()) return error.TestFailed;
-}
+const std_net = embed_std.posix_net;
 
 test "motion/unit/std" {
     std.testing.log_level = .info;
@@ -193,36 +115,6 @@ test "zux/integration/embed_std" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "runtime/unit/embed_std" {
-    const Runtime = runtime.make(.{
-        .stdz_impl = embed_std.stdz_impl,
-        .channel_factory = embed_std.sync.ChannelFactory,
-        .net_impl = embed_std.net_impl.impl,
-    });
-
-    _ = Runtime.std.mem.Allocator;
-    _ = Runtime.testing.T;
-    _ = Runtime.context.init;
-    _ = Runtime.sync.Channel(u8);
-    _ = Runtime.sync.Racer(u8);
-    _ = Runtime.io.readFull;
-    _ = Runtime.drivers.Gpio;
-    _ = Runtime.net.Dialer;
-    _ = Runtime.mime.MediaType;
-    _ = Runtime.bt.HciHost;
-    _ = Runtime.motion.Sample;
-    _ = Runtime.audio.Mixer;
-    _ = Runtime.ledstrip.Color;
-    _ = Runtime.zux.Store;
-
-    if (!runtime.isRuntime(Runtime)) return error.TestFailed;
-    if (runtime.isRuntime(struct {})) return error.TestFailed;
-    if (runtime.isRuntime(struct {
-        const FakeMarker = enum { runtime };
-        pub const runtime_marker: FakeMarker = .runtime;
-    })) return error.TestFailed;
-}
-
 test "bt/unit/std" {
     std.testing.log_level = .info;
 
@@ -265,63 +157,13 @@ test "bt/integration/embed_std" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "sync/unit/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .sync);
-    defer t.deinit();
-
-    t.run("sync/unit/std", sync.test_runner.unit.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "sync/unit/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .sync);
-    defer t.deinit();
-
-    t.run("sync/unit/embed_std", sync.test_runner.unit.make(embed_std.std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "io/unit/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .io);
-    defer t.deinit();
-
-    t.run("io/unit/std", io.test_runner.unit.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "io/unit/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .io);
-    defer t.deinit();
-
-    t.run("io/unit/embed_std", io.test_runner.unit.make(embed_std.std));
-    if (!t.wait()) return error.TestFailed;
-}
-
 test "net/unit/std" {
     std.testing.log_level = .info;
 
     var t = testing.T.new(std, .net);
     defer t.deinit();
 
-    t.run("net/unit/std", net.test_runner.unit.make2(std, runtime_posix));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "net/unit/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .net);
-    defer t.deinit();
-
-    t.run("net/unit/embed_std", net.test_runner.unit.make2(embed_std.std, runtime_embed_std));
+    t.run("net/unit/std", net.test_runner.unit.make(std, std_net));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -332,51 +174,7 @@ test "net/integration/std" {
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
-    t.run("net/integration/std", net.test_runner.integration.make2(std, runtime_posix));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "net/integration/runtime_posix/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .net);
-    defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
-
-    t.run("net/integration/runtime_posix/std", net.test_runner.integration.runtime.make2(std, runtime_posix));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "net/integration/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .net);
-    defer t.deinit();
-    t.timeout(20 * embed_std.std.time.ns_per_s);
-
-    t.run("net/integration/embed_std", net.test_runner.integration.make2(embed_std.std, runtime_embed_std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "net/integration2/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .net);
-    defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
-
-    t.run("net/integration2/std", net.test_runner.integration.runtime.make2(std, runtime_embed_std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "net/integration2/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .net);
-    defer t.deinit();
-    t.timeout(20 * embed_std.std.time.ns_per_s);
-
-    t.run("net/integration2/embed_std", net.test_runner.integration.runtime.make2(embed_std.std, runtime_embed_std));
+    t.run("net/integration/std", net.test_runner.integration.make(std, std_net));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -420,68 +218,3 @@ test "ledstrip/unit/embed_std" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "sync/integration/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .sync);
-    defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
-
-    t.run("sync/integration/std", sync.test_runner.integration.make(std, embed_std.sync.Channel));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "sync/integration/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .sync);
-    defer t.deinit();
-    t.timeout(20 * embed_std.std.time.ns_per_s);
-
-    t.run("sync/integration/embed_std", sync.test_runner.integration.make(embed_std.std, embed_std.sync.Channel));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "stdz/unit/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .stdz);
-    defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
-
-    t.run("stdz/unit/std", test_runner.stdz.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "stdz/unit/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .stdz);
-    defer t.deinit();
-    t.timeout(20 * embed_std.std.time.ns_per_s);
-
-    t.run("stdz/unit/embed_std", test_runner.stdz.make(embed_std.std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "context/unit/std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(std, .context);
-    defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
-
-    t.run("context/unit/std", test_runner.context.make(std));
-    if (!t.wait()) return error.TestFailed;
-}
-
-test "context/unit/embed_std" {
-    std.testing.log_level = .info;
-
-    var t = testing.T.new(embed_std.std, .context);
-    defer t.deinit();
-    t.timeout(20 * embed_std.std.time.ns_per_s);
-
-    t.run("context/unit/embed_std", test_runner.context.make(embed_std.std));
-    if (!t.wait()) return error.TestFailed;
-}

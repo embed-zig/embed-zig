@@ -31,35 +31,6 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             t.run("http_server", http_server.make(lib, net));
             t.run("http_transport", http_transport.make2(lib, net));
             t.run("https_transport", https_transport.make(lib, net));
-            return t.wait();
-        }
-
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
-            _ = self;
-            _ = allocator;
-        }
-    };
-
-    const Holder = struct {
-        var runner: Runner = .{};
-    };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
-}
-
-/// Integration slice for `net.make2(lib, impl).Runtime` only.
-///
-/// `net` is the struct type returned by `net.make2` (namespace with `Runtime`).
-pub fn make2(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
-            _ = self;
-            _ = allocator;
-        }
-
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
-            _ = self;
-            _ = allocator;
-
             t.run("runtime", runtime_runner.make(lib, net));
             return t.wait();
         }

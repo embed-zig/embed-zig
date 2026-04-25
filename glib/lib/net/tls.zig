@@ -374,7 +374,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                             return .{};
                         }
                     };
-                    const FakeNet = net_root.make2(lib, FakeRuntimeImpl);
+                    const FakeNet = net_root.make(lib, FakeRuntimeImpl);
 
                     var ctx_api = try ContextApi.init(case_allocator);
                     defer ctx_api.deinit();

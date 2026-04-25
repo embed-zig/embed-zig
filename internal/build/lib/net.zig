@@ -14,18 +14,11 @@ pub fn create(
         .target = target,
         .optimize = optimize,
     });
-    const runtime_posix_mod = b.createModule(.{
-        .root_source_file = b.path("lib/runtime_posix.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
     b.modules.put("net", mod) catch @panic("OOM");
-    b.modules.put("runtime_posix", runtime_posix_mod) catch @panic("OOM");
 }
 
 pub fn link(b: *std.Build) void {
     const mod = b.modules.get("net") orelse @panic("net module missing");
-    const runtime_posix_mod = b.modules.get("runtime_posix") orelse @panic("runtime_posix module missing");
     const stdz = b.modules.get("stdz") orelse @panic("net requires stdz");
     const sync = b.modules.get("sync") orelse @panic("net requires sync");
     const context = b.modules.get("context") orelse @panic("net requires context");
@@ -36,5 +29,4 @@ pub fn link(b: *std.Build) void {
     mod.addImport("context", context);
     mod.addImport("io", io);
     mod.addImport("testing", testing);
-    runtime_posix_mod.addImport("net", mod);
 }

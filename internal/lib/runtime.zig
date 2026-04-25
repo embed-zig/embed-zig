@@ -44,7 +44,7 @@ pub fn make(comptime options: Options) type {
         };
         pub const io = io_mod;
         pub const drivers = drivers_mod;
-        pub const net = net_mod.make2(std_ns, net_impl);
+        pub const net = net_mod.make(std_ns, net_impl);
         pub const mime = mime_mod;
         pub const bt = struct {
             const bound = bt_mod.make(std_ns, sync.Channel);
