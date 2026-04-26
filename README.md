@@ -34,11 +34,21 @@ const dep = b.dependency("embed_zig", .{
 const glib = dep.module("glib");
 const gstd = dep.module("gstd");
 const embed = dep.module("embed");
+const core_bluetooth = dep.module("core_bluetooth");
+const core_wlan = dep.module("core_wlan");
+const lvgl = dep.module("lvgl");
+const opus = dep.module("opus");
+const portaudio = dep.module("portaudio");
+const speexdsp = dep.module("speexdsp");
+const stb_truetype = dep.module("stb_truetype");
 ```
 
-The package name is `embed_zig`. The top-level package exposes three modules:
-`glib`, `gstd`, and `embed`. The `embed` namespace contains `bt`,
-`drivers`, `motion`, `audio`, `ledstrip`, and `zux`.
+The package name is `embed_zig`. The top-level package exposes core modules
+`glib`, `gstd`, and `embed`, plus package-backed modules such as
+`core_bluetooth`, `core_wlan`, `lvgl`, `opus`, `portaudio`, `speexdsp`, and
+`stb_truetype`. The `lvgl` package also exports `lvgl_osal` for its custom OS
+adapter. The `embed` namespace contains `bt`, `drivers`, `motion`, `audio`,
+`ledstrip`, and `zux`.
 
 ## Build And Test
 
@@ -54,6 +64,13 @@ zig build test
 - [`embed/lib/bt/README.md`](embed/lib/bt/README.md)
 - [`embed/lib/drivers/README.md`](embed/lib/drivers/README.md)
 - [`embed/lib/zux/README.md`](embed/lib/zux/README.md)
+- [`pkg/core_bluetooth/README.md`](pkg/core_bluetooth/README.md)
+- [`pkg/core_wlan/README.md`](pkg/core_wlan/README.md)
+- [`pkg/lvgl/README.md`](pkg/lvgl/README.md)
+- [`pkg/opus/README.md`](pkg/opus/README.md)
+- [`pkg/portaudio/README.md`](pkg/portaudio/README.md)
+- [`pkg/speexdsp/README.md`](pkg/speexdsp/README.md)
+- [`pkg/stb_truetype/README.md`](pkg/stb_truetype/README.md)
 
 ## Contributing
 

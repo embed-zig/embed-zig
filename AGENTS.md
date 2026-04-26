@@ -6,12 +6,12 @@ Before starting any development work, read the repository-wide conduct rules in 
 
 - The repository root is now a thin package-export layer.
 - The top-level `build.zig` should only wire public exports and package dependencies.
-- The top level exports exactly three public modules: `glib`, `gstd`, and `embed`.
+- The top level exports the core public modules `glib`, `gstd`, and `embed`, plus explicit package-backed public modules from `pkg/` such as `core_bluetooth`, `core_wlan`, `lvgl`, `opus`, `portaudio`, `speexdsp`, and `stb_truetype`.
 - The `embed` module is a namespace composed from the implementation modules under `embed/lib/`.
 - Do not reintroduce additional top-level public modules such as `bt`, `drivers`, or `embed_std`.
 - Do not reintroduce top-level implementation trees under `lib/` that mirror `embed/lib/`.
-- Do not add top-level test build steps or top-level test entrypoints for this package-export layer; implementation tests belong in `embed/`.
-- Put implementation code, module wiring, and tests in the `embed/` package unless the change is specifically about the top-level package boundary.
+- Top-level test build steps may only orchestrate exported package tests; implementation test entrypoints belong in `embed/` or the relevant `pkg/`.
+- Put embed implementation code, module wiring, and tests in the `embed/` package unless the change is specifically about the top-level package boundary; put external package modules under `pkg/`.
 
 ## Read Before Editing
 
