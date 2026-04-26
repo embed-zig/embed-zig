@@ -3,8 +3,8 @@
     .version = "1.2.0",
     .fingerprint = 0x3e50a1e0fc32b0a6,
     .dependencies = .{
-        .internal = .{
-            .path = "internal",
+        .embed = .{
+            .path = "embed",
         },
         .glib = .{
             .path = "glib",
@@ -18,7 +18,7 @@
         "build.zig.zon",
         "glib/",
         "glib_stdrt/",
-        "internal/",
+        "embed/",
         "pkg/",
     },
 }

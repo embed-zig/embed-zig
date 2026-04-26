@@ -4,24 +4,23 @@ pub fn create(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-) void {
-    const mod = b.createModule(.{
-        .root_source_file = b.path("lib/motion.zig"),
+) *std.Build.Module {
+    return b.createModule(.{
+        .root_source_file = b.path("lib/audio.zig"),
         .target = target,
         .optimize = optimize,
     });
-    b.modules.put("motion", mod) catch @panic("OOM");
 }
 
 pub fn link(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    mod: *std.Build.Module,
 ) void {
     const glib_dep = b.dependency("glib", .{
         .target = target,
         .optimize = optimize,
     });
-    const mod = b.modules.get("motion") orelse @panic("motion module missing");
     mod.addImport("glib", glib_dep.module("glib"));
 }

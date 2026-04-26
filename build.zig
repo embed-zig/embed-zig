@@ -3,7 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const internal_dep = b.dependency("internal", .{
+    const embed_dep = b.dependency("embed", .{
         .target = target,
         .optimize = optimize,
     });
@@ -15,21 +15,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    const glib_mod = glib_dep.module("glib");
-    const glib_stdrt_mod = glib_stdrt_dep.module("glib_stdrt");
-    const drivers_mod = internal_dep.module("drivers");
-    const bt_mod = internal_dep.module("bt");
-    const motion_mod = internal_dep.module("motion");
-    const audio_mod = internal_dep.module("audio");
-    const ledstrip_mod = internal_dep.module("ledstrip");
-    const zux_mod = internal_dep.module("zux");
-
-    b.modules.put("glib", glib_mod) catch @panic("OOM");
-    b.modules.put("glib_stdrt", glib_stdrt_mod) catch @panic("OOM");
-    b.modules.put("drivers", drivers_mod) catch @panic("OOM");
-    b.modules.put("bt", bt_mod) catch @panic("OOM");
-    b.modules.put("motion", motion_mod) catch @panic("OOM");
-    b.modules.put("audio", audio_mod) catch @panic("OOM");
-    b.modules.put("ledstrip", ledstrip_mod) catch @panic("OOM");
-    b.modules.put("zux", zux_mod) catch @panic("OOM");
+    b.modules.put("glib", glib_dep.module("glib")) catch @panic("OOM");
+    b.modules.put("glib_stdrt", glib_stdrt_dep.module("glib_stdrt")) catch @panic("OOM");
+    b.modules.put("embed", embed_dep.module("embed")) catch @panic("OOM");
 }

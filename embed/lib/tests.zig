@@ -1,11 +1,12 @@
+const embed = @import("embed");
 const glib = @import("glib");
 const glib_stdrt = @import("glib_stdrt");
-const bt = @import("bt");
-const ledstrip = @import("ledstrip");
-const drivers = @import("drivers");
-const motion = @import("motion");
-const audio = @import("audio");
-const zux = @import("zux");
+const bt = embed.bt;
+const ledstrip = embed.ledstrip;
+const drivers = embed.drivers;
+const motion = embed.motion;
+const audio = embed.audio;
+const zux = embed.zux;
 
 test "motion/unit/std" {
     const std = @import("std");
