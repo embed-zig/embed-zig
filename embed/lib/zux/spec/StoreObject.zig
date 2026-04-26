@@ -1,5 +1,4 @@
 const glib = @import("glib");
-const builtin = glib.std.builtin;
 const JsonParser = @import("JsonParser.zig");
 const StoreObject = @This();
 
@@ -76,7 +75,7 @@ fn parseStructType(parser: *JsonParser) type {
     const field_count = parser.countObjectFields();
     parser.expectByte('{');
 
-    var fields: [field_count]builtin.Type.StructField = undefined;
+    var fields: [field_count]glib.std.builtin.Type.StructField = undefined;
     var field_index: usize = 0;
 
     if (parser.consumeByte('}')) {

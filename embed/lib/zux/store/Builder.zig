@@ -1,5 +1,4 @@
 const glib = @import("glib");
-const builtin = glib.std.builtin;
 const StoreSubscriber = @import("Subscriber.zig");
 const StoreState = @import("State.zig");
 const StoreTypes = @import("Stores.zig");
@@ -450,7 +449,7 @@ fn makeStoresConfig(comptime builder: anytype) StoresConfigType(builder) {
 }
 
 fn StoresConfigType(comptime builder: anytype) type {
-    var fields: [builder.store_count]builtin.Type.StructField = undefined;
+    var fields: [builder.store_count]glib.std.builtin.Type.StructField = undefined;
 
     inline for (0..builder.store_count) |i| {
         const binding = builder.store_bindings[i];
@@ -501,7 +500,7 @@ fn StateNodeConfigType(comptime builder: anytype, comptime prefix: []const u8) t
     collectChildPrefixes(builder, prefix, &child_prefixes, &child_count);
 
     const field_count = child_count + @as(usize, if (labels_len > 0) 1 else 0);
-    var fields: [field_count]builtin.Type.StructField = undefined;
+    var fields: [field_count]glib.std.builtin.Type.StructField = undefined;
     comptime var field_index: usize = 0;
 
     if (labels_len > 0) {

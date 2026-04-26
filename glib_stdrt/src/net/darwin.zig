@@ -1,7 +1,5 @@
 const std = @import("std");
-const net_mod = @import("glib").net;
-const runtime = net_mod.runtime;
-const netip = net_mod.netip;
+const glib = @import("glib");
 
 const posix = std.posix;
 const system = posix.system;
@@ -33,7 +31,7 @@ fn mulAddU32(base: u32, factor: u32, addend: u32) error{Overflow}!u32 {
     return sum[0];
 }
 
-fn parseScopeId(addr: netip.Addr) EncodeSockAddrError!u32 {
+fn parseScopeId(addr: glib.net.netip.Addr) EncodeSockAddrError!u32 {
     const zone = addr.zone[0..addr.zone_len];
     if (zone.len == 0) return 0;
 
@@ -45,7 +43,7 @@ fn parseScopeId(addr: netip.Addr) EncodeSockAddrError!u32 {
     return scope_id;
 }
 
-fn encodeSockAddr(addr_port: netip.AddrPort) EncodeSockAddrError!EncodedSockAddr {
+fn encodeSockAddr(addr_port: glib.net.netip.AddrPort) EncodeSockAddrError!EncodedSockAddr {
     var storage: posix.sockaddr.storage = undefined;
     zeroStorage(&storage);
 
@@ -81,14 +79,14 @@ fn encodeSockAddr(addr_port: netip.AddrPort) EncodeSockAddrError!EncodedSockAddr
     return error.InvalidAddress;
 }
 
-fn encodeErrorToSocket(err: EncodeSockAddrError) runtime.SocketError {
+fn encodeErrorToSocket(err: EncodeSockAddrError) glib.net.runtime.SocketError {
     return switch (err) {
         error.InvalidAddress => error.Unexpected,
         error.InvalidScopeId => error.Unexpected,
     };
 }
 
-fn socketDomain(domain: runtime.Domain) u32 {
+fn socketDomain(domain: glib.net.runtime.Domain) u32 {
     return switch (domain) {
         .inet => posix.AF.INET,
         .inet6 => posix.AF.INET6,
@@ -144,12 +142,12 @@ fn OpCommon(comptime Self: type) type {
             return @atomicLoad(u8, &self.write_interrupt, .acquire) != 0;
         }
 
-        fn takeReadInterrupt(self: *Self, want: runtime.PollEvents) bool {
+        fn takeReadInterrupt(self: *Self, want: glib.net.runtime.PollEvents) bool {
             if (!want.read_interrupt) return false;
             return @atomicRmw(u8, &self.read_interrupt, .Xchg, 0, .acq_rel) != 0;
         }
 
-        fn takeWriteInterrupt(self: *Self, want: runtime.PollEvents) bool {
+        fn takeWriteInterrupt(self: *Self, want: glib.net.runtime.PollEvents) bool {
             if (!want.write_interrupt) return false;
             return @atomicRmw(u8, &self.write_interrupt, .Xchg, 0, .acq_rel) != 0;
         }
@@ -219,7 +217,7 @@ fn OpCommon(comptime Self: type) type {
             triggerWake(self, writeWakeIdent(self));
         }
 
-        fn signalCommon(self: *Self, ev: runtime.SignalEvent) void {
+        fn signalCommon(self: *Self, ev: glib.net.runtime.SignalEvent) void {
             if (isClosed(self)) return;
             switch (ev) {
                 .read_interrupt => {
@@ -233,7 +231,7 @@ fn OpCommon(comptime Self: type) type {
             }
         }
 
-        fn pollCommon(self: *Self, want: runtime.PollEvents, timeout_ms: ?u32) runtime.PollError!runtime.PollEvents {
+        fn pollCommon(self: *Self, want: glib.net.runtime.PollEvents, timeout_ms: ?u32) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
             if (isClosed(self)) return error.Closed;
             if (self.kq == -1) return error.Unexpected;
             const started_ms = if (timeout_ms != null) std.time.milliTimestamp() else 0;
@@ -241,7 +239,7 @@ fn OpCommon(comptime Self: type) type {
             while (true) {
                 if (isClosed(self)) return error.Closed;
 
-                var out = runtime.PollEvents{
+                var out = glib.net.runtime.PollEvents{
                     .read_interrupt = takeReadInterrupt(self, want),
                     .write_interrupt = takeWriteInterrupt(self, want),
                 };
@@ -344,7 +342,7 @@ pub const Tcp = struct {
         self.deinitKq();
     }
 
-    pub fn shutdown(self: *Tcp, how: runtime.ShutdownHow) runtime.SocketError!void {
+    pub fn shutdown(self: *Tcp, how: glib.net.runtime.ShutdownHow) glib.net.runtime.SocketError!void {
         if (tcp_ops.isClosed(self)) return error.Closed;
         const posix_how: posix.ShutdownHow = switch (how) {
             .read => .recv,
@@ -357,23 +355,23 @@ pub const Tcp = struct {
         };
     }
 
-    pub fn signal(self: *Tcp, ev: runtime.SignalEvent) void {
+    pub fn signal(self: *Tcp, ev: glib.net.runtime.SignalEvent) void {
         if (tcp_ops.isClosed(self)) return;
         tcp_ops.signalCommon(self, ev);
     }
 
-    pub fn bind(self: *Tcp, ap: netip.AddrPort) runtime.SocketError!void {
+    pub fn bind(self: *Tcp, ap: glib.net.netip.AddrPort) glib.net.runtime.SocketError!void {
         if (tcp_ops.isClosed(self)) return error.Closed;
         const enc = encodeSockAddr(ap) catch |err| return encodeErrorToSocket(err);
         posix.bind(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| return socketError(err);
     }
 
-    pub fn listen(self: *Tcp, backlog: u31) runtime.SocketError!void {
+    pub fn listen(self: *Tcp, backlog: u31) glib.net.runtime.SocketError!void {
         if (tcp_ops.isClosed(self)) return error.Closed;
         posix.listen(self.sock, backlog) catch |err| return socketError(err);
     }
 
-    pub fn accept(self: *Tcp, remote: ?*netip.AddrPort) runtime.SocketError!Tcp {
+    pub fn accept(self: *Tcp, remote: ?*glib.net.netip.AddrPort) glib.net.runtime.SocketError!Tcp {
         if (tcp_ops.isClosed(self)) return error.Closed;
 
         var storage: posix.sockaddr.storage = undefined;
@@ -395,7 +393,7 @@ pub const Tcp = struct {
         return child;
     }
 
-    pub fn connect(self: *Tcp, ap: netip.AddrPort) runtime.SocketError!void {
+    pub fn connect(self: *Tcp, ap: glib.net.netip.AddrPort) glib.net.runtime.SocketError!void {
         if (tcp_ops.isClosed(self)) return error.Closed;
         const enc = encodeSockAddr(ap) catch |err| return encodeErrorToSocket(err);
         posix.connect(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| {
@@ -405,7 +403,7 @@ pub const Tcp = struct {
         };
     }
 
-    pub fn finishConnect(self: *Tcp) runtime.SocketError!void {
+    pub fn finishConnect(self: *Tcp) glib.net.runtime.SocketError!void {
         if (tcp_ops.isClosed(self)) return error.Closed;
 
         var err_code: i32 = 0;
@@ -414,17 +412,17 @@ pub const Tcp = struct {
         return soErrorToSocket(err_code);
     }
 
-    pub fn recv(self: *Tcp, buf: []u8) runtime.SocketError!usize {
+    pub fn recv(self: *Tcp, buf: []u8) glib.net.runtime.SocketError!usize {
         if (tcp_ops.isClosed(self)) return error.Closed;
         return posix.recv(self.sock, buf, 0) catch |err| return socketError(err);
     }
 
-    pub fn send(self: *Tcp, buf: []const u8) runtime.SocketError!usize {
+    pub fn send(self: *Tcp, buf: []const u8) glib.net.runtime.SocketError!usize {
         if (tcp_ops.isClosed(self)) return error.Closed;
         return posix.send(self.sock, buf, 0) catch |err| return socketError(err);
     }
 
-    pub fn localAddr(self: *Tcp) runtime.SocketError!netip.AddrPort {
+    pub fn localAddr(self: *Tcp) glib.net.runtime.SocketError!glib.net.netip.AddrPort {
         if (tcp_ops.isClosed(self)) return error.Closed;
         var storage: posix.sockaddr.storage = undefined;
         var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
@@ -432,7 +430,7 @@ pub const Tcp = struct {
         return sockaddrToAddrPort(&storage, len);
     }
 
-    pub fn remoteAddr(self: *Tcp) runtime.SocketError!netip.AddrPort {
+    pub fn remoteAddr(self: *Tcp) glib.net.runtime.SocketError!glib.net.netip.AddrPort {
         if (tcp_ops.isClosed(self)) return error.Closed;
         var storage: posix.sockaddr.storage = undefined;
         var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
@@ -440,7 +438,7 @@ pub const Tcp = struct {
         return sockaddrToAddrPort(&storage, len);
     }
 
-    pub fn setOpt(self: *Tcp, opt: runtime.TcpOption) runtime.SetSockOptError!void {
+    pub fn setOpt(self: *Tcp, opt: glib.net.runtime.TcpOption) glib.net.runtime.SetSockOptError!void {
         if (tcp_ops.isClosed(self)) return error.Closed;
         switch (opt) {
             .socket => |s| try applySocketLevelOpt(self.sock, s),
@@ -452,7 +450,7 @@ pub const Tcp = struct {
         }
     }
 
-    pub fn poll(self: *Tcp, want: runtime.PollEvents, timeout_ms: ?u32) runtime.PollError!runtime.PollEvents {
+    pub fn poll(self: *Tcp, want: glib.net.runtime.PollEvents, timeout_ms: ?u32) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
         return tcp_ops.pollCommon(self, want, timeout_ms);
     }
 
@@ -504,18 +502,18 @@ pub const Udp = struct {
         self.deinitKq();
     }
 
-    pub fn signal(self: *Udp, ev: runtime.SignalEvent) void {
+    pub fn signal(self: *Udp, ev: glib.net.runtime.SignalEvent) void {
         if (udp_ops.isClosed(self)) return;
         udp_ops.signalCommon(self, ev);
     }
 
-    pub fn bind(self: *Udp, ap: netip.AddrPort) runtime.SocketError!void {
+    pub fn bind(self: *Udp, ap: glib.net.netip.AddrPort) glib.net.runtime.SocketError!void {
         if (udp_ops.isClosed(self)) return error.Closed;
         const enc = encodeSockAddr(ap) catch |err| return encodeErrorToSocket(err);
         posix.bind(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| return socketError(err);
     }
 
-    pub fn connect(self: *Udp, ap: netip.AddrPort) runtime.SocketError!void {
+    pub fn connect(self: *Udp, ap: glib.net.netip.AddrPort) glib.net.runtime.SocketError!void {
         if (udp_ops.isClosed(self)) return error.Closed;
         const enc = encodeSockAddr(ap) catch |err| return encodeErrorToSocket(err);
         posix.connect(self.sock, @ptrCast(&enc.storage), enc.len) catch |err| {
@@ -525,17 +523,17 @@ pub const Udp = struct {
         };
     }
 
-    pub fn finishConnect(self: *Udp) runtime.SocketError!void {
+    pub fn finishConnect(self: *Udp) glib.net.runtime.SocketError!void {
         _ = self;
         return;
     }
 
-    pub fn recv(self: *Udp, buf: []u8) runtime.SocketError!usize {
+    pub fn recv(self: *Udp, buf: []u8) glib.net.runtime.SocketError!usize {
         if (udp_ops.isClosed(self)) return error.Closed;
         return posix.recv(self.sock, buf, 0) catch |err| return socketError(err);
     }
 
-    pub fn recvFrom(self: *Udp, buf: []u8, src: ?*netip.AddrPort) runtime.SocketError!usize {
+    pub fn recvFrom(self: *Udp, buf: []u8, src: ?*glib.net.netip.AddrPort) glib.net.runtime.SocketError!usize {
         if (udp_ops.isClosed(self)) return error.Closed;
 
         if (src) |out| {
@@ -549,18 +547,18 @@ pub const Udp = struct {
         return posix.recv(self.sock, buf, 0) catch |err| return socketError(err);
     }
 
-    pub fn send(self: *Udp, buf: []const u8) runtime.SocketError!usize {
+    pub fn send(self: *Udp, buf: []const u8) glib.net.runtime.SocketError!usize {
         if (udp_ops.isClosed(self)) return error.Closed;
         return posix.send(self.sock, buf, 0) catch |err| return socketError(err);
     }
 
-    pub fn sendTo(self: *Udp, buf: []const u8, dst: netip.AddrPort) runtime.SocketError!usize {
+    pub fn sendTo(self: *Udp, buf: []const u8, dst: glib.net.netip.AddrPort) glib.net.runtime.SocketError!usize {
         if (udp_ops.isClosed(self)) return error.Closed;
         const enc = encodeSockAddr(dst) catch |err| return encodeErrorToSocket(err);
         return posix.sendto(self.sock, buf, 0, @ptrCast(&enc.storage), enc.len) catch |err| return socketError(err);
     }
 
-    pub fn localAddr(self: *Udp) runtime.SocketError!netip.AddrPort {
+    pub fn localAddr(self: *Udp) glib.net.runtime.SocketError!glib.net.netip.AddrPort {
         if (udp_ops.isClosed(self)) return error.Closed;
         var storage: posix.sockaddr.storage = undefined;
         var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
@@ -568,7 +566,7 @@ pub const Udp = struct {
         return sockaddrToAddrPort(&storage, len);
     }
 
-    pub fn remoteAddr(self: *Udp) runtime.SocketError!netip.AddrPort {
+    pub fn remoteAddr(self: *Udp) glib.net.runtime.SocketError!glib.net.netip.AddrPort {
         if (udp_ops.isClosed(self)) return error.Closed;
         var storage: posix.sockaddr.storage = undefined;
         var len: posix.socklen_t = @sizeOf(posix.sockaddr.storage);
@@ -576,14 +574,14 @@ pub const Udp = struct {
         return sockaddrToAddrPort(&storage, len);
     }
 
-    pub fn setOpt(self: *Udp, opt: runtime.UdpOption) runtime.SetSockOptError!void {
+    pub fn setOpt(self: *Udp, opt: glib.net.runtime.UdpOption) glib.net.runtime.SetSockOptError!void {
         if (udp_ops.isClosed(self)) return error.Closed;
         switch (opt) {
             .socket => |s| try applySocketLevelOpt(self.sock, s),
         }
     }
 
-    pub fn poll(self: *Udp, want: runtime.PollEvents, timeout_ms: ?u32) runtime.PollError!runtime.PollEvents {
+    pub fn poll(self: *Udp, want: glib.net.runtime.PollEvents, timeout_ms: ?u32) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
         return udp_ops.pollCommon(self, want, timeout_ms);
     }
 
@@ -604,7 +602,7 @@ pub const Udp = struct {
     }
 };
 
-fn applySocketLevelOpt(sock: posix.socket_t, opt: runtime.SocketLevelOption) runtime.SetSockOptError!void {
+fn applySocketLevelOpt(sock: posix.socket_t, opt: glib.net.runtime.SocketLevelOption) glib.net.runtime.SetSockOptError!void {
     switch (opt) {
         .reuse_addr => |enabled| {
             try setSockOptBool(sock, posix.SOL.SOCKET, posix.SO.REUSEADDR, enabled);
@@ -618,7 +616,7 @@ fn applySocketLevelOpt(sock: posix.socket_t, opt: runtime.SocketLevelOption) run
     }
 }
 
-fn sockaddrToAddrPort(storage: *const posix.sockaddr.storage, len: posix.socklen_t) !netip.AddrPort {
+fn sockaddrToAddrPort(storage: *const posix.sockaddr.storage, len: posix.socklen_t) !glib.net.netip.AddrPort {
     if (len < @sizeOf(posix.sockaddr)) return error.Unexpected;
     const family = @as(*const posix.sockaddr, @ptrCast(storage)).family;
 
@@ -627,32 +625,32 @@ fn sockaddrToAddrPort(storage: *const posix.sockaddr.storage, len: posix.socklen
         const sa: *const posix.sockaddr.in = @ptrCast(@alignCast(storage));
         const port = std.mem.bigToNative(u16, sa.port);
         const addr_bytes: *align(1) const [4]u8 = @ptrCast(&sa.addr);
-        return netip.AddrPort.from4(addr_bytes.*, port);
+        return glib.net.netip.AddrPort.from4(addr_bytes.*, port);
     }
 
     if (family == posix.AF.INET6) {
         if (len < @sizeOf(posix.sockaddr.in6)) return error.Unexpected;
         const sa: *const posix.sockaddr.in6 = @ptrCast(@alignCast(storage));
         const port = std.mem.bigToNative(u16, sa.port);
-        return netip.AddrPort.from16(sa.addr, port);
+        return glib.net.netip.AddrPort.from16(sa.addr, port);
     }
 
     return error.Unexpected;
 }
 
-fn translateSetSockOptErr(err: anyerror) runtime.SetSockOptError {
+fn translateSetSockOptErr(err: anyerror) glib.net.runtime.SetSockOptError {
     return switch (err) {
         error.NotSupported, error.ProtocolNotSupported => error.Unsupported,
         else => error.Unexpected,
     };
 }
 
-fn setSockOptBool(fd: posix.socket_t, level: anytype, opt: anytype, enable: bool) runtime.SetSockOptError!void {
+fn setSockOptBool(fd: posix.socket_t, level: anytype, opt: anytype, enable: bool) glib.net.runtime.SetSockOptError!void {
     const value: [4]u8 = @bitCast(@as(i32, if (enable) 1 else 0));
     posix.setsockopt(fd, level, opt, &value) catch |err| return translateSetSockOptErr(err);
 }
 
-fn socketError(err: anyerror) runtime.SocketError {
+fn socketError(err: anyerror) glib.net.runtime.SocketError {
     return switch (err) {
         error.WouldBlock => error.WouldBlock,
         error.AccessDenied, error.PermissionDenied => error.AccessDenied,
@@ -690,7 +688,7 @@ fn remainingTimeoutMs(started_ms: i64, total_ms: u32) u32 {
     return total_ms - @as(u32, @intCast(elapsed));
 }
 
-fn hasAnyWantedEvent(got: runtime.PollEvents, want: runtime.PollEvents) bool {
+fn hasAnyWantedEvent(got: glib.net.runtime.PollEvents, want: glib.net.runtime.PollEvents) bool {
     return (want.read and got.read) or
         (want.write and got.write) or
         (want.failed and got.failed) or
@@ -699,7 +697,7 @@ fn hasAnyWantedEvent(got: runtime.PollEvents, want: runtime.PollEvents) bool {
         (want.write_interrupt and got.write_interrupt);
 }
 
-fn soErrorToSocket(code: i32) runtime.SocketError {
+fn soErrorToSocket(code: i32) glib.net.runtime.SocketError {
     const e = @as(posix.E, @enumFromInt(code));
     return switch (e) {
         .ACCES => error.AccessDenied,
@@ -722,7 +720,7 @@ fn soErrorToSocket(code: i32) runtime.SocketError {
     };
 }
 
-pub fn tcp(domain: runtime.Domain) runtime.CreateError!Tcp {
+pub fn tcp(domain: glib.net.runtime.Domain) glib.net.runtime.CreateError!Tcp {
     const family = socketDomain(domain);
     const sock = posix.socket(family, posix.SOCK.STREAM, 0) catch |err| return translateCreateErr(err);
     errdefer posix.close(sock);
@@ -744,7 +742,7 @@ pub fn tcp(domain: runtime.Domain) runtime.CreateError!Tcp {
     return s;
 }
 
-pub fn udp(domain: runtime.Domain) runtime.CreateError!Udp {
+pub fn udp(domain: glib.net.runtime.Domain) glib.net.runtime.CreateError!Udp {
     const family = socketDomain(domain);
     const sock = posix.socket(family, posix.SOCK.DGRAM, 0) catch |err| return translateCreateErr(err);
     errdefer posix.close(sock);
@@ -766,7 +764,7 @@ pub fn udp(domain: runtime.Domain) runtime.CreateError!Udp {
     return s;
 }
 
-fn translateCreateErr(err: posix.SocketError) runtime.CreateError {
+fn translateCreateErr(err: posix.SocketError) glib.net.runtime.CreateError {
     return switch (err) {
         error.AddressFamilyNotSupported,
         error.ProtocolFamilyNotAvailable,

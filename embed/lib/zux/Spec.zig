@@ -1,7 +1,6 @@
 const glib = @import("glib");
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
-const sync = glib.sync;
 
 const Assembler = @import("Assembler.zig");
 const Store = @import("Store.zig");
@@ -1050,22 +1049,22 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
                         pub fn close(_: *@This()) void {}
 
-                        pub fn send(_: *@This(), _: T) !sync.channel.SendResult() {
+                        pub fn send(_: *@This(), _: T) !glib.sync.channel.SendResult() {
                             return .{ .ok = false };
                         }
 
-                        pub fn sendTimeout(_: *@This(), _: T, _: u32) !sync.channel.SendResult() {
+                        pub fn sendTimeout(_: *@This(), _: T, _: u32) !glib.sync.channel.SendResult() {
                             return .{ .ok = false };
                         }
 
-                        pub fn recv(_: *@This()) !sync.channel.RecvResult(T) {
+                        pub fn recv(_: *@This()) !glib.sync.channel.RecvResult(T) {
                             return .{
                                 .value = undefined,
                                 .ok = false,
                             };
                         }
 
-                        pub fn recvTimeout(_: *@This(), _: u32) !sync.channel.RecvResult(T) {
+                        pub fn recvTimeout(_: *@This(), _: u32) !glib.sync.channel.RecvResult(T) {
                             return .{
                                 .value = undefined,
                                 .ok = false,
@@ -1074,7 +1073,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     };
                 }
             }.factory;
-            const TestChannel = sync.channel.make(TestChannelImpl);
+            const TestChannel = glib.sync.channel.make(TestChannelImpl);
 
             const SpecType = make(.{
                 .stores = &.{

@@ -1,11 +1,10 @@
 //! Std-backed log impl.
 
 const std = @import("std");
-const stdz_mod = @import("glib").std;
-const stdz_log = stdz_mod.log;
+const glib = @import("glib");
 
 pub fn write(
-    comptime level: stdz_log.Level,
+    comptime level: glib.std.log.Level,
     comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,

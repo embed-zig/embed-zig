@@ -26,27 +26,21 @@ pub fn from565(pixel: u16) Self {
 }
 
 test "drivers/unit_tests/Display/Rgb/cmp_compares_all_channels" {
-    const testing = glib.std.testing;
-
-    try testing.expect(init(1, 2, 3).cmp(init(1, 2, 3)));
-    try testing.expect(!init(1, 2, 3).cmp(init(1, 2, 4)));
+    try glib.std.testing.expect(init(1, 2, 3).cmp(init(1, 2, 3)));
+    try glib.std.testing.expect(!init(1, 2, 3).cmp(init(1, 2, 4)));
 }
 
 test "drivers/unit_tests/Display/Rgb/from565_decodes_common_colors" {
-    const testing = glib.std.testing;
-
-    try testing.expect(init(0, 0, 0).cmp(from565(0x0000)));
-    try testing.expect(init(255, 255, 255).cmp(from565(0xFFFF)));
-    try testing.expect(init(255, 0, 0).cmp(from565(0xF800)));
-    try testing.expect(init(0, 255, 0).cmp(from565(0x07E0)));
-    try testing.expect(init(0, 0, 255).cmp(from565(0x001F)));
+    try glib.std.testing.expect(init(0, 0, 0).cmp(from565(0x0000)));
+    try glib.std.testing.expect(init(255, 255, 255).cmp(from565(0xFFFF)));
+    try glib.std.testing.expect(init(255, 0, 0).cmp(from565(0xF800)));
+    try glib.std.testing.expect(init(0, 255, 0).cmp(from565(0x07E0)));
+    try glib.std.testing.expect(init(0, 0, 255).cmp(from565(0x001F)));
 }
 
 test "drivers/unit_tests/Display/Rgb/from565_expands_partial_channels" {
-    const testing = glib.std.testing;
-
     const decoded = from565(0x8410);
-    try testing.expectEqual(@as(u8, 132), decoded.r);
-    try testing.expectEqual(@as(u8, 130), decoded.g);
-    try testing.expectEqual(@as(u8, 132), decoded.b);
+    try glib.std.testing.expectEqual(@as(u8, 132), decoded.r);
+    try glib.std.testing.expectEqual(@as(u8, 130), decoded.g);
+    try glib.std.testing.expectEqual(@as(u8, 132), decoded.b);
 }

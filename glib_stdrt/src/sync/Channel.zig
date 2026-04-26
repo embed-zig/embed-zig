@@ -1,10 +1,9 @@
 //! Channel impl backed by lib thread primitives only.
 
-const sync_mod = @import("glib").sync;
-const channel = sync_mod.channel;
+const glib = @import("glib");
 
-pub const ChannelFactory: channel.FactoryType = struct {
-    fn factory(comptime lib: type) channel.ChannelType {
+pub const ChannelFactory: glib.sync.channel.FactoryType = struct {
+    fn factory(comptime lib: type) glib.sync.channel.ChannelType {
         return struct {
             fn factory(comptime T: type) type {
                 return Channel(lib, T);
@@ -78,31 +77,31 @@ fn Channel(comptime lib: type, comptime T: type) type {
             self.inner.can_send.broadcast();
         }
 
-        pub fn send(self: *Self, value: T) !channel.SendResult() {
+        pub fn send(self: *Self, value: T) !glib.sync.channel.SendResult() {
             if (self.inner.capacity == 0)
                 return self.sendUnbuffered(value, null);
             return self.sendBuffered(value, null);
         }
 
-        pub fn sendTimeout(self: *Self, value: T, timeout_ms: u32) !channel.SendResult() {
+        pub fn sendTimeout(self: *Self, value: T, timeout_ms: u32) !glib.sync.channel.SendResult() {
             if (self.inner.capacity == 0)
                 return self.sendUnbuffered(value, timeout_ms);
             return self.sendBuffered(value, timeout_ms);
         }
 
-        pub fn recv(self: *Self) !channel.RecvResult(T) {
+        pub fn recv(self: *Self) !glib.sync.channel.RecvResult(T) {
             if (self.inner.capacity == 0)
                 return self.recvUnbuffered(null);
             return self.recvBuffered(null);
         }
 
-        pub fn recvTimeout(self: *Self, timeout_ms: u32) !channel.RecvResult(T) {
+        pub fn recvTimeout(self: *Self, timeout_ms: u32) !glib.sync.channel.RecvResult(T) {
             if (self.inner.capacity == 0)
                 return self.recvUnbuffered(timeout_ms);
             return self.recvBuffered(timeout_ms);
         }
 
-        fn sendBuffered(self: *Self, value: T, timeout_ms: ?u32) !channel.SendResult() {
+        fn sendBuffered(self: *Self, value: T, timeout_ms: ?u32) !glib.sync.channel.SendResult() {
             self.inner.mutex.lock();
             defer self.inner.mutex.unlock();
 
@@ -122,7 +121,7 @@ fn Channel(comptime lib: type, comptime T: type) type {
             return .{ .ok = true };
         }
 
-        fn recvBuffered(self: *Self, timeout_ms: ?u32) !channel.RecvResult(T) {
+        fn recvBuffered(self: *Self, timeout_ms: ?u32) !glib.sync.channel.RecvResult(T) {
             self.inner.mutex.lock();
             defer self.inner.mutex.unlock();
 
@@ -142,7 +141,7 @@ fn Channel(comptime lib: type, comptime T: type) type {
             return .{ .value = value, .ok = true };
         }
 
-        fn sendUnbuffered(self: *Self, value: T, timeout_ms: ?u32) !channel.SendResult() {
+        fn sendUnbuffered(self: *Self, value: T, timeout_ms: ?u32) !glib.sync.channel.SendResult() {
             self.inner.send_mutex.lock();
             defer self.inner.send_mutex.unlock();
             self.inner.mutex.lock();
@@ -176,7 +175,7 @@ fn Channel(comptime lib: type, comptime T: type) type {
             return .{ .ok = true };
         }
 
-        fn recvUnbuffered(self: *Self, timeout_ms: ?u32) !channel.RecvResult(T) {
+        fn recvUnbuffered(self: *Self, timeout_ms: ?u32) !glib.sync.channel.RecvResult(T) {
             self.inner.mutex.lock();
             defer self.inner.mutex.unlock();
 

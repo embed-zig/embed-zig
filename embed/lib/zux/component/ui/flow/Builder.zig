@@ -1,5 +1,4 @@
 const glib = @import("glib");
-const builtin = glib.std.builtin;
 const Dag = @import("Dag.zig");
 const ReducerTemplate = @import("Reducer.zig");
 const StateTemplate = @import("State.zig");
@@ -176,7 +175,7 @@ fn appendUniqueLabel(labels: *[]const []const u8, comptime label: []const u8) vo
 
 fn makeEnum(comptime labels: []const []const u8, comptime duplicate_message: []const u8) type {
     const count = labels.len;
-    var fields: [count]builtin.Type.EnumField = undefined;
+    var fields: [count]glib.std.builtin.Type.EnumField = undefined;
 
     inline for (labels, 0..) |label, i| {
         const name = label;

@@ -1,5 +1,4 @@
 const glib = @import("glib");
-const builtin = glib.std.builtin;
 
 pub const Context = @import("event/Context.zig");
 pub const EventReceiver = @import("event/EventReceiver.zig");
@@ -16,8 +15,8 @@ const wifi_event = @import("component/wifi/event.zig");
 pub fn make(comptime Events: anytype) type {
     const count = Events.len;
 
-    comptime var enum_fields: [count]builtin.Type.EnumField = undefined;
-    comptime var union_fields: [count]builtin.Type.UnionField = undefined;
+    comptime var enum_fields: [count]glib.std.builtin.Type.EnumField = undefined;
+    comptime var union_fields: [count]glib.std.builtin.Type.UnionField = undefined;
 
     inline for (Events, 0..) |T, i| {
         const name = @tagName(T.kind);

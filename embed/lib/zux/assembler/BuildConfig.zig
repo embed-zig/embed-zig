@@ -1,5 +1,4 @@
 const glib = @import("glib");
-const builtin = glib.std.builtin;
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
 const modem_api = @import("drivers");
@@ -7,7 +6,7 @@ const modem_api = @import("drivers");
 pub fn make(comptime config: anytype) type {
     const info = configStructInfo(config);
     const total_len = totalPeriphLen(config);
-    var fields: [total_len]builtin.Type.StructField = undefined;
+    var fields: [total_len]glib.std.builtin.Type.StructField = undefined;
     comptime var field_index: usize = 0;
 
     inline for (info.fields) |field| {
@@ -50,7 +49,7 @@ pub fn build(comptime config: anytype) make(config) {
     return out;
 }
 
-fn configStructInfo(comptime config: anytype) builtin.Type.Struct {
+fn configStructInfo(comptime config: anytype) glib.std.builtin.Type.Struct {
     const ConfigType = @TypeOf(config);
     return switch (@typeInfo(ConfigType)) {
         .@"struct" => |info| info,

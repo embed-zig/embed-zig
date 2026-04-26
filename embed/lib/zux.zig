@@ -1,5 +1,4 @@
 const glib = @import("glib");
-const sync = glib.sync;
 
 const Assembler = @import("zux/Assembler.zig");
 const Config = @import("zux/assembler/Config.zig");
@@ -22,7 +21,7 @@ pub const spec = struct {
 pub fn assemble(
     comptime lib: type,
     comptime config: Config,
-    comptime Channel: sync.channel.ChannelType,
+    comptime Channel: glib.sync.channel.ChannelType,
 ) type {
     return Assembler.make(lib, config, Channel);
 }

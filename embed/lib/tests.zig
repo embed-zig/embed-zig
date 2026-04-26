@@ -25,10 +25,10 @@ test "motion/unit/glib_stdrt" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.std, .motion);
+    var t = glib.testing.T.new(glib_stdrt.runtime.std, .motion);
     defer t.deinit();
 
-    t.run("motion/unit/glib_stdrt", motion.test_runner.unit.make(glib_stdrt.std));
+    t.run("motion/unit/glib_stdrt", motion.test_runner.unit.make(glib_stdrt.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -49,10 +49,10 @@ test "audio/unit/glib_stdrt" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.std, .audio);
+    var t = glib.testing.T.new(glib_stdrt.runtime.std, .audio);
     defer t.deinit();
 
-    t.run("audio/unit/glib_stdrt", audio.test_runner.unit.make(glib_stdrt.std));
+    t.run("audio/unit/glib_stdrt", audio.test_runner.unit.make(glib_stdrt.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -74,11 +74,11 @@ test "audio/integration/glib_stdrt" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.std, .audio);
+    var t = glib.testing.T.new(glib_stdrt.runtime.std, .audio);
     defer t.deinit();
-    t.timeout(20 * glib_stdrt.std.time.ns_per_s);
+    t.timeout(20 * glib_stdrt.runtime.std.time.ns_per_s);
 
-    t.run("audio/integration/glib_stdrt", audio.test_runner.integration.make(glib_stdrt.std));
+    t.run("audio/integration/glib_stdrt", audio.test_runner.integration.make(glib_stdrt.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -90,7 +90,7 @@ test "zux/unit/std" {
     var t = glib.testing.T.new(std, .zux);
     defer t.deinit();
 
-    t.run("zux/unit/std", zux.test_runner.unit.make(std, glib_stdrt.sync.Channel));
+    t.run("zux/unit/std", zux.test_runner.unit.make(std, glib_stdrt.runtime.sync.Channel));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -99,10 +99,10 @@ test "zux/unit/glib_stdrt" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.std, .zux);
+    var t = glib.testing.T.new(glib_stdrt.runtime.std, .zux);
     defer t.deinit();
 
-    t.run("zux/unit/glib_stdrt", zux.test_runner.unit.make(glib_stdrt.std, glib_stdrt.sync.Channel));
+    t.run("zux/unit/glib_stdrt", zux.test_runner.unit.make(glib_stdrt.runtime.std, glib_stdrt.runtime.sync.Channel));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -115,7 +115,7 @@ test "zux/integration/std" {
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
-    t.run("zux/integration/std", zux.test_runner.integration.make(std, glib_stdrt.sync.Channel));
+    t.run("zux/integration/std", zux.test_runner.integration.make(std, glib_stdrt.runtime.sync.Channel));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -124,11 +124,11 @@ test "zux/integration/glib_stdrt" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.std, .zux);
+    var t = glib.testing.T.new(glib_stdrt.runtime.std, .zux);
     defer t.deinit();
-    t.timeout(20 * glib_stdrt.std.time.ns_per_s);
+    t.timeout(20 * glib_stdrt.runtime.std.time.ns_per_s);
 
-    t.run("zux/integration/glib_stdrt", zux.test_runner.integration.make(glib_stdrt.std, glib_stdrt.sync.Channel));
+    t.run("zux/integration/glib_stdrt", zux.test_runner.integration.make(glib_stdrt.runtime.std, glib_stdrt.runtime.sync.Channel));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -149,10 +149,10 @@ test "bt/unit/glib_stdrt" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.std, .bt);
+    var t = glib.testing.T.new(glib_stdrt.runtime.std, .bt);
     defer t.deinit();
 
-    t.run("bt/unit/glib_stdrt", bt.test_runner.unit.make(glib_stdrt.std));
+    t.run("bt/unit/glib_stdrt", bt.test_runner.unit.make(glib_stdrt.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -174,9 +174,9 @@ test "bt/integration/glib_stdrt" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.std, .bt);
+    var t = glib.testing.T.new(glib_stdrt.runtime.std, .bt);
     defer t.deinit();
-    t.timeout(60 * glib_stdrt.std.time.ns_per_s);
+    t.timeout(60 * glib_stdrt.runtime.std.time.ns_per_s);
 
     t.run("bt/integration/glib_stdrt", bt.test_runner.integration.make(glib_stdrt.runtime));
     if (!t.wait()) return error.TestFailed;
@@ -199,10 +199,10 @@ test "drivers/unit/glib_stdrt" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.std, .drivers);
+    var t = glib.testing.T.new(glib_stdrt.runtime.std, .drivers);
     defer t.deinit();
 
-    t.run("drivers/unit/glib_stdrt", drivers.test_runner.unit.make(glib_stdrt.std));
+    t.run("drivers/unit/glib_stdrt", drivers.test_runner.unit.make(glib_stdrt.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -223,9 +223,9 @@ test "ledstrip/unit/glib_stdrt" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.std, .ledstrip);
+    var t = glib.testing.T.new(glib_stdrt.runtime.std, .ledstrip);
     defer t.deinit();
 
-    t.run("ledstrip/unit/glib_stdrt", ledstrip.test_runner.unit.make(glib_stdrt.std));
+    t.run("ledstrip/unit/glib_stdrt", ledstrip.test_runner.unit.make(glib_stdrt.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }

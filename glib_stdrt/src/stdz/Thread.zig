@@ -2,8 +2,8 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
-const stdz_mod = @import("glib").std;
-const stdz_thread = stdz_mod.Thread;
+const glib = @import("glib");
+
 const posix = std.posix;
 const windows = std.os.windows;
 
@@ -23,7 +23,7 @@ pub const Mutex = @import("Thread/Mutex.zig");
 pub const Condition = @import("Thread/Condition.zig");
 pub const RwLock = @import("Thread/RwLock.zig");
 
-pub fn spawn(config: stdz_thread.SpawnConfig, comptime f: anytype, args: anytype) stdz_thread.SpawnError!Self {
+pub fn spawn(config: glib.std.Thread.SpawnConfig, comptime f: anytype, args: anytype) glib.std.Thread.SpawnError!Self {
     const handle = try std.Thread.spawn(.{
         .stack_size = config.stack_size,
         .allocator = config.allocator,
@@ -39,7 +39,7 @@ pub fn detach(self: Self) void {
     self.handle.detach();
 }
 
-pub fn yield() stdz_thread.YieldError!void {
+pub fn yield() glib.std.Thread.YieldError!void {
     return try std.Thread.yield();
 }
 
@@ -47,7 +47,7 @@ pub fn sleep(ns: u64) void {
     std.Thread.sleep(ns);
 }
 
-pub fn getCpuCount() stdz_thread.CpuCountError!usize {
+pub fn getCpuCount() glib.std.Thread.CpuCountError!usize {
     return try std.Thread.getCpuCount();
 }
 
@@ -55,7 +55,7 @@ pub fn getCurrentId() Id {
     return std.Thread.getCurrentId();
 }
 
-pub fn setName(name: []const u8) stdz_thread.SetNameError!void {
+pub fn setName(name: []const u8) glib.std.Thread.SetNameError!void {
     if (std_max_name_len == 0) return error.Unsupported;
     if (name.len > max_name_len) return error.NameTooLong;
 
@@ -149,7 +149,7 @@ pub fn setName(name: []const u8) stdz_thread.SetNameError!void {
     return error.Unsupported;
 }
 
-pub fn getName(buffer_ptr: *[max_name_len:0]u8) stdz_thread.GetNameError!?[]const u8 {
+pub fn getName(buffer_ptr: *[max_name_len:0]u8) glib.std.Thread.GetNameError!?[]const u8 {
     if (std_max_name_len == 0) return error.Unsupported;
 
     buffer_ptr[max_name_len] = 0;

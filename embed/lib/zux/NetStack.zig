@@ -1,9 +1,8 @@
-const Context = @import("event/Context.zig");
-const event = @import("event.zig");
-const net = glib.net;
 const glib = @import("glib");
 
-const Addr = net.netip.Addr;
+const Context = @import("event/Context.zig");
+const event = @import("event.zig");
+
 const EventReceiver = event.EventReceiver;
 const NetStack = @This();
 
@@ -118,7 +117,7 @@ pub const AddrAddedEvent = struct {
 
     source_id: u32,
     netif_id: u32,
-    addr: Addr,
+    addr: glib.net.netip.Addr,
     prefix_len: u8,
     source: AddrSource,
     ctx: Context.Type = null,
@@ -129,7 +128,7 @@ pub const AddrRemovedEvent = struct {
 
     source_id: u32,
     netif_id: u32,
-    addr: Addr,
+    addr: glib.net.netip.Addr,
     prefix_len: u8,
     source: AddrSource,
     ctx: Context.Type = null,
@@ -140,15 +139,15 @@ pub const DhcpLeaseAcquiredEvent = struct {
 
     source_id: u32,
     netif_id: u32,
-    addr: Addr,
-    gateway: Addr,
-    netmask: Addr,
+    addr: glib.net.netip.Addr,
+    gateway: glib.net.netip.Addr,
+    netmask: glib.net.netip.Addr,
     dns_count: u8,
-    dns_buf: [max_dns_server_count]Addr,
+    dns_buf: [max_dns_server_count]glib.net.netip.Addr,
     lease_time_s: u32,
     ctx: Context.Type = null,
 
-    pub fn dnsServers(self: *const @This()) []const Addr {
+    pub fn dnsServers(self: *const @This()) []const glib.net.netip.Addr {
         return self.dns_buf[0..self.dns_count];
     }
 };
@@ -166,7 +165,7 @@ pub const DefaultRouteChangedEvent = struct {
 
     source_id: u32,
     netif_id: u32,
-    gateway: Addr,
+    gateway: glib.net.netip.Addr,
     ctx: Context.Type = null,
 };
 
@@ -175,7 +174,7 @@ pub const RouterDiscoveredEvent = struct {
 
     source_id: u32,
     netif_id: u32,
-    router: Addr,
+    router: glib.net.netip.Addr,
     ctx: Context.Type = null,
 };
 
@@ -184,7 +183,7 @@ pub const RouterLostEvent = struct {
 
     source_id: u32,
     netif_id: u32,
-    router: Addr,
+    router: glib.net.netip.Addr,
     ctx: Context.Type = null,
 };
 
@@ -194,10 +193,10 @@ pub const DnsServersChangedEvent = struct {
     source_id: u32,
     netif_id: u32,
     dns_count: u8,
-    dns_buf: [max_dns_server_count]Addr,
+    dns_buf: [max_dns_server_count]glib.net.netip.Addr,
     ctx: Context.Type = null,
 
-    pub fn dnsServers(self: *const @This()) []const Addr {
+    pub fn dnsServers(self: *const @This()) []const glib.net.netip.Addr {
         return self.dns_buf[0..self.dns_count];
     }
 };
@@ -234,8 +233,8 @@ pub const PppUpEvent = struct {
 
     source_id: u32,
     netif_id: u32,
-    local_addr: Addr,
-    peer_addr: Addr,
+    local_addr: glib.net.netip.Addr,
+    peer_addr: glib.net.netip.Addr,
     ctx: Context.Type = null,
 };
 
@@ -280,7 +279,7 @@ pub const NetifDown = struct {
 pub const AddrAdded = struct {
     source_id: u32,
     netif_id: u32,
-    addr: Addr,
+    addr: glib.net.netip.Addr,
     prefix_len: u8,
     source: AddrSource,
     ctx: Context.Type = null,
@@ -289,7 +288,7 @@ pub const AddrAdded = struct {
 pub const AddrRemoved = struct {
     source_id: u32,
     netif_id: u32,
-    addr: Addr,
+    addr: glib.net.netip.Addr,
     prefix_len: u8,
     source: AddrSource,
     ctx: Context.Type = null,
@@ -298,10 +297,10 @@ pub const AddrRemoved = struct {
 pub const DhcpLeaseAcquired = struct {
     source_id: u32,
     netif_id: u32,
-    addr: Addr,
-    gateway: Addr,
-    netmask: Addr,
-    dns_servers: []const Addr = &.{},
+    addr: glib.net.netip.Addr,
+    gateway: glib.net.netip.Addr,
+    netmask: glib.net.netip.Addr,
+    dns_servers: []const glib.net.netip.Addr = &.{},
     lease_time_s: u32 = 0,
     ctx: Context.Type = null,
 };
@@ -315,28 +314,28 @@ pub const DhcpLeaseLost = struct {
 pub const DefaultRouteChanged = struct {
     source_id: u32,
     netif_id: u32,
-    gateway: Addr,
+    gateway: glib.net.netip.Addr,
     ctx: Context.Type = null,
 };
 
 pub const RouterDiscovered = struct {
     source_id: u32,
     netif_id: u32,
-    router: Addr,
+    router: glib.net.netip.Addr,
     ctx: Context.Type = null,
 };
 
 pub const RouterLost = struct {
     source_id: u32,
     netif_id: u32,
-    router: Addr,
+    router: glib.net.netip.Addr,
     ctx: Context.Type = null,
 };
 
 pub const DnsServersChanged = struct {
     source_id: u32,
     netif_id: u32,
-    dns_servers: []const Addr,
+    dns_servers: []const glib.net.netip.Addr,
     ctx: Context.Type = null,
 };
 
@@ -364,8 +363,8 @@ pub const PppAuthFailed = struct {
 pub const PppUp = struct {
     source_id: u32,
     netif_id: u32,
-    local_addr: Addr,
-    peer_addr: Addr,
+    local_addr: glib.net.netip.Addr,
+    peer_addr: glib.net.netip.Addr,
     ctx: Context.Type = null,
 };
 
@@ -557,7 +556,7 @@ pub fn makeEvent(update: Update) !event.Event {
     };
 }
 
-fn copyDnsCount(dns_servers: []const Addr) !u8 {
+fn copyDnsCount(dns_servers: []const glib.net.netip.Addr) !u8 {
     if (dns_servers.len > max_dns_server_count) return error.InvalidDnsServerCount;
     return @intCast(dns_servers.len);
 }
@@ -577,10 +576,10 @@ fn copyNetifNameBuf(name: ?[]const u8) ![max_netif_name_len]u8 {
     return buf;
 }
 
-fn copyDnsBuf(dns_servers: []const Addr) ![max_dns_server_count]Addr {
+fn copyDnsBuf(dns_servers: []const glib.net.netip.Addr) ![max_dns_server_count]glib.net.netip.Addr {
     if (dns_servers.len > max_dns_server_count) return error.InvalidDnsServerCount;
 
-    var buf = [_]Addr{.{}} ** max_dns_server_count;
+    var buf = [_]glib.net.netip.Addr{.{}} ** max_dns_server_count;
     @memcpy(buf[0..dns_servers.len], dns_servers);
     return buf;
 }
@@ -631,18 +630,18 @@ fn eventReceiverEmitUpdate(ctx: *const anyopaque, update: Update) void {
 pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn makeEventCopiesDhcpAndDnsFields(testing: anytype) !void {
-            const dns = [_]Addr{
-                Addr.from4(.{ 1, 1, 1, 1 }),
-                Addr.from4(.{ 8, 8, 8, 8 }),
+            const dns = [_]glib.net.netip.Addr{
+                glib.net.netip.Addr.from4(.{ 1, 1, 1, 1 }),
+                glib.net.netip.Addr.from4(.{ 8, 8, 8, 8 }),
             };
 
             const value = try makeEvent(.{
                 .dhcp_lease_acquired = .{
                     .source_id = 51,
                     .netif_id = 7,
-                    .addr = Addr.from4(.{ 192, 168, 10, 23 }),
-                    .gateway = Addr.from4(.{ 192, 168, 10, 1 }),
-                    .netmask = Addr.from4(.{ 255, 255, 255, 0 }),
+                    .addr = glib.net.netip.Addr.from4(.{ 192, 168, 10, 23 }),
+                    .gateway = glib.net.netip.Addr.from4(.{ 192, 168, 10, 1 }),
+                    .netmask = glib.net.netip.Addr.from4(.{ 255, 255, 255, 0 }),
                     .dns_servers = dns[0..],
                     .lease_time_s = 7200,
                 },
@@ -689,8 +688,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .ppp_up = .{
                     .source_id = 61,
                     .netif_id = 9,
-                    .local_addr = Addr.from4(.{ 10, 64, 0, 2 }),
-                    .peer_addr = Addr.from4(.{ 10, 64, 0, 1 }),
+                    .local_addr = glib.net.netip.Addr.from4(.{ 10, 64, 0, 2 }),
+                    .peer_addr = glib.net.netip.Addr.from4(.{ 10, 64, 0, 1 }),
                 },
             });
 
@@ -775,9 +774,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     const receiver_ctx = self.receiver_ctx orelse return error.MissingReceiver;
                     const emit_fn = self.emit_fn orelse return error.MissingReceiver;
 
-                    const dns = [_]Addr{
-                        Addr.from4(.{ 9, 9, 9, 9 }),
-                        Addr.from4(.{ 1, 0, 0, 1 }),
+                    const dns = [_]glib.net.netip.Addr{
+                        glib.net.netip.Addr.from4(.{ 9, 9, 9, 9 }),
+                        glib.net.netip.Addr.from4(.{ 1, 0, 0, 1 }),
                     };
 
                     emit_fn(receiver_ctx, .{

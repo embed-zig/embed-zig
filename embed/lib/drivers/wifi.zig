@@ -2,13 +2,11 @@
 
 const glib = @import("glib");
 
-const net = glib.net;
-
 const root = @This();
 
 pub const max_ssid_len: usize = 32;
 pub const MacAddr = [6]u8;
-pub const Addr = net.netip.Addr;
+pub const Addr = glib.net.netip.Addr;
 
 pub const Security = enum {
     unknown,

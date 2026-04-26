@@ -3,7 +3,6 @@ const EventReceiver = @import("../event.zig").EventReceiver;
 const Emitter = @import("Emitter.zig");
 const Message = @import("Message.zig");
 const Node = @import("Node.zig");
-const sync = glib.sync;
 
 pub fn Config(comptime lib: type) type {
     return struct {

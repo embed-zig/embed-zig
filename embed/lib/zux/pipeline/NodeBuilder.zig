@@ -1,5 +1,4 @@
 const glib = @import("glib");
-const builtin = glib.std.builtin;
 const BranchNode = @import("BranchNode.zig");
 const Emitter = @import("Emitter.zig");
 const Message = @import("Message.zig");
@@ -331,7 +330,7 @@ fn validatedNextCaseStartOrSwitchEnd(
 
 fn makeConfig(comptime builder: anytype) type {
     const total_field_count = builder.tag_len + @as(usize, if (builder.switch_count > 0) 1 else 0);
-    var fields: [total_field_count]builtin.Type.StructField = undefined;
+    var fields: [total_field_count]glib.std.builtin.Type.StructField = undefined;
 
     inline for (0..builder.tag_len) |i| {
         const tag = builder.tags[i];

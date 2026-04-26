@@ -1,5 +1,4 @@
 const glib = @import("glib");
-const builtin = glib.std.builtin;
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
 const modem_api = drivers;
@@ -2276,7 +2275,7 @@ fn makeRuntimeNodeBuilder(comptime context: anytype) @TypeOf(context.node_builde
 
 fn makePeriphInstancesType(comptime build_config_value: anytype, comptime registry: anytype) type {
     const count = registryPeriphLen(registry);
-    var fields: [count]builtin.Type.StructField = undefined;
+    var fields: [count]glib.std.builtin.Type.StructField = undefined;
 
     inline for (0..count) |i| {
         const periph = registry.periphs[i];
@@ -2310,7 +2309,7 @@ fn makeInitConfigType(
     comptime UserRootConfig: type,
 ) type {
     const total_fields = 1 + totalPeriphLen(registries) + @as(usize, if (has_user_root_config) 1 else 0);
-    var fields: [total_fields]builtin.Type.StructField = undefined;
+    var fields: [total_fields]glib.std.builtin.Type.StructField = undefined;
     comptime var field_index: usize = 0;
 
     fields[field_index] = .{
@@ -2360,7 +2359,7 @@ fn makeInitConfigType(
     });
 }
 
-fn configStructInfo(comptime config: anytype) builtin.Type.Struct {
+fn configStructInfo(comptime config: anytype) glib.std.builtin.Type.Struct {
     const ConfigType = @TypeOf(config);
     return switch (@typeInfo(ConfigType)) {
         .@"struct" => |info| info,
@@ -2405,7 +2404,7 @@ fn registryPeriphLen(comptime registry: anytype) usize {
 fn makeLabelEnum(comptime registries: anytype) type {
     const info = configStructInfo(registries);
     const total_len = totalPeriphLen(registries);
-    var fields: [total_len]builtin.Type.EnumField = undefined;
+    var fields: [total_len]glib.std.builtin.Type.EnumField = undefined;
     comptime var field_index: usize = 0;
 
     inline for (info.fields) |field| {
@@ -2440,7 +2439,7 @@ fn makeLabelEnum(comptime registries: anytype) type {
 
 fn makeSingleRegistryLabelEnum(comptime registry: anytype) type {
     const total_len = registryPeriphLen(registry);
-    var fields: [total_len]builtin.Type.EnumField = undefined;
+    var fields: [total_len]glib.std.builtin.Type.EnumField = undefined;
 
     inline for (0..total_len) |i| {
         const record = registry.periphs[i];
