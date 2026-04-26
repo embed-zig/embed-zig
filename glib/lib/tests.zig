@@ -9,3 +9,7 @@ pub const testing = struct {
 pub const context = struct {
     pub const unit = @import("tests/context.zig");
 };
+
+pub const time = struct {
+    pub const unit = @import("time").test_runner.unit;
+};

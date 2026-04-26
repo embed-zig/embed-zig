@@ -7,6 +7,8 @@
 const stdz_mod = @import("stdz");
 const context_mod = @import("context");
 const testing_mod = @import("testing");
+const time_mod = @import("time");
+const tests_mod = @import("lib/tests.zig");
 
 pub const std = struct {
     pub const ascii = stdz_mod.ascii;
@@ -84,7 +86,7 @@ pub const std = struct {
         return stdz_mod.make(Impl);
     }
 
-    pub const test_runner = @import("tests").std;
+    pub const test_runner = tests_mod.std;
 };
 pub const testing = struct {
     pub const T = testing_mod.T;
@@ -93,7 +95,7 @@ pub const testing = struct {
     pub const LimitAllocator = testing_mod.LimitAllocator;
     pub const TestRunner = testing_mod.TestRunner;
 
-    pub const test_runner = @import("tests").testing;
+    pub const test_runner = tests_mod.testing;
 };
 pub const context = struct {
     pub const Context = context_mod.Context;
@@ -102,7 +104,17 @@ pub const context = struct {
         return context_mod.make(lib);
     }
 
-    pub const test_runner = @import("tests").context;
+    pub const test_runner = tests_mod.context;
+};
+pub const time = struct {
+    pub const duration = time_mod.duration;
+    pub const instant = time_mod.instant;
+
+    pub fn make(comptime Impl: type) type {
+        return time_mod.make(Impl);
+    }
+
+    pub const test_runner = tests_mod.time;
 };
 pub const sync = @import("sync");
 pub const io = @import("io");
@@ -113,12 +125,14 @@ pub const runtime = struct {
     const TypeMarker = struct {};
     pub const Options = struct {
         stdz_impl: type,
+        time_impl: type,
         channel_factory: @import("sync").channel.FactoryType,
         net_impl: type,
     };
 
     pub fn make(comptime options: Options) type {
         const std_ns = @import("stdz").make(options.stdz_impl);
+        const time_ns = @import("time").make(options.time_impl);
         const channel_factory = options.channel_factory;
         const net_impl = options.net_impl;
 
@@ -126,6 +140,7 @@ pub const runtime = struct {
             const runtime_marker: TypeMarker = .{};
             pub const runtime = runtime_ns;
             pub const std = std_ns;
+            pub const time = time_ns;
             pub const context = @import("context").make(std_ns);
             pub const sync = struct {
                 pub const ChannelFactory = channel_factory;

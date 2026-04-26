@@ -6,14 +6,12 @@ pub fn create(
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Module {
     return b.createModule(.{
-        .root_source_file = b.path("lib/tests.zig"),
+        .root_source_file = b.path("lib/time.zig"),
         .target = target,
         .optimize = optimize,
     });
 }
 
 pub fn link(mod: *std.Build.Module, deps: anytype) void {
-    mod.addImport("stdz", deps.stdz);
     mod.addImport("testing", deps.testing);
-    mod.addImport("context", deps.context);
 }

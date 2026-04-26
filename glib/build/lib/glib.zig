@@ -16,9 +16,9 @@ pub fn link(mod: *std.Build.Module, deps: anytype) void {
     mod.addImport("stdz", deps.stdz);
     mod.addImport("testing", deps.testing);
     mod.addImport("context", deps.context);
+    mod.addImport("time", deps.time);
     mod.addImport("sync", deps.sync);
     mod.addImport("io", deps.io);
     mod.addImport("mime", deps.mime);
     mod.addImport("net", deps.net);
-    mod.addImport("tests", deps.tests);
 }

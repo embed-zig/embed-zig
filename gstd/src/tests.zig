@@ -50,6 +50,37 @@ test "mime/unit/gstd" {
     if (!t.wait()) return error.TestFailed;
 }
 
+test "time/unit/std" {
+    const std = @import("std");
+
+    std.testing.log_level = .info;
+
+    var t = glib.testing.T.new(std, .time);
+    defer t.deinit();
+
+    t.run("time/unit/std", glib.time.test_runner.unit.make(std));
+    if (!t.wait()) return error.TestFailed;
+}
+
+test "time/unit/gstd" {
+    const std = @import("std");
+
+    std.testing.log_level = .info;
+
+    var t = glib.testing.T.new(gstd.runtime.std, .time);
+    defer t.deinit();
+
+    t.run("time/unit/gstd", glib.time.test_runner.unit.make(gstd.runtime.std));
+    if (!t.wait()) return error.TestFailed;
+}
+
+test "runtime/time/gstd" {
+    const std = @import("std");
+
+    const now = gstd.runtime.time.instant.now();
+    try std.testing.expect(gstd.runtime.time.instant.since(now, now) == 0);
+}
+
 test "sync/unit/std" {
     const std = @import("std");
 
