@@ -1,5 +1,5 @@
 const glib = @import("glib");
-const glib_stdrt = @import("../glib_stdrt.zig");
+const gstd = @import("../gstd.zig");
 const net_backend = @import("net.zig");
 
 test "testing/unit/std" {
@@ -14,15 +14,15 @@ test "testing/unit/std" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "testing/unit/stdrt" {
+test "testing/unit/gstd" {
     const std = @import("std");
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.runtime.std, .testing);
+    var t = glib.testing.T.new(gstd.runtime.std, .testing);
     defer t.deinit();
 
-    t.run("testing/unit/stdrt", glib.testing.test_runner.unit.make(glib_stdrt.runtime.std));
+    t.run("testing/unit/gstd", glib.testing.test_runner.unit.make(gstd.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -38,15 +38,15 @@ test "mime/unit/std" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "mime/unit/stdrt" {
+test "mime/unit/gstd" {
     const std = @import("std");
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.runtime.std, .mime);
+    var t = glib.testing.T.new(gstd.runtime.std, .mime);
     defer t.deinit();
 
-    t.run("mime/unit/stdrt", glib.mime.test_runner.unit.make(glib_stdrt.runtime.std));
+    t.run("mime/unit/gstd", glib.mime.test_runner.unit.make(gstd.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -62,15 +62,15 @@ test "sync/unit/std" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "sync/unit/stdrt" {
+test "sync/unit/gstd" {
     const std = @import("std");
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.runtime.std, .sync);
+    var t = glib.testing.T.new(gstd.runtime.std, .sync);
     defer t.deinit();
 
-    t.run("sync/unit/stdrt", glib.sync.test_runner.unit.make(glib_stdrt.runtime.std));
+    t.run("sync/unit/gstd", glib.sync.test_runner.unit.make(gstd.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -83,20 +83,20 @@ test "sync/integration/std" {
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
-    t.run("sync/integration/std", glib.sync.test_runner.integration.make(std, glib_stdrt.runtime.sync.Channel));
+    t.run("sync/integration/std", glib.sync.test_runner.integration.make(std, gstd.runtime.sync.Channel));
     if (!t.wait()) return error.TestFailed;
 }
 
-test "sync/integration/stdrt" {
+test "sync/integration/gstd" {
     const std = @import("std");
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.runtime.std, .sync);
+    var t = glib.testing.T.new(gstd.runtime.std, .sync);
     defer t.deinit();
-    t.timeout(20 * glib_stdrt.runtime.std.time.ns_per_s);
+    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
 
-    t.run("sync/integration/stdrt", glib.sync.test_runner.integration.make(glib_stdrt.runtime.std, glib_stdrt.runtime.sync.Channel));
+    t.run("sync/integration/gstd", glib.sync.test_runner.integration.make(gstd.runtime.std, gstd.runtime.sync.Channel));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -112,15 +112,15 @@ test "io/unit/std" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "io/unit/stdrt" {
+test "io/unit/gstd" {
     const std = @import("std");
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.runtime.std, .io);
+    var t = glib.testing.T.new(gstd.runtime.std, .io);
     defer t.deinit();
 
-    t.run("io/unit/stdrt", glib.io.test_runner.unit.make(glib_stdrt.runtime.std));
+    t.run("io/unit/gstd", glib.io.test_runner.unit.make(gstd.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -130,25 +130,25 @@ test "net/unit/std" {
     std.testing.log_level = .info;
 
     const posix_net = glib.net.make(std, net_backend.posix_impl);
-    const std_stdrt_net = glib.net.make(std, glib_stdrt.runtime.net.Runtime);
+    const std_net = glib.net.make(std, gstd.runtime.net.Runtime);
 
     var t = glib.testing.T.new(std, .net);
     defer t.deinit();
 
     t.run("net/unit/std_posix", glib.net.test_runner.unit.make(std, posix_net));
-    t.run("net/unit/std_stdrt", glib.net.test_runner.unit.make(std, std_stdrt_net));
+    t.run("net/unit/std", glib.net.test_runner.unit.make(std, std_net));
     if (!t.wait()) return error.TestFailed;
 }
 
-test "net/unit/stdrt" {
+test "net/unit/gstd" {
     const std = @import("std");
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.runtime.std, .net);
+    var t = glib.testing.T.new(gstd.runtime.std, .net);
     defer t.deinit();
 
-    t.run("net/unit/stdrt", glib.net.test_runner.unit.make(glib_stdrt.runtime.std, glib_stdrt.runtime.net));
+    t.run("net/unit/gstd", glib.net.test_runner.unit.make(gstd.runtime.std, gstd.runtime.net));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -158,27 +158,27 @@ test "net/integration/std" {
     std.testing.log_level = .info;
 
     const posix_net = glib.net.make(std, net_backend.posix_impl);
-    const std_stdrt_net = glib.net.make(std, glib_stdrt.runtime.net.Runtime);
+    const std_net = glib.net.make(std, gstd.runtime.net.Runtime);
 
     var t = glib.testing.T.new(std, .net);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
     t.run("net/integration/std_posix", glib.net.test_runner.integration.make(std, posix_net));
-    t.run("net/integration/std_stdrt", glib.net.test_runner.integration.make(std, std_stdrt_net));
+    t.run("net/integration/std", glib.net.test_runner.integration.make(std, std_net));
     if (!t.wait()) return error.TestFailed;
 }
 
-test "net/integration/stdrt" {
+test "net/integration/gstd" {
     const std = @import("std");
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.runtime.std, .net);
+    var t = glib.testing.T.new(gstd.runtime.std, .net);
     defer t.deinit();
-    t.timeout(20 * glib_stdrt.runtime.std.time.ns_per_s);
+    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
 
-    t.run("net/integration/stdrt", glib.net.test_runner.integration.make(glib_stdrt.runtime.std, glib_stdrt.runtime.net));
+    t.run("net/integration/gstd", glib.net.test_runner.integration.make(gstd.runtime.std, gstd.runtime.net));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -195,16 +195,16 @@ test "stdz/unit/std" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "stdz/unit/stdrt" {
+test "stdz/unit/gstd" {
     const std = @import("std");
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.runtime.std, .stdz);
+    var t = glib.testing.T.new(gstd.runtime.std, .stdz);
     defer t.deinit();
-    t.timeout(20 * glib_stdrt.runtime.std.time.ns_per_s);
+    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
 
-    t.run("stdz/unit/stdrt", glib.std.test_runner.unit.make(glib_stdrt.runtime.std));
+    t.run("stdz/unit/gstd", glib.std.test_runner.unit.make(gstd.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -221,15 +221,15 @@ test "context/unit/std" {
     if (!t.wait()) return error.TestFailed;
 }
 
-test "context/unit/stdrt" {
+test "context/unit/gstd" {
     const std = @import("std");
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(glib_stdrt.runtime.std, .context);
+    var t = glib.testing.T.new(gstd.runtime.std, .context);
     defer t.deinit();
-    t.timeout(20 * glib_stdrt.runtime.std.time.ns_per_s);
+    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
 
-    t.run("context/unit/stdrt", glib.context.test_runner.unit.make(glib_stdrt.runtime.std));
+    t.run("context/unit/gstd", glib.context.test_runner.unit.make(gstd.runtime.std));
     if (!t.wait()) return error.TestFailed;
 }

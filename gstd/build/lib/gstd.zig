@@ -6,7 +6,7 @@ pub fn create(
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Module {
     return b.createModule(.{
-        .root_source_file = b.path("glib_stdrt.zig"),
+        .root_source_file = b.path("gstd.zig"),
         .target = target,
         .optimize = optimize,
     });

@@ -153,8 +153,8 @@ under `lib/net/test_runner/integration/`, all wired from `lib/tests.zig`.
 ## Test layout
 
 - `lib/net.zig` exports only `net.test_runner.unit` and `net.test_runner.integration`.
-- `glib_stdrt/src/tests.zig` wires the std-backed `net/unit/std_posix` and `net/integration/std_posix` suites through `net.test_runner.*.make(std, glib_stdrt.posix_net)`.
-- `glib_stdrt/src/tests.zig` wires the `net/unit/stdrt` and `net/integration/stdrt` suites through `net.test_runner.*.make(glib_stdrt.std, glib_stdrt.net)` so the full higher-level stack exercises the std-backed runtime.
+- `gstd/src/tests.zig` wires the std-backed `net/unit/std_posix` and `net/integration/std_posix` suites through `glib.net.make(std, net_backend.posix_impl)`.
+- `gstd/src/tests.zig` wires the `net/unit/std`, `net/integration/std`, `net/unit/gstd`, and `net/integration/gstd` suites so the full higher-level stack exercises both plain `std` and the std-backed `gstd.runtime`.
 - `lib/net/test_runner/unit.zig` aggregates source-file `TestRunner`s and topic namespaces such as `netip`, `http`, `textproto`, `cmux`, `resolver`, `tls`, and `core`.
 - `lib/net/test_runner/integration.zig` fans out into deterministic local runners such as `tcp`, `udp`, `resolver_local`, `cmux`, `http_server`, `http_transport`, and `https_transport`.
 - `lib/net/test_runner/integration/runtime.zig` is the focused `net.make2(...).Runtime` integration slice shared by `net/integration/runtime_posix/*` and `net/integration2/*`.

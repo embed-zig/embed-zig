@@ -5,7 +5,7 @@ pub fn create(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     glib_dep: *std.Build.Dependency,
-    glib_stdrt_mod: *std.Build.Module,
+    gstd_mod: *std.Build.Module,
 ) void {
     const test_mod = b.createModule(.{
         .root_source_file = b.path("test.zig"),
@@ -13,13 +13,13 @@ pub fn create(
         .optimize = optimize,
     });
     test_mod.addImport("glib", glib_dep.module("glib"));
-    _ = glib_stdrt_mod;
+    _ = gstd_mod;
 
     const compile_test = b.addTest(.{
         .root_module = test_mod,
     });
     const run_test = b.addRunArtifact(compile_test);
 
-    const test_step = b.step("test", "Run glib_stdrt tests");
+    const test_step = b.step("test", "Run gstd tests");
     test_step.dependOn(&run_test.step);
 }

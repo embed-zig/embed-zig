@@ -99,12 +99,12 @@ pub fn create(
         .target = target,
         .optimize = optimize,
     });
-    const glib_stdrt_dep = b.dependency("glib_stdrt", .{
+    const gstd_dep = b.dependency("gstd", .{
         .target = target,
         .optimize = optimize,
     });
     test_mod.addImport("glib", glib_dep.module("glib"));
-    test_mod.addImport("glib_stdrt", glib_stdrt_dep.module("glib_stdrt"));
+    test_mod.addImport("gstd", gstd_dep.module("gstd"));
 
     inline for (@typeInfo(Libraries).@"struct".decls) |decl| {
         const mod = b.modules.get(decl.name) orelse @panic("test dependency missing");

@@ -11,11 +11,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    const glib_stdrt_dep = b.dependency("glib_stdrt", .{
+    const gstd_dep = b.dependency("gstd", .{
         .target = target,
         .optimize = optimize,
     });
     b.modules.put("glib", glib_dep.module("glib")) catch @panic("OOM");
-    b.modules.put("glib_stdrt", glib_stdrt_dep.module("glib_stdrt")) catch @panic("OOM");
+    b.modules.put("gstd", gstd_dep.module("gstd")) catch @panic("OOM");
     b.modules.put("embed", embed_dep.module("embed")) catch @panic("OOM");
 }

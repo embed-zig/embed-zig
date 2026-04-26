@@ -6,7 +6,7 @@ Before starting any development work, read the repository-wide conduct rules in 
 
 - The repository root is now a thin package-export layer.
 - The top-level `build.zig` should only wire public exports and package dependencies.
-- The top level exports exactly three public modules: `glib`, `glib_stdrt`, and `embed`.
+- The top level exports exactly three public modules: `glib`, `gstd`, and `embed`.
 - The `embed` module is a namespace composed from the implementation modules under `embed/lib/`.
 - Do not reintroduce additional top-level public modules such as `bt`, `drivers`, or `embed_std`.
 - Do not reintroduce top-level implementation trees under `lib/` that mirror `embed/lib/`.
@@ -23,7 +23,7 @@ Before starting any development work, read the repository-wide conduct rules in 
 - Read `[glib/lib/net/http/README.md](glib/lib/net/http/README.md)` before editing `glib/lib/net/http`, the HTTP transport surface, or future HTTP client/server planning docs.
 - Read `[glib/lib/mime/README.md](glib/lib/mime/README.md)` before editing MIME parsing / formatting or HTTP-related content-type handling.
 - Read `[embed/lib/bt/README.md](embed/lib/bt/README.md)` before editing the Bluetooth host stack, client/server, mocker, xfer, or bt tests.
-- Read `[glib_stdrt/README.md](glib_stdrt/README.md)` before editing the std-backed compatibility layer.
+- Read `[gstd/README.md](gstd/README.md)` before editing the std-backed compatibility layer.
 - Read `[embed/lib/zux/README.md](embed/lib/zux/README.md)` before editing the `zux` module.
 - Read `[embed/lib/drivers/README.md](embed/lib/drivers/README.md)` before editing generic drivers or device-specific driver modules.
 

@@ -60,6 +60,7 @@ lib/sync/
 - integration or compatibility entrypoints call those runners from the shared
   test trees
 
-For a std-backed host implementation, use `@import("glib_stdrt").sync.Channel`,
-`@import("glib").sync.Pool.make(std, T)`, `@import("glib_stdrt").sync.Racer(...)`,
-and `@import("glib").sync.Timer.make(std)`.
+For a std-backed host implementation, use
+`@import("gstd").runtime.sync.Channel` with the `glib.sync` test runners and
+helpers. `gstd` exposes the pre-instantiated runtime namespace instead of
+re-exporting `sync` directly.

@@ -1,5 +1,5 @@
 const std = @import("std");
-const lib_glib_stdrt = @import("build/lib/glib_stdrt.zig");
+const lib_gstd = @import("build/lib/gstd.zig");
 const build_tests = @import("build/tests.zig");
 
 pub fn build(b: *std.Build) void {
@@ -11,11 +11,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const glib_stdrt_mod = lib_glib_stdrt.create(b, target, optimize);
-    lib_glib_stdrt.link(glib_stdrt_mod, .{
+    const gstd_mod = lib_gstd.create(b, target, optimize);
+    lib_gstd.link(gstd_mod, .{
         .glib = glib_dep.module("glib"),
     });
-    b.modules.put("glib_stdrt", glib_stdrt_mod) catch @panic("OOM");
+    b.modules.put("gstd", gstd_mod) catch @panic("OOM");
 
-    build_tests.create(b, target, optimize, glib_dep, glib_stdrt_mod);
+    build_tests.create(b, target, optimize, glib_dep, gstd_mod);
 }

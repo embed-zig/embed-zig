@@ -9,16 +9,12 @@
         .glib = .{
             .path = "glib",
         },
-        .glib_stdrt = .{
-            .path = "glib_stdrt",
+        .gstd = .{
+            .path = "gstd",
         },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
-        "glib/",
-        "glib_stdrt/",
-        "embed/",
-        "pkg/",
     },
 }

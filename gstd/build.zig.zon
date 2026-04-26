@@ -1,7 +1,7 @@
 .{
-    .name = .glib_stdrt,
+    .name = .gstd,
     .version = "0.0.1",
-    .fingerprint = 0x1b2339c858881d95,
+    .fingerprint = 0xd08edf1c35345bbc,
     .dependencies = .{
         .glib = .{
             .path = "../glib",
@@ -9,7 +9,7 @@
     },
     .paths = .{
         "README.md",
-        "glib_stdrt.zig",
+        "gstd.zig",
         "build.zig",
         "build.zig.zon",
         "build/",
