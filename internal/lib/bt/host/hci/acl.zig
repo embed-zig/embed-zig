@@ -6,8 +6,7 @@
 //! Packet format: [indicator(1)][handle+flags(2)][data_len(2)][data...]
 //! Indicator byte 0x02 = ACL Data.
 
-const std = @import("std");
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 pub const INDICATOR: u8 = 0x02;
 pub const HEADER_LEN: usize = 5; // indicator(1) + handle+flags(2) + data_len(2)
@@ -40,8 +39,8 @@ pub const Header = struct {
 /// Expects at least 4 bytes.
 pub fn parseHeader(raw: []const u8) ?Header {
     if (raw.len < 4) return null;
-    const w0 = std.mem.readInt(u16, raw[0..2], .little);
-    const w1 = std.mem.readInt(u16, raw[2..4], .little);
+    const w0 = glib.std.mem.readInt(u16, raw[0..2], .little);
+    const w1 = glib.std.mem.readInt(u16, raw[2..4], .little);
     return .{
         .conn_handle = w0 & 0x0FFF,
         .pb_flag = @enumFromInt(@as(u2, @truncate(w0 >> 12))),
@@ -60,15 +59,15 @@ pub fn parsePacketHeader(raw: []const u8) ?Header {
 /// Encode an ACL data packet into buf. Returns the encoded slice.
 pub fn encode(buf: []u8, conn_handle: u16, pb_flag: PbFlag, payload: []const u8) []const u8 {
     const total = HEADER_LEN + payload.len;
-    std.debug.assert(buf.len >= total);
-    std.debug.assert(payload.len <= 0xFFFF);
+    glib.std.debug.assert(buf.len >= total);
+    glib.std.debug.assert(payload.len <= 0xFFFF);
 
     buf[0] = INDICATOR;
     const flags: u16 = (conn_handle & 0x0FFF) |
         (@as(u16, @intFromEnum(pb_flag)) << 12) |
         (@as(u16, @intFromEnum(BcFlag.point_to_point)) << 14);
-    std.mem.writeInt(u16, buf[1..3], flags, .little);
-    std.mem.writeInt(u16, buf[3..5], @truncate(payload.len), .little);
+    glib.std.mem.writeInt(u16, buf[1..3], flags, .little);
+    glib.std.mem.writeInt(u16, buf[3..5], @truncate(payload.len), .little);
     if (payload.len > 0) {
         @memcpy(buf[HEADER_LEN..][0..payload.len], payload);
     }
@@ -83,7 +82,7 @@ pub fn getPayload(raw: []const u8) ?[]const u8 {
     return raw[HEADER_LEN..end];
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             var buf: [MAX_PACKET_LEN]u8 = undefined;
@@ -127,7 +126,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -146,6 +145,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

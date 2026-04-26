@@ -1,4 +1,4 @@
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 const Assembler = @import("../../Assembler.zig");
 const Store = @import("../../Store.zig");
@@ -19,22 +19,21 @@ const PairingFlow = blk: {
     break :blk builder.build();
 };
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
             const testing = lib.testing;
 
             const TestCase = struct {
                 fn make_uses_store_and_node_builder_config() !void {
-                    const embed_std = @import("embed_std");
-                    const AssemblerType = Assembler.make(embed_std.std, .{
+                    const AssemblerType = Assembler.make(lib, .{
                         .store = .{
                             .max_stores = 8,
                             .max_state_nodes = 32,
@@ -59,7 +58,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     }, Channel);
 
                     const assembler = comptime AssemblerType.init();
-                    try testing.expect(AssemblerType.Lib == embed_std.std);
+                    try testing.expect(AssemblerType.Lib == lib);
                     try testing.expectEqual(@as(usize, 8), assembler.store_builder.store_bindings.len);
                     try testing.expectEqual(@as(usize, 32), assembler.store_builder.state_bindings.len);
                     try testing.expectEqual(@as(usize, 24), assembler.node_builder.ops.len);
@@ -94,8 +93,6 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 }
 
                 fn reexports_store_and_node_builder_methods() !void {
-                    const embed_std = @import("embed_std");
-
                     const WifiStore = struct { enabled: bool = false };
                     const ReducerFactory = struct {
                         fn factory(
@@ -115,7 +112,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     }.factory;
 
                     const assembler = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{}, Channel);
+                        const AssemblerType = Assembler.make(lib, .{}, Channel);
                         var next = AssemblerType.init();
                         next.setStore(.wifi, WifiStore);
                         next.setState("ui/home", .{.wifi});
@@ -134,18 +131,17 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expectEqual(@as(usize, 1), assembler.node_builder.switch_count);
                     try testing.expectEqual(@as(usize, 5), assembler.node_builder.len);
                     try testing.expectEqual(@as(usize, 1), assembler.reducer_count);
-                    try testing.expect(embed_std.std.mem.eql(u8, "wifi_reducer", assembler.reducer_bindings[0].name));
+                    try testing.expect(lib.mem.eql(u8, "wifi_reducer", assembler.reducer_bindings[0].name));
                     try testing.expectEqual(@as(usize, 0), assembler.adc_button_registry.len);
                     try testing.expectEqual(@as(usize, 0), assembler.gpio_button_registry.len);
                     try testing.expectEqual(@as(usize, 0), assembler.ledstrip_registry.len);
                 }
 
                 fn build_auto_wires_configured_reducers() !void {
-                    const embed_std = @import("embed_std");
                     const CounterState = struct {
                         ticks: usize = 0,
                     };
-                    const CounterStore = Store.Object.make(embed_std.std, CounterState, .counter);
+                    const CounterStore = Store.Object.make(lib, CounterState, .counter);
                     const CounterReducerFactory = struct {
                         fn factory(
                             comptime StoresType: type,
@@ -172,7 +168,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     }.factory;
 
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{
+                        const AssemblerType = Assembler.make(lib, .{
                             .max_reducers = 2,
                         }, Channel);
                         var next = AssemblerType.init();
@@ -204,12 +200,11 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 }
 
                 fn manual_start_disables_auto_ticks_and_dispatch_processes_messages() !void {
-                    const embed_std = @import("embed_std");
                     const CounterState = struct {
                         ticks: usize = 0,
                         pressed: bool = false,
                     };
-                    const CounterStore = Store.Object.make(embed_std.std, CounterState, .counter);
+                    const CounterStore = Store.Object.make(lib, CounterState, .counter);
                     const CounterReducerFactory = struct {
                         fn factory(
                             comptime StoresType: type,
@@ -244,7 +239,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     }.factory;
 
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{
+                        const AssemblerType = Assembler.make(lib, .{
                             .max_reducers = 1,
                         }, Channel);
                         var next = AssemblerType.init();
@@ -261,7 +256,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     defer app.deinit();
 
                     try app.start(.{ .ticker = .manual });
-                    embed_std.std.Thread.sleep(3 * embed_std.std.time.ns_per_ms);
+                    lib.Thread.sleep(3 * lib.time.ns_per_ms);
                     try testing.expectEqual(@as(usize, 0), app.store.stores.counter.get().ticks);
 
                     try app.dispatch(.{
@@ -318,10 +313,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 }
 
                 fn add_grouped_button_records_registry_entry() !void {
-                    const embed_std = @import("embed_std");
-
                     const assembler = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{
+                        const AssemblerType = Assembler.make(lib, .{
                             .max_adc_buttons = 2,
                         }, Channel);
                         var next = AssemblerType.init();
@@ -335,10 +328,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 }
 
                 fn build_config_exposes_added_labels() !void {
-                    const embed_std = @import("embed_std");
-
                     const BuildConfig = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{
+                        const AssemblerType = Assembler.make(lib, .{
                             .max_adc_buttons = 2,
                             .max_imu = 1,
                             .max_led_strips = 1,
@@ -368,10 +359,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 }
 
                 fn add_led_strip_records_registry_entry() !void {
-                    const embed_std = @import("embed_std");
-
                     const assembler = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{
+                        const AssemblerType = Assembler.make(lib, .{
                             .max_led_strips = 2,
                         }, Channel);
                         var next = AssemblerType.init();
@@ -385,10 +374,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 }
 
                 fn add_component_registries_record_entries() !void {
-                    const embed_std = @import("embed_std");
-
                     const assembler = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{
+                        const AssemblerType = Assembler.make(lib, .{
                             .max_imu = 1,
                             .max_modem = 1,
                             .max_nfc = 1,
@@ -417,10 +404,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 }
 
                 fn add_ui_registries_record_entries() !void {
-                    const embed_std = @import("embed_std");
-
                     const assembler = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{
+                        const AssemblerType = Assembler.make(lib, .{
                             .max_flows = 1,
                             .max_overlays = 1,
                             .max_routers = 1,
@@ -456,9 +441,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 }
 
                 fn component_duplicate_detector_rejects_reused_labels_and_ids() !void {
-                    const embed_std = @import("embed_std");
                     const assembler = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{
+                        const AssemblerType = Assembler.make(lib, .{
                             .max_gpio_buttons = 1,
                             .max_flows = 1,
                             .max_overlays = 1,
@@ -510,10 +494,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 }
 
                 fn build_without_optional_ui_still_returns_valid_app() !void {
-                    const embed_std = @import("embed_std");
-
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{}, Channel);
+                        const AssemblerType = Assembler.make(lib, .{}, Channel);
                         var next = AssemblerType.init();
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{};
@@ -534,10 +516,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 }
 
                 fn ui_source_ids_follow_configured_ids() !void {
-                    const embed_std = @import("embed_std");
-
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{
+                        const AssemblerType = Assembler.make(lib, .{
                             .max_flows = 2,
                             .max_overlays = 2,
                             .max_routers = 2,
@@ -664,9 +644,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 }
 
                 fn built_app_exposes_registry_metadata() !void {
-                    const embed_std = @import("embed_std");
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{
+                        const AssemblerType = Assembler.make(lib, .{
                             .max_adc_buttons = 1,
                             .max_flows = 1,
                             .max_overlays = 1,
@@ -711,15 +690,14 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
 
                 fn build_returns_app_methods() !void {
                     const drivers = @import("drivers");
-                    const embed_std = @import("embed_std");
                     const ledstrip_mod = @import("ledstrip");
 
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{
+                        const AssemblerType = Assembler.make(lib, .{
                             .max_adc_buttons = 2,
                             .max_led_strips = 1,
                             .pipeline = .{
-                                .tick_interval_ns = 7 * embed_std.std.time.ns_per_ms,
+                                .tick_interval_ns = 7 * lib.time.ns_per_ms,
                                 .spawn_config = .{
                                     .stack_size = 64 * 1024,
                                 },
@@ -769,7 +747,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     try testing.expectEqual(@as(usize, 4), Built.pixel_count);
                     try testing.expectEqual(@as(usize, 4), Built.LedStrip(.strip).pixel_count);
                     try testing.expectEqual(@as(usize, 4), Built.LedStrip(.strip).FrameType.pixel_count);
-                    try testing.expectEqual(@as(u64, 7 * embed_std.std.time.ns_per_ms), Built.ImplType.pipeline_config.tick_interval_ns);
+                    try testing.expectEqual(@as(u64, 7 * lib.time.ns_per_ms), Built.ImplType.pipeline_config.tick_interval_ns);
                     if (@hasField(@TypeOf(Built.ImplType.pipeline_config.spawn_config), "stack_size")) {
                         try testing.expectEqual(
                             @as(usize, 64 * 1024),
@@ -948,8 +926,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                 }
 
                 fn render_subscriber_runs_on_store_commit() !void {
-                    const embed_std = @import("embed_std");
-                    const CounterStore = Store.Object.make(embed_std.std, struct {
+                    const CounterStore = Store.Object.make(lib, struct {
                         value: u32 = 0,
                     }, .counter);
                     const RenderNamespace = struct {
@@ -970,7 +947,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
                     const RenderFactory = RenderNamespace.factory;
 
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(embed_std.std, .{
+                        const AssemblerType = Assembler.make(lib, .{
                             .max_handles = 1,
                             .store = .{
                                 .max_stores = 1,
@@ -1080,5 +1057,5 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

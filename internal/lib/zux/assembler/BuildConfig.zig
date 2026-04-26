@@ -1,5 +1,5 @@
-const stdz = @import("stdz");
-const builtin = stdz.builtin;
+const glib = @import("glib");
+const builtin = glib.std.builtin;
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
 const modem_api = @import("drivers");

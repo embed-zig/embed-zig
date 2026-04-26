@@ -1,4 +1,4 @@
-const stdz = @import("stdz");
+const glib = @import("glib");
 const JsonParser = @import("JsonParser.zig");
 const StatePath = @This();
 
@@ -17,11 +17,11 @@ pub fn parseSlice(comptime source: []const u8) StatePath {
 }
 
 pub fn parseAllocSlice(
-    allocator: stdz.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     source: []const u8,
 ) !StatePath {
-    var parsed_value = try stdz.json.parseFromSlice(
-        stdz.json.Value,
+    var parsed_value = try glib.std.json.parseFromSlice(
+        glib.std.json.Value,
         allocator,
         source,
         .{},
@@ -31,7 +31,7 @@ pub fn parseAllocSlice(
     return try parseJsonValue(allocator, parsed_value.value);
 }
 
-pub fn deinit(self: *StatePath, allocator: stdz.mem.Allocator) void {
+pub fn deinit(self: *StatePath, allocator: glib.std.mem.Allocator) void {
     allocator.free(self.path);
     for (self.labels) |label| {
         allocator.free(label);
@@ -109,8 +109,8 @@ fn parseLabelSlices(comptime source: []const u8) []const []const u8 {
 }
 
 pub fn parseJsonValue(
-    allocator: stdz.mem.Allocator,
-    value: stdz.json.Value,
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
 ) !StatePath {
     if (@inComptime()) {
         const object = switch (value) {
@@ -148,8 +148,8 @@ pub fn parseJsonValue(
 
     var iterator = object.iterator();
     while (iterator.next()) |entry| {
-        if (!stdz.mem.eql(u8, entry.key_ptr.*, "path") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "labels"))
+        if (!glib.std.mem.eql(u8, entry.key_ptr.*, "path") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "labels"))
         {
             return error.UnknownStatePathField;
         }
@@ -214,8 +214,8 @@ fn validatePathComptime(comptime path: []const u8) void {
 }
 
 fn parseLabelsValue(
-    allocator: stdz.mem.Allocator,
-    value: stdz.json.Value,
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
 ) ![]const []const u8 {
     const array = switch (value) {
         .array => |array| array,
@@ -238,7 +238,7 @@ fn parseLabelsValue(
     return labels;
 }
 
-fn parseLabelsValueComptime(comptime value: stdz.json.Value) []const []const u8 {
+fn parseLabelsValueComptime(comptime value: glib.std.json.Value) []const []const u8 {
     const array = switch (value) {
         .array => |array| array,
         else => @compileError("zux.spec.StatePath.parseJsonValue `labels` must be a JSON array"),

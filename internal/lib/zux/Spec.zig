@@ -1,8 +1,7 @@
-const stdz = @import("stdz");
+const glib = @import("glib");
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
-const testing_api = @import("testing");
-const sync = @import("sync");
+const sync = glib.sync;
 
 const Assembler = @import("Assembler.zig");
 const Store = @import("Store.zig");
@@ -280,7 +279,7 @@ pub fn make(comptime spec_doc: anytype) type {
             comptime lib: type,
             comptime config: AssemblerConfig,
             comptime Channel: fn (type) type,
-        ) testing_api.TestRunner {
+        ) glib.testing.TestRunner {
             const BuiltApp = comptime blk: {
                 const assembled = self.assembler(lib, config, Channel);
                 break :blk assembled.build(makeTestBuildConfig(assembled.BuildConfig()));
@@ -292,7 +291,7 @@ pub fn make(comptime spec_doc: anytype) type {
                     _ = allocator;
                 }
 
-                pub fn run(self_runner: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+                pub fn run(self_runner: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
                     _ = self_runner;
 
                     inline for (user_stories) |story| {
@@ -318,12 +317,12 @@ pub fn make(comptime spec_doc: anytype) type {
             const Holder = struct {
                 var runner: Runner = .{};
             };
-            return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+            return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
         }
 
         fn reducerIndex(comptime label: []const u8) usize {
             inline for (reducers, 0..) |reducer, i| {
-                if (stdz.mem.eql(u8, reducer.label, label)) return i;
+                if (glib.std.mem.eql(u8, reducer.label, label)) return i;
             }
 
             @compileError("zux.Spec.setReducer received a label '" ++ label ++ "' that is not declared in the spec doc reducer list");
@@ -331,7 +330,7 @@ pub fn make(comptime spec_doc: anytype) type {
 
         fn componentIndex(comptime label: []const u8) usize {
             inline for (components, 0..) |component, i| {
-                if (stdz.mem.eql(u8, component.label, label)) return i;
+                if (glib.std.mem.eql(u8, component.label, label)) return i;
             }
 
             @compileError("zux.Spec received a component label '" ++ label ++ "' that is not declared in the spec doc component list");
@@ -339,7 +338,7 @@ pub fn make(comptime spec_doc: anytype) type {
 
         fn renderIndex(comptime label: []const u8) usize {
             inline for (renders, 0..) |render_spec, i| {
-                if (stdz.mem.eql(u8, render_spec.label, label)) return i;
+                if (glib.std.mem.eql(u8, render_spec.label, label)) return i;
             }
 
             @compileError("zux.Spec.setRender received a label '" ++ label ++ "' that is not declared in the spec doc render list");
@@ -396,7 +395,7 @@ pub fn make(comptime spec_doc: anytype) type {
 
         fn componentForLabel(comptime label: []const u8) ComponentSpec {
             inline for (components) |component| {
-                if (stdz.mem.eql(u8, component.label, label)) return component;
+                if (glib.std.mem.eql(u8, component.label, label)) return component;
             }
 
             @compileError("zux.Spec.testRunner could not find component label '" ++ label ++ "'");
@@ -770,7 +769,6 @@ pub fn make(comptime spec_doc: anytype) type {
             };
             return drivers.wifi.Ap.make(&Holder.impl);
         }
-
     };
 }
 
@@ -790,7 +788,7 @@ fn comptimeStartsWith(comptime text: []const u8, comptime prefix: []const u8) bo
     return true;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const DummyChannel = struct {
         fn factory(comptime T: type) type {
             _ = T;
@@ -1039,12 +1037,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try testing.expect(@hasDecl(assembled.flow_registry.periphs[0].FlowType, "Reducer"));
         }
 
-        fn test_runner_executes_user_stories(testing: anytype, t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn test_runner_executes_user_stories(testing: anytype, t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
             _ = allocator;
             const TestChannelImpl = struct {
                 fn factory(comptime T: type) type {
                     return struct {
-                        pub fn init(_: stdz.mem.Allocator, _: usize) !@This() {
+                        pub fn init(_: glib.std.mem.Allocator, _: usize) !@This() {
                             return .{};
                         }
 
@@ -1171,7 +1169,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             const testing = lib.testing;
 
@@ -1207,5 +1205,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

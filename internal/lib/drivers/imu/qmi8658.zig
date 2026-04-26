@@ -23,10 +23,11 @@
 //!   try imu.open();
 //!   const data = try imu.readRaw();
 
+const glib = @import("glib");
 const Delay = @import("../Delay.zig");
 const I2c = @import("../I2c.zig");
+
 const qmi8658 = @This();
-const testing_api = @import("testing");
 const degrees_per_radian: f32 = 57.29577951308232;
 const pi: f32 = 3.141592653589793;
 const half_pi: f32 = pi / 2.0;
@@ -406,7 +407,7 @@ pub fn selfTest(self: *Self) !bool {
 pub fn getRevisionId(self: *Self) !u8 {
     return self.readRegister(.revision_id);
 }
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn openConfiguresChipAndUsesDelay() !void {
             const FakeI2c = struct {
@@ -466,8 +467,6 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         }
 
         fn atan2ApproxStaysCloseToStdMath() !void {
-            const std = @import("std");
-
             var max_error_deg: f32 = 0.0;
             var yi: i16 = -128;
             while (yi <= 128) : (yi += 1) {
@@ -478,7 +477,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     const y: f32 = @as(f32, @floatFromInt(yi)) / 8.0;
                     const x: f32 = @as(f32, @floatFromInt(xi)) / 8.0;
                     const approx = atan2Approx(y, x);
-                    const exact = std.math.atan2(y, x);
+                    const exact = lib.math.atan2(y, x);
                     const error_deg = absf(approx - exact) * degrees_per_radian;
 
                     if (error_deg > max_error_deg) max_error_deg = error_deg;
@@ -495,7 +494,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -519,5 +518,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

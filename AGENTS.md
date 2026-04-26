@@ -4,10 +4,10 @@ Before starting any development work, read the repository-wide conduct rules in 
 
 ## Package Layout
 
-- The repository root is now a thin facade package.
+- The repository root is now a thin package-export layer.
 - The top-level `build.zig` should only wire public exports and package dependencies.
-- The top level exports exactly two public modules: `embed` and `embed_std`.
-- The top-level `lib/embed.zig` is a facade namespace composed from the `internal` package modules.
+- The top level exports public modules directly: `glib`, `glib_stdrt`, `drivers`, `bt`, `motion`, `audio`, `ledstrip`, and `zux`.
+- Do not reintroduce top-level facade modules such as `embed` or `embed_std`.
 - Do not reintroduce top-level implementation trees under `lib/` that mirror `internal/lib/`.
 - Do not add top-level test build steps or top-level test entrypoints for this facade package; implementation tests belong in `internal/`.
 - Put implementation code, module wiring, and tests in the `internal/` package unless the change is specifically about the top-level facade boundary.
@@ -22,7 +22,7 @@ Before starting any development work, read the repository-wide conduct rules in 
 - Read `[internal/lib/net/http/README.md](internal/lib/net/http/README.md)` before editing `internal/lib/net/http`, the HTTP transport surface, or future HTTP client/server planning docs.
 - Read `[internal/lib/mime/README.md](internal/lib/mime/README.md)` before editing MIME parsing / formatting or HTTP-related content-type handling.
 - Read `[internal/lib/bt/README.md](internal/lib/bt/README.md)` before editing the Bluetooth host stack, client/server, mocker, xfer, or bt tests.
-- Read `[internal/lib/embed_std/README.md](internal/lib/embed_std/README.md)` before editing the std-backed compatibility layer.
+- Read `[glib_stdrt/README.md](glib_stdrt/README.md)` before editing the std-backed compatibility layer.
 - Read `[internal/lib/zux/README.md](internal/lib/zux/README.md)` before editing the `zux` module.
 - Read `[internal/lib/drivers/README.md](internal/lib/drivers/README.md)` before editing generic drivers or device-specific driver modules.
 

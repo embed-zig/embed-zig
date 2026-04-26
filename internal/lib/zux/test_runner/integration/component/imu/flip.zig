@@ -1,4 +1,4 @@
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 const common = @import("common.zig");
 const component_imu = @import("../../../../component/Imu.zig");
@@ -29,7 +29,7 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             reset();
         }
 
-        pub fn run(self: *Self, t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *Self, t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
 
             var dummy_imu = common.DummyImuImpl{};
@@ -187,12 +187,12 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
     };
 }
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
     const BuiltApp = comptime common.makeBuiltApp(lib, Channel);
     const Case = TestCase(lib, BuiltApp);
 
     const Holder = struct {
         var runner: Case = .{};
     };
-    return testing_api.TestRunner.make(Case).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Case).new(&Holder.runner);
 }

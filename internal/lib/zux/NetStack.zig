@@ -1,7 +1,7 @@
 const Context = @import("event/Context.zig");
 const event = @import("event.zig");
-const net = @import("net");
-const testing_api = @import("testing");
+const net = glib.net;
+const glib = @import("glib");
 
 const Addr = net.netip.Addr;
 const EventReceiver = event.EventReceiver;
@@ -628,7 +628,7 @@ fn eventReceiverEmitUpdate(ctx: *const anyopaque, update: Update) void {
     receiver.emit(value);
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn makeEventCopiesDhcpAndDnsFields(testing: anytype) !void {
             const dns = [_]Addr{
@@ -909,7 +909,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
             const testing = lib.testing;
@@ -942,5 +942,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

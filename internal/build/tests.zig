@@ -111,13 +111,20 @@ pub fn create(
     });
     b.modules.put("tests", test_mod) catch @panic("OOM");
 
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const glib_stdrt_dep = b.dependency("glib_stdrt", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    test_mod.addImport("glib", glib_dep.module("glib"));
+    test_mod.addImport("glib_stdrt", glib_stdrt_dep.module("glib_stdrt"));
+
     inline for (@typeInfo(Libraries).@"struct".decls) |decl| {
         const mod = b.modules.get(decl.name) orelse @panic("test dependency missing");
         test_mod.addImport(decl.name, mod);
-    }
-    if (b.modules.get("stdz")) |stdz_mod| {
-        // Keep legacy test imports working while `stdz` fronts the runtime layer.
-        test_mod.addImport("stdz", stdz_mod);
     }
     inline for (@typeInfo(Libraries).@"struct".decls) |decl| {
         const mod_name = decl.name;

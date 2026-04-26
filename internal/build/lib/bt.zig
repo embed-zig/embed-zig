@@ -13,14 +13,15 @@ pub fn create(
     b.modules.put("bt", mod) catch @panic("OOM");
 }
 
-pub fn link(b: *std.Build) void {
-    const stdz = b.modules.get("stdz") orelse @panic("bt requires stdz");
-    const embed_std = b.modules.get("embed_std") orelse @panic("bt requires embed_std");
-    const sync = b.modules.get("sync") orelse @panic("bt requires sync");
-    const testing = b.modules.get("testing") orelse @panic("bt requires testing");
+pub fn link(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const mod = b.modules.get("bt") orelse @panic("bt module missing");
-    mod.addImport("stdz", stdz);
-    mod.addImport("embed_std", embed_std);
-    mod.addImport("sync", sync);
-    mod.addImport("testing", testing);
+    mod.addImport("glib", glib_dep.module("glib"));
 }

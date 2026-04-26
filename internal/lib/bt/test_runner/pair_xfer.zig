@@ -7,11 +7,11 @@
 //! On hardware these would run on two different boards/processes.
 //! For local tests, a mock HCI system can run both in one process.
 
-const stdz = @import("stdz");
+const glib = @import("glib");
+
 const bt = @import("../../bt.zig");
 const Central = @import("../Central.zig");
 const Peripheral = @import("../Peripheral.zig");
-const testing_api = @import("testing");
 
 const device_name = "PairXfer";
 const service_uuid: u16 = 0x180D;
@@ -20,19 +20,19 @@ const xfer_char_uuid: u16 = 0x2A58;
 const timeout_ms: u32 = 5000;
 const reconnect_timeout_ms: u32 = 10000;
 
-pub fn makeCentral(comptime lib: type, comptime ClientType: type, host: anytype) testing_api.TestRunner {
+pub fn makeCentral(comptime lib: type, comptime ClientType: type, host: anytype) glib.testing.TestRunner {
     const HostPtr = @TypeOf(host);
     comptime requireHostPointer(HostPtr);
 
     const Runner = struct {
         host: HostPtr,
 
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             runCentralRole(lib, ClientType, self.host, allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
@@ -40,7 +40,7 @@ pub fn makeCentral(comptime lib: type, comptime ClientType: type, host: anytype)
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }
@@ -48,22 +48,22 @@ pub fn makeCentral(comptime lib: type, comptime ClientType: type, host: anytype)
 
     const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{ .host = host };
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
-pub fn makePeripheral(comptime lib: type, comptime ServerType: type, host: anytype) testing_api.TestRunner {
+pub fn makePeripheral(comptime lib: type, comptime ServerType: type, host: anytype) glib.testing.TestRunner {
     const HostPtr = @TypeOf(host);
     comptime requireHostPointer(HostPtr);
 
     const Runner = struct {
         host: HostPtr,
 
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             runPeripheralRole(lib, ServerType, self.host, allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
@@ -71,7 +71,7 @@ pub fn makePeripheral(comptime lib: type, comptime ServerType: type, host: anyty
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }
@@ -79,10 +79,10 @@ pub fn makePeripheral(comptime lib: type, comptime ServerType: type, host: anyty
 
     const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{ .host = host };
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
-fn runCentralRole(comptime lib: type, comptime ClientType: type, host: anytype, allocator: stdz.mem.Allocator) !void {
+fn runCentralRole(comptime lib: type, comptime ClientType: type, host: anytype, allocator: glib.std.mem.Allocator) !void {
     const testing = lib.testing;
 
     const State = struct {
@@ -146,7 +146,7 @@ fn runCentralRole(comptime lib: type, comptime ClientType: type, host: anytype, 
     try testing.expectEqual(@as(u32, 2), state.disconnected_count);
 }
 
-fn runPeripheralRole(comptime lib: type, comptime ServerType: type, host: anytype, allocator: stdz.mem.Allocator) !void {
+fn runPeripheralRole(comptime lib: type, comptime ServerType: type, host: anytype, allocator: glib.std.mem.Allocator) !void {
     const testing = lib.testing;
     const XferReadRequest = ServerType.XferReadRequest;
     const XferWriteRequest = ServerType.XferWriteRequest;
@@ -216,7 +216,7 @@ fn runPeripheralRole(comptime lib: type, comptime ServerType: type, host: anytyp
             }
         }
 
-        fn handleXferRead(ctx: ?*anyopaque, payload_allocator: stdz.mem.Allocator, req: *const XferReadRequest) ![]u8 {
+        fn handleXferRead(ctx: ?*anyopaque, payload_allocator: glib.std.mem.Allocator, req: *const XferReadRequest) ![]u8 {
             const self: *@This() = @ptrCast(@alignCast(ctx.?));
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -315,7 +315,7 @@ fn runPeripheralRole(comptime lib: type, comptime ServerType: type, host: anytyp
     try testing.expect(lib.mem.eql(u8, state.receiver_value[0..state.receiver_len], &expected_receiver));
 }
 
-fn runPrimaryClientSession(comptime lib: type, conn: anytype, allocator: stdz.mem.Allocator) !void {
+fn runPrimaryClientSession(comptime lib: type, conn: anytype, allocator: glib.std.mem.Allocator) !void {
     const testing = lib.testing;
 
     var expected_read: [32]u8 = undefined;
@@ -347,7 +347,7 @@ fn runPrimaryClientSession(comptime lib: type, conn: anytype, allocator: stdz.me
     try testing.expect(lib.mem.eql(u8, beta, expected_beta[0..]));
 }
 
-fn runReconnectClientSession(comptime lib: type, conn: anytype, allocator: stdz.mem.Allocator) !void {
+fn runReconnectClientSession(comptime lib: type, conn: anytype, allocator: glib.std.mem.Allocator) !void {
     const testing = lib.testing;
     _ = allocator;
 

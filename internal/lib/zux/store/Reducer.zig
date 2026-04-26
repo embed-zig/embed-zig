@@ -1,4 +1,4 @@
-const testing_api = @import("testing");
+const glib = @import("glib");
 const Emitter = @import("../pipeline/Emitter.zig");
 const Message = @import("../pipeline/Message.zig");
 const Node = @import("../pipeline/Node.zig");
@@ -64,10 +64,9 @@ pub fn make(comptime Store: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn use_case_shape(testing: anytype, _: lib.mem.Allocator) !void {
-            const embed_std = @import("embed_std");
             const store = @import("../Store.zig");
 
             const ButtonStore = struct {
@@ -78,7 +77,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const B = store.Builder(.{});
                 var builder = B.init();
                 builder.setStore(.button, ButtonStore);
-                break :blk builder.make(embed_std.std);
+                break :blk builder.make(lib);
             };
 
             const ReducerTy = make(AppStore);
@@ -160,7 +159,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             const testing = lib.testing;
 
@@ -180,5 +179,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

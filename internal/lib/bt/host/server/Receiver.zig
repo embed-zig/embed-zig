@@ -5,12 +5,12 @@
 //! chunk payloads into this characteristic. The receiver rebuilds the payload
 //! with `xfer.recv(...)` and dispatches the final bytes to one handler.
 
+const glib = @import("glib");
+
 const bt = @import("../../../bt.zig");
 const att = @import("../att.zig");
-const sync = @import("sync");
 const xfer = @import("../xfer.zig");
 const Chunk = xfer.Chunk;
-const testing_api = @import("testing");
 
 pub const Request = struct {
     conn_handle: u16,
@@ -358,7 +358,7 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const DummySubscription = struct {
@@ -390,16 +390,16 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         }
                         pub fn deinit(_: *@This()) void {}
                         pub fn close(_: *@This()) void {}
-                        pub fn recvTimeout(_: *@This(), _: u32) !sync.channel.RecvResult(T) {
+                        pub fn recvTimeout(_: *@This(), _: u32) !glib.sync.channel.RecvResult(T) {
                             return error.Unexpected;
                         }
-                        pub fn recv(_: *@This()) !sync.channel.RecvResult(T) {
+                        pub fn recv(_: *@This()) !glib.sync.channel.RecvResult(T) {
                             return error.Unexpected;
                         }
-                        pub fn send(_: *@This(), _: T) !sync.channel.SendResult() {
+                        pub fn send(_: *@This(), _: T) !glib.sync.channel.SendResult() {
                             return .{ .ok = true };
                         }
-                        pub fn sendTimeout(_: *@This(), _: T, _: u32) !sync.channel.SendResult() {
+                        pub fn sendTimeout(_: *@This(), _: T, _: u32) !glib.sync.channel.SendResult() {
                             return .{ .ok = true };
                         }
                     };
@@ -412,7 +412,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     onRequest: ?*const fn (?*anyopaque, *const bt.Peripheral.Request, *bt.Peripheral.ResponseWriter) void = null,
                     onSubscription: ?*const fn (?*anyopaque, Subscription) void = null,
                 };
-                const ChannelFactoryImpl = sync.channel.make(Dummy.Channel);
+                const ChannelFactoryImpl = glib.sync.channel.make(Dummy.Channel);
 
                 pub fn ChannelFactory(comptime T: type) type {
                     return ChannelFactoryImpl(T);
@@ -465,7 +465,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -484,5 +484,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

@@ -1,7 +1,8 @@
 //! wifi — portable Wi-Fi abstractions and helpers.
 
-const net = @import("net");
-const testing_api = @import("testing");
+const glib = @import("glib");
+
+const net = glib.net;
 
 const root = @This();
 
@@ -195,7 +196,7 @@ pub const Ap = struct {
         };
     }
 
-    pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
         const TestCase = struct {
             fn makeAllowsMissingOptionalIntrospection() !void {
                 const Impl = struct {
@@ -225,7 +226,7 @@ pub const Ap = struct {
                 _ = allocator;
             }
 
-            pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
                 _ = self;
                 _ = allocator;
 
@@ -245,7 +246,7 @@ pub const Ap = struct {
         const Holder = struct {
             var runner: Runner = .{};
         };
-        return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+        return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
     }
 };
 
@@ -471,7 +472,7 @@ pub const Sta = struct {
         };
     }
 
-    pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
         const TestCase = struct {
             fn makeAllowsMissingOptionalIntrospection() !void {
                 const Impl = struct {
@@ -503,7 +504,7 @@ pub const Sta = struct {
                 _ = allocator;
             }
 
-            pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
                 _ = self;
                 _ = allocator;
 
@@ -523,7 +524,7 @@ pub const Sta = struct {
         const Holder = struct {
             var runner: Runner = .{};
         };
-        return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+        return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
     }
 };
 
@@ -674,7 +675,7 @@ pub const Wifi = struct {
         };
     }
 
-    pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+    pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
         const TestCase = struct {
             fn exposesStaAndApVtableSurface() !void {
                 const StaImpl = struct {
@@ -759,7 +760,7 @@ pub const Wifi = struct {
                 _ = allocator;
             }
 
-            pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+            pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
                 _ = self;
                 _ = allocator;
 
@@ -779,7 +780,7 @@ pub const Wifi = struct {
         const Holder = struct {
             var runner: Runner = .{};
         };
-        return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+        return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
     }
 };
 
@@ -799,6 +800,6 @@ pub const test_runner = struct {
     pub const integration = @import("wifi/test_runner/integration.zig");
 };
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     return test_runner.unit.make(lib);
 }

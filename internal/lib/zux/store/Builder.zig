@@ -1,6 +1,5 @@
-const stdz = @import("stdz");
-const builtin = stdz.builtin;
-const testing_api = @import("testing");
+const glib = @import("glib");
+const builtin = glib.std.builtin;
 const StoreSubscriber = @import("Subscriber.zig");
 const StoreState = @import("State.zig");
 const StoreTypes = @import("Stores.zig");
@@ -609,7 +608,7 @@ fn firstPathSeparatorIndex(comptime text: []const u8) ?usize {
     return null;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn set_store_and_state_tracks_counts_and_overwrites(testing: anytype, _: lib.mem.Allocator) !void {
             const B = Builder(.{});
@@ -771,7 +770,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             const testing = lib.testing;
 
@@ -815,5 +814,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

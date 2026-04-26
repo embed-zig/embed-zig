@@ -3,8 +3,7 @@
 //! Pure stateless codec — encode/decode ATT PDUs, UUID handling.
 //! No I/O, no state.
 
-const std = @import("std");
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 // --- Constants ---
 
@@ -91,7 +90,7 @@ pub const UUID = union(enum) {
                 .uuid128 => false,
             },
             .uuid128 => |a| switch (other) {
-                .uuid128 => |b| std.mem.eql(u8, &a, &b),
+                .uuid128 => |b| glib.std.mem.eql(u8, &a, &b),
                 .uuid16 => false,
             },
         };
@@ -100,12 +99,12 @@ pub const UUID = union(enum) {
     pub fn writeTo(self: UUID, buf: []u8) usize {
         switch (self) {
             .uuid16 => |v| {
-                std.debug.assert(buf.len >= 2);
-                std.mem.writeInt(u16, buf[0..2], v, .little);
+                glib.std.debug.assert(buf.len >= 2);
+                glib.std.mem.writeInt(u16, buf[0..2], v, .little);
                 return 2;
             },
             .uuid128 => |v| {
-                std.debug.assert(buf.len >= 16);
+                glib.std.debug.assert(buf.len >= 16);
                 @memcpy(buf[0..16], &v);
                 return 16;
             },
@@ -114,7 +113,7 @@ pub const UUID = union(enum) {
 
     pub fn readFrom(data: []const u8, len: usize) ?UUID {
         if (len == 2 and data.len >= 2) {
-            return .{ .uuid16 = std.mem.readInt(u16, data[0..2], .little) };
+            return .{ .uuid16 = glib.std.mem.readInt(u16, data[0..2], .little) };
         } else if (len == 16 and data.len >= 16) {
             return .{ .uuid128 = data[0..16].* };
         }
@@ -230,28 +229,28 @@ pub fn decodePdu(raw: []const u8) ?Pdu {
             if (params.len < 4) break :blk null;
             break :blk .{ .error_response = .{
                 .request_opcode = params[0],
-                .handle = std.mem.readInt(u16, params[1..3], .little),
+                .handle = glib.std.mem.readInt(u16, params[1..3], .little),
                 .error_code = @enumFromInt(params[3]),
             } };
         },
         EXCHANGE_MTU_REQUEST => blk: {
             if (params.len < 2) break :blk null;
             break :blk .{ .exchange_mtu_request = .{
-                .client_mtu = std.mem.readInt(u16, params[0..2], .little),
+                .client_mtu = glib.std.mem.readInt(u16, params[0..2], .little),
             } };
         },
         EXCHANGE_MTU_RESPONSE => blk: {
             if (params.len < 2) break :blk null;
             break :blk .{ .exchange_mtu_response = .{
-                .server_mtu = std.mem.readInt(u16, params[0..2], .little),
+                .server_mtu = glib.std.mem.readInt(u16, params[0..2], .little),
             } };
         },
         READ_BY_GROUP_TYPE_REQUEST => blk: {
             if (params.len < 4) break :blk null;
             const uuid_len = params.len - 4;
             break :blk .{ .read_by_group_type_request = .{
-                .start_handle = std.mem.readInt(u16, params[0..2], .little),
-                .end_handle = std.mem.readInt(u16, params[2..4], .little),
+                .start_handle = glib.std.mem.readInt(u16, params[0..2], .little),
+                .end_handle = glib.std.mem.readInt(u16, params[2..4], .little),
                 .uuid = UUID.readFrom(params[4..], uuid_len) orelse break :blk null,
             } };
         },
@@ -266,8 +265,8 @@ pub fn decodePdu(raw: []const u8) ?Pdu {
             if (params.len < 4) break :blk null;
             const uuid_len = params.len - 4;
             break :blk .{ .read_by_type_request = .{
-                .start_handle = std.mem.readInt(u16, params[0..2], .little),
-                .end_handle = std.mem.readInt(u16, params[2..4], .little),
+                .start_handle = glib.std.mem.readInt(u16, params[0..2], .little),
+                .end_handle = glib.std.mem.readInt(u16, params[2..4], .little),
                 .uuid = UUID.readFrom(params[4..], uuid_len) orelse break :blk null,
             } };
         },
@@ -281,8 +280,8 @@ pub fn decodePdu(raw: []const u8) ?Pdu {
         FIND_INFORMATION_REQUEST => blk: {
             if (params.len < 4) break :blk null;
             break :blk .{ .find_information_request = .{
-                .start_handle = std.mem.readInt(u16, params[0..2], .little),
-                .end_handle = std.mem.readInt(u16, params[2..4], .little),
+                .start_handle = glib.std.mem.readInt(u16, params[0..2], .little),
+                .end_handle = glib.std.mem.readInt(u16, params[2..4], .little),
             } };
         },
         FIND_INFORMATION_RESPONSE => blk: {
@@ -295,28 +294,28 @@ pub fn decodePdu(raw: []const u8) ?Pdu {
         READ_REQUEST => blk: {
             if (params.len < 2) break :blk null;
             break :blk .{ .read_request = .{
-                .handle = std.mem.readInt(u16, params[0..2], .little),
+                .handle = glib.std.mem.readInt(u16, params[0..2], .little),
             } };
         },
         READ_RESPONSE => .{ .read_response = .{ .value = params } },
         READ_BLOB_REQUEST => blk: {
             if (params.len < 4) break :blk null;
             break :blk .{ .read_blob_request = .{
-                .handle = std.mem.readInt(u16, params[0..2], .little),
-                .offset = std.mem.readInt(u16, params[2..4], .little),
+                .handle = glib.std.mem.readInt(u16, params[0..2], .little),
+                .offset = glib.std.mem.readInt(u16, params[2..4], .little),
             } };
         },
         WRITE_REQUEST => blk: {
             if (params.len < 2) break :blk null;
             break :blk .{ .write_request = .{
-                .handle = std.mem.readInt(u16, params[0..2], .little),
+                .handle = glib.std.mem.readInt(u16, params[0..2], .little),
                 .value = params[2..],
             } };
         },
         WRITE_COMMAND => blk: {
             if (params.len < 2) break :blk null;
             break :blk .{ .write_command = .{
-                .handle = std.mem.readInt(u16, params[0..2], .little),
+                .handle = glib.std.mem.readInt(u16, params[0..2], .little),
                 .value = params[2..],
             } };
         },
@@ -324,14 +323,14 @@ pub fn decodePdu(raw: []const u8) ?Pdu {
         HANDLE_VALUE_NOTIFICATION => blk: {
             if (params.len < 2) break :blk null;
             break :blk .{ .notification = .{
-                .handle = std.mem.readInt(u16, params[0..2], .little),
+                .handle = glib.std.mem.readInt(u16, params[0..2], .little),
                 .value = params[2..],
             } };
         },
         HANDLE_VALUE_INDICATION => blk: {
             if (params.len < 2) break :blk null;
             break :blk .{ .indication = .{
-                .handle = std.mem.readInt(u16, params[0..2], .little),
+                .handle = glib.std.mem.readInt(u16, params[0..2], .little),
                 .value = params[2..],
             } };
         },
@@ -341,123 +340,123 @@ pub fn decodePdu(raw: []const u8) ?Pdu {
 }
 
 pub fn encodeErrorResponse(buf: []u8, request_opcode: u8, handle: u16, code: ErrorCode) []const u8 {
-    std.debug.assert(buf.len >= 5);
+    glib.std.debug.assert(buf.len >= 5);
     buf[0] = ERROR_RESPONSE;
     buf[1] = request_opcode;
-    std.mem.writeInt(u16, buf[2..4], handle, .little);
+    glib.std.mem.writeInt(u16, buf[2..4], handle, .little);
     buf[4] = @intFromEnum(code);
     return buf[0..5];
 }
 
 pub fn encodeMtuRequest(buf: []u8, mtu: u16) []const u8 {
-    std.debug.assert(buf.len >= 3);
+    glib.std.debug.assert(buf.len >= 3);
     buf[0] = EXCHANGE_MTU_REQUEST;
-    std.mem.writeInt(u16, buf[1..3], mtu, .little);
+    glib.std.mem.writeInt(u16, buf[1..3], mtu, .little);
     return buf[0..3];
 }
 
 pub fn encodeMtuResponse(buf: []u8, mtu: u16) []const u8 {
-    std.debug.assert(buf.len >= 3);
+    glib.std.debug.assert(buf.len >= 3);
     buf[0] = EXCHANGE_MTU_RESPONSE;
-    std.mem.writeInt(u16, buf[1..3], mtu, .little);
+    glib.std.mem.writeInt(u16, buf[1..3], mtu, .little);
     return buf[0..3];
 }
 
 pub fn encodeReadByGroupTypeRequest(buf: []u8, start_handle: u16, end_handle: u16, uuid: UUID) []const u8 {
     const uuid_len = uuid.byteLen();
-    std.debug.assert(buf.len >= 5 + uuid_len);
+    glib.std.debug.assert(buf.len >= 5 + uuid_len);
     buf[0] = READ_BY_GROUP_TYPE_REQUEST;
-    std.mem.writeInt(u16, buf[1..3], start_handle, .little);
-    std.mem.writeInt(u16, buf[3..5], end_handle, .little);
+    glib.std.mem.writeInt(u16, buf[1..3], start_handle, .little);
+    glib.std.mem.writeInt(u16, buf[3..5], end_handle, .little);
     _ = uuid.writeTo(buf[5 .. 5 + uuid_len]);
     return buf[0 .. 5 + uuid_len];
 }
 
 pub fn encodeReadByTypeRequest(buf: []u8, start_handle: u16, end_handle: u16, uuid: UUID) []const u8 {
     const uuid_len = uuid.byteLen();
-    std.debug.assert(buf.len >= 5 + uuid_len);
+    glib.std.debug.assert(buf.len >= 5 + uuid_len);
     buf[0] = READ_BY_TYPE_REQUEST;
-    std.mem.writeInt(u16, buf[1..3], start_handle, .little);
-    std.mem.writeInt(u16, buf[3..5], end_handle, .little);
+    glib.std.mem.writeInt(u16, buf[1..3], start_handle, .little);
+    glib.std.mem.writeInt(u16, buf[3..5], end_handle, .little);
     _ = uuid.writeTo(buf[5 .. 5 + uuid_len]);
     return buf[0 .. 5 + uuid_len];
 }
 
 pub fn encodeFindInformationRequest(buf: []u8, start_handle: u16, end_handle: u16) []const u8 {
-    std.debug.assert(buf.len >= 5);
+    glib.std.debug.assert(buf.len >= 5);
     buf[0] = FIND_INFORMATION_REQUEST;
-    std.mem.writeInt(u16, buf[1..3], start_handle, .little);
-    std.mem.writeInt(u16, buf[3..5], end_handle, .little);
+    glib.std.mem.writeInt(u16, buf[1..3], start_handle, .little);
+    glib.std.mem.writeInt(u16, buf[3..5], end_handle, .little);
     return buf[0..5];
 }
 
 pub fn encodeReadRequest(buf: []u8, handle: u16) []const u8 {
-    std.debug.assert(buf.len >= 3);
+    glib.std.debug.assert(buf.len >= 3);
     buf[0] = READ_REQUEST;
-    std.mem.writeInt(u16, buf[1..3], handle, .little);
+    glib.std.mem.writeInt(u16, buf[1..3], handle, .little);
     return buf[0..3];
 }
 
 pub fn encodeReadBlobRequest(buf: []u8, handle: u16, offset: u16) []const u8 {
-    std.debug.assert(buf.len >= 5);
+    glib.std.debug.assert(buf.len >= 5);
     buf[0] = READ_BLOB_REQUEST;
-    std.mem.writeInt(u16, buf[1..3], handle, .little);
-    std.mem.writeInt(u16, buf[3..5], offset, .little);
+    glib.std.mem.writeInt(u16, buf[1..3], handle, .little);
+    glib.std.mem.writeInt(u16, buf[3..5], offset, .little);
     return buf[0..5];
 }
 
 pub fn encodeReadResponse(buf: []u8, value: []const u8) []const u8 {
-    std.debug.assert(buf.len >= 1 + value.len);
+    glib.std.debug.assert(buf.len >= 1 + value.len);
     buf[0] = READ_RESPONSE;
     @memcpy(buf[1..][0..value.len], value);
     return buf[0 .. 1 + value.len];
 }
 
 pub fn encodeWriteRequest(buf: []u8, handle: u16, value: []const u8) []const u8 {
-    std.debug.assert(buf.len >= 3 + value.len);
+    glib.std.debug.assert(buf.len >= 3 + value.len);
     buf[0] = WRITE_REQUEST;
-    std.mem.writeInt(u16, buf[1..3], handle, .little);
+    glib.std.mem.writeInt(u16, buf[1..3], handle, .little);
     @memcpy(buf[3..][0..value.len], value);
     return buf[0 .. 3 + value.len];
 }
 
 pub fn encodeWriteCommand(buf: []u8, handle: u16, value: []const u8) []const u8 {
-    std.debug.assert(buf.len >= 3 + value.len);
+    glib.std.debug.assert(buf.len >= 3 + value.len);
     buf[0] = WRITE_COMMAND;
-    std.mem.writeInt(u16, buf[1..3], handle, .little);
+    glib.std.mem.writeInt(u16, buf[1..3], handle, .little);
     @memcpy(buf[3..][0..value.len], value);
     return buf[0 .. 3 + value.len];
 }
 
 pub fn encodeWriteResponse(buf: []u8) []const u8 {
-    std.debug.assert(buf.len >= 1);
+    glib.std.debug.assert(buf.len >= 1);
     buf[0] = WRITE_RESPONSE;
     return buf[0..1];
 }
 
 pub fn encodeNotification(buf: []u8, handle: u16, value: []const u8) []const u8 {
-    std.debug.assert(buf.len >= 3 + value.len);
+    glib.std.debug.assert(buf.len >= 3 + value.len);
     buf[0] = HANDLE_VALUE_NOTIFICATION;
-    std.mem.writeInt(u16, buf[1..3], handle, .little);
+    glib.std.mem.writeInt(u16, buf[1..3], handle, .little);
     @memcpy(buf[3..][0..value.len], value);
     return buf[0 .. 3 + value.len];
 }
 
 pub fn encodeIndication(buf: []u8, handle: u16, value: []const u8) []const u8 {
-    std.debug.assert(buf.len >= 3 + value.len);
+    glib.std.debug.assert(buf.len >= 3 + value.len);
     buf[0] = HANDLE_VALUE_INDICATION;
-    std.mem.writeInt(u16, buf[1..3], handle, .little);
+    glib.std.mem.writeInt(u16, buf[1..3], handle, .little);
     @memcpy(buf[3..][0..value.len], value);
     return buf[0 .. 3 + value.len];
 }
 
 pub fn encodeConfirmation(buf: []u8) []const u8 {
-    std.debug.assert(buf.len >= 1);
+    glib.std.debug.assert(buf.len >= 1);
     buf[0] = HANDLE_VALUE_CONFIRMATION;
     return buf[0..1];
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const uuid16 = UUID.from16(0x180D);
@@ -553,7 +552,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             try lib.testing.expect(decodePdu(&.{}) == null);
-            try lib.testing.expect(decodePdu(&.{ READ_REQUEST }) == null);
+            try lib.testing.expect(decodePdu(&.{READ_REQUEST}) == null);
         }
     };
     const Runner = struct {
@@ -562,7 +561,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -581,6 +580,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

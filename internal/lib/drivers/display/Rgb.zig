@@ -1,3 +1,5 @@
+const glib = @import("glib");
+
 const Self = @This();
 
 r: u8,
@@ -24,14 +26,14 @@ pub fn from565(pixel: u16) Self {
 }
 
 test "drivers/unit_tests/Display/Rgb/cmp_compares_all_channels" {
-    const testing = @import("std").testing;
+    const testing = glib.std.testing;
 
     try testing.expect(init(1, 2, 3).cmp(init(1, 2, 3)));
     try testing.expect(!init(1, 2, 3).cmp(init(1, 2, 4)));
 }
 
 test "drivers/unit_tests/Display/Rgb/from565_decodes_common_colors" {
-    const testing = @import("std").testing;
+    const testing = glib.std.testing;
 
     try testing.expect(init(0, 0, 0).cmp(from565(0x0000)));
     try testing.expect(init(255, 255, 255).cmp(from565(0xFFFF)));
@@ -41,7 +43,7 @@ test "drivers/unit_tests/Display/Rgb/from565_decodes_common_colors" {
 }
 
 test "drivers/unit_tests/Display/Rgb/from565_expands_partial_channels" {
-    const testing = @import("std").testing;
+    const testing = glib.std.testing;
 
     const decoded = from565(0x8410);
     try testing.expectEqual(@as(u8, 132), decoded.r);

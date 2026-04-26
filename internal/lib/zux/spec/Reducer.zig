@@ -1,4 +1,4 @@
-const stdz = @import("stdz");
+const glib = @import("glib");
 const JsonParser = @import("JsonParser.zig");
 const Reducer = @This();
 
@@ -17,11 +17,11 @@ pub fn parseSlice(comptime source: []const u8) Reducer {
 }
 
 pub fn parseAllocSlice(
-    allocator: stdz.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     source: []const u8,
 ) !Reducer {
-    var parsed_value = try stdz.json.parseFromSlice(
-        stdz.json.Value,
+    var parsed_value = try glib.std.json.parseFromSlice(
+        glib.std.json.Value,
         allocator,
         source,
         .{},
@@ -31,7 +31,7 @@ pub fn parseAllocSlice(
     return try parseJsonValue(allocator, parsed_value.value);
 }
 
-pub fn deinit(self: *Reducer, allocator: stdz.mem.Allocator) void {
+pub fn deinit(self: *Reducer, allocator: glib.std.mem.Allocator) void {
     allocator.free(self.label);
     allocator.free(self.reducer_fn_name);
 }
@@ -83,8 +83,8 @@ fn parseFromParser(parser: *JsonParser) Reducer {
 }
 
 pub fn parseJsonValue(
-    allocator: stdz.mem.Allocator,
-    value: stdz.json.Value,
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
 ) !Reducer {
     if (@inComptime()) {
         const object = switch (value) {
@@ -131,9 +131,9 @@ pub fn parseJsonValue(
 
     var iterator = object.iterator();
     while (iterator.next()) |entry| {
-        if (!stdz.mem.eql(u8, entry.key_ptr.*, "label") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "reducer_fn_name") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "fn_name"))
+        if (!glib.std.mem.eql(u8, entry.key_ptr.*, "label") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "reducer_fn_name") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "fn_name"))
         {
             return error.UnknownReducerField;
         }

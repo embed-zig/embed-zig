@@ -1,3 +1,5 @@
+const glib = @import("glib");
+
 pub const Central = @import("bt/Central.zig");
 pub const Host = @import("bt/Host.zig");
 pub const Peripheral = @import("bt/Peripheral.zig");
@@ -17,7 +19,14 @@ const Client = @import("bt/host/Client.zig");
 
 const bt = @This();
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
+pub fn make(comptime gz: type) type {
+    comptime {
+        if (!glib.runtime.is(gz)) @compileError("bt.make requires a glib runtime namespace");
+    }
+
+    const lib = gz.std;
+    const Channel = gz.sync.Channel;
+
     return struct {
         const self = @This();
 

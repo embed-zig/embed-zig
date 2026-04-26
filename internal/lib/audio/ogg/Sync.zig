@@ -1,18 +1,17 @@
 //! `audio/ogg/Sync.zig` owns the pure Zig rewrite of upstream
 //! `ogg_sync_state` buffer management and page sync logic.
 
-const stdz = @import("stdz");
+const glib = @import("glib");
 const crc = @import("crc.zig");
 const Page = @import("Page.zig");
 const Packet = @import("Packet.zig");
 const Stream = @import("Stream.zig");
-const testing_api = @import("testing");
 
 const Self = @This();
 
 const page_header_limit = Page.minimum_header_len + 255;
 
-pub const Error = stdz.mem.Allocator.Error || error{
+pub const Error = glib.std.mem.Allocator.Error || error{
     InvalidState,
     Overflow,
     InvalidWrite,
@@ -30,7 +29,7 @@ pub const PageOutResult = union(enum) {
     page: Page,
 };
 
-allocator: ?stdz.mem.Allocator = null,
+allocator: ?glib.std.mem.Allocator = null,
 data: ?[]u8 = null,
 fill: usize = 0,
 returned: usize = 0,
@@ -40,7 +39,7 @@ headerbytes: usize = 0,
 bodybytes: usize = 0,
 initialized: bool = false,
 
-pub fn init(allocator: stdz.mem.Allocator) Self {
+pub fn init(allocator: glib.std.mem.Allocator) Self {
     return .{
         .allocator = allocator,
         .initialized = true,
@@ -223,7 +222,7 @@ fn bytesEqual(left: []const u8, right: []const u8) bool {
     return true;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn testPageOutAssemblesBufferedChunks(allocator: lib.mem.Allocator) !void {
             const testing = lib.testing;
@@ -346,7 +345,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
 
             TestCase.testPageOutAssemblesBufferedChunks(allocator) catch |err| {
@@ -377,5 +376,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

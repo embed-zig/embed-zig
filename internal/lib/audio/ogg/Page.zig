@@ -2,7 +2,7 @@
 //! metadata helpers and public checksum application behavior.
 
 const crc = @import("crc.zig");
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 const Self = @This();
 
@@ -111,7 +111,7 @@ fn readU64At(self: *const Self, index: usize) Error!u64 {
         (@as(u64, header[index + 7]) << 56);
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn testMetadataReadersExposeHeaderFields() !void {
             const testing = lib.testing;
@@ -179,7 +179,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -207,5 +207,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

@@ -153,11 +153,8 @@ under `lib/net/test_runner/integration/`, all wired from `lib/tests.zig`.
 ## Test layout
 
 - `lib/net.zig` exports only `net.test_runner.unit` and `net.test_runner.integration`.
-- `lib/tests.zig` wires the std-backed `net/unit/std` and `net/integration/std` suites through `net.test_runner.*.make2(std, runtime_posix)`.
-- `lib/tests.zig` also wires `net/integration/runtime_posix/std` through `net.test_runner.integration.runtime.make2(std, runtime_posix)` so the host `runtime_posix` wake and poll contract stays covered directly.
-- `lib/tests.zig` wires the `net/unit/embed_std` and `net/integration/embed_std` suites through `net.test_runner.*.make2(embed_std.std, runtime_embed_std)` so the full higher-level stack exercises `embed_std.net_impl.impl`.
-- `lib/tests.zig` also wires `net/integration2/*` through `net.test_runner.integration.runtime.make2(lib, runtime_embed_std)` so the focused direct-`Runtime` slice still exercises `embed_std.net_impl.impl` in isolation.
-- `internal/build/tests.zig` includes both `net/integration/*` and `net/integration2/*` in the `test-integration-net` matrix.
+- `glib_stdrt/src/tests.zig` wires the std-backed `net/unit/std_posix` and `net/integration/std_posix` suites through `net.test_runner.*.make(std, glib_stdrt.posix_net)`.
+- `glib_stdrt/src/tests.zig` wires the `net/unit/stdrt` and `net/integration/stdrt` suites through `net.test_runner.*.make(glib_stdrt.std, glib_stdrt.net)` so the full higher-level stack exercises the std-backed runtime.
 - `lib/net/test_runner/unit.zig` aggregates source-file `TestRunner`s and topic namespaces such as `netip`, `http`, `textproto`, `cmux`, `resolver`, `tls`, and `core`.
 - `lib/net/test_runner/integration.zig` fans out into deterministic local runners such as `tcp`, `udp`, `resolver_local`, `cmux`, `http_server`, `http_transport`, and `https_transport`.
 - `lib/net/test_runner/integration/runtime.zig` is the focused `net.make2(...).Runtime` integration slice shared by `net/integration/runtime_posix/*` and `net/integration2/*`.

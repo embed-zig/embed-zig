@@ -1,10 +1,9 @@
 //! `audio/ogg/Stream.zig` owns the pure Zig rewrite of upstream
 //! `ogg_stream_state` plus encode/decode page and packet flow.
 
-const stdz = @import("stdz");
+const glib = @import("glib");
 const Page = @import("Page.zig");
 const Packet = @import("Packet.zig");
-const testing_api = @import("testing");
 
 const Self = @This();
 
@@ -22,7 +21,7 @@ pub const PacketResult = union(enum) {
     packet: Packet,
 };
 
-pub const Error = stdz.mem.Allocator.Error || error{
+pub const Error = glib.std.mem.Allocator.Error || error{
     InvalidState,
     Overflow,
     SerialMismatch,
@@ -30,7 +29,7 @@ pub const Error = stdz.mem.Allocator.Error || error{
     InvalidPage,
 };
 
-allocator: ?stdz.mem.Allocator = null,
+allocator: ?glib.std.mem.Allocator = null,
 body_data: ?[]u8 = null,
 body_fill: usize = 0,
 body_returned: usize = 0,
@@ -51,7 +50,7 @@ pageno: i64 = 0,
 packetno: i64 = 0,
 granulepos: i64 = 0,
 
-pub fn init(allocator: stdz.mem.Allocator, serialno: u32) Error!Self {
+pub fn init(allocator: glib.std.mem.Allocator, serialno: u32) Error!Self {
     return .{
         .allocator = allocator,
         .body_data = try allocator.alloc(u8, initial_body_storage),
@@ -519,7 +518,7 @@ fn maxInt(comptime T: type) T {
     return (@as(T, 1) << (@typeInfo(T).int.bits - 1)) - 1 + (@as(T, 1) << (@typeInfo(T).int.bits - 1));
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn testPacketInPartsProducesExpectedPage(allocator: lib.mem.Allocator) !void {
             const testing = lib.testing;
@@ -646,7 +645,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
 
             TestCase.testPacketInPartsProducesExpectedPage(allocator) catch |err| {
@@ -677,5 +676,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

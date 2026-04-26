@@ -1,6 +1,7 @@
 //! host.client.Subscription — queue of server pushes for one characteristic.
 
-const std = @import("std");
+const glib = @import("glib");
+
 const bt = @import("../../../bt.zig");
 
 pub fn Subscription(comptime lib: type, comptime ClientType: type) type {
@@ -15,7 +16,7 @@ pub fn Subscription(comptime lib: type, comptime ClientType: type) type {
             cccd_handle: u16,
             mutex: lib.Thread.Mutex = .{},
             cond: lib.Thread.Condition = .{},
-            queue: std.ArrayListUnmanaged(Message) = .{},
+            queue: glib.std.ArrayListUnmanaged(Message) = .{},
             closed: bool = false,
             waiters: usize = 0,
             refs: usize = 1,
@@ -95,7 +96,7 @@ pub fn Subscription(comptime lib: type, comptime ClientType: type) type {
             state.mutex.lock();
             state.closed = true;
             state.cond.broadcast();
-            std.debug.assert(state.refs != 0);
+            glib.std.debug.assert(state.refs != 0);
             state.refs -= 1;
             if (state.refs != 0) {
                 state.mutex.unlock();

@@ -1,3 +1,5 @@
+const glib = @import("glib");
+
 const JsonParser = @This();
 
 source: []const u8,
@@ -591,9 +593,7 @@ fn isDigit(ch: u8) bool {
     return ch >= '0' and ch <= '9';
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn parses_scalars_and_whitespace(testing: anytype, allocator: lib.mem.Allocator) !void {
             _ = allocator;
@@ -736,7 +736,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             const testing = lib.testing;
 
@@ -765,5 +765,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

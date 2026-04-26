@@ -1,6 +1,7 @@
 //! host.Client — higher-level client facade built on host.Central.
 
-const std = @import("std");
+const glib = @import("glib");
+
 const bt = @import("../../bt.zig");
 const ConnMod = @import("client/Conn.zig");
 const CharacteristicMod = @import("client/Characteristic.zig");
@@ -22,7 +23,7 @@ pub fn make(comptime lib: type) type {
         central: ?bt.Central = null,
         hook_installed: bool = false,
         mutex: lib.Thread.Mutex = .{},
-        subscriptions: std.ArrayListUnmanaged(*SubscriptionState) = .{},
+        subscriptions: glib.std.ArrayListUnmanaged(*SubscriptionState) = .{},
 
         pub fn init(allocator: lib.mem.Allocator) Self {
             return .{
@@ -34,7 +35,7 @@ pub fn make(comptime lib: type) type {
             if (self.central == null) {
                 self.central = central;
             } else {
-                std.debug.assert(sameCentral(self.central.?, central));
+                glib.std.debug.assert(sameCentral(self.central.?, central));
             }
 
             if (!self.hook_installed) {
@@ -223,4 +224,3 @@ pub fn make(comptime lib: type) type {
         }
     };
 }
-

@@ -1,8 +1,8 @@
 //! ledstrip.Transition — helpers for moving frames toward new target colors.
 
+const glib = @import("glib");
 const Color = @import("Color.zig");
 const Frame = @import("Frame.zig");
-const testing_api = @import("testing");
 
 pub fn stepChannel(cur: u8, tgt: u8, amount: u8) u8 {
     if (cur < tgt) {
@@ -66,7 +66,7 @@ fn lerpChannel(cur: u8, tgt: u8, steps: u8) u8 {
     return @intCast(@as(i16, cur) + step);
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn stepTowardReachesTarget() !void {
             var color = Color.black;
@@ -137,7 +137,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -177,5 +177,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

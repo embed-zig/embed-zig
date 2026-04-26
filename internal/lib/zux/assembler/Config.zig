@@ -1,4 +1,4 @@
-const stdz = @import("stdz");
+const glib = @import("glib");
 const NodeBuilder = @import("../pipeline/NodeBuilder.zig");
 const Poller = @import("../pipeline/Poller.zig");
 const Store = @import("../Store.zig");
@@ -8,8 +8,8 @@ const root = @This();
 store: Store.BuilderOptions = .{},
 node: NodeBuilder.BuilderOptions = .{},
 pipeline: struct {
-    tick_interval_ns: u64 = 10 * stdz.time.ns_per_ms,
-    spawn_config: stdz.Thread.SpawnConfig = .{},
+    tick_interval_ns: u64 = 10 * glib.std.time.ns_per_ms,
+    spawn_config: glib.std.Thread.SpawnConfig = .{},
 } = .{},
 poller: Poller.Config = .{},
 max_adc_buttons: usize = 16,

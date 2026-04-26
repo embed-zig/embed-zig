@@ -300,4 +300,3 @@ fn copySmsTextBuf(value: []const u8) ![max_sms_text_len]u8 {
     @memcpy(buf[0..value.len], value);
     return buf;
 }
-

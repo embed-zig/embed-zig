@@ -9,11 +9,11 @@
 //!   while (gap.nextCommand()) |cmd| _ = try transport.write(cmd);
 //!   gap.handleEvent(hci_event);
 
-const std = @import("std");
+const glib = @import("glib");
+
 const commands = @import("hci/commands.zig");
 const events = @import("hci/events.zig");
 const Status = @import("hci/status.zig").Status;
-const testing_api = @import("testing");
 
 const Gap = @This();
 
@@ -59,8 +59,8 @@ const CmdQueue = struct {
     count: usize = 0,
 
     fn push(self: *CmdQueue, data: []const u8) void {
-        std.debug.assert(self.count < MAX_PENDING_CMDS);
-        std.debug.assert(data.len <= self.items[self.tail].buf.len);
+        glib.std.debug.assert(self.count < MAX_PENDING_CMDS);
+        glib.std.debug.assert(data.len <= self.items[self.tail].buf.len);
         @memcpy(self.items[self.tail].buf[0..data.len], data);
         self.items[self.tail].len = data.len;
         self.tail = (self.tail + 1) % MAX_PENDING_CMDS;
@@ -355,7 +355,7 @@ pub const ConnConfig = struct {
     timeout: u16 = 0x00C8,
 };
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             {
@@ -492,7 +492,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -511,6 +511,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

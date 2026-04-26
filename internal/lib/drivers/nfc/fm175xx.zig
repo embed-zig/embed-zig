@@ -3,8 +3,7 @@
 //! Local design notes: `lib/drivers/nfc/AGENTS.md`
 //! Local driver notes: `lib/drivers/nfc/fm175xx.md`
 
-const Fm175xx = @This();
-
+const glib = @import("glib");
 const Delay = @import("../Delay.zig");
 const I2c = @import("../I2c.zig");
 const Spi = @import("../Spi.zig");
@@ -12,7 +11,8 @@ const TypeA = @import("io/TypeA.zig");
 const regs = @import("fm175xx/regs.zig");
 const type_a = @import("fm175xx/type_a.zig");
 const ntag = @import("fm175xx/ntag.zig");
-const testing_api = @import("testing");
+
+const Fm175xx = @This();
 
 pub const Error = error{
     Timeout,
@@ -515,7 +515,7 @@ fn finishCommand(self: *Fm175xx, maybe_err: ?TypeA.Error, out_bits: usize) TypeA
     return out_bits;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn openAndTypeAConfigureOverI2c() !void {
             const FakeI2c = struct {
@@ -823,7 +823,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -863,5 +863,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

@@ -1,15 +1,14 @@
 //! ledstrip animator test runner — grouped contract checks for Animator.
 
-const stdz = @import("stdz");
-const testing_api = @import("testing");
+const glib = @import("glib");
 const AnimatorMod = @import("../Animator.zig");
 const Color = @import("../Color.zig");
 const LedStrip = @import("../LedStrip.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
-    // Fake strip + Animator: no host threads; shallow call depth (~same class as stdz fmt/json tests).
-    return testing_api.TestRunner.fromFn(lib, 32 * 1024, struct {
-        fn run(t: *testing_api.T, allocator: stdz.mem.Allocator) !void {
+pub fn make(comptime lib: type) glib.testing.TestRunner {
+    // Fake strip + Animator: no host threads; shallow call depth.
+    return glib.testing.TestRunner.fromFn(lib, 32 * 1024, struct {
+        fn run(t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
             _ = t;
             try runAnimatorSuite(lib, allocator);
         }

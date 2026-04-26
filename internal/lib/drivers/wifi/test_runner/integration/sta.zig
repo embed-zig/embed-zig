@@ -4,8 +4,7 @@
 //! introspection and hook registration. Callers can disable scan probing
 //! explicitly when they need a non-invasive surface-only check.
 
-const stdz = @import("stdz");
-const testing_api = @import("testing");
+const glib = @import("glib");
 const wifi = @import("../../../wifi.zig");
 
 pub const Options = struct {
@@ -14,11 +13,11 @@ pub const Options = struct {
     scan_config: wifi.Sta.ScanConfig = .{},
 };
 
-pub fn make(comptime lib: type, device: anytype) testing_api.TestRunner {
+pub fn make(comptime lib: type, device: anytype) glib.testing.TestRunner {
     return makeWithOptions(lib, device, .{});
 }
 
-pub fn makeWithOptions(comptime lib: type, device: anytype, options: Options) testing_api.TestRunner {
+pub fn makeWithOptions(comptime lib: type, device: anytype, options: Options) glib.testing.TestRunner {
     const DevicePtr = @TypeOf(device);
     comptime requireDevicePointer(DevicePtr);
 
@@ -26,12 +25,12 @@ pub fn makeWithOptions(comptime lib: type, device: anytype, options: Options) te
         device: DevicePtr,
         options: Options,
 
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = allocator;
             runSurface(lib, self.device, self.options) catch |err| {
                 t.logFatal(@errorName(err));
@@ -40,7 +39,7 @@ pub fn makeWithOptions(comptime lib: type, device: anytype, options: Options) te
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }
@@ -51,7 +50,7 @@ pub fn makeWithOptions(comptime lib: type, device: anytype, options: Options) te
         .device = device,
         .options = options,
     };
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
 pub fn runSurface(comptime lib: type, device: anytype, options: Options) !void {
@@ -103,7 +102,7 @@ fn requireDevicePointer(comptime T: type) void {
     }
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn runnerObservesScanEventsWhenRequired() !void {
             const Impl = struct {
@@ -185,12 +184,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -201,7 +200,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -210,5 +209,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

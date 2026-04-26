@@ -1,12 +1,12 @@
 //! host.Server — higher-level server facade built on host.Peripheral.
 
-const std = @import("std");
+const glib = @import("glib");
+
 const bt = @import("../../bt.zig");
 const att = @import("att.zig");
 const Chunk = @import("xfer.zig").Chunk;
 const sender_mod = @import("server/Sender.zig");
 const receiver_mod = @import("server/Receiver.zig");
-const testing_api = @import("testing");
 
 const root = @This();
 
@@ -435,7 +435,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
             if (self.peripheral == null) {
                 self.peripheral = peripheral;
             } else {
-                std.debug.assert(samePeripheral(self.peripheral.?, peripheral));
+                glib.std.debug.assert(samePeripheral(self.peripheral.?, peripheral));
             }
 
             if (!self.hook_installed) {
@@ -769,7 +769,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const DummyChannel = struct {
@@ -1052,7 +1052,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -1071,5 +1071,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

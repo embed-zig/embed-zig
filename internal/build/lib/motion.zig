@@ -13,8 +13,15 @@ pub fn create(
     b.modules.put("motion", mod) catch @panic("OOM");
 }
 
-pub fn link(b: *std.Build) void {
-    const testing = b.modules.get("testing") orelse @panic("motion requires testing");
+pub fn link(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const mod = b.modules.get("motion") orelse @panic("motion module missing");
-    mod.addImport("testing", testing);
+    mod.addImport("glib", glib_dep.module("glib"));
 }

@@ -1,25 +1,24 @@
-const stdz = @import("stdz");
+const glib = @import("glib");
 const wifi_event = @import("event.zig");
 const wifi_state = @import("state.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const Message = @import("../../pipeline/Message.zig");
-const testing_api = @import("testing");
 
 const ApReducer = @This();
 const ApState = wifi_state.Ap;
 const MacAddr = wifi_event.MacAddr;
 const Addr = wifi_event.Addr;
 
-clients: stdz.AutoHashMap(MacAddr, ClientRecord),
+clients: glib.std.AutoHashMap(MacAddr, ClientRecord),
 
 const ClientRecord = struct {
     ip: ?Addr = null,
     aid: u16 = 0,
 };
 
-pub fn init(allocator: stdz.mem.Allocator) ApReducer {
+pub fn init(allocator: glib.std.mem.Allocator) ApReducer {
     return .{
-        .clients = stdz.AutoHashMap(MacAddr, ClientRecord).init(allocator),
+        .clients = glib.std.AutoHashMap(MacAddr, ClientRecord).init(allocator),
     };
 }
 
@@ -164,17 +163,16 @@ pub fn deinit(self: *ApReducer) void {
 }
 
 fn syncClientSummary(state: *ApState, self: *ApReducer) void {
-    const max_count: usize = stdz.math.maxInt(u16);
+    const max_count: usize = glib.std.math.maxInt(u16);
     state.client_count = @intCast(@min(self.clients.count(), max_count));
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn reduceTracksActiveClients() !void {
-            const embed_std = @import("embed_std");
             const StoreObject = @import("../../store/Object.zig");
 
-            const ApStore = StoreObject.make(embed_std.std, ApState, .wifi_ap);
+            const ApStore = StoreObject.make(lib, ApState, .wifi_ap);
             var store = ApStore.init(lib.testing.allocator, .{});
             defer store.deinit();
             var reducer = ApReducer.init(lib.testing.allocator);
@@ -277,7 +275,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -297,5 +295,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

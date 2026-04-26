@@ -6,9 +6,9 @@
 //! Event packet format: [indicator(1)][event_code(1)][param_len(1)][params...]
 //! Indicator byte 0x04 = HCI Event.
 
-const std = @import("std");
+const glib = @import("glib");
+
 const Status = @import("status.zig").Status;
-const testing_api = @import("testing");
 
 pub const INDICATOR: u8 = 0x04;
 pub const HEADER_LEN: usize = 3; // indicator + event_code + param_len
@@ -65,13 +65,13 @@ pub const NumCompletedPackets = struct {
     pub fn getHandle(self: NumCompletedPackets, index: usize) ?u16 {
         const offset = index * 4;
         if (offset + 2 > self.data.len) return null;
-        return std.mem.readInt(u16, self.data[offset..][0..2], .little);
+        return glib.std.mem.readInt(u16, self.data[offset..][0..2], .little);
     }
 
     pub fn getCount(self: NumCompletedPackets, index: usize) ?u16 {
         const offset = index * 4 + 2;
         if (offset + 2 > self.data.len) return null;
-        return std.mem.readInt(u16, self.data[offset..][0..2], .little);
+        return glib.std.mem.readInt(u16, self.data[offset..][0..2], .little);
     }
 };
 
@@ -149,7 +149,7 @@ fn decodeCommandComplete(params: []const u8) Event {
     if (params.len < 4) return .{ .unknown = .{ .event_code = COMMAND_COMPLETE, .data = params } };
     return .{ .command_complete = .{
         .num_cmd_packets = params[0],
-        .opcode = std.mem.readInt(u16, params[1..3], .little),
+        .opcode = glib.std.mem.readInt(u16, params[1..3], .little),
         .status = Status.fromByte(params[3]),
         .return_params = if (params.len > 4) params[4..] else &.{},
     } };
@@ -160,7 +160,7 @@ fn decodeCommandStatus(params: []const u8) Event {
     return .{ .command_status = .{
         .status = Status.fromByte(params[0]),
         .num_cmd_packets = params[1],
-        .opcode = std.mem.readInt(u16, params[2..4], .little),
+        .opcode = glib.std.mem.readInt(u16, params[2..4], .little),
     } };
 }
 
@@ -168,7 +168,7 @@ fn decodeDisconnectionComplete(params: []const u8) Event {
     if (params.len < 4) return .{ .unknown = .{ .event_code = DISCONNECTION_COMPLETE, .data = params } };
     return .{ .disconnection_complete = .{
         .status = Status.fromByte(params[0]),
-        .conn_handle = std.mem.readInt(u16, params[1..3], .little) & 0x0FFF,
+        .conn_handle = glib.std.mem.readInt(u16, params[1..3], .little) & 0x0FFF,
         .reason = Status.fromByte(params[3]),
     } };
 }
@@ -202,13 +202,13 @@ fn decodeLeConnectionComplete(params: []const u8) Event {
     if (params.len < 18) return .{ .unknown = .{ .event_code = LE_META, .data = params } };
     return .{ .le_connection_complete = .{
         .status = Status.fromByte(params[0]),
-        .conn_handle = std.mem.readInt(u16, params[1..3], .little) & 0x0FFF,
+        .conn_handle = glib.std.mem.readInt(u16, params[1..3], .little) & 0x0FFF,
         .role = params[3],
         .peer_addr_type = params[4],
         .peer_addr = params[5..11].*,
-        .conn_interval = std.mem.readInt(u16, params[11..13], .little),
-        .conn_latency = std.mem.readInt(u16, params[13..15], .little),
-        .supervision_timeout = std.mem.readInt(u16, params[15..17], .little),
+        .conn_interval = glib.std.mem.readInt(u16, params[11..13], .little),
+        .conn_latency = glib.std.mem.readInt(u16, params[13..15], .little),
+        .supervision_timeout = glib.std.mem.readInt(u16, params[15..17], .little),
     } };
 }
 
@@ -216,13 +216,13 @@ fn decodeLeEnhancedConnectionComplete(params: []const u8) Event {
     if (params.len < 30) return .{ .unknown = .{ .event_code = LE_META, .data = params } };
     return .{ .le_connection_complete = .{
         .status = Status.fromByte(params[0]),
-        .conn_handle = std.mem.readInt(u16, params[1..3], .little) & 0x0FFF,
+        .conn_handle = glib.std.mem.readInt(u16, params[1..3], .little) & 0x0FFF,
         .role = params[3],
         .peer_addr_type = params[4],
         .peer_addr = params[5..11].*,
-        .conn_interval = std.mem.readInt(u16, params[23..25], .little),
-        .conn_latency = std.mem.readInt(u16, params[25..27], .little),
-        .supervision_timeout = std.mem.readInt(u16, params[27..29], .little),
+        .conn_interval = glib.std.mem.readInt(u16, params[23..25], .little),
+        .conn_latency = glib.std.mem.readInt(u16, params[25..27], .little),
+        .supervision_timeout = glib.std.mem.readInt(u16, params[27..29], .little),
     } };
 }
 
@@ -230,14 +230,14 @@ fn decodeLeConnectionUpdateComplete(params: []const u8) Event {
     if (params.len < 9) return .{ .unknown = .{ .event_code = LE_META, .data = params } };
     return .{ .le_connection_update_complete = .{
         .status = Status.fromByte(params[0]),
-        .conn_handle = std.mem.readInt(u16, params[1..3], .little) & 0x0FFF,
-        .conn_interval = std.mem.readInt(u16, params[3..5], .little),
-        .conn_latency = std.mem.readInt(u16, params[5..7], .little),
-        .supervision_timeout = std.mem.readInt(u16, params[7..9], .little),
+        .conn_handle = glib.std.mem.readInt(u16, params[1..3], .little) & 0x0FFF,
+        .conn_interval = glib.std.mem.readInt(u16, params[3..5], .little),
+        .conn_latency = glib.std.mem.readInt(u16, params[5..7], .little),
+        .supervision_timeout = glib.std.mem.readInt(u16, params[7..9], .little),
     } };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             {
@@ -381,7 +381,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -400,6 +400,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

@@ -1,11 +1,12 @@
-const testing_api = @import("testing");
+const glib = @import("glib");
+
 const harness_mod = @import("harness.zig");
 const write_mod = @import("../../../host/xfer/write.zig");
 const recv_mod = @import("../../../host/xfer/recv.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 96 * 1024, struct {
-        fn run(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
+    return glib.testing.TestRunner.fromFn(lib, 96 * 1024, struct {
+        fn run(t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
             _ = t;
             try runCase(lib, Channel, allocator);
         }

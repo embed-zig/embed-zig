@@ -1,4 +1,4 @@
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 const bt = @import("bt");
 const component_bt = @import("../../../component/bt.zig");
@@ -6,7 +6,7 @@ const zux_event = @import("../../../event.zig");
 
 const EventReceiver = zux_event.EventReceiver;
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
     const TestCase = struct {
         fn initAdaptsMockerHostUpdates(testing: anytype, allocator: lib.mem.Allocator) !void {
             const World = bt.Mocker(lib, Channel);
@@ -106,8 +106,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
     };
 
     // Mocker world + polling loop; similar stack demand to BT xfer harness glue.
-    return testing_api.TestRunner.fromFn(lib, 96 * 1024, struct {
-        fn run(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+    return glib.testing.TestRunner.fromFn(lib, 96 * 1024, struct {
+        fn run(t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
             _ = t;
             try TestCase.initAdaptsMockerHostUpdates(lib.testing, allocator);
         }

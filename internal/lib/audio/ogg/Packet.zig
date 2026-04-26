@@ -1,8 +1,7 @@
 //! `audio/ogg/Packet.zig` owns the pure Zig rewrite of upstream `ogg_packet`
 //! plus the clear behavior needed by encode/decode paths.
 
-const stdz = @import("stdz");
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 const Self = @This();
 
@@ -13,7 +12,7 @@ pub const Options = struct {
     packetno: i64 = 0,
 };
 
-allocator: ?stdz.mem.Allocator = null,
+allocator: ?glib.std.mem.Allocator = null,
 packet: []const u8 = &.{},
 bos: bool = false,
 eos: bool = false,
@@ -33,10 +32,10 @@ pub fn initBorrowed(packet: []const u8, options: Options) Self {
 }
 
 pub fn initOwned(
-    allocator: stdz.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     packet: []const u8,
     options: Options,
-) stdz.mem.Allocator.Error!Self {
+) glib.std.mem.Allocator.Error!Self {
     const owned_packet = try allocator.dupe(u8, packet);
     return .{
         .allocator = allocator,
@@ -66,7 +65,7 @@ pub fn clear(self: *Self) void {
     self.* = .{};
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn testBorrowedPacketExposesMetadataAndPayload() !void {
             const testing = lib.testing;
@@ -126,7 +125,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
 
             TestCase.testBorrowedPacketExposesMetadataAndPayload() catch |err| {
@@ -153,5 +152,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

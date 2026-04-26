@@ -1,4 +1,4 @@
-const stdz = @import("stdz");
+const glib = @import("glib");
 const motion = @import("motion");
 
 const Context = @import("../../event/Context.zig");
@@ -7,28 +7,27 @@ const Emitter = @import("../../pipeline/Emitter.zig");
 const Message = @import("../../pipeline/Message.zig");
 const Node = @import("../../pipeline/Node.zig");
 const State = @import("state.zig");
-const testing_api = @import("testing");
 
 const Reducer = @This();
 
-allocator: stdz.mem.Allocator,
-detectors: stdz.AutoHashMap(u32, motion.GestureDetector),
+allocator: glib.std.mem.Allocator,
+detectors: glib.std.AutoHashMap(u32, motion.GestureDetector),
 thresholds: motion.Thresholds,
 out: ?Emitter = null,
 
 pub fn init(
-    allocator: stdz.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     thresholds: motion.Thresholds,
 ) Reducer {
     return .{
         .allocator = allocator,
-        .detectors = stdz.AutoHashMap(u32, motion.GestureDetector).init(allocator),
+        .detectors = glib.std.AutoHashMap(u32, motion.GestureDetector).init(allocator),
         .thresholds = thresholds,
         .out = null,
     };
 }
 
-pub fn initDefault(allocator: stdz.mem.Allocator) Reducer {
+pub fn initDefault(allocator: glib.std.mem.Allocator) Reducer {
     return init(allocator, motion.Thresholds.default);
 }
 
@@ -176,10 +175,10 @@ fn forward(self: *Reducer, message: Message) !usize {
 fn timestampMs(timestamp_ns: i128) u64 {
     if (timestamp_ns <= 0) return 0;
 
-    const ns_per_ms: i128 = stdz.time.ns_per_ms;
+    const ns_per_ms: i128 = glib.std.time.ns_per_ms;
     const timestamp_ms = @divTrunc(timestamp_ns, ns_per_ms);
-    const max_u64_ms: i128 = @intCast(stdz.math.maxInt(u64));
-    if (timestamp_ms >= max_u64_ms) return stdz.math.maxInt(u64);
+    const max_u64_ms: i128 = @intCast(glib.std.math.maxInt(u64));
+    if (timestamp_ms >= max_u64_ms) return glib.std.math.maxInt(u64);
     return @intCast(timestamp_ms);
 }
 
@@ -192,7 +191,7 @@ fn motionKind(action: motion.Action) State.Motion {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn forwardsRawAccelAndEmitsShake(testing: anytype) !void {
             const Collector = struct {
@@ -532,7 +531,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
             const testing = lib.testing;
@@ -573,5 +572,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

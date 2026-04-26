@@ -1,11 +1,12 @@
 //! bt.Host — type-erased BLE host bundle.
 
+const glib = @import("glib");
+
 const bt = @import("../bt.zig");
 const CentralMod = @import("host/Central.zig");
 const Hci = @import("host/Hci.zig");
 const PeripheralMod = @import("host/Peripheral.zig");
 const Transport = @import("Transport.zig");
-const testing_api = @import("testing");
 
 const root = @This();
 
@@ -243,7 +244,7 @@ pub fn makeHci(comptime lib: type, comptime Channel: fn (type) type) type {
 pub fn makeHciTransport(
     comptime lib: type,
     comptime Channel: fn (type) type,
- ) type {
+) type {
     const HciType = Hci.make(lib);
     const Base = makeHci(lib, Channel);
 
@@ -343,11 +344,15 @@ pub fn makeHciTransport(
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
-            const embed_std = @import("embed_std");
-            const ChannelFactory = embed_std.sync.ChannelFactory(lib);
+            const ChannelFactory = struct {
+                fn Channel(comptime T: type) type {
+                    _ = T;
+                    return void;
+                }
+            }.Channel;
 
             comptime {
                 _ = deinit;
@@ -374,7 +379,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -393,6 +398,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

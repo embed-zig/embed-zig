@@ -1,4 +1,4 @@
-const stdz = @import("stdz");
+const glib = @import("glib");
 const JsonParser = @import("JsonParser.zig");
 const Render = @This();
 
@@ -18,11 +18,11 @@ pub fn parseSlice(comptime source: []const u8) Render {
 }
 
 pub fn parseAllocSlice(
-    allocator: stdz.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     source: []const u8,
 ) !Render {
-    var parsed_value = try stdz.json.parseFromSlice(
-        stdz.json.Value,
+    var parsed_value = try glib.std.json.parseFromSlice(
+        glib.std.json.Value,
         allocator,
         source,
         .{},
@@ -32,7 +32,7 @@ pub fn parseAllocSlice(
     return try parseJsonValue(allocator, parsed_value.value);
 }
 
-pub fn deinit(self: *Render, allocator: stdz.mem.Allocator) void {
+pub fn deinit(self: *Render, allocator: glib.std.mem.Allocator) void {
     allocator.free(self.label);
     allocator.free(self.state_path);
     allocator.free(self.render_fn_name);
@@ -93,8 +93,8 @@ fn parseFromParser(parser: *JsonParser) Render {
 }
 
 pub fn parseJsonValue(
-    allocator: stdz.mem.Allocator,
-    value: stdz.json.Value,
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
 ) !Render {
     if (@inComptime()) {
         const object = switch (value) {
@@ -155,11 +155,11 @@ pub fn parseJsonValue(
 
     var iterator = object.iterator();
     while (iterator.next()) |entry| {
-        if (!stdz.mem.eql(u8, entry.key_ptr.*, "label") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "state_path") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "path") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "render_fn_name") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "fn_name"))
+        if (!glib.std.mem.eql(u8, entry.key_ptr.*, "label") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "state_path") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "path") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "render_fn_name") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "fn_name"))
         {
             return error.UnknownRenderField;
         }

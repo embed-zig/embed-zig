@@ -1,7 +1,7 @@
-const testing_api = @import("testing");
+const glib = @import("glib");
 const MixerMod = @import("../../../Mixer.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type) glib.testing.TestRunner {
     const DefaultMixerType = MixerMod.make(lib);
     const Track = MixerMod.Track;
 
@@ -85,8 +85,8 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
         }
     };
 
-    return testing_api.TestRunner.fromFn(lib, 96 * 1024, struct {
-        fn run(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+    return glib.testing.TestRunner.fromFn(lib, 96 * 1024, struct {
+        fn run(t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
             _ = t;
             try TestCase.run(allocator);
         }

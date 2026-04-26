@@ -1,10 +1,10 @@
 //! ledstrip.Animator — multi-frame strip animation helpers.
 
+const glib = @import("glib");
 const Color = @import("Color.zig");
 const Frame = @import("Frame.zig");
 const LedStrip = @import("LedStrip.zig");
 const Transition = @import("Transition.zig");
-const testing_api = @import("testing");
 
 pub fn make(comptime n: usize, comptime max_frames: usize) type {
     comptime {
@@ -176,7 +176,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn fixedConvergesToTarget() !void {
             const F = Frame.make(4);
@@ -412,7 +412,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
 
             TestCase.fixedConvergesToTarget() catch |err| {
@@ -467,5 +467,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

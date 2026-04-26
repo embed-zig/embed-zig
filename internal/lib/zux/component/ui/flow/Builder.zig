@@ -1,5 +1,5 @@
-const stdz = @import("stdz");
-const builtin = stdz.builtin;
+const glib = @import("glib");
+const builtin = glib.std.builtin;
 const Dag = @import("Dag.zig");
 const ReducerTemplate = @import("Reducer.zig");
 const StateTemplate = @import("State.zig");
@@ -193,7 +193,7 @@ fn makeEnum(comptime labels: []const []const u8, comptime duplicate_message: []c
 
     return @Type(.{
         .@"enum" = .{
-            .tag_type = if (count == 0) u0 else stdz.math.IntFittingRange(0, count - 1),
+            .tag_type = if (count == 0) u0 else glib.std.math.IntFittingRange(0, count - 1),
             .fields = &fields,
             .decls = &.{},
             .is_exhaustive = true,

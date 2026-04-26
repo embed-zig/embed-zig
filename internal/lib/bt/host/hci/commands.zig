@@ -6,8 +6,7 @@
 //! Packet format: [indicator(1)][opcode(2)][param_len(1)][params...]
 //! Indicator byte 0x01 = HCI Command.
 
-const std = @import("std");
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 pub const INDICATOR: u8 = 0x01;
 pub const HEADER_LEN: usize = 4; // indicator + opcode(2) + param_len(1)
@@ -48,9 +47,9 @@ pub const LE_READ_MAX_DATA_LENGTH: u16 = 0x202F;
 
 /// Generic encoder: writes any HCI command with raw parameter bytes.
 pub fn encode(buf: []u8, opcode: u16, params: []const u8) []const u8 {
-    std.debug.assert(params.len <= MAX_PARAM_LEN);
+    glib.std.debug.assert(params.len <= MAX_PARAM_LEN);
     const total = HEADER_LEN + params.len;
-    std.debug.assert(buf.len >= total);
+    glib.std.debug.assert(buf.len >= total);
 
     buf[0] = INDICATOR;
     buf[1] = @truncate(opcode);
@@ -87,14 +86,14 @@ pub fn readBufferSize(buf: []u8) []const u8 {
 /// HCI_Set_Event_Mask (Vol 4 Part E 7.3.1)
 pub fn setEventMask(buf: []u8, mask: u64) []const u8 {
     var params: [8]u8 = undefined;
-    std.mem.writeInt(u64, &params, mask, .little);
+    glib.std.mem.writeInt(u64, &params, mask, .little);
     return encode(buf, SET_EVENT_MASK, &params);
 }
 
 /// HCI_LE_Set_Event_Mask (Vol 4 Part E 7.8.1)
 pub fn leSetEventMask(buf: []u8, mask: u64) []const u8 {
     var params: [8]u8 = undefined;
-    std.mem.writeInt(u64, &params, mask, .little);
+    glib.std.mem.writeInt(u64, &params, mask, .little);
     return encode(buf, LE_SET_EVENT_MASK, &params);
 }
 
@@ -111,8 +110,8 @@ pub fn leSetRandomAddr(buf: []u8, addr: [6]u8) []const u8 {
 /// HCI_LE_Set_Advertising_Parameters (Vol 4 Part E 7.8.5)
 pub fn leSetAdvParams(buf: []u8, config: AdvParams) []const u8 {
     var params: [15]u8 = undefined;
-    std.mem.writeInt(u16, params[0..2], config.interval_min, .little);
-    std.mem.writeInt(u16, params[2..4], config.interval_max, .little);
+    glib.std.mem.writeInt(u16, params[0..2], config.interval_min, .little);
+    glib.std.mem.writeInt(u16, params[2..4], config.interval_max, .little);
     params[4] = @intFromEnum(config.adv_type);
     params[5] = @intFromEnum(config.own_addr_type);
     params[6] = @intFromEnum(config.peer_addr_type);
@@ -149,8 +148,8 @@ pub fn leSetAdvEnable(buf: []u8, enabled: bool) []const u8 {
 pub fn leSetScanParams(buf: []u8, config: ScanParams) []const u8 {
     var params: [7]u8 = undefined;
     params[0] = @intFromBool(config.active);
-    std.mem.writeInt(u16, params[1..3], config.interval, .little);
-    std.mem.writeInt(u16, params[3..5], config.window, .little);
+    glib.std.mem.writeInt(u16, params[1..3], config.interval, .little);
+    glib.std.mem.writeInt(u16, params[3..5], config.window, .little);
     params[5] = @intFromEnum(config.own_addr_type);
     params[6] = @intFromEnum(config.filter_policy);
     return encode(buf, LE_SET_SCAN_PARAMS, &params);
@@ -164,18 +163,18 @@ pub fn leSetScanEnable(buf: []u8, enabled: bool, filter_duplicates: bool) []cons
 /// HCI_LE_Create_Connection (Vol 4 Part E 7.8.12)
 pub fn leCreateConnection(buf: []u8, config: ConnParams) []const u8 {
     var params: [25]u8 = undefined;
-    std.mem.writeInt(u16, params[0..2], config.scan_interval, .little);
-    std.mem.writeInt(u16, params[2..4], config.scan_window, .little);
+    glib.std.mem.writeInt(u16, params[0..2], config.scan_interval, .little);
+    glib.std.mem.writeInt(u16, params[2..4], config.scan_window, .little);
     params[4] = @intFromEnum(config.filter_policy);
     params[5] = @intFromEnum(config.peer_addr_type);
     @memcpy(params[6..12], &config.peer_addr);
     params[12] = @intFromEnum(config.own_addr_type);
-    std.mem.writeInt(u16, params[13..15], config.conn_interval_min, .little);
-    std.mem.writeInt(u16, params[15..17], config.conn_interval_max, .little);
-    std.mem.writeInt(u16, params[17..19], config.max_latency, .little);
-    std.mem.writeInt(u16, params[19..21], config.supervision_timeout, .little);
-    std.mem.writeInt(u16, params[21..23], config.min_ce_length, .little);
-    std.mem.writeInt(u16, params[23..25], config.max_ce_length, .little);
+    glib.std.mem.writeInt(u16, params[13..15], config.conn_interval_min, .little);
+    glib.std.mem.writeInt(u16, params[15..17], config.conn_interval_max, .little);
+    glib.std.mem.writeInt(u16, params[17..19], config.max_latency, .little);
+    glib.std.mem.writeInt(u16, params[19..21], config.supervision_timeout, .little);
+    glib.std.mem.writeInt(u16, params[21..23], config.min_ce_length, .little);
+    glib.std.mem.writeInt(u16, params[23..25], config.max_ce_length, .little);
     return encode(buf, LE_CREATE_CONNECTION, &params);
 }
 
@@ -187,7 +186,7 @@ pub fn leCreateConnectionCancel(buf: []u8) []const u8 {
 /// HCI_Disconnect (Vol 4 Part E 7.1.6)
 pub fn disconnect(buf: []u8, conn_handle: u16, reason: u8) []const u8 {
     var params: [3]u8 = undefined;
-    std.mem.writeInt(u16, params[0..2], conn_handle, .little);
+    glib.std.mem.writeInt(u16, params[0..2], conn_handle, .little);
     params[2] = reason;
     return encode(buf, DISCONNECT, &params);
 }
@@ -267,7 +266,7 @@ pub const ConnParams = struct {
     max_ce_length: u16 = 0,
 };
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             var buf: [MAX_CMD_LEN]u8 = undefined;
@@ -310,7 +309,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -329,6 +328,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

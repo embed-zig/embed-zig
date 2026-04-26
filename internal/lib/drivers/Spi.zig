@@ -3,8 +3,9 @@
 //! This wrapper intentionally exposes only the operations currently needed by
 //! `lib/drivers`: write-only transactions and full-duplex transfers.
 
+const glib = @import("glib");
+
 const Spi = @This();
-const testing_api = @import("testing");
 
 ptr: *anyopaque,
 vtable: *const VTable,
@@ -60,7 +61,7 @@ pub fn init(pointer: anytype) Spi {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn dispatchesWriteAndTransfer() !void {
             const Fake = struct {
@@ -132,7 +133,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -156,5 +157,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

@@ -3,11 +3,11 @@
 //! Wraps shared `host.Hci` to implement the low-level `bt.Central` VTable.
 //! Translates scan / connect / GATT client operations into HCI + ATT traffic.
 
-const std = @import("std");
+const glib = @import("glib");
+
 const bt = @import("../../bt.zig");
 const att = @import("att.zig");
 const gatt_client = @import("gatt/client.zig");
-const testing_api = @import("testing");
 
 pub fn make(comptime lib: type) type {
     return struct {
@@ -22,8 +22,8 @@ pub fn make(comptime lib: type) type {
         started: bool = false,
         att_mtu: u16 = bt.Central.DEFAULT_ATT_MTU,
         mutex: lib.Thread.Mutex = .{},
-        hooks: std.ArrayListUnmanaged(EventHook) = .{},
-        scan_service_uuids: std.ArrayListUnmanaged(u16) = .{},
+        hooks: glib.std.ArrayListUnmanaged(EventHook) = .{},
+        scan_service_uuids: glib.std.ArrayListUnmanaged(u16) = .{},
         allocator: lib.mem.Allocator,
 
         const EventHook = struct {
@@ -539,7 +539,7 @@ pub fn make(comptime lib: type) type {
                     0x02, 0x03 => {
                         var pos: usize = 0;
                         while (pos + 2 <= field_data.len) : (pos += 2) {
-                            const uuid = std.mem.readInt(u16, field_data[pos..][0..2], .little);
+                            const uuid = glib.std.mem.readInt(u16, field_data[pos..][0..2], .little);
                             for (filter) |wanted| {
                                 if (wanted == uuid) return true;
                             }
@@ -547,7 +547,7 @@ pub fn make(comptime lib: type) type {
                     },
                     0x16 => {
                         if (field_data.len >= 2) {
-                            const uuid = std.mem.readInt(u16, field_data[0..][0..2], .little);
+                            const uuid = glib.std.mem.readInt(u16, field_data[0..][0..2], .little);
                             for (filter) |wanted| {
                                 if (wanted == uuid) return true;
                             }
@@ -590,7 +590,7 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const Impl = make(lib);
@@ -764,10 +764,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                             const resp = [_]u8{
                                 att.READ_BY_TYPE_RESPONSE,
                                 7,
-                                0x02, 0x00,
+                                0x02,
+                                0x00,
                                 0x10,
-                                0x03, 0x00,
-                                0x58, 0x2A,
+                                0x03,
+                                0x00,
+                                0x58,
+                                0x2A,
                             };
                             @memcpy(out[0..resp.len], &resp);
                             return resp.len;
@@ -778,8 +781,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                             const resp = [_]u8{
                                 att.FIND_INFORMATION_RESPONSE,
                                 0x01,
-                                0x04, 0x00,
-                                0x02, 0x29,
+                                0x04,
+                                0x00,
+                                0x02,
+                                0x29,
                             };
                             @memcpy(out[0..resp.len], &resp);
                             return resp.len;
@@ -807,7 +812,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -827,6 +832,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

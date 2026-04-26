@@ -3,9 +3,9 @@
 //! Generates ATT request PDUs and parses ATT response PDUs.
 //! No I/O — the Hci coordinator handles actual transport.
 
-const std = @import("std");
+const glib = @import("glib");
+
 const att = @import("../att.zig");
-const testing_api = @import("testing");
 
 pub const DiscoveredService = struct {
     start_handle: u16,
@@ -38,9 +38,9 @@ pub fn parseDiscoverServicesResponse(data: []const u8, out: []DiscoveredService)
                 const entry = resp.data[offset..][0..entry_len];
                 if (entry_len >= 6) {
                     out[count] = .{
-                        .start_handle = std.mem.readInt(u16, entry[0..2], .little),
-                        .end_handle = std.mem.readInt(u16, entry[2..4], .little),
-                        .uuid = std.mem.readInt(u16, entry[4..6], .little),
+                        .start_handle = glib.std.mem.readInt(u16, entry[0..2], .little),
+                        .end_handle = glib.std.mem.readInt(u16, entry[2..4], .little),
+                        .uuid = glib.std.mem.readInt(u16, entry[4..6], .little),
                     };
                     count += 1;
                 }
@@ -70,10 +70,10 @@ pub fn parseDiscoverCharsResponse(data: []const u8, out: []DiscoveredChar) usize
                 const entry = resp.data[offset..][0..entry_len];
                 if (entry_len >= 7) {
                     out[count] = .{
-                        .decl_handle = std.mem.readInt(u16, entry[0..2], .little),
+                        .decl_handle = glib.std.mem.readInt(u16, entry[0..2], .little),
                         .properties = entry[2],
-                        .value_handle = std.mem.readInt(u16, entry[3..5], .little),
-                        .uuid = std.mem.readInt(u16, entry[5..7], .little),
+                        .value_handle = glib.std.mem.readInt(u16, entry[3..5], .little),
+                        .uuid = glib.std.mem.readInt(u16, entry[5..7], .little),
                     };
                     count += 1;
                 }
@@ -98,8 +98,8 @@ pub fn parseFindCccdResponse(data: []const u8) ?u16 {
             if (resp.format != 0x01) return null; // only 16-bit UUIDs
             var offset: usize = 0;
             while (offset + 4 <= resp.data.len) {
-                const handle = std.mem.readInt(u16, resp.data[offset..][0..2], .little);
-                const uuid = std.mem.readInt(u16, resp.data[offset + 2 ..][0..2], .little);
+                const handle = glib.std.mem.readInt(u16, resp.data[offset..][0..2], .little);
+                const uuid = glib.std.mem.readInt(u16, resp.data[offset + 2 ..][0..2], .little);
                 if (uuid == att.CCCD_UUID) return handle;
                 offset += 4;
             }
@@ -164,7 +164,7 @@ pub fn isErrorFor(data: []const u8, request_opcode: u8) ?att.ErrorCode {
     }
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             {
@@ -211,7 +211,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -230,6 +230,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

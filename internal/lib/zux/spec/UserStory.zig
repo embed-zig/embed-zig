@@ -1,5 +1,4 @@
-const stdz = @import("stdz");
-const testing_api = @import("testing");
+const glib = @import("glib");
 const JsonParser = @import("JsonParser.zig");
 const UserStory = @This();
 
@@ -38,7 +37,7 @@ pub fn deinit(self: *UserStory) void {
     _ = self;
 }
 
-pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *ZuxApp) testing_api.TestRunner {
+pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *ZuxApp) glib.testing.TestRunner {
     comptime {
         validateCreateTestRunnerApp(ZuxApp);
     }
@@ -47,12 +46,12 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
         story: *const UserStory,
         app: *ZuxApp,
 
-        pub fn init(runner: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(runner: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = runner;
             _ = allocator;
         }
 
-        pub fn run(runner: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(runner: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             runner.app.start(.{ .ticker = .manual }) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
@@ -66,7 +65,7 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
             return true;
         }
 
-        fn runSteps(runner: *@This(), allocator: stdz.mem.Allocator) !void {
+        fn runSteps(runner: *@This(), allocator: glib.std.mem.Allocator) !void {
             var tick_seq: u64 = 0;
             var timestamp_ns: i128 = 0;
 
@@ -77,7 +76,7 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
 
         fn runOneStep(
             runner: *@This(),
-            allocator: stdz.mem.Allocator,
+            allocator: glib.std.mem.Allocator,
             step: Step,
             tick_seq: *u64,
             timestamp_ns: *i128,
@@ -100,8 +99,8 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
             }
 
             for (step.inputs) |event_source| {
-                var event_value = try stdz.json.parseFromSlice(
-                    stdz.json.Value,
+                var event_value = try glib.std.json.parseFromSlice(
+                    glib.std.json.Value,
                     allocator,
                     event_source,
                     .{},
@@ -117,9 +116,9 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
 
             for (step.outputs) |output| {
                 inline for (@typeInfo(ZuxApp.Store.Stores).@"struct".fields) |field| {
-                    if (stdz.mem.eql(u8, output.label, field.name)) {
-                        var state_value = try stdz.json.parseFromSlice(
-                            stdz.json.Value,
+                    if (glib.std.mem.eql(u8, output.label, field.name)) {
+                        var state_value = try glib.std.json.parseFromSlice(
+                            glib.std.json.Value,
                             allocator,
                             output.state,
                             .{},
@@ -128,7 +127,7 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                         const actual_state = @field(runner.app.store.stores, field.name).get();
                         const StateType = @TypeOf(actual_state);
                         if (!try jsonValueMatches(StateType, state_value.value, actual_state)) {
-                            stdz.debug.print(
+                            glib.std.debug.print(
                                 "zux UserStory mismatch label={s} expected={s} actual={any}\n",
                                 .{ output.label, output.state, actual_state },
                             );
@@ -221,7 +220,7 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
             return frame;
         }
 
-        pub fn deinit(runner: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(runner: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = runner;
             _ = allocator;
         }
@@ -235,7 +234,7 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
         .story = self,
         .app = app,
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
 
 fn parseStoryFromParser(parser: *JsonParser) UserStory {
@@ -504,8 +503,8 @@ fn validateCreateTestRunnerApp(comptime ZuxApp: type) void {
 
 fn decodeJsonValue(
     comptime T: type,
-    allocator: stdz.mem.Allocator,
-    value: stdz.json.Value,
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
 ) !T {
     comptime {
         @setEvalBranchQuota(20_000);
@@ -533,7 +532,7 @@ fn decodeJsonValue(
         .@"enum" => |info| switch (value) {
             .string => |name| blk: {
                 inline for (info.fields) |field| {
-                    if (stdz.mem.eql(u8, name, field.name)) {
+                    if (glib.std.mem.eql(u8, name, field.name)) {
                         break :blk @field(T, field.name);
                     }
                 }
@@ -623,7 +622,7 @@ fn decodeJsonValue(
                 var matched = false;
 
                 inline for (info.fields, 0..) |field, i| {
-                    if (stdz.mem.eql(u8, entry.key_ptr.*, field.name)) {
+                    if (glib.std.mem.eql(u8, entry.key_ptr.*, field.name)) {
                         @field(result, field.name) = try decodeJsonValue(
                             field.type,
                             allocator,
@@ -659,7 +658,7 @@ fn decodeJsonValue(
             if (iterator.next() != null) return error.InvalidUnionObject;
 
             inline for (info.fields) |field| {
-                if (stdz.mem.eql(u8, entry.key_ptr.*, field.name)) {
+                if (glib.std.mem.eql(u8, entry.key_ptr.*, field.name)) {
                     return @unionInit(
                         T,
                         field.name,
@@ -694,7 +693,7 @@ fn castJsonInteger(comptime T: type, int_value: i64) !T {
 
 fn jsonValueMatches(
     comptime T: type,
-    expected: stdz.json.Value,
+    expected: glib.std.json.Value,
     actual: T,
 ) !bool {
     return switch (@typeInfo(T)) {
@@ -717,7 +716,7 @@ fn jsonValueMatches(
         },
 
         .@"enum" => switch (expected) {
-            .string => |name| stdz.mem.eql(u8, name, @tagName(actual)),
+            .string => |name| glib.std.mem.eql(u8, name, @tagName(actual)),
             else => error.ExpectedEnumString,
         },
 
@@ -727,7 +726,7 @@ fn jsonValueMatches(
         },
 
         .array => |info| if (info.child == u8) switch (expected) {
-            .string => |text| text.len <= info.len and stdz.mem.eql(u8, text, actual[0..text.len]),
+            .string => |text| text.len <= info.len and glib.std.mem.eql(u8, text, actual[0..text.len]),
             .array => |array| blk: {
                 if (array.items.len > info.len) return error.ArrayLengthMismatch;
                 for (array.items, 0..) |item, i| {
@@ -751,7 +750,7 @@ fn jsonValueMatches(
             .slice => switch (expected) {
                 .string => |text| {
                     if (info.child != u8) return error.ExpectedArray;
-                    return stdz.mem.eql(u8, text, actual);
+                    return glib.std.mem.eql(u8, text, actual);
                 },
                 .array => |array| blk: {
                     if (array.items.len != actual.len) return false;
@@ -776,7 +775,7 @@ fn jsonValueMatches(
                 var matched = false;
 
                 inline for (info.fields) |field| {
-                    if (stdz.mem.eql(u8, entry.key_ptr.*, field.name)) {
+                    if (glib.std.mem.eql(u8, entry.key_ptr.*, field.name)) {
                         if (!(try jsonValueMatches(
                             field.type,
                             entry.value_ptr.*,
@@ -806,7 +805,7 @@ fn jsonValueMatches(
 
             switch (actual) {
                 inline else => |payload, tag| {
-                    if (!stdz.mem.eql(u8, entry.key_ptr.*, @tagName(tag))) break :blk false;
+                    if (!glib.std.mem.eql(u8, entry.key_ptr.*, @tagName(tag))) break :blk false;
                     break :blk try jsonValueMatches(@TypeOf(payload), entry.value_ptr.*, payload);
                 },
             }
@@ -818,7 +817,7 @@ fn jsonValueMatches(
 
 fn freeDecodedValue(
     comptime T: type,
-    allocator: stdz.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     value: *const T,
 ) void {
     switch (@typeInfo(T)) {
@@ -877,7 +876,7 @@ fn comptimeEql(comptime a: []const u8, comptime b: []const u8) bool {
     return true;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn parses_story_json(testing: anytype, allocator: lib.mem.Allocator) !void {
             const source =
@@ -933,8 +932,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             if (parsed.steps[1].inputs.len != 1) {
                 return error.ExpectedDispatchStep;
             }
-            var input_value = try stdz.json.parseFromSlice(
-                stdz.json.Value,
+            var input_value = try glib.std.json.parseFromSlice(
+                glib.std.json.Value,
                 allocator,
                 parsed.steps[1].inputs[0],
                 .{},
@@ -949,8 +948,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 return error.ExpectedStateCheckStep;
             }
             try testing.expectEqualStrings("counter", parsed.steps[2].outputs[0].label);
-            var state_value = try stdz.json.parseFromSlice(
-                stdz.json.Value,
+            var state_value = try glib.std.json.parseFromSlice(
+                glib.std.json.Value,
                 allocator,
                 parsed.steps[2].outputs[0].state,
                 .{},
@@ -994,7 +993,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             const testing = lib.testing;
 
@@ -1019,5 +1018,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

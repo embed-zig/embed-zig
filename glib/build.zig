@@ -57,6 +57,14 @@ pub fn build(b: *std.Build) void {
         .context = context_mod,
     });
 
+    b.modules.put("stdz", stdz_mod) catch @panic("OOM");
+    b.modules.put("testing", testing_mod) catch @panic("OOM");
+    b.modules.put("context", context_mod) catch @panic("OOM");
+    b.modules.put("sync", sync_mod) catch @panic("OOM");
+    b.modules.put("io", io_mod) catch @panic("OOM");
+    b.modules.put("mime", mime_mod) catch @panic("OOM");
+    b.modules.put("net", net_mod) catch @panic("OOM");
+
     const glib_mod = lib_glib.create(b, target, optimize);
     lib_glib.link(glib_mod, .{
         .stdz = stdz_mod,

@@ -1,13 +1,13 @@
-const stdz = @import("stdz");
-const testing_api = @import("testing");
+const glib = @import("glib");
+
 const harness_mod = @import("harness.zig");
 const read_mod = @import("../../../host/xfer/read.zig");
 const send_mod = @import("../../../host/xfer/send.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
     // Harness + 2 helper threads; worker thread is thin glue (xfer protocol stacks live on spawns).
-    return testing_api.TestRunner.fromFn(lib, 96 * 1024, struct {
-        fn run(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+    return glib.testing.TestRunner.fromFn(lib, 96 * 1024, struct {
+        fn run(t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
             _ = t;
             try runCase(lib, Channel, allocator);
         }
@@ -53,7 +53,7 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
 
         fn dataFn(
             _: ?*anyopaque,
-            payload_allocator: stdz.mem.Allocator,
+            payload_allocator: glib.std.mem.Allocator,
             conn_handle: u16,
             service_uuid: u16,
             char_uuid: u16,

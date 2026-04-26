@@ -109,6 +109,7 @@ pub const io = @import("io");
 pub const mime = @import("mime");
 pub const net = @import("net");
 pub const runtime = struct {
+    const runtime_ns = @This();
     const TypeMarker = struct {};
     pub const Options = struct {
         stdz_impl: type,
@@ -123,6 +124,7 @@ pub const runtime = struct {
 
         return struct {
             const runtime_marker: TypeMarker = .{};
+            pub const runtime = runtime_ns;
             pub const std = std_ns;
             pub const context = @import("context").make(std_ns);
             pub const sync = struct {

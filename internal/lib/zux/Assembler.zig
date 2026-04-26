@@ -484,7 +484,6 @@ pub fn make(
                         .vtable = &gen.vtable,
                     };
                 }
-
             };
         }
     };

@@ -13,10 +13,15 @@ pub fn create(
     b.modules.put("ledstrip", mod) catch @panic("OOM");
 }
 
-pub fn link(b: *std.Build) void {
-    const stdz = b.modules.get("stdz") orelse @panic("ledstrip requires stdz");
-    const testing = b.modules.get("testing") orelse @panic("ledstrip requires testing");
+pub fn link(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const mod = b.modules.get("ledstrip") orelse @panic("ledstrip module missing");
-    mod.addImport("stdz", stdz);
-    mod.addImport("testing", testing);
+    mod.addImport("glib", glib_dep.module("glib"));
 }

@@ -1,4 +1,4 @@
-const stdz = @import("stdz");
+const glib = @import("glib");
 const motion = @import("motion");
 const Context = @import("../../event/Context.zig");
 const button_event = @import("event.zig");
@@ -6,7 +6,6 @@ const button_state = @import("state.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const Message = @import("../../pipeline/Message.zig");
 const Node = @import("../../pipeline/Node.zig");
-const testing_api = @import("testing");
 
 const Reducer = @This();
 const State = button_state.Detected;
@@ -22,16 +21,16 @@ const Key = struct {
 pub const default_long_press_ns: u64 = ClickDetector.default_long_press_ns;
 pub const default_multi_click_window_ns: u64 = ClickDetector.default_multi_click_window_ns;
 
-allocator: stdz.mem.Allocator,
-states: stdz.AutoHashMap(Key, ClickDetector),
+allocator: glib.std.mem.Allocator,
+states: glib.std.AutoHashMap(Key, ClickDetector),
 out: ?Emitter = null,
 long_press_ns: u64 = default_long_press_ns,
 multi_click_window_ns: u64 = default_multi_click_window_ns,
 
-pub fn init(allocator: stdz.mem.Allocator) Reducer {
+pub fn init(allocator: glib.std.mem.Allocator) Reducer {
     return .{
         .allocator = allocator,
-        .states = stdz.AutoHashMap(Key, ClickDetector).init(allocator),
+        .states = glib.std.AutoHashMap(Key, ClickDetector).init(allocator),
         .out = null,
         .long_press_ns = default_long_press_ns,
         .multi_click_window_ns = default_multi_click_window_ns,
@@ -262,7 +261,7 @@ fn forward(self: *Reducer, message: Message) !usize {
     return 0;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn rawSingleButtonClickEmitsCountAfterTick(testing: anytype) !void {
             const Collector = struct {
@@ -589,10 +588,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         }
 
         fn reduceGroupedUpdatesStore(testing: anytype) !void {
-            const embed_std = @import("embed_std");
             const StoreObject = @import("../../store/Object.zig");
 
-            const GroupedStore = StoreObject.make(embed_std.std, GroupedState, .grouped_button);
+            const GroupedStore = StoreObject.make(lib, GroupedState, .grouped_button);
             var store = GroupedStore.init(testing.allocator, .{});
             defer store.deinit();
 
@@ -620,10 +618,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         }
 
         fn reduceSingleUpdatesStore(testing: anytype) !void {
-            const embed_std = @import("embed_std");
             const StoreObject = @import("../../store/Object.zig");
 
-            const SingleStore = StoreObject.make(embed_std.std, SingleState, .single_button);
+            const SingleStore = StoreObject.make(lib, SingleState, .single_button);
             var store = SingleStore.init(testing.allocator, .{});
             defer store.deinit();
 
@@ -649,10 +646,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         }
 
         fn reduceUpdatesStore(testing: anytype) !void {
-            const embed_std = @import("embed_std");
             const StoreObject = @import("../../store/Object.zig");
 
-            const GestureStore = StoreObject.make(embed_std.std, State, .button_gesture);
+            const GestureStore = StoreObject.make(lib, State, .button_gesture);
             var store = GestureStore.init(testing.allocator, .{});
             defer store.deinit();
 
@@ -689,7 +685,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
             const testing = lib.testing;
@@ -738,5 +734,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

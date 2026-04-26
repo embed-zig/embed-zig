@@ -2,7 +2,7 @@ const modem_event = @import("event.zig");
 const ModemState = @import("State.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const Message = @import("../../pipeline/Message.zig");
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 const Reducer = @This();
 
@@ -156,13 +156,12 @@ pub fn deinit(self: *Reducer) void {
     _ = self;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn reduceTracksModemState() !void {
-            const embed_std = @import("embed_std");
             const StoreObject = @import("../../store/Object.zig");
 
-            const ModemStore = StoreObject.make(embed_std.std, ModemState, .modem);
+            const ModemStore = StoreObject.make(lib, ModemState, .modem);
             var store = ModemStore.init(lib.testing.allocator, .{});
             defer store.deinit();
             var reducer = Reducer.init();
@@ -345,7 +344,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -365,5 +364,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

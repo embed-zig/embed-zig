@@ -5,6 +5,7 @@ const re_export = struct {
 
     pub const IntFittingRange = std.math.IntFittingRange;
     pub const Order = std.math.Order;
+    pub const atan2 = std.math.atan2;
     pub const maxInt = std.math.maxInt;
     pub const nan = std.math.nan;
     pub const order = std.math.order;
@@ -12,6 +13,7 @@ const re_export = struct {
 
 pub const IntFittingRange = re_export.IntFittingRange;
 pub const Order = re_export.Order;
+pub const atan2 = re_export.atan2;
 pub const maxInt = re_export.maxInt;
 pub const nan = re_export.nan;
 pub const order = re_export.order;

@@ -9,13 +9,15 @@
         .glib = .{
             .path = "glib",
         },
+        .glib_stdrt = .{
+            .path = "glib_stdrt",
+        },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "glib/",
         "glib_stdrt/",
-        "lib/",
         "internal/",
         "pkg/",
     },

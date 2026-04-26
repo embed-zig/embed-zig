@@ -22,9 +22,10 @@
 //!   try adc.setSampleRate(16_000);
 //!   try adc.setGainAll(.@"30dB");
 
+const glib = @import("glib");
 const I2c = @import("../I2c.zig");
+
 const es7210 = @This();
-const testing_api = @import("testing");
 
 /// ES7210 I2C address (7-bit, depends on AD1/AD0 pins)
 pub const Address = enum(u7) {
@@ -680,7 +681,7 @@ fn getClockCoeff(mclk: u32, lrck: u32) ?ClockCoeff {
     }
     return null;
 }
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn selectMicsEnablesTdmForThreeChannels() !void {
             const FakeI2c = struct {
@@ -726,7 +727,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -746,5 +747,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

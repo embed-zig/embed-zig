@@ -1,4 +1,4 @@
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 const Message = @import("../../pipeline/Message.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
@@ -8,14 +8,14 @@ const NodeBuilder = @import("../../pipeline/NodeBuilder.zig");
 const BranchNode = @import("../../pipeline/BranchNode.zig");
 const Pipeline = @import("../../pipeline/Pipeline.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
             t.parallel();
@@ -38,5 +38,5 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

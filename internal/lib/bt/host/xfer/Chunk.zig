@@ -1,7 +1,6 @@
 //! Chunk — BLE xfer chunk encoding and bitmask utilities.
 
-const stdz = @import("stdz");
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 /// Maximum number of chunks supported by the 12-bit header fields.
 pub const max_chunks: u16 = 4095;
@@ -56,11 +55,11 @@ pub const Header = struct {
 };
 
 pub fn isReadStartMagic(data: []const u8) bool {
-    return data.len >= read_start_magic.len and stdz.mem.eql(u8, data[0..read_start_magic.len], &read_start_magic);
+    return data.len >= read_start_magic.len and glib.std.mem.eql(u8, data[0..read_start_magic.len], &read_start_magic);
 }
 
 pub fn isWriteStartMagic(data: []const u8) bool {
-    return data.len >= write_start_magic.len and stdz.mem.eql(u8, data[0..write_start_magic.len], &write_start_magic);
+    return data.len >= write_start_magic.len and glib.std.mem.eql(u8, data[0..write_start_magic.len], &write_start_magic);
 }
 
 pub fn isAck(data: []const u8) bool {
@@ -159,7 +158,7 @@ pub fn chunksNeeded(data_len: usize, mtu: u16) usize {
     return (data_len + dcs - 1) / dcs;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const headers = [_]Header{
@@ -272,7 +271,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -291,6 +290,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

@@ -1,6 +1,5 @@
-const stdz = @import("stdz");
-const builtin = stdz.builtin;
-const testing_api = @import("testing");
+const glib = @import("glib");
+const builtin = glib.std.builtin;
 const JsonParser = @import("JsonParser.zig");
 const StoreObject = @This();
 
@@ -195,7 +194,7 @@ fn isIdentContinue(ch: u8) bool {
     return isIdentStart(ch) or (ch >= '0' and ch <= '9');
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn parse_from_slice_generates_store_object_type(testing: anytype) !void {
             const Spec = parseSlice(
@@ -256,7 +255,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
             const testing = lib.testing;
@@ -286,5 +285,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

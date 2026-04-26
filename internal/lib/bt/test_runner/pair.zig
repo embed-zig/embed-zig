@@ -7,10 +7,10 @@
 //! On hardware these would run on two different boards/processes.
 //! For local tests, a mock HCI system can run both in one process.
 
-const stdz = @import("stdz");
+const glib = @import("glib");
+
 const Central = @import("../Central.zig");
 const Peripheral = @import("../Peripheral.zig");
-const testing_api = @import("testing");
 
 const device_name = "EmbedPair";
 const service_uuid: u16 = 0xFFE0;
@@ -23,19 +23,19 @@ const indicate_request = "PAIR:INDICATE";
 const indicate_value = "i1";
 const pair_timeout_ms: u32 = 5000;
 
-pub fn makeCentral(comptime lib: type, host: anytype) testing_api.TestRunner {
+pub fn makeCentral(comptime lib: type, host: anytype) glib.testing.TestRunner {
     const HostPtr = @TypeOf(host);
     comptime requireHostPointer(HostPtr);
 
     const Runner = struct {
         host: HostPtr,
 
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = allocator;
             const c = self.host.central();
             c.start() catch |err| {
@@ -51,7 +51,7 @@ pub fn makeCentral(comptime lib: type, host: anytype) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }
@@ -59,22 +59,22 @@ pub fn makeCentral(comptime lib: type, host: anytype) testing_api.TestRunner {
 
     const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{ .host = host };
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
-pub fn makePeripheral(comptime lib: type, host: anytype) testing_api.TestRunner {
+pub fn makePeripheral(comptime lib: type, host: anytype) glib.testing.TestRunner {
     const HostPtr = @TypeOf(host);
     comptime requireHostPointer(HostPtr);
 
     const Runner = struct {
         host: HostPtr,
 
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = allocator;
             const p = self.host.peripheral();
             p.start() catch |err| {
@@ -90,7 +90,7 @@ pub fn makePeripheral(comptime lib: type, host: anytype) testing_api.TestRunner 
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }
@@ -98,7 +98,7 @@ pub fn makePeripheral(comptime lib: type, host: anytype) testing_api.TestRunner 
 
     const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{ .host = host };
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
 fn runCentralRole(comptime lib: type, c: Central) !void {

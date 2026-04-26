@@ -3,19 +3,19 @@
 //! Tests lifecycle, scanning with various configs, event hooks, and
 //! error conditions. Does NOT require a paired Peripheral.
 
-const stdz = @import("stdz");
+const glib = @import("glib");
+
 const bt = @import("../../../bt.zig");
 const Central = @import("../../Central.zig");
-const testing_api = @import("testing");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
+pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -33,7 +33,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -42,22 +42,22 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-pub fn makeWithHost(comptime lib: type, host: anytype) testing_api.TestRunner {
+pub fn makeWithHost(comptime lib: type, host: anytype) glib.testing.TestRunner {
     const HostPtr = @TypeOf(host);
     comptime requireHostPointer(HostPtr);
 
     const Runner = struct {
         host: HostPtr,
 
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = allocator;
             const c = self.host.central();
             c.start() catch |err| {
@@ -73,7 +73,7 @@ pub fn makeWithHost(comptime lib: type, host: anytype) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
             lib.testing.allocator.destroy(self);
         }
@@ -81,7 +81,7 @@ pub fn makeWithHost(comptime lib: type, host: anytype) testing_api.TestRunner {
 
     const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{ .host = host };
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
 fn runCentral(comptime lib: type, c: Central) !void {

@@ -1,4 +1,5 @@
-const sync = @import("sync");
+const glib = @import("glib");
+const sync = glib.sync;
 
 const Assembler = @import("zux/Assembler.zig");
 const Config = @import("zux/assembler/Config.zig");

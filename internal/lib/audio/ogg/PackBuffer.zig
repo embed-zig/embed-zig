@@ -1,8 +1,7 @@
 //! `audio/ogg/PackBuffer.zig` owns the pure Zig rewrite of upstream
 //! `oggpack_buffer` and the `oggpack_*` / `oggpackB_*` bit-packing routines.
 
-const stdz = @import("stdz");
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 const Self = @This();
 
@@ -26,7 +25,7 @@ const masks_msb_tail = [9]u8{
     0x00, 0x80, 0xc0, 0xe0, 0xf0, 0xf8, 0xfc, 0xfe, 0xff,
 };
 
-allocator: ?stdz.mem.Allocator = null,
+allocator: ?glib.std.mem.Allocator = null,
 buffer: ?[]u8 = null,
 storage: usize = 0,
 end_byte: usize = 0,
@@ -34,9 +33,9 @@ end_bit: u8 = 0,
 owns_buffer: bool = false,
 valid: bool = false,
 
-pub const InitWriteError = stdz.mem.Allocator.Error;
+pub const InitWriteError = glib.std.mem.Allocator.Error;
 
-pub const WriteError = stdz.mem.Allocator.Error || error{
+pub const WriteError = glib.std.mem.Allocator.Error || error{
     InvalidState,
     InvalidBitCount,
     Overflow,
@@ -47,7 +46,7 @@ pub const AccessError = error{
     InvalidBitCount,
 };
 
-pub fn initWrite(allocator: stdz.mem.Allocator) InitWriteError!Self {
+pub fn initWrite(allocator: glib.std.mem.Allocator) InitWriteError!Self {
     const buffer = try allocator.alloc(u8, buffer_increment);
     @memset(buffer, 0);
     return .{
@@ -483,7 +482,7 @@ fn checkedAdd(a: usize, b: usize) ?usize {
     return result[0];
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn testLsbWriteReadAndAlignRoundTrip(allocator: lib.mem.Allocator) !void {
             const testing = lib.testing;
@@ -558,7 +557,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
 
             TestCase.testLsbWriteReadAndAlignRoundTrip(allocator) catch |err| {
@@ -589,5 +588,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

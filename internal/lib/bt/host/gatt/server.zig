@@ -5,9 +5,9 @@
 //!
 //! No I/O — produces ATT response PDUs into caller-provided buffers.
 
-const std = @import("std");
+const glib = @import("glib");
+
 const att = @import("../att.zig");
-const testing_api = @import("testing");
 
 pub const CharProps = struct {
     read: bool = false,
@@ -225,9 +225,9 @@ pub fn GattServer(comptime services: []const ServiceDef) type {
 
                 if (pos + this_len > max_pos) break;
 
-                std.mem.writeInt(u16, out[pos..][0..2], a.handle, .little);
-                std.mem.writeInt(u16, out[pos + 2 ..][0..2], end_handle, .little);
-                std.mem.writeInt(u16, out[pos + 4 ..][0..2], a.value_uuid, .little);
+                glib.std.mem.writeInt(u16, out[pos..][0..2], a.handle, .little);
+                glib.std.mem.writeInt(u16, out[pos + 2 ..][0..2], end_handle, .little);
+                glib.std.mem.writeInt(u16, out[pos + 4 ..][0..2], a.value_uuid, .little);
                 pos += this_len;
             }
 
@@ -258,10 +258,10 @@ pub fn GattServer(comptime services: []const ServiceDef) type {
                     if (entry_len == 0) entry_len = this_len;
                     if (pos + this_len > max_pos) break;
 
-                    std.mem.writeInt(u16, out[pos..][0..2], a.handle, .little);
+                    glib.std.mem.writeInt(u16, out[pos..][0..2], a.handle, .little);
                     out[pos + 2] = a.props;
-                    std.mem.writeInt(u16, out[pos + 3 ..][0..2], a.handle + 1, .little);
-                    std.mem.writeInt(u16, out[pos + 5 ..][0..2], a.value_uuid, .little);
+                    glib.std.mem.writeInt(u16, out[pos + 3 ..][0..2], a.handle + 1, .little);
+                    glib.std.mem.writeInt(u16, out[pos + 5 ..][0..2], a.value_uuid, .little);
                     pos += this_len;
                 }
             }
@@ -283,8 +283,8 @@ pub fn GattServer(comptime services: []const ServiceDef) type {
                 if (a.handle < req.start_handle or a.handle > req.end_handle) continue;
                 if (pos + 4 > max_pos) break; // handle(2) + uuid16(2)
 
-                std.mem.writeInt(u16, out[pos..][0..2], a.handle, .little);
-                std.mem.writeInt(u16, out[pos + 2 ..][0..2], a.type_uuid, .little);
+                glib.std.mem.writeInt(u16, out[pos..][0..2], a.handle, .little);
+                glib.std.mem.writeInt(u16, out[pos + 2 ..][0..2], a.type_uuid, .little);
                 pos += 4;
             }
 
@@ -304,14 +304,14 @@ pub fn GattServer(comptime services: []const ServiceDef) type {
                 return switch (a.kind) {
                     .primary_service => blk: {
                         out[0] = att.READ_RESPONSE;
-                        std.mem.writeInt(u16, out[1..3], a.value_uuid, .little);
+                        glib.std.mem.writeInt(u16, out[1..3], a.value_uuid, .little);
                         break :blk 3;
                     },
                     .characteristic_decl => blk: {
                         out[0] = att.READ_RESPONSE;
                         out[1] = a.props;
-                        std.mem.writeInt(u16, out[2..4], a.handle + 1, .little);
-                        std.mem.writeInt(u16, out[4..6], a.value_uuid, .little);
+                        glib.std.mem.writeInt(u16, out[2..4], a.handle + 1, .little);
+                        glib.std.mem.writeInt(u16, out[4..6], a.value_uuid, .little);
                         break :blk 6;
                     },
                     .characteristic_value => blk: {
@@ -324,7 +324,7 @@ pub fn GattServer(comptime services: []const ServiceDef) type {
                     },
                     .cccd => blk: {
                         out[0] = att.READ_RESPONSE;
-                        std.mem.writeInt(u16, out[1..3], self.cccd_values[i], .little);
+                        glib.std.mem.writeInt(u16, out[1..3], self.cccd_values[i], .little);
                         break :blk 3;
                     },
                 };
@@ -348,7 +348,7 @@ pub fn GattServer(comptime services: []const ServiceDef) type {
                     },
                     .cccd => {
                         if (value.len >= 2) {
-                            self.cccd_values[i] = std.mem.readInt(u16, value[0..2], .little);
+                            self.cccd_values[i] = glib.std.mem.readInt(u16, value[0..2], .little);
                         }
                         if (needs_response) return att.encodeWriteResponse(out).len;
                         return 0;
@@ -374,7 +374,7 @@ pub fn GattServer(comptime services: []const ServiceDef) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const services = comptime &[_]ServiceDef{
@@ -496,7 +496,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -515,6 +515,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

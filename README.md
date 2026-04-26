@@ -31,11 +31,14 @@ const dep = b.dependency("embed_zig", .{
     .optimize = optimize,
 });
 
-const embed = dep.module("embed");
+const glib = dep.module("glib");
+const glib_stdrt = dep.module("glib_stdrt");
+const bt = dep.module("bt");
 ```
 
-The package name is `embed_zig`. Additional modules such as `context`,
-`sync`, `net`, `ledstrip`, and `zux` are exposed by the same package.
+The package name is `embed_zig`. Modules are exposed directly by name; examples
+include `glib`, `glib_stdrt`, `bt`, `drivers`, `motion`, `audio`, `ledstrip`,
+and `zux`.
 
 ## Build And Test
 
@@ -46,14 +49,11 @@ zig build test
 
 ## Package Docs
 
-- [`lib/embed/README.md`](lib/embed/README.md)
-- [`lib/context/README.md`](lib/context/README.md)
-- [`lib/sync/README.md`](lib/sync/README.md)
-- [`lib/io/README.md`](lib/io/README.md)
-- [`lib/net/README.md`](lib/net/README.md)
-- [`lib/bt/README.md`](lib/bt/README.md)
-- [`lib/embed_std/README.md`](lib/embed_std/README.md)
-- [`lib/zux/README.md`](lib/zux/README.md)
+- [`glib/README.md`](glib/README.md)
+- [`glib_stdrt/README.md`](glib_stdrt/README.md)
+- [`internal/lib/bt/README.md`](internal/lib/bt/README.md)
+- [`internal/lib/drivers/README.md`](internal/lib/drivers/README.md)
+- [`internal/lib/zux/README.md`](internal/lib/zux/README.md)
 
 ## Contributing
 

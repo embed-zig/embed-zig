@@ -1,6 +1,6 @@
 //! Nfc — NFC reader contracts and chip drivers.
 
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 pub const io = @import("nfc/io.zig");
 pub const Fm175xx = @import("nfc/fm175xx.zig");
@@ -92,7 +92,7 @@ pub const Reader = struct {
     }
 };
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn initSetsAndClearsEventCallback(testing: anytype) !void {
             const Impl = struct {
@@ -133,7 +133,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -153,5 +153,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

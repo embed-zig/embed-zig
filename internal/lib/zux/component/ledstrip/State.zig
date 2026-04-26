@@ -1,4 +1,4 @@
-const stdz = @import("stdz");
+const glib = @import("glib");
 const ledstrip = @import("ledstrip");
 
 pub fn make(comptime n: usize, comptime max_frames: usize) type {
@@ -26,8 +26,8 @@ pub fn make(comptime n: usize, comptime max_frames: usize) type {
         /// Cross-fade duration toward each keyframe for multi-frame modes (nanoseconds).
         duration_ns: u64 = 0,
         /// `Pipeline` tick sequence when the strip became stationary at `current_frame`
-        /// (`stdz.math.maxInt(u64)` while transitioning).
-        rest_started_seq: u64 = stdz.math.maxInt(u64),
+        /// (`glib.std.math.maxInt(u64)` while transitioning).
+        rest_started_seq: u64 = glib.std.math.maxInt(u64),
         step_amount: u8 = 5,
 
         current: FrameType = .{},

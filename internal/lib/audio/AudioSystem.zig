@@ -4,7 +4,7 @@ const Mixer = @import("Mixer.zig");
 const MicMod = @import("Mic.zig");
 const SpeakerMod = @import("Speaker.zig");
 const RingBufferMod = @import("mixer/RingBuffer.zig");
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 pub const Format = Mixer.Format;
 pub const Track = Mixer.Track;
@@ -500,637 +500,637 @@ pub fn Builder(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
-                /// Upper bound for polling async read/write loops in these unit tests (success is usually ms-scale).
-                const test_async_wait_ns: i128 = 5 * lib.time.ns_per_s;
+        /// Upper bound for polling async read/write loops in these unit tests (success is usually ms-scale).
+        const test_async_wait_ns: i128 = 5 * lib.time.ns_per_s;
 
-                /// Poll `read` until samples arrive or `max_wait_ns` elapses. Avoids tying
-                /// readiness to a fixed iteration count (brittle under slow scheduling / CI).
-                fn pollReadSamples(system: anytype, out: []i16, max_wait_ns: i128) !usize {
-                    const Thread = lib.Thread;
-                    const time = lib.time;
-                    const deadline: i128 = time.nanoTimestamp() + max_wait_ns;
-                    while (time.nanoTimestamp() < deadline) {
-                        const n = system.read(out) catch |err| switch (err) {
-                            error.WouldBlock => {
-                                Thread.sleep(time.ns_per_ms);
-                                continue;
-                            },
-                            else => return err,
-                        };
-                        if (n > 0) return n;
+        /// Poll `read` until samples arrive or `max_wait_ns` elapses. Avoids tying
+        /// readiness to a fixed iteration count (brittle under slow scheduling / CI).
+        fn pollReadSamples(system: anytype, out: []i16, max_wait_ns: i128) !usize {
+            const Thread = lib.Thread;
+            const time = lib.time;
+            const deadline: i128 = time.nanoTimestamp() + max_wait_ns;
+            while (time.nanoTimestamp() < deadline) {
+                const n = system.read(out) catch |err| switch (err) {
+                    error.WouldBlock => {
                         Thread.sleep(time.ns_per_ms);
+                        continue;
+                    },
+                    else => return err,
+                };
+                if (n > 0) return n;
+                Thread.sleep(time.ns_per_ms);
+            }
+            return 0;
+        }
+
+        fn waitSpeakerWrites(ctx: anytype, deadline_ns: i128) bool {
+            const Thread = lib.Thread;
+            const time = lib.time;
+            while (time.nanoTimestamp() < deadline_ns) {
+                ctx.mu.lock();
+                const w = ctx.writes;
+                ctx.mu.unlock();
+                if (w > 0) return true;
+                Thread.sleep(time.ns_per_ms);
+            }
+            return false;
+        }
+
+        fn startFailureResetsState(alloc: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const TestMic = MicMod.make(lib, 1, 4);
+            const TestSpeaker = SpeakerMod.make(lib, 4);
+            const ProcessorBackend = struct {
+                fn process(frame: TestMic.Frame, out: []i16) Error!usize {
+                    const n = @min(frame.mic[0].len, out.len);
+                    @memcpy(out[0..n], frame.mic[0][0..n]);
+                    return n;
+                }
+            };
+
+            const Built = comptime blk: {
+                var builder = Builder(lib).init();
+                builder.configMic(1, 4);
+                builder.configSpeaker(4);
+                builder.setProcessor(&ProcessorBackend.process);
+                break :blk builder.build();
+            };
+
+            const MicCtx = struct {
+                enabled: bool = false,
+            };
+            const SpeakerCtx = struct {
+                enabled: bool = false,
+            };
+
+            const MicBackend = struct {
+                fn deinit(_: *anyopaque) void {}
+                fn sampleRate(_: *anyopaque) u32 {
+                    return 16000;
+                }
+                fn micCount(_: *anyopaque) u8 {
+                    return 1;
+                }
+                fn read(_: *anyopaque, _: *TestMic.Frame) Error!void {
+                    return;
+                }
+                fn gains(_: *anyopaque) TestMic.Gains {
+                    return .{null};
+                }
+                fn setGains(_: *anyopaque, _: []const ?i8) Error!void {
+                    return;
+                }
+                fn enable(ptr: *anyopaque) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.enabled = true;
+                    return error.Unsupported;
+                }
+                fn disable(ptr: *anyopaque) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.enabled = false;
+                }
+
+                const vtable = TestMic.VTable{
+                    .deinit = deinit,
+                    .sampleRate = sampleRate,
+                    .micCount = micCount,
+                    .read = read,
+                    .gains = gains,
+                    .setGains = setGains,
+                    .enable = enable,
+                    .disable = disable,
+                };
+            };
+
+            const SpeakerBackend = struct {
+                fn deinit(_: *anyopaque) void {}
+                fn sampleRate(_: *anyopaque) u32 {
+                    return 16000;
+                }
+                fn write(_: *anyopaque, frame: []const i16) Error!usize {
+                    return frame.len;
+                }
+                fn gain(_: *anyopaque) ?i8 {
+                    return null;
+                }
+                fn setGain(_: *anyopaque, _: i8) Error!void {
+                    return;
+                }
+                fn enable(ptr: *anyopaque) Error!void {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.enabled = true;
+                }
+                fn disable(ptr: *anyopaque) Error!void {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.enabled = false;
+                }
+
+                const vtable = TestSpeaker.VTable{
+                    .deinit = deinit,
+                    .sampleRate = sampleRate,
+                    .write = write,
+                    .gain = gain,
+                    .setGain = setGain,
+                    .enable = enable,
+                    .disable = disable,
+                };
+            };
+
+            var mic_ctx = MicCtx{};
+            var speaker_ctx = SpeakerCtx{};
+            var system = try Built.init(alloc);
+            defer system.deinit();
+            try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
+            try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
+
+            try testing.expectError(error.Unsupported, system.start());
+            try testing.expect(!speaker_ctx.enabled);
+
+            var out: [4]i16 = @splat(0);
+            try testing.expectError(error.InvalidState, system.read(out[0..]));
+
+            try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
+        }
+
+        fn readLoopBuffersProcessedAudio(alloc: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const Thread = lib.Thread;
+            const time = lib.time;
+            const TestMic = MicMod.make(lib, 1, 4);
+            const TestSpeaker = SpeakerMod.make(lib, 4);
+            const ProcessorBackend = struct {
+                fn process(frame: TestMic.Frame, out: []i16) Error!usize {
+                    const n = @min(frame.mic[0].len, out.len);
+                    @memcpy(out[0..n], frame.mic[0][0..n]);
+                    return n;
+                }
+            };
+
+            const Built = comptime blk: {
+                var builder = Builder(lib).init();
+                builder.configMic(1, 4);
+                builder.configSpeaker(4);
+                builder.setProcessor(&ProcessorBackend.process);
+                break :blk builder.build();
+            };
+
+            const MicCtx = struct {
+                next: i16 = 1,
+                enabled: bool = false,
+                mu: Thread.Mutex = .{},
+            };
+            const SpeakerCtx = struct {
+                enabled: bool = false,
+                writes: usize = 0,
+                mu: Thread.Mutex = .{},
+            };
+
+            const MicBackend = struct {
+                fn deinit(_: *anyopaque) void {}
+                fn sampleRate(_: *anyopaque) u32 {
+                    return 16000;
+                }
+                fn micCount(_: *anyopaque) u8 {
+                    return 1;
+                }
+                fn read(ptr: *anyopaque, frame: *TestMic.Frame) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    defer ctx.mu.unlock();
+                    if (!ctx.enabled) return error.InvalidState;
+
+                    var i: usize = 0;
+                    while (i < frame.mic[0].len) : (i += 1) {
+                        frame.mic[0][i] = ctx.next;
+                        ctx.next = if (ctx.next == 30_000) 1 else ctx.next + 1;
                     }
-                    return 0;
+                    frame.ref = null;
+                }
+                fn gains(_: *anyopaque) TestMic.Gains {
+                    return .{null};
+                }
+                fn setGains(_: *anyopaque, _: []const ?i8) Error!void {
+                    return;
+                }
+                fn enable(ptr: *anyopaque) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = true;
+                    ctx.mu.unlock();
+                }
+                fn disable(ptr: *anyopaque) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = false;
+                    ctx.mu.unlock();
                 }
 
-                fn waitSpeakerWrites(ctx: anytype, deadline_ns: i128) bool {
-                    const Thread = lib.Thread;
-                    const time = lib.time;
-                    while (time.nanoTimestamp() < deadline_ns) {
-                        ctx.mu.lock();
-                        const w = ctx.writes;
-                        ctx.mu.unlock();
-                        if (w > 0) return true;
-                        Thread.sleep(time.ns_per_ms);
+                const vtable = TestMic.VTable{
+                    .deinit = deinit,
+                    .sampleRate = sampleRate,
+                    .micCount = micCount,
+                    .read = read,
+                    .gains = gains,
+                    .setGains = setGains,
+                    .enable = enable,
+                    .disable = disable,
+                };
+            };
+
+            const SpeakerBackend = struct {
+                fn deinit(_: *anyopaque) void {}
+                fn sampleRate(_: *anyopaque) u32 {
+                    return 16000;
+                }
+                fn write(ptr: *anyopaque, frame: []const i16) Error!usize {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    defer ctx.mu.unlock();
+                    if (!ctx.enabled) return error.InvalidState;
+                    ctx.writes += 1;
+                    return frame.len;
+                }
+                fn gain(_: *anyopaque) ?i8 {
+                    return null;
+                }
+                fn setGain(_: *anyopaque, _: i8) Error!void {
+                    return;
+                }
+                fn enable(ptr: *anyopaque) Error!void {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = true;
+                    ctx.mu.unlock();
+                }
+                fn disable(ptr: *anyopaque) Error!void {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = false;
+                    ctx.mu.unlock();
+                }
+
+                const vtable = TestSpeaker.VTable{
+                    .deinit = deinit,
+                    .sampleRate = sampleRate,
+                    .write = write,
+                    .gain = gain,
+                    .setGain = setGain,
+                    .enable = enable,
+                    .disable = disable,
+                };
+            };
+
+            var mic_ctx = MicCtx{};
+            var speaker_ctx = SpeakerCtx{};
+            var system = try Built.init(alloc);
+            defer system.deinit();
+            try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
+            try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
+
+            try system.start();
+            defer system.stop() catch {};
+
+            var out: [8]i16 = @splat(0);
+            const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
+            try testing.expect(n > 0);
+            try testing.expect(out[0] != 0);
+
+            // writeLoop may lag readLoop; don't assert speaker writes synchronously.
+            try testing.expect(waitSpeakerWrites(&speaker_ctx, time.nanoTimestamp() + test_async_wait_ns));
+        }
+
+        fn readReturnsWouldBlockWhenRunningAndEmpty(alloc: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const Thread = lib.Thread;
+            const AtomicBool = lib.atomic.Value(bool);
+            const TestMic = MicMod.make(lib, 1, 4);
+            const TestSpeaker = SpeakerMod.make(lib, 4);
+            const ProcessorBackend = struct {
+                var emit = AtomicBool.init(false);
+
+                fn process(frame: TestMic.Frame, out: []i16) Error!usize {
+                    if (!emit.load(.acquire)) return 0;
+                    const n = @min(frame.mic[0].len, out.len);
+                    @memcpy(out[0..n], frame.mic[0][0..n]);
+                    return n;
+                }
+            };
+
+            const Built = comptime blk: {
+                var builder = Builder(lib).init();
+                builder.configMic(1, 4);
+                builder.configSpeaker(4);
+                builder.setProcessor(&ProcessorBackend.process);
+                break :blk builder.build();
+            };
+
+            const MicCtx = struct {
+                next: i16 = 1,
+                enabled: bool = false,
+                mu: Thread.Mutex = .{},
+            };
+            const SpeakerCtx = struct {
+                enabled: bool = false,
+                mu: Thread.Mutex = .{},
+            };
+
+            const MicBackend = struct {
+                fn deinit(_: *anyopaque) void {}
+                fn sampleRate(_: *anyopaque) u32 {
+                    return 16000;
+                }
+                fn micCount(_: *anyopaque) u8 {
+                    return 1;
+                }
+                fn read(ptr: *anyopaque, frame: *TestMic.Frame) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    defer ctx.mu.unlock();
+                    if (!ctx.enabled) return error.InvalidState;
+
+                    var i: usize = 0;
+                    while (i < frame.mic[0].len) : (i += 1) {
+                        frame.mic[0][i] = ctx.next;
+                        ctx.next = if (ctx.next == 30_000) 1 else ctx.next + 1;
                     }
-                    return false;
+                    frame.ref = null;
+                }
+                fn gains(_: *anyopaque) TestMic.Gains {
+                    return .{null};
+                }
+                fn setGains(_: *anyopaque, _: []const ?i8) Error!void {
+                    return;
+                }
+                fn enable(ptr: *anyopaque) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = true;
+                    ctx.mu.unlock();
+                }
+                fn disable(ptr: *anyopaque) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = false;
+                    ctx.mu.unlock();
                 }
 
-                fn startFailureResetsState(alloc: lib.mem.Allocator) !void {
-                    const testing = lib.testing;
-                    const TestMic = MicMod.make(lib, 1, 4);
-                    const TestSpeaker = SpeakerMod.make(lib, 4);
-                    const ProcessorBackend = struct {
-                        fn process(frame: TestMic.Frame, out: []i16) Error!usize {
-                            const n = @min(frame.mic[0].len, out.len);
-                            @memcpy(out[0..n], frame.mic[0][0..n]);
-                            return n;
-                        }
-                    };
+                const vtable = TestMic.VTable{
+                    .deinit = deinit,
+                    .sampleRate = sampleRate,
+                    .micCount = micCount,
+                    .read = read,
+                    .gains = gains,
+                    .setGains = setGains,
+                    .enable = enable,
+                    .disable = disable,
+                };
+            };
 
-                    const Built = comptime blk: {
-                        var builder = Builder(lib).init();
-                        builder.configMic(1, 4);
-                        builder.configSpeaker(4);
-                        builder.setProcessor(&ProcessorBackend.process);
-                        break :blk builder.build();
-                    };
-
-                    const MicCtx = struct {
-                        enabled: bool = false,
-                    };
-                    const SpeakerCtx = struct {
-                        enabled: bool = false,
-                    };
-
-                    const MicBackend = struct {
-                        fn deinit(_: *anyopaque) void {}
-                        fn sampleRate(_: *anyopaque) u32 {
-                            return 16000;
-                        }
-                        fn micCount(_: *anyopaque) u8 {
-                            return 1;
-                        }
-                        fn read(_: *anyopaque, _: *TestMic.Frame) Error!void {
-                            return;
-                        }
-                        fn gains(_: *anyopaque) TestMic.Gains {
-                            return .{null};
-                        }
-                        fn setGains(_: *anyopaque, _: []const ?i8) Error!void {
-                            return;
-                        }
-                        fn enable(ptr: *anyopaque) Error!void {
-                            const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
-                            ctx.enabled = true;
-                            return error.Unsupported;
-                        }
-                        fn disable(ptr: *anyopaque) Error!void {
-                            const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
-                            ctx.enabled = false;
-                        }
-
-                        const vtable = TestMic.VTable{
-                            .deinit = deinit,
-                            .sampleRate = sampleRate,
-                            .micCount = micCount,
-                            .read = read,
-                            .gains = gains,
-                            .setGains = setGains,
-                            .enable = enable,
-                            .disable = disable,
-                        };
-                    };
-
-                    const SpeakerBackend = struct {
-                        fn deinit(_: *anyopaque) void {}
-                        fn sampleRate(_: *anyopaque) u32 {
-                            return 16000;
-                        }
-                        fn write(_: *anyopaque, frame: []const i16) Error!usize {
-                            return frame.len;
-                        }
-                        fn gain(_: *anyopaque) ?i8 {
-                            return null;
-                        }
-                        fn setGain(_: *anyopaque, _: i8) Error!void {
-                            return;
-                        }
-                        fn enable(ptr: *anyopaque) Error!void {
-                            const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
-                            ctx.enabled = true;
-                        }
-                        fn disable(ptr: *anyopaque) Error!void {
-                            const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
-                            ctx.enabled = false;
-                        }
-
-                        const vtable = TestSpeaker.VTable{
-                            .deinit = deinit,
-                            .sampleRate = sampleRate,
-                            .write = write,
-                            .gain = gain,
-                            .setGain = setGain,
-                            .enable = enable,
-                            .disable = disable,
-                        };
-                    };
-
-                    var mic_ctx = MicCtx{};
-                    var speaker_ctx = SpeakerCtx{};
-                    var system = try Built.init(alloc);
-                    defer system.deinit();
-                    try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
-                    try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
-
-                    try testing.expectError(error.Unsupported, system.start());
-                    try testing.expect(!speaker_ctx.enabled);
-
-                    var out: [4]i16 = @splat(0);
-                    try testing.expectError(error.InvalidState, system.read(out[0..]));
-
-                    try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
+            const SpeakerBackend = struct {
+                fn deinit(_: *anyopaque) void {}
+                fn sampleRate(_: *anyopaque) u32 {
+                    return 16000;
+                }
+                fn write(ptr: *anyopaque, frame: []const i16) Error!usize {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    defer ctx.mu.unlock();
+                    if (!ctx.enabled) return error.InvalidState;
+                    return frame.len;
+                }
+                fn gain(_: *anyopaque) ?i8 {
+                    return null;
+                }
+                fn setGain(_: *anyopaque, _: i8) Error!void {
+                    return;
+                }
+                fn enable(ptr: *anyopaque) Error!void {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = true;
+                    ctx.mu.unlock();
+                }
+                fn disable(ptr: *anyopaque) Error!void {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = false;
+                    ctx.mu.unlock();
                 }
 
-                fn readLoopBuffersProcessedAudio(alloc: lib.mem.Allocator) !void {
-                    const testing = lib.testing;
-                    const Thread = lib.Thread;
-                    const time = lib.time;
-                    const TestMic = MicMod.make(lib, 1, 4);
-                    const TestSpeaker = SpeakerMod.make(lib, 4);
-                    const ProcessorBackend = struct {
-                        fn process(frame: TestMic.Frame, out: []i16) Error!usize {
-                            const n = @min(frame.mic[0].len, out.len);
-                            @memcpy(out[0..n], frame.mic[0][0..n]);
-                            return n;
-                        }
-                    };
+                const vtable = TestSpeaker.VTable{
+                    .deinit = deinit,
+                    .sampleRate = sampleRate,
+                    .write = write,
+                    .gain = gain,
+                    .setGain = setGain,
+                    .enable = enable,
+                    .disable = disable,
+                };
+            };
 
-                    const Built = comptime blk: {
-                        var builder = Builder(lib).init();
-                        builder.configMic(1, 4);
-                        builder.configSpeaker(4);
-                        builder.setProcessor(&ProcessorBackend.process);
-                        break :blk builder.build();
-                    };
+            var mic_ctx = MicCtx{};
+            var speaker_ctx = SpeakerCtx{};
+            ProcessorBackend.emit.store(false, .release);
+            var system = try Built.init(alloc);
+            defer system.deinit();
+            try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
+            try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
 
-                    const MicCtx = struct {
-                        next: i16 = 1,
-                        enabled: bool = false,
-                        mu: Thread.Mutex = .{},
-                    };
-                    const SpeakerCtx = struct {
-                        enabled: bool = false,
-                        writes: usize = 0,
-                        mu: Thread.Mutex = .{},
-                    };
+            try system.start();
+            defer system.stop() catch {};
 
-                    const MicBackend = struct {
-                        fn deinit(_: *anyopaque) void {}
-                        fn sampleRate(_: *anyopaque) u32 {
-                            return 16000;
-                        }
-                        fn micCount(_: *anyopaque) u8 {
-                            return 1;
-                        }
-                        fn read(ptr: *anyopaque, frame: *TestMic.Frame) Error!void {
-                            const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            defer ctx.mu.unlock();
-                            if (!ctx.enabled) return error.InvalidState;
+            var out: [4]i16 = @splat(0);
+            try testing.expectError(error.WouldBlock, system.read(out[0..]));
 
-                            var i: usize = 0;
-                            while (i < frame.mic[0].len) : (i += 1) {
-                                frame.mic[0][i] = ctx.next;
-                                ctx.next = if (ctx.next == 30_000) 1 else ctx.next + 1;
-                            }
-                            frame.ref = null;
-                        }
-                        fn gains(_: *anyopaque) TestMic.Gains {
-                            return .{null};
-                        }
-                        fn setGains(_: *anyopaque, _: []const ?i8) Error!void {
-                            return;
-                        }
-                        fn enable(ptr: *anyopaque) Error!void {
-                            const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            ctx.enabled = true;
-                            ctx.mu.unlock();
-                        }
-                        fn disable(ptr: *anyopaque) Error!void {
-                            const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            ctx.enabled = false;
-                            ctx.mu.unlock();
-                        }
+            ProcessorBackend.emit.store(true, .release);
+            const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
+            try testing.expect(n > 0);
+        }
 
-                        const vtable = TestMic.VTable{
-                            .deinit = deinit,
-                            .sampleRate = sampleRate,
-                            .micCount = micCount,
-                            .read = read,
-                            .gains = gains,
-                            .setGains = setGains,
-                            .enable = enable,
-                            .disable = disable,
-                        };
-                    };
+        fn startAllowsMicOnlyMode(alloc: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const Thread = lib.Thread;
+            const TestMic = MicMod.make(lib, 1, 4);
+            const ProcessorBackend = struct {
+                fn process(frame: TestMic.Frame, out: []i16) Error!usize {
+                    const n = @min(frame.mic[0].len, out.len);
+                    @memcpy(out[0..n], frame.mic[0][0..n]);
+                    return n;
+                }
+            };
 
-                    const SpeakerBackend = struct {
-                        fn deinit(_: *anyopaque) void {}
-                        fn sampleRate(_: *anyopaque) u32 {
-                            return 16000;
-                        }
-                        fn write(ptr: *anyopaque, frame: []const i16) Error!usize {
-                            const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            defer ctx.mu.unlock();
-                            if (!ctx.enabled) return error.InvalidState;
-                            ctx.writes += 1;
-                            return frame.len;
-                        }
-                        fn gain(_: *anyopaque) ?i8 {
-                            return null;
-                        }
-                        fn setGain(_: *anyopaque, _: i8) Error!void {
-                            return;
-                        }
-                        fn enable(ptr: *anyopaque) Error!void {
-                            const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            ctx.enabled = true;
-                            ctx.mu.unlock();
-                        }
-                        fn disable(ptr: *anyopaque) Error!void {
-                            const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            ctx.enabled = false;
-                            ctx.mu.unlock();
-                        }
+            const Built = comptime blk: {
+                var builder = Builder(lib).init();
+                builder.configMic(1, 4);
+                builder.configSpeaker(4);
+                builder.setProcessor(&ProcessorBackend.process);
+                break :blk builder.build();
+            };
 
-                        const vtable = TestSpeaker.VTable{
-                            .deinit = deinit,
-                            .sampleRate = sampleRate,
-                            .write = write,
-                            .gain = gain,
-                            .setGain = setGain,
-                            .enable = enable,
-                            .disable = disable,
-                        };
-                    };
+            const MicCtx = struct {
+                next: i16 = 1,
+                enabled: bool = false,
+                mu: Thread.Mutex = .{},
+            };
 
-                    var mic_ctx = MicCtx{};
-                    var speaker_ctx = SpeakerCtx{};
-                    var system = try Built.init(alloc);
-                    defer system.deinit();
-                    try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
-                    try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
+            const MicBackend = struct {
+                fn deinit(_: *anyopaque) void {}
+                fn sampleRate(_: *anyopaque) u32 {
+                    return 16000;
+                }
+                fn micCount(_: *anyopaque) u8 {
+                    return 1;
+                }
+                fn read(ptr: *anyopaque, frame: *TestMic.Frame) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    defer ctx.mu.unlock();
+                    if (!ctx.enabled) return error.InvalidState;
 
-                    try system.start();
-                    defer system.stop() catch {};
-
-                    var out: [8]i16 = @splat(0);
-                    const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
-                    try testing.expect(n > 0);
-                    try testing.expect(out[0] != 0);
-
-                    // writeLoop may lag readLoop; don't assert speaker writes synchronously.
-                    try testing.expect(waitSpeakerWrites(&speaker_ctx, time.nanoTimestamp() + test_async_wait_ns));
+                    var i: usize = 0;
+                    while (i < frame.mic[0].len) : (i += 1) {
+                        frame.mic[0][i] = ctx.next;
+                        ctx.next = if (ctx.next == 30_000) 1 else ctx.next + 1;
+                    }
+                    frame.ref = null;
+                }
+                fn gains(_: *anyopaque) TestMic.Gains {
+                    return .{null};
+                }
+                fn setGains(_: *anyopaque, _: []const ?i8) Error!void {
+                    return;
+                }
+                fn enable(ptr: *anyopaque) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = true;
+                    ctx.mu.unlock();
+                }
+                fn disable(ptr: *anyopaque) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = false;
+                    ctx.mu.unlock();
                 }
 
-                fn readReturnsWouldBlockWhenRunningAndEmpty(alloc: lib.mem.Allocator) !void {
-                    const testing = lib.testing;
-                    const Thread = lib.Thread;
-                    const AtomicBool = lib.atomic.Value(bool);
-                    const TestMic = MicMod.make(lib, 1, 4);
-                    const TestSpeaker = SpeakerMod.make(lib, 4);
-                    const ProcessorBackend = struct {
-                        var emit = AtomicBool.init(false);
+                const vtable = TestMic.VTable{
+                    .deinit = deinit,
+                    .sampleRate = sampleRate,
+                    .micCount = micCount,
+                    .read = read,
+                    .gains = gains,
+                    .setGains = setGains,
+                    .enable = enable,
+                    .disable = disable,
+                };
+            };
 
-                        fn process(frame: TestMic.Frame, out: []i16) Error!usize {
-                            if (!emit.load(.acquire)) return 0;
-                            const n = @min(frame.mic[0].len, out.len);
-                            @memcpy(out[0..n], frame.mic[0][0..n]);
-                            return n;
-                        }
-                    };
+            var mic_ctx = MicCtx{};
+            var system = try Built.init(alloc);
+            defer system.deinit();
+            try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
 
-                    const Built = comptime blk: {
-                        var builder = Builder(lib).init();
-                        builder.configMic(1, 4);
-                        builder.configSpeaker(4);
-                        builder.setProcessor(&ProcessorBackend.process);
-                        break :blk builder.build();
-                    };
+            try system.start();
+            defer system.stop() catch {};
 
-                    const MicCtx = struct {
-                        next: i16 = 1,
-                        enabled: bool = false,
-                        mu: Thread.Mutex = .{},
-                    };
-                    const SpeakerCtx = struct {
-                        enabled: bool = false,
-                        mu: Thread.Mutex = .{},
-                    };
+            var out: [8]i16 = @splat(0);
+            const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
+            try testing.expect(n > 0);
+            try testing.expect(out[0] != 0);
+        }
 
-                    const MicBackend = struct {
-                        fn deinit(_: *anyopaque) void {}
-                        fn sampleRate(_: *anyopaque) u32 {
-                            return 16000;
-                        }
-                        fn micCount(_: *anyopaque) u8 {
-                            return 1;
-                        }
-                        fn read(ptr: *anyopaque, frame: *TestMic.Frame) Error!void {
-                            const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            defer ctx.mu.unlock();
-                            if (!ctx.enabled) return error.InvalidState;
+        fn startAllowsSpeakerOnlyMode(alloc: lib.mem.Allocator) !void {
+            const testing = lib.testing;
+            const Thread = lib.Thread;
+            const time = lib.time;
+            const TestSpeaker = SpeakerMod.make(lib, 4);
+            const TestMic = MicMod.make(lib, 1, 4);
+            const ProcessorBackend = struct {
+                fn process(frame: TestMic.Frame, out: []i16) Error!usize {
+                    const n = @min(frame.mic[0].len, out.len);
+                    @memcpy(out[0..n], frame.mic[0][0..n]);
+                    return n;
+                }
+            };
 
-                            var i: usize = 0;
-                            while (i < frame.mic[0].len) : (i += 1) {
-                                frame.mic[0][i] = ctx.next;
-                                ctx.next = if (ctx.next == 30_000) 1 else ctx.next + 1;
-                            }
-                            frame.ref = null;
-                        }
-                        fn gains(_: *anyopaque) TestMic.Gains {
-                            return .{null};
-                        }
-                        fn setGains(_: *anyopaque, _: []const ?i8) Error!void {
-                            return;
-                        }
-                        fn enable(ptr: *anyopaque) Error!void {
-                            const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            ctx.enabled = true;
-                            ctx.mu.unlock();
-                        }
-                        fn disable(ptr: *anyopaque) Error!void {
-                            const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            ctx.enabled = false;
-                            ctx.mu.unlock();
-                        }
+            const Built = comptime blk: {
+                var builder = Builder(lib).init();
+                builder.configMic(1, 4);
+                builder.configSpeaker(4);
+                builder.setProcessor(&ProcessorBackend.process);
+                break :blk builder.build();
+            };
 
-                        const vtable = TestMic.VTable{
-                            .deinit = deinit,
-                            .sampleRate = sampleRate,
-                            .micCount = micCount,
-                            .read = read,
-                            .gains = gains,
-                            .setGains = setGains,
-                            .enable = enable,
-                            .disable = disable,
-                        };
-                    };
+            const SpeakerCtx = struct {
+                enabled: bool = false,
+                writes: usize = 0,
+                mu: Thread.Mutex = .{},
+            };
 
-                    const SpeakerBackend = struct {
-                        fn deinit(_: *anyopaque) void {}
-                        fn sampleRate(_: *anyopaque) u32 {
-                            return 16000;
-                        }
-                        fn write(ptr: *anyopaque, frame: []const i16) Error!usize {
-                            const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            defer ctx.mu.unlock();
-                            if (!ctx.enabled) return error.InvalidState;
-                            return frame.len;
-                        }
-                        fn gain(_: *anyopaque) ?i8 {
-                            return null;
-                        }
-                        fn setGain(_: *anyopaque, _: i8) Error!void {
-                            return;
-                        }
-                        fn enable(ptr: *anyopaque) Error!void {
-                            const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            ctx.enabled = true;
-                            ctx.mu.unlock();
-                        }
-                        fn disable(ptr: *anyopaque) Error!void {
-                            const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            ctx.enabled = false;
-                            ctx.mu.unlock();
-                        }
-
-                        const vtable = TestSpeaker.VTable{
-                            .deinit = deinit,
-                            .sampleRate = sampleRate,
-                            .write = write,
-                            .gain = gain,
-                            .setGain = setGain,
-                            .enable = enable,
-                            .disable = disable,
-                        };
-                    };
-
-                    var mic_ctx = MicCtx{};
-                    var speaker_ctx = SpeakerCtx{};
-                    ProcessorBackend.emit.store(false, .release);
-                    var system = try Built.init(alloc);
-                    defer system.deinit();
-                    try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
-                    try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
-
-                    try system.start();
-                    defer system.stop() catch {};
-
-                    var out: [4]i16 = @splat(0);
-                    try testing.expectError(error.WouldBlock, system.read(out[0..]));
-
-                    ProcessorBackend.emit.store(true, .release);
-                    const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
-                    try testing.expect(n > 0);
+            const SpeakerBackend = struct {
+                fn deinit(_: *anyopaque) void {}
+                fn sampleRate(_: *anyopaque) u32 {
+                    return 16000;
+                }
+                fn write(ptr: *anyopaque, frame: []const i16) Error!usize {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    defer ctx.mu.unlock();
+                    if (!ctx.enabled) return error.InvalidState;
+                    ctx.writes += 1;
+                    return frame.len;
+                }
+                fn gain(_: *anyopaque) ?i8 {
+                    return null;
+                }
+                fn setGain(_: *anyopaque, _: i8) Error!void {
+                    return;
+                }
+                fn enable(ptr: *anyopaque) Error!void {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = true;
+                    ctx.mu.unlock();
+                }
+                fn disable(ptr: *anyopaque) Error!void {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = false;
+                    ctx.mu.unlock();
                 }
 
-                fn startAllowsMicOnlyMode(alloc: lib.mem.Allocator) !void {
-                    const testing = lib.testing;
-                    const Thread = lib.Thread;
-                    const TestMic = MicMod.make(lib, 1, 4);
-                    const ProcessorBackend = struct {
-                        fn process(frame: TestMic.Frame, out: []i16) Error!usize {
-                            const n = @min(frame.mic[0].len, out.len);
-                            @memcpy(out[0..n], frame.mic[0][0..n]);
-                            return n;
-                        }
-                    };
+                const vtable = TestSpeaker.VTable{
+                    .deinit = deinit,
+                    .sampleRate = sampleRate,
+                    .write = write,
+                    .gain = gain,
+                    .setGain = setGain,
+                    .enable = enable,
+                    .disable = disable,
+                };
+            };
 
-                    const Built = comptime blk: {
-                        var builder = Builder(lib).init();
-                        builder.configMic(1, 4);
-                        builder.configSpeaker(4);
-                        builder.setProcessor(&ProcessorBackend.process);
-                        break :blk builder.build();
-                    };
+            var speaker_ctx = SpeakerCtx{};
+            var system = try Built.init(alloc);
+            defer system.deinit();
+            try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
 
-                    const MicCtx = struct {
-                        next: i16 = 1,
-                        enabled: bool = false,
-                        mu: Thread.Mutex = .{},
-                    };
+            const handle = try system.createTrack(.{});
+            defer handle.track.deinit();
+            defer handle.ctrl.deinit();
+            try handle.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 1, 2, 3, 4 });
 
-                    const MicBackend = struct {
-                        fn deinit(_: *anyopaque) void {}
-                        fn sampleRate(_: *anyopaque) u32 {
-                            return 16000;
-                        }
-                        fn micCount(_: *anyopaque) u8 {
-                            return 1;
-                        }
-                        fn read(ptr: *anyopaque, frame: *TestMic.Frame) Error!void {
-                            const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            defer ctx.mu.unlock();
-                            if (!ctx.enabled) return error.InvalidState;
+            try system.start();
+            defer system.stop() catch {};
 
-                            var i: usize = 0;
-                            while (i < frame.mic[0].len) : (i += 1) {
-                                frame.mic[0][i] = ctx.next;
-                                ctx.next = if (ctx.next == 30_000) 1 else ctx.next + 1;
-                            }
-                            frame.ref = null;
-                        }
-                        fn gains(_: *anyopaque) TestMic.Gains {
-                            return .{null};
-                        }
-                        fn setGains(_: *anyopaque, _: []const ?i8) Error!void {
-                            return;
-                        }
-                        fn enable(ptr: *anyopaque) Error!void {
-                            const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            ctx.enabled = true;
-                            ctx.mu.unlock();
-                        }
-                        fn disable(ptr: *anyopaque) Error!void {
-                            const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            ctx.enabled = false;
-                            ctx.mu.unlock();
-                        }
+            var out: [4]i16 = @splat(0);
+            try testing.expectError(error.InvalidState, system.read(out[0..]));
 
-                        const vtable = TestMic.VTable{
-                            .deinit = deinit,
-                            .sampleRate = sampleRate,
-                            .micCount = micCount,
-                            .read = read,
-                            .gains = gains,
-                            .setGains = setGains,
-                            .enable = enable,
-                            .disable = disable,
-                        };
-                    };
-
-                    var mic_ctx = MicCtx{};
-                    var system = try Built.init(alloc);
-                    defer system.deinit();
-                    try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
-
-                    try system.start();
-                    defer system.stop() catch {};
-
-                    var out: [8]i16 = @splat(0);
-                    const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
-                    try testing.expect(n > 0);
-                    try testing.expect(out[0] != 0);
-                }
-
-                fn startAllowsSpeakerOnlyMode(alloc: lib.mem.Allocator) !void {
-                    const testing = lib.testing;
-                    const Thread = lib.Thread;
-                    const time = lib.time;
-                    const TestSpeaker = SpeakerMod.make(lib, 4);
-                    const TestMic = MicMod.make(lib, 1, 4);
-                    const ProcessorBackend = struct {
-                        fn process(frame: TestMic.Frame, out: []i16) Error!usize {
-                            const n = @min(frame.mic[0].len, out.len);
-                            @memcpy(out[0..n], frame.mic[0][0..n]);
-                            return n;
-                        }
-                    };
-
-                    const Built = comptime blk: {
-                        var builder = Builder(lib).init();
-                        builder.configMic(1, 4);
-                        builder.configSpeaker(4);
-                        builder.setProcessor(&ProcessorBackend.process);
-                        break :blk builder.build();
-                    };
-
-                    const SpeakerCtx = struct {
-                        enabled: bool = false,
-                        writes: usize = 0,
-                        mu: Thread.Mutex = .{},
-                    };
-
-                    const SpeakerBackend = struct {
-                        fn deinit(_: *anyopaque) void {}
-                        fn sampleRate(_: *anyopaque) u32 {
-                            return 16000;
-                        }
-                        fn write(ptr: *anyopaque, frame: []const i16) Error!usize {
-                            const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            defer ctx.mu.unlock();
-                            if (!ctx.enabled) return error.InvalidState;
-                            ctx.writes += 1;
-                            return frame.len;
-                        }
-                        fn gain(_: *anyopaque) ?i8 {
-                            return null;
-                        }
-                        fn setGain(_: *anyopaque, _: i8) Error!void {
-                            return;
-                        }
-                        fn enable(ptr: *anyopaque) Error!void {
-                            const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            ctx.enabled = true;
-                            ctx.mu.unlock();
-                        }
-                        fn disable(ptr: *anyopaque) Error!void {
-                            const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
-                            ctx.mu.lock();
-                            ctx.enabled = false;
-                            ctx.mu.unlock();
-                        }
-
-                        const vtable = TestSpeaker.VTable{
-                            .deinit = deinit,
-                            .sampleRate = sampleRate,
-                            .write = write,
-                            .gain = gain,
-                            .setGain = setGain,
-                            .enable = enable,
-                            .disable = disable,
-                        };
-                    };
-
-                    var speaker_ctx = SpeakerCtx{};
-                    var system = try Built.init(alloc);
-                    defer system.deinit();
-                    try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
-
-                    const handle = try system.createTrack(.{});
-                    defer handle.track.deinit();
-                    defer handle.ctrl.deinit();
-                    try handle.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 1, 2, 3, 4 });
-
-                    try system.start();
-                    defer system.stop() catch {};
-
-                    var out: [4]i16 = @splat(0);
-                    try testing.expectError(error.InvalidState, system.read(out[0..]));
-
-                    const deadline = time.nanoTimestamp() + test_async_wait_ns;
-                    try testing.expect(waitSpeakerWrites(&speaker_ctx, deadline));
-                }
+            const deadline = time.nanoTimestamp() + test_async_wait_ns;
+            try testing.expect(waitSpeakerWrites(&speaker_ctx, deadline));
+        }
     };
 
     const Runner = struct {
@@ -1139,36 +1139,36 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("start_failure_resets_state", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("start_failure_resets_state", glib.testing.TestRunner.fromFn(lib, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.startFailureResetsState(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("readLoop_buffers_processed_audio", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("readLoop_buffers_processed_audio", glib.testing.TestRunner.fromFn(lib, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.readLoopBuffersProcessedAudio(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("read_returns_wouldblock_when_running_and_empty", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("read_returns_wouldblock_when_running_and_empty", glib.testing.TestRunner.fromFn(lib, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.readReturnsWouldBlockWhenRunningAndEmpty(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("start_allows_mic_only_mode", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("start_allows_mic_only_mode", glib.testing.TestRunner.fromFn(lib, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.startAllowsMicOnlyMode(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("start_allows_speaker_only_mode", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("start_allows_speaker_only_mode", glib.testing.TestRunner.fromFn(lib, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: lib.mem.Allocator) !void {
                     try TestCase.startAllowsSpeakerOnlyMode(case_allocator);
                 }
             }.run));
@@ -1184,5 +1184,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

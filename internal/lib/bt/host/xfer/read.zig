@@ -7,9 +7,10 @@
 //! - `write(data)` to emit one outbound control/data packet
 //! - `deinit()` to release session resources
 
+const glib = @import("glib");
+
 const att = @import("../att.zig");
 const Chunk = @import("Chunk.zig");
-const testing_api = @import("testing");
 
 pub const Config = struct {
     att_mtu: u16 = att.DEFAULT_MTU,
@@ -134,7 +135,7 @@ fn sendMissingReadChunks(transport: anytype, rcvmask: []const u8, total: u16, ma
     }
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const HappyTransport = struct {
@@ -276,7 +277,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -295,6 +296,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

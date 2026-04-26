@@ -1,5 +1,7 @@
+const glib = @import("glib");
+
 const host_central = @import("../../../host/Central.zig");
 
-pub fn make(comptime lib: type) @import("testing").TestRunner {
+pub fn make(comptime lib: type) glib.testing.TestRunner {
     return host_central.TestRunner(lib);
 }

@@ -2,7 +2,7 @@ const modem_api = @import("drivers");
 const modem_event = @import("event.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const zux_event = @import("../../event.zig");
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 const EventHook = @This();
 
@@ -40,7 +40,7 @@ pub fn emitFn(ctx: *const anyopaque, source_id: u32, adapter_event: modem_api.Mo
     }) catch @panic("zux.component.modem.EventHook failed to forward event");
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn emitFnForwardsSignalThroughEmitter(testing: anytype) !void {
             const Sink = struct {
@@ -235,7 +235,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
             const testing = lib.testing;
@@ -276,5 +276,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

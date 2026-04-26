@@ -1,6 +1,5 @@
-const stdz = @import("stdz");
+const glib = @import("glib");
 const Emitter = @import("Emitter.zig");
-const testing_api = @import("testing");
 
 const Poller = @This();
 
@@ -19,11 +18,11 @@ fn typeId(comptime T: type) *const anyopaque {
     return @ptrCast(&TypeIdHolder(T).id);
 }
 
-pub const default_poll_interval_ns: u64 = 10 * stdz.time.ns_per_ms;
+pub const default_poll_interval_ns: u64 = 10 * glib.std.time.ns_per_ms;
 
 pub const Config = struct {
     poll_interval_ns: u64 = default_poll_interval_ns,
-    spawn_config: stdz.Thread.SpawnConfig = .{},
+    spawn_config: glib.std.Thread.SpawnConfig = .{},
 };
 
 pub const VTable = struct {
@@ -98,7 +97,7 @@ pub fn init(comptime T: type, impl: *T) Poller {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn initBindStartStopAndDeinit(testing: anytype) !void {
             const Impl = struct {
@@ -156,7 +155,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
             const testing = lib.testing;
@@ -177,5 +176,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

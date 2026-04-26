@@ -9,7 +9,8 @@
 //! that speaks HCI packets, so the host stack can be exercised end-to-end
 //! without external hardware.
 
-const std = @import("std");
+const glib = @import("glib");
+
 const BtHci = @import("../Hci.zig");
 const Central = @import("../Central.zig");
 const Transport = @import("../Transport.zig");
@@ -20,7 +21,6 @@ const hci_status = @import("../host/hci/status.zig").Status;
 const l2cap = @import("../host/l2cap.zig");
 const att = @import("../host/att.zig");
 const gatt_client = @import("../host/gatt/client.zig");
-const testing_api = @import("testing");
 
 pub fn Hci(comptime lib: type) type {
     return struct {
@@ -128,7 +128,7 @@ pub fn Hci(comptime lib: type) type {
             cccd_handle: u16,
             cccd_value: u16 = 0,
             initial_value: []const u8,
-            value: std.ArrayListUnmanaged(u8) = .{},
+            value: glib.std.ArrayListUnmanaged(u8) = .{},
         };
 
         const Packet = struct {
@@ -143,10 +143,10 @@ pub fn Hci(comptime lib: type) type {
 
         allocator: lib.mem.Allocator,
         mutex: lib.Thread.Mutex = .{},
-        queue: std.ArrayListUnmanaged(Packet) = .{},
-        host_server_pushes: std.ArrayListUnmanaged(ServerPush) = .{},
-        services: std.ArrayListUnmanaged(ServiceState) = .{},
-        chars: std.ArrayListUnmanaged(CharState) = .{},
+        queue: glib.std.ArrayListUnmanaged(Packet) = .{},
+        host_server_pushes: glib.std.ArrayListUnmanaged(ServerPush) = .{},
+        services: glib.std.ArrayListUnmanaged(ServiceState) = .{},
+        chars: glib.std.ArrayListUnmanaged(CharState) = .{},
         acl_reassembler: l2cap.Reassembler = .{},
         config: Config,
         default_recv_timeout_ms: ?u32,
@@ -460,11 +460,11 @@ pub fn Hci(comptime lib: type) type {
             }
             if (self.default_peer) |peer| {
                 if (peer.localAddrType() != addr_type) return error.Rejected;
-                if (!std.mem.eql(u8, &addr, &peer.config.controller_addr)) return error.Rejected;
+                if (!glib.std.mem.eql(u8, &addr, &peer.config.controller_addr)) return error.Rejected;
                 return self.establishPeerLink(peer);
             }
             if (addrTypeFromConfig(self.config.peer_addr_type) != addr_type) return error.Rejected;
-            if (!std.mem.eql(u8, &addr, &self.config.peer_addr)) return error.Rejected;
+            if (!glib.std.mem.eql(u8, &addr, &self.config.peer_addr)) return error.Rejected;
 
             self.activateLink(.central, null);
             self.fireConnected(.central, self.connHandleForRole(.central));
@@ -1101,7 +1101,7 @@ pub fn Hci(comptime lib: type) type {
         }
 
         fn attRequestHandle(data: []const u8) u16 {
-            if (data.len >= 3) return std.mem.readInt(u16, data[1..][0..2], .little);
+            if (data.len >= 3) return glib.std.mem.readInt(u16, data[1..][0..2], .little);
             return 0x0000;
         }
 
@@ -1237,7 +1237,7 @@ pub fn Hci(comptime lib: type) type {
             const param_len: usize = raw[3];
             if (raw.len < 4 + param_len) return error.InvalidPacket;
 
-            const opcode = std.mem.readInt(u16, raw[1..][0..2], .little);
+            const opcode = glib.std.mem.readInt(u16, raw[1..][0..2], .little);
             const params = raw[4 .. 4 + param_len];
 
             switch (opcode) {
@@ -1290,7 +1290,7 @@ pub fn Hci(comptime lib: type) type {
                     const peer_addr = params[6..][0..6].*;
 
                     try self.enqueueCommandStatus(.success, opcode);
-                    if (peer_addr_type == self.config.peer_addr_type and std.mem.eql(u8, &peer_addr, &self.config.peer_addr)) {
+                    if (peer_addr_type == self.config.peer_addr_type and glib.std.mem.eql(u8, &peer_addr, &self.config.peer_addr)) {
                         self.activateLink(.central, null);
                         try self.enqueueLeConnectionCompleteForRole(.success, .central);
                     } else {
@@ -1302,7 +1302,7 @@ pub fn Hci(comptime lib: type) type {
                 },
                 hci_commands.DISCONNECT => {
                     if (params.len < 3) return error.InvalidPacket;
-                    const conn_handle = std.mem.readInt(u16, params[0..][0..2], .little) & 0x0FFF;
+                    const conn_handle = glib.std.mem.readInt(u16, params[0..][0..2], .little) & 0x0FFF;
                     const reason: hci_status = @enumFromInt(params[2]);
 
                     self.mutex.lock();
@@ -1422,9 +1422,9 @@ pub fn Hci(comptime lib: type) type {
                 if (service.start_handle < req.start_handle or service.start_handle > req.end_handle) continue;
                 if (pos + 6 > out.len) break;
 
-                std.mem.writeInt(u16, out[pos..][0..2], service.start_handle, .little);
-                std.mem.writeInt(u16, out[pos + 2 ..][0..2], service.end_handle, .little);
-                std.mem.writeInt(u16, out[pos + 4 ..][0..2], service.uuid, .little);
+                glib.std.mem.writeInt(u16, out[pos..][0..2], service.start_handle, .little);
+                glib.std.mem.writeInt(u16, out[pos + 2 ..][0..2], service.end_handle, .little);
+                glib.std.mem.writeInt(u16, out[pos + 4 ..][0..2], service.uuid, .little);
                 pos += 6;
             }
 
@@ -1447,10 +1447,10 @@ pub fn Hci(comptime lib: type) type {
                 if (char.decl_handle < req.start_handle or char.decl_handle > req.end_handle) continue;
                 if (pos + 7 > out.len) break;
 
-                std.mem.writeInt(u16, out[pos..][0..2], char.decl_handle, .little);
+                glib.std.mem.writeInt(u16, out[pos..][0..2], char.decl_handle, .little);
                 out[pos + 2] = char.properties;
-                std.mem.writeInt(u16, out[pos + 3 ..][0..2], char.value_handle, .little);
-                std.mem.writeInt(u16, out[pos + 5 ..][0..2], char.uuid, .little);
+                glib.std.mem.writeInt(u16, out[pos + 3 ..][0..2], char.value_handle, .little);
+                glib.std.mem.writeInt(u16, out[pos + 5 ..][0..2], char.uuid, .little);
                 pos += 7;
             }
 
@@ -1468,26 +1468,26 @@ pub fn Hci(comptime lib: type) type {
 
             for (self.services.items) |service| {
                 if (service.start_handle >= req.start_handle and service.start_handle <= req.end_handle and pos + 4 <= out.len) {
-                    std.mem.writeInt(u16, out[pos..][0..2], service.start_handle, .little);
-                    std.mem.writeInt(u16, out[pos + 2 ..][0..2], att.PRIMARY_SERVICE_UUID, .little);
+                    glib.std.mem.writeInt(u16, out[pos..][0..2], service.start_handle, .little);
+                    glib.std.mem.writeInt(u16, out[pos + 2 ..][0..2], att.PRIMARY_SERVICE_UUID, .little);
                     pos += 4;
                 }
 
                 const end = service.first_char_index + service.char_count;
                 for (self.chars.items[service.first_char_index..end]) |char| {
                     if (char.decl_handle >= req.start_handle and char.decl_handle <= req.end_handle and pos + 4 <= out.len) {
-                        std.mem.writeInt(u16, out[pos..][0..2], char.decl_handle, .little);
-                        std.mem.writeInt(u16, out[pos + 2 ..][0..2], att.CHARACTERISTIC_UUID, .little);
+                        glib.std.mem.writeInt(u16, out[pos..][0..2], char.decl_handle, .little);
+                        glib.std.mem.writeInt(u16, out[pos + 2 ..][0..2], att.CHARACTERISTIC_UUID, .little);
                         pos += 4;
                     }
                     if (char.value_handle >= req.start_handle and char.value_handle <= req.end_handle and pos + 4 <= out.len) {
-                        std.mem.writeInt(u16, out[pos..][0..2], char.value_handle, .little);
-                        std.mem.writeInt(u16, out[pos + 2 ..][0..2], char.uuid, .little);
+                        glib.std.mem.writeInt(u16, out[pos..][0..2], char.value_handle, .little);
+                        glib.std.mem.writeInt(u16, out[pos + 2 ..][0..2], char.uuid, .little);
                         pos += 4;
                     }
                     if (char.cccd_handle != 0 and char.cccd_handle >= req.start_handle and char.cccd_handle <= req.end_handle and pos + 4 <= out.len) {
-                        std.mem.writeInt(u16, out[pos..][0..2], char.cccd_handle, .little);
-                        std.mem.writeInt(u16, out[pos + 2 ..][0..2], att.CCCD_UUID, .little);
+                        glib.std.mem.writeInt(u16, out[pos..][0..2], char.cccd_handle, .little);
+                        glib.std.mem.writeInt(u16, out[pos + 2 ..][0..2], att.CCCD_UUID, .little);
                         pos += 4;
                     }
                 }
@@ -1506,7 +1506,7 @@ pub fn Hci(comptime lib: type) type {
             for (self.services.items) |service| {
                 if (service.start_handle == handle) {
                     out[0] = att.READ_RESPONSE;
-                    std.mem.writeInt(u16, out[1..][0..2], service.uuid, .little);
+                    glib.std.mem.writeInt(u16, out[1..][0..2], service.uuid, .little);
                     return 3;
                 }
 
@@ -1515,8 +1515,8 @@ pub fn Hci(comptime lib: type) type {
                     if (char.decl_handle == handle) {
                         out[0] = att.READ_RESPONSE;
                         out[1] = char.properties;
-                        std.mem.writeInt(u16, out[2..][0..2], char.value_handle, .little);
-                        std.mem.writeInt(u16, out[4..][0..2], char.uuid, .little);
+                        glib.std.mem.writeInt(u16, out[2..][0..2], char.value_handle, .little);
+                        glib.std.mem.writeInt(u16, out[4..][0..2], char.uuid, .little);
                         return 6;
                     }
                     if (char.value_handle == handle) {
@@ -1528,7 +1528,7 @@ pub fn Hci(comptime lib: type) type {
                     }
                     if (char.cccd_handle != 0 and char.cccd_handle == handle) {
                         out[0] = att.READ_RESPONSE;
-                        std.mem.writeInt(u16, out[1..][0..2], char.cccd_value, .little);
+                        glib.std.mem.writeInt(u16, out[1..][0..2], char.cccd_value, .little);
                         return 3;
                     }
                 }
@@ -1553,7 +1553,7 @@ pub fn Hci(comptime lib: type) type {
 
                 if (char.cccd_handle != 0 and char.cccd_handle == handle) {
                     if (value.len >= 2) {
-                        char.cccd_value = std.mem.readInt(u16, value[0..][0..2], .little);
+                        char.cccd_value = glib.std.mem.readInt(u16, value[0..][0..2], .little);
                     }
                     if (needs_response) return att.encodeWriteResponse(out).len;
                     return 0;
@@ -1634,7 +1634,7 @@ pub fn Hci(comptime lib: type) type {
             buf[1] = 0x0E;
             buf[2] = @intCast(4 + return_params.len);
             buf[3] = 1; // num command packets
-            std.mem.writeInt(u16, buf[4..][0..2], opcode, .little);
+            glib.std.mem.writeInt(u16, buf[4..][0..2], opcode, .little);
             buf[6] = @intFromEnum(status);
             if (return_params.len > 0) {
                 @memcpy(buf[7..][0..return_params.len], return_params);
@@ -1649,7 +1649,7 @@ pub fn Hci(comptime lib: type) type {
             buf[2] = 0x04;
             buf[3] = @intFromEnum(status);
             buf[4] = 1;
-            std.mem.writeInt(u16, buf[5..][0..2], opcode, .little);
+            glib.std.mem.writeInt(u16, buf[5..][0..2], opcode, .little);
             try self.enqueuePacket(&buf);
         }
 
@@ -1701,13 +1701,13 @@ pub fn Hci(comptime lib: type) type {
             buf[2] = 19;
             buf[3] = 0x01; // LE Connection Complete
             buf[4] = @intFromEnum(status);
-            std.mem.writeInt(u16, buf[5..][0..2], conn_handle, .little);
+            glib.std.mem.writeInt(u16, buf[5..][0..2], conn_handle, .little);
             buf[7] = role;
             buf[8] = @intFromEnum(peer_addr_type);
             @memcpy(buf[9..][0..6], &peer_addr);
-            std.mem.writeInt(u16, buf[15..][0..2], 0x0018, .little);
-            std.mem.writeInt(u16, buf[17..][0..2], 0x0000, .little);
-            std.mem.writeInt(u16, buf[19..][0..2], 0x00C8, .little);
+            glib.std.mem.writeInt(u16, buf[15..][0..2], 0x0018, .little);
+            glib.std.mem.writeInt(u16, buf[17..][0..2], 0x0000, .little);
+            glib.std.mem.writeInt(u16, buf[19..][0..2], 0x00C8, .little);
             buf[21] = 0x00; // master clock accuracy
             try self.enqueuePacket(&buf);
         }
@@ -1718,7 +1718,7 @@ pub fn Hci(comptime lib: type) type {
             buf[1] = 0x05;
             buf[2] = 0x04;
             buf[3] = @intFromEnum(hci_status.success);
-            std.mem.writeInt(u16, buf[4..][0..2], conn_handle, .little);
+            glib.std.mem.writeInt(u16, buf[4..][0..2], conn_handle, .little);
             buf[6] = @intFromEnum(reason);
             try self.enqueuePacket(&buf);
         }
@@ -1748,7 +1748,7 @@ pub fn Hci(comptime lib: type) type {
                 out[pos + 1] = 0x03;
                 pos += 2;
                 for (self.services.items[0..uuid_count]) |service| {
-                    std.mem.writeInt(u16, out[pos..][0..2], service.uuid, .little);
+                    glib.std.mem.writeInt(u16, out[pos..][0..2], service.uuid, .little);
                     pos += 2;
                 }
             }
@@ -1769,7 +1769,7 @@ pub fn Hci(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const Mock = Hci(lib);
@@ -1893,7 +1893,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -1912,6 +1912,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

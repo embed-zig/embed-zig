@@ -5,6 +5,8 @@
 //!
 //! Takes `comptime lib: type` for platform primitives (Thread, Mutex, time).
 
+const glib = @import("glib");
+
 const Transport = @import("../Transport.zig");
 const Api = @import("../Hci.zig");
 const commands = @import("hci/commands.zig");
@@ -14,7 +16,6 @@ const Status = @import("hci/status.zig").Status;
 const l2cap = @import("l2cap.zig");
 const att = @import("att.zig");
 const Gap = @import("Gap.zig");
-const testing_api = @import("testing");
 
 pub fn make(comptime lib: type) type {
     return struct {
@@ -83,7 +84,7 @@ pub fn make(comptime lib: type) type {
             if (need_start) {
                 self.start() catch |err| {
                     self.mutex.lock();
-                    @import("std").debug.assert(self.active_roles != 0);
+                    glib.std.debug.assert(self.active_roles != 0);
                     self.active_roles -= 1;
                     self.mutex.unlock();
                     return mapError(err);
@@ -747,7 +748,7 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             {
@@ -815,7 +816,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -834,6 +835,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

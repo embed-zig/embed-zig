@@ -1,14 +1,13 @@
-const stdz = @import("stdz");
+const glib = @import("glib");
 const EventReceiver = @import("../event.zig").EventReceiver;
 const Emitter = @import("Emitter.zig");
 const Message = @import("Message.zig");
 const Node = @import("Node.zig");
-const sync = @import("sync");
-const testing_api = @import("testing");
+const sync = glib.sync;
 
 pub fn Config(comptime lib: type) type {
     return struct {
-        tick_interval_ns: u64 = 10 * stdz.time.ns_per_ms,
+        tick_interval_ns: u64 = 10 * glib.std.time.ns_per_ms,
         spawn_config: lib.Thread.SpawnConfig = .{},
     };
 }
@@ -273,7 +272,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type, comptime confi
     };
 }
 
-pub fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
     const HarnessLib = struct {
         pub const mem = lib.mem;
         pub const Thread = lib.Thread;
@@ -596,7 +595,7 @@ pub fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) testing_
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             const testing = lib.testing;
 
@@ -625,5 +624,5 @@ pub fn TestRunner(comptime lib: type, comptime Channel: fn (type) type) testing_
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

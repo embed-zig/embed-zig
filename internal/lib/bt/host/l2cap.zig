@@ -12,9 +12,9 @@
 //! - Reassembler: reassembles ACL fragments into complete L2CAP SDUs
 //! - FragmentIterator: splits L2CAP SDUs into ACL-sized fragments
 
-const std = @import("std");
+const glib = @import("glib");
+
 const acl = @import("hci/acl.zig");
-const testing_api = @import("testing");
 
 pub const HEADER_LEN: usize = 4;
 
@@ -37,17 +37,17 @@ pub const Sdu = struct {
 pub fn parseHeader(data: []const u8) ?Header {
     if (data.len < HEADER_LEN) return null;
     return .{
-        .length = std.mem.readInt(u16, data[0..2], .little),
-        .cid = std.mem.readInt(u16, data[2..4], .little),
+        .length = glib.std.mem.readInt(u16, data[0..2], .little),
+        .cid = glib.std.mem.readInt(u16, data[2..4], .little),
     };
 }
 
 /// Encode L2CAP header + payload into buf. Returns the encoded slice.
 pub fn encode(buf: []u8, cid: u16, payload: []const u8) []const u8 {
     const total = HEADER_LEN + payload.len;
-    std.debug.assert(buf.len >= total);
-    std.mem.writeInt(u16, buf[0..2], @truncate(payload.len), .little);
-    std.mem.writeInt(u16, buf[2..4], cid, .little);
+    glib.std.debug.assert(buf.len >= total);
+    glib.std.mem.writeInt(u16, buf[0..2], @truncate(payload.len), .little);
+    glib.std.mem.writeInt(u16, buf[2..4], cid, .little);
     if (payload.len > 0) {
         @memcpy(buf[HEADER_LEN..][0..payload.len], payload);
     }
@@ -153,8 +153,8 @@ pub const FragmentIterator = struct {
             const l2cap_total = HEADER_LEN + self.l2cap_data.len;
             const first_chunk = @min(l2cap_total, max_payload);
 
-            std.mem.writeInt(u16, self.buf[0..2], @truncate(self.l2cap_data.len), .little);
-            std.mem.writeInt(u16, self.buf[2..4], CID_ATT, .little);
+            glib.std.mem.writeInt(u16, self.buf[0..2], @truncate(self.l2cap_data.len), .little);
+            glib.std.mem.writeInt(u16, self.buf[2..4], CID_ATT, .little);
             const data_in_first = first_chunk - HEADER_LEN;
             if (data_in_first > 0) {
                 @memcpy(self.buf[HEADER_LEN..][0..data_in_first], self.l2cap_data[0..data_in_first]);
@@ -186,7 +186,7 @@ pub const FragmentIterator = struct {
 
 /// Create a FragmentIterator for an ATT payload.
 pub fn fragmentIterator(buf: []u8, att_payload: []const u8, conn_handle: u16, max_data_len: u16) FragmentIterator {
-    std.debug.assert(buf.len >= Reassembler.MAX_SDU_LEN + acl.MAX_PACKET_LEN);
+    glib.std.debug.assert(buf.len >= Reassembler.MAX_SDU_LEN + acl.MAX_PACKET_LEN);
     return .{
         .buf = buf,
         .l2cap_data = att_payload,
@@ -195,7 +195,7 @@ pub fn fragmentIterator(buf: []u8, att_payload: []const u8, conn_handle: u16, ma
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             var buf: [128]u8 = undefined;
@@ -274,7 +274,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -293,6 +293,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

@@ -1,5 +1,4 @@
-const stdz = @import("stdz");
-const testing_api = @import("testing");
+const glib = @import("glib");
 const ui_flow = @import("../component/ui/flow.zig");
 const ui_overlay = @import("../component/ui/overlay.zig");
 const route = @import("../component/ui/route.zig");
@@ -95,19 +94,19 @@ pub fn parseSliceWithKindPath(
 }
 
 pub fn parseAllocSlice(
-    allocator: stdz.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     source: []const u8,
 ) !Component {
     return parseAllocSliceWithKindPath(allocator, "", source);
 }
 
 pub fn parseAllocSliceWithKindPath(
-    allocator: stdz.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     comptime kind_path: []const u8,
     source: []const u8,
 ) !Component {
-    var parsed_value = try stdz.json.parseFromSlice(
-        stdz.json.Value,
+    var parsed_value = try glib.std.json.parseFromSlice(
+        glib.std.json.Value,
         allocator,
         source,
         .{},
@@ -121,7 +120,7 @@ pub fn parseAllocSliceWithKindPath(
     return try parseJsonValue(allocator, parsed_value.value);
 }
 
-pub fn deinit(self: *Component, allocator: stdz.mem.Allocator) void {
+pub fn deinit(self: *Component, allocator: glib.std.mem.Allocator) void {
     allocator.free(self.label);
     freeRuntimeKind(self.kind, allocator);
 }
@@ -177,8 +176,8 @@ fn parseFromParser(parser: *JsonParser) Component {
 }
 
 pub fn parseJsonValue(
-    allocator: stdz.mem.Allocator,
-    value: stdz.json.Value,
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
 ) !Component {
     if (@inComptime()) {
         const object = expectObjectComptime(
@@ -215,9 +214,9 @@ pub fn parseJsonValue(
 
     var iterator = object.iterator();
     while (iterator.next()) |entry| {
-        if (!stdz.mem.eql(u8, entry.key_ptr.*, "label") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "id") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "kind"))
+        if (!glib.std.mem.eql(u8, entry.key_ptr.*, "label") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "id") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "kind"))
         {
             return error.UnknownComponentField;
         }
@@ -249,9 +248,9 @@ pub fn parseJsonValue(
 }
 
 pub fn parseJsonValueWithKindPath(
-    allocator: stdz.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     comptime kind_path: []const u8,
-    value: stdz.json.Value,
+    value: glib.std.json.Value,
 ) !Component {
     const object = switch (value) {
         .object => |object| object,
@@ -285,22 +284,22 @@ pub fn parseJsonValueWithKindPath(
     };
 }
 
-fn freeRuntimeKind(kind: Kind, allocator: stdz.mem.Allocator) void {
+fn freeRuntimeKind(kind: Kind, allocator: glib.std.mem.Allocator) void {
     switch (kind) {
         .flow => |flow| freeRuntimeFlow(flow, allocator),
         else => {},
     }
 }
 
-fn freeRuntimeFlow(flow: FlowSpec, allocator: stdz.mem.Allocator) void {
+fn freeRuntimeFlow(flow: FlowSpec, allocator: glib.std.mem.Allocator) void {
     allocator.free(flow.initial);
     freeRuntimeFlowNodes(flow.nodes, allocator);
     freeRuntimeFlowEdges(flow.edges, allocator);
 }
 
 fn parseKindValue(
-    allocator: stdz.mem.Allocator,
-    value: stdz.json.Value,
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
 ) !Kind {
     const object = switch (value) {
         .object => |object| object,
@@ -311,8 +310,8 @@ fn parseKindValue(
     const entry = iterator.next() orelse return error.ExpectedComponentKindObject;
     if (iterator.next() != null) return error.InvalidComponentKindObject;
 
-    if (stdz.mem.eql(u8, entry.key_ptr.*, "grouped_button")) {
-        var payload = try stdz.json.parseFromValue(
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "grouped_button")) {
+        var payload = try glib.std.json.parseFromValue(
             struct { button_count: usize },
             allocator,
             entry.value_ptr.*,
@@ -325,16 +324,16 @@ fn parseKindValue(
             },
         };
     }
-    if (stdz.mem.eql(u8, entry.key_ptr.*, "single_button")) {
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "single_button")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .single_button = {} };
     }
-    if (stdz.mem.eql(u8, entry.key_ptr.*, "imu")) {
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "imu")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .imu = {} };
     }
-    if (stdz.mem.eql(u8, entry.key_ptr.*, "led_strip")) {
-        var payload = try stdz.json.parseFromValue(
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "led_strip")) {
+        var payload = try glib.std.json.parseFromValue(
             struct { pixel_count: usize },
             allocator,
             entry.value_ptr.*,
@@ -347,24 +346,24 @@ fn parseKindValue(
             },
         };
     }
-    if (stdz.mem.eql(u8, entry.key_ptr.*, "modem")) {
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "modem")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .modem = {} };
     }
-    if (stdz.mem.eql(u8, entry.key_ptr.*, "nfc")) {
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "nfc")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .nfc = {} };
     }
-    if (stdz.mem.eql(u8, entry.key_ptr.*, "wifi_sta")) {
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "wifi_sta")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .wifi_sta = {} };
     }
-    if (stdz.mem.eql(u8, entry.key_ptr.*, "wifi_ap")) {
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "wifi_ap")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .wifi_ap = {} };
     }
-    if (stdz.mem.eql(u8, entry.key_ptr.*, "router")) {
-        var payload = try stdz.json.parseFromValue(
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "router")) {
+        var payload = try glib.std.json.parseFromValue(
             struct { initial_item: route.Router.Item },
             allocator,
             entry.value_ptr.*,
@@ -377,7 +376,7 @@ fn parseKindValue(
             },
         };
     }
-    if (stdz.mem.eql(u8, entry.key_ptr.*, "flow")) {
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "flow")) {
         return .{
             .flow = try parseFlowPayloadValue(
                 allocator,
@@ -386,8 +385,8 @@ fn parseKindValue(
             ),
         };
     }
-    if (stdz.mem.eql(u8, entry.key_ptr.*, "overlay")) {
-        var payload = try stdz.json.parseFromValue(
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "overlay")) {
+        var payload = try glib.std.json.parseFromValue(
             struct { initial_state: ui_overlay.State },
             allocator,
             entry.value_ptr.*,
@@ -400,8 +399,8 @@ fn parseKindValue(
             },
         };
     }
-    if (stdz.mem.eql(u8, entry.key_ptr.*, "selection")) {
-        var payload = try stdz.json.parseFromValue(
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "selection")) {
+        var payload = try glib.std.json.parseFromValue(
             struct { initial_state: ui_selection.State },
             allocator,
             entry.value_ptr.*,
@@ -419,8 +418,8 @@ fn parseKindValue(
 }
 
 fn parseFlowPayloadValue(
-    allocator: stdz.mem.Allocator,
-    value: stdz.json.Value,
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
     comptime context: []const u8,
 ) !FlowSpec {
     const object = switch (value) {
@@ -429,9 +428,9 @@ fn parseFlowPayloadValue(
     };
     var iterator = object.iterator();
     while (iterator.next()) |entry| {
-        if (!stdz.mem.eql(u8, entry.key_ptr.*, "initial") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "nodes") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "edges"))
+        if (!glib.std.mem.eql(u8, entry.key_ptr.*, "initial") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "nodes") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "edges"))
         {
             return error.UnknownFlowField;
         }
@@ -468,8 +467,8 @@ fn parseFlowPayloadValue(
 }
 
 fn parseFlowNodesValue(
-    allocator: stdz.mem.Allocator,
-    value: stdz.json.Value,
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
 ) ![]const []const u8 {
     const array = switch (value) {
         .array => |array| array,
@@ -493,8 +492,8 @@ fn parseFlowNodesValue(
 }
 
 fn parseFlowEdgesValue(
-    allocator: stdz.mem.Allocator,
-    value: stdz.json.Value,
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
 ) ![]const FlowEdge {
     const array = switch (value) {
         .array => |array| array,
@@ -516,8 +515,8 @@ fn parseFlowEdgesValue(
 }
 
 fn parseFlowEdgeValue(
-    allocator: stdz.mem.Allocator,
-    value: stdz.json.Value,
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
 ) !FlowEdge {
     const object = switch (value) {
         .object => |object| object,
@@ -525,9 +524,9 @@ fn parseFlowEdgeValue(
     };
     var iterator = object.iterator();
     while (iterator.next()) |entry| {
-        if (!stdz.mem.eql(u8, entry.key_ptr.*, "from") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "to") and
-            !stdz.mem.eql(u8, entry.key_ptr.*, "event"))
+        if (!glib.std.mem.eql(u8, entry.key_ptr.*, "from") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "to") and
+            !glib.std.mem.eql(u8, entry.key_ptr.*, "event"))
         {
             return error.UnknownFlowEdgeField;
         }
@@ -747,7 +746,7 @@ fn parseFlowEdgeSlice(
 }
 
 fn parseFlowPayloadComptime(
-    comptime value: stdz.json.Value,
+    comptime value: glib.std.json.Value,
     comptime context: []const u8,
 ) FlowSpec {
     const object = expectObjectComptime(value, context);
@@ -784,7 +783,7 @@ fn parseFlowPayloadComptime(
 }
 
 fn parseFlowNodesComptime(
-    comptime value: stdz.json.Value,
+    comptime value: glib.std.json.Value,
     comptime context: []const u8,
 ) []const []const u8 {
     const array = switch (value) {
@@ -800,7 +799,7 @@ fn parseFlowNodesComptime(
 }
 
 fn parseFlowEdgesComptime(
-    comptime value: stdz.json.Value,
+    comptime value: glib.std.json.Value,
     comptime context: []const u8,
 ) []const FlowEdge {
     const array = switch (value) {
@@ -816,7 +815,7 @@ fn parseFlowEdgesComptime(
 }
 
 fn parseFlowEdgeComptime(
-    comptime value: stdz.json.Value,
+    comptime value: glib.std.json.Value,
     comptime context: []const u8,
 ) FlowEdge {
     const object = expectObjectComptime(value, context);
@@ -884,14 +883,14 @@ fn validateFlowComptime(
     }
 }
 
-fn freeRuntimeFlowNodes(nodes: []const []const u8, allocator: stdz.mem.Allocator) void {
+fn freeRuntimeFlowNodes(nodes: []const []const u8, allocator: glib.std.mem.Allocator) void {
     for (nodes) |node_name| {
         allocator.free(node_name);
     }
     allocator.free(nodes);
 }
 
-fn freeRuntimeFlowEdges(edges: []const FlowEdge, allocator: stdz.mem.Allocator) void {
+fn freeRuntimeFlowEdges(edges: []const FlowEdge, allocator: glib.std.mem.Allocator) void {
     for (edges) |edge| {
         allocator.free(edge.from);
         allocator.free(edge.to);
@@ -902,7 +901,7 @@ fn freeRuntimeFlowEdges(edges: []const FlowEdge, allocator: stdz.mem.Allocator) 
 
 fn containsText(haystack: []const []const u8, needle: []const u8) bool {
     for (haystack) |candidate| {
-        if (stdz.mem.eql(u8, candidate, needle)) return true;
+        if (glib.std.mem.eql(u8, candidate, needle)) return true;
     }
     return false;
 }
@@ -910,7 +909,7 @@ fn containsText(haystack: []const []const u8, needle: []const u8) bool {
 fn hasDuplicateText(haystack: []const []const u8) bool {
     for (haystack, 0..) |candidate, i| {
         for (haystack[0..i]) |existing| {
-            if (stdz.mem.eql(u8, candidate, existing)) return true;
+            if (glib.std.mem.eql(u8, candidate, existing)) return true;
         }
     }
     return false;
@@ -930,7 +929,7 @@ fn allFlowEdgeToKnown(nodes: []const []const u8, edges: []const FlowEdge) bool {
     return true;
 }
 
-fn expectEmptyPayload(value: stdz.json.Value) !void {
+fn expectEmptyPayload(value: glib.std.json.Value) !void {
     switch (value) {
         .null => return,
         .object => |object| {
@@ -1165,11 +1164,11 @@ fn parsePathKindSlice(comptime kind_path: []const u8, comptime source: []const u
 }
 
 fn parsePathKindValue(
-    allocator: stdz.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     comptime kind_path: []const u8,
-    object: stdz.json.ObjectMap,
+    object: glib.std.json.ObjectMap,
 ) !Kind {
-    if (stdz.mem.eql(u8, kind_path, "button/grouped")) {
+    if (glib.std.mem.eql(u8, kind_path, "button/grouped")) {
         return .{
             .grouped_button = .{
                 .button_count = try parseRequiredUsizeFieldValue(
@@ -1181,13 +1180,13 @@ fn parsePathKindValue(
             },
         };
     }
-    if (stdz.mem.eql(u8, kind_path, "button/single")) {
+    if (glib.std.mem.eql(u8, kind_path, "button/single")) {
         return .{ .single_button = {} };
     }
-    if (stdz.mem.eql(u8, kind_path, "imu")) {
+    if (glib.std.mem.eql(u8, kind_path, "imu")) {
         return .{ .imu = {} };
     }
-    if (stdz.mem.eql(u8, kind_path, "led_strip")) {
+    if (glib.std.mem.eql(u8, kind_path, "led_strip")) {
         return .{
             .led_strip = .{
                 .pixel_count = try parseRequiredUsizeFieldValue(
@@ -1199,21 +1198,21 @@ fn parsePathKindValue(
             },
         };
     }
-    if (stdz.mem.eql(u8, kind_path, "modem")) {
+    if (glib.std.mem.eql(u8, kind_path, "modem")) {
         return .{ .modem = {} };
     }
-    if (stdz.mem.eql(u8, kind_path, "nfc")) {
+    if (glib.std.mem.eql(u8, kind_path, "nfc")) {
         return .{ .nfc = {} };
     }
-    if (stdz.mem.eql(u8, kind_path, "wifi/sta")) {
+    if (glib.std.mem.eql(u8, kind_path, "wifi/sta")) {
         return .{ .wifi_sta = {} };
     }
-    if (stdz.mem.eql(u8, kind_path, "wifi/ap")) {
+    if (glib.std.mem.eql(u8, kind_path, "wifi/ap")) {
         return .{ .wifi_ap = {} };
     }
-    if (stdz.mem.eql(u8, kind_path, "ui/route")) {
+    if (glib.std.mem.eql(u8, kind_path, "ui/route")) {
         const initial_item_value = object.get("initial_item") orelse return error.MissingRouterInitialItem;
-        var payload = try stdz.json.parseFromValue(route.Router.Item, allocator, initial_item_value, .{});
+        var payload = try glib.std.json.parseFromValue(route.Router.Item, allocator, initial_item_value, .{});
         defer payload.deinit();
         return .{
             .router = .{
@@ -1221,7 +1220,7 @@ fn parsePathKindValue(
             },
         };
     }
-    if (stdz.mem.eql(u8, kind_path, "ui/flow")) {
+    if (glib.std.mem.eql(u8, kind_path, "ui/flow")) {
         return .{
             .flow = try parseFlowPayloadValue(
                 allocator,
@@ -1230,9 +1229,9 @@ fn parsePathKindValue(
             ),
         };
     }
-    if (stdz.mem.eql(u8, kind_path, "ui/overlay")) {
+    if (glib.std.mem.eql(u8, kind_path, "ui/overlay")) {
         const initial_state_value = object.get("initial_state") orelse return error.MissingOverlayInitialState;
-        var payload = try stdz.json.parseFromValue(
+        var payload = try glib.std.json.parseFromValue(
             ui_overlay.State,
             allocator,
             initial_state_value,
@@ -1245,9 +1244,9 @@ fn parsePathKindValue(
             },
         };
     }
-    if (stdz.mem.eql(u8, kind_path, "ui/selection")) {
+    if (glib.std.mem.eql(u8, kind_path, "ui/selection")) {
         const initial_state_value = object.get("initial_state") orelse return error.MissingSelectionInitialState;
-        var payload = try stdz.json.parseFromValue(
+        var payload = try glib.std.json.parseFromValue(
             ui_selection.State,
             allocator,
             initial_state_value,
@@ -1486,8 +1485,8 @@ fn parseRequiredValueFieldFromObjectSlice(
 }
 
 fn parseRequiredNonEmptyStringFieldValue(
-    allocator: stdz.mem.Allocator,
-    object: stdz.json.ObjectMap,
+    allocator: glib.std.mem.Allocator,
+    object: glib.std.json.ObjectMap,
     field_name: []const u8,
     missing_err: anyerror,
     expected_err: anyerror,
@@ -1504,7 +1503,7 @@ fn parseRequiredNonEmptyStringFieldValue(
 }
 
 fn parseRequiredU32FieldValue(
-    object: stdz.json.ObjectMap,
+    object: glib.std.json.ObjectMap,
     field_name: []const u8,
     missing_err: anyerror,
     expected_err: anyerror,
@@ -1520,7 +1519,7 @@ fn parseRequiredU32FieldValue(
 }
 
 fn parseRequiredUsizeFieldValue(
-    object: stdz.json.ObjectMap,
+    object: glib.std.json.ObjectMap,
     field_name: []const u8,
     missing_err: anyerror,
     expected_err: anyerror,
@@ -1536,8 +1535,8 @@ fn parseRequiredUsizeFieldValue(
 }
 
 fn parseRequiredAlternativeStringFieldValue(
-    allocator: stdz.mem.Allocator,
-    object: stdz.json.ObjectMap,
+    allocator: glib.std.mem.Allocator,
+    object: glib.std.json.ObjectMap,
     first_name: []const u8,
     second_name: []const u8,
     missing_err: anyerror,
@@ -1605,7 +1604,7 @@ fn expectEmptyPayloadSlice(
     parser.finish();
 }
 
-fn parseKindValueComptime(comptime value: stdz.json.Value) Kind {
+fn parseKindValueComptime(comptime value: glib.std.json.Value) Kind {
     const object = expectObjectComptime(
         value,
         "zux.spec.Component.parseJsonValue component kind",
@@ -1747,7 +1746,7 @@ fn parseKindValueComptime(comptime value: stdz.json.Value) Kind {
     @compileError("zux.spec.Component.parseJsonValue encountered an unknown component kind");
 }
 
-fn parseRouterItemComptime(comptime value: stdz.json.Value) route.Router.Item {
+fn parseRouterItemComptime(comptime value: glib.std.json.Value) route.Router.Item {
     const object = expectObjectComptime(
         value,
         "zux.spec.Component.parseJsonValue router initial_item",
@@ -1785,7 +1784,7 @@ fn parseRouterItemComptime(comptime value: stdz.json.Value) route.Router.Item {
     return item;
 }
 
-fn parseOverlayStateComptime(comptime value: stdz.json.Value) ui_overlay.State {
+fn parseOverlayStateComptime(comptime value: glib.std.json.Value) ui_overlay.State {
     const object = expectObjectComptime(
         value,
         "zux.spec.Component.parseJsonValue overlay initial_state",
@@ -1822,7 +1821,7 @@ fn parseOverlayStateComptime(comptime value: stdz.json.Value) ui_overlay.State {
     return state;
 }
 
-fn parseSelectionStateComptime(comptime value: stdz.json.Value) ui_selection.State {
+fn parseSelectionStateComptime(comptime value: glib.std.json.Value) ui_selection.State {
     const object = expectObjectComptime(
         value,
         "zux.spec.Component.parseJsonValue selection initial_state",
@@ -1856,9 +1855,9 @@ fn parseSelectionStateComptime(comptime value: stdz.json.Value) ui_selection.Sta
 }
 
 fn expectObjectComptime(
-    comptime value: stdz.json.Value,
+    comptime value: glib.std.json.Value,
     comptime context: []const u8,
-) stdz.json.ObjectMap {
+) glib.std.json.ObjectMap {
     return switch (value) {
         .object => |object| object,
         else => @compileError(context ++ " must be a JSON object"),
@@ -1866,7 +1865,7 @@ fn expectObjectComptime(
 }
 
 fn expectEmptyPayloadComptime(
-    comptime value: stdz.json.Value,
+    comptime value: glib.std.json.Value,
     comptime context: []const u8,
 ) void {
     switch (value) {
@@ -1881,7 +1880,7 @@ fn expectEmptyPayloadComptime(
 }
 
 fn parseRequiredU32FieldComptime(
-    comptime object: stdz.json.ObjectMap,
+    comptime object: glib.std.json.ObjectMap,
     comptime field_name: []const u8,
     comptime context: []const u8,
 ) u32 {
@@ -1892,7 +1891,7 @@ fn parseRequiredU32FieldComptime(
 }
 
 fn parseRequiredUsizeFieldComptime(
-    comptime object: stdz.json.ObjectMap,
+    comptime object: glib.std.json.ObjectMap,
     comptime field_name: []const u8,
     comptime context: []const u8,
 ) usize {
@@ -1903,7 +1902,7 @@ fn parseRequiredUsizeFieldComptime(
 }
 
 fn parseNonEmptyStringFieldComptime(
-    comptime object: stdz.json.ObjectMap,
+    comptime object: glib.std.json.ObjectMap,
     comptime field_name: []const u8,
     comptime context: []const u8,
 ) []const u8 {
@@ -1914,7 +1913,7 @@ fn parseNonEmptyStringFieldComptime(
 }
 
 fn parseStringValueComptime(
-    comptime value: stdz.json.Value,
+    comptime value: glib.std.json.Value,
     comptime context: []const u8,
 ) []const u8 {
     return switch (value) {
@@ -1924,7 +1923,7 @@ fn parseStringValueComptime(
 }
 
 fn parseNonEmptyStringValueComptime(
-    comptime value: stdz.json.Value,
+    comptime value: glib.std.json.Value,
     comptime context: []const u8,
 ) []const u8 {
     const text = parseStringValueComptime(value, context);
@@ -1935,7 +1934,7 @@ fn parseNonEmptyStringValueComptime(
 }
 
 fn parseU32ValueComptime(
-    comptime value: stdz.json.Value,
+    comptime value: glib.std.json.Value,
     comptime context: []const u8,
 ) u32 {
     const int_value = switch (value) {
@@ -1949,7 +1948,7 @@ fn parseU32ValueComptime(
 }
 
 fn parseUsizeValueComptime(
-    comptime value: stdz.json.Value,
+    comptime value: glib.std.json.Value,
     comptime context: []const u8,
 ) usize {
     const int_value = switch (value) {
@@ -1963,7 +1962,7 @@ fn parseUsizeValueComptime(
 }
 
 fn parseBoolValueComptime(
-    comptime value: stdz.json.Value,
+    comptime value: glib.std.json.Value,
     comptime context: []const u8,
 ) bool {
     return switch (value) {
@@ -1980,7 +1979,7 @@ fn comptimeEql(comptime a: []const u8, comptime b: []const u8) bool {
     return true;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn parses_component_json_slice(testing: anytype, allocator: lib.mem.Allocator) !void {
             const source =
@@ -2044,7 +2043,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             const testing = lib.testing;
 
@@ -2069,5 +2068,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

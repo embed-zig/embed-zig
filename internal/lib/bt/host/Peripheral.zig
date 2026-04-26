@@ -3,11 +3,11 @@
 //! Wraps shared `host.Hci` to implement the low-level `bt.Peripheral`
 //! VTable, including advertising and ATT server request handling.
 
-const std = @import("std");
+const glib = @import("glib");
+
 const root = @import("../../bt.zig");
 const bt = @import("../Peripheral.zig");
 const att = @import("att.zig");
-const testing_api = @import("testing");
 
 pub fn make(comptime lib: type) type {
     return struct {
@@ -18,10 +18,10 @@ pub fn make(comptime lib: type) type {
         started: bool = false,
         mutex: lib.Thread.Mutex = .{},
         allocator: lib.mem.Allocator,
-        hooks: std.ArrayListUnmanaged(EventHook) = .{},
-        subscription_hooks: std.ArrayListUnmanaged(SubscriptionHook) = .{},
-        services: std.ArrayListUnmanaged(ServiceEntry) = .{},
-        chars: std.ArrayListUnmanaged(CharEntry) = .{},
+        hooks: glib.std.ArrayListUnmanaged(EventHook) = .{},
+        subscription_hooks: glib.std.ArrayListUnmanaged(SubscriptionHook) = .{},
+        services: glib.std.ArrayListUnmanaged(ServiceEntry) = .{},
+        chars: glib.std.ArrayListUnmanaged(CharEntry) = .{},
         request_ctx: ?*anyopaque = null,
         request_handler: ?bt.RequestHandlerFn = null,
         conn_handle: u16 = 0,
@@ -132,7 +132,7 @@ pub fn make(comptime lib: type) type {
                         .svc_uuid = svc.uuid,
                         .char_uuid = ch.uuid,
                         .config = ch.config,
-                    }) catch std.debug.panic("OOM rebuilding peripheral GATT chars", .{});
+                    }) catch @panic("OOM rebuilding peripheral GATT chars");
                 }
             }
             self.rebuildAttributeLayoutLocked();
@@ -184,7 +184,7 @@ pub fn make(comptime lib: type) type {
                         adv_data_buf[adv_pos + 1] = 0x03;
                         adv_pos += 2;
                         for (0..uuid_count) |i| {
-                            std.mem.writeInt(u16, adv_data_buf[adv_pos..][0..2], config.service_uuids[i], .little);
+                            glib.std.mem.writeInt(u16, adv_data_buf[adv_pos..][0..2], config.service_uuids[i], .little);
                             adv_pos += 2;
                         }
                     }
@@ -338,7 +338,7 @@ pub fn make(comptime lib: type) type {
                     .uuid = entry.svc_uuid,
                     .start_handle = start_handle,
                     .end_handle = next_handle - 1,
-                }) catch std.debug.panic("OOM rebuilding peripheral GATT services", .{});
+                }) catch @panic("OOM rebuilding peripheral GATT services");
             }
         }
 
@@ -451,9 +451,9 @@ pub fn make(comptime lib: type) type {
             for (self.services.items) |service| {
                 if (service.start_handle < req.start_handle or service.start_handle > req.end_handle) continue;
                 if (pos + 6 > out.len) break;
-                std.mem.writeInt(u16, out[pos..][0..2], service.start_handle, .little);
-                std.mem.writeInt(u16, out[pos + 2 ..][0..2], service.end_handle, .little);
-                std.mem.writeInt(u16, out[pos + 4 ..][0..2], service.uuid, .little);
+                glib.std.mem.writeInt(u16, out[pos..][0..2], service.start_handle, .little);
+                glib.std.mem.writeInt(u16, out[pos + 2 ..][0..2], service.end_handle, .little);
+                glib.std.mem.writeInt(u16, out[pos + 4 ..][0..2], service.uuid, .little);
                 pos += 6;
             }
 
@@ -480,10 +480,10 @@ pub fn make(comptime lib: type) type {
                 const attr_handle: u16 = @intCast(handle_num);
                 if (self.findCharByDeclHandleLocked(attr_handle)) |entry| {
                     if (pos + 7 > out.len) break;
-                    std.mem.writeInt(u16, out[pos..][0..2], entry.decl_handle, .little);
+                    glib.std.mem.writeInt(u16, out[pos..][0..2], entry.decl_handle, .little);
                     out[pos + 2] = entry.config.properties();
-                    std.mem.writeInt(u16, out[pos + 3 ..][0..2], entry.value_handle, .little);
-                    std.mem.writeInt(u16, out[pos + 5 ..][0..2], entry.char_uuid, .little);
+                    glib.std.mem.writeInt(u16, out[pos + 3 ..][0..2], entry.value_handle, .little);
+                    glib.std.mem.writeInt(u16, out[pos + 5 ..][0..2], entry.char_uuid, .little);
                     pos += 7;
                 }
             }
@@ -508,26 +508,26 @@ pub fn make(comptime lib: type) type {
                 if (pos + 4 > out.len) break;
 
                 if (self.findServiceByStartHandleLocked(attr_handle) != null) {
-                    std.mem.writeInt(u16, out[pos..][0..2], attr_handle, .little);
-                    std.mem.writeInt(u16, out[pos + 2 ..][0..2], att.PRIMARY_SERVICE_UUID, .little);
+                    glib.std.mem.writeInt(u16, out[pos..][0..2], attr_handle, .little);
+                    glib.std.mem.writeInt(u16, out[pos + 2 ..][0..2], att.PRIMARY_SERVICE_UUID, .little);
                     pos += 4;
                     continue;
                 }
                 if (self.findCharByDeclHandleLocked(attr_handle) != null) {
-                    std.mem.writeInt(u16, out[pos..][0..2], attr_handle, .little);
-                    std.mem.writeInt(u16, out[pos + 2 ..][0..2], att.CHARACTERISTIC_UUID, .little);
+                    glib.std.mem.writeInt(u16, out[pos..][0..2], attr_handle, .little);
+                    glib.std.mem.writeInt(u16, out[pos + 2 ..][0..2], att.CHARACTERISTIC_UUID, .little);
                     pos += 4;
                     continue;
                 }
                 if (self.findCharByValueHandleLocked(attr_handle)) |entry| {
-                    std.mem.writeInt(u16, out[pos..][0..2], attr_handle, .little);
-                    std.mem.writeInt(u16, out[pos + 2 ..][0..2], entry.char_uuid, .little);
+                    glib.std.mem.writeInt(u16, out[pos..][0..2], attr_handle, .little);
+                    glib.std.mem.writeInt(u16, out[pos + 2 ..][0..2], entry.char_uuid, .little);
                     pos += 4;
                     continue;
                 }
                 if (self.findCharByCccdHandleLocked(attr_handle) != null) {
-                    std.mem.writeInt(u16, out[pos..][0..2], attr_handle, .little);
-                    std.mem.writeInt(u16, out[pos + 2 ..][0..2], att.CCCD_UUID, .little);
+                    glib.std.mem.writeInt(u16, out[pos..][0..2], attr_handle, .little);
+                    glib.std.mem.writeInt(u16, out[pos + 2 ..][0..2], att.CCCD_UUID, .little);
                     pos += 4;
                 }
             }
@@ -547,7 +547,7 @@ pub fn make(comptime lib: type) type {
             for (self.services.items) |service| {
                 if (service.start_handle == attr_handle) {
                     out[0] = att.READ_RESPONSE;
-                    std.mem.writeInt(u16, out[1..][0..2], service.uuid, .little);
+                    glib.std.mem.writeInt(u16, out[1..][0..2], service.uuid, .little);
                     self.mutex.unlock();
                     return 3;
                 }
@@ -557,8 +557,8 @@ pub fn make(comptime lib: type) type {
                 if (entry.decl_handle == attr_handle) {
                     out[0] = att.READ_RESPONSE;
                     out[1] = entry.config.properties();
-                    std.mem.writeInt(u16, out[2..][0..2], entry.value_handle, .little);
-                    std.mem.writeInt(u16, out[4..][0..2], entry.char_uuid, .little);
+                    glib.std.mem.writeInt(u16, out[2..][0..2], entry.value_handle, .little);
+                    glib.std.mem.writeInt(u16, out[4..][0..2], entry.char_uuid, .little);
                     self.mutex.unlock();
                     return 6;
                 }
@@ -577,7 +577,7 @@ pub fn make(comptime lib: type) type {
                 }
                 if (entry.cccd_handle == attr_handle) {
                     out[0] = att.READ_RESPONSE;
-                    std.mem.writeInt(u16, out[1..][0..2], entry.cccd_value, .little);
+                    glib.std.mem.writeInt(u16, out[1..][0..2], entry.cccd_value, .little);
                     self.mutex.unlock();
                     return 3;
                 }
@@ -627,7 +627,7 @@ pub fn make(comptime lib: type) type {
                         return 0;
                     }
                     if (value.len >= 2) {
-                        const next_cccd_value = std.mem.readInt(u16, value[0..][0..2], .little);
+                        const next_cccd_value = glib.std.mem.readInt(u16, value[0..][0..2], .little);
                         if (entry.cccd_value != next_cccd_value) {
                             entry.cccd_value = next_cccd_value;
                             subscription_info = .{
@@ -725,13 +725,13 @@ pub fn make(comptime lib: type) type {
         }
 
         fn attRequestHandle(data: []const u8) u16 {
-            if (data.len >= 3) return std.mem.readInt(u16, data[1..][0..2], .little);
+            if (data.len >= 3) return glib.std.mem.readInt(u16, data[1..][0..2], .little);
             return 0x0000;
         }
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const Impl = make(lib);
@@ -869,7 +869,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -888,6 +888,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
-

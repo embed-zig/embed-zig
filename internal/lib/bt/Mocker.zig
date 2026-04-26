@@ -4,7 +4,8 @@
 //! bundles on top. Nodes can discover each other, connect by address, and
 //! carry a 3D position for future spatial simulation.
 
-const std = @import("std");
+const glib = @import("glib");
+
 const root = @import("../bt.zig");
 const host_mod = @import("Host.zig");
 const Hci = @import("mocker/Hci.zig").Hci;
@@ -42,7 +43,7 @@ pub fn Mocker(comptime lib: type, comptime Channel: fn (type) type) type {
         allocator: lib.mem.Allocator,
         config: Config,
         mutex: lib.Thread.Mutex = .{},
-        nodes: std.ArrayListUnmanaged(Node) = .{},
+        nodes: glib.std.ArrayListUnmanaged(Node) = .{},
 
         pub fn init(allocator: lib.mem.Allocator, config: Config) Self {
             return .{
@@ -162,7 +163,7 @@ pub fn Mocker(comptime lib: type, comptime Channel: fn (type) type) type {
         fn findNodeByAddr(self: *Self, addr: root.Hci.BdAddr, addr_type: root.Hci.AddrType) ?*HciImpl {
             for (self.nodes.items) |node| {
                 if (node.impl.controllerAddrType() != addr_type) continue;
-                if (std.mem.eql(u8, &node.impl.controllerAddr(), &addr)) return node.impl;
+                if (glib.std.mem.eql(u8, &node.impl.controllerAddr(), &addr)) return node.impl;
             }
             return null;
         }

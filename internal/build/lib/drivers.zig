@@ -13,12 +13,15 @@ pub fn create(
     b.modules.put("drivers", mod) catch @panic("OOM");
 }
 
-pub fn link(b: *std.Build) void {
-    const stdz = b.modules.get("stdz") orelse @panic("drivers requires stdz");
-    const net = b.modules.get("net") orelse @panic("drivers requires net");
-    const testing = b.modules.get("testing") orelse @panic("drivers requires testing");
+pub fn link(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const mod = b.modules.get("drivers") orelse @panic("drivers module missing");
-    mod.addImport("stdz", stdz);
-    mod.addImport("net", net);
-    mod.addImport("testing", testing);
+    mod.addImport("glib", glib_dep.module("glib"));
 }

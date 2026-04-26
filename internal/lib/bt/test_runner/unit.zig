@@ -1,5 +1,4 @@
-const stdz = @import("stdz");
-const testing_api = @import("testing");
+const glib = @import("glib");
 
 pub const Central = @import("unit/Central.zig");
 pub const Peripheral = @import("unit/Peripheral.zig");
@@ -44,14 +43,14 @@ pub const mocker = struct {
     pub const Hci = @import("unit/mocker/Hci.zig");
 };
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime lib: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -83,7 +82,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -92,5 +91,5 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

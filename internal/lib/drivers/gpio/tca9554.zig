@@ -18,9 +18,10 @@
 //!   try gpio.setDirection(.pin6, .output);
 //!   try gpio.write(.pin6, .high);
 
+const glib = @import("glib");
 const I2c = @import("../I2c.zig");
+
 const tca9554 = @This();
-const testing_api = @import("testing");
 
 /// TCA9554 register addresses
 pub const Register = enum(u8) {
@@ -285,7 +286,7 @@ pub fn isHigh(self: *Self, pin: Pin) !bool {
 pub fn isLow(self: *Self, pin: Pin) !bool {
     return (try self.read(pin)) == .low;
 }
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn setDirectionAndWriteUpdateCachedRegisters() !void {
             const FakeI2c = struct {
@@ -328,7 +329,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -348,5 +349,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

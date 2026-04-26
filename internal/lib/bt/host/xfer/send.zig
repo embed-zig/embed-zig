@@ -8,10 +8,10 @@
 //! - `deinit()` to release session resources
 //! - `connHandle()`, `serviceUuid()`, and `charUuid()` for handler context
 
-const stdz = @import("stdz");
+const glib = @import("glib");
+
 const att = @import("../att.zig");
 const Chunk = @import("Chunk.zig");
-const testing_api = @import("testing");
 const write_xfer = @import("write.zig");
 
 pub const Config = struct {
@@ -23,7 +23,7 @@ pub const Config = struct {
 
 pub const DataFn = *const fn (
     ctx: ?*anyopaque,
-    allocator: stdz.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     conn_handle: u16,
     service_uuid: u16,
     char_uuid: u16,
@@ -31,7 +31,7 @@ pub const DataFn = *const fn (
 
 pub fn send(
     comptime lib: type,
-    allocator: stdz.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     transport: anytype,
     data_ctx: ?*anyopaque,
     dataFn: DataFn,
@@ -104,7 +104,7 @@ pub fn send(
     });
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const invalid_read_start = [_]u8{ 0xFF, 0xFF, 0x00, 0x03 };
@@ -150,7 +150,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 &invalid_transport,
                 null,
                 struct {
-                    fn dataFn(_: ?*anyopaque, _: stdz.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
+                    fn dataFn(_: ?*anyopaque, _: glib.std.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
                         return error.ShouldNotRun;
                     }
                 }.dataFn,
@@ -198,7 +198,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 &oversized_transport,
                 null,
                 struct {
-                    fn dataFn(_: ?*anyopaque, _: stdz.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
+                    fn dataFn(_: ?*anyopaque, _: glib.std.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
                         return error.ShouldNotRun;
                     }
                 }.dataFn,
@@ -248,7 +248,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 &empty_transport,
                 null,
                 struct {
-                    fn dataFn(_: ?*anyopaque, _: stdz.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
+                    fn dataFn(_: ?*anyopaque, _: glib.std.mem.Allocator, _: u16, _: u16, _: u16) ![]u8 {
                         return &.{};
                     }
                 }.dataFn,
@@ -259,12 +259,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -275,7 +275,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -283,5 +283,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

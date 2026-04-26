@@ -1,5 +1,7 @@
+const glib = @import("glib");
+
 const read_mod = @import("../../../../host/xfer/read.zig");
 
-pub fn make(comptime lib: type) @import("testing").TestRunner {
+pub fn make(comptime lib: type) glib.testing.TestRunner {
     return read_mod.TestRunner(lib);
 }
