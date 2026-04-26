@@ -42,7 +42,7 @@ fn readOnce(type_a: TypeA, page: u8, out: []u8) TypeA.Error!void {
     @memcpy(out, &rx);
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn readAllReadsCapacityDerivedLength() !void {
             const Fake = struct {
@@ -81,12 +81,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var buf: [64]u8 = undefined;
             const len = try readAll(TypeA.init(&fake), &buf);
 
-            try lib.testing.expectEqual(@as(usize, 48), len);
-            try lib.testing.expectEqual(@as(u8, 0x04), buf[14]);
-            try lib.testing.expectEqual(@as(u8, 0xA0), buf[16]);
-            try lib.testing.expectEqual(@as(u8, 0xAF), buf[31]);
-            try lib.testing.expectEqual(@as(u8, 0xB0), buf[32]);
-            try lib.testing.expectEqual(@as(u8, 0xBF), buf[47]);
+            try grt.std.testing.expectEqual(@as(usize, 48), len);
+            try grt.std.testing.expectEqual(@as(u8, 0x04), buf[14]);
+            try grt.std.testing.expectEqual(@as(u8, 0xA0), buf[16]);
+            try grt.std.testing.expectEqual(@as(u8, 0xAF), buf[31]);
+            try grt.std.testing.expectEqual(@as(u8, 0xB0), buf[32]);
+            try grt.std.testing.expectEqual(@as(u8, 0xBF), buf[47]);
         }
 
         fn readAllRejectsSmallOutputBuffer() !void {
@@ -101,17 +101,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var fake = Fake{};
             var buf: [32]u8 = undefined;
-            try lib.testing.expectError(error.InvalidArgument, readAll(TypeA.init(&fake), &buf));
+            try grt.std.testing.expectError(error.InvalidArgument, readAll(TypeA.init(&fake), &buf));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -126,7 +126,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

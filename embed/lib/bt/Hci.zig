@@ -345,7 +345,7 @@ pub fn make(pointer: anytype) Hci {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const Impl = struct {
@@ -433,37 +433,37 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const hci = make(&impl);
 
             try hci.retain();
-            try lib.testing.expect(impl.retained);
+            try grt.std.testing.expect(impl.retained);
 
             hci.setCentralListener(.{});
             hci.setPeripheralListener(.{});
 
             try hci.startScanning(.{});
-            try lib.testing.expect(hci.isScanning());
+            try grt.std.testing.expect(hci.isScanning());
             hci.stopScanning();
 
             try hci.startAdvertising(.{});
-            try lib.testing.expect(hci.isAdvertising());
+            try grt.std.testing.expect(hci.isAdvertising());
             hci.stopAdvertising();
 
             try hci.connect(.{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF }, .public, .{});
             const link = hci.getLink(.central) orelse return error.NoLink;
-            try lib.testing.expectEqual(@as(u16, 0x0040), link.conn_handle);
-            try lib.testing.expectEqual(@as(?BdAddr, .{ 1, 2, 3, 4, 5, 6 }), hci.getAddr());
+            try grt.std.testing.expectEqual(@as(u16, 0x0040), link.conn_handle);
+            try grt.std.testing.expectEqual(@as(?BdAddr, .{ 1, 2, 3, 4, 5, 6 }), hci.getAddr());
 
             var resp: [8]u8 = undefined;
             const n = try hci.sendAttRequest(0x0040, &.{0x01}, &resp);
-            try lib.testing.expectEqual(@as(usize, 2), n);
-            try lib.testing.expectEqual(@as(u8, 0xAA), resp[0]);
+            try grt.std.testing.expectEqual(@as(usize, 2), n);
+            try grt.std.testing.expectEqual(@as(u8, 0xAA), resp[0]);
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -474,7 +474,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

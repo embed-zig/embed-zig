@@ -43,7 +43,7 @@ pub fn init(pointer: anytype) Delay {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn dispatchesSleepMs() !void {
             const Fake = struct {
@@ -62,18 +62,18 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             delay.sleepMs(10);
             delay.sleepMs(25);
 
-            try lib.testing.expectEqual(@as(usize, 2), fake.calls);
-            try lib.testing.expectEqual(@as(u32, 25), fake.last_ms);
+            try grt.std.testing.expectEqual(@as(usize, 2), fake.calls);
+            try grt.std.testing.expectEqual(@as(u32, 25), fake.last_ms);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -84,7 +84,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -69,21 +69,21 @@ pub fn make(comptime n: usize) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn solidFillsAllPixels() !void {
             const F = make(4);
             const frame = F.solid(Color.red);
             for (frame.pixels) |pixel| {
-                try lib.testing.expectEqual(Color.red, pixel);
+                try grt.std.testing.expectEqual(Color.red, pixel);
             }
         }
 
         fn gradientPreservesEndpoints() !void {
             const F = make(8);
             const frame = F.gradient(Color.red, Color.blue);
-            try lib.testing.expectEqual(Color.red, frame.pixels[0]);
-            try lib.testing.expectEqual(Color.blue, frame.pixels[7]);
+            try grt.std.testing.expectEqual(Color.red, frame.pixels[0]);
+            try grt.std.testing.expectEqual(Color.blue, frame.pixels[7]);
         }
 
         fn rotateShiftsPixelsLeft() !void {
@@ -92,10 +92,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .pixels = .{ Color.red, Color.green, Color.blue, Color.white },
             };
             const rotated = frame.rotate();
-            try lib.testing.expectEqual(Color.green, rotated.pixels[0]);
-            try lib.testing.expectEqual(Color.blue, rotated.pixels[1]);
-            try lib.testing.expectEqual(Color.white, rotated.pixels[2]);
-            try lib.testing.expectEqual(Color.red, rotated.pixels[3]);
+            try grt.std.testing.expectEqual(Color.green, rotated.pixels[0]);
+            try grt.std.testing.expectEqual(Color.blue, rotated.pixels[1]);
+            try grt.std.testing.expectEqual(Color.white, rotated.pixels[2]);
+            try grt.std.testing.expectEqual(Color.red, rotated.pixels[3]);
         }
 
         fn flipReversesPixels() !void {
@@ -104,15 +104,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .pixels = .{ Color.red, Color.green, Color.blue },
             };
             const flipped = frame.flip();
-            try lib.testing.expectEqual(Color.blue, flipped.pixels[0]);
-            try lib.testing.expectEqual(Color.green, flipped.pixels[1]);
-            try lib.testing.expectEqual(Color.red, flipped.pixels[2]);
+            try grt.std.testing.expectEqual(Color.blue, flipped.pixels[0]);
+            try grt.std.testing.expectEqual(Color.green, flipped.pixels[1]);
+            try grt.std.testing.expectEqual(Color.red, flipped.pixels[2]);
         }
 
         fn withBrightnessScalesEntireFrame() !void {
             const F = make(1);
             const frame = F.solid(Color.white).withBrightness(128);
-            try lib.testing.expectEqual(Color.rgb(128, 128, 128), frame.pixels[0]);
+            try grt.std.testing.expectEqual(Color.rgb(128, 128, 128), frame.pixels[0]);
         }
 
         fn eqlComparesPixels() !void {
@@ -121,8 +121,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const b = F.solid(Color.red);
             const c = F.solid(Color.green);
 
-            try lib.testing.expect(a.eql(b));
-            try lib.testing.expect(!a.eql(c));
+            try grt.std.testing.expect(a.eql(b));
+            try grt.std.testing.expect(!a.eql(c));
         }
 
         fn handlesZeroAndOnePixelSizes() !void {
@@ -130,24 +130,24 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const F1 = make(1);
             const empty = F0{};
 
-            try lib.testing.expect(F0.solid(Color.red).eql(empty));
-            try lib.testing.expect(F0.gradient(Color.red, Color.blue).eql(empty));
-            try lib.testing.expect(empty.rotate().eql(empty));
-            try lib.testing.expect(empty.flip().eql(empty));
+            try grt.std.testing.expect(F0.solid(Color.red).eql(empty));
+            try grt.std.testing.expect(F0.gradient(Color.red, Color.blue).eql(empty));
+            try grt.std.testing.expect(empty.rotate().eql(empty));
+            try grt.std.testing.expect(empty.flip().eql(empty));
 
             const single = F1.gradient(Color.green, Color.blue);
-            try lib.testing.expectEqual(Color.green, single.pixels[0]);
-            try lib.testing.expect(single.rotate().eql(single));
+            try grt.std.testing.expectEqual(Color.green, single.pixels[0]);
+            try grt.std.testing.expect(single.rotate().eql(single));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -182,7 +182,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

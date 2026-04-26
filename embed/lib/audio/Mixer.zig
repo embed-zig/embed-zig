@@ -60,11 +60,11 @@ pub fn closeWithError(self: root) void {
     self.vtable.closeWithError(self.ptr);
 }
 
-pub fn make(comptime lib: type) type {
-    const Thread = lib.Thread;
-    const Allocator = lib.mem.Allocator;
-    const ArrayListUnmanaged = lib.ArrayListUnmanaged;
-    const TrackState = TrackStateMod.make(lib);
+pub fn make(comptime grt: type) type {
+    const Thread = grt.std.Thread;
+    const Allocator = glib.std.mem.Allocator;
+    const ArrayListUnmanaged = grt.std.ArrayListUnmanaged;
+    const TrackState = TrackStateMod.make(grt);
 
     const TrackImpl = struct {
         pub const Config = struct {
@@ -235,8 +235,8 @@ pub fn make(comptime lib: type) type {
         }
 
         pub fn createTrack(self: *Self, config: Track.Config) !TrackHandle {
-            const TrackType = Track.make(lib, TrackImpl);
-            const TrackCtrlType = TrackCtrl.make(lib, TrackCtrlImpl);
+            const TrackType = Track.make(grt, TrackImpl);
+            const TrackCtrlType = TrackCtrl.make(grt, TrackCtrlImpl);
 
             self.mutex.lock();
             const unavailable = self.close_write or self.closed or self.close_error;
@@ -371,8 +371,8 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
-    const MixerType = make(lib);
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const MixerType = make(grt);
 
     const TestCase = struct {
         fn exposesSurface() void {
@@ -389,7 +389,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 _ = root.close;
                 _ = root.closeWithError;
                 _ = root.make;
-                _ = make(lib).init;
+                _ = make(grt).init;
                 _ = Track.write;
                 _ = Track.deinit;
                 _ = Track.make;
@@ -405,9 +405,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }
         }
 
-        fn defaultBackendHappyPath(testing: anytype) !void {
+        fn defaultBackendHappyPath() !void {
             const mixer = try MixerType.init(.{
-                .allocator = lib.testing.allocator,
+                .allocator = grt.std.testing.allocator,
                 .output = .{ .rate = 16000, .channels = .mono },
             });
             defer mixer.deinit();
@@ -420,14 +420,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var out: [4]i16 = undefined;
             const n = mixer.read(&out) orelse unreachable;
-            try testing.expectEqual(@as(usize, 3), n);
-            try testing.expectEqualSlices(i16, &.{ 10, 20, 30 }, out[0..3]);
-            try testing.expectEqual(@as(usize, 6), handle.ctrl.readBytes());
+            try grt.std.testing.expectEqual(@as(usize, 3), n);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 10, 20, 30 }, out[0..3]);
+            try grt.std.testing.expectEqual(@as(usize, 6), handle.ctrl.readBytes());
         }
 
-        fn defaultBackendMixesGain(testing: anytype) !void {
+        fn defaultBackendMixesGain() !void {
             const mixer = try MixerType.init(.{
-                .allocator = lib.testing.allocator,
+                .allocator = grt.std.testing.allocator,
                 .output = .{ .rate = 16000, .channels = .mono },
             });
             defer mixer.deinit();
@@ -445,13 +445,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var out: [4]i16 = undefined;
             const n = mixer.read(&out) orelse unreachable;
-            try testing.expectEqual(@as(usize, 2), n);
-            try testing.expectEqualSlices(i16, &.{ 150, 300 }, out[0..2]);
+            try grt.std.testing.expectEqual(@as(usize, 2), n);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 150, 300 }, out[0..2]);
         }
 
-        fn defaultBackendDrainsAfterCloseWrite(testing: anytype) !void {
+        fn defaultBackendDrainsAfterCloseWrite() !void {
             const mixer = try MixerType.init(.{
-                .allocator = lib.testing.allocator,
+                .allocator = grt.std.testing.allocator,
                 .output = .{ .rate = 8000, .channels = .mono },
             });
             defer mixer.deinit();
@@ -464,24 +464,24 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             mixer.closeWrite();
 
             var out: [4]i16 = undefined;
-            try testing.expectEqual(@as(?usize, 2), mixer.read(&out));
-            try testing.expectEqual(@as(?usize, null), mixer.read(&out));
+            try grt.std.testing.expectEqual(@as(?usize, 2), mixer.read(&out));
+            try grt.std.testing.expectEqual(@as(?usize, null), mixer.read(&out));
         }
 
-        fn defaultBackendRejectsCreateAfterMixerCloseWrite(testing: anytype) !void {
+        fn defaultBackendRejectsCreateAfterMixerCloseWrite() !void {
             const mixer = try MixerType.init(.{
-                .allocator = lib.testing.allocator,
+                .allocator = grt.std.testing.allocator,
                 .output = .{ .rate = 8000, .channels = .mono },
             });
             defer mixer.deinit();
 
             mixer.closeWrite();
-            try testing.expectError(error.Closed, mixer.createTrack(.{}));
+            try grt.std.testing.expectError(error.Closed, mixer.createTrack(.{}));
         }
 
-        fn defaultBackendCloseIsTerminalWithoutErrorPath(testing: anytype) !void {
+        fn defaultBackendCloseIsTerminalWithoutErrorPath() !void {
             const mixer = try MixerType.init(.{
-                .allocator = lib.testing.allocator,
+                .allocator = grt.std.testing.allocator,
                 .output = .{ .rate = 8000, .channels = .mono },
             });
             defer mixer.deinit();
@@ -494,13 +494,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             mixer.close();
 
             var out: [4]i16 = undefined;
-            try testing.expectEqual(@as(?usize, null), mixer.read(&out));
-            try testing.expectError(error.Closed, mixer.createTrack(.{}));
+            try grt.std.testing.expectEqual(@as(?usize, null), mixer.read(&out));
+            try grt.std.testing.expectError(error.Closed, mixer.createTrack(.{}));
         }
 
-        fn defaultBackendLastHandleDropClosesTrackAndPreservesBufferedAudio(testing: anytype) !void {
+        fn defaultBackendLastHandleDropClosesTrackAndPreservesBufferedAudio() !void {
             const mixer = try MixerType.init(.{
-                .allocator = lib.testing.allocator,
+                .allocator = grt.std.testing.allocator,
                 .output = .{ .rate = 8000, .channels = .mono },
             });
             defer mixer.deinit();
@@ -511,15 +511,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             handle.ctrl.deinit();
 
             var out: [4]i16 = undefined;
-            try testing.expectEqual(@as(?usize, 2), mixer.read(&out));
-            try testing.expectEqualSlices(i16, &.{ 4, 5 }, out[0..2]);
-            try testing.expectEqual(@as(?usize, 0), mixer.read(&out));
+            try grt.std.testing.expectEqual(@as(?usize, 2), mixer.read(&out));
+            try grt.std.testing.expectEqualSlices(i16, &.{ 4, 5 }, out[0..2]);
+            try grt.std.testing.expectEqual(@as(?usize, 0), mixer.read(&out));
         }
 
-        fn defaultBackendOverflowingSilenceTailFallsBackToCloseWrite(testing: anytype) !void {
-            const max_u32 = lib.math.maxInt(u32);
+        fn defaultBackendOverflowingSilenceTailFallsBackToCloseWrite() !void {
+            const max_u32 = grt.std.math.maxInt(u32);
             const mixer = try MixerType.init(.{
-                .allocator = lib.testing.allocator,
+                .allocator = grt.std.testing.allocator,
                 .output = .{ .rate = max_u32, .channels = .stereo },
             });
             defer mixer.deinit();
@@ -533,56 +533,55 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var out: [8]i16 = undefined;
             const n = mixer.read(&out) orelse unreachable;
-            try testing.expectEqual(@as(usize, 2), n);
-            try testing.expectEqualSlices(i16, &.{ 1, 2 }, out[0..2]);
-            try testing.expectEqual(@as(?usize, 0), mixer.read(&out));
+            try grt.std.testing.expectEqual(@as(usize, 2), n);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 1, 2 }, out[0..2]);
+            try grt.std.testing.expectEqual(@as(?usize, 0), mixer.read(&out));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
             TestCase.exposesSurface();
-            TestCase.defaultBackendHappyPath(testing) catch |err| {
+            TestCase.defaultBackendHappyPath() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.defaultBackendMixesGain(testing) catch |err| {
+            TestCase.defaultBackendMixesGain() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.defaultBackendDrainsAfterCloseWrite(testing) catch |err| {
+            TestCase.defaultBackendDrainsAfterCloseWrite() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.defaultBackendRejectsCreateAfterMixerCloseWrite(testing) catch |err| {
+            TestCase.defaultBackendRejectsCreateAfterMixerCloseWrite() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.defaultBackendCloseIsTerminalWithoutErrorPath(testing) catch |err| {
+            TestCase.defaultBackendCloseIsTerminalWithoutErrorPath() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.defaultBackendLastHandleDropClosesTrackAndPreservesBufferedAudio(testing) catch |err| {
+            TestCase.defaultBackendLastHandleDropClosesTrackAndPreservesBufferedAudio() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.defaultBackendOverflowingSilenceTailFallsBackToCloseWrite(testing) catch |err| {
+            TestCase.defaultBackendOverflowingSilenceTailFallsBackToCloseWrite() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

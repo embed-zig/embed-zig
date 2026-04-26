@@ -1,18 +1,18 @@
 const glib = @import("glib");
 const Subscriber = @import("Subscriber.zig");
 
-pub fn make(comptime lib: type, comptime T: type, comptime label: anytype) type {
-    const Allocator = lib.mem.Allocator;
-    const AtomicU64 = lib.atomic.Value(u64);
-    const SubscriberList = lib.ArrayList(*Subscriber);
-    const Mutex = lib.Thread.Mutex;
-    const RwLock = lib.Thread.RwLock;
+pub fn make(comptime grt: type, comptime T: type, comptime label: anytype) type {
+    const Allocator = glib.std.mem.Allocator;
+    const AtomicU64 = grt.std.atomic.Value(u64);
+    const SubscriberList = grt.std.ArrayList(*Subscriber);
+    const Mutex = grt.std.Thread.Mutex;
+    const RwLock = grt.std.Thread.RwLock;
     const label_name = labelText(label);
 
     return struct {
         const Self = @This();
 
-        pub const Lib = lib;
+        pub const Lib = grt;
         pub const StateType = T;
         pub const Label = label_name;
         pub const Notification = Subscriber.Notification;
@@ -331,17 +331,10 @@ fn assignPatchedValue(dst: anytype, src: anytype) void {
     @compileError("zux.StoreObject.patch type mismatch: cannot patch " ++ @typeName(Dst) ++ " with " ++ @typeName(Src));
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
-    const StoreLib = struct {
-        pub const atomic = lib.atomic;
-        pub const mem = lib.mem;
-        pub const Thread = lib.Thread;
-        pub const ArrayList = lib.ArrayList;
-    };
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn diff_scalars_and_nested(testing: anytype, _: lib.mem.Allocator) !void {
-            const S = make(StoreLib, struct {
+        fn diff_scalars_and_nested(_: glib.std.mem.Allocator) !void {
+            const S = make(grt, struct {
                 count: u32,
                 enabled: bool,
                 nested: struct {
@@ -365,12 +358,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .nested = .{ .ok = true },
             };
 
-            try testing.expect(!diffValue(S.StateType, a, b));
-            try testing.expect(diffValue(S.StateType, a, c));
+            try grt.std.testing.expect(!diffValue(S.StateType, a, b));
+            try grt.std.testing.expect(diffValue(S.StateType, a, c));
         }
 
-        fn diff_slices(testing: anytype, _: lib.mem.Allocator) !void {
-            const S = make(StoreLib, struct {
+        fn diff_slices(_: glib.std.mem.Allocator) !void {
+            const S = make(grt, struct {
                 name: []const u8,
                 data: []const u8,
             }, .test_diff_slices);
@@ -388,12 +381,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .data = "abd",
             };
 
-            try testing.expect(!diffValue(S.StateType, a, b));
-            try testing.expect(diffValue(S.StateType, a, c));
+            try grt.std.testing.expect(!diffValue(S.StateType, a, b));
+            try grt.std.testing.expect(diffValue(S.StateType, a, c));
         }
 
-        fn set_write_then_tick(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const S = make(StoreLib, struct {
+        fn set_write_then_tick(allocator: glib.std.mem.Allocator) !void {
+            const S = make(grt, struct {
                 count: u32,
                 enabled: bool,
             }, .test_set);
@@ -404,24 +397,24 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             });
             defer state.deinit();
 
-            try testing.expectEqual(@as(u32, 1), state.get().count);
+            try grt.std.testing.expectEqual(@as(u32, 1), state.get().count);
             state.tick();
-            try testing.expectEqual(@as(u32, 1), state.get().count);
+            try grt.std.testing.expectEqual(@as(u32, 1), state.get().count);
 
             state.set(.{
                 .count = 2,
                 .enabled = true,
             });
 
-            try testing.expectEqual(@as(u32, 1), state.get().count);
+            try grt.std.testing.expectEqual(@as(u32, 1), state.get().count);
 
             state.tick();
-            try testing.expectEqual(@as(u32, 2), state.get().count);
-            try testing.expect(state.get().enabled);
+            try grt.std.testing.expectEqual(@as(u32, 2), state.get().count);
+            try grt.std.testing.expect(state.get().enabled);
         }
 
-        fn eql_reads_released_state(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const S = make(StoreLib, struct {
+        fn eql_reads_released_state(allocator: glib.std.mem.Allocator) !void {
+            const S = make(grt, struct {
                 count: u32 = 0,
                 enabled: bool = false,
             }, .test_eql);
@@ -429,8 +422,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var state = S.init(allocator, .{});
             defer state.deinit();
 
-            try testing.expect(state.eql(.{}));
-            try testing.expect(!state.eql(.{
+            try grt.std.testing.expect(state.eql(.{}));
+            try grt.std.testing.expect(!state.eql(.{
                 .count = 1,
             }));
 
@@ -439,17 +432,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .enabled = true,
             });
 
-            try testing.expect(state.eql(.{}));
+            try grt.std.testing.expect(state.eql(.{}));
 
             state.tick();
-            try testing.expect(state.eql(.{
+            try grt.std.testing.expect(state.eql(.{
                 .count = 1,
                 .enabled = true,
             }));
         }
 
-        fn invoke_mutates_running_then_tick_publishes(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const S = make(StoreLib, struct {
+        fn invoke_mutates_running_then_tick_publishes(allocator: glib.std.mem.Allocator) !void {
+            const S = make(grt, struct {
                 frame: [4]u8,
                 brightness: u8,
             }, .test_invoke);
@@ -478,18 +471,18 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }.apply);
 
             const before_tick = state.get();
-            try testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3, 4 }, &before_tick.frame);
-            try testing.expectEqual(@as(u8, 16), before_tick.brightness);
+            try grt.std.testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3, 4 }, &before_tick.frame);
+            try grt.std.testing.expectEqual(@as(u8, 16), before_tick.brightness);
 
             state.tick();
 
             const after_tick = state.get();
-            try testing.expectEqualSlices(u8, &[_]u8{ 1, 9, 3, 7 }, &after_tick.frame);
-            try testing.expectEqual(@as(u8, 128), after_tick.brightness);
+            try grt.std.testing.expectEqualSlices(u8, &[_]u8{ 1, 9, 3, 7 }, &after_tick.frame);
+            try grt.std.testing.expectEqual(@as(u8, 128), after_tick.brightness);
         }
 
-        fn patch_merge_nested_and_replace_array(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const S = make(StoreLib, struct {
+        fn patch_merge_nested_and_replace_array(allocator: glib.std.mem.Allocator) !void {
+            const S = make(grt, struct {
                 count: u32,
                 nested: struct {
                     enabled: bool,
@@ -515,20 +508,20 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .values = [_]u8{ 7, 8, 9 },
             });
 
-            try testing.expectEqual(@as(bool, false), state.get().nested.enabled);
-            try testing.expectEqualStrings("old", state.get().nested.name);
-            try testing.expectEqual(@as(u8, 1), state.get().values[0]);
+            try grt.std.testing.expectEqual(@as(bool, false), state.get().nested.enabled);
+            try grt.std.testing.expectEqualStrings("old", state.get().nested.name);
+            try grt.std.testing.expectEqual(@as(u8, 1), state.get().values[0]);
 
             state.tick();
 
             const snapshot = state.get();
-            try testing.expect(snapshot.nested.enabled);
-            try testing.expectEqualStrings("old", snapshot.nested.name);
-            try testing.expectEqualSlices(u8, &.{ 7, 8, 9 }, &snapshot.values);
+            try grt.std.testing.expect(snapshot.nested.enabled);
+            try grt.std.testing.expectEqualStrings("old", snapshot.nested.name);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 7, 8, 9 }, &snapshot.values);
         }
 
-        fn subscribe_add_and_remove_subscriber(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const S = make(StoreLib, struct {
+        fn subscribe_add_and_remove_subscriber(allocator: glib.std.mem.Allocator) !void {
+            const S = make(grt, struct {
                 value: u32,
             }, .test_subscriptions);
 
@@ -544,15 +537,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             try state.subscribe(&subscriber);
             try state.subscribe(&subscriber);
-            try testing.expectEqual(@as(usize, 1), state.subscribers.items.len);
+            try grt.std.testing.expectEqual(@as(usize, 1), state.subscribers.items.len);
 
-            try testing.expect(state.unsubscribe(&subscriber));
-            try testing.expectEqual(@as(usize, 0), state.subscribers.items.len);
-            try testing.expect(!state.unsubscribe(&subscriber));
+            try grt.std.testing.expect(state.unsubscribe(&subscriber));
+            try grt.std.testing.expectEqual(@as(usize, 0), state.subscribers.items.len);
+            try grt.std.testing.expect(!state.unsubscribe(&subscriber));
         }
 
-        fn tick_notify_subscribers_with_label(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const S = make(StoreLib, struct {
+        fn tick_notify_subscribers_with_label(allocator: glib.std.mem.Allocator) !void {
+            const S = make(grt, struct {
                 value: u32,
             }, .app_session);
 
@@ -578,14 +571,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             state.set(.{ .value = 2 });
             state.tick();
 
-            try testing.expect(impl.called);
-            try testing.expectEqualStrings("app_session", impl.label);
-            try testing.expectEqual(@as(u64, 1), impl.tick_count);
-            try testing.expectEqual(@as(u32, 2), state.get().value);
+            try grt.std.testing.expect(impl.called);
+            try grt.std.testing.expectEqualStrings("app_session", impl.label);
+            try grt.std.testing.expectEqual(@as(u64, 1), impl.tick_count);
+            try grt.std.testing.expectEqual(@as(u32, 2), state.get().value);
         }
 
-        fn tick_noop_does_not_notify_but_advances_tick_count(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const S = make(StoreLib, struct {
+        fn tick_noop_does_not_notify_but_advances_tick_count(allocator: glib.std.mem.Allocator) !void {
+            const S = make(grt, struct {
                 value: u32,
             }, .tick_noop);
 
@@ -608,20 +601,20 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             state.tick();
 
-            try testing.expectEqual(@as(u64, 1), state.tick_count.load(.acquire));
-            try testing.expect(!impl.called);
-            try testing.expectEqual(@as(u64, 0), impl.tick_count);
+            try grt.std.testing.expectEqual(@as(u64, 1), state.tick_count.load(.acquire));
+            try grt.std.testing.expect(!impl.called);
+            try grt.std.testing.expectEqual(@as(u64, 0), impl.tick_count);
 
             state.set(.{ .value = 2 });
             state.tick();
 
-            try testing.expectEqual(@as(u64, 2), state.tick_count.load(.acquire));
-            try testing.expect(impl.called);
-            try testing.expectEqual(@as(u64, 2), impl.tick_count);
+            try grt.std.testing.expectEqual(@as(u64, 2), state.tick_count.load(.acquire));
+            try grt.std.testing.expect(impl.called);
+            try grt.std.testing.expectEqual(@as(u64, 2), impl.tick_count);
         }
 
-        fn tick_notifies_multiple_subscribers_once_each(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const S = make(StoreLib, struct {
+        fn tick_notifies_multiple_subscribers_once_each(allocator: glib.std.mem.Allocator) !void {
+            const S = make(grt, struct {
                 value: u32,
             }, .multi_subscriber);
 
@@ -648,80 +641,79 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             state.set(.{ .value = 2 });
             state.tick();
 
-            try testing.expectEqual(@as(usize, 1), a.calls);
-            try testing.expectEqual(@as(usize, 1), b.calls);
-            try testing.expectEqual(@as(u64, 1), a.last_tick_count);
-            try testing.expectEqual(@as(u64, 1), b.last_tick_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), a.calls);
+            try grt.std.testing.expectEqual(@as(usize, 1), b.calls);
+            try grt.std.testing.expectEqual(@as(u64, 1), a.last_tick_count);
+            try grt.std.testing.expectEqual(@as(u64, 1), b.last_tick_count);
 
             state.tick();
 
-            try testing.expectEqual(@as(usize, 1), a.calls);
-            try testing.expectEqual(@as(usize, 1), b.calls);
+            try grt.std.testing.expectEqual(@as(usize, 1), a.calls);
+            try grt.std.testing.expectEqual(@as(usize, 1), b.calls);
 
             state.set(.{ .value = 3 });
             state.tick();
 
-            try testing.expectEqual(@as(usize, 2), a.calls);
-            try testing.expectEqual(@as(usize, 2), b.calls);
-            try testing.expectEqual(@as(u64, 3), a.last_tick_count);
-            try testing.expectEqual(@as(u64, 3), b.last_tick_count);
+            try grt.std.testing.expectEqual(@as(usize, 2), a.calls);
+            try grt.std.testing.expectEqual(@as(usize, 2), b.calls);
+            try grt.std.testing.expectEqual(@as(u64, 3), a.last_tick_count);
+            try grt.std.testing.expectEqual(@as(u64, 3), b.last_tick_count);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.diff_scalars_and_nested(testing, allocator) catch |err| {
+            TestCase.diff_scalars_and_nested(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.diff_slices(testing, allocator) catch |err| {
+            TestCase.diff_slices(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.set_write_then_tick(testing, allocator) catch |err| {
+            TestCase.set_write_then_tick(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.eql_reads_released_state(testing, allocator) catch |err| {
+            TestCase.eql_reads_released_state(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.invoke_mutates_running_then_tick_publishes(testing, allocator) catch |err| {
+            TestCase.invoke_mutates_running_then_tick_publishes(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.patch_merge_nested_and_replace_array(testing, allocator) catch |err| {
+            TestCase.patch_merge_nested_and_replace_array(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.subscribe_add_and_remove_subscriber(testing, allocator) catch |err| {
+            TestCase.subscribe_add_and_remove_subscriber(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.tick_notify_subscribers_with_label(testing, allocator) catch |err| {
+            TestCase.tick_notify_subscribers_with_label(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.tick_noop_does_not_notify_but_advances_tick_count(testing, allocator) catch |err| {
+            TestCase.tick_noop_does_not_notify_but_advances_tick_count(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.tick_notifies_multiple_subscribers_once_each(testing, allocator) catch |err| {
+            TestCase.tick_notifies_multiple_subscribers_once_each(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

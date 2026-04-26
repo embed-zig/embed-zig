@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 const error_mod = @import("error.zig");
 const types = @import("types.zig");
@@ -157,14 +158,12 @@ fn fitsSpxUint32(value: anytype) bool {
     return @as(u64, @intCast(value)) <= max;
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn rejectsInvalidInitArguments() !void {
-            try lib.testing.expectError(error.InvalidArgument, Self.init(0, 16_000, 16_000, types.resampler_quality_default));
-            try lib.testing.expectError(error.InvalidArgument, Self.init(1, 0, 16_000, types.resampler_quality_default));
-            try lib.testing.expectError(error.InvalidArgument, Self.init(1, 16_000, 16_000, types.resampler_quality_max + 1));
+            try grt.std.testing.expectError(error.InvalidArgument, Self.init(0, 16_000, 16_000, types.resampler_quality_default));
+            try grt.std.testing.expectError(error.InvalidArgument, Self.init(1, 0, 16_000, types.resampler_quality_default));
+            try grt.std.testing.expectError(error.InvalidArgument, Self.init(1, 16_000, 16_000, types.resampler_quality_max + 1));
         }
 
         fn rejectsInvalidProcessArguments() !void {
@@ -176,28 +175,28 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             var interleaved_in = [_]types.Sample{0} ** 321;
             var interleaved_out = [_]types.Sample{0} ** 320;
 
-            try lib.testing.expectError(error.InvalidArgument, resampler.processInt(2, mono_in[0..], mono_out[0..]));
-            try lib.testing.expectError(error.InvalidArgument, resampler.processInterleavedInt(interleaved_in[0..], interleaved_out[0..]));
+            try grt.std.testing.expectError(error.InvalidArgument, resampler.processInt(2, mono_in[0..], mono_out[0..]));
+            try grt.std.testing.expectError(error.InvalidArgument, resampler.processInterleavedInt(interleaved_in[0..], interleaved_out[0..]));
         }
 
         fn rejectsInvalidControlArguments() !void {
             var resampler = try Self.init(1, 16_000, 8_000, types.resampler_quality_default);
             defer resampler.deinit();
 
-            try lib.testing.expectError(error.InvalidArgument, resampler.setRate(0, 16_000));
-            try lib.testing.expectError(error.InvalidArgument, resampler.setRate(16_000, 0));
-            try lib.testing.expectError(error.InvalidArgument, resampler.setQuality(types.resampler_quality_min - 1));
-            try lib.testing.expectError(error.InvalidArgument, resampler.setQuality(types.resampler_quality_max + 1));
+            try grt.std.testing.expectError(error.InvalidArgument, resampler.setRate(0, 16_000));
+            try grt.std.testing.expectError(error.InvalidArgument, resampler.setRate(16_000, 0));
+            try grt.std.testing.expectError(error.InvalidArgument, resampler.setQuality(types.resampler_quality_min - 1));
+            try grt.std.testing.expectError(error.InvalidArgument, resampler.setQuality(types.resampler_quality_max + 1));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -216,7 +215,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -225,5 +224,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

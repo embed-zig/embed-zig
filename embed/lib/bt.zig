@@ -19,23 +19,19 @@ const Client = @import("bt/host/Client.zig");
 
 const bt = @This();
 
-pub fn make(comptime gz: type) type {
+pub fn make(comptime grt: type) type {
     comptime {
-        if (!glib.runtime.is(gz)) @compileError("bt.make requires a glib runtime namespace");
+        if (!glib.runtime.is(grt)) @compileError("bt.make requires a glib runtime namespace");
     }
-
-    const lib = gz.std;
-    const Channel = gz.sync.Channel;
-
     return struct {
         const self = @This();
 
         pub fn makeHost(comptime Impl: type) type {
-            return bt.Host.make(lib, Impl, Channel);
+            return bt.Host.make(grt, Impl);
         }
-        pub const HciHost = bt.Host.makeHci(lib, Channel);
-        pub const HciHostTransport = bt.Host.makeHciTransport(lib, Channel);
-        pub const Server = bt.Server.make(lib, Channel);
-        pub const Client = bt.Client.make(lib);
+        pub const HciHost = bt.Host.makeHci(grt);
+        pub const HciHostTransport = bt.Host.makeHciTransport(grt);
+        pub const Server = bt.Server.make(grt);
+        pub const Client = bt.Client.make(grt);
     };
 }

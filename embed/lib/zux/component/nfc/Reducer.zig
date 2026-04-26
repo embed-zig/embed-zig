@@ -52,13 +52,13 @@ pub fn reduce(store: anytype, message: Message, emit: Emitter) !usize {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn reduceFoundUpdatesStore(testing: anytype) !void {
+        fn reduceFoundUpdatesStore() !void {
             const StoreObject = @import("../../store/Object.zig");
 
-            const FoundStore = StoreObject.make(lib, NfcState, .nfc);
-            var store = FoundStore.init(testing.allocator, .{});
+            const FoundStore = StoreObject.make(grt, NfcState, .nfc);
+            var store = FoundStore.init(grt.std.testing.allocator, .{});
             defer store.deinit();
 
             const NoopSink = struct {
@@ -66,7 +66,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
             var sink = NoopSink{};
 
-            try testing.expectEqual(@as(usize, 0), try reduceFound(&store, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try reduceFound(&store, .{
                 .origin = .source,
                 .body = .{
                     .nfc_found = .{
@@ -87,17 +87,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             store.tick();
             const next = store.get();
-            try testing.expectEqual(@as(u32, 17), next.source_id);
-            try testing.expectEqual(@as(?@import("event.zig").CardType, .ndef), next.card_type);
-            try testing.expectEqualSlices(u8, &.{ 0x04, 0xA1, 0xB2, 0xC3 }, next.uid());
-            try testing.expectEqual(@as(usize, 0), next.payload().len);
+            try grt.std.testing.expectEqual(@as(u32, 17), next.source_id);
+            try grt.std.testing.expectEqual(@as(?@import("event.zig").CardType, .ndef), next.card_type);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x04, 0xA1, 0xB2, 0xC3 }, next.uid());
+            try grt.std.testing.expectEqual(@as(usize, 0), next.payload().len);
         }
 
-        fn reduceReadUpdatesStore(testing: anytype) !void {
+        fn reduceReadUpdatesStore() !void {
             const StoreObject = @import("../../store/Object.zig");
 
-            const ReadStore = StoreObject.make(lib, NfcState, .nfc);
-            var store = ReadStore.init(testing.allocator, .{});
+            const ReadStore = StoreObject.make(grt, NfcState, .nfc);
+            var store = ReadStore.init(grt.std.testing.allocator, .{});
             defer store.deinit();
 
             const NoopSink = struct {
@@ -105,7 +105,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
             var sink = NoopSink{};
 
-            try testing.expectEqual(@as(usize, 0), try reduceRead(&store, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try reduceRead(&store, .{
                 .origin = .source,
                 .body = .{
                     .nfc_read = .{
@@ -131,17 +131,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             store.tick();
             const next = store.get();
-            try testing.expectEqual(@as(u32, 17), next.source_id);
-            try testing.expectEqual(@as(?@import("event.zig").CardType, .ndef), next.card_type);
-            try testing.expectEqualSlices(u8, &.{ 0x04, 0xA1, 0xB2, 0xC3 }, next.uid());
-            try testing.expectEqualSlices(u8, &.{ 0x03, 0x02, 0xD1, 0x01 }, next.payload());
+            try grt.std.testing.expectEqual(@as(u32, 17), next.source_id);
+            try grt.std.testing.expectEqual(@as(?@import("event.zig").CardType, .ndef), next.card_type);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x04, 0xA1, 0xB2, 0xC3 }, next.uid());
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x03, 0x02, 0xD1, 0x01 }, next.payload());
         }
 
-        fn reduceTracksCombinedState(testing: anytype) !void {
+        fn reduceTracksCombinedState() !void {
             const StoreObject = @import("../../store/Object.zig");
 
-            const NfcStore = StoreObject.make(lib, NfcState, .nfc);
-            var store = NfcStore.init(testing.allocator, .{});
+            const NfcStore = StoreObject.make(grt, NfcState, .nfc);
+            var store = NfcStore.init(grt.std.testing.allocator, .{});
             defer store.deinit();
 
             const NoopSink = struct {
@@ -149,7 +149,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
             var sink = NoopSink{};
 
-            try testing.expectEqual(@as(usize, 0), try reduce(&store, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .nfc_found = .{
@@ -167,7 +167,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 },
             }, Emitter.init(&sink)));
-            try testing.expectEqual(@as(usize, 0), try reduce(&store, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .nfc_read = .{
@@ -193,40 +193,39 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             store.tick();
             const next = store.get();
-            try testing.expectEqual(@as(u32, 21), next.source_id);
-            try testing.expectEqual(@as(?@import("event.zig").CardType, .ndef), next.card_type);
-            try testing.expectEqualSlices(u8, &.{ 0x04, 0xA1, 0xB2, 0xC3 }, next.uid());
-            try testing.expectEqualSlices(u8, &.{ 0x03, 0x02, 0xD1, 0x01 }, next.payload());
+            try grt.std.testing.expectEqual(@as(u32, 21), next.source_id);
+            try grt.std.testing.expectEqual(@as(?@import("event.zig").CardType, .ndef), next.card_type);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x04, 0xA1, 0xB2, 0xC3 }, next.uid());
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x03, 0x02, 0xD1, 0x01 }, next.payload());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.reduceFoundUpdatesStore(testing) catch |err| {
+            TestCase.reduceFoundUpdatesStore() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.reduceReadUpdatesStore(testing) catch |err| {
+            TestCase.reduceReadUpdatesStore() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.reduceTracksCombinedState(testing) catch |err| {
+            TestCase.reduceTracksCombinedState() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

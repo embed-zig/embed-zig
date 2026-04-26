@@ -222,11 +222,9 @@ fn bytesEqual(left: []const u8, right: []const u8) bool {
     return true;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn testPageOutAssemblesBufferedChunks(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testPageOutAssemblesBufferedChunks(allocator: glib.std.mem.Allocator) !void {
             var encoder = try Stream.init(allocator, 1234);
             defer encoder.deinit();
 
@@ -254,17 +252,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             switch (try sync.pageOut()) {
                 .page => |synced_page| {
-                    try testing.expectEqual(@as(u32, 1234), try synced_page.serialNo());
-                    try testing.expectEqual(@as(u32, 0), try synced_page.pageNo());
-                    try testing.expectEqualSlices(u8, "hello sync", synced_page.body);
+                    try grt.std.testing.expectEqual(@as(u32, 1234), try synced_page.serialNo());
+                    try grt.std.testing.expectEqual(@as(u32, 0), try synced_page.pageNo());
+                    try grt.std.testing.expectEqualSlices(u8, "hello sync", synced_page.body);
                 },
                 else => return error.TestUnexpectedResult,
             }
         }
 
-        fn testPageSeekReportsSkippedBytesForBadCapturePattern(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testPageSeekReportsSkippedBytesForBadCapturePattern(allocator: glib.std.mem.Allocator) !void {
             var sync = init(allocator);
             defer sync.deinit();
 
@@ -273,14 +269,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             try sync.wrote(32);
 
             switch (try sync.pageSeek()) {
-                .skipped => |count| try testing.expectEqual(@as(usize, 32), count),
+                .skipped => |count| try grt.std.testing.expectEqual(@as(usize, 32), count),
                 else => return error.TestUnexpectedResult,
             }
         }
 
-        fn testPageOutReturnsHoleAfterChecksumFailure(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testPageOutReturnsHoleAfterChecksumFailure(allocator: glib.std.mem.Allocator) !void {
             var encoder = try Stream.init(allocator, 9);
             defer encoder.deinit();
 
@@ -309,14 +303,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 else => return error.TestUnexpectedResult,
             }
             switch (try sync.pageOut()) {
-                .page => |synced_page| try testing.expectEqualSlices(u8, "good-1", synced_page.body),
+                .page => |synced_page| try grt.std.testing.expectEqualSlices(u8, "good-1", synced_page.body),
                 else => return error.TestUnexpectedResult,
             }
         }
 
-        fn testResetClearsSyncBookkeeping(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testResetClearsSyncBookkeeping(allocator: glib.std.mem.Allocator) !void {
             var sync = init(allocator);
             defer sync.deinit();
 
@@ -325,11 +317,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             try sync.wrote(4);
             try sync.reset();
 
-            try testing.expectEqual(@as(usize, 0), sync.fill);
-            try testing.expectEqual(@as(usize, 0), sync.returned);
-            try testing.expect(!sync.unsynced);
-            try testing.expectEqual(@as(usize, 0), sync.headerbytes);
-            try testing.expectEqual(@as(usize, 0), sync.bodybytes);
+            try grt.std.testing.expectEqual(@as(usize, 0), sync.fill);
+            try grt.std.testing.expectEqual(@as(usize, 0), sync.returned);
+            try grt.std.testing.expect(!sync.unsynced);
+            try grt.std.testing.expectEqual(@as(usize, 0), sync.headerbytes);
+            try grt.std.testing.expectEqual(@as(usize, 0), sync.bodybytes);
         }
 
         fn appendPageBytes(dest: []u8, header: []const u8, body: []const u8) usize {
@@ -340,12 +332,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             TestCase.testPageOutAssemblesBufferedChunks(allocator) catch |err| {
@@ -367,7 +359,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

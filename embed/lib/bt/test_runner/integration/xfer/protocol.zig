@@ -8,11 +8,7 @@ pub const write_recv_happy = @import("write_recv_happy.zig");
 pub const write_recv_retry = @import("write_recv_retry.zig");
 pub const write_recv_timeout = @import("write_recv_timeout.zig");
 
-pub fn make(comptime gz: type) glib.testing.TestRunner {
-    return makeWithChannel(gz.std, gz.sync.Channel);
-}
-
-pub fn makeWithChannel(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
@@ -23,12 +19,12 @@ pub fn makeWithChannel(comptime lib: type, comptime Channel: fn (type) type) gli
             _ = self;
             _ = allocator;
 
-            t.run("read_send/happy_path", read_send_happy.make(lib, Channel));
-            t.run("read_send/retry_missing_chunk", read_send_retry.make(lib, Channel));
-            t.run("read_send/timeout", read_send_timeout.make(lib, Channel));
-            t.run("write_recv/happy_path", write_recv_happy.make(lib, Channel));
-            t.run("write_recv/retry_missing_chunk", write_recv_retry.make(lib, Channel));
-            t.run("write_recv/timeout", write_recv_timeout.make(lib, Channel));
+            t.run("read_send/happy_path", read_send_happy.make(grt));
+            t.run("read_send/retry_missing_chunk", read_send_retry.make(grt));
+            t.run("read_send/timeout", read_send_timeout.make(grt));
+            t.run("write_recv/happy_path", write_recv_happy.make(grt));
+            t.run("write_recv/retry_missing_chunk", write_recv_retry.make(grt));
+            t.run("write_recv/timeout", write_recv_timeout.make(grt));
             return t.wait();
         }
 

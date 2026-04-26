@@ -158,7 +158,7 @@ pub fn chunksNeeded(data_len: usize, mtu: u16) usize {
     return (data_len + dcs - 1) / dcs;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const headers = [_]Header{
@@ -172,50 +172,50 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             for (headers) |header| {
                 const encoded = header.encode();
                 const decoded = Header.decode(&encoded);
-                try lib.testing.expectEqual(header.total, decoded.total);
-                try lib.testing.expectEqual(header.seq, decoded.seq);
+                try grt.std.testing.expectEqual(header.total, decoded.total);
+                try grt.std.testing.expectEqual(header.seq, decoded.seq);
             }
 
             try (Header{ .total = 1, .seq = 1 }).validate();
             try (Header{ .total = 4095, .seq = 4095 }).validate();
-            try lib.testing.expectError(error.InvalidHeader, (Header{ .total = 0, .seq = 1 }).validate());
-            try lib.testing.expectError(error.InvalidHeader, (Header{ .total = 1, .seq = 0 }).validate());
-            try lib.testing.expectError(error.InvalidHeader, (Header{ .total = 1, .seq = 2 }).validate());
-            try lib.testing.expectError(error.InvalidHeader, (Header{ .total = 4096, .seq = 1 }).validate());
+            try grt.std.testing.expectError(error.InvalidHeader, (Header{ .total = 0, .seq = 1 }).validate());
+            try grt.std.testing.expectError(error.InvalidHeader, (Header{ .total = 1, .seq = 0 }).validate());
+            try grt.std.testing.expectError(error.InvalidHeader, (Header{ .total = 1, .seq = 2 }).validate());
+            try grt.std.testing.expectError(error.InvalidHeader, (Header{ .total = 4096, .seq = 1 }).validate());
 
-            try lib.testing.expect(isReadStartMagic(&read_start_magic));
-            try lib.testing.expect(isWriteStartMagic(&write_start_magic));
-            try lib.testing.expect(!isReadStartMagic(&write_start_magic));
-            try lib.testing.expect(!isWriteStartMagic(&read_start_magic));
-            try lib.testing.expect(isAck(&ack_signal));
-            try lib.testing.expect(isAck(&[_]u8{ 0xFF, 0xFF, 0x00 }));
-            try lib.testing.expect(!isAck(&[_]u8{0xFF}));
+            try grt.std.testing.expect(isReadStartMagic(&read_start_magic));
+            try grt.std.testing.expect(isWriteStartMagic(&write_start_magic));
+            try grt.std.testing.expect(!isReadStartMagic(&write_start_magic));
+            try grt.std.testing.expect(!isWriteStartMagic(&read_start_magic));
+            try grt.std.testing.expect(isAck(&ack_signal));
+            try grt.std.testing.expect(isAck(&[_]u8{ 0xFF, 0xFF, 0x00 }));
+            try grt.std.testing.expect(!isAck(&[_]u8{0xFF}));
 
             const seqs = [_]u16{ 1, 42, 4095 };
             var loss_buf: [6]u8 = undefined;
             const encoded_loss = encodeLossList(&seqs, &loss_buf);
-            try lib.testing.expectEqual(@as(usize, 6), encoded_loss.len);
+            try grt.std.testing.expectEqual(@as(usize, 6), encoded_loss.len);
 
             var decoded: [3]u16 = undefined;
             const decoded_count = decodeLossList(encoded_loss, &decoded);
-            try lib.testing.expectEqual(@as(usize, 3), decoded_count);
-            try lib.testing.expectEqualSlices(u16, &seqs, decoded[0..decoded_count]);
+            try grt.std.testing.expectEqual(@as(usize, 3), decoded_count);
+            try grt.std.testing.expectEqualSlices(u16, &seqs, decoded[0..decoded_count]);
 
             var short_buf: [4]u8 = undefined;
             const truncated = encodeLossList(&seqs, &short_buf);
-            try lib.testing.expectEqual(@as(usize, 4), truncated.len);
+            try grt.std.testing.expectEqual(@as(usize, 4), truncated.len);
 
             var truncated_out: [2]u16 = undefined;
             const truncated_count = decodeLossList(truncated, &truncated_out);
-            try lib.testing.expectEqual(@as(usize, 2), truncated_count);
-            try lib.testing.expectEqual(@as(u16, 1), truncated_out[0]);
-            try lib.testing.expectEqual(@as(u16, 42), truncated_out[1]);
+            try grt.std.testing.expectEqual(@as(usize, 2), truncated_count);
+            try grt.std.testing.expectEqual(@as(u16, 1), truncated_out[0]);
+            try grt.std.testing.expectEqual(@as(u16, 42), truncated_out[1]);
 
             var mask_buf: [2]u8 = undefined;
             Bitmask.initClear(&mask_buf, 10);
-            try lib.testing.expectEqual(@as(usize, 2), Bitmask.requiredBytes(10));
-            try lib.testing.expect(!Bitmask.isSet(&mask_buf, 1));
-            try lib.testing.expect(!Bitmask.isComplete(&mask_buf, 10));
+            try grt.std.testing.expectEqual(@as(usize, 2), Bitmask.requiredBytes(10));
+            try grt.std.testing.expect(!Bitmask.isSet(&mask_buf, 1));
+            try grt.std.testing.expect(!Bitmask.isComplete(&mask_buf, 10));
 
             Bitmask.set(&mask_buf, 1);
             Bitmask.set(&mask_buf, 2);
@@ -226,52 +226,52 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             Bitmask.set(&mask_buf, 9);
             Bitmask.set(&mask_buf, 10);
 
-            try lib.testing.expect(Bitmask.isSet(&mask_buf, 1));
-            try lib.testing.expect(!Bitmask.isSet(&mask_buf, 3));
-            try lib.testing.expect(!Bitmask.isSet(&mask_buf, 7));
+            try grt.std.testing.expect(Bitmask.isSet(&mask_buf, 1));
+            try grt.std.testing.expect(!Bitmask.isSet(&mask_buf, 3));
+            try grt.std.testing.expect(!Bitmask.isSet(&mask_buf, 7));
 
             var missing: [10]u16 = undefined;
             const missing_count = Bitmask.collectMissing(&mask_buf, 10, &missing);
-            try lib.testing.expectEqual(@as(usize, 2), missing_count);
-            try lib.testing.expectEqual(@as(u16, 3), missing[0]);
-            try lib.testing.expectEqual(@as(u16, 7), missing[1]);
+            try grt.std.testing.expectEqual(@as(usize, 2), missing_count);
+            try grt.std.testing.expectEqual(@as(u16, 3), missing[0]);
+            try grt.std.testing.expectEqual(@as(u16, 7), missing[1]);
 
             Bitmask.set(&mask_buf, 3);
             Bitmask.set(&mask_buf, 7);
-            try lib.testing.expect(Bitmask.isComplete(&mask_buf, 10));
+            try grt.std.testing.expect(Bitmask.isComplete(&mask_buf, 10));
             Bitmask.clear(&mask_buf, 5);
-            try lib.testing.expect(!Bitmask.isComplete(&mask_buf, 10));
-            try lib.testing.expect(!Bitmask.isSet(&mask_buf, 5));
+            try grt.std.testing.expect(!Bitmask.isComplete(&mask_buf, 10));
+            try grt.std.testing.expect(!Bitmask.isSet(&mask_buf, 5));
 
             var all_set: [2]u8 = undefined;
             Bitmask.initAllSet(&all_set, 10);
-            try lib.testing.expectEqual(@as(u8, 0xFF), all_set[0]);
-            try lib.testing.expectEqual(@as(u8, 0x03), all_set[1]);
-            try lib.testing.expect(Bitmask.isComplete(&all_set, 10));
+            try grt.std.testing.expectEqual(@as(u8, 0xFF), all_set[0]);
+            try grt.std.testing.expectEqual(@as(u8, 0x03), all_set[1]);
+            try grt.std.testing.expect(Bitmask.isComplete(&all_set, 10));
 
             var one_byte: [1]u8 = undefined;
             Bitmask.initAllSet(&one_byte, 3);
-            try lib.testing.expectEqual(@as(u8, 0x07), one_byte[0]);
+            try grt.std.testing.expectEqual(@as(u8, 0x07), one_byte[0]);
 
-            try lib.testing.expectEqual(@as(usize, 241), dataChunkSize(247));
-            try lib.testing.expectEqual(@as(usize, 24), dataChunkSize(30));
-            try lib.testing.expectEqual(@as(usize, 1), dataChunkSize(7));
-            try lib.testing.expectEqual(@as(usize, 1), dataChunkSize(6));
-            try lib.testing.expectEqual(@as(usize, 1), dataChunkSize(1));
-            try lib.testing.expectEqual(@as(usize, 0), chunksNeeded(0, 247));
-            try lib.testing.expectEqual(@as(usize, 1), chunksNeeded(1, 247));
-            try lib.testing.expectEqual(@as(usize, 4), chunksNeeded(964, 247));
-            try lib.testing.expectEqual(@as(usize, 5), chunksNeeded(1000, 247));
-            try lib.testing.expectEqual(@as(usize, 3), chunksNeeded(56, 30));
+            try grt.std.testing.expectEqual(@as(usize, 241), dataChunkSize(247));
+            try grt.std.testing.expectEqual(@as(usize, 24), dataChunkSize(30));
+            try grt.std.testing.expectEqual(@as(usize, 1), dataChunkSize(7));
+            try grt.std.testing.expectEqual(@as(usize, 1), dataChunkSize(6));
+            try grt.std.testing.expectEqual(@as(usize, 1), dataChunkSize(1));
+            try grt.std.testing.expectEqual(@as(usize, 0), chunksNeeded(0, 247));
+            try grt.std.testing.expectEqual(@as(usize, 1), chunksNeeded(1, 247));
+            try grt.std.testing.expectEqual(@as(usize, 4), chunksNeeded(964, 247));
+            try grt.std.testing.expectEqual(@as(usize, 5), chunksNeeded(1000, 247));
+            try grt.std.testing.expectEqual(@as(usize, 3), chunksNeeded(56, 30));
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -282,7 +282,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

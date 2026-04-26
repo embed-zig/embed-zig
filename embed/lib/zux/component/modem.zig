@@ -55,9 +55,9 @@ fn eventReceiverEmitUpdate(ctx: *const anyopaque, source_id: u32, adapter_event:
     receiver.emit(value);
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn setAndEmitReportsThroughEventReceiver(testing: anytype) !void {
+        fn setAndEmitReportsThroughEventReceiver() !void {
             const Sink = struct {
                 sim_count: usize = 0,
                 network_registration_count: usize = 0,
@@ -152,32 +152,32 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             component.setEventReceiver(&receiver);
             try adapter_impl.emit();
 
-            try testing.expectEqual(@as(usize, 1), sink.sim_count);
-            try testing.expectEqual(@as(usize, 1), sink.network_registration_count);
-            try testing.expectEqual(@as(usize, 1), sink.data_packet_count);
-            try testing.expectEqual(@as(usize, 1), sink.network_signal_count);
-            try testing.expectEqual(@as(usize, 1), sink.data_apn_count);
-            try testing.expectEqual(@as(usize, 1), sink.call_incoming_count);
-            try testing.expectEqual(@as(usize, 1), sink.call_state_count);
-            try testing.expectEqual(@as(usize, 1), sink.call_end_count);
-            try testing.expectEqual(@as(usize, 1), sink.sms_count);
-            try testing.expectEqual(@as(usize, 1), sink.gnss_state_count);
-            try testing.expectEqual(@as(usize, 1), sink.gnss_fix_count);
-            try testing.expectEqual(@as(u32, 51), sink.last_source_id);
-            try testing.expectEqual(@as(i16, -73), sink.last_rssi_dbm);
-            try testing.expectEqual(@as(usize, 8), sink.last_apn_len);
-            try testing.expectEqual(@as(u8, 3), sink.last_call_id);
-            try testing.expectEqual(CallEndReason.remote_hangup, sink.last_call_end_reason);
-            try testing.expectEqual(@as(usize, 2), sink.last_sms_len);
-            try testing.expectEqual(GnssState.fixed, sink.last_gnss_state);
-            try testing.expectEqual(GnssFixQuality.three_d, sink.last_gnss_fix_quality);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.sim_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.network_registration_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.data_packet_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.network_signal_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.data_apn_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.call_incoming_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.call_state_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.call_end_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.sms_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.gnss_state_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.gnss_fix_count);
+            try grt.std.testing.expectEqual(@as(u32, 51), sink.last_source_id);
+            try grt.std.testing.expectEqual(@as(i16, -73), sink.last_rssi_dbm);
+            try grt.std.testing.expectEqual(@as(usize, 8), sink.last_apn_len);
+            try grt.std.testing.expectEqual(@as(u8, 3), sink.last_call_id);
+            try grt.std.testing.expectEqual(CallEndReason.remote_hangup, sink.last_call_end_reason);
+            try grt.std.testing.expectEqual(@as(usize, 2), sink.last_sms_len);
+            try grt.std.testing.expectEqual(GnssState.fixed, sink.last_gnss_state);
+            try grt.std.testing.expectEqual(GnssFixQuality.three_d, sink.last_gnss_fix_quality);
 
             component.clearEventReceiver();
-            try testing.expect(adapter_impl.receiver_ctx == null);
-            try testing.expect(adapter_impl.emit_fn == null);
+            try grt.std.testing.expect(adapter_impl.receiver_ctx == null);
+            try grt.std.testing.expect(adapter_impl.emit_fn == null);
         }
 
-        fn eventReceiverDropsInvalidApn(testing: anytype) !void {
+        fn eventReceiverDropsInvalidApn() !void {
             const Sink = struct {
                 called: bool = false,
 
@@ -201,10 +201,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             );
 
-            try testing.expect(!sink.called);
+            try grt.std.testing.expect(!sink.called);
         }
 
-        fn eventReceiverDropsInvalidCallNumber(testing: anytype) !void {
+        fn eventReceiverDropsInvalidCallNumber() !void {
             const Sink = struct {
                 called: bool = false,
 
@@ -232,10 +232,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             );
 
-            try testing.expect(!sink.called);
+            try grt.std.testing.expect(!sink.called);
         }
 
-        fn eventReceiverDropsInvalidSmsText(testing: anytype) !void {
+        fn eventReceiverDropsInvalidSmsText() !void {
             const Sink = struct {
                 called: bool = false,
 
@@ -262,41 +262,40 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             );
 
-            try testing.expect(!sink.called);
+            try grt.std.testing.expect(!sink.called);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.setAndEmitReportsThroughEventReceiver(testing) catch |err| {
+            TestCase.setAndEmitReportsThroughEventReceiver() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.eventReceiverDropsInvalidApn(testing) catch |err| {
+            TestCase.eventReceiverDropsInvalidApn() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.eventReceiverDropsInvalidCallNumber(testing) catch |err| {
+            TestCase.eventReceiverDropsInvalidCallNumber() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.eventReceiverDropsInvalidSmsText(testing) catch |err| {
+            TestCase.eventReceiverDropsInvalidSmsText() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

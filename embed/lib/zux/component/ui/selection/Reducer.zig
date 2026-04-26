@@ -5,18 +5,18 @@ const Message = @import("../../../pipeline/Message.zig");
 const Subscriber = @import("../../../store/Subscriber.zig");
 const State = @import("State.zig");
 
-pub fn make(comptime lib: type) type {
-    const AtomicU64 = lib.atomic.Value(u64);
-    const Mutex = lib.Thread.Mutex;
-    const RwLock = lib.Thread.RwLock;
-    const SubscriberList = lib.ArrayList(*Subscriber);
+pub fn make(comptime grt: type) type {
+    const AtomicU64 = grt.std.atomic.Value(u64);
+    const Mutex = grt.std.Thread.Mutex;
+    const RwLock = grt.std.Thread.RwLock;
+    const SubscriberList = grt.std.ArrayList(*Subscriber);
 
     return struct {
         const Self = @This();
 
         pub const StateType = State;
 
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
 
         running_mu: Mutex = .{},
         running_state: State = .{},
@@ -29,7 +29,7 @@ pub fn make(comptime lib: type) type {
         subscribers_notifying: bool = false,
         tick_count: AtomicU64 = AtomicU64.init(0),
 
-        pub fn init(allocator: lib.mem.Allocator, initial: State) Self {
+        pub fn init(allocator: glib.std.mem.Allocator, initial: State) Self {
             const normalized = normalizeState(initial);
             return .{
                 .allocator = allocator,
@@ -226,11 +226,11 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
-    const SelectionStore = make(lib);
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const SelectionStore = make(grt);
 
     const TestCase = struct {
-        fn next_prev_loop_and_tick_snapshot(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn next_prev_loop_and_tick_snapshot(allocator: glib.std.mem.Allocator) !void {
             var selection = SelectionStore.init(allocator, .{
                 .count = 3,
                 .loop = true,
@@ -243,28 +243,28 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var noop = NoopSink{};
             const emit = Emitter.init(&noop);
 
-            try testing.expectEqual(@as(usize, 0), selection.get().index);
-            try testing.expectEqual(@as(usize, 3), selection.get().count);
-            try testing.expectEqual(true, selection.get().loop);
+            try grt.std.testing.expectEqual(@as(usize, 0), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 3), selection.get().count);
+            try grt.std.testing.expectEqual(true, selection.get().loop);
 
-            try testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
                 .origin = .manual,
                 .body = .{
                     .ui_selection_next = .{},
                 },
             }, emit));
 
-            try testing.expectEqual(@as(usize, 0), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 0), selection.get().index);
             selection.tick();
-            try testing.expectEqual(@as(usize, 1), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 1), selection.get().index);
 
-            try testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
                 .origin = .manual,
                 .body = .{
                     .ui_selection_next = .{},
                 },
             }, emit));
-            try testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
                 .origin = .manual,
                 .body = .{
                     .ui_selection_next = .{},
@@ -272,9 +272,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit));
             selection.tick();
 
-            try testing.expectEqual(@as(usize, 0), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 0), selection.get().index);
 
-            try testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
                 .origin = .manual,
                 .body = .{
                     .ui_selection_prev = .{},
@@ -282,10 +282,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit));
             selection.tick();
 
-            try testing.expectEqual(@as(usize, 2), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 2), selection.get().index);
         }
 
-        fn set_count_clamps_and_non_loop_edges_noop(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn set_count_clamps_and_non_loop_edges_noop(allocator: glib.std.mem.Allocator) !void {
             var selection = SelectionStore.init(allocator, .{
                 .index = 4,
                 .count = 5,
@@ -299,9 +299,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var noop = NoopSink{};
             const emit = Emitter.init(&noop);
 
-            try testing.expectEqual(@as(usize, 4), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 4), selection.get().index);
 
-            try testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
                 .origin = .manual,
                 .body = .{
                     .ui_selection_set_count = .{
@@ -311,10 +311,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit));
             selection.tick();
 
-            try testing.expectEqual(@as(usize, 1), selection.get().index);
-            try testing.expectEqual(@as(usize, 2), selection.get().count);
+            try grt.std.testing.expectEqual(@as(usize, 1), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 2), selection.get().count);
 
-            try testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
                 .origin = .manual,
                 .body = .{
                     .ui_selection_set_loop = .{
@@ -324,18 +324,18 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit));
             selection.tick();
 
-            try testing.expectEqual(false, selection.get().loop);
+            try grt.std.testing.expectEqual(false, selection.get().loop);
 
-            try testing.expectEqual(@as(usize, 0), try SelectionStore.reduce(&selection, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try SelectionStore.reduce(&selection, .{
                 .origin = .manual,
                 .body = .{
                     .ui_selection_next = .{},
                 },
             }, emit));
             selection.tick();
-            try testing.expectEqual(@as(usize, 1), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 1), selection.get().index);
 
-            try testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
                 .origin = .manual,
                 .body = .{
                     .ui_selection_reset = .{},
@@ -343,19 +343,19 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit));
             selection.tick();
 
-            try testing.expectEqual(@as(usize, 0), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 0), selection.get().index);
 
-            try testing.expectEqual(@as(usize, 0), try SelectionStore.reduce(&selection, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try SelectionStore.reduce(&selection, .{
                 .origin = .manual,
                 .body = .{
                     .ui_selection_prev = .{},
                 },
             }, emit));
             selection.tick();
-            try testing.expectEqual(@as(usize, 0), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 0), selection.get().index);
         }
 
-        fn set_and_empty_count_normalize_as_expected(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn set_and_empty_count_normalize_as_expected(allocator: glib.std.mem.Allocator) !void {
             var selection = SelectionStore.init(allocator, .{
                 .index = 9,
                 .count = 0,
@@ -369,10 +369,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var noop = NoopSink{};
             const emit = Emitter.init(&noop);
 
-            try testing.expectEqual(@as(usize, 0), selection.get().index);
-            try testing.expectEqual(@as(usize, 0), selection.get().count);
+            try grt.std.testing.expectEqual(@as(usize, 0), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 0), selection.get().count);
 
-            try testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
                 .origin = .manual,
                 .body = .{
                     .ui_selection_set_count = .{
@@ -382,10 +382,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit));
             selection.tick();
 
-            try testing.expectEqual(@as(usize, 0), selection.get().index);
-            try testing.expectEqual(@as(usize, 4), selection.get().count);
+            try grt.std.testing.expectEqual(@as(usize, 0), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 4), selection.get().count);
 
-            try testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try SelectionStore.reduce(&selection, .{
                 .origin = .manual,
                 .body = .{
                     .ui_selection_set = .{
@@ -395,36 +395,35 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit));
             selection.tick();
 
-            try testing.expectEqual(@as(usize, 3), selection.get().index);
+            try grt.std.testing.expectEqual(@as(usize, 3), selection.get().index);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.next_prev_loop_and_tick_snapshot(testing, allocator) catch |err| {
+            TestCase.next_prev_loop_and_tick_snapshot(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.set_count_clamps_and_non_loop_edges_noop(testing, allocator) catch |err| {
+            TestCase.set_count_clamps_and_non_loop_edges_noop(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.set_and_empty_count_normalize_as_expected(testing, allocator) catch |err| {
+            TestCase.set_and_empty_count_normalize_as_expected(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

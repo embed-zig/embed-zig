@@ -3,7 +3,7 @@ const drivers = @import("drivers");
 const Context = @import("../../event/Context.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 
-pub fn make(comptime lib: type) type {
+pub fn make(comptime grt: type) type {
     return struct {
         const Self = @This();
 
@@ -12,25 +12,25 @@ pub fn make(comptime lib: type) type {
             Unexpected,
         };
 
-        pub const default_poll_interval_ns: u64 = 10 * lib.time.ns_per_ms;
+        pub const default_poll_interval_ns: u64 = 10 * grt.std.time.ns_per_ms;
 
         pub const Config = struct {
             source_id: u32,
             poll_interval_ns: u64 = default_poll_interval_ns,
-            spawn_config: lib.Thread.SpawnConfig = .{},
+            spawn_config: grt.std.Thread.SpawnConfig = .{},
             ctx: Context.Type = null,
         };
 
         imu: drivers.imu,
         source_id: u32,
         poll_interval_ns: u64 = default_poll_interval_ns,
-        spawn_config: lib.Thread.SpawnConfig = .{},
+        spawn_config: grt.std.Thread.SpawnConfig = .{},
         ctx: Context.Type = null,
         out: ?Emitter = null,
-        state_mu: lib.Thread.Mutex = .{},
+        state_mu: grt.std.Thread.Mutex = .{},
         running: bool = false,
         async_failed: bool = false,
-        thread: ?lib.Thread = null,
+        thread: ?grt.std.Thread = null,
 
         pub fn init(imu: drivers.imu, config: Config) Self {
             return .{
@@ -58,7 +58,7 @@ pub fn make(comptime lib: type) type {
             self.async_failed = false;
             self.state_mu.unlock();
 
-            const thread = lib.Thread.spawn(self.spawn_config, Self.run, .{self}) catch {
+            const thread = grt.std.Thread.spawn(self.spawn_config, Self.run, .{self}) catch {
                 self.state_mu.lock();
                 self.running = false;
                 self.state_mu.unlock();
@@ -122,14 +122,14 @@ pub fn make(comptime lib: type) type {
                 };
 
                 if (snapshot.poll_interval_ns > 0) {
-                    lib.Thread.sleep(snapshot.poll_interval_ns);
+                    grt.std.Thread.sleep(snapshot.poll_interval_ns);
                 }
             }
         }
 
         fn pollOnce(self: *Self, out: Emitter, source_id: u32, ctx: Context.Type) !void {
             const sample = try self.imu.read();
-            const timestamp_ns = lib.time.nanoTimestamp();
+            const timestamp_ns = grt.std.time.nanoTimestamp();
 
             if (sample.accel) |accel| {
                 try out.emit(.{

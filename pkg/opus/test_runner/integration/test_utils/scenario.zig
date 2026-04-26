@@ -1,17 +1,18 @@
-const testing_api = @import("testing");
+const glib = @import("glib");
 const binding = @import("../../../src/binding.zig");
 const Encoder = @import("../../../src/Encoder.zig");
 const Decoder = @import("../../../src/Decoder.zig");
 const Packet = @import("../../../src/Packet.zig");
 
-pub fn makeVersionCheck(comptime lib: type) testing_api.TestRunner {
+pub fn makeVersionCheck(comptime grt: type) glib.testing.TestRunner {
+    _ = grt;
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -23,7 +24,7 @@ pub fn makeVersionCheck(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -32,81 +33,80 @@ pub fn makeVersionCheck(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-pub fn makeInt16Scenario(comptime lib: type, sample_rate: u32, channels: u8, seconds: usize) testing_api.TestRunner {
+pub fn makeInt16Scenario(comptime grt: type, sample_rate: u32, channels: u8, seconds: usize) glib.testing.TestRunner {
     const Runner = struct {
         sample_rate: u32,
         channels: u8,
         seconds: usize,
 
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = allocator;
-            runInt16Scenario(lib, self.sample_rate, self.channels, self.seconds) catch |err| {
+            runInt16Scenario(grt, self.sample_rate, self.channels, self.seconds) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{
         .sample_rate = sample_rate,
         .channels = channels,
         .seconds = seconds,
     };
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
-pub fn makeFloatScenario(comptime lib: type, sample_rate: u32, channels: u8, seconds: usize) testing_api.TestRunner {
+pub fn makeFloatScenario(comptime grt: type, sample_rate: u32, channels: u8, seconds: usize) glib.testing.TestRunner {
     const Runner = struct {
         sample_rate: u32,
         channels: u8,
         seconds: usize,
 
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = allocator;
-            runFloatScenario(lib, self.sample_rate, self.channels, self.seconds) catch |err| {
+            runFloatScenario(grt, self.sample_rate, self.channels, self.seconds) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{
         .sample_rate = sample_rate,
         .channels = channels,
         .seconds = seconds,
     };
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
-fn runInt16Scenario(comptime lib: type, sample_rate: u32, channels: u8, seconds: usize) !void {
-    const testing = lib.testing;
+fn runInt16Scenario(comptime grt: type, sample_rate: u32, channels: u8, seconds: usize) !void {
     const frame_ms: u32 = 20;
     const frame_size: usize = sample_rate * frame_ms / 1000;
     const frame_count: usize = seconds * 1000 / frame_ms;
@@ -114,28 +114,28 @@ fn runInt16Scenario(comptime lib: type, sample_rate: u32, channels: u8, seconds:
     const frame_stride: usize = frame_size * channel_count;
     const total_samples = frame_count * frame_stride;
 
-    var encoder = try Encoder.init(testing.allocator, sample_rate, channels, .audio);
-    defer encoder.deinit(testing.allocator);
-    var decoder = try Decoder.init(testing.allocator, sample_rate, channels);
-    defer decoder.deinit(testing.allocator);
+    var encoder = try Encoder.init(grt.std.testing.allocator, sample_rate, channels, .audio);
+    defer encoder.deinit(grt.std.testing.allocator);
+    var decoder = try Decoder.init(grt.std.testing.allocator, sample_rate, channels);
+    defer decoder.deinit(grt.std.testing.allocator);
 
-    try testing.expectEqual(@as(u32, @intCast(frame_size)), encoder.frameSizeForMs(frame_ms));
-    try testing.expectEqual(@as(u32, @intCast(frame_size)), decoder.frameSizeForMs(frame_ms));
+    try grt.std.testing.expectEqual(@as(u32, @intCast(frame_size)), encoder.frameSizeForMs(frame_ms));
+    try grt.std.testing.expectEqual(@as(u32, @intCast(frame_size)), decoder.frameSizeForMs(frame_ms));
 
     try encoder.setBitrate(128_000);
-    try testing.expect(try encoder.getBitrate() > 0);
+    try grt.std.testing.expect(try encoder.getBitrate() > 0);
     try encoder.setComplexity(10);
     try encoder.setSignal(.music);
     try encoder.setBandwidth(.fullband);
     try encoder.setVbr(false);
     try encoder.setDtx(false);
     try encoder.resetState();
-    try testing.expectEqual(sample_rate, try decoder.getSampleRate());
+    try grt.std.testing.expectEqual(sample_rate, try decoder.getSampleRate());
 
-    const original = try testing.allocator.alloc(i16, total_samples);
-    defer testing.allocator.free(original);
-    const decoded = try testing.allocator.alloc(i16, total_samples);
-    defer testing.allocator.free(decoded);
+    const original = try grt.std.testing.allocator.alloc(i16, total_samples);
+    defer grt.std.testing.allocator.free(original);
+    const decoded = try grt.std.testing.allocator.alloc(i16, total_samples);
+    defer grt.std.testing.allocator.free(decoded);
 
     var packet_buf: [1500]u8 = undefined;
     for (0..frame_count) |frame_idx| {
@@ -147,31 +147,30 @@ fn runInt16Scenario(comptime lib: type, sample_rate: u32, channels: u8, seconds:
         fillMusicFrame(in_frame, sample_offset, sample_rate, channels);
 
         const packet = try encoder.encode(in_frame, @intCast(frame_size), packet_buf[0..]);
-        try testing.expect(packet.len > 0);
-        try testing.expectEqual(channels, try Packet.getChannels(packet));
-        try testing.expectEqual(@as(u32, 1), try Packet.getFrames(packet));
-        try testing.expectEqual(@as(u32, @intCast(frame_size)), try Packet.getSamples(packet, sample_rate));
+        try grt.std.testing.expect(packet.len > 0);
+        try grt.std.testing.expectEqual(channels, try Packet.getChannels(packet));
+        try grt.std.testing.expectEqual(@as(u32, 1), try Packet.getFrames(packet));
+        try grt.std.testing.expectEqual(@as(u32, @intCast(frame_size)), try Packet.getSamples(packet, sample_rate));
 
         const samples = try decoder.decode(packet, out_frame, false);
-        try testing.expectEqual(frame_stride, samples.len);
+        try grt.std.testing.expectEqual(frame_stride, samples.len);
     }
 
-    const plc_buf = try testing.allocator.alloc(i16, frame_stride);
-    defer testing.allocator.free(plc_buf);
+    const plc_buf = try grt.std.testing.allocator.alloc(i16, frame_stride);
+    defer grt.std.testing.allocator.free(plc_buf);
     const concealed = try decoder.plc(plc_buf);
-    try testing.expectEqual(frame_stride, concealed.len);
+    try grt.std.testing.expectEqual(frame_stride, concealed.len);
 
     const max_shift: usize = 512;
     const metrics = comparePcmInterleaved(original, decoded, channel_count, max_shift);
-    try testing.expect(metrics.best_shift <= max_shift);
-    try testing.expect(metrics.correlation > 0.75);
-    try testing.expect(metrics.mean_abs_error < 5_000.0);
-    try testing.expect(metrics.energy_ratio > 0.10);
-    try testing.expect(metrics.energy_ratio < 2.20);
+    try grt.std.testing.expect(metrics.best_shift <= max_shift);
+    try grt.std.testing.expect(metrics.correlation > 0.75);
+    try grt.std.testing.expect(metrics.mean_abs_error < 5_000.0);
+    try grt.std.testing.expect(metrics.energy_ratio > 0.10);
+    try grt.std.testing.expect(metrics.energy_ratio < 2.20);
 }
 
-fn runFloatScenario(comptime lib: type, sample_rate: u32, channels: u8, seconds: usize) !void {
-    const testing = lib.testing;
+fn runFloatScenario(comptime grt: type, sample_rate: u32, channels: u8, seconds: usize) !void {
     const frame_ms: u32 = 20;
     const frame_size: usize = sample_rate * frame_ms / 1000;
     const frame_count: usize = seconds * 1000 / frame_ms;
@@ -179,15 +178,15 @@ fn runFloatScenario(comptime lib: type, sample_rate: u32, channels: u8, seconds:
     const frame_stride: usize = frame_size * channel_count;
     const total_samples = frame_count * frame_stride;
 
-    var encoder = try Encoder.init(testing.allocator, sample_rate, channels, .audio);
-    defer encoder.deinit(testing.allocator);
-    var decoder = try Decoder.init(testing.allocator, sample_rate, channels);
-    defer decoder.deinit(testing.allocator);
+    var encoder = try Encoder.init(grt.std.testing.allocator, sample_rate, channels, .audio);
+    defer encoder.deinit(grt.std.testing.allocator);
+    var decoder = try Decoder.init(grt.std.testing.allocator, sample_rate, channels);
+    defer decoder.deinit(grt.std.testing.allocator);
 
-    const original = try testing.allocator.alloc(f32, total_samples);
-    defer testing.allocator.free(original);
-    const decoded = try testing.allocator.alloc(f32, total_samples);
-    defer testing.allocator.free(decoded);
+    const original = try grt.std.testing.allocator.alloc(f32, total_samples);
+    defer grt.std.testing.allocator.free(original);
+    const decoded = try grt.std.testing.allocator.alloc(f32, total_samples);
+    defer grt.std.testing.allocator.free(decoded);
 
     var packet_buf: [1500]u8 = undefined;
     for (0..frame_count) |frame_idx| {
@@ -199,26 +198,26 @@ fn runFloatScenario(comptime lib: type, sample_rate: u32, channels: u8, seconds:
         fillFloatFrame(in_frame, sample_offset, sample_rate, channels);
 
         const packet = try encoder.encodeFloat(in_frame, @intCast(frame_size), packet_buf[0..]);
-        try testing.expect(packet.len > 0);
-        try testing.expectEqual(channels, try Packet.getChannels(packet));
-        try testing.expectEqual(@as(u32, 1), try Packet.getFrames(packet));
-        try testing.expectEqual(@as(u32, @intCast(frame_size)), try Packet.getSamples(packet, sample_rate));
+        try grt.std.testing.expect(packet.len > 0);
+        try grt.std.testing.expectEqual(channels, try Packet.getChannels(packet));
+        try grt.std.testing.expectEqual(@as(u32, 1), try Packet.getFrames(packet));
+        try grt.std.testing.expectEqual(@as(u32, @intCast(frame_size)), try Packet.getSamples(packet, sample_rate));
 
         const samples = try decoder.decodeFloat(packet, out_frame, false);
-        try testing.expectEqual(frame_stride, samples.len);
+        try grt.std.testing.expectEqual(frame_stride, samples.len);
     }
 
-    const plc_buf = try testing.allocator.alloc(f32, frame_stride);
-    defer testing.allocator.free(plc_buf);
+    const plc_buf = try grt.std.testing.allocator.alloc(f32, frame_stride);
+    defer grt.std.testing.allocator.free(plc_buf);
     const concealed = try decoder.plcFloat(plc_buf);
-    try testing.expectEqual(frame_stride, concealed.len);
+    try grt.std.testing.expectEqual(frame_stride, concealed.len);
 
     const metrics = compareFloatPcmInterleaved(original, decoded, channel_count, 512);
-    try testing.expect(metrics.best_shift <= 512);
-    try testing.expect(metrics.correlation > 0.50);
-    try testing.expect(metrics.mean_abs_error < 0.65);
-    try testing.expect(metrics.energy_ratio > 0.05);
-    try testing.expect(metrics.energy_ratio < 2.50);
+    try grt.std.testing.expect(metrics.best_shift <= 512);
+    try grt.std.testing.expect(metrics.correlation > 0.50);
+    try grt.std.testing.expect(metrics.mean_abs_error < 0.65);
+    try grt.std.testing.expect(metrics.energy_ratio > 0.05);
+    try grt.std.testing.expect(metrics.energy_ratio < 2.50);
 }
 
 const Comparison = struct {

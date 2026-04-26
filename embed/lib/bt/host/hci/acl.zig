@@ -82,51 +82,51 @@ pub fn getPayload(raw: []const u8) ?[]const u8 {
     return raw[HEADER_LEN..end];
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             var buf: [MAX_PACKET_LEN]u8 = undefined;
             const payload = "hello BLE";
             const pkt = encode(&buf, 0x0040, .first_auto_flush, payload);
 
-            try lib.testing.expectEqual(INDICATOR, pkt[0]);
-            try lib.testing.expectEqual(@as(usize, HEADER_LEN + payload.len), pkt.len);
+            try grt.std.testing.expectEqual(INDICATOR, pkt[0]);
+            try grt.std.testing.expectEqual(@as(usize, HEADER_LEN + payload.len), pkt.len);
 
             const hdr = parsePacketHeader(pkt) orelse return error.ParseFailed;
-            try lib.testing.expectEqual(@as(u16, 0x0040), hdr.conn_handle);
-            try lib.testing.expectEqual(PbFlag.first_auto_flush, hdr.pb_flag);
-            try lib.testing.expectEqual(BcFlag.point_to_point, hdr.bc_flag);
-            try lib.testing.expectEqual(@as(u16, payload.len), hdr.data_len);
+            try grt.std.testing.expectEqual(@as(u16, 0x0040), hdr.conn_handle);
+            try grt.std.testing.expectEqual(PbFlag.first_auto_flush, hdr.pb_flag);
+            try grt.std.testing.expectEqual(BcFlag.point_to_point, hdr.bc_flag);
+            try grt.std.testing.expectEqual(@as(u16, payload.len), hdr.data_len);
 
             const data = getPayload(pkt) orelse return error.PayloadFailed;
-            try lib.testing.expectEqualSlices(u8, payload, data);
+            try grt.std.testing.expectEqualSlices(u8, payload, data);
 
             var raw: [4]u8 = undefined;
             const handle_flags: u16 = 0x0040 | (@as(u16, @intFromEnum(PbFlag.continuing)) << 12);
-            lib.mem.writeInt(u16, raw[0..2], handle_flags, .little);
-            lib.mem.writeInt(u16, raw[2..4], 27, .little);
+            grt.std.mem.writeInt(u16, raw[0..2], handle_flags, .little);
+            grt.std.mem.writeInt(u16, raw[2..4], 27, .little);
 
             const parsed = parseHeader(&raw) orelse return error.ParseFailed;
-            try lib.testing.expectEqual(@as(u16, 0x0040), parsed.conn_handle);
-            try lib.testing.expectEqual(PbFlag.continuing, parsed.pb_flag);
-            try lib.testing.expectEqual(@as(u16, 27), parsed.data_len);
+            try grt.std.testing.expectEqual(@as(u16, 0x0040), parsed.conn_handle);
+            try grt.std.testing.expectEqual(PbFlag.continuing, parsed.pb_flag);
+            try grt.std.testing.expectEqual(@as(u16, 27), parsed.data_len);
 
-            try lib.testing.expectEqual(@as(?Header, null), parseHeader(&.{ 0x00, 0x00 }));
+            try grt.std.testing.expectEqual(@as(?Header, null), parseHeader(&.{ 0x00, 0x00 }));
 
             var empty_buf: [HEADER_LEN]u8 = undefined;
             const empty_pkt = encode(&empty_buf, 0x0001, .first_auto_flush, &.{});
-            try lib.testing.expectEqual(@as(usize, HEADER_LEN), empty_pkt.len);
+            try grt.std.testing.expectEqual(@as(usize, HEADER_LEN), empty_pkt.len);
             const empty_hdr = parsePacketHeader(empty_pkt) orelse return error.ParseFailed;
-            try lib.testing.expectEqual(@as(u16, 0), empty_hdr.data_len);
+            try grt.std.testing.expectEqual(@as(u16, 0), empty_hdr.data_len);
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -137,7 +137,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

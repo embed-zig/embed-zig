@@ -111,11 +111,9 @@ fn readU64At(self: *const Self, index: usize) Error!u64 {
         (@as(u64, header[index + 7]) << 56);
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn testMetadataReadersExposeHeaderFields() !void {
-            const testing = lib.testing;
-
             var header = [_]u8{
                 0x4f, 0x67, 0x67, 0x53, 0x00, 0x07, 0x08, 0x07,
                 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x11, 0x22,
@@ -125,19 +123,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var page = init(header[0..], &.{});
 
-            try testing.expectEqual(@as(u8, 0), try page.version());
-            try testing.expect(try page.continued());
-            try testing.expect(try page.bos());
-            try testing.expect(try page.eos());
-            try testing.expectEqual(@as(i64, 0x0102030405060708), try page.granulePos());
-            try testing.expectEqual(@as(u32, 0x44332211), try page.serialNo());
-            try testing.expectEqual(@as(u32, 0x88776655), try page.pageNo());
-            try testing.expectEqual(@as(usize, 3), try page.packetCount());
+            try grt.std.testing.expectEqual(@as(u8, 0), try page.version());
+            try grt.std.testing.expect(try page.continued());
+            try grt.std.testing.expect(try page.bos());
+            try grt.std.testing.expect(try page.eos());
+            try grt.std.testing.expectEqual(@as(i64, 0x0102030405060708), try page.granulePos());
+            try grt.std.testing.expectEqual(@as(u32, 0x44332211), try page.serialNo());
+            try grt.std.testing.expectEqual(@as(u32, 0x88776655), try page.pageNo());
+            try grt.std.testing.expectEqual(@as(usize, 3), try page.packetCount());
         }
 
         fn testSetChecksumRewritesChecksumField() !void {
-            const testing = lib.testing;
-
             var header = [_]u8{
                 0x4f, 0x67, 0x67, 0x53, 0x00, 0x02, 0x01, 0x02,
                 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x13, 0x37,
@@ -154,8 +150,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var page = init(header[0..], body[0..]);
             try page.setChecksum();
 
-            try testing.expectEqual(expected_crc, try page.checksum());
-            try testing.expectEqualSlices(
+            try grt.std.testing.expectEqual(expected_crc, try page.checksum());
+            try grt.std.testing.expectEqualSlices(
                 u8,
                 expected_bytes[0..],
                 header[crc.checksum_field_offset .. crc.checksum_field_offset + crc.checksum_field_len],
@@ -163,23 +159,21 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
         }
 
         fn testShortHeadersAreRejected() !void {
-            const testing = lib.testing;
-
             var short_header = [_]u8{ 0x4f, 0x67, 0x67 };
             var page = init(short_header[0..], &.{});
-            try testing.expectError(error.InvalidHeader, page.version());
-            try testing.expectError(error.InvalidHeader, page.packetCount());
-            try testing.expectError(error.InvalidHeader, page.setChecksum());
+            try grt.std.testing.expectError(error.InvalidHeader, page.version());
+            try grt.std.testing.expectError(error.InvalidHeader, page.packetCount());
+            try grt.std.testing.expectError(error.InvalidHeader, page.setChecksum());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -198,7 +192,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

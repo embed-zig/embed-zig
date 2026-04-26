@@ -17,9 +17,9 @@ pub fn emit(self: EventReceiver, value: event.Event) void {
     self.emit_fn(self.ctx, value);
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn emitDispatchesThroughFunctionPointer(testing: anytype) !void {
+        fn emitDispatchesThroughFunctionPointer() !void {
             const Impl = struct {
                 called: bool = false,
                 source_id: u32 = 0,
@@ -49,30 +49,29 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(impl.called);
-            try testing.expectEqual(@as(u32, 7), impl.source_id);
+            try grt.std.testing.expect(impl.called);
+            try grt.std.testing.expectEqual(@as(u32, 7), impl.source_id);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.emitDispatchesThroughFunctionPointer(testing) catch |err| {
+            TestCase.emitDispatchesThroughFunctionPointer() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

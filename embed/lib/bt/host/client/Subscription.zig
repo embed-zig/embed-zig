@@ -4,18 +4,18 @@ const glib = @import("glib");
 
 const bt = @import("../../../bt.zig");
 
-pub fn Subscription(comptime lib: type, comptime ClientType: type) type {
+pub fn Subscription(comptime grt: type, comptime ClientType: type) type {
     return struct {
         pub const Message = bt.Central.NotificationData;
 
         pub const State = struct {
-            allocator: lib.mem.Allocator,
+            allocator: glib.std.mem.Allocator,
             client: ?*ClientType,
             conn_handle: u16,
             value_handle: u16,
             cccd_handle: u16,
-            mutex: lib.Thread.Mutex = .{},
-            cond: lib.Thread.Condition = .{},
+            mutex: grt.std.Thread.Mutex = .{},
+            cond: grt.std.Thread.Condition = .{},
             queue: glib.std.ArrayListUnmanaged(Message) = .{},
             closed: bool = false,
             waiters: usize = 0,
@@ -27,7 +27,7 @@ pub fn Subscription(comptime lib: type, comptime ClientType: type) type {
         const Self = @This();
 
         pub fn init(
-            allocator: lib.mem.Allocator,
+            allocator: glib.std.mem.Allocator,
             client: *ClientType,
             conn_handle: u16,
             value_handle: u16,

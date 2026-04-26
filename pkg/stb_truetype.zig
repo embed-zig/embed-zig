@@ -4,6 +4,8 @@
 //!   const stb = @import("stb_truetype");
 //!   const font = try stb.Font.init(bytes);
 
+const glib = @import("glib");
+const gstd = @import("gstd");
 const binding_mod = @import("stb_truetype/src/binding.zig");
 const types_mod = @import("stb_truetype/src/types.zig");
 
@@ -25,23 +27,17 @@ test "stb_truetype/unit_tests" {
 }
 
 test "stb_truetype/integration_tests/embed" {
-    const lib = @import("embed_std").std;
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .stb_truetype_integration_embed);
+    var t = glib.testing.T.new(gstd.runtime.std, .stb_truetype_integration_embed);
     defer t.deinit();
 
-    t.run("stb_truetype", test_runner.integration.make(lib));
+    t.run("stb_truetype", test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "stb_truetype/integration_tests/std" {
-    const lib = @import("std");
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .stb_truetype_integration_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .stb_truetype_integration_std);
     defer t.deinit();
 
-    t.run("stb_truetype", test_runner.integration.make(lib));
+    t.run("stb_truetype", test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }

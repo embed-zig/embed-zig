@@ -93,9 +93,9 @@ pub fn init(comptime T: type, impl: *T) Node {
     return node;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn initBindAndProcess(testing: anytype) !void {
+        fn initBindAndProcess() !void {
             const Impl = struct {
                 called: bool = false,
 
@@ -110,8 +110,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var impl = Impl{};
 
             var node = Node.init(Impl, &impl);
-            try testing.expect((try node.as(Impl)) == &impl);
-            try testing.expectError(error.TypeMismatch, node.as(struct { x: u8 }));
+            try grt.std.testing.expect((try node.as(Impl)) == &impl);
+            try grt.std.testing.expectError(error.TypeMismatch, node.as(struct { x: u8 }));
             const emitted = try node.process(.{
                 .origin = .source,
                 .body = .{
@@ -122,11 +122,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(impl.called);
-            try testing.expectEqual(@as(usize, 1), emitted);
+            try grt.std.testing.expect(impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
 
-        fn cascadeThroughBoundOutputs(testing: anytype) !void {
+        fn cascadeThroughBoundOutputs() !void {
             const Forward = struct {
                 out: ?Emitter = null,
                 called: bool = false,
@@ -176,37 +176,36 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(first_impl.called);
-            try testing.expect(second_impl.called);
-            try testing.expect(collector.called);
-            try testing.expectEqual(@as(i128, 10), collector.last_timestamp_ns);
-            try testing.expectEqual(@as(usize, 1), emitted);
+            try grt.std.testing.expect(first_impl.called);
+            try grt.std.testing.expect(second_impl.called);
+            try grt.std.testing.expect(collector.called);
+            try grt.std.testing.expectEqual(@as(i128, 10), collector.last_timestamp_ns);
+            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.initBindAndProcess(testing) catch |err| {
+            TestCase.initBindAndProcess() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.cascadeThroughBoundOutputs(testing) catch |err| {
+            TestCase.cascadeThroughBoundOutputs() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

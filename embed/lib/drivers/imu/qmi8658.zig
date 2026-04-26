@@ -407,7 +407,7 @@ pub fn selfTest(self: *Self) !bool {
 pub fn getRevisionId(self: *Self) !u8 {
     return self.readRegister(.revision_id);
 }
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn openConfiguresChipAndUsesDelay() !void {
             const FakeI2c = struct {
@@ -454,16 +454,16 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             try imu.open();
 
-            try lib.testing.expect(imu.is_open);
-            try lib.testing.expectEqual(@as(usize, 5), fake_i2c.write_count);
-            try lib.testing.expectEqual(@as(I2c.Address, 0x6A), fake_i2c.last_addr);
-            try lib.testing.expectEqual(@as(u32, 10), fake_delay.last_ms);
-            try lib.testing.expectEqual(@as(usize, 1), fake_delay.calls);
-            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.reset), 0xB0 }, fake_i2c.writes[0]);
-            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl1), 0x40 }, fake_i2c.writes[1]);
-            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl7), 0x03 }, fake_i2c.writes[2]);
-            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl2), 0x15 }, fake_i2c.writes[3]);
-            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl3), 0x55 }, fake_i2c.writes[4]);
+            try grt.std.testing.expect(imu.is_open);
+            try grt.std.testing.expectEqual(@as(usize, 5), fake_i2c.write_count);
+            try grt.std.testing.expectEqual(@as(I2c.Address, 0x6A), fake_i2c.last_addr);
+            try grt.std.testing.expectEqual(@as(u32, 10), fake_delay.last_ms);
+            try grt.std.testing.expectEqual(@as(usize, 1), fake_delay.calls);
+            try grt.std.testing.expectEqual([2]u8{ @intFromEnum(Register.reset), 0xB0 }, fake_i2c.writes[0]);
+            try grt.std.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl1), 0x40 }, fake_i2c.writes[1]);
+            try grt.std.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl7), 0x03 }, fake_i2c.writes[2]);
+            try grt.std.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl2), 0x15 }, fake_i2c.writes[3]);
+            try grt.std.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl3), 0x55 }, fake_i2c.writes[4]);
         }
 
         fn atan2ApproxStaysCloseToStdMath() !void {
@@ -477,24 +477,24 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     const y: f32 = @as(f32, @floatFromInt(yi)) / 8.0;
                     const x: f32 = @as(f32, @floatFromInt(xi)) / 8.0;
                     const approx = atan2Approx(y, x);
-                    const exact = lib.math.atan2(y, x);
+                    const exact = grt.std.math.atan2(y, x);
                     const error_deg = absf(approx - exact) * degrees_per_radian;
 
                     if (error_deg > max_error_deg) max_error_deg = error_deg;
                 }
             }
 
-            try lib.testing.expect(max_error_deg <= 0.1);
+            try grt.std.testing.expect(max_error_deg <= 0.1);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -509,7 +509,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

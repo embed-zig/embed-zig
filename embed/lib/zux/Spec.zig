@@ -176,11 +176,10 @@ pub fn make(comptime spec_doc: anytype) type {
 
         pub fn assembler(
             self: *Self,
-            comptime lib: type,
+            comptime grt: type,
             comptime config: AssemblerConfig,
-            comptime Channel: fn (type) type,
-        ) Assembler.make(lib, config, Channel) {
-            const AssemblerType = Assembler.make(lib, config, Channel);
+        ) Assembler.make(grt, config) {
+            const AssemblerType = Assembler.make(grt, config);
 
             return comptime blk: {
                 var next = AssemblerType.init();
@@ -189,7 +188,7 @@ pub fn make(comptime spec_doc: anytype) type {
                     next.setStore(
                         store_spec.Label,
                         Store.Object.make(
-                            lib,
+                            grt,
                             store_spec.StateType,
                             store_spec.Label,
                         ),
@@ -275,26 +274,25 @@ pub fn make(comptime spec_doc: anytype) type {
 
         pub fn testRunner(
             self: *Self,
-            comptime lib: type,
+            comptime grt: type,
             comptime config: AssemblerConfig,
-            comptime Channel: fn (type) type,
         ) glib.testing.TestRunner {
             const BuiltApp = comptime blk: {
-                const assembled = self.assembler(lib, config, Channel);
+                const assembled = self.assembler(grt, config);
                 break :blk assembled.build(makeTestBuildConfig(assembled.BuildConfig()));
             };
 
             const Runner = struct {
-                pub fn init(self_runner: *@This(), allocator: lib.mem.Allocator) !void {
+                pub fn init(self_runner: *@This(), allocator: glib.std.mem.Allocator) !void {
                     _ = self_runner;
                     _ = allocator;
                 }
 
-                pub fn run(self_runner: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+                pub fn run(self_runner: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
                     _ = self_runner;
 
                     inline for (user_stories) |story| {
-                        var app = BuiltApp.init(makeTestInitConfig(lib, BuiltApp, allocator)) catch |err| {
+                        var app = BuiltApp.init(makeTestInitConfig(grt, BuiltApp, allocator)) catch |err| {
                             t.logFatal(@errorName(err));
                             return false;
                         };
@@ -307,7 +305,7 @@ pub fn make(comptime spec_doc: anytype) type {
                     return true;
                 }
 
-                pub fn deinit(self_runner: *@This(), allocator: lib.mem.Allocator) void {
+                pub fn deinit(self_runner: *@This(), allocator: glib.std.mem.Allocator) void {
                     _ = self_runner;
                     _ = allocator;
                 }
@@ -354,10 +352,11 @@ pub fn make(comptime spec_doc: anytype) type {
         }
 
         fn makeTestInitConfig(
-            comptime lib: type,
+            comptime grt: type,
             comptime AppType: type,
-            allocator: lib.mem.Allocator,
+            allocator: glib.std.mem.Allocator,
         ) AppType.InitConfig {
+            _ = grt;
             var init_config: AppType.InitConfig = undefined;
 
             inline for (@typeInfo(AppType.InitConfig).@"struct".fields) |field| {
@@ -787,16 +786,9 @@ fn comptimeStartsWith(comptime text: []const u8, comptime prefix: []const u8) bo
     return true;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
-    const DummyChannel = struct {
-        fn factory(comptime T: type) type {
-            _ = T;
-            return struct {};
-        }
-    }.factory;
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn parse_slice_dispatches_fragment_kinds(testing: anytype, _: lib.mem.Allocator) !void {
+        fn parse_slice_dispatches_fragment_kinds(_: glib.std.mem.Allocator) !void {
             const parsed = comptime parseSlice(
                 \\{
                 \\  "kind": "Reducer",
@@ -809,14 +801,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             switch (parsed) {
                 .reducer => |reducer| {
-                    try testing.expectEqualStrings("counter_reducer", reducer.label);
-                    try testing.expectEqualStrings("counterReducer", reducer.reducer_fn_name);
+                    try grt.std.testing.expectEqualStrings("counter_reducer", reducer.label);
+                    try grt.std.testing.expectEqualStrings("counterReducer", reducer.reducer_fn_name);
                 },
                 else => return error.ExpectedReducerFragment,
             }
         }
 
-        fn generated_type_exposes_declared_metadata(testing: anytype, _: lib.mem.Allocator) !void {
+        fn generated_type_exposes_declared_metadata(_: glib.std.mem.Allocator) !void {
             const spec_doc = comptime blk: {
                 break :blk switch (parseSlice(
                     \\{
@@ -884,46 +876,46 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
             const SpecType = comptime make(spec_doc);
 
-            try testing.expectEqual(@as(usize, 1), SpecType.stores.len);
-            try testing.expectEqualStrings("counter", SpecType.stores[0].Label);
-            try testing.expect(@hasField(SpecType.stores[0].StateType, "value"));
-            try testing.expect(@FieldType(SpecType.stores[0].StateType, "value") == u32);
+            try grt.std.testing.expectEqual(@as(usize, 1), SpecType.stores.len);
+            try grt.std.testing.expectEqualStrings("counter", SpecType.stores[0].Label);
+            try grt.std.testing.expect(@hasField(SpecType.stores[0].StateType, "value"));
+            try grt.std.testing.expect(@FieldType(SpecType.stores[0].StateType, "value") == u32);
 
-            try testing.expectEqual(@as(usize, 1), SpecType.state_paths.len);
-            try testing.expectEqualStrings("ui", SpecType.state_paths[0].path);
-            try testing.expectEqual(@as(usize, 1), SpecType.state_paths[0].labels.len);
-            try testing.expectEqualStrings("counter", SpecType.state_paths[0].labels[0]);
+            try grt.std.testing.expectEqual(@as(usize, 1), SpecType.state_paths.len);
+            try grt.std.testing.expectEqualStrings("ui", SpecType.state_paths[0].path);
+            try grt.std.testing.expectEqual(@as(usize, 1), SpecType.state_paths[0].labels.len);
+            try grt.std.testing.expectEqualStrings("counter", SpecType.state_paths[0].labels[0]);
 
-            try testing.expectEqual(@as(usize, 1), SpecType.components.len);
-            try testing.expectEqualStrings("buttons", SpecType.components[0].label);
-            try testing.expectEqual(@as(u32, 7), SpecType.components[0].id);
+            try grt.std.testing.expectEqual(@as(usize, 1), SpecType.components.len);
+            try grt.std.testing.expectEqualStrings("buttons", SpecType.components[0].label);
+            try grt.std.testing.expectEqual(@as(u32, 7), SpecType.components[0].id);
             switch (SpecType.components[0].kind) {
                 .single_button => {},
                 else => return error.ExpectedSingleButtonComponent,
             }
 
-            try testing.expectEqual(@as(usize, 1), SpecType.reducers.len);
-            try testing.expectEqualStrings("counter_reducer", SpecType.reducers[0].label);
-            try testing.expectEqualStrings("counterReducer", SpecType.reducers[0].reducer_fn_name);
+            try grt.std.testing.expectEqual(@as(usize, 1), SpecType.reducers.len);
+            try grt.std.testing.expectEqualStrings("counter_reducer", SpecType.reducers[0].label);
+            try grt.std.testing.expectEqualStrings("counterReducer", SpecType.reducers[0].reducer_fn_name);
 
-            try testing.expectEqual(@as(usize, 1), SpecType.renders.len);
-            try testing.expectEqualStrings("counter_render", SpecType.renders[0].label);
-            try testing.expectEqualStrings("ui", SpecType.renders[0].state_path);
-            try testing.expectEqualStrings("counterRender", SpecType.renders[0].render_fn_name);
+            try grt.std.testing.expectEqual(@as(usize, 1), SpecType.renders.len);
+            try grt.std.testing.expectEqualStrings("counter_render", SpecType.renders[0].label);
+            try grt.std.testing.expectEqualStrings("ui", SpecType.renders[0].state_path);
+            try grt.std.testing.expectEqualStrings("counterRender", SpecType.renders[0].render_fn_name);
 
-            try testing.expectEqual(@as(usize, 1), SpecType.user_stories.len);
-            try testing.expectEqualStrings("warm up", SpecType.user_stories[0].name);
-            try testing.expectEqualStrings("walks a tick", SpecType.user_stories[0].description);
-            try testing.expectEqual(@as(usize, 1), SpecType.user_stories[0].steps.len);
+            try grt.std.testing.expectEqual(@as(usize, 1), SpecType.user_stories.len);
+            try grt.std.testing.expectEqualStrings("warm up", SpecType.user_stories[0].name);
+            try grt.std.testing.expectEqualStrings("walks a tick", SpecType.user_stories[0].description);
+            try grt.std.testing.expectEqual(@as(usize, 1), SpecType.user_stories[0].steps.len);
             if (SpecType.user_stories[0].steps[0].tick) |tick| {
-                try testing.expectEqual(@as(i128, 42), tick.interval);
-                try testing.expectEqual(@as(usize, 1), tick.n);
+                try grt.std.testing.expectEqual(@as(i128, 42), tick.interval);
+                try grt.std.testing.expectEqual(@as(usize, 1), tick.n);
             } else {
                 return error.ExpectedTickStep;
             }
         }
 
-        fn assembler_wires_declared_metadata(testing: anytype, _: lib.mem.Allocator) !void {
+        fn assembler_wires_declared_metadata(_: glib.std.mem.Allocator) !void {
             const SpecType = make(.{
                 .stores = &.{
                     StoreObjectSpecType.make("counter", struct {
@@ -977,7 +969,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 var spec = SpecType.init();
                 spec.setReducer("counter_reducer", ReducerFactory);
                 spec.setRender("counter_render", RenderFactory);
-                break :blk spec.assembler(lib, .{
+                break :blk spec.assembler(grt, .{
                     .max_reducers = 1,
                     .max_handles = 1,
                     .store = .{
@@ -986,16 +978,16 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                         .max_store_refs = 4,
                         .max_depth = 4,
                     },
-                }, DummyChannel);
+                });
             };
 
-            try testing.expectEqual(@as(usize, 1), assembled.store_builder.store_count);
-            try testing.expectEqual(@as(usize, 1), assembled.store_builder.state_binding_count);
-            try testing.expectEqual(@as(usize, 1), assembled.reducer_count);
-            try testing.expectEqual(@as(usize, 1), assembled.render_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), assembled.store_builder.store_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), assembled.store_builder.state_binding_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), assembled.reducer_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), assembled.render_count);
         }
 
-        fn assembler_wires_flow_components(testing: anytype, _: lib.mem.Allocator) !void {
+        fn assembler_wires_flow_components(_: glib.std.mem.Allocator) !void {
             const SpecType = make(.{
                 .components = &.{
                     ComponentSpec{
@@ -1020,7 +1012,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             const assembled = comptime blk: {
                 var spec = SpecType.init();
-                break :blk spec.assembler(lib, .{
+                break :blk spec.assembler(grt, .{
                     .max_flows = 1,
                     .store = .{
                         .max_stores = 1,
@@ -1028,53 +1020,16 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                         .max_store_refs = 4,
                         .max_depth = 4,
                     },
-                }, DummyChannel);
+                });
             };
 
-            try testing.expectEqual(@as(usize, 1), assembled.flow_registry.len);
-            try testing.expectEqual(@as(u32, 31), assembled.flow_registry.periphs[0].id);
-            try testing.expect(@hasDecl(assembled.flow_registry.periphs[0].FlowType, "Reducer"));
+            try grt.std.testing.expectEqual(@as(usize, 1), assembled.flow_registry.len);
+            try grt.std.testing.expectEqual(@as(u32, 31), assembled.flow_registry.periphs[0].id);
+            try grt.std.testing.expect(@hasDecl(assembled.flow_registry.periphs[0].FlowType, "Reducer"));
         }
 
-        fn test_runner_executes_user_stories(testing: anytype, t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
+        fn test_runner_executes_user_stories(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
             _ = allocator;
-            const TestChannelImpl = struct {
-                fn factory(comptime T: type) type {
-                    return struct {
-                        pub fn init(_: glib.std.mem.Allocator, _: usize) !@This() {
-                            return .{};
-                        }
-
-                        pub fn deinit(_: *@This()) void {}
-
-                        pub fn close(_: *@This()) void {}
-
-                        pub fn send(_: *@This(), _: T) !glib.sync.channel.SendResult() {
-                            return .{ .ok = false };
-                        }
-
-                        pub fn sendTimeout(_: *@This(), _: T, _: u32) !glib.sync.channel.SendResult() {
-                            return .{ .ok = false };
-                        }
-
-                        pub fn recv(_: *@This()) !glib.sync.channel.RecvResult(T) {
-                            return .{
-                                .value = undefined,
-                                .ok = false,
-                            };
-                        }
-
-                        pub fn recvTimeout(_: *@This(), _: u32) !glib.sync.channel.RecvResult(T) {
-                            return .{
-                                .value = undefined,
-                                .ok = false,
-                            };
-                        }
-                    };
-                }
-            }.factory;
-            const TestChannel = glib.sync.channel.make(TestChannelImpl);
-
             const SpecType = make(.{
                 .stores = &.{
                     StoreObjectSpecType.make("counter", struct {
@@ -1146,7 +1101,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const runner = comptime blk: {
                 var spec = SpecType.init();
                 spec.setReducer("counter_reducer", ReducerFactory);
-                break :blk spec.testRunner(lib, .{
+                break :blk spec.testRunner(grt, .{
                     .max_reducers = 1,
                     .store = .{
                         .max_stores = 1,
@@ -1154,48 +1109,47 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                         .max_store_refs = 4,
                         .max_depth = 4,
                     },
-                }, TestChannel);
+                });
             };
 
             t.run("spec test runner", runner);
-            try testing.expect(t.wait());
+            try grt.std.testing.expect(t.wait());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.parse_slice_dispatches_fragment_kinds(testing, allocator) catch |err| {
+            TestCase.parse_slice_dispatches_fragment_kinds(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.generated_type_exposes_declared_metadata(testing, allocator) catch |err| {
+            TestCase.generated_type_exposes_declared_metadata(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.assembler_wires_declared_metadata(testing, allocator) catch |err| {
+            TestCase.assembler_wires_declared_metadata(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.assembler_wires_flow_components(testing, allocator) catch |err| {
+            TestCase.assembler_wires_flow_components(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.test_runner_executes_user_stories(testing, t, allocator) catch |err| {
+            TestCase.test_runner_executes_user_stories(t, allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

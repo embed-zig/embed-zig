@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const stdz = @import("stdz");
 const testing_mod = @import("testing");
 
@@ -24,7 +25,9 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = allocator;
 
             t.run("background", background.make(lib));
-            t.run("bind_fd", bind_fd.make(lib));
+            if (builtin.target.os.tag != .windows) {
+                t.run("bind_fd", bind_fd.make(lib));
+            }
             t.run("cancel/basic", cancel_basic.make(lib));
             t.run("cancel/cause", cancel_cause.make(lib));
             t.run("cancel/propagation", cancel_propagation.make(lib));

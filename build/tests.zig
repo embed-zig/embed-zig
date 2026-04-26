@@ -46,7 +46,8 @@ pub fn addCommonImports(
     });
 
     compile_test.root_module.addImport("embed_std", createEmbedStdShim(b, target, optimize, gstd_dep));
-    compile_test.root_module.addImport("testing", glib_dep.module("testing"));
+    compile_test.root_module.addImport("glib", glib_dep.module("glib"));
+    compile_test.root_module.addImport("gstd", gstd_dep.module("gstd"));
 }
 
 pub fn createEmbedShim(

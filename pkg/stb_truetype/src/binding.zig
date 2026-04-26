@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const c = @cImport({
     @cInclude("stb_truetype.h");
 });
@@ -14,19 +15,14 @@ pub const stbtt_GetCodepointBitmapBox = c.stbtt_GetCodepointBitmapBox;
 pub const stbtt_MakeCodepointBitmap = c.stbtt_MakeCodepointBitmap;
 pub const stbtt_FindGlyphIndex = c.stbtt_FindGlyphIndex;
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const embed = @import("embed");
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        const testing = lib.testing;
-
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -37,13 +33,13 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
 
         fn runExportsCoreStbSymbols() !void {
-            try testing.expect(@sizeOf(FontInfo) > 0);
+            try grt.std.testing.expect(@sizeOf(FontInfo) > 0);
 
             _ = stbtt_InitFont;
             _ = stbtt_ScaleForPixelHeight;
@@ -51,7 +47,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }

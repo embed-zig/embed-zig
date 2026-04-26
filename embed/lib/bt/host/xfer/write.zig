@@ -20,7 +20,8 @@ pub const Config = struct {
     max_timeout_retries: u8 = 5,
 };
 
-pub fn write(comptime lib: type, allocator: lib.mem.Allocator, transport: anytype, data: []const u8, config: Config) !void {
+pub fn write(comptime grt: type, allocator: glib.std.mem.Allocator, transport: anytype, data: []const u8, config: Config) !void {
+    _ = grt;
     const TransportPtr = @TypeOf(transport);
     const Transport = switch (@typeInfo(TransportPtr)) {
         .pointer => |ptr| ptr.child,
@@ -118,7 +119,7 @@ fn sendMarkedChunks(
     }
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const AckTransport = struct {
@@ -135,7 +136,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     return Chunk.ack_signal.len;
                 }
                 pub fn write(self: *@This(), data: []const u8) !usize {
-                    try lib.testing.expectEqualSlices(u8, &Chunk.write_start_magic, data);
+                    try grt.std.testing.expectEqualSlices(u8, &Chunk.write_start_magic, data);
                     self.start_writes += 1;
                     return data.len;
                 }
@@ -153,11 +154,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var payload_data: [20]u8 = undefined;
             @memset(&payload_data, 0xAB);
             var ack_transport = AckTransport{};
-            try write(lib, lib.testing.allocator, &ack_transport, &payload_data, .{ .send_redundancy = 1 });
-            try lib.testing.expectEqual(@as(usize, 1), ack_transport.start_writes);
-            try lib.testing.expectEqual(@as(usize, 2), ack_transport.chunk_count);
-            try lib.testing.expectEqualSlices(u16, &.{ 1, 2 }, ack_transport.chunk_seqs[0..ack_transport.chunk_count]);
-            try lib.testing.expect(ack_transport.deinited);
+            try write(grt, grt.std.testing.allocator, &ack_transport, &payload_data, .{ .send_redundancy = 1 });
+            try grt.std.testing.expectEqual(@as(usize, 1), ack_transport.start_writes);
+            try grt.std.testing.expectEqual(@as(usize, 2), ack_transport.chunk_count);
+            try grt.std.testing.expectEqualSlices(u16, &.{ 1, 2 }, ack_transport.chunk_seqs[0..ack_transport.chunk_count]);
+            try grt.std.testing.expect(ack_transport.deinited);
 
             const RetryTransport = struct {
                 step_index: usize = 0,
@@ -196,10 +197,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             @memset(&payload_data, 0xCD);
             var retry_transport = RetryTransport{};
-            try write(lib, lib.testing.allocator, &retry_transport, &payload_data, .{ .send_redundancy = 1 });
-            try lib.testing.expectEqual(@as(usize, 3), retry_transport.chunk_count);
-            try lib.testing.expectEqualSlices(u16, &.{ 1, 2, 2 }, retry_transport.chunk_seqs[0..retry_transport.chunk_count]);
-            try lib.testing.expect(retry_transport.deinited);
+            try write(grt, grt.std.testing.allocator, &retry_transport, &payload_data, .{ .send_redundancy = 1 });
+            try grt.std.testing.expectEqual(@as(usize, 3), retry_transport.chunk_count);
+            try grt.std.testing.expectEqualSlices(u16, &.{ 1, 2, 2 }, retry_transport.chunk_seqs[0..retry_transport.chunk_count]);
+            try grt.std.testing.expect(retry_transport.deinited);
 
             const TimeoutTransport = struct {
                 read_count: usize = 0,
@@ -222,7 +223,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     }
                 }
                 pub fn write(self: *@This(), bytes: []const u8) !usize {
-                    try lib.testing.expectEqualSlices(u8, &Chunk.write_start_magic, bytes);
+                    try grt.std.testing.expectEqualSlices(u8, &Chunk.write_start_magic, bytes);
                     self.start_writes += 1;
                     return bytes.len;
                 }
@@ -237,10 +238,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             @memset(&payload_data, 0xEF);
             var timeout_transport = TimeoutTransport{};
-            try write(lib, lib.testing.allocator, &timeout_transport, &payload_data, .{ .send_redundancy = 1 });
-            try lib.testing.expectEqual(@as(usize, 2), timeout_transport.start_writes);
-            try lib.testing.expectEqual(@as(usize, 4), timeout_transport.chunk_count);
-            try lib.testing.expect(timeout_transport.deinited);
+            try write(grt, grt.std.testing.allocator, &timeout_transport, &payload_data, .{ .send_redundancy = 1 });
+            try grt.std.testing.expectEqual(@as(usize, 2), timeout_transport.start_writes);
+            try grt.std.testing.expectEqual(@as(usize, 4), timeout_transport.chunk_count);
+            try grt.std.testing.expect(timeout_transport.deinited);
 
             const InvalidLossTransport = struct {
                 read_count: usize = 0,
@@ -265,20 +266,20 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             @memset(&payload_data, 0xAA);
             var invalid_transport = InvalidLossTransport{};
-            try lib.testing.expectError(
+            try grt.std.testing.expectError(
                 error.InvalidResponse,
-                write(lib, lib.testing.allocator, &invalid_transport, &payload_data, .{ .send_redundancy = 1 }),
+                write(grt, grt.std.testing.allocator, &invalid_transport, &payload_data, .{ .send_redundancy = 1 }),
             );
-            try lib.testing.expect(invalid_transport.deinited);
+            try grt.std.testing.expect(invalid_transport.deinited);
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -289,7 +290,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

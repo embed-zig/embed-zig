@@ -1,5 +1,6 @@
-pub fn waitUntilTrue(comptime lib: type, flag: *lib.atomic.Value(bool), comptime err_tag: anyerror) !void {
-    const Thread = lib.Thread;
+const glib = @import("glib");
+pub fn waitUntilTrue(comptime grt: type, flag: *grt.std.atomic.Value(bool), comptime err_tag: anyerror) !void {
+    const Thread = grt.std.Thread;
 
     var spins: usize = 0;
     while (!flag.load(.acquire)) : (spins += 1) {
@@ -12,15 +13,15 @@ pub fn waitUntilTrue(comptime lib: type, flag: *lib.atomic.Value(bool), comptime
     }
 }
 
-fn allocatorAlignment(comptime lib: type) type {
-    const alloc_ptr_type = @TypeOf(lib.testing.allocator.vtable.alloc);
+fn allocatorAlignment(comptime grt: type) type {
+    const alloc_ptr_type = @TypeOf(grt.std.testing.allocator.vtable.alloc);
     const alloc_fn_type = @typeInfo(alloc_ptr_type).pointer.child;
     return @typeInfo(alloc_fn_type).@"fn".params[2].type.?;
 }
 
-pub fn CountingAllocatorType(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
-    const Alignment = allocatorAlignment(lib);
+pub fn CountingAllocatorType(comptime grt: type) type {
+    const Allocator = glib.std.mem.Allocator;
+    const Alignment = allocatorAlignment(grt);
 
     return struct {
         backing: Allocator,

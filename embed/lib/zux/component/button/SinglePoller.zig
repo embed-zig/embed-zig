@@ -4,7 +4,7 @@ const Context = @import("../../event/Context.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const Poller = @import("../../pipeline/Poller.zig");
 
-pub fn make(comptime lib: type) type {
+pub fn make(comptime grt: type) type {
     return struct {
         const Self = @This();
 
@@ -21,14 +21,14 @@ pub fn make(comptime lib: type) type {
         button: drivers.button.Single,
         source_id: u32,
         poll_interval_ns: u64 = Poller.default_poll_interval_ns,
-        spawn_config: lib.Thread.SpawnConfig = .{},
+        spawn_config: grt.std.Thread.SpawnConfig = .{},
         ctx: Context.Type = null,
         out: ?Emitter = null,
-        state_mu: lib.Thread.Mutex = .{},
+        state_mu: grt.std.Thread.Mutex = .{},
         running: bool = false,
         async_failed: bool = false,
         last_pressed: ?bool = null,
-        thread: ?lib.Thread = null,
+        thread: ?grt.std.Thread = null,
 
         pub fn init(self: *Self, button: drivers.button.Single, config: Config) Poller {
             self.* = .{
@@ -58,7 +58,7 @@ pub fn make(comptime lib: type) type {
             self.last_pressed = null;
             self.state_mu.unlock();
 
-            const thread = lib.Thread.spawn(self.spawn_config, Self.run, .{self}) catch {
+            const thread = grt.std.Thread.spawn(self.spawn_config, Self.run, .{self}) catch {
                 self.state_mu.lock();
                 self.running = false;
                 self.state_mu.unlock();
@@ -122,7 +122,7 @@ pub fn make(comptime lib: type) type {
                 };
 
                 if (snapshot.poll_interval_ns > 0) {
-                    lib.Thread.sleep(snapshot.poll_interval_ns);
+                    grt.std.Thread.sleep(snapshot.poll_interval_ns);
                 }
             }
         }
@@ -140,7 +140,7 @@ pub fn make(comptime lib: type) type {
 
             try out.emit(.{
                 .origin = .source,
-                .timestamp_ns = lib.time.nanoTimestamp(),
+                .timestamp_ns = grt.std.time.nanoTimestamp(),
                 .body = .{
                     .raw_single_button = .{
                         .source_id = source_id,
@@ -157,11 +157,11 @@ pub fn make(comptime lib: type) type {
             self.async_failed = true;
         }
 
-        fn adaptSpawnConfig(source: @FieldType(Poller.Config, "spawn_config")) lib.Thread.SpawnConfig {
-            var out: lib.Thread.SpawnConfig = .{};
+        fn adaptSpawnConfig(source: @FieldType(Poller.Config, "spawn_config")) grt.std.Thread.SpawnConfig {
+            var out: grt.std.Thread.SpawnConfig = .{};
             const Source = @TypeOf(source);
 
-            inline for (@typeInfo(lib.Thread.SpawnConfig).@"struct".fields) |field| {
+            inline for (@typeInfo(grt.std.Thread.SpawnConfig).@"struct".fields) |field| {
                 if (@hasField(Source, field.name)) {
                     @field(out, field.name) = @field(source, field.name);
                 }

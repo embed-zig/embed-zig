@@ -663,7 +663,7 @@ fn getClockCoeff(mclk: u32, rate: u32) ?ClockCoeff {
     }
     return null;
 }
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn setMicGainDbAndReadChipIdUseI2cWrapper() !void {
             const FakeI2c = struct {
@@ -702,19 +702,19 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             try codec.setMicGainDb(24);
             const chip_id = try codec.readChipId();
 
-            try lib.testing.expectEqual(@as(u16, 0x8311), chip_id);
-            try lib.testing.expectEqual(@as(usize, 1), fake.write_count);
-            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.adc_16), @intFromEnum(MicGain.@"24dB") }, fake.writes[0]);
+            try grt.std.testing.expectEqual(@as(u16, 0x8311), chip_id);
+            try grt.std.testing.expectEqual(@as(usize, 1), fake.write_count);
+            try grt.std.testing.expectEqual([2]u8{ @intFromEnum(Register.adc_16), @intFromEnum(MicGain.@"24dB") }, fake.writes[0]);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -725,7 +725,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

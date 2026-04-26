@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 
 pub const ErrorCode = enum(c_int) {
@@ -165,28 +166,26 @@ pub fn isUnderflow(code: binding.PaError) bool {
     return code == binding.paOutputUnderflowed;
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            mapsKnownNegativeCodes(lib) catch |err| {
+            mapsKnownNegativeCodes() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            returnsNullForUnknownCodes(lib) catch |err| {
+            returnsNullForUnknownCodes() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            classifiesOverflowAndUnderflow(lib) catch |err| {
+            classifiesOverflowAndUnderflow() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -194,35 +193,32 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            checkedCountAcceptsPositiveValues(lib) catch |err| {
+            checkedCountAcceptsPositiveValues() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
 
-        fn mapsKnownNegativeCodes(comptime L: type) !void {
-            const testing = L.testing;
-            try testing.expectEqual(ErrorCode.invalid_device, fromPaError(binding.paInvalidDevice).?);
-            try testing.expectEqual(ErrorCode.stream_is_stopped, fromPaError(binding.paStreamIsStopped).?);
-            try testing.expectEqual(Error.InvalidDevice, toError(binding.paInvalidDevice).?);
+        fn mapsKnownNegativeCodes() !void {
+            try grt.std.testing.expectEqual(ErrorCode.invalid_device, fromPaError(binding.paInvalidDevice).?);
+            try grt.std.testing.expectEqual(ErrorCode.stream_is_stopped, fromPaError(binding.paStreamIsStopped).?);
+            try grt.std.testing.expectEqual(Error.InvalidDevice, toError(binding.paInvalidDevice).?);
         }
 
-        fn returnsNullForUnknownCodes(comptime L: type) !void {
-            const testing = L.testing;
-            try testing.expectEqual(@as(?ErrorCode, null), fromPaError(-999_999));
+        fn returnsNullForUnknownCodes() !void {
+            try grt.std.testing.expectEqual(@as(?ErrorCode, null), fromPaError(-999_999));
         }
 
-        fn classifiesOverflowAndUnderflow(comptime L: type) !void {
-            const testing = L.testing;
-            try testing.expect(isOverflow(binding.paInputOverflowed));
-            try testing.expect(!isOverflow(binding.paOutputUnderflowed));
-            try testing.expect(isUnderflow(binding.paOutputUnderflowed));
+        fn classifiesOverflowAndUnderflow() !void {
+            try grt.std.testing.expect(isOverflow(binding.paInputOverflowed));
+            try grt.std.testing.expect(!isOverflow(binding.paOutputUnderflowed));
+            try grt.std.testing.expect(isUnderflow(binding.paOutputUnderflowed));
         }
 
         fn checkAcceptsSuccessCodes() !void {
@@ -230,14 +226,13 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             try check(binding.paFormatIsSupported);
         }
 
-        fn checkedCountAcceptsPositiveValues(comptime L: type) !void {
-            const testing = L.testing;
-            try testing.expectEqual(@as(usize, 4), try checkedCount(4));
+        fn checkedCountAcceptsPositiveValues() !void {
+            try grt.std.testing.expectEqual(@as(usize, 4), try checkedCount(4));
         }
     };
 
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

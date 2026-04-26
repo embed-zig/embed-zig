@@ -28,15 +28,15 @@ pub fn init() root {
     return .{};
 }
 
-pub fn makeRouterStoreType(comptime lib: type, comptime initial: route_component.Router.Item) type {
-    const Inner = route_component.Reducer.make(lib);
+pub fn makeRouterStoreType(comptime grt: type, comptime initial: route_component.Router.Item) type {
+    const Inner = route_component.Reducer.make(grt);
 
     return struct {
         const Self = @This();
 
         inner: Inner,
 
-        pub fn init(allocator: lib.mem.Allocator, _: anytype) !Self {
+        pub fn init(allocator: glib.std.mem.Allocator, _: anytype) !Self {
             return .{
                 .inner = try Inner.init(allocator, initial),
             };
@@ -72,15 +72,15 @@ pub fn makeRouterStoreType(comptime lib: type, comptime initial: route_component
     };
 }
 
-pub fn makeSelectionStoreType(comptime lib: type, comptime initial: selection_component.State) type {
-    const Inner = selection_component.Reducer.make(lib);
+pub fn makeSelectionStoreType(comptime grt: type, comptime initial: selection_component.State) type {
+    const Inner = selection_component.Reducer.make(grt);
 
     return struct {
         const Self = @This();
 
         inner: Inner,
 
-        pub fn init(allocator: lib.mem.Allocator, _: anytype) Self {
+        pub fn init(allocator: glib.std.mem.Allocator, _: anytype) Self {
             return .{
                 .inner = Inner.init(allocator, initial),
             };
@@ -112,15 +112,15 @@ pub fn makeSelectionStoreType(comptime lib: type, comptime initial: selection_co
     };
 }
 
-pub fn makeFlowStoreType(comptime lib: type, comptime FlowType: type) type {
-    const Inner = FlowType.Reducer(lib);
+pub fn makeFlowStoreType(comptime grt: type, comptime FlowType: type) type {
+    const Inner = FlowType.Reducer(grt);
 
     return struct {
         const Self = @This();
 
         inner: Inner,
 
-        pub fn init(allocator: lib.mem.Allocator, _: anytype) Self {
+        pub fn init(allocator: glib.std.mem.Allocator, _: anytype) Self {
             return .{
                 .inner = Inner.init(allocator, FlowType.initialState()),
             };
@@ -152,15 +152,15 @@ pub fn makeFlowStoreType(comptime lib: type, comptime FlowType: type) type {
     };
 }
 
-pub fn makeOverlayStoreType(comptime lib: type, comptime initial: overlay_component.State) type {
-    const Inner = overlay_component.Reducer.make(lib);
+pub fn makeOverlayStoreType(comptime grt: type, comptime initial: overlay_component.State) type {
+    const Inner = overlay_component.Reducer.make(grt);
 
     return struct {
         const Self = @This();
 
         inner: Inner,
 
-        pub fn init(allocator: lib.mem.Allocator, _: anytype) Self {
+        pub fn init(allocator: glib.std.mem.Allocator, _: anytype) Self {
             return .{
                 .inner = Inner.init(allocator, initial),
             };
@@ -247,16 +247,16 @@ pub fn build(builder: root, comptime context: anytype) type {
     const runtime_poller_count = totalPollerCount(context.registries);
     const ledstrip_pixel_count = ledStripPixelCount(ledstrip_registry);
     const ledstrip_frame_capacity = ledStripFrameCapacity(ledstrip_registry);
-    const runtime_pipeline_config: Pipeline.Config(context.lib) = .{
+    const runtime_pipeline_config: Pipeline.Config(context.grt) = .{
         .tick_interval_ns = context.assembler_config.pipeline.tick_interval_ns,
         .spawn_config = adaptSpawnConfig(
-            context.lib.Thread.SpawnConfig,
+            context.grt.std.Thread.SpawnConfig,
             context.assembler_config.pipeline.spawn_config,
         ),
     };
 
     const runtime_store_builder = makeRuntimeStoreBuilder(context);
-    const StoreType = runtime_store_builder.make(context.lib);
+    const StoreType = runtime_store_builder.make(context.grt);
 
     const UserRoot = if (has_user_root_config) context.node_builder.make() else void;
     const runtime_node_builder = makeRuntimeNodeBuilder(context);
@@ -271,7 +271,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const WifiStaInstances = makePeriphInstancesType(context.build_config, wifi_sta_registry);
     const WifiApInstances = makePeriphInstancesType(context.build_config, wifi_ap_registry);
     const GeneratedInitConfig = makeInitConfigType(
-        context.lib,
+        context.grt,
         context.build_config,
         context.registries,
         has_user_root_config,
@@ -286,9 +286,9 @@ pub fn build(builder: root, comptime context: anytype) type {
     const periph_ids = makePeriphIdTable(context.registries);
     const periph_kinds = makePeriphKindTable(context.registries);
     const runtime_poller_config: Poller.Config = context.assembler_config.poller;
-    const SingleButtonPoller = button.SinglePoller.make(context.lib);
-    const GroupedButtonPoller = button.GroupedPoller.make(context.lib);
-    const ImuPollerType = component_imu.Poller.make(context.lib);
+    const SingleButtonPoller = button.SinglePoller.make(context.grt);
+    const GroupedButtonPoller = button.GroupedPoller.make(context.grt);
+    const ImuPollerType = component_imu.Poller.make(context.grt);
     const ImuPollerWrapper = if (has_imu_runtime) struct {
         inner: ImuPollerType,
 
@@ -299,7 +299,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         pub fn start(self: *@This(), config: Poller.Config) !void {
             self.inner.poll_interval_ns = config.poll_interval_ns;
             self.inner.spawn_config = adaptSpawnConfig(
-                context.lib.Thread.SpawnConfig,
+                context.grt.std.Thread.SpawnConfig,
                 config.spawn_config,
             );
             try self.inner.start();
@@ -321,7 +321,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         )
     else
         void;
-    const BuiltPipeline = Pipeline.make(context.lib, context.channel, runtime_pipeline_config);
+    const BuiltPipeline = Pipeline.make(context.grt, runtime_pipeline_config);
     const PipelineSink = struct {
         pipeline: *BuiltPipeline,
 
@@ -584,7 +584,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const Impl = struct {
         const Self = @This();
 
-        pub const Lib = context.lib;
+        pub const Lib = context.grt;
         pub const Config = context.assembler_config;
         pub const BuildConfig = @TypeOf(context.build_config);
         pub const build_config = context.build_config;
@@ -642,7 +642,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         }
 
         const Runtime = struct {
-            allocator: Lib.mem.Allocator,
+            allocator: glib.std.mem.Allocator,
             store: StoreType,
             single_buttons: SingleButtonInstances,
             grouped_buttons: GroupedButtonInstances,
@@ -1063,7 +1063,7 @@ pub fn build(builder: root, comptime context: anytype) type {
                 return wifi_aps;
             }
 
-            fn initStoreValues(allocator: Lib.mem.Allocator) !StoreType.Stores {
+            fn initStoreValues(allocator: glib.std.mem.Allocator) !StoreType.Stores {
                 var stores_value: StoreType.Stores = undefined;
                 var initialized_count: usize = 0;
                 errdefer deinitStoreValuesPrefix(&stores_value, initialized_count);
@@ -1076,7 +1076,7 @@ pub fn build(builder: root, comptime context: anytype) type {
                 return stores_value;
             }
 
-            fn initStoreValue(comptime StoreFieldType: type, allocator: Lib.mem.Allocator) !StoreFieldType {
+            fn initStoreValue(comptime StoreFieldType: type, allocator: glib.std.mem.Allocator) !StoreFieldType {
                 if (@hasDecl(StoreFieldType, "init")) {
                     const result = StoreFieldType.init(allocator, .{});
                     return switch (@typeInfo(@TypeOf(result))) {
@@ -1359,7 +1359,7 @@ pub fn build(builder: root, comptime context: anytype) type {
                 },
                 .interval_ms => |interval_ms| {
                     if (interval_ms == 0) return error.InvalidStartConfig;
-                    self.runtime.pipeline.tick_interval_ns = @as(u64, interval_ms) * Lib.time.ns_per_ms;
+                    self.runtime.pipeline.tick_interval_ns = @as(u64, interval_ms) * Lib.std.time.ns_per_ms;
                 },
             } else {
                 self.runtime.pipeline.tick_interval_ns = runtime_pipeline_config.tick_interval_ns;
@@ -1923,7 +1923,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         pub fn available_moves(
             self: *Self,
             comptime label: FlowLabel,
-            allocator: Lib.mem.Allocator,
+            allocator: glib.std.mem.Allocator,
         ) ![]FlowMove(label) {
             const FlowType = flowTypeForLabel(label);
             const state = flowStateForLabel(self, label);
@@ -2056,7 +2056,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         fn emitBody(self: *Self, body: Message.Event) !void {
             try self.dispatch(.{
                 .origin = .manual,
-                .timestamp_ns = Lib.time.nanoTimestamp(),
+                .timestamp_ns = Lib.std.time.nanoTimestamp(),
                 .body = body,
             });
         }
@@ -2157,42 +2157,42 @@ fn makeRuntimeStoreBuilder(comptime context: anytype) @TypeOf(context.store_buil
 
     inline for (0..registryPeriphLen(context.registries.gpio_button)) |i| {
         const periph = context.registries.gpio_button.periphs[i];
-        builder.setStore(periph.label, store.Object.make(context.lib, button.state.Detected, periph.label));
+        builder.setStore(periph.label, store.Object.make(context.grt, button.state.Detected, periph.label));
     }
     inline for (0..registryPeriphLen(context.registries.adc_button)) |i| {
         const periph = context.registries.adc_button.periphs[i];
-        builder.setStore(periph.label, store.Object.make(context.lib, button.state.Detected, periph.label));
+        builder.setStore(periph.label, store.Object.make(context.grt, button.state.Detected, periph.label));
     }
     inline for (0..registryPeriphLen(context.registries.imu)) |i| {
         const periph = context.registries.imu.periphs[i];
-        builder.setStore(periph.label, store.Object.make(context.lib, component_imu.State, periph.label));
+        builder.setStore(periph.label, store.Object.make(context.grt, component_imu.State, periph.label));
     }
     inline for (0..ledstrip_count) |i| {
         const periph = ledstrip_registry.periphs[i];
-        builder.setStore(periph.label, store.Object.make(context.lib, LedStripStateType, periph.label));
+        builder.setStore(periph.label, store.Object.make(context.grt, LedStripStateType, periph.label));
     }
     inline for (0..registryPeriphLen(context.registries.modem)) |i| {
         const periph = context.registries.modem.periphs[i];
-        builder.setStore(periph.label, store.Object.make(context.lib, component_modem.State, periph.label));
+        builder.setStore(periph.label, store.Object.make(context.grt, component_modem.State, periph.label));
     }
     inline for (0..registryPeriphLen(context.registries.nfc)) |i| {
         const periph = context.registries.nfc.periphs[i];
-        builder.setStore(periph.label, store.Object.make(context.lib, component_nfc.State, periph.label));
+        builder.setStore(periph.label, store.Object.make(context.grt, component_nfc.State, periph.label));
     }
     inline for (0..registryPeriphLen(context.registries.wifi_sta)) |i| {
         const periph = context.registries.wifi_sta.periphs[i];
-        builder.setStore(periph.label, store.Object.make(context.lib, component_wifi.state.Sta, periph.label));
+        builder.setStore(periph.label, store.Object.make(context.grt, component_wifi.state.Sta, periph.label));
     }
     inline for (0..registryPeriphLen(context.registries.wifi_ap)) |i| {
         const periph = context.registries.wifi_ap.periphs[i];
-        builder.setStore(periph.label, store.Object.make(context.lib, component_wifi.state.Ap, periph.label));
+        builder.setStore(periph.label, store.Object.make(context.grt, component_wifi.state.Ap, periph.label));
     }
 
     inline for (0..registryPeriphLen(context.flow_registry)) |i| {
         const flow_record = context.flow_registry.periphs[i];
         builder.setStore(
             flow_record.label,
-            makeFlowStoreType(context.lib, flow_record.FlowType),
+            makeFlowStoreType(context.grt, flow_record.FlowType),
         );
     }
 
@@ -2302,22 +2302,23 @@ fn makePeriphInstancesType(comptime build_config_value: anytype, comptime regist
 }
 
 fn makeInitConfigType(
-    comptime lib: type,
+    comptime grt: type,
     comptime build_config_value: anytype,
     comptime registries: anytype,
     comptime has_user_root_config: bool,
     comptime UserRootConfig: type,
 ) type {
+    _ = grt;
     const total_fields = 1 + totalPeriphLen(registries) + @as(usize, if (has_user_root_config) 1 else 0);
     var fields: [total_fields]glib.std.builtin.Type.StructField = undefined;
     comptime var field_index: usize = 0;
 
     fields[field_index] = .{
         .name = "allocator",
-        .type = lib.mem.Allocator,
+        .type = glib.std.mem.Allocator,
         .default_value_ptr = null,
         .is_comptime = false,
-        .alignment = @alignOf(lib.mem.Allocator),
+        .alignment = @alignOf(glib.std.mem.Allocator),
     };
     field_index += 1;
 

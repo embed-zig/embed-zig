@@ -156,9 +156,9 @@ pub fn make(comptime Impl: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn exposesVtableSurface(allocator: lib.mem.Allocator) !void {
+        fn exposesVtableSurface(allocator: glib.std.mem.Allocator) !void {
             const State = struct {
                 deinit_calls: usize = 0,
                 refresh_calls: usize = 0,
@@ -167,7 +167,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             const Impl = struct {
                 pub const Config = struct {
-                    allocator: lib.mem.Allocator,
+                    allocator: glib.std.mem.Allocator,
                     state: *State,
                     pixel_count: usize = 8,
                 };
@@ -217,12 +217,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             strip.setPixels(1, &[_]Color{ Color.green, Color.blue, Color.white });
             strip.refresh();
 
-            try lib.testing.expectEqual(@as(usize, 5), strip.count());
-            try lib.testing.expectEqual(Color.red, strip.pixel(0));
-            try lib.testing.expectEqual(Color.green, strip.pixel(1));
-            try lib.testing.expectEqual(Color.blue, strip.pixel(2));
-            try lib.testing.expectEqual(Color.white, strip.pixel(3));
-            try lib.testing.expectEqual(@as(usize, 1), state.refresh_calls);
+            try grt.std.testing.expectEqual(@as(usize, 5), strip.count());
+            try grt.std.testing.expectEqual(Color.red, strip.pixel(0));
+            try grt.std.testing.expectEqual(Color.green, strip.pixel(1));
+            try grt.std.testing.expectEqual(Color.blue, strip.pixel(2));
+            try grt.std.testing.expectEqual(Color.white, strip.pixel(3));
+            try grt.std.testing.expectEqual(@as(usize, 1), state.refresh_calls);
 
             comptime {
                 _ = root.deinit;
@@ -241,14 +241,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }
         }
 
-        fn helperMethodsRespectStripBounds(allocator: lib.mem.Allocator) !void {
+        fn helperMethodsRespectStripBounds(allocator: glib.std.mem.Allocator) !void {
             const State = struct {
                 pixels: [4]Color = [_]Color{Color.black} ** 4,
             };
 
             const Impl = struct {
                 pub const Config = struct {
-                    allocator: lib.mem.Allocator,
+                    allocator: glib.std.mem.Allocator,
                     state: *State,
                 };
 
@@ -285,28 +285,28 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             defer strip.deinit();
 
             strip.setPixels(2, &[_]Color{ Color.red, Color.green, Color.blue });
-            try lib.testing.expectEqual(Color.red, strip.pixel(2));
-            try lib.testing.expectEqual(Color.green, strip.pixel(3));
+            try grt.std.testing.expectEqual(Color.red, strip.pixel(2));
+            try grt.std.testing.expectEqual(Color.green, strip.pixel(3));
 
             strip.fill(Color.white);
             for (0..strip.count()) |index| {
-                try lib.testing.expectEqual(Color.white, strip.pixel(index));
+                try grt.std.testing.expectEqual(Color.white, strip.pixel(index));
             }
 
             strip.clear();
             for (0..strip.count()) |index| {
-                try lib.testing.expectEqual(Color.black, strip.pixel(index));
+                try grt.std.testing.expectEqual(Color.black, strip.pixel(index));
             }
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             TestCase.exposesVtableSurface(allocator) catch |err| {
@@ -320,7 +320,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

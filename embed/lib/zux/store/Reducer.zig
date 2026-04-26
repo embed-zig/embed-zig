@@ -64,9 +64,9 @@ pub fn make(comptime Store: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn use_case_shape(testing: anytype, _: lib.mem.Allocator) !void {
+        fn use_case_shape(_: glib.std.mem.Allocator) !void {
             const store = @import("../Store.zig");
 
             const ButtonStore = struct {
@@ -77,7 +77,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const B = store.Builder(.{});
                 var builder = B.init();
                 builder.setStore(.button, ButtonStore);
-                break :blk builder.make(lib);
+                break :blk builder.make(grt);
             };
 
             const ReducerTy = make(AppStore);
@@ -145,32 +145,31 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(stores.button.pressed);
-            try testing.expect(sink.called);
-            try testing.expectEqual(@as(?u32, 0), sink.last_button_id);
-            try testing.expect(sink.last_pressed);
-            try testing.expectEqual(@as(usize, 1), emitted);
+            try grt.std.testing.expect(stores.button.pressed);
+            try grt.std.testing.expect(sink.called);
+            try grt.std.testing.expectEqual(@as(?u32, 0), sink.last_button_id);
+            try grt.std.testing.expect(sink.last_pressed);
+            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.use_case_shape(testing, allocator) catch |err| {
+            TestCase.use_case_shape(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

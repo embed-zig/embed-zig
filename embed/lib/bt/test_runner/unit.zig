@@ -43,7 +43,7 @@ pub const mocker = struct {
     pub const Hci = @import("unit/mocker/Hci.zig");
 };
 
-pub fn make(comptime lib: type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
@@ -54,31 +54,31 @@ pub fn make(comptime lib: type) glib.testing.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("Central", Central.make(lib));
-            t.run("Peripheral", Peripheral.make(lib));
-            t.run("Host", host.Host.make(lib));
-            t.run("Hci", Hci.make(lib));
-            t.run("host/Central", host.Central.make(lib));
-            t.run("host/Peripheral", host.Peripheral.make(lib));
-            t.run("host/Gap", host.Gap.make(lib));
-            t.run("host/Hci", host.Hci.make(lib));
-            t.run("host/att", host.att.make(lib));
-            t.run("host/l2cap", host.l2cap.make(lib));
-            t.run("host/gatt/client", host.gatt.client.make(lib));
-            t.run("host/gatt/server", host.gatt.server.make(lib));
-            t.run("host/hci/status", host.hci.status.make(lib));
-            t.run("host/hci/commands", host.hci.commands.make(lib));
-            t.run("host/hci/events", host.hci.events.make(lib));
-            t.run("host/hci/acl", host.hci.acl.make(lib));
-            t.run("host/server/Receiver", host.server.Receiver.make(lib));
-            t.run("host/server/Server", host.server.Server.make(lib));
-            t.run("host/server/Sender", host.server.Sender.make(lib));
-            t.run("host/xfer/Chunk", host.xfer.Chunk.make(lib));
-            t.run("host/xfer/read", host.xfer.read.make(lib));
-            t.run("host/xfer/send", host.xfer.send.make(lib));
-            t.run("host/xfer/write", host.xfer.write.make(lib));
-            t.run("host/xfer/recv", host.xfer.recv.make(lib));
-            t.run("mocker/Hci", mocker.Hci.make(lib));
+            t.run("Central", Central.make(grt));
+            t.run("Peripheral", Peripheral.make(grt));
+            t.run("Host", host.Host.make(grt));
+            t.run("Hci", Hci.make(grt));
+            t.run("host/Central", host.Central.make(grt));
+            t.run("host/Peripheral", host.Peripheral.make(grt));
+            t.run("host/Gap", host.Gap.make(grt));
+            t.run("host/Hci", host.Hci.make(grt));
+            t.run("host/att", host.att.make(grt));
+            t.run("host/l2cap", host.l2cap.make(grt));
+            t.run("host/gatt/client", host.gatt.client.make(grt));
+            t.run("host/gatt/server", host.gatt.server.make(grt));
+            t.run("host/hci/status", host.hci.status.make(grt));
+            t.run("host/hci/commands", host.hci.commands.make(grt));
+            t.run("host/hci/events", host.hci.events.make(grt));
+            t.run("host/hci/acl", host.hci.acl.make(grt));
+            t.run("host/server/Receiver", host.server.Receiver.make(grt));
+            t.run("host/server/Server", host.server.Server.make(grt));
+            t.run("host/server/Sender", host.server.Sender.make(grt));
+            t.run("host/xfer/Chunk", host.xfer.Chunk.make(grt));
+            t.run("host/xfer/read", host.xfer.read.make(grt));
+            t.run("host/xfer/send", host.xfer.send.make(grt));
+            t.run("host/xfer/write", host.xfer.write.make(grt));
+            t.run("host/xfer/recv", host.xfer.recv.make(grt));
+            t.run("mocker/Hci", mocker.Hci.make(grt));
             return t.wait();
         }
 

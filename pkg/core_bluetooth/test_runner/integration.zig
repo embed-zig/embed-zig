@@ -1,26 +1,26 @@
-const testing_api = @import("testing");
+const glib = @import("glib");
 const central = @import("integration/central.zig");
 const peripheral = @import("integration/peripheral.zig");
 const host_callback = @import("integration/host_callback.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("central", central.make(lib));
-            t.run("peripheral", peripheral.make(lib));
-            t.run("host_callback", host_callback.make(lib));
+            t.run("central", central.make(grt));
+            t.run("peripheral", peripheral.make(grt));
+            t.run("host_callback", host_callback.make(grt));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -29,5 +29,5 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

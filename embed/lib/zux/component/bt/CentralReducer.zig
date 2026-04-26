@@ -76,13 +76,13 @@ pub fn deinit(self: *CentralReducer) void {
     _ = self;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn reduceTracksCommonState() !void {
             const StoreObject = @import("../../store/Object.zig");
 
-            const CentralStore = StoreObject.make(lib, CentralState, .bt_central);
-            var store = CentralStore.init(lib.testing.allocator, .{});
+            const CentralStore = StoreObject.make(grt, CentralState, .bt_central);
+            var store = CentralStore.init(grt.std.testing.allocator, .{});
             defer store.deinit();
             var reducer = CentralReducer.init();
             defer reducer.deinit();
@@ -93,7 +93,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var sink = NoopSink{};
             const emit = Emitter.init(&sink);
 
-            try lib.testing.expectEqual(@as(usize, 0), try reducer.reduce(&store, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_central_found = .{
@@ -117,7 +117,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 },
             }, emit));
-            try lib.testing.expectEqual(@as(usize, 0), try reducer.reduce(&store, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_central_connected = .{
@@ -131,7 +131,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 },
             }, emit));
-            try lib.testing.expectEqual(@as(usize, 0), try reducer.reduce(&store, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_central_notification = .{
@@ -150,14 +150,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             store.tick();
             const state = store.get();
-            try lib.testing.expectEqual(@as(u32, 9), state.source_id);
-            try lib.testing.expect(state.connected);
-            try lib.testing.expectEqual(@as(?u16, 0x0040), state.conn_handle);
-            try lib.testing.expectEqual(@as(?i8, -48), state.last_rssi);
-            try lib.testing.expectEqualStrings("peer", state.name());
-            try lib.testing.expectEqualSlices(u8, &.{ 0x01, 0x02, 0x03 }, state.advData());
-            try lib.testing.expectEqual(@as(?u16, 0x0025), state.last_notification_attr_handle);
-            try lib.testing.expectEqualStrings("abc", state.lastNotification());
+            try grt.std.testing.expectEqual(@as(u32, 9), state.source_id);
+            try grt.std.testing.expect(state.connected);
+            try grt.std.testing.expectEqual(@as(?u16, 0x0040), state.conn_handle);
+            try grt.std.testing.expectEqual(@as(?i8, -48), state.last_rssi);
+            try grt.std.testing.expectEqualStrings("peer", state.name());
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x01, 0x02, 0x03 }, state.advData());
+            try grt.std.testing.expectEqual(@as(?u16, 0x0025), state.last_notification_attr_handle);
+            try grt.std.testing.expectEqualStrings("abc", state.lastNotification());
 
             _ = try reducer.reduce(&store, .{
                 .origin = .source,
@@ -170,19 +170,19 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit);
             store.tick();
             const disconnected = store.get();
-            try lib.testing.expect(!disconnected.connected);
-            try lib.testing.expectEqual(@as(?u16, null), disconnected.conn_handle);
-            try lib.testing.expectEqualStrings("peer", disconnected.name());
+            try grt.std.testing.expect(!disconnected.connected);
+            try grt.std.testing.expectEqual(@as(?u16, null), disconnected.conn_handle);
+            try grt.std.testing.expectEqualStrings("peer", disconnected.name());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -193,7 +193,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

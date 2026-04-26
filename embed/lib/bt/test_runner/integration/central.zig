@@ -8,7 +8,7 @@ const glib = @import("glib");
 const bt = @import("../../../bt.zig");
 const Central = @import("../../Central.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
@@ -19,8 +19,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
             _ = self;
             _ = allocator;
 
-            const Mocker = bt.Mocker(lib, Channel);
-            var mocker = Mocker.init(lib.testing.allocator, .{});
+            const Mocker = bt.Mocker(grt);
+            var mocker = Mocker.init(grt.std.testing.allocator, .{});
             defer mocker.deinit();
 
             var host = mocker.createHost(.{}) catch |err| {
@@ -29,7 +29,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
             };
             defer host.deinit();
 
-            t.run("central", makeWithHost(lib, &host));
+            t.run("central", makeWithHost(grt, &host));
             return t.wait();
         }
 
@@ -45,7 +45,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
     return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-pub fn makeWithHost(comptime lib: type, host: anytype) glib.testing.TestRunner {
+pub fn makeWithHost(comptime grt: type, host: anytype) glib.testing.TestRunner {
     const HostPtr = @TypeOf(host);
     comptime requireHostPointer(HostPtr);
 
@@ -66,7 +66,7 @@ pub fn makeWithHost(comptime lib: type, host: anytype) glib.testing.TestRunner {
             };
             defer c.stop();
 
-            runCentral(lib, c) catch |err| {
+            runCentral(grt, c) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -75,37 +75,35 @@ pub fn makeWithHost(comptime lib: type, host: anytype) glib.testing.TestRunner {
 
         pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{ .host = host };
     return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
-fn runCentral(comptime lib: type, c: Central) !void {
-    const testing = lib.testing;
-
-    try testing.expectEqual(Central.State.idle, c.getState());
+fn runCentral(comptime grt: type, c: Central) !void {
+    try grt.std.testing.expectEqual(Central.State.idle, c.getState());
     _ = c.getAddr();
 
     try c.startScanning(.{ .active = true, .timeout_ms = 1000 });
-    try testing.expectEqual(Central.State.scanning, c.getState());
+    try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
-    try testing.expectEqual(Central.State.idle, c.getState());
+    try grt.std.testing.expectEqual(Central.State.idle, c.getState());
 
     try c.startScanning(.{ .active = false, .timeout_ms = 1000 });
-    try testing.expectEqual(Central.State.scanning, c.getState());
+    try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
-    try testing.expectEqual(Central.State.idle, c.getState());
+    try grt.std.testing.expectEqual(Central.State.idle, c.getState());
 
     try c.startScanning(.{
         .active = true,
         .timeout_ms = 1000,
         .service_uuids = &.{0x180D},
     });
-    try testing.expectEqual(Central.State.scanning, c.getState());
+    try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
 
     try c.startScanning(.{
@@ -113,7 +111,7 @@ fn runCentral(comptime lib: type, c: Central) !void {
         .timeout_ms = 1000,
         .service_uuids = &.{ 0x180D, 0x180F, 0xFFE0 },
     });
-    try testing.expectEqual(Central.State.scanning, c.getState());
+    try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
 
     try c.startScanning(.{
@@ -121,7 +119,7 @@ fn runCentral(comptime lib: type, c: Central) !void {
         .timeout_ms = 1000,
         .filter_duplicates = false,
     });
-    try testing.expectEqual(Central.State.scanning, c.getState());
+    try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
 
     try c.startScanning(.{
@@ -130,39 +128,39 @@ fn runCentral(comptime lib: type, c: Central) !void {
         .interval_ms = 100,
         .window_ms = 50,
     });
-    try testing.expectEqual(Central.State.scanning, c.getState());
+    try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
 
-    try testing.expectEqual(Central.State.idle, c.getState());
+    try grt.std.testing.expectEqual(Central.State.idle, c.getState());
     c.stopScanning();
-    try testing.expectEqual(Central.State.idle, c.getState());
+    try grt.std.testing.expectEqual(Central.State.idle, c.getState());
 
-    var hook_called = lib.atomic.Value(bool).init(false);
+    var hook_called = grt.std.atomic.Value(bool).init(false);
     c.addEventHook(@ptrCast(&hook_called), struct {
         fn cb(ctx: ?*anyopaque, _: Central.Event) void {
-            const flag: *lib.atomic.Value(bool) = @ptrCast(@alignCast(ctx.?));
+            const flag: *grt.std.atomic.Value(bool) = @ptrCast(@alignCast(ctx.?));
             flag.store(true, .release);
         }
     }.cb);
 
-    var hook2_called = lib.atomic.Value(bool).init(false);
+    var hook2_called = grt.std.atomic.Value(bool).init(false);
     c.addEventHook(@ptrCast(&hook2_called), struct {
         fn cb(ctx: ?*anyopaque, _: Central.Event) void {
-            const flag: *lib.atomic.Value(bool) = @ptrCast(@alignCast(ctx.?));
+            const flag: *grt.std.atomic.Value(bool) = @ptrCast(@alignCast(ctx.?));
             flag.store(true, .release);
         }
     }.cb);
 
     try c.startScanning(.{ .active = true, .timeout_ms = 500 });
-    try testing.expectEqual(Central.State.scanning, c.getState());
+    try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
-    try testing.expectEqual(Central.State.idle, c.getState());
+    try grt.std.testing.expectEqual(Central.State.idle, c.getState());
     try c.startScanning(.{ .active = true, .timeout_ms = 500 });
-    try testing.expectEqual(Central.State.scanning, c.getState());
+    try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
-    try testing.expectEqual(Central.State.idle, c.getState());
+    try grt.std.testing.expectEqual(Central.State.idle, c.getState());
 
-    try testing.expectEqual(Central.State.idle, c.getState());
+    try grt.std.testing.expectEqual(Central.State.idle, c.getState());
 }
 
 fn requireHostPointer(comptime T: type) void {

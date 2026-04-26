@@ -34,39 +34,39 @@ pub fn lerp(a: root, b: root, t: u8) root {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn rgbAndNamedConstantsMatch() !void {
-            try lib.testing.expectEqual(red, rgb(255, 0, 0));
-            try lib.testing.expectEqual(green, rgb(0, 255, 0));
-            try lib.testing.expectEqual(blue, rgb(0, 0, 255));
-            try lib.testing.expectEqual(white, rgb(255, 255, 255));
-            try lib.testing.expectEqual(black, rgb(0, 0, 0));
+            try grt.std.testing.expectEqual(red, rgb(255, 0, 0));
+            try grt.std.testing.expectEqual(green, rgb(0, 255, 0));
+            try grt.std.testing.expectEqual(blue, rgb(0, 0, 255));
+            try grt.std.testing.expectEqual(white, rgb(255, 255, 255));
+            try grt.std.testing.expectEqual(black, rgb(0, 0, 0));
         }
 
         fn withBrightnessScalesChannels() !void {
             const color = rgb(255, 128, 64).withBrightness(128);
-            try lib.testing.expectEqual(root.rgb(128, 64, 32), color);
+            try grt.std.testing.expectEqual(root.rgb(128, 64, 32), color);
         }
 
         fn lerpInterpolatesEndpointsAndMidpoint() !void {
-            try lib.testing.expectEqual(red, lerp(red, blue, 0));
-            try lib.testing.expectEqual(blue, lerp(red, blue, 255));
+            try grt.std.testing.expectEqual(red, lerp(red, blue, 0));
+            try grt.std.testing.expectEqual(blue, lerp(red, blue, 255));
 
             const mid = lerp(red, blue, 128);
-            try lib.testing.expectEqual(@as(u8, 127), mid.r);
-            try lib.testing.expectEqual(@as(u8, 0), mid.g);
-            try lib.testing.expectEqual(@as(u8, 128), mid.b);
+            try grt.std.testing.expectEqual(@as(u8, 127), mid.r);
+            try grt.std.testing.expectEqual(@as(u8, 0), mid.g);
+            try grt.std.testing.expectEqual(@as(u8, 128), mid.b);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -85,7 +85,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

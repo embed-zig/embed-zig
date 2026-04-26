@@ -4,25 +4,25 @@ const ClickDetector = @import("../ClickDetector.zig");
 const GestureDetector = @import("../GestureDetector.zig");
 const types = @import("../types.zig");
 
-pub fn make(comptime lib: type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             t.parallel();
-            t.run("types", types.TestRunner(lib));
-            t.run("GestureDetector", GestureDetector.TestRunner(lib));
-            t.run("ClickDetector", ClickDetector.TestRunner(lib));
+            t.run("types", types.TestRunner(grt));
+            t.run("GestureDetector", GestureDetector.TestRunner(grt));
+            t.run("ClickDetector", ClickDetector.TestRunner(grt));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

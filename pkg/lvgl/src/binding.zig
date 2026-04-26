@@ -1,5 +1,4 @@
-const testing_api = @import("testing");
-
+const glib = @import("glib");
 const c = @cImport({
     @cInclude("lvgl.h");
     @cInclude("lv_os_custom.h");
@@ -352,20 +351,20 @@ pub const lv_observer_get_target = c.lv_observer_get_target;
 pub const lv_observer_get_target_obj = c.lv_observer_get_target_obj;
 pub const lv_observer_get_user_data = c.lv_observer_get_user_data;
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn exports_lvgl_base_symbols(_: lib.mem.Allocator) !void {
-            try lib.testing.expect(@sizeOf(Color) > 0);
-            try lib.testing.expect(@sizeOf(Point) > 0);
-            try lib.testing.expect(@sizeOf(Area) > 0);
-            try lib.testing.expect(@sizeOf(Style) > 0);
-            try lib.testing.expect(@typeInfo(Anim) == .@"opaque");
-            try lib.testing.expect(@typeInfo(Subject) == .@"opaque");
+        fn exports_lvgl_base_symbols(_: glib.std.mem.Allocator) !void {
+            try grt.std.testing.expect(@sizeOf(Color) > 0);
+            try grt.std.testing.expect(@sizeOf(Point) > 0);
+            try grt.std.testing.expect(@sizeOf(Area) > 0);
+            try grt.std.testing.expect(@sizeOf(Style) > 0);
+            try grt.std.testing.expect(@typeInfo(Anim) == .@"opaque");
+            try grt.std.testing.expect(@typeInfo(Subject) == .@"opaque");
 
-            try lib.testing.expect(LV_COLOR_DEPTH > 0);
-            try lib.testing.expect(LV_PART_ANY != 0);
-            try lib.testing.expect(LV_STATE_ANY != 0);
-            try lib.testing.expect(LV_OBJ_FLAG_CLICKABLE != 0);
+            try grt.std.testing.expect(LV_COLOR_DEPTH > 0);
+            try grt.std.testing.expect(LV_PART_ANY != 0);
+            try grt.std.testing.expect(LV_STATE_ANY != 0);
+            try grt.std.testing.expect(LV_OBJ_FLAG_CLICKABLE != 0);
 
             _ = lv_color_make;
             _ = lv_area_get_width;
@@ -399,12 +398,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             TestCase.exports_lvgl_base_symbols(allocator) catch |err| {
@@ -414,7 +413,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -423,5 +422,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

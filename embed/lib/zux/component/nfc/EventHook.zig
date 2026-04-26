@@ -40,9 +40,9 @@ pub fn emitFn(ctx: *const anyopaque, update: drivers.nfc.Update) void {
     }) catch @panic("zux.component.nfc.EventHook failed to forward event");
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn emitFnForwardsFoundThroughEmitter(testing: anytype) !void {
+        fn emitFnForwardsFoundThroughEmitter() !void {
             const Sink = struct {
                 called: bool = false,
                 last_source_id: u32 = 0,
@@ -71,12 +71,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .card_type = .ndef,
             });
 
-            try testing.expect(sink.called);
-            try testing.expectEqual(@as(u32, 21), sink.last_source_id);
-            try testing.expectEqual(@as(usize, 4), sink.last_uid_len);
+            try grt.std.testing.expect(sink.called);
+            try grt.std.testing.expectEqual(@as(u32, 21), sink.last_source_id);
+            try grt.std.testing.expectEqual(@as(usize, 4), sink.last_uid_len);
         }
 
-        fn emitFnForwardsReadThroughEmitter(testing: anytype) !void {
+        fn emitFnForwardsReadThroughEmitter() !void {
             const Sink = struct {
                 called: bool = false,
                 last_source_id: u32 = 0,
@@ -107,36 +107,35 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .card_type = .ndef,
             });
 
-            try testing.expect(sink.called);
-            try testing.expectEqual(@as(u32, 22), sink.last_source_id);
-            try testing.expectEqual(@as(usize, 4), sink.last_uid_len);
-            try testing.expectEqual(@as(usize, 4), sink.last_payload_len);
+            try grt.std.testing.expect(sink.called);
+            try grt.std.testing.expectEqual(@as(u32, 22), sink.last_source_id);
+            try grt.std.testing.expectEqual(@as(usize, 4), sink.last_uid_len);
+            try grt.std.testing.expectEqual(@as(usize, 4), sink.last_payload_len);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.emitFnForwardsFoundThroughEmitter(testing) catch |err| {
+            TestCase.emitFnForwardsFoundThroughEmitter() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.emitFnForwardsReadThroughEmitter(testing) catch |err| {
+            TestCase.emitFnForwardsReadThroughEmitter() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

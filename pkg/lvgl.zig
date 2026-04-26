@@ -5,6 +5,8 @@
 //!   const lvgl_osal = @import("lvgl_osal");
 //!   _ = lvgl.binding;
 
+const glib = @import("glib");
+const gstd = @import("gstd");
 pub const binding = @import("lvgl/src/binding.zig");
 const types_mod = @import("lvgl/src/types.zig");
 
@@ -37,7 +39,7 @@ pub const test_runner = struct {
     pub const integration = @import("lvgl/test_runner/integration.zig");
 };
 
-/// Bitmap harness display for `test_runner.integration.make(lib, &display)`.
+/// Bitmap harness display for `test_runner.integration.make(gstd.runtime, &display)`.
 pub const IntegrationTestingDisplay = @import("lvgl/test_runner/integration/bitmap/test_utils/TestingDisplay.zig");
 
 pub fn init() void {
@@ -54,21 +56,19 @@ pub fn isInitialized() bool {
 
 test "lvgl/unit_tests" {
     const std = @import("std");
-    const testing_mod = @import("testing");
 
-    var t = testing_mod.T.new(std, .lvgl_unit);
+    var t = glib.testing.T.new(std, .lvgl_unit);
     defer t.deinit();
 
-    t.run("unit", test_runner.unit.make(std));
+    t.run("unit", test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "lvgl/integration_tests" {
     const std = @import("std");
-    const testing_mod = @import("testing");
     std.testing.log_level = .info;
 
-    var t = testing_mod.T.new(std, .lvgl_integration);
+    var t = glib.testing.T.new(std, .lvgl_integration);
     defer t.deinit();
 
     var testing_display = IntegrationTestingDisplay.initPassthrough(std.testing.allocator, 320, 240, null);
@@ -77,7 +77,7 @@ test "lvgl/integration_tests" {
     var harness_display = try testing_display.display();
     defer harness_display.deinit();
 
-    t.run("integration", test_runner.integration.make(std, &harness_display));
+    t.run("integration", test_runner.integration.make(gstd.runtime, &harness_display));
     if (!t.wait()) return error.TestFailed;
     try testing_display.assertComplete();
 }

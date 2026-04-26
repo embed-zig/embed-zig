@@ -1,15 +1,15 @@
+const glib = @import("glib");
 const display_api = @import("drivers");
-const testing_mod = @import("testing");
 const TestingDisplay = @import("TestingDisplay.zig");
 
 const Display = display_api.Display;
 
 pub fn make(
-    comptime lib: type,
+    comptime grt: type,
     comptime Case: type,
     case_data: Case,
     output: ?*Display,
-) testing_mod.TestRunner {
+) glib.testing.TestRunner {
     const Runner = struct {
         case_data: Case,
         output: ?*Display,
@@ -17,7 +17,7 @@ pub fn make(
         display: Display = undefined,
         is_initialized: bool = false,
 
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             const width_px = Case.width_px;
             const height_px = Case.height_px;
 
@@ -35,8 +35,8 @@ pub fn make(
             self.is_initialized = true;
         }
 
-        pub fn run(self: *@This(), child_t: *testing_mod.T, allocator: lib.mem.Allocator) bool {
-            var runner = self.case_data.makeRunner(lib, &self.display);
+        pub fn run(self: *@This(), child_t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
+            var runner = self.case_data.makeRunner(grt, &self.display);
             defer runner.deinit(allocator);
 
             if (!runner.run(child_t, allocator)) {
@@ -53,20 +53,20 @@ pub fn make(
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
             if (self.is_initialized) {
                 self.display.deinit();
                 self.td.deinit();
             }
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{
         .case_data = case_data,
         .output = output,
     };
-    return testing_mod.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }

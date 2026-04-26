@@ -261,9 +261,9 @@ fn forward(self: *Reducer, message: Message) !usize {
     return 0;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn rawSingleButtonClickEmitsCountAfterTick(testing: anytype) !void {
+        fn rawSingleButtonClickEmitsCountAfterTick() !void {
             const Collector = struct {
                 count: usize = 0,
                 last_click_count: u16 = 0,
@@ -286,13 +286,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            var detector_impl = Reducer.init(testing.allocator);
+            var detector_impl = Reducer.init(grt.std.testing.allocator);
             defer detector_impl.deinit();
             var collector = Collector{};
             var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
-            try testing.expectEqual(@as(usize, 0), try detector.process(.{
+            try grt.std.testing.expectEqual(@as(usize, 0), try detector.process(.{
                 .origin = .source,
                 .timestamp_ns = 10,
                 .body = .{
@@ -302,7 +302,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 },
             }));
-            try testing.expectEqual(@as(usize, 0), try detector.process(.{
+            try grt.std.testing.expectEqual(@as(usize, 0), try detector.process(.{
                 .origin = .source,
                 .timestamp_ns = 20,
                 .body = .{
@@ -312,7 +312,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 },
             }));
-            try testing.expectEqual(
+            try grt.std.testing.expectEqual(
                 @as(usize, 2),
                 try detector.process(.{
                     .origin = .timer,
@@ -323,13 +323,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }),
             );
 
-            try testing.expectEqual(@as(usize, 1), collector.count);
-            try testing.expectEqual(@as(u16, 1), collector.last_click_count);
-            try testing.expectEqual(@as(u64, 0), collector.last_long_press_ns);
-            try testing.expectEqual(@as(?u32, null), collector.last_button_id);
+            try grt.std.testing.expectEqual(@as(usize, 1), collector.count);
+            try grt.std.testing.expectEqual(@as(u16, 1), collector.last_click_count);
+            try grt.std.testing.expectEqual(@as(u64, 0), collector.last_long_press_ns);
+            try grt.std.testing.expectEqual(@as(?u32, null), collector.last_button_id);
         }
 
-        fn rawGroupedButtonFourClicksEmitClickCount(testing: anytype) !void {
+        fn rawGroupedButtonFourClicksEmitClickCount() !void {
             const Collector = struct {
                 last_click_count: u16 = 0,
                 last_button_id: ?u32 = null,
@@ -351,7 +351,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            var detector_impl = Reducer.init(testing.allocator);
+            var detector_impl = Reducer.init(grt.std.testing.allocator);
             defer detector_impl.deinit();
             var collector = Collector{};
             var detector = detector_impl.node();
@@ -381,7 +381,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 });
             }
-            try testing.expectEqual(
+            try grt.std.testing.expectEqual(
                 @as(usize, 2),
                 try detector.process(.{
                     .origin = .timer,
@@ -392,12 +392,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }),
             );
 
-            try testing.expectEqual(@as(u16, 4), collector.last_click_count);
-            try testing.expectEqual(@as(?u32, 3), collector.last_button_id);
-            try testing.expectEqual(@as(usize, 1), collector.count);
+            try grt.std.testing.expectEqual(@as(u16, 4), collector.last_click_count);
+            try grt.std.testing.expectEqual(@as(?u32, 3), collector.last_button_id);
+            try grt.std.testing.expectEqual(@as(usize, 1), collector.count);
         }
 
-        fn longPressEmitsUpdatedDuration(testing: anytype) !void {
+        fn longPressEmitsUpdatedDuration() !void {
             const Collector = struct {
                 count: usize = 0,
                 last_long_press_ns: u64 = 0,
@@ -417,7 +417,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            var detector_impl = Reducer.init(testing.allocator);
+            var detector_impl = Reducer.init(grt.std.testing.allocator);
             defer detector_impl.deinit();
             var collector = Collector{};
             var detector = detector_impl.node();
@@ -433,7 +433,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 },
             });
-            try testing.expectEqual(
+            try grt.std.testing.expectEqual(
                 @as(usize, 2),
                 try detector.process(.{
                     .origin = .timer,
@@ -443,10 +443,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 }),
             );
-            try testing.expectEqual(default_long_press_ns + 25, collector.last_long_press_ns);
-            try testing.expectEqual(@as(usize, 1), collector.count);
+            try grt.std.testing.expectEqual(default_long_press_ns + 25, collector.last_long_press_ns);
+            try grt.std.testing.expectEqual(@as(usize, 1), collector.count);
 
-            try testing.expectEqual(
+            try grt.std.testing.expectEqual(
                 @as(usize, 2),
                 try detector.process(.{
                     .origin = .timer,
@@ -456,10 +456,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 }),
             );
-            try testing.expectEqual(default_long_press_ns + 75, collector.last_long_press_ns);
-            try testing.expectEqual(@as(usize, 2), collector.count);
+            try grt.std.testing.expectEqual(default_long_press_ns + 75, collector.last_long_press_ns);
+            try grt.std.testing.expectEqual(@as(usize, 2), collector.count);
 
-            try testing.expectEqual(@as(usize, 1), try detector.process(.{
+            try grt.std.testing.expectEqual(@as(usize, 1), try detector.process(.{
                 .origin = .source,
                 .timestamp_ns = 10 + @as(i128, default_long_press_ns) + 100,
                 .body = .{
@@ -469,11 +469,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 },
             }));
-            try testing.expectEqual(default_long_press_ns + 100, collector.last_long_press_ns);
-            try testing.expectEqual(@as(usize, 3), collector.count);
+            try grt.std.testing.expectEqual(default_long_press_ns + 100, collector.last_long_press_ns);
+            try grt.std.testing.expectEqual(@as(usize, 3), collector.count);
         }
 
-        fn updatedLongPressThresholdAppliesToExistingKey(testing: anytype) !void {
+        fn updatedLongPressThresholdAppliesToExistingKey() !void {
             const Collector = struct {
                 long_press_ns: u64 = 0,
                 count: usize = 0,
@@ -493,7 +493,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            var detector_impl = Reducer.init(testing.allocator);
+            var detector_impl = Reducer.init(grt.std.testing.allocator);
             defer detector_impl.deinit();
             var collector = Collector{};
             var detector = detector_impl.node();
@@ -511,7 +511,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             });
 
             detector_impl.long_press_ns = 100;
-            try testing.expectEqual(
+            try grt.std.testing.expectEqual(
                 @as(usize, 2),
                 try detector.process(.{
                     .origin = .timer,
@@ -521,11 +521,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 }),
             );
-            try testing.expectEqual(@as(u64, 100), collector.long_press_ns);
-            try testing.expectEqual(@as(usize, 1), collector.count);
+            try grt.std.testing.expectEqual(@as(u64, 100), collector.long_press_ns);
+            try grt.std.testing.expectEqual(@as(usize, 1), collector.count);
         }
 
-        fn updatedMultiClickWindowAppliesToExistingKey(testing: anytype) !void {
+        fn updatedMultiClickWindowAppliesToExistingKey() !void {
             const Collector = struct {
                 click_count: u16 = 0,
                 count: usize = 0,
@@ -545,7 +545,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            var detector_impl = Reducer.init(testing.allocator);
+            var detector_impl = Reducer.init(grt.std.testing.allocator);
             defer detector_impl.deinit();
             var collector = Collector{};
             var detector = detector_impl.node();
@@ -573,7 +573,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             });
 
             detector_impl.multi_click_window_ns = 50;
-            try testing.expectEqual(
+            try grt.std.testing.expectEqual(
                 @as(usize, 2),
                 try detector.process(.{
                     .origin = .timer,
@@ -583,15 +583,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 }),
             );
-            try testing.expectEqual(@as(u16, 1), collector.click_count);
-            try testing.expectEqual(@as(usize, 1), collector.count);
+            try grt.std.testing.expectEqual(@as(u16, 1), collector.click_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), collector.count);
         }
 
-        fn reduceGroupedUpdatesStore(testing: anytype) !void {
+        fn reduceGroupedUpdatesStore() !void {
             const StoreObject = @import("../../store/Object.zig");
 
-            const GroupedStore = StoreObject.make(lib, GroupedState, .grouped_button);
-            var store = GroupedStore.init(testing.allocator, .{});
+            const GroupedStore = StoreObject.make(grt, GroupedState, .grouped_button);
+            var store = GroupedStore.init(grt.std.testing.allocator, .{});
             defer store.deinit();
 
             const NoopSink = struct {
@@ -599,7 +599,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
             var sink = NoopSink{};
 
-            try testing.expectEqual(@as(usize, 0), try reduceGrouped(&store, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try reduceGrouped(&store, .{
                 .origin = .source,
                 .body = .{
                     .raw_grouped_button = .{
@@ -612,16 +612,16 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             store.tick();
             const next = store.get();
-            try testing.expectEqual(@as(u32, 3), next.source_id);
-            try testing.expectEqual(@as(?u32, 1), next.button_id);
-            try testing.expect(next.pressed);
+            try grt.std.testing.expectEqual(@as(u32, 3), next.source_id);
+            try grt.std.testing.expectEqual(@as(?u32, 1), next.button_id);
+            try grt.std.testing.expect(next.pressed);
         }
 
-        fn reduceSingleUpdatesStore(testing: anytype) !void {
+        fn reduceSingleUpdatesStore() !void {
             const StoreObject = @import("../../store/Object.zig");
 
-            const SingleStore = StoreObject.make(lib, SingleState, .single_button);
-            var store = SingleStore.init(testing.allocator, .{});
+            const SingleStore = StoreObject.make(grt, SingleState, .single_button);
+            var store = SingleStore.init(grt.std.testing.allocator, .{});
             defer store.deinit();
 
             const NoopSink = struct {
@@ -629,7 +629,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
             var sink = NoopSink{};
 
-            try testing.expectEqual(@as(usize, 0), try reduceSingle(&store, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try reduceSingle(&store, .{
                 .origin = .source,
                 .body = .{
                     .raw_single_button = .{
@@ -641,15 +641,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             store.tick();
             const next = store.get();
-            try testing.expectEqual(@as(u32, 9), next.source_id);
-            try testing.expect(next.pressed);
+            try grt.std.testing.expectEqual(@as(u32, 9), next.source_id);
+            try grt.std.testing.expect(next.pressed);
         }
 
-        fn reduceUpdatesStore(testing: anytype) !void {
+        fn reduceUpdatesStore() !void {
             const StoreObject = @import("../../store/Object.zig");
 
-            const GestureStore = StoreObject.make(lib, State, .button_gesture);
-            var store = GestureStore.init(testing.allocator, .{});
+            const GestureStore = StoreObject.make(grt, State, .button_gesture);
+            var store = GestureStore.init(grt.std.testing.allocator, .{});
             defer store.deinit();
 
             const NoopSink = struct {
@@ -657,7 +657,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
             var sink = NoopSink{};
 
-            try testing.expectEqual(@as(usize, 0), try reduce(&store, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try reduce(&store, .{
                 .origin = .node,
                 .body = .{
                     .button_gesture = .{
@@ -670,62 +670,61 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             store.tick();
             const next = store.get();
-            try testing.expectEqual(@as(u32, 5), next.source_id);
-            try testing.expectEqual(@as(?u32, 2), next.button_id);
-            try testing.expect(next.gesture_kind != null);
-            try testing.expectEqual(@as(@TypeOf(next.gesture_kind.?), .click), next.gesture_kind.?);
-            try testing.expectEqual(@as(u16, 3), next.click_count);
-            try testing.expectEqual(@as(u64, 0), next.long_press_ns);
+            try grt.std.testing.expectEqual(@as(u32, 5), next.source_id);
+            try grt.std.testing.expectEqual(@as(?u32, 2), next.button_id);
+            try grt.std.testing.expect(next.gesture_kind != null);
+            try grt.std.testing.expectEqual(@as(@TypeOf(next.gesture_kind.?), .click), next.gesture_kind.?);
+            try grt.std.testing.expectEqual(@as(u16, 3), next.click_count);
+            try grt.std.testing.expectEqual(@as(u64, 0), next.long_press_ns);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.rawSingleButtonClickEmitsCountAfterTick(testing) catch |err| {
+            TestCase.rawSingleButtonClickEmitsCountAfterTick() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.rawGroupedButtonFourClicksEmitClickCount(testing) catch |err| {
+            TestCase.rawGroupedButtonFourClicksEmitClickCount() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.longPressEmitsUpdatedDuration(testing) catch |err| {
+            TestCase.longPressEmitsUpdatedDuration() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.updatedLongPressThresholdAppliesToExistingKey(testing) catch |err| {
+            TestCase.updatedLongPressThresholdAppliesToExistingKey() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.updatedMultiClickWindowAppliesToExistingKey(testing) catch |err| {
+            TestCase.updatedMultiClickWindowAppliesToExistingKey() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.reduceSingleUpdatesStore(testing) catch |err| {
+            TestCase.reduceSingleUpdatesStore() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.reduceGroupedUpdatesStore(testing) catch |err| {
+            TestCase.reduceGroupedUpdatesStore() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.reduceUpdatesStore(testing) catch |err| {
+            TestCase.reduceUpdatesStore() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

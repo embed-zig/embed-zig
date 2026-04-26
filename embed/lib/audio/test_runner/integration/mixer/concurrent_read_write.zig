@@ -1,15 +1,14 @@
 const glib = @import("glib");
 const MixerMod = @import("../../../Mixer.zig");
 
-pub fn make(comptime lib: type) glib.testing.TestRunner {
-    const DefaultMixerType = MixerMod.make(lib);
+pub fn make(comptime grt: type) glib.testing.TestRunner {
+    const DefaultMixerType = MixerMod.make(grt);
     const Track = MixerMod.Track;
 
     const TestCase = struct {
-        fn run(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const Atomic = lib.atomic.Value;
-            const Thread = lib.Thread;
+        fn run(allocator: glib.std.mem.Allocator) !void {
+            const Atomic = grt.std.atomic.Value;
+            const Thread = grt.std.Thread;
 
             const total_samples = 32;
             const chunk_len = 8;
@@ -80,13 +79,13 @@ pub fn make(comptime lib: type) glib.testing.TestRunner {
             writer.join();
             if (state.result) |err| return err;
 
-            try testing.expectEqual(@as(usize, total_samples), collected_len);
-            try testing.expectEqualSlices(i16, state.samples[0..], collected[0..collected_len]);
+            try grt.std.testing.expectEqual(@as(usize, total_samples), collected_len);
+            try grt.std.testing.expectEqualSlices(i16, state.samples[0..], collected[0..collected_len]);
         }
     };
 
-    return glib.testing.TestRunner.fromFn(lib, 96 * 1024, struct {
-        fn run(t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
+    return glib.testing.TestRunner.fromFn(grt.std, 96 * 1024, struct {
+        fn run(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
             _ = t;
             try TestCase.run(allocator);
         }

@@ -156,13 +156,13 @@ pub fn deinit(self: *Reducer) void {
     _ = self;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn reduceTracksModemState() !void {
             const StoreObject = @import("../../store/Object.zig");
 
-            const ModemStore = StoreObject.make(lib, ModemState, .modem);
-            var store = ModemStore.init(lib.testing.allocator, .{});
+            const ModemStore = StoreObject.make(grt, ModemState, .modem);
+            var store = ModemStore.init(grt.std.testing.allocator, .{});
             defer store.deinit();
             var reducer = Reducer.init();
             defer reducer.deinit();
@@ -320,31 +320,31 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             store.tick();
             const state = store.get();
-            try lib.testing.expectEqual(@as(u32, 51), state.source_id);
-            try lib.testing.expectEqual(modem_event.SimState.ready, state.sim);
-            try lib.testing.expectEqual(modem_event.RegistrationState.home, state.registration);
-            try lib.testing.expectEqual(modem_event.PacketState.connected, state.packet);
-            try lib.testing.expectEqual(@as(?i16, -73), state.signal.?.rssi_dbm);
-            try lib.testing.expectEqual(modem_event.Rat.lte, state.signal.?.rat);
-            try lib.testing.expectEqualStrings("internet", state.apn());
-            try lib.testing.expectEqual(@as(?u8, 3), if (state.call) |call| call.call_id else null);
-            try lib.testing.expectEqual(@as(?modem_event.CallEndReason, .remote_hangup), if (state.call) |call| call.end_reason else null);
-            try lib.testing.expectEqualStrings("10086", state.call.?.number());
-            try lib.testing.expectEqual(@as(?u16, 9), if (state.sms) |sms| sms.index else null);
-            try lib.testing.expectEqualStrings("10010", state.sms.?.sender());
-            try lib.testing.expectEqualStrings("hi", state.sms.?.text());
-            try lib.testing.expectEqual(modem_event.GnssState.fixed, state.gnss_state);
-            try lib.testing.expectEqual(modem_event.GnssFixQuality.three_d, state.gnss_fix.?.quality);
+            try grt.std.testing.expectEqual(@as(u32, 51), state.source_id);
+            try grt.std.testing.expectEqual(modem_event.SimState.ready, state.sim);
+            try grt.std.testing.expectEqual(modem_event.RegistrationState.home, state.registration);
+            try grt.std.testing.expectEqual(modem_event.PacketState.connected, state.packet);
+            try grt.std.testing.expectEqual(@as(?i16, -73), state.signal.?.rssi_dbm);
+            try grt.std.testing.expectEqual(modem_event.Rat.lte, state.signal.?.rat);
+            try grt.std.testing.expectEqualStrings("internet", state.apn());
+            try grt.std.testing.expectEqual(@as(?u8, 3), if (state.call) |call| call.call_id else null);
+            try grt.std.testing.expectEqual(@as(?modem_event.CallEndReason, .remote_hangup), if (state.call) |call| call.end_reason else null);
+            try grt.std.testing.expectEqualStrings("10086", state.call.?.number());
+            try grt.std.testing.expectEqual(@as(?u16, 9), if (state.sms) |sms| sms.index else null);
+            try grt.std.testing.expectEqualStrings("10010", state.sms.?.sender());
+            try grt.std.testing.expectEqualStrings("hi", state.sms.?.text());
+            try grt.std.testing.expectEqual(modem_event.GnssState.fixed, state.gnss_state);
+            try grt.std.testing.expectEqual(modem_event.GnssFixQuality.three_d, state.gnss_fix.?.quality);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -355,7 +355,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

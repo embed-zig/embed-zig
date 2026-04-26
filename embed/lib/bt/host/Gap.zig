@@ -355,22 +355,22 @@ pub const ConnConfig = struct {
     timeout: u16 = 0x00C8,
 };
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             {
                 var gap = init();
                 gap.startScanning(.{});
-                try lib.testing.expectEqual(State.scanning, gap.state);
-                try lib.testing.expect(gap.isScanning());
+                try grt.std.testing.expectEqual(State.scanning, gap.state);
+                try grt.std.testing.expect(gap.isScanning());
 
                 const cmd1 = gap.nextCommand() orelse return error.NoCommand;
-                try lib.testing.expectEqual(commands.INDICATOR, cmd1[0]);
-                try lib.testing.expectEqual(commands.LE_SET_SCAN_PARAMS, lib.mem.readInt(u16, cmd1[1..3], .little));
+                try grt.std.testing.expectEqual(commands.INDICATOR, cmd1[0]);
+                try grt.std.testing.expectEqual(commands.LE_SET_SCAN_PARAMS, grt.std.mem.readInt(u16, cmd1[1..3], .little));
 
                 const cmd2 = gap.nextCommand() orelse return error.NoCommand;
-                try lib.testing.expectEqual(commands.LE_SET_SCAN_ENABLE, lib.mem.readInt(u16, cmd2[1..3], .little));
-                try lib.testing.expectEqual(@as(?[]const u8, null), gap.nextCommand());
+                try grt.std.testing.expectEqual(commands.LE_SET_SCAN_ENABLE, grt.std.mem.readInt(u16, cmd2[1..3], .little));
+                try grt.std.testing.expectEqual(@as(?[]const u8, null), gap.nextCommand());
             }
 
             {
@@ -380,38 +380,38 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 _ = gap.nextCommand();
 
                 gap.stopScanning();
-                try lib.testing.expectEqual(State.idle, gap.state);
-                try lib.testing.expect(!gap.isScanning());
+                try grt.std.testing.expectEqual(State.idle, gap.state);
+                try grt.std.testing.expect(!gap.isScanning());
 
                 const cmd = gap.nextCommand() orelse return error.NoCommand;
-                try lib.testing.expectEqual(commands.LE_SET_SCAN_ENABLE, lib.mem.readInt(u16, cmd[1..3], .little));
-                try lib.testing.expectEqual(@as(u8, 0), cmd[4]);
+                try grt.std.testing.expectEqual(commands.LE_SET_SCAN_ENABLE, grt.std.mem.readInt(u16, cmd[1..3], .little));
+                try grt.std.testing.expectEqual(@as(u8, 0), cmd[4]);
             }
 
             {
                 var gap = init();
                 gap.startAdvertising(.{ .adv_data = &[_]u8{ 0x02, 0x01, 0x06 } });
-                try lib.testing.expectEqual(State.advertising, gap.state);
-                try lib.testing.expect(gap.isAdvertising());
+                try grt.std.testing.expectEqual(State.advertising, gap.state);
+                try grt.std.testing.expect(gap.isAdvertising());
 
                 const cmd1 = gap.nextCommand() orelse return error.NoCommand;
-                try lib.testing.expectEqual(commands.LE_SET_ADV_PARAMS, lib.mem.readInt(u16, cmd1[1..3], .little));
+                try grt.std.testing.expectEqual(commands.LE_SET_ADV_PARAMS, grt.std.mem.readInt(u16, cmd1[1..3], .little));
 
                 const cmd2 = gap.nextCommand() orelse return error.NoCommand;
-                try lib.testing.expectEqual(commands.LE_SET_ADV_DATA, lib.mem.readInt(u16, cmd2[1..3], .little));
+                try grt.std.testing.expectEqual(commands.LE_SET_ADV_DATA, grt.std.mem.readInt(u16, cmd2[1..3], .little));
 
                 const cmd3 = gap.nextCommand() orelse return error.NoCommand;
-                try lib.testing.expectEqual(commands.LE_SET_ADV_ENABLE, lib.mem.readInt(u16, cmd3[1..3], .little));
+                try grt.std.testing.expectEqual(commands.LE_SET_ADV_ENABLE, grt.std.mem.readInt(u16, cmd3[1..3], .little));
             }
 
             {
                 var gap = init();
                 gap.connect(.{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF }, .public, .{});
-                try lib.testing.expectEqual(State.connecting, gap.state);
-                try lib.testing.expect(gap.isConnectingCentral());
+                try grt.std.testing.expectEqual(State.connecting, gap.state);
+                try grt.std.testing.expect(gap.isConnectingCentral());
 
                 const cmd = gap.nextCommand() orelse return error.NoCommand;
-                try lib.testing.expectEqual(commands.LE_CREATE_CONNECTION, lib.mem.readInt(u16, cmd[1..3], .little));
+                try grt.std.testing.expectEqual(commands.LE_CREATE_CONNECTION, grt.std.mem.readInt(u16, cmd[1..3], .little));
             }
 
             {
@@ -427,9 +427,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     .conn_latency = 0,
                     .supervision_timeout = 0x00C8,
                 } });
-                try lib.testing.expectEqual(State.connected, gap.state);
+                try grt.std.testing.expectEqual(State.connected, gap.state);
                 const link = gap.getLink(.central) orelse return error.NoLink;
-                try lib.testing.expectEqual(@as(u16, 0x0040), link.conn_handle);
+                try grt.std.testing.expectEqual(@as(u16, 0x0040), link.conn_handle);
             }
 
             {
@@ -448,7 +448,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     .conn_handle = 0x0040,
                     .reason = .remote_user_terminated,
                 } });
-                try lib.testing.expectEqual(State.idle, gap.state);
+                try grt.std.testing.expectEqual(State.idle, gap.state);
             }
 
             {
@@ -457,9 +457,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 _ = gap.nextCommand();
                 _ = gap.nextCommand();
                 gap.startAdvertising(.{ .adv_data = &[_]u8{ 0x02, 0x01, 0x06 } });
-                try lib.testing.expect(gap.isScanning());
-                try lib.testing.expect(gap.isAdvertising());
-                try lib.testing.expectEqual(State.advertising, gap.state);
+                try grt.std.testing.expect(gap.isScanning());
+                try grt.std.testing.expect(gap.isAdvertising());
+                try grt.std.testing.expectEqual(State.advertising, gap.state);
             }
 
             {
@@ -470,9 +470,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     .status = .success,
                     .return_params = &[6]u8{ 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 },
                 } });
-                try lib.testing.expect(gap.addr_known);
-                try lib.testing.expectEqual(@as(u8, 0x11), gap.bd_addr[0]);
-                try lib.testing.expectEqual(@as(u8, 0x66), gap.bd_addr[5]);
+                try grt.std.testing.expect(gap.addr_known);
+                try grt.std.testing.expectEqual(@as(u8, 0x11), gap.bd_addr[0]);
+                try grt.std.testing.expectEqual(@as(u8, 0x66), gap.bd_addr[5]);
             }
 
             {
@@ -481,18 +481,18 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 gap.resetController();
 
                 const cmd = gap.nextCommand() orelse return error.NoCommand;
-                try lib.testing.expectEqual(commands.RESET, lib.mem.readInt(u16, cmd[1..3], .little));
-                try lib.testing.expectEqual(@as(?[]const u8, null), gap.nextCommand());
+                try grt.std.testing.expectEqual(commands.RESET, grt.std.mem.readInt(u16, cmd[1..3], .little));
+                try grt.std.testing.expectEqual(@as(?[]const u8, null), gap.nextCommand());
             }
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -503,7 +503,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

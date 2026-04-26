@@ -131,7 +131,7 @@ pub fn fromTca9554(pointer: anytype, comptime pin: anytype) Gpio {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn dispatchesRead() !void {
             const Fake = struct {
@@ -150,7 +150,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var fake = Fake{};
             const gpio = Gpio.init(&fake);
-            try lib.testing.expectEqual(Level.high, try gpio.read());
+            try grt.std.testing.expectEqual(Level.high, try gpio.read());
         }
 
         fn propagatesBackendErrors() !void {
@@ -169,7 +169,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var fake = Fake{ .fail = true };
             const gpio = Gpio.init(&fake);
-            try lib.testing.expectError(error.Timeout, gpio.read());
+            try grt.std.testing.expectError(error.Timeout, gpio.read());
         }
 
         fn writeAndDirectionDispatch() !void {
@@ -194,8 +194,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const gpio = Gpio.init(&fake);
             try gpio.setOutput();
             try gpio.setHigh();
-            try lib.testing.expectEqual(Level.high, fake.last_level);
-            try lib.testing.expectEqual(Direction.output, fake.last_direction);
+            try grt.std.testing.expectEqual(Level.high, fake.last_level);
+            try grt.std.testing.expectEqual(Direction.output, fake.last_direction);
         }
 
         fn fromTca9554AdaptsChipMethods() !void {
@@ -224,21 +224,21 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var expander = Expander{ .level = .high };
             const gpio = Gpio.fromTca9554(&expander, .pin3);
-            try lib.testing.expectEqual(Level.high, try gpio.read());
+            try grt.std.testing.expectEqual(Level.high, try gpio.read());
             try gpio.setLow();
             try gpio.setInput();
-            try lib.testing.expectEqual(@as(?Level, .low), expander.last_level);
-            try lib.testing.expectEqual(@as(?Direction, .input), expander.last_direction);
+            try grt.std.testing.expectEqual(@as(?Level, .low), expander.last_level);
+            try grt.std.testing.expectEqual(@as(?Direction, .input), expander.last_direction);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -256,7 +256,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

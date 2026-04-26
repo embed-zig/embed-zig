@@ -482,11 +482,9 @@ fn checkedAdd(a: usize, b: usize) ?usize {
     return result[0];
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn testLsbWriteReadAndAlignRoundTrip(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testLsbWriteReadAndAlignRoundTrip(allocator: glib.std.mem.Allocator) !void {
             var pack = try initWrite(allocator);
             defer pack.deinit();
 
@@ -495,17 +493,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             try pack.writeAlign();
 
             const bytes_used = pack.bytes();
-            try testing.expectEqual(@as(usize, 2), bytes_used);
+            try grt.std.testing.expectEqual(@as(usize, 2), bytes_used);
 
             var reader = initRead(pack.getBuffer().?[0..bytes_used]);
-            try testing.expectEqual(@as(?u32, 0b10101), try reader.look(5));
-            try testing.expectEqual(@as(?u32, 0b10101), try reader.read(5));
-            try testing.expectEqual(@as(?u32, 0b11110000), try reader.read(8));
+            try grt.std.testing.expectEqual(@as(?u32, 0b10101), try reader.look(5));
+            try grt.std.testing.expectEqual(@as(?u32, 0b10101), try reader.read(5));
+            try grt.std.testing.expectEqual(@as(?u32, 0b11110000), try reader.read(8));
         }
 
-        fn testMsbWriteReadAndAlignRoundTrip(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testMsbWriteReadAndAlignRoundTrip(allocator: glib.std.mem.Allocator) !void {
             var pack = try initWrite(allocator);
             defer pack.deinit();
 
@@ -515,14 +511,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             const bytes_used = pack.bytes();
             var reader = initRead(pack.getBuffer().?[0..bytes_used]);
-            try testing.expectEqual(@as(?u32, 0b10101), try reader.lookMsb(5));
-            try testing.expectEqual(@as(?u32, 0b10101), try reader.readMsb(5));
-            try testing.expectEqual(@as(?u32, 0b11001100), try reader.readMsb(8));
+            try grt.std.testing.expectEqual(@as(?u32, 0b10101), try reader.lookMsb(5));
+            try grt.std.testing.expectEqual(@as(?u32, 0b10101), try reader.readMsb(5));
+            try grt.std.testing.expectEqual(@as(?u32, 0b11001100), try reader.readMsb(8));
         }
 
-        fn testWriteCopyPreservesTrailingBits(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testWriteCopyPreservesTrailingBits(allocator: glib.std.mem.Allocator) !void {
             var source = try initWrite(allocator);
             defer source.deinit();
             try source.write(0x5a, 8);
@@ -533,31 +527,29 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             try dest.writeCopy(source.getBuffer().?[0..source.bytes()], 13);
 
             var reader = initRead(dest.getBuffer().?[0..dest.bytes()]);
-            try testing.expectEqual(@as(?u32, 0x5a), try reader.read(8));
-            try testing.expectEqual(@as(?u32, 0x03), try reader.read(5));
+            try grt.std.testing.expectEqual(@as(?u32, 0x5a), try reader.read(8));
+            try grt.std.testing.expectEqual(@as(?u32, 0x03), try reader.read(5));
         }
 
         fn testPastEndReadInvalidatesBuffer() !void {
-            const testing = lib.testing;
-
             var buffer = [_]u8{0};
             var reader = initRead(buffer[0..]);
             var i: usize = 0;
             while (i < 8) : (i += 1) {
-                try testing.expectEqual(@as(?u1, 0), reader.read1());
+                try grt.std.testing.expectEqual(@as(?u1, 0), reader.read1());
             }
-            try testing.expectEqual(@as(?u1, null), reader.read1());
-            try testing.expect(!reader.valid);
+            try grt.std.testing.expectEqual(@as(?u1, null), reader.read1());
+            try grt.std.testing.expect(!reader.valid);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             TestCase.testLsbWriteReadAndAlignRoundTrip(allocator) catch |err| {
@@ -579,7 +571,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

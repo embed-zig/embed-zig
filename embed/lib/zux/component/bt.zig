@@ -34,9 +34,9 @@ pub fn clearEventReceiver(self: *root) void {
     self.host.clearEventCallback();
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn setAndEmitReportsThroughEventReceiver(testing: anytype) !void {
+        fn setAndEmitReportsThroughEventReceiver() !void {
             const Sink = struct {
                 started_count: usize = 0,
                 stopped_count: usize = 0,
@@ -125,50 +125,49 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             adapter.setEventReceiver(&receiver);
             try host_impl.emit();
 
-            try testing.expectEqual(@as(usize, 1), sink.started_count);
-            try testing.expectEqual(@as(usize, 1), sink.stopped_count);
-            try testing.expectEqual(@as(usize, 1), sink.found_count);
-            try testing.expectEqual(@as(usize, 1), sink.central_connected_count);
-            try testing.expectEqual(@as(usize, 1), sink.central_disconnected_count);
-            try testing.expectEqual(@as(usize, 1), sink.central_notification_count);
-            try testing.expectEqual(@as(usize, 1), sink.periph_connected_count);
-            try testing.expectEqual(@as(usize, 1), sink.periph_disconnected_count);
-            try testing.expectEqual(@as(usize, 1), sink.periph_mtu_changed_count);
-            try testing.expectEqual(@as(u32, 41), sink.last_source_id);
-            try testing.expectEqual(@as(usize, 10), sink.last_name_len);
-            try testing.expectEqual(@as(usize, 7), sink.last_adv_len);
-            try testing.expectEqual(@as(i8, -52), sink.last_rssi);
-            try testing.expectEqual(@as(u16, 0x0040), sink.last_central_conn_handle);
-            try testing.expectEqual(@as(u16, 0x0041), sink.last_periph_conn_handle);
-            try testing.expectEqual(@as(u16, 0x0009), sink.last_notification_attr_handle);
-            try testing.expectEqual(@as(usize, 3), sink.last_notification_len);
-            try testing.expectEqual(@as(u16, 247), sink.last_periph_mtu);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.started_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.stopped_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.found_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.central_connected_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.central_disconnected_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.central_notification_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.periph_connected_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.periph_disconnected_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.periph_mtu_changed_count);
+            try grt.std.testing.expectEqual(@as(u32, 41), sink.last_source_id);
+            try grt.std.testing.expectEqual(@as(usize, 10), sink.last_name_len);
+            try grt.std.testing.expectEqual(@as(usize, 7), sink.last_adv_len);
+            try grt.std.testing.expectEqual(@as(i8, -52), sink.last_rssi);
+            try grt.std.testing.expectEqual(@as(u16, 0x0040), sink.last_central_conn_handle);
+            try grt.std.testing.expectEqual(@as(u16, 0x0041), sink.last_periph_conn_handle);
+            try grt.std.testing.expectEqual(@as(u16, 0x0009), sink.last_notification_attr_handle);
+            try grt.std.testing.expectEqual(@as(usize, 3), sink.last_notification_len);
+            try grt.std.testing.expectEqual(@as(u16, 247), sink.last_periph_mtu);
 
             adapter.clearEventReceiver();
-            try testing.expect(host_impl.receiver_ctx == null);
-            try testing.expect(host_impl.emit_fn == null);
+            try grt.std.testing.expect(host_impl.receiver_ctx == null);
+            try grt.std.testing.expect(host_impl.emit_fn == null);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.setAndEmitReportsThroughEventReceiver(testing) catch |err| {
+            TestCase.setAndEmitReportsThroughEventReceiver() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

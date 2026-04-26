@@ -67,9 +67,9 @@ pub fn process(self: *BranchNode, message: Message) !usize {
     return 0;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn routesButtonMessageToButtonNode(testing: anytype) !void {
+        fn routesButtonMessageToButtonNode() !void {
             const Forward = struct {
                 out: ?Emitter = null,
                 called: bool = false,
@@ -116,13 +116,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(forward_impl.called);
-            try testing.expect(collector.called);
-            try testing.expectEqual(Message.Origin.node, collector.last_origin);
-            try testing.expectEqual(@as(usize, 1), emitted);
+            try grt.std.testing.expect(forward_impl.called);
+            try grt.std.testing.expect(collector.called);
+            try grt.std.testing.expectEqual(Message.Origin.node, collector.last_origin);
+            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
 
-        fn passthroughWhenRouteMapIsEmpty(testing: anytype) !void {
+        fn passthroughWhenRouteMapIsEmpty() !void {
             const Collector = struct {
                 called: bool = false,
                 last_button_id: ?u32 = 0,
@@ -152,12 +152,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(collector.called);
-            try testing.expectEqual(@as(?u32, 3), collector.last_button_id);
-            try testing.expectEqual(@as(usize, 1), emitted);
+            try grt.std.testing.expect(collector.called);
+            try grt.std.testing.expectEqual(@as(?u32, 3), collector.last_button_id);
+            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
 
-        fn passthroughWhenMessageTagIsUnmapped(testing: anytype) !void {
+        fn passthroughWhenMessageTagIsUnmapped() !void {
             const Collector = struct {
                 called: bool = false,
                 last_button_id: ?u32 = 0,
@@ -199,12 +199,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(collector.called);
-            try testing.expectEqual(@as(?u32, 3), collector.last_button_id);
-            try testing.expectEqual(@as(usize, 1), emitted);
+            try grt.std.testing.expect(collector.called);
+            try grt.std.testing.expectEqual(@as(?u32, 3), collector.last_button_id);
+            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
 
-        fn tickBroadcastsToAllRoutes(testing: anytype) !void {
+        fn tickBroadcastsToAllRoutes() !void {
             const Forward = struct {
                 out: ?Emitter = null,
                 called: usize = 0,
@@ -249,23 +249,22 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expectEqual(@as(usize, 1), first_impl.called);
-            try testing.expectEqual(@as(usize, 1), second_impl.called);
-            try testing.expectEqual(@as(usize, 2), collector.count);
-            try testing.expectEqual(@as(usize, 2), emitted);
+            try grt.std.testing.expectEqual(@as(usize, 1), first_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 1), second_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 2), collector.count);
+            try grt.std.testing.expectEqual(@as(usize, 2), emitted);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
             inline for (.{
                 TestCase.routesButtonMessageToButtonNode,
@@ -273,7 +272,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 TestCase.passthroughWhenMessageTagIsUnmapped,
                 TestCase.tickBroadcastsToAllRoutes,
             }) |case| {
-                case(testing) catch |err| {
+                case() catch |err| {
                     t.logFatal(@errorName(err));
                     return false;
                 };
@@ -281,7 +280,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

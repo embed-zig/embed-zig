@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const embed = @import("embed");
 const binding = @import("binding.zig");
 const opus_error = @import("error.zig");
@@ -21,11 +22,11 @@ pub fn getSize(channels: u8) usize {
 }
 
 pub fn init(
-    allocator: embed.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     sample_rate: u32,
     channels: u8,
     application: Application,
-) (Error || embed.mem.Allocator.Error)!Self {
+) (Error || glib.std.mem.Allocator.Error)!Self {
     try validateChannels(channels);
     try validateSampleRate(sample_rate);
     const size = getSize(channels);
@@ -48,7 +49,7 @@ pub fn init(
     };
 }
 
-pub fn deinit(self: *Self, allocator: embed.mem.Allocator) void {
+pub fn deinit(self: *Self, allocator: glib.std.mem.Allocator) void {
     allocator.free(self.mem);
     self.* = undefined;
 }
@@ -146,22 +147,20 @@ fn validatePcmLen(self: *const Self, sample_count: usize, frame_size: u32) Error
     if (sample_count < frame_samples * channels) return Error.BadArg;
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn initAndControls() !void {
-            try lib.testing.expect(getSize(1) > 0);
+            try grt.std.testing.expect(getSize(1) > 0);
 
-            var encoder = try Self.init(lib.testing.allocator, 48_000, 1, .audio);
-            defer encoder.deinit(lib.testing.allocator);
+            var encoder = try Self.init(grt.std.testing.allocator, 48_000, 1, .audio);
+            defer encoder.deinit(grt.std.testing.allocator);
 
-            try lib.testing.expectEqual(@as(u32, 48_000), encoder.sample_rate);
-            try lib.testing.expectEqual(@as(u8, 1), encoder.channels);
-            try lib.testing.expectEqual(@as(u32, 960), encoder.frameSizeForMs(20));
+            try grt.std.testing.expectEqual(@as(u32, 48_000), encoder.sample_rate);
+            try grt.std.testing.expectEqual(@as(u8, 1), encoder.channels);
+            try grt.std.testing.expectEqual(@as(u32, 960), encoder.frameSizeForMs(20));
 
             try encoder.setBitrate(64_000);
-            try lib.testing.expect(try encoder.getBitrate() > 0);
+            try grt.std.testing.expect(try encoder.getBitrate() > 0);
             try encoder.setComplexity(10);
             try encoder.setSignal(.music);
             try encoder.setBandwidth(.fullband);
@@ -171,11 +170,11 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn rejectsInvalidChannelsAndShortPcm() !void {
-            try lib.testing.expectEqual(@as(usize, 0), getSize(3));
-            try lib.testing.expectError(Error.BadArg, Self.init(lib.testing.allocator, 48_000, 3, .audio));
+            try grt.std.testing.expectEqual(@as(usize, 0), getSize(3));
+            try grt.std.testing.expectError(Error.BadArg, Self.init(grt.std.testing.allocator, 48_000, 3, .audio));
 
-            var encoder = try Self.init(lib.testing.allocator, 48_000, 2, .audio);
-            defer encoder.deinit(lib.testing.allocator);
+            var encoder = try Self.init(grt.std.testing.allocator, 48_000, 2, .audio);
+            defer encoder.deinit(grt.std.testing.allocator);
 
             const frame_size = encoder.frameSizeForMs(20);
             const too_short = [_]i16{0} ** 1919;
@@ -187,24 +186,24 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             var out: [1500]u8 = undefined;
             const empty_out = [_]u8{};
 
-            try lib.testing.expectError(Error.BadArg, encoder.encode(too_short[0..], frame_size, out[0..]));
-            try lib.testing.expectError(Error.BadArg, encoder.encode(too_short[0..0], 0, out[0..]));
-            try lib.testing.expectError(Error.BufferTooSmall, encoder.encode(valid_pcm[0..], frame_size, empty_out[0..]));
-            try lib.testing.expectError(Error.BadArg, encoder.setComplexity(11));
+            try grt.std.testing.expectError(Error.BadArg, encoder.encode(too_short[0..], frame_size, out[0..]));
+            try grt.std.testing.expectError(Error.BadArg, encoder.encode(too_short[0..0], 0, out[0..]));
+            try grt.std.testing.expectError(Error.BufferTooSmall, encoder.encode(valid_pcm[0..], frame_size, empty_out[0..]));
+            try grt.std.testing.expectError(Error.BadArg, encoder.setComplexity(11));
         }
 
         fn rejectsInvalidSampleRate() !void {
-            try lib.testing.expectError(Error.BadArg, Self.init(lib.testing.allocator, 44_100, 1, .audio));
+            try grt.std.testing.expectError(Error.BadArg, Self.init(grt.std.testing.allocator, 44_100, 1, .audio));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -223,7 +222,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -232,5 +231,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

@@ -46,7 +46,7 @@ pub fn init(pointer: anytype) Adc {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn dispatchesReadVoltage() !void {
             const Fake = struct {
@@ -59,7 +59,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var fake = Fake{};
             const adc = Adc.init(&fake);
-            try lib.testing.expectEqual(@as(f32, 1.23), try adc.readVoltage());
+            try grt.std.testing.expectEqual(@as(f32, 1.23), try adc.readVoltage());
         }
 
         fn propagatesBackendErrors() !void {
@@ -74,17 +74,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var fake = Fake{ .fail = true };
             const adc = Adc.init(&fake);
-            try lib.testing.expectError(error.Timeout, adc.readVoltage());
+            try grt.std.testing.expectError(error.Timeout, adc.readVoltage());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -99,7 +99,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

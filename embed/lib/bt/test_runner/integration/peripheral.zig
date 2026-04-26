@@ -8,7 +8,7 @@ const glib = @import("glib");
 const bt = @import("../../../bt.zig");
 const Peripheral = @import("../../Peripheral.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
@@ -19,8 +19,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
             _ = self;
             _ = allocator;
 
-            const Mocker = bt.Mocker(lib, Channel);
-            var mocker = Mocker.init(lib.testing.allocator, .{});
+            const Mocker = bt.Mocker(grt);
+            var mocker = Mocker.init(grt.std.testing.allocator, .{});
             defer mocker.deinit();
 
             var host = mocker.createHost(.{}) catch |err| {
@@ -29,7 +29,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
             };
             defer host.deinit();
 
-            t.run("peripheral", makeWithHost(lib, &host));
+            t.run("peripheral", makeWithHost(grt, &host));
             return t.wait();
         }
 
@@ -45,7 +45,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
     return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-pub fn makeWithHost(comptime lib: type, host: anytype) glib.testing.TestRunner {
+pub fn makeWithHost(comptime grt: type, host: anytype) glib.testing.TestRunner {
     const HostPtr = @TypeOf(host);
     comptime requireHostPointer(HostPtr);
 
@@ -66,7 +66,7 @@ pub fn makeWithHost(comptime lib: type, host: anytype) glib.testing.TestRunner {
             };
             defer p.stop();
 
-            runPeripheral(lib, p) catch |err| {
+            runPeripheral(grt, p) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -75,19 +75,17 @@ pub fn makeWithHost(comptime lib: type, host: anytype) glib.testing.TestRunner {
 
         pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{ .host = host };
     return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
-fn runPeripheral(comptime lib: type, p: Peripheral) !void {
-    const testing = lib.testing;
-
-    try testing.expectEqual(Peripheral.State.idle, p.getState());
+fn runPeripheral(comptime grt: type, p: Peripheral) !void {
+    try grt.std.testing.expectEqual(Peripheral.State.idle, p.getState());
     _ = p.getAddr();
 
     p.setConfig(.{
@@ -124,79 +122,79 @@ fn runPeripheral(comptime lib: type, p: Peripheral) !void {
         .device_name = "ZigTest",
         .service_uuids = &.{0x180D},
     });
-    try testing.expectEqual(Peripheral.State.advertising, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.advertising, p.getState());
     p.stopAdvertising();
-    try testing.expectEqual(Peripheral.State.idle, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.idle, p.getState());
 
     try p.startAdvertising(.{
         .device_name = "ZigMultiSvc",
         .service_uuids = &.{ 0x180D, 0x180F, 0xFFE0 },
     });
-    try testing.expectEqual(Peripheral.State.advertising, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.advertising, p.getState());
     p.stopAdvertising();
 
     try p.startAdvertising(.{
         .device_name = "ZigBLE-TestDevice-LongName-0123",
         .service_uuids = &.{0x180D},
     });
-    try testing.expectEqual(Peripheral.State.advertising, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.advertising, p.getState());
     p.stopAdvertising();
 
     try p.startAdvertising(.{
         .service_uuids = &.{0xFFE0},
     });
-    try testing.expectEqual(Peripheral.State.advertising, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.advertising, p.getState());
     p.stopAdvertising();
 
     try p.startAdvertising(.{
         .device_name = "ZigNameOnly",
     });
-    try testing.expectEqual(Peripheral.State.advertising, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.advertising, p.getState());
     p.stopAdvertising();
 
     try p.startAdvertising(.{ .device_name = "ZigTest" });
-    try testing.expectEqual(Peripheral.State.advertising, p.getState());
-    try testing.expectError(
+    try grt.std.testing.expectEqual(Peripheral.State.advertising, p.getState());
+    try grt.std.testing.expectError(
         error.AlreadyAdvertising,
         p.startAdvertising(.{ .device_name = "ZigTest2" }),
     );
     p.stopAdvertising();
-    try testing.expectEqual(Peripheral.State.idle, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.idle, p.getState());
 
     p.stopAdvertising();
-    try testing.expectEqual(Peripheral.State.idle, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.idle, p.getState());
 
     try p.startAdvertising(.{
         .device_name = "ZigCycle1",
         .service_uuids = &.{0x180D},
     });
-    try testing.expectEqual(Peripheral.State.advertising, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.advertising, p.getState());
     p.stopAdvertising();
-    try testing.expectEqual(Peripheral.State.idle, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.idle, p.getState());
     try p.startAdvertising(.{
         .device_name = "ZigCycle2",
         .service_uuids = &.{0xFFE0},
     });
-    try testing.expectEqual(Peripheral.State.advertising, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.advertising, p.getState());
     p.stopAdvertising();
-    try testing.expectEqual(Peripheral.State.idle, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.idle, p.getState());
 
-    var hook_event_count = lib.atomic.Value(u32).init(0);
+    var hook_event_count = grt.std.atomic.Value(u32).init(0);
     p.addEventHook(@ptrCast(&hook_event_count), struct {
         fn cb(ctx: ?*anyopaque, _: Peripheral.Event) void {
-            const counter: *lib.atomic.Value(u32) = @ptrCast(@alignCast(ctx.?));
+            const counter: *grt.std.atomic.Value(u32) = @ptrCast(@alignCast(ctx.?));
             _ = counter.fetchAdd(1, .monotonic);
         }
     }.cb);
 
     try p.startAdvertising(.{ .device_name = "ZigHookTest" });
     p.stopAdvertising();
-    try testing.expect(hook_event_count.load(.acquire) >= 2);
+    try grt.std.testing.expect(hook_event_count.load(.acquire) >= 2);
 
-    var hook2_count = lib.atomic.Value(u32).init(0);
+    var hook2_count = grt.std.atomic.Value(u32).init(0);
     p.addEventHook(@ptrCast(&hook2_count), struct {
         fn cb(ctx: ?*anyopaque, _: Peripheral.Event) void {
-            const counter: *lib.atomic.Value(u32) = @ptrCast(@alignCast(ctx.?));
+            const counter: *grt.std.atomic.Value(u32) = @ptrCast(@alignCast(ctx.?));
             _ = counter.fetchAdd(1, .monotonic);
         }
     }.cb);
@@ -205,10 +203,10 @@ fn runPeripheral(comptime lib: type, p: Peripheral) !void {
     const prev2 = hook2_count.load(.acquire);
     try p.startAdvertising(.{ .device_name = "ZigMultiHook" });
     p.stopAdvertising();
-    try testing.expect(hook_event_count.load(.acquire) > prev1);
-    try testing.expect(hook2_count.load(.acquire) > prev2);
+    try grt.std.testing.expect(hook_event_count.load(.acquire) > prev1);
+    try grt.std.testing.expect(hook2_count.load(.acquire) > prev2);
 
-    try testing.expectEqual(Peripheral.State.idle, p.getState());
+    try grt.std.testing.expectEqual(Peripheral.State.idle, p.getState());
 }
 
 fn requireHostPointer(comptime T: type) void {

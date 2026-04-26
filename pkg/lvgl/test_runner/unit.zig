@@ -1,7 +1,7 @@
-//! Aggregates `TestRunner(comptime lib: type)` entrypoints from `src/*` and display helpers.
+//! Aggregates `TestRunner(comptime grt: type)` entrypoints from `src/*` and display helpers.
 
+const glib = @import("glib");
 const embed = @import("embed");
-const testing = @import("testing");
 
 const binding = @import("../src/binding.zig");
 const types_mod = @import("../src/types.zig");
@@ -24,48 +24,48 @@ const Label = @import("../src/widget/Label.zig");
 const Button = @import("../src/widget/Button.zig");
 const TestingDisplay = @import("integration/bitmap/test_utils/TestingDisplay.zig");
 
-pub fn make(comptime lib: type) testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("binding", binding.TestRunner(lib));
-            t.run("types", types_mod.TestRunner(lib));
-            t.run("Color", Color.TestRunner(lib));
-            t.run("Point", Point.TestRunner(lib));
-            t.run("Area", Area.TestRunner(lib));
-            t.run("Style", Style.TestRunner(lib));
-            t.run("Display", Display.TestRunner(lib));
-            t.run("Indev", Indev.TestRunner(lib));
-            t.run("Tick", Tick.TestRunner(lib));
-            t.run("Event", Event.TestRunner(lib));
-            t.run("Anim", Anim.TestRunner(lib));
-            t.run("Subject", Subject.TestRunner(lib));
-            t.run("Observer", Observer.TestRunner(lib));
-            t.run("object/Obj", Obj.TestRunner(lib));
-            t.run("object/Tree", Tree.TestRunner(lib));
-            t.run("object/Flags", Flags.TestRunner(lib));
-            t.run("object/State", State.TestRunner(lib));
-            t.run("widget/Label", Label.TestRunner(lib));
-            t.run("widget/Button", Button.TestRunner(lib));
-            t.run("display/TestingDisplay", TestingDisplay.TestRunner(lib));
+            t.run("binding", binding.TestRunner(grt));
+            t.run("types", types_mod.TestRunner(grt));
+            t.run("Color", Color.TestRunner(grt));
+            t.run("Point", Point.TestRunner(grt));
+            t.run("Area", Area.TestRunner(grt));
+            t.run("Style", Style.TestRunner(grt));
+            t.run("Display", Display.TestRunner(grt));
+            t.run("Indev", Indev.TestRunner(grt));
+            t.run("Tick", Tick.TestRunner(grt));
+            t.run("Event", Event.TestRunner(grt));
+            t.run("Anim", Anim.TestRunner(grt));
+            t.run("Subject", Subject.TestRunner(grt));
+            t.run("Observer", Observer.TestRunner(grt));
+            t.run("object/Obj", Obj.TestRunner(grt));
+            t.run("object/Tree", Tree.TestRunner(grt));
+            t.run("object/Flags", Flags.TestRunner(grt));
+            t.run("object/State", State.TestRunner(grt));
+            t.run("widget/Label", Label.TestRunner(grt));
+            t.run("widget/Button", Button.TestRunner(grt));
+            t.run("display/TestingDisplay", TestingDisplay.TestRunner(grt));
 
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
-    return testing.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }

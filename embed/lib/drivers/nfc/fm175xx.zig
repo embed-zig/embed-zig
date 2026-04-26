@@ -515,7 +515,7 @@ fn finishCommand(self: *Fm175xx, maybe_err: ?TypeA.Error, out_bits: usize) TypeA
     return out_bits;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn openAndTypeAConfigureOverI2c() !void {
             const FakeI2c = struct {
@@ -573,14 +573,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             try reader.open();
             try reader.setIsoType(.a);
 
-            try lib.testing.expectEqual(@as(usize, 1), power.enabled);
-            try lib.testing.expectEqual(@as(u32, 100), delay.last_sleep_ms);
-            try lib.testing.expectEqual(@as(u8, 0x00), i2c.regs_map[regs.tx_mode]);
-            try lib.testing.expectEqual(@as(u8, 0x00), i2c.regs_map[regs.rx_mode]);
-            try lib.testing.expectEqual(@as(u8, 0xF8), i2c.regs_map[regs.gsn]);
-            try lib.testing.expectEqual(@as(u8, 0x3F), i2c.regs_map[regs.gwgsp]);
-            try lib.testing.expectEqual(@as(u8, 0x68), i2c.regs_map[regs.rfcfg]);
-            try lib.testing.expectEqual(@as(u8, 0x74), i2c.regs_map[regs.rx_thres]);
+            try grt.std.testing.expectEqual(@as(usize, 1), power.enabled);
+            try grt.std.testing.expectEqual(@as(u32, 100), delay.last_sleep_ms);
+            try grt.std.testing.expectEqual(@as(u8, 0x00), i2c.regs_map[regs.tx_mode]);
+            try grt.std.testing.expectEqual(@as(u8, 0x00), i2c.regs_map[regs.rx_mode]);
+            try grt.std.testing.expectEqual(@as(u8, 0xF8), i2c.regs_map[regs.gsn]);
+            try grt.std.testing.expectEqual(@as(u8, 0x3F), i2c.regs_map[regs.gwgsp]);
+            try grt.std.testing.expectEqual(@as(u8, 0x68), i2c.regs_map[regs.rfcfg]);
+            try grt.std.testing.expectEqual(@as(u8, 0x74), i2c.regs_map[regs.rx_thres]);
         }
 
         fn setRfValidatesReadback() !void {
@@ -623,10 +623,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var reader = Fm175xx.initI2c(I2c.init(&i2c), Delay.init(&delay), .{});
 
             try reader.setRf(.path2);
-            try lib.testing.expectEqual(@as(u8, 0x82), i2c.regs_map[regs.tx_ctrl]);
-            try lib.testing.expectEqual(@as(u32, 5), delay.last_sleep_ms);
+            try grt.std.testing.expectEqual(@as(u8, 0x82), i2c.regs_map[regs.tx_ctrl]);
+            try grt.std.testing.expectEqual(@as(u32, 5), delay.last_sleep_ms);
 
-            try lib.testing.expectError(error.UnsupportedOperation, reader.setIsoType(.b));
+            try grt.std.testing.expectError(error.UnsupportedOperation, reader.setIsoType(.b));
         }
 
         fn spiBackendFormatsRegisterAccess() !void {
@@ -664,8 +664,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             try reader.setRf(.path1);
 
-            try lib.testing.expectEqual(@as(usize, 2), spi.last_tx_len);
-            try lib.testing.expectEqualSlices(u8, &.{ (regs.tx_ctrl << 1) | 0x80, 0x00 }, spi.last_tx[0..2]);
+            try grt.std.testing.expectEqual(@as(usize, 2), spi.last_tx_len);
+            try grt.std.testing.expectEqualSlices(u8, &.{ (regs.tx_ctrl << 1) | 0x80, 0x00 }, spi.last_tx[0..2]);
         }
 
         fn transceiveReadsFifoAndReportsPartialBits() !void {
@@ -732,9 +732,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .timeout_ms = 1,
             }, &rx);
 
-            try lib.testing.expectEqual(@as(usize, 11), bits);
-            try lib.testing.expectEqualSlices(u8, &.{ 0xAB, 0xCD }, &rx);
-            try lib.testing.expect(delay.sleep_calls >= 1);
+            try grt.std.testing.expectEqual(@as(usize, 11), bits);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0xAB, 0xCD }, &rx);
+            try grt.std.testing.expect(delay.sleep_calls >= 1);
         }
 
         fn transceiveUsesSoftwareTimeoutGuard() !void {
@@ -775,12 +775,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var reader = Fm175xx.initI2c(I2c.init(&i2c), Delay.init(&delay), .{});
 
             var rx: [1]u8 = undefined;
-            try lib.testing.expectError(error.Timeout, reader.transceive(.{
+            try grt.std.testing.expectError(error.Timeout, reader.transceive(.{
                 .tx = &.{0x26},
                 .tx_bits = 7,
                 .timeout_ms = 2,
             }, &rx));
-            try lib.testing.expect(delay.sleep_calls >= 1);
+            try grt.std.testing.expect(delay.sleep_calls >= 1);
         }
 
         fn transceiveRejectsInvalidExchangeInputs() !void {
@@ -803,13 +803,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var reader = Fm175xx.initI2c(I2c.init(&i2c), Delay.init(&delay), .{});
             var rx: [1]u8 = undefined;
 
-            try lib.testing.expectError(error.InvalidArgument, reader.transceive(.{
+            try grt.std.testing.expectError(error.InvalidArgument, reader.transceive(.{
                 .tx = &.{0x26},
                 .tx_bits = 7,
                 .timeout_ms = 0,
             }, &rx));
 
-            try lib.testing.expectError(error.InvalidArgument, reader.transceive(.{
+            try grt.std.testing.expectError(error.InvalidArgument, reader.transceive(.{
                 .tx = &.{0x26},
                 .tx_bits = 7,
                 .timeout_ms = TypeA.max_timeout_ms + 1,
@@ -818,12 +818,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -854,7 +854,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

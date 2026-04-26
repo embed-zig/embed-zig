@@ -18,14 +18,14 @@ pub const store = @import("unit/store.zig");
 pub const ui = @import("unit/ui.zig");
 pub const wifi = @import("unit/wifi.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -34,26 +34,26 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
             }
 
             t.parallel();
-            t.run("assembler", assembler.make(lib, Channel));
-            t.run("Spec", Spec.TestRunner(lib));
-            t.run("spec/JsonParser", JsonParser.TestRunner(lib));
-            t.run("spec/Component", Component.TestRunner(lib));
-            t.run("spec/UserStory", UserStory.TestRunner(lib));
-            t.run("button", button.make(lib));
-            t.run("bt", bt.make(lib));
-            t.run("event", event.make(lib));
-            t.run("imu", imu.make(lib));
-            t.run("modem", modem.make(lib));
-            t.run("netstack", netstack.make(lib));
-            t.run("nfc", nfc.make(lib));
-            t.run("pipeline", pipeline.make(lib, Channel));
-            t.run("store", store.make(lib));
-            t.run("ui", ui.make(lib));
-            t.run("wifi", wifi.make(lib));
+            t.run("assembler", assembler.make(grt));
+            t.run("Spec", Spec.TestRunner(grt));
+            t.run("spec/JsonParser", JsonParser.TestRunner(grt));
+            t.run("spec/Component", Component.TestRunner(grt));
+            t.run("spec/UserStory", UserStory.TestRunner(grt));
+            t.run("button", button.make(grt));
+            t.run("bt", bt.make(grt));
+            t.run("event", event.make(grt));
+            t.run("imu", imu.make(grt));
+            t.run("modem", modem.make(grt));
+            t.run("netstack", netstack.make(grt));
+            t.run("nfc", nfc.make(grt));
+            t.run("pipeline", pipeline.make(grt));
+            t.run("store", store.make(grt));
+            t.run("ui", ui.make(grt));
+            t.run("wifi", wifi.make(grt));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

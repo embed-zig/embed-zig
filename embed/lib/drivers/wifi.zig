@@ -194,7 +194,7 @@ pub const Ap = struct {
         };
     }
 
-    pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+    pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         const TestCase = struct {
             fn makeAllowsMissingOptionalIntrospection() !void {
                 const Impl = struct {
@@ -214,17 +214,17 @@ pub const Ap = struct {
                 ap.removeEventHook(null, struct {
                     fn onEvent(_: ?*anyopaque, _: Event) void {}
                 }.onEvent);
-                try lib.testing.expect(ap.getMacAddr() == null);
+                try grt.std.testing.expect(ap.getMacAddr() == null);
             }
         };
 
         const Runner = struct {
-            pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
                 _ = self;
                 _ = allocator;
             }
 
-            pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+            pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
                 _ = self;
                 _ = allocator;
 
@@ -235,7 +235,7 @@ pub const Ap = struct {
                 return true;
             }
 
-            pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
                 _ = self;
                 _ = allocator;
             }
@@ -470,7 +470,7 @@ pub const Sta = struct {
         };
     }
 
-    pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+    pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         const TestCase = struct {
             fn makeAllowsMissingOptionalIntrospection() !void {
                 const Impl = struct {
@@ -491,18 +491,18 @@ pub const Sta = struct {
                 sta.removeEventHook(null, struct {
                     fn onEvent(_: ?*anyopaque, _: Event) void {}
                 }.onEvent);
-                try lib.testing.expect(sta.getMacAddr() == null);
-                try lib.testing.expect(sta.getIpInfo() == null);
+                try grt.std.testing.expect(sta.getMacAddr() == null);
+                try grt.std.testing.expect(sta.getIpInfo() == null);
             }
         };
 
         const Runner = struct {
-            pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
                 _ = self;
                 _ = allocator;
             }
 
-            pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+            pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
                 _ = self;
                 _ = allocator;
 
@@ -513,7 +513,7 @@ pub const Sta = struct {
                 return true;
             }
 
-            pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
                 _ = self;
                 _ = allocator;
             }
@@ -572,7 +572,8 @@ pub const Wifi = struct {
         self.vtable.clearEventCallback(self.ptr);
     }
 
-    pub fn make(comptime lib: type, comptime Impl: type) type {
+    pub fn make(comptime grt: type, comptime Impl: type) type {
+        _ = grt;
         comptime {
             if (!@hasDecl(Impl, "Config")) @compileError("Wifi impl must define Config");
             if (!@hasDecl(Impl, "init")) @compileError("Wifi impl must define init");
@@ -591,7 +592,7 @@ pub const Wifi = struct {
             _ = @as(*const fn (*Impl) void, &Impl.clearEventCallback);
         }
 
-        const Allocator = lib.mem.Allocator;
+        const Allocator = glib.std.mem.Allocator;
         const Ctx = struct {
             allocator: Allocator,
             impl: Impl,
@@ -673,7 +674,7 @@ pub const Wifi = struct {
         };
     }
 
-    pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+    pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         const TestCase = struct {
             fn exposesStaAndApVtableSurface() !void {
                 const StaImpl = struct {
@@ -701,7 +702,7 @@ pub const Wifi = struct {
 
                 const Impl = struct {
                     pub const Config = struct {
-                        allocator: lib.mem.Allocator,
+                        allocator: glib.std.mem.Allocator,
                     };
 
                     sta_impl: StaImpl = .{},
@@ -744,8 +745,8 @@ pub const Wifi = struct {
                     _ = Self.Event;
                     _ = Self.CallbackFn;
                     _ = Self.make;
-                    _ = Self.make(lib, Impl).init;
-                    if (!@hasField(Self.make(lib, Impl).Config, "allocator")) {
+                    _ = Self.make(grt, Impl).init;
+                    if (!@hasField(Self.make(grt, Impl).Config, "allocator")) {
                         @compileError("make config must expose allocator");
                     }
                 }
@@ -753,12 +754,12 @@ pub const Wifi = struct {
         };
 
         const Runner = struct {
-            pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
                 _ = self;
                 _ = allocator;
             }
 
-            pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+            pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
                 _ = self;
                 _ = allocator;
 
@@ -769,7 +770,7 @@ pub const Wifi = struct {
                 return true;
             }
 
-            pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
                 _ = self;
                 _ = allocator;
             }
@@ -782,13 +783,13 @@ pub const Wifi = struct {
     }
 };
 
-pub fn make(comptime lib: type) type {
+pub fn make(comptime grt: type) type {
     return struct {
         pub const Ap = root.Ap;
         pub const Sta = root.Sta;
 
         pub fn makeWifi(comptime Impl: type) type {
-            return root.Wifi.make(lib, Impl);
+            return root.Wifi.make(grt, Impl);
         }
     };
 }
@@ -798,6 +799,6 @@ pub const test_runner = struct {
     pub const integration = @import("wifi/test_runner/integration.zig");
 };
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
-    return test_runner.unit.make(lib);
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    return test_runner.unit.make(grt);
 }

@@ -1,4 +1,4 @@
-const testing_api = @import("testing");
+const glib = @import("glib");
 const binding = @import("binding.zig");
 
 const Self = @This();
@@ -71,33 +71,33 @@ pub fn fromBinding(raw: binding.Area) Self {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn helpers_preserve_lvgl_semantics(_: lib.mem.Allocator) !void {
+        fn helpers_preserve_lvgl_semantics(_: glib.std.mem.Allocator) !void {
             var area = Self.init(2, 4, 6, 9);
-            try lib.testing.expectEqual(@as(i32, 5), area.width());
-            try lib.testing.expectEqual(@as(i32, 6), area.height());
-            try lib.testing.expectEqual(@as(u32, 30), area.size());
+            try grt.std.testing.expectEqual(@as(i32, 5), area.width());
+            try grt.std.testing.expectEqual(@as(i32, 6), area.height());
+            try grt.std.testing.expectEqual(@as(u32, 30), area.size());
 
             area.setWidth(3);
-            try lib.testing.expectEqual(@as(i32, 3), area.width());
+            try grt.std.testing.expectEqual(@as(i32, 3), area.width());
 
             area.setHeight(2);
-            try lib.testing.expectEqual(@as(i32, 2), area.height());
+            try grt.std.testing.expectEqual(@as(i32, 2), area.height());
 
             area.move(10, -2);
-            try lib.testing.expectEqual(@as(i32, 12), area.x1);
-            try lib.testing.expectEqual(@as(i32, 2), area.y1);
+            try grt.std.testing.expectEqual(@as(i32, 12), area.x1);
+            try grt.std.testing.expectEqual(@as(i32, 2), area.y1);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             TestCase.helpers_preserve_lvgl_semantics(allocator) catch |err| {
@@ -107,7 +107,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -116,5 +116,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

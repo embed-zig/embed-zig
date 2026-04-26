@@ -1,4 +1,4 @@
-const testing_api = @import("testing");
+const glib = @import("glib");
 const binding = @import("binding.zig");
 
 pub const Result = enum(c_int) {
@@ -74,27 +74,27 @@ pub const opa = struct {
     pub const pct100: Opa = 255;
 };
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn base_enums_match_imported_bindings(_: lib.mem.Allocator) !void {
-            try lib.testing.expect(@intFromEnum(Result.invalid) == 0);
-            try lib.testing.expect(@intFromEnum(Result.ok) == 1);
-            try lib.testing.expect(@intFromEnum(StyleRes.not_found) == 0);
-            try lib.testing.expect(@intFromEnum(StyleRes.found) == 1);
+        fn base_enums_match_imported_bindings(_: glib.std.mem.Allocator) !void {
+            try grt.std.testing.expect(@intFromEnum(Result.invalid) == 0);
+            try grt.std.testing.expect(@intFromEnum(Result.ok) == 1);
+            try grt.std.testing.expect(@intFromEnum(StyleRes.not_found) == 0);
+            try grt.std.testing.expect(@intFromEnum(StyleRes.found) == 1);
 
-            try lib.testing.expect(@intFromEnum(Align.center) == 9);
-            try lib.testing.expectEqual(@as(u8, 0x0F), Dir.all.toInt());
-            try lib.testing.expectEqual(@as(binding.Opa, 255), opa.cover);
+            try grt.std.testing.expect(@intFromEnum(Align.center) == 9);
+            try grt.std.testing.expectEqual(@as(u8, 0x0F), Dir.all.toInt());
+            try grt.std.testing.expectEqual(@as(binding.Opa, 255), opa.cover);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             TestCase.base_enums_match_imported_bindings(allocator) catch |err| {
@@ -104,7 +104,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -113,5 +113,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

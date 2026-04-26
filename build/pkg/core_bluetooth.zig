@@ -30,8 +30,8 @@ pub fn link(
     const mod = b.modules.get("core_bluetooth") orelse @panic("core_bluetooth module missing");
     mod.addImport("bt", build_tests.createBtShim(b, target, optimize));
     mod.addImport("embed_std", createEmbedStdShim(b, target, optimize, gstd_dep));
+    mod.addImport("glib", glib_dep.module("glib"));
     mod.addImport("gstd", gstd_dep.module("gstd"));
-    mod.addImport("testing", glib_dep.module("testing"));
 
     if (target.result.os.tag == .macos) {
         mod.linkFramework("CoreBluetooth", .{});

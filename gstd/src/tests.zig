@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const glib = @import("glib");
 const gstd = @import("../gstd.zig");
 const net_backend = @import("net.zig");
@@ -160,13 +161,15 @@ test "net/unit/std" {
 
     std.testing.log_level = .info;
 
-    const posix_net = glib.net.make(std, net_backend.posix_impl);
     const std_net = glib.net.make(std, gstd.runtime.net.Runtime);
 
     var t = glib.testing.T.new(std, .net);
     defer t.deinit();
 
-    t.run("net/unit/std_posix", glib.net.test_runner.unit.make(std, posix_net));
+    if (builtin.target.os.tag != .windows) {
+        const posix_net = glib.net.make(std, net_backend.posix_impl);
+        t.run("net/unit/std_posix", glib.net.test_runner.unit.make(std, posix_net));
+    }
     t.run("net/unit/std", glib.net.test_runner.unit.make(std, std_net));
     if (!t.wait()) return error.TestFailed;
 }
@@ -188,14 +191,16 @@ test "net/integration/std" {
 
     std.testing.log_level = .info;
 
-    const posix_net = glib.net.make(std, net_backend.posix_impl);
     const std_net = glib.net.make(std, gstd.runtime.net.Runtime);
 
     var t = glib.testing.T.new(std, .net);
     defer t.deinit();
     t.timeout(20 * std.time.ns_per_s);
 
-    t.run("net/integration/std_posix", glib.net.test_runner.integration.make(std, posix_net));
+    if (builtin.target.os.tag != .windows) {
+        const posix_net = glib.net.make(std, net_backend.posix_impl);
+        t.run("net/integration/std_posix", glib.net.test_runner.integration.make(std, posix_net));
+    }
     t.run("net/integration/std", glib.net.test_runner.integration.make(std, std_net));
     if (!t.wait()) return error.TestFailed;
 }

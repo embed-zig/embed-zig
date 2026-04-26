@@ -100,7 +100,7 @@ pub fn Builder(comptime config: BuilderConfig) blk: {
     return .{};
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn builderSelectsButtonIdByVoltage() !void {
             const Built = comptime blk: {
@@ -123,9 +123,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const adc = Adc.init(&reader);
             const button = Built.init(adc);
 
-            try lib.testing.expectEqual(@as(usize, 3), button.buttonCount());
-            try lib.testing.expectEqual(@as(?u32, 1), try button.pressedButton());
-            try lib.testing.expectEqual(@as(usize, 3), Built.range_count);
+            try grt.std.testing.expectEqual(@as(usize, 3), button.buttonCount());
+            try grt.std.testing.expectEqual(@as(?u32, 1), try button.pressedButton());
+            try grt.std.testing.expectEqual(@as(usize, 3), Built.range_count);
         }
 
         fn outOfRangeVoltageMeansNotPressed() !void {
@@ -146,8 +146,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const adc = Adc.init(&reader);
             const button = Built.init(adc);
 
-            try lib.testing.expectEqual(@as(usize, 2), button.buttonCount());
-            try lib.testing.expectEqual(@as(?u32, null), try button.pressedButton());
+            try grt.std.testing.expectEqual(@as(usize, 2), button.buttonCount());
+            try grt.std.testing.expectEqual(@as(?u32, null), try button.pressedButton());
         }
 
         fn propagatesAdcErrors() !void {
@@ -167,17 +167,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const adc = Adc.init(&reader);
             const button = Built.init(adc);
 
-            try lib.testing.expectError(error.Timeout, button.pressedButton());
+            try grt.std.testing.expectError(error.Timeout, button.pressedButton());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -196,7 +196,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

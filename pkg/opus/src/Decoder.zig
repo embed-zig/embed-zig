@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const embed = @import("embed");
 const binding = @import("binding.zig");
 const opus_error = @import("error.zig");
@@ -16,10 +17,10 @@ pub fn getSize(channels: u8) usize {
 }
 
 pub fn init(
-    allocator: embed.mem.Allocator,
+    allocator: glib.std.mem.Allocator,
     sample_rate: u32,
     channels: u8,
-) (Error || embed.mem.Allocator.Error)!Self {
+) (Error || glib.std.mem.Allocator.Error)!Self {
     try validateChannels(channels);
     try validateSampleRate(sample_rate);
     const size = getSize(channels);
@@ -37,7 +38,7 @@ pub fn init(
     };
 }
 
-pub fn deinit(self: *Self, allocator: embed.mem.Allocator) void {
+pub fn deinit(self: *Self, allocator: glib.std.mem.Allocator) void {
     allocator.free(self.mem);
     self.* = undefined;
 }
@@ -57,7 +58,7 @@ pub fn decode(self: *Self, data: []const u8, pcm: []i16, fec: bool) Error![]cons
         frame_size,
         @intFromBool(fec),
     ));
-    return pcm[0 .. try self.totalSamples(n, pcm.len)];
+    return pcm[0..try self.totalSamples(n, pcm.len)];
 }
 
 pub fn decodeFloat(self: *Self, data: []const u8, pcm: []f32, fec: bool) Error![]const f32 {
@@ -71,19 +72,19 @@ pub fn decodeFloat(self: *Self, data: []const u8, pcm: []f32, fec: bool) Error![
         frame_size,
         @intFromBool(fec),
     ));
-    return pcm[0 .. try self.totalSamples(n, pcm.len)];
+    return pcm[0..try self.totalSamples(n, pcm.len)];
 }
 
 pub fn plc(self: *Self, pcm: []i16) Error![]const i16 {
     const frame_size = try self.frameSizeFromPcmLen(pcm.len);
     const n = try opus_error.checkedPositive(binding.opus_decode(self.handle, null, 0, pcm.ptr, frame_size, 0));
-    return pcm[0 .. try self.totalSamples(n, pcm.len)];
+    return pcm[0..try self.totalSamples(n, pcm.len)];
 }
 
 pub fn plcFloat(self: *Self, pcm: []f32) Error![]const f32 {
     const frame_size = try self.frameSizeFromPcmLen(pcm.len);
     const n = try opus_error.checkedPositive(binding.opus_decode_float(self.handle, null, 0, pcm.ptr, frame_size, 0));
-    return pcm[0 .. try self.totalSamples(n, pcm.len)];
+    return pcm[0..try self.totalSamples(n, pcm.len)];
 }
 
 pub fn getSampleRate(self: *Self) Error!u32 {
@@ -126,37 +127,35 @@ fn totalSamples(self: *const Self, samples_per_channel: usize, capacity: usize) 
     return total;
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn initAndQuerySampleRate() !void {
-            try lib.testing.expect(getSize(1) > 0);
+            try grt.std.testing.expect(getSize(1) > 0);
 
-            var decoder = try Self.init(lib.testing.allocator, 48_000, 1);
-            defer decoder.deinit(lib.testing.allocator);
+            var decoder = try Self.init(grt.std.testing.allocator, 48_000, 1);
+            defer decoder.deinit(grt.std.testing.allocator);
 
-            try lib.testing.expectEqual(@as(u32, 48_000), decoder.sample_rate);
-            try lib.testing.expectEqual(@as(u8, 1), decoder.channels);
-            try lib.testing.expectEqual(@as(u32, 960), decoder.frameSizeForMs(20));
-            try lib.testing.expectEqual(@as(u32, 48_000), try decoder.getSampleRate());
+            try grt.std.testing.expectEqual(@as(u32, 48_000), decoder.sample_rate);
+            try grt.std.testing.expectEqual(@as(u8, 1), decoder.channels);
+            try grt.std.testing.expectEqual(@as(u32, 960), decoder.frameSizeForMs(20));
+            try grt.std.testing.expectEqual(@as(u32, 48_000), try decoder.getSampleRate());
             try decoder.resetState();
         }
 
         fn rejectsInvalidSampleRate() !void {
-            try lib.testing.expectError(Error.BadArg, Self.init(lib.testing.allocator, 44_100, 1));
+            try grt.std.testing.expectError(Error.BadArg, Self.init(grt.std.testing.allocator, 44_100, 1));
         }
 
         fn stereoDecodeAndPlcReturnFullInterleavedFrames() !void {
             const Encoder = @import("Encoder.zig");
 
-            try lib.testing.expectEqual(@as(usize, 0), getSize(3));
-            try lib.testing.expectError(Error.BadArg, Self.init(lib.testing.allocator, 48_000, 3));
+            try grt.std.testing.expectEqual(@as(usize, 0), getSize(3));
+            try grt.std.testing.expectError(Error.BadArg, Self.init(grt.std.testing.allocator, 48_000, 3));
 
-            var encoder = try Encoder.init(lib.testing.allocator, 48_000, 2, .audio);
-            defer encoder.deinit(lib.testing.allocator);
-            var decoder = try Self.init(lib.testing.allocator, 48_000, 2);
-            defer decoder.deinit(lib.testing.allocator);
+            var encoder = try Encoder.init(grt.std.testing.allocator, 48_000, 2, .audio);
+            defer encoder.deinit(grt.std.testing.allocator);
+            var decoder = try Self.init(grt.std.testing.allocator, 48_000, 2);
+            defer decoder.deinit(grt.std.testing.allocator);
 
             var pcm: [1920]i16 = undefined;
             for (&pcm, 0..) |*sample, i| {
@@ -170,30 +169,30 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
             var decoded: [1920]i16 = undefined;
             const samples = try decoder.decode(packet, decoded[0..], false);
-            try lib.testing.expectEqual(@as(usize, 1920), samples.len);
+            try grt.std.testing.expectEqual(@as(usize, 1920), samples.len);
             const fec_samples = try decoder.decode(packet, decoded[0..], true);
-            try lib.testing.expectEqual(@as(usize, 1920), fec_samples.len);
-            try lib.testing.expectError(Error.BadArg, decoder.decode(packet, decoded[0 .. decoded.len - 1], false));
+            try grt.std.testing.expectEqual(@as(usize, 1920), fec_samples.len);
+            try grt.std.testing.expectError(Error.BadArg, decoder.decode(packet, decoded[0 .. decoded.len - 1], false));
 
             const concealed = try decoder.plc(decoded[0..]);
-            try lib.testing.expectEqual(@as(usize, 1920), concealed.len);
+            try grt.std.testing.expectEqual(@as(usize, 1920), concealed.len);
         }
 
         fn rejectsEmptyPacketInput() !void {
-            var decoder = try Self.init(lib.testing.allocator, 48_000, 1);
-            defer decoder.deinit(lib.testing.allocator);
+            var decoder = try Self.init(grt.std.testing.allocator, 48_000, 1);
+            defer decoder.deinit(grt.std.testing.allocator);
 
             const empty = [_]u8{};
             var pcm_i16: [960]i16 = undefined;
             var pcm_f32: [960]f32 = undefined;
 
-            try lib.testing.expectError(Error.InvalidPacket, decoder.decode(empty[0..], pcm_i16[0..], false));
-            try lib.testing.expectError(Error.InvalidPacket, decoder.decodeFloat(empty[0..], pcm_f32[0..], false));
+            try grt.std.testing.expectError(Error.InvalidPacket, decoder.decode(empty[0..], pcm_i16[0..], false));
+            try grt.std.testing.expectError(Error.InvalidPacket, decoder.decodeFloat(empty[0..], pcm_f32[0..], false));
         }
 
         fn rejectsNonEmptyInvalidPacketInput() !void {
-            var decoder = try Self.init(lib.testing.allocator, 48_000, 1);
-            defer decoder.deinit(lib.testing.allocator);
+            var decoder = try Self.init(grt.std.testing.allocator, 48_000, 1);
+            defer decoder.deinit(grt.std.testing.allocator);
 
             const invalid = [_]u8{ 0xff, 0xff };
             var pcm_i16: [960]i16 = undefined;
@@ -217,10 +216,10 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         fn floatRoundtripSmoke() !void {
             const Encoder = @import("Encoder.zig");
 
-            var encoder = try Encoder.init(lib.testing.allocator, 48_000, 1, .audio);
-            defer encoder.deinit(lib.testing.allocator);
-            var decoder = try Self.init(lib.testing.allocator, 48_000, 1);
-            defer decoder.deinit(lib.testing.allocator);
+            var encoder = try Encoder.init(grt.std.testing.allocator, 48_000, 1, .audio);
+            defer encoder.deinit(grt.std.testing.allocator);
+            var decoder = try Self.init(grt.std.testing.allocator, 48_000, 1);
+            defer decoder.deinit(grt.std.testing.allocator);
 
             var pcm: [960]f32 = undefined;
             for (&pcm, 0..) |*sample, i| {
@@ -233,26 +232,26 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
             var decoded: [960]f32 = undefined;
             const samples = try decoder.decodeFloat(packet, decoded[0..], false);
-            try lib.testing.expectEqual(@as(usize, 960), samples.len);
+            try grt.std.testing.expectEqual(@as(usize, 960), samples.len);
             const fec_samples = try decoder.decodeFloat(packet, decoded[0..], true);
-            try lib.testing.expectEqual(@as(usize, 960), fec_samples.len);
+            try grt.std.testing.expectEqual(@as(usize, 960), fec_samples.len);
 
             var energy: f32 = 0;
             for (samples) |sample| energy += @abs(sample);
-            try lib.testing.expect(energy > 1.0);
+            try grt.std.testing.expect(energy > 1.0);
 
             const concealed = try decoder.plcFloat(decoded[0..]);
-            try lib.testing.expectEqual(@as(usize, 960), concealed.len);
+            try grt.std.testing.expectEqual(@as(usize, 960), concealed.len);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -283,7 +282,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -292,5 +291,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

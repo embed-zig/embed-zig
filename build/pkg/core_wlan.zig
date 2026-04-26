@@ -30,8 +30,8 @@ pub fn link(
     const mod = b.modules.get("core_wlan") orelse @panic("core_wlan module missing");
     mod.addImport("embed", build_tests.createEmbedShim(b, target, optimize, gstd_dep));
     mod.addImport("embed_std", createEmbedStdShim(b, target, optimize, gstd_dep));
+    mod.addImport("glib", glib_dep.module("glib"));
     mod.addImport("drivers", build_tests.createDriversShim(b, target, optimize));
-    mod.addImport("testing", glib_dep.module("testing"));
 
     if (target.result.os.tag == .macos) {
         mod.linkFramework("CoreWLAN", .{});

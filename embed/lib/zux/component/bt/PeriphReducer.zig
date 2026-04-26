@@ -136,15 +136,15 @@ fn syncConnectionSummary(state: *PeriphState, self: *PeriphReducer) void {
     state.connected_count = @intCast(@min(self.connections.count(), max_count));
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn reduceTracksActiveConnections() !void {
             const StoreObject = @import("../../store/Object.zig");
 
-            const PeriphStore = StoreObject.make(lib, PeriphState, .bt_periph);
-            var store = PeriphStore.init(lib.testing.allocator, .{});
+            const PeriphStore = StoreObject.make(grt, PeriphState, .bt_periph);
+            var store = PeriphStore.init(grt.std.testing.allocator, .{});
             defer store.deinit();
-            var reducer = PeriphReducer.init(lib.testing.allocator);
+            var reducer = PeriphReducer.init(grt.std.testing.allocator);
             defer reducer.deinit();
 
             const NoopSink = struct {
@@ -216,13 +216,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             store.tick();
             const state = store.get();
-            try lib.testing.expectEqual(@as(u32, 21), state.source_id);
-            try lib.testing.expect(state.connected());
-            try lib.testing.expect(state.advertising);
-            try lib.testing.expectEqual(@as(u16, 2), state.connected_count);
-            try lib.testing.expectEqual(@as(?u16, 0x0042), state.last_connected_conn_handle);
-            try lib.testing.expectEqual(@as(?u16, 0x0042), state.last_mtu_conn_handle);
-            try lib.testing.expectEqual(@as(?u16, 247), state.last_mtu);
+            try grt.std.testing.expectEqual(@as(u32, 21), state.source_id);
+            try grt.std.testing.expect(state.connected());
+            try grt.std.testing.expect(state.advertising);
+            try grt.std.testing.expectEqual(@as(u16, 2), state.connected_count);
+            try grt.std.testing.expectEqual(@as(?u16, 0x0042), state.last_connected_conn_handle);
+            try grt.std.testing.expectEqual(@as(?u16, 0x0042), state.last_mtu_conn_handle);
+            try grt.std.testing.expectEqual(@as(?u16, 247), state.last_mtu);
 
             _ = try reducer.reduce(&store, .{
                 .origin = .source,
@@ -253,9 +253,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit);
             store.tick();
             const partially_connected = store.get();
-            try lib.testing.expect(partially_connected.connected());
-            try lib.testing.expectEqual(@as(u16, 1), partially_connected.connected_count);
-            try lib.testing.expectEqual(@as(?u16, 0x0041), partially_connected.last_disconnected_conn_handle);
+            try grt.std.testing.expect(partially_connected.connected());
+            try grt.std.testing.expectEqual(@as(u16, 1), partially_connected.connected_count);
+            try grt.std.testing.expectEqual(@as(?u16, 0x0041), partially_connected.last_disconnected_conn_handle);
 
             _ = try reducer.reduce(&store, .{
                 .origin = .source,
@@ -276,21 +276,21 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit);
             store.tick();
             const disconnected = store.get();
-            try lib.testing.expect(!disconnected.connected());
-            try lib.testing.expectEqual(@as(u16, 0), disconnected.connected_count);
-            try lib.testing.expect(!disconnected.advertising);
-            try lib.testing.expectEqual(@as(?u16, 0x0042), disconnected.last_disconnected_conn_handle);
-            try lib.testing.expectEqual(@as(?u16, 247), disconnected.last_mtu);
+            try grt.std.testing.expect(!disconnected.connected());
+            try grt.std.testing.expectEqual(@as(u16, 0), disconnected.connected_count);
+            try grt.std.testing.expect(!disconnected.advertising);
+            try grt.std.testing.expectEqual(@as(?u16, 0x0042), disconnected.last_disconnected_conn_handle);
+            try grt.std.testing.expectEqual(@as(?u16, 247), disconnected.last_mtu);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -301,7 +301,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -195,19 +195,19 @@ pub fn fragmentIterator(buf: []u8, att_payload: []const u8, conn_handle: u16, ma
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             var buf: [128]u8 = undefined;
             const payload = "ATT data";
             const encoded = encode(&buf, CID_ATT, payload);
 
-            try lib.testing.expectEqual(@as(usize, HEADER_LEN + payload.len), encoded.len);
+            try grt.std.testing.expectEqual(@as(usize, HEADER_LEN + payload.len), encoded.len);
 
             const hdr = parseHeader(encoded) orelse return error.ParseFailed;
-            try lib.testing.expectEqual(@as(u16, payload.len), hdr.length);
-            try lib.testing.expectEqual(CID_ATT, hdr.cid);
-            try lib.testing.expectEqualSlices(u8, payload, encoded[HEADER_LEN..]);
+            try grt.std.testing.expectEqual(@as(u16, payload.len), hdr.length);
+            try grt.std.testing.expectEqual(CID_ATT, hdr.cid);
+            try grt.std.testing.expectEqualSlices(u8, payload, encoded[HEADER_LEN..]);
 
             var reasm = Reassembler{};
             var l2cap_buf: [64]u8 = undefined;
@@ -221,15 +221,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .data_len = @truncate(l2cap_pkt.len),
             }, l2cap_pkt) orelse return error.ReassemblyFailed;
 
-            try lib.testing.expectEqual(@as(u16, 0x0040), sdu.conn_handle);
-            try lib.testing.expectEqual(CID_ATT, sdu.cid);
-            try lib.testing.expectEqualSlices(u8, att_data, sdu.data);
+            try grt.std.testing.expectEqual(@as(u16, 0x0040), sdu.conn_handle);
+            try grt.std.testing.expectEqual(CID_ATT, sdu.cid);
+            try grt.std.testing.expectEqualSlices(u8, att_data, sdu.data);
 
             reasm = .{};
             const fragmented = "hello world, this is fragmented";
             var fragmented_buf: [128]u8 = undefined;
-            lib.mem.writeInt(u16, fragmented_buf[0..2], fragmented.len, .little);
-            lib.mem.writeInt(u16, fragmented_buf[2..4], CID_ATT, .little);
+            grt.std.mem.writeInt(u16, fragmented_buf[0..2], fragmented.len, .little);
+            grt.std.mem.writeInt(u16, fragmented_buf[2..4], CID_ATT, .little);
             @memcpy(fragmented_buf[4..][0..10], fragmented[0..10]);
 
             const r1 = reasm.feed(.{
@@ -238,7 +238,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .bc_flag = .point_to_point,
                 .data_len = 14,
             }, fragmented_buf[0..14]);
-            try lib.testing.expectEqual(@as(?Sdu, null), r1);
+            try grt.std.testing.expectEqual(@as(?Sdu, null), r1);
 
             const r2 = reasm.feed(.{
                 .conn_handle = 0x0040,
@@ -247,34 +247,34 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .data_len = @truncate(fragmented.len - 10),
             }, fragmented[10..]) orelse return error.ReassemblyFailed;
 
-            try lib.testing.expectEqual(CID_ATT, r2.cid);
-            try lib.testing.expectEqualSlices(u8, fragmented, r2.data);
+            try grt.std.testing.expectEqual(CID_ATT, r2.cid);
+            try grt.std.testing.expectEqualSlices(u8, fragmented, r2.data);
 
-            try lib.testing.expectEqual(@as(?Header, null), parseHeader(&.{ 0x00, 0x00 }));
+            try grt.std.testing.expectEqual(@as(?Header, null), parseHeader(&.{ 0x00, 0x00 }));
 
             var fragment_buf: [Reassembler.MAX_SDU_LEN + acl.MAX_PACKET_LEN]u8 = undefined;
             const iter_payload = "abcdefghijklmnop";
             var it = fragmentIterator(&fragment_buf, iter_payload, 0x0040, 6);
 
             const first = it.next() orelse return error.MissingFirstFragment;
-            try lib.testing.expectEqual(acl.PbFlag.first_auto_flush, (acl.parsePacketHeader(first) orelse return error.BadHeader).pb_flag);
+            try grt.std.testing.expectEqual(acl.PbFlag.first_auto_flush, (acl.parsePacketHeader(first) orelse return error.BadHeader).pb_flag);
 
             const second = it.next() orelse return error.MissingSecondFragment;
             const second_payload = acl.getPayload(second) orelse return error.BadSecondPayload;
-            try lib.testing.expectEqualSlices(u8, iter_payload[2..8], second_payload);
+            try grt.std.testing.expectEqualSlices(u8, iter_payload[2..8], second_payload);
 
             const third = it.next() orelse return error.MissingThirdFragment;
             const third_payload = acl.getPayload(third) orelse return error.BadThirdPayload;
-            try lib.testing.expectEqualSlices(u8, iter_payload[8..14], third_payload);
+            try grt.std.testing.expectEqualSlices(u8, iter_payload[8..14], third_payload);
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -285,7 +285,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

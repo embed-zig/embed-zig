@@ -22,7 +22,7 @@ const l2cap = @import("../host/l2cap.zig");
 const att = @import("../host/att.zig");
 const gatt_client = @import("../host/gatt/client.zig");
 
-pub fn Hci(comptime lib: type) type {
+pub fn Hci(comptime grt: type) type {
     return struct {
         const Self = @This();
         const PROP_READ: u8 = 0x02;
@@ -141,8 +141,8 @@ pub fn Hci(comptime lib: type) type {
             InvalidPacket,
         };
 
-        allocator: lib.mem.Allocator,
-        mutex: lib.Thread.Mutex = .{},
+        allocator: glib.std.mem.Allocator,
+        mutex: grt.std.Thread.Mutex = .{},
         queue: glib.std.ArrayListUnmanaged(Packet) = .{},
         host_server_pushes: glib.std.ArrayListUnmanaged(ServerPush) = .{},
         services: glib.std.ArrayListUnmanaged(ServiceState) = .{},
@@ -169,7 +169,7 @@ pub fn Hci(comptime lib: type) type {
         central_listener: BtHci.CentralListener = .{},
         peripheral_listener: BtHci.PeripheralListener = .{},
 
-        pub fn init(allocator: lib.mem.Allocator, config: Config) !Self {
+        pub fn init(allocator: glib.std.mem.Allocator, config: Config) !Self {
             var self = Self{
                 .allocator = allocator,
                 .config = config,
@@ -623,9 +623,9 @@ pub fn Hci(comptime lib: type) type {
                 self.mutex.unlock();
 
                 if (deadline_ns) |deadline| {
-                    if (nowNs(lib) >= deadline) return error.Timeout;
+                    if (nowNs() >= deadline) return error.Timeout;
                 }
-                lib.Thread.sleep(NS_PER_MS);
+                grt.std.Thread.sleep(NS_PER_MS);
             }
         }
 
@@ -713,7 +713,7 @@ pub fn Hci(comptime lib: type) type {
             var waited_ms: u32 = 0;
             while (waited_ms <= timeout_ms) : (waited_ms += 1) {
                 if (self.popServerPush()) |push| return push;
-                lib.Thread.sleep(NS_PER_MS);
+                grt.std.Thread.sleep(NS_PER_MS);
             }
             return null;
         }
@@ -814,11 +814,11 @@ pub fn Hci(comptime lib: type) type {
         fn effectiveReadDeadlineNs(self: *const Self) ?i64 {
             if (self.read_deadline_ns) |deadline| return deadline;
             const timeout_ms = self.default_recv_timeout_ms orelse DEFAULT_RECV_TIMEOUT_MS;
-            return nowNs(lib) + @as(i64, @intCast(timeout_ms)) * @as(i64, @intCast(NS_PER_MS));
+            return nowNs() + @as(i64, @intCast(timeout_ms)) * @as(i64, @intCast(NS_PER_MS));
         }
 
-        fn nowNs(comptime l: type) i64 {
-            return l.time.milliTimestamp() * @as(i64, @intCast(NS_PER_MS));
+        fn nowNs() i64 {
+            return grt.std.time.milliTimestamp() * @as(i64, @intCast(NS_PER_MS));
         }
 
         pub fn writeHost(self: *Self, handle: u16, value: []const u8) PeerError!void {
@@ -859,7 +859,7 @@ pub fn Hci(comptime lib: type) type {
                 const find_resp = self.sendAttToHostExpectResponse(find_req) catch |err| switch (err) {
                     error.Timeout => {
                         if (attempt + 1 < CCCD_DISCOVERY_MAX_ATTEMPTS) {
-                            lib.Thread.sleep(NS_PER_MS);
+                            grt.std.Thread.sleep(NS_PER_MS);
                             continue;
                         }
                         return error.Timeout;
@@ -1581,7 +1581,7 @@ pub fn Hci(comptime lib: type) type {
                 self.mutex.unlock();
                 if (ready) break;
                 if (waited_ms >= self.config.peer_timeout_ms) return error.Timeout;
-                lib.Thread.sleep(NS_PER_MS);
+                grt.std.Thread.sleep(NS_PER_MS);
                 waited_ms += 1;
             }
 
@@ -1769,10 +1769,10 @@ pub fn Hci(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
-            const Mock = Hci(lib);
+            const Mock = Hci(grt);
 
             {
                 const CentralState = struct {
@@ -1803,7 +1803,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     }
                 };
 
-                var mock = try Mock.init(lib.testing.allocator, .{});
+                var mock = try Mock.init(grt.std.testing.allocator, .{});
                 defer mock.deinit();
 
                 const hci = mock.asHci();
@@ -1820,15 +1820,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 defer hci.release();
 
                 try hci.startScanning(.{});
-                try lib.testing.expect(central_state.saw_adv);
+                try grt.std.testing.expect(central_state.saw_adv);
 
                 try hci.connect(mock.getPeerAddr(), .public, .{});
-                try lib.testing.expect(central_state.connected);
-                try lib.testing.expect(hci.getLink(.central) != null);
+                try grt.std.testing.expect(central_state.connected);
+                try grt.std.testing.expect(hci.getLink(.central) != null);
 
                 hci.disconnect(mock.config.conn_handle, 0x13);
-                try lib.testing.expect(central_state.disconnected);
-                try lib.testing.expect(hci.getLink(.central) == null);
+                try grt.std.testing.expect(central_state.disconnected);
+                try grt.std.testing.expect(hci.getLink(.central) == null);
 
                 var peripheral_state = PeripheralState{};
                 hci.setPeripheralListener(.{
@@ -1840,15 +1840,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     .connectable = true,
                 });
                 try mock.connectAsCentral();
-                try lib.testing.expect(peripheral_state.connected);
-                try lib.testing.expect(hci.getLink(.peripheral) != null);
+                try grt.std.testing.expect(peripheral_state.connected);
+                try grt.std.testing.expect(hci.getLink(.peripheral) != null);
             }
 
             {
-                var central = try Mock.init(lib.testing.allocator, .{});
+                var central = try Mock.init(grt.std.testing.allocator, .{});
                 defer central.deinit();
 
-                var peripheral = try Mock.init(lib.testing.allocator, .{
+                var peripheral = try Mock.init(grt.std.testing.allocator, .{
                     .controller_addr = .{ 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 },
                     .peer_addr = .{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
                 });
@@ -1858,14 +1858,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 try central.establishPeerLink(&peripheral);
 
                 var params: [3]u8 = undefined;
-                lib.mem.writeInt(u16, params[0..2], central.config.conn_handle, .little);
+                grt.std.mem.writeInt(u16, params[0..2], central.config.conn_handle, .little);
                 params[2] = @intFromEnum(hci_status.remote_user_terminated);
 
                 var cmd_buf: [hci_commands.MAX_CMD_LEN]u8 = undefined;
                 _ = try central.write(hci_commands.encode(&cmd_buf, hci_commands.DISCONNECT, &params));
 
-                try lib.testing.expect(central.asHci().getLink(.central) == null);
-                try lib.testing.expect(peripheral.asHci().getLink(.peripheral) == null);
+                try grt.std.testing.expect(central.asHci().getLink(.central) == null);
+                try grt.std.testing.expect(peripheral.asHci().getLink(.peripheral) == null);
 
                 var evt_buf: [80]u8 = undefined;
                 const evt_len = try peripheral.read(&evt_buf);
@@ -1877,23 +1877,23 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }
 
             {
-                var mock = try Mock.init(lib.testing.allocator, .{
+                var mock = try Mock.init(grt.std.testing.allocator, .{
                     .recv_timeout_ms = null,
                 });
                 defer mock.deinit();
 
                 var buf: [8]u8 = undefined;
-                try lib.testing.expectError(error.Timeout, mock.read(&buf));
+                try grt.std.testing.expectError(error.Timeout, mock.read(&buf));
             }
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -1904,7 +1904,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

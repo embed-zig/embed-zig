@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const testing_api = @import("testing");
 
 const Channel = @import("../Channel.zig");
@@ -22,7 +23,9 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             t.run("Pool", Pool.TestRunner(lib));
             t.run("Racer", Racer.TestRunner(lib));
             t.run("Timer", Timer.TestRunner(lib));
-            t.run("WakeFd", WakeFd.TestRunner(lib));
+            if (builtin.target.os.tag != .windows) {
+                t.run("WakeFd", WakeFd.TestRunner(lib));
+            }
             return t.wait();
         }
 

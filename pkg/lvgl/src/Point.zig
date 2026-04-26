@@ -1,4 +1,4 @@
-const testing_api = @import("testing");
+const glib = @import("glib");
 const binding = @import("binding.zig");
 
 const Self = @This();
@@ -38,30 +38,30 @@ pub fn fromBinding(raw: binding.Point) Self {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn layout_and_mutation_helpers(_: lib.mem.Allocator) !void {
+        fn layout_and_mutation_helpers(_: glib.std.mem.Allocator) !void {
             var p = Self.init(1, 2);
             p.set(10, 20);
-            try lib.testing.expectEqual(@as(i32, 10), p.x);
-            try lib.testing.expectEqual(@as(i32, 20), p.y);
+            try grt.std.testing.expectEqual(@as(i32, 10), p.x);
+            try grt.std.testing.expectEqual(@as(i32, 20), p.y);
 
             var q = Self.init(3, 4);
             p.swap(&q);
-            try lib.testing.expectEqual(@as(i32, 3), p.x);
-            try lib.testing.expectEqual(@as(i32, 4), p.y);
-            try lib.testing.expectEqual(@as(i32, 10), q.x);
-            try lib.testing.expectEqual(@as(i32, 20), q.y);
+            try grt.std.testing.expectEqual(@as(i32, 3), p.x);
+            try grt.std.testing.expectEqual(@as(i32, 4), p.y);
+            try grt.std.testing.expectEqual(@as(i32, 10), q.x);
+            try grt.std.testing.expectEqual(@as(i32, 20), q.y);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             TestCase.layout_and_mutation_helpers(allocator) catch |err| {
@@ -71,7 +71,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -80,5 +80,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

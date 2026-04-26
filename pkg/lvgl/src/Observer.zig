@@ -1,5 +1,5 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
-const testing_api = @import("testing");
 
 const Self = @This();
 
@@ -25,23 +25,20 @@ pub fn userData(self: *const Self) ?*anyopaque {
     return binding.lv_observer_get_user_data(self.handle);
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Impl = struct {
-        fn raw_handle_roundtrip(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn raw_handle_roundtrip(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             const raw_handle: *binding.Observer = @ptrFromInt(1);
             const observer = Self.fromRaw(raw_handle);
 
-            try testing.expectEqual(raw_handle, observer.raw());
+            try grt.std.testing.expectEqual(raw_handle, observer.raw());
 
             _ = Self.remove;
             _ = Self.target;
             _ = Self.userData;
         }
 
-        fn can_observe_subject_updates(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
+        fn can_observe_subject_updates(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             const Subject = @import("Subject.zig");
 
             const CallbackCtx = struct {
@@ -76,19 +73,18 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             subject.setInt(34);
 
-            try testing.expectEqual(calls_after_add + 1, ctx.calls);
-            try testing.expectEqual(raw_observer, ctx.observer.?);
-            try testing.expectEqual(subject.rawPtr(), ctx.subject.?);
-            try testing.expectEqual(@as(?*anyopaque, null), observer.target());
-            try testing.expectEqual(@as(?*anyopaque, null), ctx.target);
-            try testing.expectEqual(@as(?*anyopaque, @ptrCast(&ctx)), observer.userData());
-            try testing.expectEqual(@as(?*anyopaque, @ptrCast(&ctx)), ctx.user_data);
+            try grt.std.testing.expectEqual(calls_after_add + 1, ctx.calls);
+            try grt.std.testing.expectEqual(raw_observer, ctx.observer.?);
+            try grt.std.testing.expectEqual(subject.rawPtr(), ctx.subject.?);
+            try grt.std.testing.expectEqual(@as(?*anyopaque, null), observer.target());
+            try grt.std.testing.expectEqual(@as(?*anyopaque, null), ctx.target);
+            try grt.std.testing.expectEqual(@as(?*anyopaque, @ptrCast(&ctx)), observer.userData());
+            try grt.std.testing.expectEqual(@as(?*anyopaque, @ptrCast(&ctx)), ctx.user_data);
 
             observer.remove();
         }
 
-        fn remove_stops_future_subject_notifications(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
+        fn remove_stops_future_subject_notifications(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             const Subject = @import("Subject.zig");
 
             const CallbackCtx = struct {
@@ -112,33 +108,33 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const calls_after_add = ctx.calls;
 
             subject.setInt(2);
-            try testing.expectEqual(calls_after_add + 1, ctx.calls);
+            try grt.std.testing.expectEqual(calls_after_add + 1, ctx.calls);
 
             observer.remove();
             const calls_after_remove = ctx.calls;
             subject.setInt(3);
 
-            try testing.expectEqual(calls_after_remove, ctx.calls);
+            try grt.std.testing.expectEqual(calls_after_remove, ctx.calls);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("lvgl/unit_tests/Observer/raw_handle_roundtrip", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.raw_handle_roundtrip));
-            t.run("lvgl/unit_tests/Observer/can_observe_subject_updates", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.can_observe_subject_updates));
-            t.run("lvgl/unit_tests/Observer/remove_stops_future_subject_notifications", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.remove_stops_future_subject_notifications));
+            t.run("lvgl/unit_tests/Observer/raw_handle_roundtrip", glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, Impl.raw_handle_roundtrip));
+            t.run("lvgl/unit_tests/Observer/can_observe_subject_updates", glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, Impl.can_observe_subject_updates));
+            t.run("lvgl/unit_tests/Observer/remove_stops_future_subject_notifications", glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, Impl.remove_stops_future_subject_notifications));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -147,5 +143,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

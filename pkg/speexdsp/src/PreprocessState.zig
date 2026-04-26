@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 const EchoState = @import("EchoState.zig");
 const error_mod = @import("error.zig");
@@ -116,13 +117,11 @@ fn fitsCInt(value: anytype) bool {
     return @as(u64, @intCast(value)) <= max;
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn rejectsInvalidInitArguments() !void {
-            try lib.testing.expectError(error.InvalidArgument, Self.init(0, 16_000));
-            try lib.testing.expectError(error.InvalidArgument, Self.init(160, 0));
+            try grt.std.testing.expectError(error.InvalidArgument, Self.init(0, 16_000));
+            try grt.std.testing.expectError(error.InvalidArgument, Self.init(160, 0));
         }
 
         fn rejectsInvalidFrameLengths() !void {
@@ -131,18 +130,18 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
             var frame = [_]types.Sample{0} ** 160;
 
-            try lib.testing.expectError(error.InvalidArgument, preprocess.run(frame[0..159]));
-            try lib.testing.expectError(error.InvalidArgument, preprocess.estimateUpdate(frame[0..159]));
+            try grt.std.testing.expectError(error.InvalidArgument, preprocess.run(frame[0..159]));
+            try grt.std.testing.expectError(error.InvalidArgument, preprocess.estimateUpdate(frame[0..159]));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -157,7 +156,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -166,5 +165,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

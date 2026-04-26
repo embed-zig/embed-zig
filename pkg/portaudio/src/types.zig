@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 
 pub const DeviceIndex = binding.PaDeviceIndex;
@@ -29,54 +30,48 @@ pub fn toPaNonInterleavedSampleFormat(format: SampleFormat) binding.PaSampleForm
     return toPaSampleFormat(format) | non_interleaved_flag;
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            sampleFormatMapsToPortaudioConstants(lib) catch |err| {
+            sampleFormatMapsToPortaudioConstants() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            deviceSpecialValuesMatchBinding(lib) catch |err| {
+            deviceSpecialValuesMatchBinding() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
 
-        fn sampleFormatMapsToPortaudioConstants(comptime L: type) !void {
-            const testing = L.testing;
-
-            try testing.expectEqual(binding.paFloat32, toPaSampleFormat(.float32));
-            try testing.expectEqual(binding.paInt16, toPaSampleFormat(.int16));
-            try testing.expectEqual(binding.paInt16 | binding.paNonInterleaved, toPaNonInterleavedSampleFormat(.int16));
+        fn sampleFormatMapsToPortaudioConstants() !void {
+            try grt.std.testing.expectEqual(binding.paFloat32, toPaSampleFormat(.float32));
+            try grt.std.testing.expectEqual(binding.paInt16, toPaSampleFormat(.int16));
+            try grt.std.testing.expectEqual(binding.paInt16 | binding.paNonInterleaved, toPaNonInterleavedSampleFormat(.int16));
         }
 
-        fn deviceSpecialValuesMatchBinding(comptime L: type) !void {
-            const testing = L.testing;
-
-            try testing.expectEqual(binding.paNoDevice, no_device);
-            try testing.expectEqual(binding.paUseHostApiSpecificDeviceSpecification, use_host_api_specific_device_specification);
-            try testing.expectEqual(binding.paFramesPerBufferUnspecified, frames_per_buffer_unspecified);
+        fn deviceSpecialValuesMatchBinding() !void {
+            try grt.std.testing.expectEqual(binding.paNoDevice, no_device);
+            try grt.std.testing.expectEqual(binding.paUseHostApiSpecificDeviceSpecification, use_host_api_specific_device_specification);
+            try grt.std.testing.expectEqual(binding.paFramesPerBufferUnspecified, frames_per_buffer_unspecified);
         }
     };
 
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

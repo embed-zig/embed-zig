@@ -4,6 +4,8 @@
 //!   const opus = @import("opus");
 //!   var enc = try opus.Encoder.init(allocator, 48_000, 1, .audio);
 
+const glib = @import("glib");
+const gstd = @import("gstd");
 const binding_mod = @import("opus/src/binding.zig");
 const types = @import("opus/src/types.zig");
 
@@ -41,45 +43,33 @@ pub const test_runner = struct {
 };
 
 test "opus/unit_tests/std" {
-    const lib = @import("std");
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .opus_unit_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .opus_unit_std);
     defer t.deinit();
 
-    t.run("unit", test_runner.unit.make(lib));
+    t.run("unit", test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "opus/unit_tests/embed_std" {
-    const lib = @import("embed_std").std;
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .opus_unit_embed_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .opus_unit_embed_std);
     defer t.deinit();
 
-    t.run("unit", test_runner.unit.make(lib));
+    t.run("unit", test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "opus/integration_tests/std" {
-    const lib = @import("std");
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .opus_integration_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .opus_integration_std);
     defer t.deinit();
 
-    t.run("integration", test_runner.integration.make(lib));
+    t.run("integration", test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "opus/integration_tests/embed_std" {
-    const lib = @import("embed_std").std;
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .opus_integration_embed_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .opus_integration_embed_std);
     defer t.deinit();
 
-    t.run("integration", test_runner.integration.make(lib));
+    t.run("integration", test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }

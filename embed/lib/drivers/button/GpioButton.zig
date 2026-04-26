@@ -26,7 +26,7 @@ pub fn make(comptime config: Config) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn lowLevelButtonTreatsLowAsPressed() !void {
             const Built = GpioButton.make(.{ .active_level = .low });
@@ -48,7 +48,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var pin = Pin{ .level = .low };
             const button = Built.init(Gpio.init(&pin));
 
-            try lib.testing.expect(try button.isPressed());
+            try grt.std.testing.expect(try button.isPressed());
         }
 
         fn highLevelButtonTreatsHighAsPressed() !void {
@@ -67,7 +67,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var pin = Pin{};
             const button = Built.init(Gpio.init(&pin));
 
-            try lib.testing.expect(try button.isPressed());
+            try grt.std.testing.expect(try button.isPressed());
         }
 
         fn propagatesGpioErrors() !void {
@@ -86,17 +86,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var pin = Pin{};
             const button = Built.init(Gpio.init(&pin));
 
-            try lib.testing.expectError(error.Timeout, button.isPressed());
+            try grt.std.testing.expectError(error.Timeout, button.isPressed());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -115,7 +115,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

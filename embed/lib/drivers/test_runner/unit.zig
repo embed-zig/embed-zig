@@ -22,43 +22,43 @@ const type_a = @import("../nfc/fm175xx/type_a.zig");
 const ntag = @import("../nfc/fm175xx/ntag.zig");
 const Fm175xx = @import("../nfc/fm175xx.zig");
 
-pub fn make(comptime lib: type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             t.parallel();
-            t.run("Adc", Adc.TestRunner(lib));
-            t.run("Button", Button.TestRunner(lib));
-            t.run("Gpio", Gpio.TestRunner(lib));
-            t.run("I2c", I2c.TestRunner(lib));
-            t.run("Delay", Delay.TestRunner(lib));
-            t.run("Spi", Spi.TestRunner(lib));
-            t.run("Uart", Uart.TestRunner(lib));
-            t.run("AdcButton", AdcButton.TestRunner(lib));
-            t.run("Display", Display.TestRunner(lib));
-            t.run("GpioButton", GpioButton.TestRunner(lib));
-            t.run("Es7210", Es7210.TestRunner(lib));
-            t.run("Es8311", Es8311.TestRunner(lib));
-            t.run("Modem", Modem.TestRunner(lib));
-            t.run("wifi", wifi.test_runner.unit.make(lib));
-            t.run("Qmi8658", Qmi8658.TestRunner(lib));
-            t.run("Nfc", Nfc.TestRunner(lib));
-            t.run("Tca9554", Tca9554.TestRunner(lib));
-            t.run("TypeA", TypeA.TestRunner(lib));
-            t.run("type_a", type_a.TestRunner(lib));
-            t.run("ntag", ntag.TestRunner(lib));
-            t.run("Fm175xx", Fm175xx.TestRunner(lib));
+            t.run("Adc", Adc.TestRunner(grt));
+            t.run("Button", Button.TestRunner(grt));
+            t.run("Gpio", Gpio.TestRunner(grt));
+            t.run("I2c", I2c.TestRunner(grt));
+            t.run("Delay", Delay.TestRunner(grt));
+            t.run("Spi", Spi.TestRunner(grt));
+            t.run("Uart", Uart.TestRunner(grt));
+            t.run("AdcButton", AdcButton.TestRunner(grt));
+            t.run("Display", Display.TestRunner(grt));
+            t.run("GpioButton", GpioButton.TestRunner(grt));
+            t.run("Es7210", Es7210.TestRunner(grt));
+            t.run("Es8311", Es8311.TestRunner(grt));
+            t.run("Modem", Modem.TestRunner(grt));
+            t.run("wifi", wifi.test_runner.unit.make(grt));
+            t.run("Qmi8658", Qmi8658.TestRunner(grt));
+            t.run("Nfc", Nfc.TestRunner(grt));
+            t.run("Tca9554", Tca9554.TestRunner(grt));
+            t.run("TypeA", TypeA.TestRunner(grt));
+            t.run("type_a", type_a.TestRunner(grt));
+            t.run("ntag", ntag.TestRunner(grt));
+            t.run("Fm175xx", Fm175xx.TestRunner(grt));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

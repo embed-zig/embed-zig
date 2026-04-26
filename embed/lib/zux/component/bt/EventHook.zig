@@ -40,9 +40,9 @@ pub fn emitFn(ctx: *const anyopaque, source_id: u32, host_event: bt.Host.Event) 
     }) catch @panic("zux.component.bt.EventHook failed to forward event");
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn emitFnForwardsThroughEmitter(testing: anytype) !void {
+        fn emitFnForwardsThroughEmitter() !void {
             const Sink = struct {
                 called: bool = false,
                 last_source_id: u32 = 0,
@@ -68,30 +68,29 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(sink.called);
-            try testing.expectEqual(@as(u32, 41), sink.last_source_id);
+            try grt.std.testing.expect(sink.called);
+            try grt.std.testing.expectEqual(@as(u32, 41), sink.last_source_id);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.emitFnForwardsThroughEmitter(testing) catch |err| {
+            TestCase.emitFnForwardsThroughEmitter() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

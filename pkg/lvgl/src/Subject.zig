@@ -1,5 +1,5 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
-const testing_api = @import("testing");
 
 const Self = @This();
 
@@ -85,42 +85,36 @@ pub fn previousString(self: *Self) ?[*:0]const u8 {
     return binding.lv_subject_get_previous_string(self.handle);
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Impl = struct {
-        fn integer_subject_tracks_current_and_previous_values(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn integer_subject_tracks_current_and_previous_values(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             var subject = try Self.initInt(12);
             defer subject.deinit();
 
-            try testing.expectEqual(@as(i32, 12), subject.getInt());
+            try grt.std.testing.expectEqual(@as(i32, 12), subject.getInt());
 
             subject.setInt(34);
 
-            try testing.expectEqual(@as(i32, 34), subject.getInt());
-            try testing.expectEqual(@as(i32, 12), subject.previousInt());
+            try grt.std.testing.expectEqual(@as(i32, 34), subject.getInt());
+            try grt.std.testing.expectEqual(@as(i32, 12), subject.previousInt());
         }
 
-        fn pointer_subject_tracks_previous_pointer_value(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn pointer_subject_tracks_previous_pointer_value(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             var first: u8 = 1;
             var second: u8 = 2;
             var subject = try Self.initPointer(&first);
             defer subject.deinit();
 
-            try testing.expectEqual(@as(?*const anyopaque, @ptrCast(&first)), subject.getPointer());
-            try testing.expectEqual(@as(?*const anyopaque, @ptrCast(&first)), subject.previousPointer());
+            try grt.std.testing.expectEqual(@as(?*const anyopaque, @ptrCast(&first)), subject.getPointer());
+            try grt.std.testing.expectEqual(@as(?*const anyopaque, @ptrCast(&first)), subject.previousPointer());
 
             subject.setPointer(&second);
 
-            try testing.expectEqual(@as(?*const anyopaque, @ptrCast(&second)), subject.getPointer());
-            try testing.expectEqual(@as(?*const anyopaque, @ptrCast(&first)), subject.previousPointer());
+            try grt.std.testing.expectEqual(@as(?*const anyopaque, @ptrCast(&second)), subject.getPointer());
+            try grt.std.testing.expectEqual(@as(?*const anyopaque, @ptrCast(&first)), subject.previousPointer());
         }
 
-        fn string_subject_copies_into_owned_buffers(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn string_subject_copies_into_owned_buffers(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             var current_buffer = [_:0]u8{0} ** 16;
             var previous_buffer = [_:0]u8{0} ** 16;
             var subject = try Self.initString(current_buffer[0.. :0], previous_buffer[0.. :0], "hi");
@@ -128,13 +122,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             subject.copyString("bye");
 
-            try testing.expectEqualStrings("bye", lib.mem.span(subject.getString()));
-            try testing.expectEqualStrings("hi", lib.mem.span(subject.previousString().?));
+            try grt.std.testing.expectEqualStrings("bye", grt.std.mem.span(subject.getString()));
+            try grt.std.testing.expectEqualStrings("hi", grt.std.mem.span(subject.previousString().?));
         }
 
-        fn string_subject_uses_caller_provided_storage(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn string_subject_uses_caller_provided_storage(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             var current_buffer = [_:0]u8{0} ** 16;
             var previous_buffer = [_:0]u8{0} ** 16;
             const current = current_buffer[0.. :0];
@@ -144,29 +136,29 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             subject.copyString("bye");
 
-            try testing.expectEqual(@intFromPtr(current.ptr), @intFromPtr(subject.getString()));
-            try testing.expectEqual(@intFromPtr(previous.ptr), @intFromPtr(subject.previousString().?));
+            try grt.std.testing.expectEqual(@intFromPtr(current.ptr), @intFromPtr(subject.getString()));
+            try grt.std.testing.expectEqual(@intFromPtr(previous.ptr), @intFromPtr(subject.previousString().?));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("lvgl/unit_tests/Subject/integer_subject_tracks_current_and_previous_values", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.integer_subject_tracks_current_and_previous_values));
-            t.run("lvgl/unit_tests/Subject/pointer_subject_tracks_previous_pointer_value", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.pointer_subject_tracks_previous_pointer_value));
-            t.run("lvgl/unit_tests/Subject/string_subject_copies_into_owned_buffers", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.string_subject_copies_into_owned_buffers));
-            t.run("lvgl/unit_tests/Subject/string_subject_uses_caller_provided_storage", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.string_subject_uses_caller_provided_storage));
+            t.run("lvgl/unit_tests/Subject/integer_subject_tracks_current_and_previous_values", glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, Impl.integer_subject_tracks_current_and_previous_values));
+            t.run("lvgl/unit_tests/Subject/pointer_subject_tracks_previous_pointer_value", glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, Impl.pointer_subject_tracks_previous_pointer_value));
+            t.run("lvgl/unit_tests/Subject/string_subject_copies_into_owned_buffers", glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, Impl.string_subject_copies_into_owned_buffers));
+            t.run("lvgl/unit_tests/Subject/string_subject_uses_caller_provided_storage", glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, Impl.string_subject_uses_caller_provided_storage));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -175,5 +167,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

@@ -1,8 +1,8 @@
 //! Bitmap integration runner — aggregates per-case bitmap checks.
 
+const glib = @import("glib");
 const display_api = @import("drivers");
 const embed = @import("embed");
-const testing = @import("testing");
 const CaseRunner = @import("bitmap/test_utils/CaseRunner.zig");
 const basic = @import("bitmap/basic.zig");
 const label = @import("bitmap/label.zig");
@@ -11,32 +11,32 @@ const anim = @import("bitmap/anim.zig");
 
 const Display = display_api.Display;
 
-pub fn make(comptime lib: type, output: ?*Display) testing.TestRunner {
+pub fn make(comptime grt: type, output: ?*Display) glib.testing.TestRunner {
     const Runner = struct {
         output: ?*Display,
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = allocator;
 
-            t.run("basic", CaseRunner.make(lib, basic.Case, .{}, self.output));
-            t.run("label", CaseRunner.make(lib, label.Case, .{}, self.output));
-            t.run("button", CaseRunner.make(lib, button.Case, .{}, self.output));
-            t.run("anim", CaseRunner.make(lib, anim.Case, .{}, self.output));
+            t.run("basic", CaseRunner.make(grt, basic.Case, .{}, self.output));
+            t.run("label", CaseRunner.make(grt, label.Case, .{}, self.output));
+            t.run("button", CaseRunner.make(grt, button.Case, .{}, self.output));
+            t.run("anim", CaseRunner.make(grt, anim.Case, .{}, self.output));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{ .output = output };
-    return testing.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }

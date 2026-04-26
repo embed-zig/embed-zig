@@ -65,7 +65,8 @@ pub fn drawBitmap(
     return self.vtable.drawBitmap(self.ptr, x, y, w, h, pixels);
 }
 
-pub fn make(comptime lib: type, comptime Impl: type) type {
+pub fn make(comptime grt: type, comptime Impl: type) type {
+    _ = grt;
     comptime {
         if (!@hasDecl(Impl, "Config")) @compileError("Display impl must define Config");
         if (!@hasDecl(Impl, "init")) @compileError("Display impl must define init");
@@ -85,7 +86,7 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
         );
     }
 
-    const Allocator = lib.mem.Allocator;
+    const Allocator = glib.std.mem.Allocator;
     const Ctx = struct {
         allocator: Allocator,
         impl: Impl,
@@ -176,9 +177,9 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn exposesGeometryAndDrawVtableSurface(allocator: lib.mem.Allocator) !void {
+        fn exposesGeometryAndDrawVtableSurface(allocator: glib.std.mem.Allocator) !void {
             const State = struct {
                 deinit_calls: usize = 0,
                 draws: usize = 0,
@@ -191,7 +192,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             const Impl = struct {
                 pub const Config = struct {
-                    allocator: lib.mem.Allocator,
+                    allocator: glib.std.mem.Allocator,
                     state: *State,
                     width_px: u16 = 8,
                     height_px: u16 = 4,
@@ -239,7 +240,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             var state = State{};
-            var display = try make(lib, Impl).init(.{
+            var display = try make(grt, Impl).init(.{
                 .allocator = allocator,
                 .state = &state,
             });
@@ -252,15 +253,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 rgb(255, 255, 255),
             };
 
-            try lib.testing.expectEqual(@as(u16, 8), display.width());
-            try lib.testing.expectEqual(@as(u16, 4), display.height());
+            try grt.std.testing.expectEqual(@as(u16, 8), display.width());
+            try grt.std.testing.expectEqual(@as(u16, 4), display.height());
             try display.drawBitmap(1, 1, 2, 2, &pixels);
-            try lib.testing.expectEqual(@as(usize, 1), state.draws);
-            try lib.testing.expectEqual(@as(u16, 1), state.last_x);
-            try lib.testing.expectEqual(@as(u16, 1), state.last_y);
-            try lib.testing.expectEqual(@as(u16, 2), state.last_w);
-            try lib.testing.expectEqual(@as(u16, 2), state.last_h);
-            try lib.testing.expectEqualSlices(Rgb, pixels[0..], state.last_pixels);
+            try grt.std.testing.expectEqual(@as(usize, 1), state.draws);
+            try grt.std.testing.expectEqual(@as(u16, 1), state.last_x);
+            try grt.std.testing.expectEqual(@as(u16, 1), state.last_y);
+            try grt.std.testing.expectEqual(@as(u16, 2), state.last_w);
+            try grt.std.testing.expectEqual(@as(u16, 2), state.last_h);
+            try grt.std.testing.expectEqualSlices(Rgb, pixels[0..], state.last_pixels);
 
             comptime {
                 _ = root.deinit;
@@ -269,21 +270,21 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 _ = root.drawBitmap;
                 _ = root.rgb;
                 _ = root.make;
-                _ = make(lib, Impl).init;
-                if (!@hasField(make(lib, Impl).Config, "allocator")) {
+                _ = make(grt, Impl).init;
+                if (!@hasField(make(grt, Impl).Config, "allocator")) {
                     @compileError("make config must expose allocator");
                 }
             }
         }
 
-        fn validatesBoundsBeforeCallingBackend(allocator: lib.mem.Allocator) !void {
+        fn validatesBoundsBeforeCallingBackend(allocator: glib.std.mem.Allocator) !void {
             const State = struct {
                 draws: usize = 0,
             };
 
             const Impl = struct {
                 pub const Config = struct {
-                    allocator: lib.mem.Allocator,
+                    allocator: glib.std.mem.Allocator,
                     state: *State,
                 };
 
@@ -318,7 +319,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             var state = State{};
-            var display = try make(lib, Impl).init(.{
+            var display = try make(grt, Impl).init(.{
                 .allocator = allocator,
                 .state = &state,
             });
@@ -326,19 +327,19 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             const pixels = [_]Rgb{rgb(255, 0, 0)} ** 4;
 
-            try lib.testing.expectError(error.OutOfBounds, display.drawBitmap(3, 3, 2, 2, &pixels));
-            try lib.testing.expectError(error.OutOfBounds, display.drawBitmap(0, 0, 2, 2, pixels[0..3]));
-            try lib.testing.expectEqual(@as(usize, 0), state.draws);
+            try grt.std.testing.expectError(error.OutOfBounds, display.drawBitmap(3, 3, 2, 2, &pixels));
+            try grt.std.testing.expectError(error.OutOfBounds, display.drawBitmap(0, 0, 2, 2, pixels[0..3]));
+            try grt.std.testing.expectEqual(@as(usize, 0), state.draws);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             TestCase.exposesGeometryAndDrawVtableSurface(allocator) catch |err| {
@@ -352,7 +353,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

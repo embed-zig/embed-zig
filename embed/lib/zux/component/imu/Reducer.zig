@@ -191,9 +191,9 @@ fn motionKind(action: motion.Action) State.Motion {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn forwardsRawAccelAndEmitsShake(testing: anytype) !void {
+        fn forwardsRawAccelAndEmitsShake() !void {
             const Collector = struct {
                 raw_count: usize = 0,
                 motion_count: usize = 0,
@@ -213,7 +213,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            var detector_impl = Reducer.init(testing.allocator, .{
+            var detector_impl = Reducer.init(grt.std.testing.allocator, .{
                 .shake_threshold_g = 1.0,
                 .shake_min_duration_ms = 50,
                 .shake_max_duration_ms = 500,
@@ -226,10 +226,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             inline for ([_]struct { ts: i128, x: f32, y: f32, z: f32 }{
                 .{ .ts = 0, .x = 0, .y = 0, .z = 1.0 },
-                .{ .ts = 10 * lib.time.ns_per_ms, .x = 2.0, .y = 0, .z = 1.0 },
-                .{ .ts = 20 * lib.time.ns_per_ms, .x = -2.0, .y = 0, .z = 1.0 },
-                .{ .ts = 30 * lib.time.ns_per_ms, .x = 2.0, .y = 0, .z = 1.0 },
-                .{ .ts = 80 * lib.time.ns_per_ms, .x = 0, .y = 0, .z = 1.0 },
+                .{ .ts = 10 * grt.std.time.ns_per_ms, .x = 2.0, .y = 0, .z = 1.0 },
+                .{ .ts = 20 * grt.std.time.ns_per_ms, .x = -2.0, .y = 0, .z = 1.0 },
+                .{ .ts = 30 * grt.std.time.ns_per_ms, .x = 2.0, .y = 0, .z = 1.0 },
+                .{ .ts = 80 * grt.std.time.ns_per_ms, .x = 0, .y = 0, .z = 1.0 },
             }) |sample| {
                 _ = try detector.process(.{
                     .origin = .source,
@@ -245,12 +245,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 });
             }
 
-            try testing.expectEqual(@as(usize, 5), collector.raw_count);
-            try testing.expectEqual(@as(usize, 0), collector.motion_count);
+            try grt.std.testing.expectEqual(@as(usize, 5), collector.raw_count);
+            try grt.std.testing.expectEqual(@as(usize, 0), collector.motion_count);
 
             _ = try detector.process(.{
                 .origin = .source,
-                .timestamp_ns = 140 * lib.time.ns_per_ms,
+                .timestamp_ns = 140 * grt.std.time.ns_per_ms,
                 .body = .{
                     .raw_imu_accel = .{
                         .source_id = 7,
@@ -261,16 +261,16 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expectEqual(@as(usize, 6), collector.raw_count);
-            try testing.expectEqual(@as(usize, 1), collector.motion_count);
-            try testing.expectEqual(@as(u32, 7), collector.last_source_id);
+            try grt.std.testing.expectEqual(@as(usize, 6), collector.raw_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), collector.motion_count);
+            try grt.std.testing.expectEqual(@as(u32, 7), collector.last_source_id);
             switch (collector.last_motion.?) {
-                .shake => |shake| try testing.expect(shake.magnitude >= 1.0),
-                else => try testing.expect(false),
+                .shake => |shake| try grt.std.testing.expect(shake.magnitude >= 1.0),
+                else => try grt.std.testing.expect(false),
             }
         }
 
-        fn forwardsUnrelatedMessagesUnchanged(testing: anytype) !void {
+        fn forwardsUnrelatedMessagesUnchanged() !void {
             const Collector = struct {
                 saw_tick: bool = false,
 
@@ -282,21 +282,21 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            var detector_impl = Reducer.initDefault(testing.allocator);
+            var detector_impl = Reducer.initDefault(grt.std.testing.allocator);
             defer detector_impl.deinit();
             var collector = Collector{};
             var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
-            try testing.expectEqual(@as(usize, 1), try detector.process(.{
+            try grt.std.testing.expectEqual(@as(usize, 1), try detector.process(.{
                 .origin = .timer,
                 .timestamp_ns = 99,
                 .body = .{ .tick = .{} },
             }));
-            try testing.expect(collector.saw_tick);
+            try grt.std.testing.expect(collector.saw_tick);
         }
 
-        fn perSourceDetectorsAreIsolated(testing: anytype) !void {
+        fn perSourceDetectorsAreIsolated() !void {
             const Collector = struct {
                 motion_source_ids: [4]u32 = [_]u32{0} ** 4,
                 motion_count: usize = 0,
@@ -313,7 +313,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            var detector_impl = Reducer.init(testing.allocator, .{
+            var detector_impl = Reducer.init(grt.std.testing.allocator, .{
                 .shake_threshold_g = 1.0,
                 .shake_min_duration_ms = 50,
                 .shake_max_duration_ms = 500,
@@ -336,7 +336,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }) |sample| {
                 _ = try detector.process(.{
                     .origin = .source,
-                    .timestamp_ns = sample.ts_ms * lib.time.ns_per_ms,
+                    .timestamp_ns = sample.ts_ms * grt.std.time.ns_per_ms,
                     .body = .{
                         .raw_imu_accel = .{
                             .source_id = sample.source_id,
@@ -348,11 +348,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 });
             }
 
-            try testing.expectEqual(@as(usize, 1), collector.motion_count);
-            try testing.expectEqual(@as(u32, 1), collector.motion_source_ids[0]);
+            try grt.std.testing.expectEqual(@as(usize, 1), collector.motion_count);
+            try grt.std.testing.expectEqual(@as(u32, 1), collector.motion_source_ids[0]);
         }
 
-        fn speakerLikeVibrationOnlyForwardsRawSamples(testing: anytype) !void {
+        fn speakerLikeVibrationOnlyForwardsRawSamples() !void {
             const Collector = struct {
                 raw_count: usize = 0,
                 motion_count: usize = 0,
@@ -366,7 +366,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            var detector_impl = Reducer.init(testing.allocator, .{
+            var detector_impl = Reducer.init(grt.std.testing.allocator, .{
                 .shake_threshold_g = 1.0,
                 .shake_min_duration_ms = 50,
                 .shake_max_duration_ms = 500,
@@ -390,7 +390,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }) |sample| {
                 _ = try detector.process(.{
                     .origin = .source,
-                    .timestamp_ns = sample.ts_ms * lib.time.ns_per_ms,
+                    .timestamp_ns = sample.ts_ms * grt.std.time.ns_per_ms,
                     .body = .{
                         .raw_imu_accel = .{
                             .source_id = 9,
@@ -402,10 +402,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 });
             }
 
-            try testing.expectEqual(@as(usize, 9), collector.raw_count);
-            try testing.expectEqual(@as(usize, 0), collector.motion_count);
+            try grt.std.testing.expectEqual(@as(usize, 9), collector.raw_count);
+            try grt.std.testing.expectEqual(@as(usize, 0), collector.motion_count);
         }
-        fn forwardsRawGyroAndEmitsFlipAfterFaceChange(testing: anytype) !void {
+        fn forwardsRawGyroAndEmitsFlipAfterFaceChange() !void {
             const Collector = struct {
                 raw_accel_count: usize = 0,
                 raw_gyro_count: usize = 0,
@@ -425,7 +425,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            var detector_impl = Reducer.init(testing.allocator, .{
+            var detector_impl = Reducer.init(grt.std.testing.allocator, .{
                 .shake_threshold_g = 9999,
                 .tilt_threshold_deg = 9999,
                 .flip_gyro_threshold_dps = 90.0,
@@ -451,7 +451,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             });
             _ = try detector.process(.{
                 .origin = .source,
-                .timestamp_ns = 220 * lib.time.ns_per_ms,
+                .timestamp_ns = 220 * grt.std.time.ns_per_ms,
                 .body = .{
                     .raw_imu_gyro = .{
                         .source_id = 5,
@@ -463,7 +463,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             });
             _ = try detector.process(.{
                 .origin = .source,
-                .timestamp_ns = 260 * lib.time.ns_per_ms,
+                .timestamp_ns = 260 * grt.std.time.ns_per_ms,
                 .body = .{
                     .raw_imu_accel = .{
                         .source_id = 5,
@@ -474,18 +474,18 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expectEqual(@as(usize, 2), collector.raw_accel_count);
-            try testing.expectEqual(@as(usize, 1), collector.raw_gyro_count);
-            try testing.expectEqual(@as(usize, 1), collector.motion_count);
+            try grt.std.testing.expectEqual(@as(usize, 2), collector.raw_accel_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), collector.raw_gyro_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), collector.motion_count);
             switch (collector.last_motion.?) {
                 .flip => |flip| {
-                    try testing.expectEqual(motion.Face.up, flip.from);
-                    try testing.expectEqual(motion.Face.down, flip.to);
+                    try grt.std.testing.expectEqual(motion.Face.up, flip.from);
+                    try grt.std.testing.expectEqual(motion.Face.down, flip.to);
                 },
-                else => try testing.expect(false),
+                else => try grt.std.testing.expect(false),
             }
         }
-        fn rawAccelClearsTransientMotionState(testing: anytype) !void {
+        fn rawAccelClearsTransientMotionState() !void {
             const FakeStore = struct {
                 value: State = .{},
 
@@ -519,51 +519,50 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 }, undefined);
 
-                try testing.expectEqual(@as(u32, 17), store.value.source_id);
-                try testing.expect(store.value.motion == null);
+                try grt.std.testing.expectEqual(@as(u32, 17), store.value.source_id);
+                try grt.std.testing.expect(store.value.motion == null);
             }
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.forwardsRawAccelAndEmitsShake(testing) catch |err| {
+            TestCase.forwardsRawAccelAndEmitsShake() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.forwardsUnrelatedMessagesUnchanged(testing) catch |err| {
+            TestCase.forwardsUnrelatedMessagesUnchanged() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.perSourceDetectorsAreIsolated(testing) catch |err| {
+            TestCase.perSourceDetectorsAreIsolated() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.speakerLikeVibrationOnlyForwardsRawSamples(testing) catch |err| {
+            TestCase.speakerLikeVibrationOnlyForwardsRawSamples() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.forwardsRawGyroAndEmitsFlipAfterFaceChange(testing) catch |err| {
+            TestCase.forwardsRawGyroAndEmitsFlipAfterFaceChange() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.rawAccelClearsTransientMotionState(testing) catch |err| {
+            TestCase.rawAccelClearsTransientMotionState() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

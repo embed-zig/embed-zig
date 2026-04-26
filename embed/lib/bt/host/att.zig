@@ -456,36 +456,36 @@ pub fn encodeConfirmation(buf: []u8) []const u8 {
     return buf[0..1];
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const uuid16 = UUID.from16(0x180D);
             const uuid128 = UUID.from128([_]u8{1} ** 16);
-            try lib.testing.expectEqual(@as(usize, 2), uuid16.byteLen());
-            try lib.testing.expectEqual(@as(usize, 16), uuid128.byteLen());
-            try lib.testing.expect(uuid16.eql(UUID.from16(0x180D)));
-            try lib.testing.expect(!uuid16.eql(uuid128));
+            try grt.std.testing.expectEqual(@as(usize, 2), uuid16.byteLen());
+            try grt.std.testing.expectEqual(@as(usize, 16), uuid128.byteLen());
+            try grt.std.testing.expect(uuid16.eql(UUID.from16(0x180D)));
+            try grt.std.testing.expect(!uuid16.eql(uuid128));
 
             var uuid_buf: [16]u8 = undefined;
-            try lib.testing.expectEqual(@as(usize, 2), uuid16.writeTo(uuid_buf[0..]));
-            try lib.testing.expectEqual(@as(u8, 0x0D), uuid_buf[0]);
-            try lib.testing.expectEqual(@as(u8, 0x18), uuid_buf[1]);
-            try lib.testing.expect(UUID.readFrom(uuid_buf[0..2], 2).?.eql(uuid16));
-            try lib.testing.expect(UUID.readFrom(&.{ 1, 2, 3 }, 16) == null);
+            try grt.std.testing.expectEqual(@as(usize, 2), uuid16.writeTo(uuid_buf[0..]));
+            try grt.std.testing.expectEqual(@as(u8, 0x0D), uuid_buf[0]);
+            try grt.std.testing.expectEqual(@as(u8, 0x18), uuid_buf[1]);
+            try grt.std.testing.expect(UUID.readFrom(uuid_buf[0..2], 2).?.eql(uuid16));
+            try grt.std.testing.expect(UUID.readFrom(&.{ 1, 2, 3 }, 16) == null);
 
             {
                 var buf: [32]u8 = undefined;
                 const req = encodeMtuRequest(&buf, 256);
                 const pdu = decodePdu(req) orelse return error.DecodeFailed;
                 switch (pdu) {
-                    .exchange_mtu_request => |mtu| try lib.testing.expectEqual(@as(u16, 256), mtu.client_mtu),
+                    .exchange_mtu_request => |mtu| try grt.std.testing.expectEqual(@as(u16, 256), mtu.client_mtu),
                     else => return error.WrongVariant,
                 }
 
                 const resp = encodeMtuResponse(&buf, 185);
                 const resp_pdu = decodePdu(resp) orelse return error.DecodeFailed;
                 switch (resp_pdu) {
-                    .exchange_mtu_response => |mtu| try lib.testing.expectEqual(@as(u16, 185), mtu.server_mtu),
+                    .exchange_mtu_response => |mtu| try grt.std.testing.expectEqual(@as(u16, 185), mtu.server_mtu),
                     else => return error.WrongVariant,
                 }
             }
@@ -496,9 +496,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const pdu = decodePdu(req) orelse return error.DecodeFailed;
                 switch (pdu) {
                     .read_by_type_request => |typed| {
-                        try lib.testing.expectEqual(@as(u16, 1), typed.start_handle);
-                        try lib.testing.expectEqual(@as(u16, 0xFFFF), typed.end_handle);
-                        try lib.testing.expect(typed.uuid.eql(UUID.from16(PRIMARY_SERVICE_UUID)));
+                        try grt.std.testing.expectEqual(@as(u16, 1), typed.start_handle);
+                        try grt.std.testing.expectEqual(@as(u16, 0xFFFF), typed.end_handle);
+                        try grt.std.testing.expect(typed.uuid.eql(UUID.from16(PRIMARY_SERVICE_UUID)));
                     },
                     else => return error.WrongVariant,
                 }
@@ -510,8 +510,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const pdu = decodePdu(req) orelse return error.DecodeFailed;
                 switch (pdu) {
                     .write_request => |write_req| {
-                        try lib.testing.expectEqual(@as(u16, 0x0025), write_req.handle);
-                        try lib.testing.expectEqualSlices(u8, "zig", write_req.value);
+                        try grt.std.testing.expectEqual(@as(u16, 0x0025), write_req.handle);
+                        try grt.std.testing.expectEqualSlices(u8, "zig", write_req.value);
                     },
                     else => return error.WrongVariant,
                 }
@@ -520,8 +520,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const cmd_pdu = decodePdu(cmd) orelse return error.DecodeFailed;
                 switch (cmd_pdu) {
                     .write_command => |write_cmd| {
-                        try lib.testing.expectEqual(@as(u16, 0x0026), write_cmd.handle);
-                        try lib.testing.expectEqualSlices(u8, "bee", write_cmd.value);
+                        try grt.std.testing.expectEqual(@as(u16, 0x0026), write_cmd.handle);
+                        try grt.std.testing.expectEqualSlices(u8, "bee", write_cmd.value);
                     },
                     else => return error.WrongVariant,
                 }
@@ -533,8 +533,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const notify_pdu = decodePdu(notify) orelse return error.DecodeFailed;
                 switch (notify_pdu) {
                     .notification => |n| {
-                        try lib.testing.expectEqual(@as(u16, 0x0042), n.handle);
-                        try lib.testing.expectEqualSlices(u8, "ok", n.value);
+                        try grt.std.testing.expectEqual(@as(u16, 0x0042), n.handle);
+                        try grt.std.testing.expectEqualSlices(u8, "ok", n.value);
                     },
                     else => return error.WrongVariant,
                 }
@@ -543,25 +543,25 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const decoded_err = decodePdu(err_pdu) orelse return error.DecodeFailed;
                 switch (decoded_err) {
                     .error_response => |err_resp| {
-                        try lib.testing.expectEqual(READ_REQUEST, err_resp.request_opcode);
-                        try lib.testing.expectEqual(@as(u16, 0x0001), err_resp.handle);
-                        try lib.testing.expectEqual(ErrorCode.invalid_handle, err_resp.error_code);
+                        try grt.std.testing.expectEqual(READ_REQUEST, err_resp.request_opcode);
+                        try grt.std.testing.expectEqual(@as(u16, 0x0001), err_resp.handle);
+                        try grt.std.testing.expectEqual(ErrorCode.invalid_handle, err_resp.error_code);
                     },
                     else => return error.WrongVariant,
                 }
             }
 
-            try lib.testing.expect(decodePdu(&.{}) == null);
-            try lib.testing.expect(decodePdu(&.{READ_REQUEST}) == null);
+            try grt.std.testing.expect(decodePdu(&.{}) == null);
+            try grt.std.testing.expect(decodePdu(&.{READ_REQUEST}) == null);
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -572,7 +572,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

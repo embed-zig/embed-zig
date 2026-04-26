@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
 const modem_api = @import("drivers");
@@ -358,7 +359,7 @@ pub fn make(comptime Impl: type) type {
                     try impl.move_flow(sample_label, .forward, edge);
                 }
 
-                fn available(impl: *Impl, allocator: impl_lib.mem.Allocator) anyerror![]SampleMove {
+                fn available(impl: *Impl, allocator: glib.std.mem.Allocator) anyerror![]SampleMove {
                     return try impl.available_moves(sample_label, allocator);
                 }
 
@@ -657,7 +658,7 @@ pub fn make(comptime Impl: type) type {
         pub fn available_moves(
             self: *Self,
             comptime label: FlowLabel,
-            allocator: Lib.mem.Allocator,
+            allocator: glib.std.mem.Allocator,
         ) ![]FlowMove(label) {
             return try self.impl.available_moves(label, allocator);
         }

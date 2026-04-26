@@ -237,7 +237,7 @@ fn decodeLeConnectionUpdateComplete(params: []const u8) Event {
     } };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             {
@@ -245,9 +245,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const evt = decode(&raw) orelse return error.DecodeFailed;
                 switch (evt) {
                     .command_complete => |cc| {
-                        try lib.testing.expectEqual(@as(u8, 1), cc.num_cmd_packets);
-                        try lib.testing.expectEqual(@as(u16, 0x0C03), cc.opcode);
-                        try lib.testing.expect(cc.status.isSuccess());
+                        try grt.std.testing.expectEqual(@as(u8, 1), cc.num_cmd_packets);
+                        try grt.std.testing.expectEqual(@as(u16, 0x0C03), cc.opcode);
+                        try grt.std.testing.expect(cc.status.isSuccess());
                     },
                     else => return error.WrongEvent,
                 }
@@ -258,8 +258,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const evt = decode(&raw) orelse return error.DecodeFailed;
                 switch (evt) {
                     .command_status => |cs| {
-                        try lib.testing.expect(cs.status.isSuccess());
-                        try lib.testing.expectEqual(@as(u16, 0x200D), cs.opcode);
+                        try grt.std.testing.expect(cs.status.isSuccess());
+                        try grt.std.testing.expectEqual(@as(u16, 0x200D), cs.opcode);
                     },
                     else => return error.WrongEvent,
                 }
@@ -270,9 +270,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const evt = decode(&raw) orelse return error.DecodeFailed;
                 switch (evt) {
                     .disconnection_complete => |dc| {
-                        try lib.testing.expect(dc.status.isSuccess());
-                        try lib.testing.expectEqual(@as(u16, 0x0040), dc.conn_handle);
-                        try lib.testing.expectEqual(Status.remote_user_terminated, dc.reason);
+                        try grt.std.testing.expect(dc.status.isSuccess());
+                        try grt.std.testing.expectEqual(@as(u16, 0x0040), dc.conn_handle);
+                        try grt.std.testing.expectEqual(Status.remote_user_terminated, dc.reason);
                     },
                     else => return error.WrongEvent,
                 }
@@ -283,9 +283,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const evt = decode(&raw) orelse return error.DecodeFailed;
                 switch (evt) {
                     .num_completed_packets => |ncp| {
-                        try lib.testing.expectEqual(@as(u8, 1), ncp.num_handles);
-                        try lib.testing.expectEqual(@as(?u16, 0x0040), ncp.getHandle(0));
-                        try lib.testing.expectEqual(@as(?u16, 2), ncp.getCount(0));
+                        try grt.std.testing.expectEqual(@as(u8, 1), ncp.num_handles);
+                        try grt.std.testing.expectEqual(@as(?u16, 0x0040), ncp.getHandle(0));
+                        try grt.std.testing.expectEqual(@as(?u16, 2), ncp.getCount(0));
                     },
                     else => return error.WrongEvent,
                 }
@@ -303,17 +303,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 raw[7] = 0x01;
                 raw[8] = 0x00;
                 @memcpy(raw[9..15], &[6]u8{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF });
-                lib.mem.writeInt(u16, raw[15..17], 0x0018, .little);
-                lib.mem.writeInt(u16, raw[17..19], 0x0000, .little);
-                lib.mem.writeInt(u16, raw[19..21], 0x00C8, .little);
+                grt.std.mem.writeInt(u16, raw[15..17], 0x0018, .little);
+                grt.std.mem.writeInt(u16, raw[17..19], 0x0000, .little);
+                grt.std.mem.writeInt(u16, raw[19..21], 0x00C8, .little);
 
                 const evt = decode(&raw) orelse return error.DecodeFailed;
                 switch (evt) {
                     .le_connection_complete => |lc| {
-                        try lib.testing.expect(lc.status.isSuccess());
-                        try lib.testing.expectEqual(@as(u16, 0x0040), lc.conn_handle);
-                        try lib.testing.expectEqual(@as(u8, 1), lc.role);
-                        try lib.testing.expectEqual(@as(u8, 0xAA), lc.peer_addr[0]);
+                        try grt.std.testing.expect(lc.status.isSuccess());
+                        try grt.std.testing.expectEqual(@as(u16, 0x0040), lc.conn_handle);
+                        try grt.std.testing.expectEqual(@as(u8, 1), lc.role);
+                        try grt.std.testing.expectEqual(@as(u8, 0xAA), lc.peer_addr[0]);
                     },
                     else => return error.WrongEvent,
                 }
@@ -333,20 +333,20 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 @memcpy(raw[9..15], &[6]u8{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF });
                 @memcpy(raw[15..21], &[6]u8{ 1, 2, 3, 4, 5, 6 });
                 @memcpy(raw[21..27], &[6]u8{ 7, 8, 9, 10, 11, 12 });
-                lib.mem.writeInt(u16, raw[27..29], 0x0018, .little);
-                lib.mem.writeInt(u16, raw[29..31], 0x0001, .little);
-                lib.mem.writeInt(u16, raw[31..33], 0x00C8, .little);
+                grt.std.mem.writeInt(u16, raw[27..29], 0x0018, .little);
+                grt.std.mem.writeInt(u16, raw[29..31], 0x0001, .little);
+                grt.std.mem.writeInt(u16, raw[31..33], 0x00C8, .little);
                 raw[33] = 0;
 
                 const evt = decode(&raw) orelse return error.DecodeFailed;
                 switch (evt) {
                     .le_connection_complete => |lc| {
-                        try lib.testing.expect(lc.status.isSuccess());
-                        try lib.testing.expectEqual(@as(u16, 0x0040), lc.conn_handle);
-                        try lib.testing.expectEqual(@as(u8, 0xAA), lc.peer_addr[0]);
-                        try lib.testing.expectEqual(@as(u16, 0x0018), lc.conn_interval);
-                        try lib.testing.expectEqual(@as(u16, 0x0001), lc.conn_latency);
-                        try lib.testing.expectEqual(@as(u16, 0x00C8), lc.supervision_timeout);
+                        try grt.std.testing.expect(lc.status.isSuccess());
+                        try grt.std.testing.expectEqual(@as(u16, 0x0040), lc.conn_handle);
+                        try grt.std.testing.expectEqual(@as(u8, 0xAA), lc.peer_addr[0]);
+                        try grt.std.testing.expectEqual(@as(u16, 0x0018), lc.conn_interval);
+                        try grt.std.testing.expectEqual(@as(u16, 0x0001), lc.conn_latency);
+                        try grt.std.testing.expectEqual(@as(u16, 0x00C8), lc.supervision_timeout);
                     },
                     else => return error.WrongEvent,
                 }
@@ -357,8 +357,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const evt = decode(&raw) orelse return error.DecodeFailed;
                 switch (evt) {
                     .unknown => |u| {
-                        try lib.testing.expectEqual(@as(u8, 0xFF), u.event_code);
-                        try lib.testing.expectEqual(@as(usize, 2), u.data.len);
+                        try grt.std.testing.expectEqual(@as(u8, 0xFF), u.event_code);
+                        try grt.std.testing.expectEqual(@as(usize, 2), u.data.len);
                     },
                     else => return error.WrongEvent,
                 }
@@ -366,22 +366,22 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             const no_indicator = decodeNoIndicator(&.{ 0x0E, 0x04, 0x01, 0x03, 0x0C, 0x00 }) orelse return error.DecodeFailed;
             switch (no_indicator) {
-                .command_complete => |cc| try lib.testing.expectEqual(@as(u16, 0x0C03), cc.opcode),
+                .command_complete => |cc| try grt.std.testing.expectEqual(@as(u16, 0x0C03), cc.opcode),
                 else => return error.WrongEvent,
             }
 
-            try lib.testing.expectEqual(@as(?Event, null), decode(&.{0x04}));
-            try lib.testing.expectEqual(@as(?Event, null), decode(&.{}));
-            try lib.testing.expectEqual(@as(?Event, null), decode(&.{ 0x02, 0x0E, 0x04, 0x01, 0x03, 0x0C, 0x00 }));
+            try grt.std.testing.expectEqual(@as(?Event, null), decode(&.{0x04}));
+            try grt.std.testing.expectEqual(@as(?Event, null), decode(&.{}));
+            try grt.std.testing.expectEqual(@as(?Event, null), decode(&.{ 0x02, 0x0E, 0x04, 0x01, 0x03, 0x0C, 0x00 }));
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -392,7 +392,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

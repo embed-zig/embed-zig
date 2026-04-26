@@ -1,21 +1,22 @@
+const glib = @import("glib");
 const Chunk = @import("../../../host/xfer.zig").Chunk;
 
 pub const test_conn_handle: u16 = 0x0042;
 pub const test_service_uuid: u16 = 0x180D;
 pub const test_char_uuid: u16 = 0x2A37;
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
-    const ByteChannel = Channel([]u8);
+pub fn make(comptime grt: type) type {
+    const ByteChannel = grt.sync.Channel([]u8);
 
     return struct {
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
         left_to_right: ByteChannel,
         right_to_left: ByteChannel,
 
         const Self = @This();
 
         pub const Endpoint = struct {
-            allocator: lib.mem.Allocator,
+            allocator: glib.std.mem.Allocator,
             inbound: *ByteChannel,
             outbound: *ByteChannel,
             drop_seq_once: ?u16 = null,
@@ -86,7 +87,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) type {
             }
         };
 
-        pub fn init(allocator: lib.mem.Allocator) !Self {
+        pub fn init(allocator: glib.std.mem.Allocator) !Self {
             return .{
                 .allocator = allocator,
                 .left_to_right = try ByteChannel.make(allocator, 64),

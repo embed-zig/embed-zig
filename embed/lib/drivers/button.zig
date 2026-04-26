@@ -99,7 +99,7 @@ pub const Grouped = struct {
     }
 };
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn singleInitCallsIsPressed() !void {
             const Impl = struct {
@@ -114,8 +114,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var impl = Impl{};
             const button = Single.init(Impl, &impl);
 
-            try lib.testing.expect(try button.isPressed());
-            try lib.testing.expect(impl.called);
+            try grt.std.testing.expect(try button.isPressed());
+            try grt.std.testing.expect(impl.called);
         }
 
         fn singleFromGpioButtonCallsIsPressed() !void {
@@ -128,7 +128,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var impl = Impl{};
             const button = Single.fromGpioButton(&impl);
 
-            try lib.testing.expect(!(try button.isPressed()));
+            try grt.std.testing.expect(!(try button.isPressed()));
         }
 
         fn groupedInitSupportsPressedButtonId() !void {
@@ -144,8 +144,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var impl = Impl{};
             const button = Grouped.init(Impl, &impl);
 
-            try lib.testing.expectEqual(@as(?u32, 3), try button.pressedButtonId());
-            try lib.testing.expect(impl.called);
+            try grt.std.testing.expectEqual(@as(?u32, 3), try button.pressedButtonId());
+            try grt.std.testing.expect(impl.called);
         }
 
         fn groupedInitSupportsPressedButton() !void {
@@ -158,7 +158,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var impl = Impl{};
             const button = Grouped.init(Impl, &impl);
 
-            try lib.testing.expectEqual(@as(?u32, 4), try button.pressedButton());
+            try grt.std.testing.expectEqual(@as(?u32, 4), try button.pressedButton());
         }
 
         fn groupedFromAdcButtonUsesPressedButton() !void {
@@ -171,17 +171,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var impl = Impl{};
             const button = Grouped.fromAdcButton(&impl);
 
-            try lib.testing.expectEqual(@as(?u32, null), try button.pressedButtonId());
+            try grt.std.testing.expectEqual(@as(?u32, null), try button.pressedButtonId());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -208,7 +208,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -4,22 +4,21 @@ const harness_mod = @import("harness.zig");
 const write_mod = @import("../../../host/xfer/write.zig");
 const recv_mod = @import("../../../host/xfer/recv.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
-    return glib.testing.TestRunner.fromFn(lib, 96 * 1024, struct {
-        fn run(t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
+    return glib.testing.TestRunner.fromFn(grt.std, 96 * 1024, struct {
+        fn run(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
             _ = t;
-            try runCase(lib, Channel, allocator);
+            try runCase(grt, allocator);
         }
     }.run);
 }
 
-pub fn run(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.mem.Allocator) !void {
-    try runCase(lib, Channel, allocator);
+pub fn run(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
+    try runCase(grt, allocator);
 }
 
-fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const Harness = harness_mod.make(lib, Channel);
+fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
+    const Harness = harness_mod.make(grt);
 
     var harness = try Harness.init(allocator);
     defer harness.deinit();
@@ -28,13 +27,13 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
     harness_mod.fillPattern(&expected, 0x31);
 
     const WriteTask = struct {
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
         transport: Harness.Endpoint,
         expected: []const u8,
         err: ?anyerror = null,
 
         fn run(self: *@This()) void {
-            write_mod.write(lib, self.allocator, &self.transport, self.expected, .{
+            write_mod.write(grt, self.allocator, &self.transport, self.expected, .{
                 .att_mtu = 23,
                 .timeout_ms = 20,
                 .send_redundancy = 1,
@@ -47,13 +46,13 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
     };
 
     const RecvTask = struct {
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
         transport: Harness.Endpoint,
         result: ?[]u8 = null,
         err: ?anyerror = null,
 
         fn run(self: *@This()) void {
-            self.result = recv_mod.recv(lib, self.allocator, &self.transport, .{
+            self.result = recv_mod.recv(grt, self.allocator, &self.transport, .{
                 .att_mtu = 23,
                 .timeout_ms = 20,
                 .max_timeout_retries = 3,
@@ -74,14 +73,14 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
         .transport = harness.right(),
     };
 
-    const write_thread = try lib.Thread.spawn(.{}, WriteTask.run, .{&write_task});
-    const recv_thread = try lib.Thread.spawn(.{}, RecvTask.run, .{&recv_task});
+    const write_thread = try grt.std.Thread.spawn(.{}, WriteTask.run, .{&write_task});
+    const recv_thread = try grt.std.Thread.spawn(.{}, RecvTask.run, .{&recv_task});
     write_thread.join();
     recv_thread.join();
 
-    try testing.expect(write_task.err == null);
-    try testing.expect(recv_task.err == null);
+    try grt.std.testing.expect(write_task.err == null);
+    try grt.std.testing.expect(recv_task.err == null);
     const result = recv_task.result orelse return error.MissingRecvResult;
     defer allocator.free(result);
-    try testing.expectEqualSlices(u8, &expected, result);
+    try grt.std.testing.expectEqualSlices(u8, &expected, result);
 }

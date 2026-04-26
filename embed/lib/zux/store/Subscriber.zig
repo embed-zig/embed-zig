@@ -43,9 +43,9 @@ pub fn init(pointer: anytype) Subscriber {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn init_and_notify(testing: anytype, _: lib.mem.Allocator) !void {
+        fn init_and_notify(_: glib.std.mem.Allocator) !void {
             const Impl = struct {
                 called: bool = false,
                 label: []const u8 = "",
@@ -62,30 +62,29 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const subscriber = Subscriber.init(&impl);
             subscriber.notify(.{ .label = "zux/test", .tick_count = 7 });
 
-            try testing.expect(impl.called);
-            try testing.expectEqualStrings("zux/test", impl.label);
-            try testing.expectEqual(@as(u64, 7), impl.tick_count);
+            try grt.std.testing.expect(impl.called);
+            try grt.std.testing.expectEqualStrings("zux/test", impl.label);
+            try grt.std.testing.expectEqual(@as(u64, 7), impl.tick_count);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.init_and_notify(testing, allocator) catch |err| {
+            TestCase.init_and_notify(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

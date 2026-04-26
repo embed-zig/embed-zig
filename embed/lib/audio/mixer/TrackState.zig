@@ -5,9 +5,9 @@ const Format = @import("Format.zig");
 const RingBufferMod = @import("RingBuffer.zig");
 const glib = @import("glib");
 
-pub fn make(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
-    const RingBuffer = RingBufferMod.make(lib);
+pub fn make(comptime grt: type) type {
+    const Allocator = glib.std.mem.Allocator;
+    const RingBuffer = RingBufferMod.make(grt);
 
     return struct {
         allocator: Allocator,
@@ -117,12 +117,12 @@ pub fn make(comptime lib: type) type {
             const channels = @as(u64, self.output.channelCount());
             const ms = @as(u64, silence_ms);
 
-            if (rate != 0 and channels > lib.math.maxInt(u64) / rate) return error.Overflow;
+            if (rate != 0 and channels > grt.std.math.maxInt(u64) / rate) return error.Overflow;
             const rate_channels = rate * channels;
-            if (rate_channels != 0 and ms > lib.math.maxInt(u64) / rate_channels) return error.Overflow;
+            if (rate_channels != 0 and ms > grt.std.math.maxInt(u64) / rate_channels) return error.Overflow;
 
             const total_samples = (rate_channels * ms) / 1000;
-            if (total_samples > lib.math.maxInt(usize)) return error.Overflow;
+            if (total_samples > grt.std.math.maxInt(usize)) return error.Overflow;
 
             var remaining: usize = @intCast(total_samples);
             var zeros: [256]i16 = @splat(0);
@@ -182,7 +182,7 @@ pub fn make(comptime lib: type) type {
                 @as(u128, self.output.rate)) +
                 @as(u128, input_format.rate) -
                 1) / @as(u128, input_format.rate);
-            if (total_out_frames_128 > @as(u128, lib.math.maxInt(usize))) return error.Overflow;
+            if (total_out_frames_128 > @as(u128, grt.std.math.maxInt(usize))) return error.Overflow;
             const total_out_frames: usize = @intCast(total_out_frames_128);
             var out_frame_index: usize = 0;
             var scratch: [256]i16 = undefined;
@@ -235,12 +235,12 @@ fn convertSample(input: []const i16, input_format: Format, output_format: Format
     return @intCast(@divTrunc(left + right, 2));
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
-    const State = make(lib);
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const State = make(grt);
 
     const TestCase = struct {
-        fn closeWriteWithSilenceAppendsTail(testing: anytype) !void {
-            const state = try State.create(lib.testing.allocator, .{ .rate = 1000, .channels = .mono }, .{});
+        fn closeWriteWithSilenceAppendsTail() !void {
+            const state = try State.create(grt.std.testing.allocator, .{ .rate = 1000, .channels = .mono }, .{});
             defer state.destroy();
 
             try state.write(.{ .rate = 1000, .channels = .mono }, &.{9});
@@ -248,65 +248,64 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var out: [4]i16 = @splat(0);
             const n = state.mixInto(&out);
-            try testing.expectEqual(@as(usize, 3), n);
-            try testing.expectEqualSlices(i16, &.{ 9, 0, 0 }, out[0..3]);
-            try testing.expectEqual(@as(usize, 6), state.readBytes());
-            try testing.expect(state.isDrained());
+            try grt.std.testing.expectEqual(@as(usize, 3), n);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 9, 0, 0 }, out[0..3]);
+            try grt.std.testing.expectEqual(@as(usize, 6), state.readBytes());
+            try grt.std.testing.expect(state.isDrained());
         }
 
-        fn sanitizesNanGain(testing: anytype) !void {
-            const state = try State.create(lib.testing.allocator, .{ .rate = 1000, .channels = .mono }, .{});
+        fn sanitizesNanGain() !void {
+            const state = try State.create(grt.std.testing.allocator, .{ .rate = 1000, .channels = .mono }, .{});
             defer state.destroy();
 
-            state.setGain(lib.math.nan(f32));
+            state.setGain(grt.std.math.nan(f32));
             try state.write(.{ .rate = 1000, .channels = .mono }, &.{ 9, 9 });
 
             var out: [4]i16 = @splat(0);
             const n = state.mixInto(&out);
-            try testing.expectEqual(@as(usize, 2), n);
-            try testing.expectEqualSlices(i16, &.{ 0, 0 }, out[0..2]);
+            try grt.std.testing.expectEqual(@as(usize, 2), n);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 0, 0 }, out[0..2]);
         }
 
-        fn convertsFormat(testing: anytype) !void {
-            const state = try State.create(lib.testing.allocator, .{ .rate = 2000, .channels = .mono }, .{});
+        fn convertsFormat() !void {
+            const state = try State.create(grt.std.testing.allocator, .{ .rate = 2000, .channels = .mono }, .{});
             defer state.destroy();
 
             try state.write(.{ .rate = 1000, .channels = .stereo }, &.{ 10, 30, 20, 40 });
 
             var out: [8]i16 = @splat(0);
             const n = state.mixInto(&out);
-            try testing.expectEqual(@as(usize, 4), n);
-            try testing.expectEqualSlices(i16, &.{ 20, 20, 30, 30 }, out[0..4]);
+            try grt.std.testing.expectEqual(@as(usize, 4), n);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 20, 20, 30, 30 }, out[0..4]);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.closeWriteWithSilenceAppendsTail(testing) catch |err| {
+            TestCase.closeWriteWithSilenceAppendsTail() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.sanitizesNanGain(testing) catch |err| {
+            TestCase.sanitizesNanGain() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.convertsFormat(testing) catch |err| {
+            TestCase.convertsFormat() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

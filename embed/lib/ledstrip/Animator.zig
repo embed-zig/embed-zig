@@ -176,7 +176,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn fixedConvergesToTarget() !void {
             const F = Frame.make(4);
@@ -191,7 +191,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 if (ticks > 100) break;
             }
 
-            try lib.testing.expect(state.current.eql(F.solid(Color.red)));
+            try grt.std.testing.expect(state.current.eql(F.solid(Color.red)));
         }
 
         fn flashAlternatesFrames() !void {
@@ -212,14 +212,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             _ = Anim.tick(&state);
             const after_second_interval = state.current;
 
-            try lib.testing.expect(!after_first_interval.eql(after_second_interval));
+            try grt.std.testing.expect(!after_first_interval.eql(after_second_interval));
         }
 
         fn zeroFramesReturnsFalse() !void {
             const Anim = make(2, 4);
             var state = Anim.State{};
 
-            try lib.testing.expect(!Anim.tick(&state));
+            try grt.std.testing.expect(!Anim.tick(&state));
         }
 
         fn brightnessScalesOutput() !void {
@@ -231,8 +231,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             state.step_amount = 255;
 
             _ = Anim.tick(&state);
-            try lib.testing.expect(state.current.pixels[0].r < 200);
-            try lib.testing.expect(state.current.pixels[0].r > 50);
+            try grt.std.testing.expect(state.current.pixels[0].r < 200);
+            try grt.std.testing.expect(state.current.pixels[0].r > 50);
         }
 
         fn rotateAnimGeneratesRotatedFrames() !void {
@@ -249,9 +249,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .frame = frame,
                 .interval = 8,
             });
-            try lib.testing.expectEqual(@as(usize, 4), state.total_frames);
-            try lib.testing.expectEqual(Color.green, state.frames[1].pixels[0]);
-            try lib.testing.expectEqual(Color.blue, state.frames[2].pixels[0]);
+            try grt.std.testing.expectEqual(@as(usize, 4), state.total_frames);
+            try grt.std.testing.expectEqual(Color.green, state.frames[1].pixels[0]);
+            try grt.std.testing.expectEqual(Color.blue, state.frames[2].pixels[0]);
         }
 
         fn pingpongUsesTwoTargetFrames() !void {
@@ -264,9 +264,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .interval = 3,
             });
 
-            try lib.testing.expectEqual(@as(usize, 2), state.total_frames);
-            try lib.testing.expectEqual(Color.red, state.frames[0].pixels[0]);
-            try lib.testing.expectEqual(Color.blue, state.frames[1].pixels[0]);
+            try grt.std.testing.expectEqual(@as(usize, 2), state.total_frames);
+            try grt.std.testing.expectEqual(Color.red, state.frames[0].pixels[0]);
+            try grt.std.testing.expectEqual(Color.blue, state.frames[1].pixels[0]);
         }
 
         fn patternMutatorsPreserveBrightnessAndStepAmount() !void {
@@ -282,20 +282,20 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .frame = F.solid(Color.blue),
                 .interval = 3,
             });
-            try lib.testing.expectEqual(@as(u8, 123), state.brightness);
-            try lib.testing.expectEqual(@as(u8, 17), state.step_amount);
+            try grt.std.testing.expectEqual(@as(u8, 123), state.brightness);
+            try grt.std.testing.expectEqual(@as(u8, 17), state.step_amount);
 
             Anim.fixed(&state, .{ .frame = F.solid(Color.green) });
-            try lib.testing.expectEqual(@as(u8, 123), state.brightness);
-            try lib.testing.expectEqual(@as(u8, 17), state.step_amount);
+            try grt.std.testing.expectEqual(@as(u8, 123), state.brightness);
+            try grt.std.testing.expectEqual(@as(u8, 17), state.step_amount);
 
             Anim.pingpong(&state, .{
                 .from = F.solid(Color.white),
                 .to = F.solid(Color.black),
                 .interval = 4,
             });
-            try lib.testing.expectEqual(@as(u8, 123), state.brightness);
-            try lib.testing.expectEqual(@as(u8, 17), state.step_amount);
+            try grt.std.testing.expectEqual(@as(u8, 123), state.brightness);
+            try grt.std.testing.expectEqual(@as(u8, 17), state.step_amount);
         }
 
         fn setPreservesCurrentAndUsesDuration() !void {
@@ -311,14 +311,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .duration = 2,
             });
 
-            try lib.testing.expectEqual(Color.black, state.current.pixels[0]);
-            try lib.testing.expectEqual(@as(u8, 64), state.step_amount);
+            try grt.std.testing.expectEqual(Color.black, state.current.pixels[0]);
+            try grt.std.testing.expectEqual(@as(u8, 64), state.step_amount);
 
             _ = Anim.tick(&state);
-            try lib.testing.expectEqual(Color.rgb(64, 64, 64), state.current.pixels[0]);
+            try grt.std.testing.expectEqual(Color.rgb(64, 64, 64), state.current.pixels[0]);
 
             _ = Anim.tick(&state);
-            try lib.testing.expectEqual(Color.rgb(128, 128, 128), state.current.pixels[0]);
+            try grt.std.testing.expectEqual(Color.rgb(128, 128, 128), state.current.pixels[0]);
         }
 
         fn setWithZeroDurationSnapsImmediately() !void {
@@ -334,11 +334,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .duration = 0,
             });
 
-            try lib.testing.expectEqual(Color.blue, state.current.pixels[0]);
-            try lib.testing.expectEqual(@as(u8, 255), state.step_amount);
+            try grt.std.testing.expectEqual(Color.blue, state.current.pixels[0]);
+            try grt.std.testing.expectEqual(@as(u8, 255), state.step_amount);
         }
 
-        fn renderFlushesCurrentFrameToStrip(allocator: lib.mem.Allocator) !void {
+        fn renderFlushesCurrentFrameToStrip(allocator: glib.std.mem.Allocator) !void {
             const StateData = struct {
                 refresh_calls: usize = 0,
                 pixels: [4]Color = [_]Color{Color.black} ** 4,
@@ -346,7 +346,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             const Impl = struct {
                 pub const Config = struct {
-                    allocator: lib.mem.Allocator,
+                    allocator: glib.std.mem.Allocator,
                     state: *StateData,
                 };
 
@@ -398,21 +398,21 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             Anim.render(strip, &anim_state);
 
-            try lib.testing.expectEqual(@as(usize, 1), strip_state.refresh_calls);
-            try lib.testing.expectEqual(Color.red, strip.pixel(0));
-            try lib.testing.expectEqual(Color.green, strip.pixel(1));
-            try lib.testing.expectEqual(Color.blue, strip.pixel(2));
-            try lib.testing.expectEqual(Color.white, strip.pixel(3));
+            try grt.std.testing.expectEqual(@as(usize, 1), strip_state.refresh_calls);
+            try grt.std.testing.expectEqual(Color.red, strip.pixel(0));
+            try grt.std.testing.expectEqual(Color.green, strip.pixel(1));
+            try grt.std.testing.expectEqual(Color.blue, strip.pixel(2));
+            try grt.std.testing.expectEqual(Color.white, strip.pixel(3));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             TestCase.fixedConvergesToTarget() catch |err| {
@@ -458,7 +458,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

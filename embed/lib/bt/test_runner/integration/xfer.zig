@@ -5,10 +5,7 @@ const pair_xfer_runner = @import("../pair_xfer.zig");
 
 pub const protocol = @import("xfer/protocol.zig");
 
-pub fn make(comptime gz: type) glib.testing.TestRunner {
-    const lib = gz.std;
-    const Channel = gz.sync.Channel;
-
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
@@ -19,9 +16,9 @@ pub fn make(comptime gz: type) glib.testing.TestRunner {
             _ = self;
             _ = allocator;
 
-            const Bt = bt.make(gz);
-            const Mocker = bt.Mocker(lib, Channel);
-            var mocker = Mocker.init(lib.testing.allocator, .{});
+            const Bt = bt.make(grt);
+            const Mocker = bt.Mocker(grt);
+            var mocker = Mocker.init(grt.std.testing.allocator, .{});
             defer mocker.deinit();
 
             var client_host = mocker.createHost(.{
@@ -46,9 +43,9 @@ pub fn make(comptime gz: type) glib.testing.TestRunner {
             defer server_host.deinit();
 
             t.parallel();
-            t.run("protocol", protocol.makeWithChannel(lib, Channel));
-            t.run("peripheral", pair_xfer_runner.makePeripheral(lib, Bt.Server, &server_host));
-            t.run("central", pair_xfer_runner.makeCentral(lib, Bt.Client, &client_host));
+            t.run("protocol", protocol.make(grt));
+            t.run("peripheral", pair_xfer_runner.makePeripheral(grt, Bt.Server, &server_host));
+            t.run("central", pair_xfer_runner.makeCentral(grt, Bt.Client, &client_host));
             return t.wait();
         }
 

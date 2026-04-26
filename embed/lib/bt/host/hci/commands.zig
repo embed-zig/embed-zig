@@ -266,50 +266,50 @@ pub const ConnParams = struct {
     max_ce_length: u16 = 0,
 };
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             var buf: [MAX_CMD_LEN]u8 = undefined;
 
             const reset_cmd = reset(&buf);
-            try lib.testing.expectEqual(@as(usize, 4), reset_cmd.len);
-            try lib.testing.expectEqual(INDICATOR, reset_cmd[0]);
-            try lib.testing.expectEqual(@as(u8, 0x03), reset_cmd[1]);
-            try lib.testing.expectEqual(@as(u8, 0x0C), reset_cmd[2]);
-            try lib.testing.expectEqual(@as(u8, 0), reset_cmd[3]);
+            try grt.std.testing.expectEqual(@as(usize, 4), reset_cmd.len);
+            try grt.std.testing.expectEqual(INDICATOR, reset_cmd[0]);
+            try grt.std.testing.expectEqual(@as(u8, 0x03), reset_cmd[1]);
+            try grt.std.testing.expectEqual(@as(u8, 0x0C), reset_cmd[2]);
+            try grt.std.testing.expectEqual(@as(u8, 0), reset_cmd[3]);
 
             const adv_enable = leSetAdvEnable(&buf, true);
-            try lib.testing.expectEqual(@as(usize, 5), adv_enable.len);
-            try lib.testing.expectEqual(INDICATOR, adv_enable[0]);
-            try lib.testing.expectEqual(@as(u8, 0x0A), adv_enable[1]);
-            try lib.testing.expectEqual(@as(u8, 0x20), adv_enable[2]);
-            try lib.testing.expectEqual(@as(u8, 1), adv_enable[3]);
-            try lib.testing.expectEqual(@as(u8, 1), adv_enable[4]);
+            try grt.std.testing.expectEqual(@as(usize, 5), adv_enable.len);
+            try grt.std.testing.expectEqual(INDICATOR, adv_enable[0]);
+            try grt.std.testing.expectEqual(@as(u8, 0x0A), adv_enable[1]);
+            try grt.std.testing.expectEqual(@as(u8, 0x20), adv_enable[2]);
+            try grt.std.testing.expectEqual(@as(u8, 1), adv_enable[3]);
+            try grt.std.testing.expectEqual(@as(u8, 1), adv_enable[4]);
 
             const scan_enable = leSetScanEnable(&buf, true, false);
-            try lib.testing.expectEqual(@as(usize, 6), scan_enable.len);
-            try lib.testing.expectEqual(@as(u8, 1), scan_enable[4]);
-            try lib.testing.expectEqual(@as(u8, 0), scan_enable[5]);
+            try grt.std.testing.expectEqual(@as(usize, 6), scan_enable.len);
+            try grt.std.testing.expectEqual(@as(u8, 1), scan_enable[4]);
+            try grt.std.testing.expectEqual(@as(u8, 0), scan_enable[5]);
 
             const disconnect_cmd = disconnect(&buf, 0x0040, 0x13);
-            try lib.testing.expectEqual(@as(usize, 7), disconnect_cmd.len);
-            try lib.testing.expectEqual(@as(u8, 0x40), disconnect_cmd[4]);
-            try lib.testing.expectEqual(@as(u8, 0x00), disconnect_cmd[5]);
-            try lib.testing.expectEqual(@as(u8, 0x13), disconnect_cmd[6]);
+            try grt.std.testing.expectEqual(@as(usize, 7), disconnect_cmd.len);
+            try grt.std.testing.expectEqual(@as(u8, 0x40), disconnect_cmd[4]);
+            try grt.std.testing.expectEqual(@as(u8, 0x00), disconnect_cmd[5]);
+            try grt.std.testing.expectEqual(@as(u8, 0x13), disconnect_cmd[6]);
 
             const generic = encode(&buf, READ_BD_ADDR, &.{});
-            try lib.testing.expectEqual(@as(usize, 4), generic.len);
-            try lib.testing.expectEqual(@as(u8, 0x09), generic[1]);
-            try lib.testing.expectEqual(@as(u8, 0x10), generic[2]);
+            try grt.std.testing.expectEqual(@as(usize, 4), generic.len);
+            try grt.std.testing.expectEqual(@as(u8, 0x09), generic[1]);
+            try grt.std.testing.expectEqual(@as(u8, 0x10), generic[2]);
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -320,7 +320,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 
 pub const InitError = error{
@@ -70,39 +71,37 @@ pub fn resamplerErrorText(status: c_int) [*:0]const u8 {
     return binding.speex_resampler_strerror(status);
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn mapsResamplerStatusCodes() !void {
-            try lib.testing.expectEqual(ResamplerErrorCode.success, toResamplerErrorCode(binding.RESAMPLER_ERR_SUCCESS).?);
-            try lib.testing.expectEqual(ResamplerErrorCode.invalid_arg, toResamplerErrorCode(binding.RESAMPLER_ERR_INVALID_ARG).?);
-            try lib.testing.expectEqual(@as(?ResamplerErrorCode, null), toResamplerErrorCode(999));
+            try grt.std.testing.expectEqual(ResamplerErrorCode.success, toResamplerErrorCode(binding.RESAMPLER_ERR_SUCCESS).?);
+            try grt.std.testing.expectEqual(ResamplerErrorCode.invalid_arg, toResamplerErrorCode(binding.RESAMPLER_ERR_INVALID_ARG).?);
+            try grt.std.testing.expectEqual(@as(?ResamplerErrorCode, null), toResamplerErrorCode(999));
         }
 
         fn exposesResamplerText() !void {
             const msg = resamplerErrorText(binding.RESAMPLER_ERR_INVALID_ARG);
-            try lib.testing.expect(msg[0] != 0);
+            try grt.std.testing.expect(msg[0] != 0);
         }
 
         fn mapsCtlStatusAndInitStatus() !void {
             try fromCtlStatus(0);
-            try lib.testing.expectError(error.Unexpected, fromCtlStatus(-1));
+            try grt.std.testing.expectError(error.Unexpected, fromCtlStatus(-1));
 
             try fromResamplerStatusOrInit(binding.RESAMPLER_ERR_SUCCESS);
-            try lib.testing.expectError(error.OutOfMemory, fromResamplerStatusOrInit(binding.RESAMPLER_ERR_ALLOC_FAILED));
-            try lib.testing.expectError(error.InvalidArgument, fromResamplerStatusOrInit(binding.RESAMPLER_ERR_INVALID_ARG));
-            try lib.testing.expectError(error.Unexpected, fromResamplerStatusOrInit(binding.RESAMPLER_ERR_BAD_STATE));
+            try grt.std.testing.expectError(error.OutOfMemory, fromResamplerStatusOrInit(binding.RESAMPLER_ERR_ALLOC_FAILED));
+            try grt.std.testing.expectError(error.InvalidArgument, fromResamplerStatusOrInit(binding.RESAMPLER_ERR_INVALID_ARG));
+            try grt.std.testing.expectError(error.Unexpected, fromResamplerStatusOrInit(binding.RESAMPLER_ERR_BAD_STATE));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -121,7 +120,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -130,5 +129,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

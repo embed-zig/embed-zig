@@ -1,6 +1,6 @@
 const glib = @import("glib");
 
-pub fn make(comptime lib: type, comptime stores_config: anytype) type {
+pub fn make(comptime grt: type, comptime stores_config: anytype) type {
     const StoresConfig = @TypeOf(stores_config);
     const info = @typeInfo(StoresConfig);
     if (info != .@"struct") {
@@ -8,7 +8,7 @@ pub fn make(comptime lib: type, comptime stores_config: anytype) type {
     }
 
     const fields_info = info.@"struct".fields;
-    var fields: [fields_info.len]lib.builtin.Type.StructField = undefined;
+    var fields: [fields_info.len]grt.std.builtin.Type.StructField = undefined;
 
     inline for (fields_info, 0..) |field, i| {
         const StoreType = @field(stores_config, field.name);
@@ -35,35 +35,29 @@ pub fn make(comptime lib: type, comptime stores_config: anytype) type {
     });
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn builds_struct_from_store_types(testing: anytype, _: lib.mem.Allocator) !void {
-            const StoreLib = struct {
-                pub const builtin = lib.builtin;
-            };
+        fn builds_struct_from_store_types(_: glib.std.mem.Allocator) !void {
             const Wifi = struct { value: u32 };
             const Cellular = struct { enabled: bool };
 
-            const StoresTy = make(StoreLib, .{
+            const StoresTy = make(grt, .{
                 .wifi = Wifi,
                 .cellular = Cellular,
             });
 
             const info = @typeInfo(StoresTy).@"struct";
-            try testing.expectEqual(@as(usize, 2), info.fields.len);
-            try testing.expectEqualStrings("wifi", info.fields[0].name);
-            try testing.expectEqualStrings("cellular", info.fields[1].name);
-            try testing.expect(info.fields[0].type == Wifi);
-            try testing.expect(info.fields[1].type == Cellular);
+            try grt.std.testing.expectEqual(@as(usize, 2), info.fields.len);
+            try grt.std.testing.expectEqualStrings("wifi", info.fields[0].name);
+            try grt.std.testing.expectEqualStrings("cellular", info.fields[1].name);
+            try grt.std.testing.expect(info.fields[0].type == Wifi);
+            try grt.std.testing.expect(info.fields[1].type == Cellular);
         }
 
-        fn allows_instantiation(testing: anytype, _: lib.mem.Allocator) !void {
-            const StoreLib = struct {
-                pub const builtin = lib.builtin;
-            };
+        fn allows_instantiation(_: glib.std.mem.Allocator) !void {
             const Wifi = struct { value: u32 };
             const Cellular = struct { enabled: bool };
-            const StoresTy = make(StoreLib, .{
+            const StoresTy = make(grt, .{
                 .wifi = Wifi,
                 .cellular = Cellular,
             });
@@ -73,14 +67,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .cellular = .{ .enabled = true },
             };
 
-            try testing.expectEqual(@as(u32, 7), stores.wifi.value);
-            try testing.expect(stores.cellular.enabled);
+            try grt.std.testing.expectEqual(@as(u32, 7), stores.wifi.value);
+            try grt.std.testing.expect(stores.cellular.enabled);
         }
 
-        fn supports_actual_usage(testing: anytype, _: lib.mem.Allocator) !void {
-            const StoreLib = struct {
-                pub const builtin = lib.builtin;
-            };
+        fn supports_actual_usage(_: glib.std.mem.Allocator) !void {
             const Wifi = struct {
                 value: u32,
 
@@ -96,7 +87,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            const StoresTy = make(StoreLib, .{
+            const StoresTy = make(grt, .{
                 .wifi = Wifi,
                 .cellular = Cellular,
             });
@@ -106,37 +97,36 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .cellular = .{ .enabled = true },
             };
 
-            try testing.expectEqual(@as(u32, 42), stores.wifi.get());
-            try testing.expect(stores.cellular.get());
+            try grt.std.testing.expectEqual(@as(u32, 42), stores.wifi.get());
+            try grt.std.testing.expect(stores.cellular.get());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.builds_struct_from_store_types(testing, allocator) catch |err| {
+            TestCase.builds_struct_from_store_types(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.allows_instantiation(testing, allocator) catch |err| {
+            TestCase.allows_instantiation(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.supports_actual_usage(testing, allocator) catch |err| {
+            TestCase.supports_actual_usage(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

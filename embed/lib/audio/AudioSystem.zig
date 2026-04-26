@@ -21,7 +21,7 @@ pub const Error = error{
     Unexpected,
 };
 
-pub fn Builder(comptime lib: type) type {
+pub fn Builder(comptime grt: type) type {
     return struct {
         const Self = @This();
 
@@ -34,11 +34,11 @@ pub fn Builder(comptime lib: type) type {
         }
 
         pub fn configMic(self: *Self, comptime mic_count: usize, comptime samples_per_channel: usize) void {
-            self.mic = MicMod.make(lib, mic_count, samples_per_channel);
+            self.mic = MicMod.make(grt, mic_count, samples_per_channel);
         }
 
         pub fn configSpeaker(self: *Self, comptime samples_per_channel: usize) void {
-            self.speaker = SpeakerMod.make(lib, samples_per_channel);
+            self.speaker = SpeakerMod.make(grt, samples_per_channel);
         }
 
         pub fn setProcessor(self: *Self, comptime process_fn: anytype) void {
@@ -63,8 +63,8 @@ pub fn Builder(comptime lib: type) type {
 
             return struct {
                 const AudioSystem = @This();
-                const DefaultMixer = Mixer.make(lib);
-                const SampleRingBuffer = RingBufferMod.make(lib);
+                const DefaultMixer = Mixer.make(grt);
+                const SampleRingBuffer = RingBufferMod.make(grt);
                 const capture_buffer_capacity = samples_per_channel * 16;
                 const ref_buffer_capacity = samples_per_channel * 16;
 
@@ -75,21 +75,21 @@ pub fn Builder(comptime lib: type) type {
                 pub const frame_mic_count: usize = mic_count;
                 pub const frame_samples_per_channel: usize = samples_per_channel;
 
-                allocator: lib.mem.Allocator,
+                allocator: glib.std.mem.Allocator,
                 mic_impl: ?AudioSystem.Mic = null,
                 speaker_impl: ?AudioSystem.Speaker = null,
                 playback: ?Mixer = null,
                 capture_rb: SampleRingBuffer,
                 ref_rb: SampleRingBuffer,
                 ref_write_scratch: []i16,
-                state_mu: lib.Thread.Mutex = .{},
+                state_mu: grt.std.Thread.Mutex = .{},
                 running: bool = false,
                 async_failed: bool = false,
                 playback_config_locked: bool = false,
-                read_thread: ?lib.Thread = null,
-                write_thread: ?lib.Thread = null,
+                read_thread: ?grt.std.Thread = null,
+                write_thread: ?grt.std.Thread = null,
 
-                pub fn init(allocator: lib.mem.Allocator) !AudioSystem {
+                pub fn init(allocator: glib.std.mem.Allocator) !AudioSystem {
                     const capture_rb = try SampleRingBuffer.init(allocator, capture_buffer_capacity);
                     errdefer {
                         var cleanup = capture_rb;
@@ -272,7 +272,7 @@ pub fn Builder(comptime lib: type) type {
                     }
 
                     const read_thread = if (read_enabled)
-                        lib.Thread.spawn(.{}, AudioSystem.readLoop, .{self}) catch {
+                        grt.std.Thread.spawn(.{}, AudioSystem.readLoop, .{self}) catch {
                             self.state_mu.lock();
                             self.running = false;
                             self.state_mu.unlock();
@@ -282,7 +282,7 @@ pub fn Builder(comptime lib: type) type {
                         null;
 
                     const write_thread = if (write_enabled)
-                        lib.Thread.spawn(.{}, AudioSystem.writeLoop, .{self}) catch {
+                        grt.std.Thread.spawn(.{}, AudioSystem.writeLoop, .{self}) catch {
                             self.state_mu.lock();
                             self.running = false;
                             self.state_mu.unlock();
@@ -454,12 +454,12 @@ pub fn Builder(comptime lib: type) type {
                 fn sleepForSamples(sample_count: usize, sample_rate: u32) void {
                     if (sample_count == 0 or sample_rate == 0) return;
 
-                    const sleep_ns_128 = (@as(u128, sample_count) * @as(u128, lib.time.ns_per_s)) /
+                    const sleep_ns_128 = (@as(u128, sample_count) * @as(u128, grt.std.time.ns_per_s)) /
                         @as(u128, sample_rate);
                     if (sleep_ns_128 == 0) return;
 
-                    const sleep_ns: u64 = @intCast(@min(sleep_ns_128, @as(u128, lib.math.maxInt(u64))));
-                    lib.Thread.sleep(sleep_ns);
+                    const sleep_ns: u64 = @intCast(@min(sleep_ns_128, @as(u128, grt.std.math.maxInt(u64))));
+                    grt.std.Thread.sleep(sleep_ns);
                 }
 
                 fn referenceChunkLen(input_len: usize, input_rate: u32, output_rate: u32) Error!usize {
@@ -468,7 +468,7 @@ pub fn Builder(comptime lib: type) type {
                     const output_len_128 = ((@as(u128, input_len) * @as(u128, output_rate)) +
                         @as(u128, input_rate) -
                         1) / @as(u128, input_rate);
-                    if (output_len_128 > @as(u128, lib.math.maxInt(usize))) return error.Overflow;
+                    if (output_len_128 > @as(u128, grt.std.math.maxInt(usize))) return error.Overflow;
                     return @intCast(output_len_128);
                 }
 
@@ -500,16 +500,16 @@ pub fn Builder(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         /// Upper bound for polling async read/write loops in these unit tests (success is usually ms-scale).
-        const test_async_wait_ns: i128 = 5 * lib.time.ns_per_s;
+        const test_async_wait_ns: i128 = 5 * grt.std.time.ns_per_s;
 
         /// Poll `read` until samples arrive or `max_wait_ns` elapses. Avoids tying
         /// readiness to a fixed iteration count (brittle under slow scheduling / CI).
         fn pollReadSamples(system: anytype, out: []i16, max_wait_ns: i128) !usize {
-            const Thread = lib.Thread;
-            const time = lib.time;
+            const Thread = grt.std.Thread;
+            const time = grt.std.time;
             const deadline: i128 = time.nanoTimestamp() + max_wait_ns;
             while (time.nanoTimestamp() < deadline) {
                 const n = system.read(out) catch |err| switch (err) {
@@ -526,8 +526,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
         }
 
         fn waitSpeakerWrites(ctx: anytype, deadline_ns: i128) bool {
-            const Thread = lib.Thread;
-            const time = lib.time;
+            const Thread = grt.std.Thread;
+            const time = grt.std.time;
             while (time.nanoTimestamp() < deadline_ns) {
                 ctx.mu.lock();
                 const w = ctx.writes;
@@ -538,10 +538,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return false;
         }
 
-        fn startFailureResetsState(alloc: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const TestMic = MicMod.make(lib, 1, 4);
-            const TestSpeaker = SpeakerMod.make(lib, 4);
+        fn startFailureResetsState(alloc: glib.std.mem.Allocator) !void {
+            const TestMic = MicMod.make(grt, 1, 4);
+            const TestSpeaker = SpeakerMod.make(grt, 4);
             const ProcessorBackend = struct {
                 fn process(frame: TestMic.Frame, out: []i16) Error!usize {
                     const n = @min(frame.mic[0].len, out.len);
@@ -551,7 +550,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             const Built = comptime blk: {
-                var builder = Builder(lib).init();
+                var builder = Builder(grt).init();
                 builder.configMic(1, 4);
                 builder.configSpeaker(4);
                 builder.setProcessor(&ProcessorBackend.process);
@@ -645,21 +644,20 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
             try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
 
-            try testing.expectError(error.Unsupported, system.start());
-            try testing.expect(!speaker_ctx.enabled);
+            try grt.std.testing.expectError(error.Unsupported, system.start());
+            try grt.std.testing.expect(!speaker_ctx.enabled);
 
             var out: [4]i16 = @splat(0);
-            try testing.expectError(error.InvalidState, system.read(out[0..]));
+            try grt.std.testing.expectError(error.InvalidState, system.read(out[0..]));
 
             try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
         }
 
-        fn readLoopBuffersProcessedAudio(alloc: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const Thread = lib.Thread;
-            const time = lib.time;
-            const TestMic = MicMod.make(lib, 1, 4);
-            const TestSpeaker = SpeakerMod.make(lib, 4);
+        fn readLoopBuffersProcessedAudio(alloc: glib.std.mem.Allocator) !void {
+            const Thread = grt.std.Thread;
+            const time = grt.std.time;
+            const TestMic = MicMod.make(grt, 1, 4);
+            const TestSpeaker = SpeakerMod.make(grt, 4);
             const ProcessorBackend = struct {
                 fn process(frame: TestMic.Frame, out: []i16) Error!usize {
                     const n = @min(frame.mic[0].len, out.len);
@@ -669,7 +667,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             const Built = comptime blk: {
-                var builder = Builder(lib).init();
+                var builder = Builder(grt).init();
                 builder.configMic(1, 4);
                 builder.configSpeaker(4);
                 builder.setProcessor(&ProcessorBackend.process);
@@ -794,19 +792,18 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var out: [8]i16 = @splat(0);
             const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
-            try testing.expect(n > 0);
-            try testing.expect(out[0] != 0);
+            try grt.std.testing.expect(n > 0);
+            try grt.std.testing.expect(out[0] != 0);
 
             // writeLoop may lag readLoop; don't assert speaker writes synchronously.
-            try testing.expect(waitSpeakerWrites(&speaker_ctx, time.nanoTimestamp() + test_async_wait_ns));
+            try grt.std.testing.expect(waitSpeakerWrites(&speaker_ctx, time.nanoTimestamp() + test_async_wait_ns));
         }
 
-        fn readReturnsWouldBlockWhenRunningAndEmpty(alloc: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const Thread = lib.Thread;
-            const AtomicBool = lib.atomic.Value(bool);
-            const TestMic = MicMod.make(lib, 1, 4);
-            const TestSpeaker = SpeakerMod.make(lib, 4);
+        fn readReturnsWouldBlockWhenRunningAndEmpty(alloc: glib.std.mem.Allocator) !void {
+            const Thread = grt.std.Thread;
+            const AtomicBool = grt.std.atomic.Value(bool);
+            const TestMic = MicMod.make(grt, 1, 4);
+            const TestSpeaker = SpeakerMod.make(grt, 4);
             const ProcessorBackend = struct {
                 var emit = AtomicBool.init(false);
 
@@ -819,7 +816,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             const Built = comptime blk: {
-                var builder = Builder(lib).init();
+                var builder = Builder(grt).init();
                 builder.configMic(1, 4);
                 builder.configSpeaker(4);
                 builder.setProcessor(&ProcessorBackend.process);
@@ -942,17 +939,16 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             defer system.stop() catch {};
 
             var out: [4]i16 = @splat(0);
-            try testing.expectError(error.WouldBlock, system.read(out[0..]));
+            try grt.std.testing.expectError(error.WouldBlock, system.read(out[0..]));
 
             ProcessorBackend.emit.store(true, .release);
             const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
-            try testing.expect(n > 0);
+            try grt.std.testing.expect(n > 0);
         }
 
-        fn startAllowsMicOnlyMode(alloc: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const Thread = lib.Thread;
-            const TestMic = MicMod.make(lib, 1, 4);
+        fn startAllowsMicOnlyMode(alloc: glib.std.mem.Allocator) !void {
+            const Thread = grt.std.Thread;
+            const TestMic = MicMod.make(grt, 1, 4);
             const ProcessorBackend = struct {
                 fn process(frame: TestMic.Frame, out: []i16) Error!usize {
                     const n = @min(frame.mic[0].len, out.len);
@@ -962,7 +958,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             const Built = comptime blk: {
-                var builder = Builder(lib).init();
+                var builder = Builder(grt).init();
                 builder.configMic(1, 4);
                 builder.configSpeaker(4);
                 builder.setProcessor(&ProcessorBackend.process);
@@ -1037,16 +1033,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var out: [8]i16 = @splat(0);
             const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
-            try testing.expect(n > 0);
-            try testing.expect(out[0] != 0);
+            try grt.std.testing.expect(n > 0);
+            try grt.std.testing.expect(out[0] != 0);
         }
 
-        fn startAllowsSpeakerOnlyMode(alloc: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const Thread = lib.Thread;
-            const time = lib.time;
-            const TestSpeaker = SpeakerMod.make(lib, 4);
-            const TestMic = MicMod.make(lib, 1, 4);
+        fn startAllowsSpeakerOnlyMode(alloc: glib.std.mem.Allocator) !void {
+            const Thread = grt.std.Thread;
+            const time = grt.std.time;
+            const TestSpeaker = SpeakerMod.make(grt, 4);
+            const TestMic = MicMod.make(grt, 1, 4);
             const ProcessorBackend = struct {
                 fn process(frame: TestMic.Frame, out: []i16) Error!usize {
                     const n = @min(frame.mic[0].len, out.len);
@@ -1056,7 +1051,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             const Built = comptime blk: {
-                var builder = Builder(lib).init();
+                var builder = Builder(grt).init();
                 builder.configMic(1, 4);
                 builder.configSpeaker(4);
                 builder.setProcessor(&ProcessorBackend.process);
@@ -1126,56 +1121,56 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             defer system.stop() catch {};
 
             var out: [4]i16 = @splat(0);
-            try testing.expectError(error.InvalidState, system.read(out[0..]));
+            try grt.std.testing.expectError(error.InvalidState, system.read(out[0..]));
 
             const deadline = time.nanoTimestamp() + test_async_wait_ns;
-            try testing.expect(waitSpeakerWrites(&speaker_ctx, deadline));
+            try grt.std.testing.expect(waitSpeakerWrites(&speaker_ctx, deadline));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("start_failure_resets_state", glib.testing.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *glib.testing.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("start_failure_resets_state", glib.testing.TestRunner.fromFn(grt.std, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: glib.std.mem.Allocator) !void {
                     try TestCase.startFailureResetsState(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("readLoop_buffers_processed_audio", glib.testing.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *glib.testing.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("readLoop_buffers_processed_audio", glib.testing.TestRunner.fromFn(grt.std, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: glib.std.mem.Allocator) !void {
                     try TestCase.readLoopBuffersProcessedAudio(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("read_returns_wouldblock_when_running_and_empty", glib.testing.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *glib.testing.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("read_returns_wouldblock_when_running_and_empty", glib.testing.TestRunner.fromFn(grt.std, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: glib.std.mem.Allocator) !void {
                     try TestCase.readReturnsWouldBlockWhenRunningAndEmpty(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("start_allows_mic_only_mode", glib.testing.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *glib.testing.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("start_allows_mic_only_mode", glib.testing.TestRunner.fromFn(grt.std, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: glib.std.mem.Allocator) !void {
                     try TestCase.startAllowsMicOnlyMode(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;
-            t.run("start_allows_speaker_only_mode", glib.testing.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *glib.testing.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("start_allows_speaker_only_mode", glib.testing.TestRunner.fromFn(grt.std, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: glib.std.mem.Allocator) !void {
                     try TestCase.startAllowsSpeakerOnlyMode(case_allocator);
                 }
             }.run));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

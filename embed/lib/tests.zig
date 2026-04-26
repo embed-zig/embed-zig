@@ -13,10 +13,10 @@ test "motion/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .motion);
+    var t = glib.testing.T.new(gstd.runtime.std, .motion);
     defer t.deinit();
 
-    t.run("motion/unit/std", motion.test_runner.unit.make(std));
+    t.run("motion/unit/std", motion.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -28,7 +28,7 @@ test "motion/unit/gstd" {
     var t = glib.testing.T.new(gstd.runtime.std, .motion);
     defer t.deinit();
 
-    t.run("motion/unit/gstd", motion.test_runner.unit.make(gstd.runtime.std));
+    t.run("motion/unit/gstd", motion.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -37,10 +37,10 @@ test "audio/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .audio);
+    var t = glib.testing.T.new(gstd.runtime.std, .audio);
     defer t.deinit();
 
-    t.run("audio/unit/std", audio.test_runner.unit.make(std));
+    t.run("audio/unit/std", audio.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -52,7 +52,7 @@ test "audio/unit/gstd" {
     var t = glib.testing.T.new(gstd.runtime.std, .audio);
     defer t.deinit();
 
-    t.run("audio/unit/gstd", audio.test_runner.unit.make(gstd.runtime.std));
+    t.run("audio/unit/gstd", audio.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -61,11 +61,11 @@ test "audio/integration/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .audio);
+    var t = glib.testing.T.new(gstd.runtime.std, .audio);
     defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
+    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
 
-    t.run("audio/integration/std", audio.test_runner.integration.make(std));
+    t.run("audio/integration/std", audio.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -78,7 +78,7 @@ test "audio/integration/gstd" {
     defer t.deinit();
     t.timeout(20 * gstd.runtime.std.time.ns_per_s);
 
-    t.run("audio/integration/gstd", audio.test_runner.integration.make(gstd.runtime.std));
+    t.run("audio/integration/gstd", audio.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -87,10 +87,10 @@ test "zux/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .zux);
+    var t = glib.testing.T.new(gstd.runtime.std, .zux);
     defer t.deinit();
 
-    t.run("zux/unit/std", zux.test_runner.unit.make(std, gstd.runtime.sync.Channel));
+    t.run("zux/unit/std", zux.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -102,7 +102,7 @@ test "zux/unit/gstd" {
     var t = glib.testing.T.new(gstd.runtime.std, .zux);
     defer t.deinit();
 
-    t.run("zux/unit/gstd", zux.test_runner.unit.make(gstd.runtime.std, gstd.runtime.sync.Channel));
+    t.run("zux/unit/gstd", zux.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -111,11 +111,11 @@ test "zux/integration/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .zux);
+    var t = glib.testing.T.new(gstd.runtime.std, .zux);
     defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
+    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
 
-    t.run("zux/integration/std", zux.test_runner.integration.make(std, gstd.runtime.sync.Channel));
+    t.run("zux/integration/std", zux.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -128,7 +128,7 @@ test "zux/integration/gstd" {
     defer t.deinit();
     t.timeout(20 * gstd.runtime.std.time.ns_per_s);
 
-    t.run("zux/integration/gstd", zux.test_runner.integration.make(gstd.runtime.std, gstd.runtime.sync.Channel));
+    t.run("zux/integration/gstd", zux.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -137,10 +137,10 @@ test "bt/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .bt);
+    var t = glib.testing.T.new(gstd.runtime.std, .bt);
     defer t.deinit();
 
-    t.run("bt/unit/std", bt.test_runner.unit.make(std));
+    t.run("bt/unit/std", bt.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -152,7 +152,7 @@ test "bt/unit/gstd" {
     var t = glib.testing.T.new(gstd.runtime.std, .bt);
     defer t.deinit();
 
-    t.run("bt/unit/gstd", bt.test_runner.unit.make(gstd.runtime.std));
+    t.run("bt/unit/gstd", bt.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -161,9 +161,9 @@ test "bt/integration/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .bt);
+    var t = glib.testing.T.new(gstd.runtime.std, .bt);
     defer t.deinit();
-    t.timeout(60 * std.time.ns_per_s);
+    t.timeout(60 * gstd.runtime.std.time.ns_per_s);
 
     t.run("bt/integration/std", bt.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
@@ -187,10 +187,10 @@ test "drivers/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .drivers);
+    var t = glib.testing.T.new(gstd.runtime.std, .drivers);
     defer t.deinit();
 
-    t.run("drivers/unit/std", drivers.test_runner.unit.make(std));
+    t.run("drivers/unit/std", drivers.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -202,7 +202,7 @@ test "drivers/unit/gstd" {
     var t = glib.testing.T.new(gstd.runtime.std, .drivers);
     defer t.deinit();
 
-    t.run("drivers/unit/gstd", drivers.test_runner.unit.make(gstd.runtime.std));
+    t.run("drivers/unit/gstd", drivers.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -211,10 +211,10 @@ test "ledstrip/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .ledstrip);
+    var t = glib.testing.T.new(gstd.runtime.std, .ledstrip);
     defer t.deinit();
 
-    t.run("ledstrip/unit/std", ledstrip.test_runner.unit.make(std));
+    t.run("ledstrip/unit/std", ledstrip.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -226,6 +226,6 @@ test "ledstrip/unit/gstd" {
     var t = glib.testing.T.new(gstd.runtime.std, .ledstrip);
     defer t.deinit();
 
-    t.run("ledstrip/unit/gstd", ledstrip.test_runner.unit.make(gstd.runtime.std));
+    t.run("ledstrip/unit/gstd", ledstrip.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }

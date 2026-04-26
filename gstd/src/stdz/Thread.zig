@@ -92,7 +92,7 @@ pub fn setName(name: []const u8) glib.std.Thread.SetNameError!void {
             };
 
             switch (windows.ntdll.NtSetInformationThread(
-                windows.kernel32.GetCurrentThread(),
+                windows.GetCurrentThread(),
                 .ThreadNameInformation,
                 &unicode_string,
                 @sizeOf(windows.UNICODE_STRING),
@@ -175,7 +175,7 @@ pub fn getName(buffer_ptr: *[max_name_len:0]u8) glib.std.Thread.GetNameError!?[]
             var buf: [buf_capacity]u8 align(@alignOf(windows.UNICODE_STRING)) = undefined;
 
             switch (windows.ntdll.NtQueryInformationThread(
-                windows.kernel32.GetCurrentThread(),
+                windows.GetCurrentThread(),
                 .ThreadNameInformation,
                 &buf,
                 buf_capacity,

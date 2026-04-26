@@ -108,7 +108,12 @@ pub fn link(
         .target = target,
         .optimize = optimize,
     });
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
     mod.addImport("embed", build_tests.createEmbedShim(b, target, optimize, gstd_dep));
+    mod.addImport("glib", glib_dep.module("glib"));
 
     const lib = library orelse return;
     const os_tag = supported_os orelse return;

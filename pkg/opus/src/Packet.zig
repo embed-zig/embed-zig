@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const embed = @import("embed");
 const binding = @import("binding.zig");
 const opus_error = @import("error.zig");
@@ -36,29 +37,27 @@ fn validatePacketData(data: []const u8) Error!void {
     if (data.len == 0) return Error.InvalidPacket;
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn helpersInspectEncodedFrame() !void {
             const Encoder = @import("Encoder.zig");
             const opus = @import("../../opus.zig");
 
-            var encoder = try Encoder.init(lib.testing.allocator, 48_000, 1, .audio);
-            defer encoder.deinit(lib.testing.allocator);
+            var encoder = try Encoder.init(grt.std.testing.allocator, 48_000, 1, .audio);
+            defer encoder.deinit(grt.std.testing.allocator);
 
             const pcm = [_]i16{0} ** 960;
             var out: [1500]u8 = undefined;
             const encoded = try encoder.encode(pcm[0..], 960, out[0..]);
 
-            try lib.testing.expect(encoded.len > 0);
-            try lib.testing.expectEqual(@as(u8, 1), try getChannels(encoded));
-            try lib.testing.expectEqual(@as(u32, 1), try getFrames(encoded));
-            try lib.testing.expectEqual(@as(u32, 960), try getSamples(encoded, 48_000));
-            try lib.testing.expectEqual(try opus.packetGetChannels(encoded), try getChannels(encoded));
-            try lib.testing.expectEqual(try opus.packetGetFrames(encoded), try getFrames(encoded));
-            try lib.testing.expectEqual(try opus.packetGetSamples(encoded, 48_000), try getSamples(encoded, 48_000));
-            try lib.testing.expectEqual(try opus.packetGetBandwidth(encoded), try getBandwidth(encoded));
+            try grt.std.testing.expect(encoded.len > 0);
+            try grt.std.testing.expectEqual(@as(u8, 1), try getChannels(encoded));
+            try grt.std.testing.expectEqual(@as(u32, 1), try getFrames(encoded));
+            try grt.std.testing.expectEqual(@as(u32, 960), try getSamples(encoded, 48_000));
+            try grt.std.testing.expectEqual(try opus.packetGetChannels(encoded), try getChannels(encoded));
+            try grt.std.testing.expectEqual(try opus.packetGetFrames(encoded), try getFrames(encoded));
+            try grt.std.testing.expectEqual(try opus.packetGetSamples(encoded, 48_000), try getSamples(encoded, 48_000));
+            try grt.std.testing.expectEqual(try opus.packetGetBandwidth(encoded), try getBandwidth(encoded));
 
             switch (try getBandwidth(encoded)) {
                 .auto,
@@ -74,20 +73,20 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         fn helpersRejectEmptyInput() !void {
             const empty = [_]u8{};
 
-            try lib.testing.expectError(Error.InvalidPacket, getChannels(empty[0..]));
-            try lib.testing.expectError(Error.InvalidPacket, getFrames(empty[0..]));
-            try lib.testing.expectError(Error.InvalidPacket, getSamples(empty[0..], 48_000));
-            try lib.testing.expectError(Error.InvalidPacket, getBandwidth(empty[0..]));
+            try grt.std.testing.expectError(Error.InvalidPacket, getChannels(empty[0..]));
+            try grt.std.testing.expectError(Error.InvalidPacket, getFrames(empty[0..]));
+            try grt.std.testing.expectError(Error.InvalidPacket, getSamples(empty[0..], 48_000));
+            try grt.std.testing.expectError(Error.InvalidPacket, getBandwidth(empty[0..]));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -102,7 +101,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -111,5 +110,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

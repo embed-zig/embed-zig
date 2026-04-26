@@ -9,7 +9,7 @@ const bt = @import("../../bt.zig");
 const att = @import("att.zig");
 const gatt_client = @import("gatt/client.zig");
 
-pub fn make(comptime lib: type) type {
+pub fn make(comptime grt: type) type {
     return struct {
         const Self = @This();
         const POLL_INTERVAL_NS: u64 = 1_000_000;
@@ -21,10 +21,10 @@ pub fn make(comptime lib: type) type {
         state: bt.Central.State = .idle,
         started: bool = false,
         att_mtu: u16 = bt.Central.DEFAULT_ATT_MTU,
-        mutex: lib.Thread.Mutex = .{},
+        mutex: grt.std.Thread.Mutex = .{},
         hooks: glib.std.ArrayListUnmanaged(EventHook) = .{},
         scan_service_uuids: glib.std.ArrayListUnmanaged(u16) = .{},
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
 
         const EventHook = struct {
             ctx: ?*anyopaque,
@@ -93,7 +93,7 @@ pub fn make(comptime lib: type) type {
             }
         };
 
-        pub fn init(hci: bt.Hci, allocator: lib.mem.Allocator) Self {
+        pub fn init(hci: bt.Hci, allocator: glib.std.mem.Allocator) Self {
             return .{ .hci = hci, .allocator = allocator };
         }
 
@@ -189,7 +189,7 @@ pub fn make(comptime lib: type) type {
                     self.state = .idle;
                     return error.Timeout;
                 }
-                lib.Thread.sleep(POLL_INTERVAL_NS);
+                grt.std.Thread.sleep(POLL_INTERVAL_NS);
             }
             const link = self.hci.getLink(.central) orelse {
                 self.state = .idle;
@@ -214,7 +214,7 @@ pub fn make(comptime lib: type) type {
             self.hci.disconnect(conn_handle, 0x13);
             var waited_ms: u32 = 0;
             while (self.hci.getLinkByHandle(conn_handle) != null and waited_ms < wait_timeout_ms) : (waited_ms += 1) {
-                lib.Thread.sleep(POLL_INTERVAL_NS);
+                grt.std.Thread.sleep(POLL_INTERVAL_NS);
             }
             if (self.hci.getLinkByHandle(conn_handle) == null) {
                 self.state = .idle;
@@ -433,7 +433,7 @@ pub fn make(comptime lib: type) type {
                 const find_resp = self.sendAttRequest(conn_handle, find_req, resp_buf) catch |err| switch (err) {
                     error.Timeout => {
                         if (attempt + 1 < CCCD_DISCOVERY_MAX_ATTEMPTS) {
-                            lib.Thread.sleep(POLL_INTERVAL_NS);
+                            grt.std.Thread.sleep(POLL_INTERVAL_NS);
                             continue;
                         }
                         return error.Timeout;
@@ -590,10 +590,10 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
-            const Impl = make(lib);
+            const Impl = make(grt);
 
             const raw = [_]u8{
                 1,
@@ -623,10 +623,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var iter = Impl.AdvIterator.init(&raw);
             const report = iter.next() orelse return error.NoReport;
-            try lib.testing.expectEqualSlices(u8, &[_]u8{ 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 }, &report.addr);
-            try lib.testing.expectEqual(bt.Central.AddrType.public, report.addr_type);
-            try lib.testing.expectEqual(@as(i8, -59), report.rssi);
-            try lib.testing.expect(iter.next() == null);
+            try grt.std.testing.expectEqualSlices(u8, &[_]u8{ 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 }, &report.addr);
+            try grt.std.testing.expectEqual(bt.Central.AddrType.public, report.addr_type);
+            try grt.std.testing.expectEqual(@as(i8, -59), report.rssi);
+            try grt.std.testing.expect(iter.next() == null);
 
             var adv: bt.Central.AdvReport = .{
                 .addr = report.addr,
@@ -634,21 +634,21 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .rssi = report.rssi,
             };
             Impl.fillAdvReport(&adv, report);
-            try lib.testing.expectEqualSlices(u8, "Zig", adv.getName());
-            try lib.testing.expectEqual(@as(u8, 12), adv.data_len);
+            try grt.std.testing.expectEqualSlices(u8, "Zig", adv.getName());
+            try grt.std.testing.expectEqual(@as(u8, 12), adv.data_len);
 
             const uuid_list = [_]u8{
                 0x03, 0x03, 0x0D, 0x18,
                 0x02, 0x01, 0x06,
             };
-            try lib.testing.expect(Impl.matchesServiceFilter(&uuid_list, &.{0x180D}));
-            try lib.testing.expect(!Impl.matchesServiceFilter(&uuid_list, &.{0x180F}));
+            try grt.std.testing.expect(Impl.matchesServiceFilter(&uuid_list, &.{0x180D}));
+            try grt.std.testing.expect(!Impl.matchesServiceFilter(&uuid_list, &.{0x180F}));
 
             const service_data = [_]u8{
                 0x05, 0x16, 0x0F, 0x18, 0x01, 0x02,
             };
-            try lib.testing.expect(Impl.matchesServiceFilter(&service_data, &.{0x180F}));
-            try lib.testing.expect(!Impl.matchesServiceFilter(&service_data, &.{0x180D}));
+            try grt.std.testing.expect(Impl.matchesServiceFilter(&service_data, &.{0x180F}));
+            try grt.std.testing.expect(!Impl.matchesServiceFilter(&service_data, &.{0x180D}));
 
             const identity_raw = [_]u8{
                 1,
@@ -665,7 +665,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
             iter = Impl.AdvIterator.init(&identity_raw);
             const identity_report = iter.next() orelse return error.NoReport;
-            try lib.testing.expectEqual(bt.Central.AddrType.public, identity_report.addr_type);
+            try grt.std.testing.expectEqual(bt.Central.AddrType.public, identity_report.addr_type);
 
             const RejectingHci = struct {
                 connecting: bool = false,
@@ -709,11 +709,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             var rejecting_hci = RejectingHci{};
-            var central = Impl.init(bt.Hci.make(&rejecting_hci), lib.testing.allocator);
+            var central = Impl.init(bt.Hci.make(&rejecting_hci), grt.std.testing.allocator);
             defer central.deinit();
 
-            try lib.testing.expectError(error.Rejected, central.connect(.{ 1, 2, 3, 4, 5, 6 }, .public, .{}));
-            try lib.testing.expectEqual(bt.Central.State.idle, central.getState());
+            try grt.std.testing.expectError(error.Rejected, central.connect(.{ 1, 2, 3, 4, 5, 6 }, .public, .{}));
+            try grt.std.testing.expectEqual(bt.Central.State.idle, central.getState());
 
             const RetryCccdHci = struct {
                 cccd_attempts: u32 = 0,
@@ -795,24 +795,24 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             var retry_hci = RetryCccdHci{};
-            var retry_central = Impl.init(bt.Hci.make(&retry_hci), lib.testing.allocator);
+            var retry_central = Impl.init(bt.Hci.make(&retry_hci), grt.std.testing.allocator);
             defer retry_central.deinit();
 
             var chars: [1]bt.Central.DiscoveredChar = undefined;
             const count = try retry_central.discoverChars(0x0040, 0x0001, 0x0004, &chars);
-            try lib.testing.expectEqual(@as(usize, 1), count);
-            try lib.testing.expectEqual(@as(u16, 0x0004), chars[0].cccd_handle);
-            try lib.testing.expectEqual(@as(u32, 2), retry_hci.cccd_attempts);
+            try grt.std.testing.expectEqual(@as(usize, 1), count);
+            try grt.std.testing.expectEqual(@as(u16, 0x0004), chars[0].cccd_handle);
+            try grt.std.testing.expectEqual(@as(u32, 2), retry_hci.cccd_attempts);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -823,7 +823,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -374,7 +374,7 @@ pub fn GattServer(comptime services: []const ServiceDef) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const services = comptime &[_]ServiceDef{
@@ -385,17 +385,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
             const table = comptime buildAttributeTable(services);
 
-            try lib.testing.expectEqual(@as(usize, 6), table.len);
-            try lib.testing.expectEqual(@as(u16, 1), table[0].handle);
-            try lib.testing.expectEqual(Attribute.Kind.primary_service, table[0].kind);
-            try lib.testing.expectEqual(@as(u16, 0x180D), table[0].value_uuid);
-            try lib.testing.expectEqual(Attribute.Kind.characteristic_decl, table[1].kind);
-            try lib.testing.expectEqual(Attribute.Kind.characteristic_value, table[2].kind);
-            try lib.testing.expectEqual(@as(u16, 0x2A37), table[2].value_uuid);
-            try lib.testing.expectEqual(Attribute.Kind.cccd, table[3].kind);
-            try lib.testing.expectEqual(Attribute.Kind.characteristic_decl, table[4].kind);
-            try lib.testing.expectEqual(Attribute.Kind.characteristic_value, table[5].kind);
-            try lib.testing.expectEqual(@as(u16, 0x2A38), table[5].value_uuid);
+            try grt.std.testing.expectEqual(@as(usize, 6), table.len);
+            try grt.std.testing.expectEqual(@as(u16, 1), table[0].handle);
+            try grt.std.testing.expectEqual(Attribute.Kind.primary_service, table[0].kind);
+            try grt.std.testing.expectEqual(@as(u16, 0x180D), table[0].value_uuid);
+            try grt.std.testing.expectEqual(Attribute.Kind.characteristic_decl, table[1].kind);
+            try grt.std.testing.expectEqual(Attribute.Kind.characteristic_value, table[2].kind);
+            try grt.std.testing.expectEqual(@as(u16, 0x2A37), table[2].value_uuid);
+            try grt.std.testing.expectEqual(Attribute.Kind.cccd, table[3].kind);
+            try grt.std.testing.expectEqual(Attribute.Kind.characteristic_decl, table[4].kind);
+            try grt.std.testing.expectEqual(Attribute.Kind.characteristic_value, table[5].kind);
+            try grt.std.testing.expectEqual(@as(u16, 0x2A38), table[5].value_uuid);
 
             {
                 const Server = GattServer(&[_]ServiceDef{
@@ -409,8 +409,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 var req_buf: [3]u8 = undefined;
                 const req = att.encodeMtuRequest(&req_buf, 256);
                 const resp_len = server.handlePdu(req, &out);
-                try lib.testing.expect(resp_len > 0);
-                try lib.testing.expectEqual(att.EXCHANGE_MTU_RESPONSE, out[0]);
+                try grt.std.testing.expect(resp_len > 0);
+                try grt.std.testing.expectEqual(att.EXCHANGE_MTU_RESPONSE, out[0]);
             }
 
             {
@@ -425,8 +425,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 var req_buf: [7]u8 = undefined;
                 const req = att.encodeReadByGroupTypeRequest(&req_buf, 0x0001, 0xFFFF, att.UUID.from16(att.PRIMARY_SERVICE_UUID));
                 const resp_len = server.handlePdu(req, &out);
-                try lib.testing.expect(resp_len > 2);
-                try lib.testing.expectEqual(att.READ_BY_GROUP_TYPE_RESPONSE, out[0]);
+                try grt.std.testing.expect(resp_len > 2);
+                try grt.std.testing.expectEqual(att.READ_BY_GROUP_TYPE_RESPONSE, out[0]);
             }
 
             {
@@ -443,7 +443,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const resp_len = server.handlePdu(req, &out);
                 const pdu = att.decodePdu(out[0..resp_len]) orelse return error.DecodeFailed;
                 switch (pdu) {
-                    .error_response => |err_resp| try lib.testing.expectEqual(att.ErrorCode.unsupported_group_type, err_resp.error_code),
+                    .error_response => |err_resp| try grt.std.testing.expectEqual(att.ErrorCode.unsupported_group_type, err_resp.error_code),
                     else => return error.WrongVariant,
                 }
             }
@@ -462,7 +462,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 const resp_len = server.handlePdu(req, &out);
                 const pdu = att.decodePdu(out[0..resp_len]) orelse return error.DecodeFailed;
                 switch (pdu) {
-                    .error_response => |err_resp| try lib.testing.expectEqual(att.ErrorCode.attribute_not_found, err_resp.error_code),
+                    .error_response => |err_resp| try grt.std.testing.expectEqual(att.ErrorCode.attribute_not_found, err_resp.error_code),
                     else => return error.WrongVariant,
                 }
             }
@@ -481,22 +481,22 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
                 const req = client_mod.encodeDiscoverServices(&req_buf, 0x0001);
                 const resp_len = server.handlePdu(req, &resp_buf);
-                try lib.testing.expect(resp_len > 0);
+                try grt.std.testing.expect(resp_len > 0);
 
                 var services_out: [4]client_mod.DiscoveredService = undefined;
                 const count = client_mod.parseDiscoverServicesResponse(resp_buf[0..resp_len], &services_out);
-                try lib.testing.expectEqual(@as(usize, 1), count);
-                try lib.testing.expectEqual(@as(u16, 0x180D), services_out[0].uuid);
+                try grt.std.testing.expectEqual(@as(usize, 1), count);
+                try grt.std.testing.expectEqual(@as(u16, 0x180D), services_out[0].uuid);
             }
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -507,7 +507,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

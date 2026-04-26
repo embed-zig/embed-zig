@@ -327,7 +327,8 @@ pub fn clearEventCallback(self: root) void {
     self.vtable.clearEventCallback(self.ptr);
 }
 
-pub fn make(comptime lib: type, comptime Impl: type) type {
+pub fn make(comptime grt: type, comptime Impl: type) type {
+    _ = grt;
     comptime {
         if (!@hasDecl(Impl, "Config")) @compileError("Modem impl must define Config");
         if (!@hasDecl(Impl, "init")) @compileError("Modem impl must define init");
@@ -352,7 +353,7 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
         _ = @as(*const fn (*Impl) void, &Impl.clearEventCallback);
     }
 
-    const Allocator = lib.mem.Allocator;
+    const Allocator = glib.std.mem.Allocator;
     const Ctx = struct {
         allocator: Allocator,
         impl: Impl,
@@ -538,12 +539,12 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn exposesVtableSurface() !void {
             const Impl = struct {
                 pub const Config = struct {
-                    allocator: lib.mem.Allocator,
+                    allocator: glib.std.mem.Allocator,
                 };
 
                 imei_value: []const u8 = "860000000000001",
@@ -646,17 +647,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 _ = root.DataWriteError;
                 _ = root.CallbackFn;
                 _ = root.make;
-                _ = make(lib, Impl).init;
-                if (!@hasField(make(lib, Impl).Config, "allocator")) {
+                _ = make(grt, Impl).init;
+                if (!@hasField(make(grt, Impl).Config, "allocator")) {
                     @compileError("make config must expose allocator");
                 }
             }
         }
 
-        fn forwardsIdentityAndApnSurface(allocator: lib.mem.Allocator) !void {
+        fn forwardsIdentityAndApnSurface(allocator: glib.std.mem.Allocator) !void {
             const Impl = struct {
                 pub const Config = struct {
-                    allocator: lib.mem.Allocator,
+                    allocator: glib.std.mem.Allocator,
                 };
 
                 imei_value: []const u8 = "860000000000001",
@@ -721,26 +722,26 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            const Built = make(lib, Impl);
+            const Built = make(grt, Impl);
             var modem = try Built.init(.{ .allocator = allocator });
             defer modem.deinit();
 
             const current_state = modem.state();
-            try lib.testing.expectEqual(SimState.ready, current_state.sim);
-            try lib.testing.expectEqual(RegistrationState.home, current_state.registration);
-            try lib.testing.expectEqual(PacketState.connected, current_state.packet);
-            try lib.testing.expectEqual(@as(?[]const u8, "860000000000001"), modem.imei());
-            try lib.testing.expectEqual(@as(?[]const u8, "460001234567890"), modem.imsi());
-            try lib.testing.expectEqualStrings("internet", modem.apn().?);
+            try grt.std.testing.expectEqual(SimState.ready, current_state.sim);
+            try grt.std.testing.expectEqual(RegistrationState.home, current_state.registration);
+            try grt.std.testing.expectEqual(PacketState.connected, current_state.packet);
+            try grt.std.testing.expectEqual(@as(?[]const u8, "860000000000001"), modem.imei());
+            try grt.std.testing.expectEqual(@as(?[]const u8, "460001234567890"), modem.imsi());
+            try grt.std.testing.expectEqualStrings("internet", modem.apn().?);
 
             try modem.setApn("cmnet");
-            try lib.testing.expectEqualStrings("cmnet", modem.apn().?);
+            try grt.std.testing.expectEqualStrings("cmnet", modem.apn().?);
         }
 
-        fn optionalDataSurfaceDefaultsToUnsupported(allocator: lib.mem.Allocator) !void {
+        fn optionalDataSurfaceDefaultsToUnsupported(allocator: glib.std.mem.Allocator) !void {
             const Impl = struct {
                 pub const Config = struct {
-                    allocator: lib.mem.Allocator,
+                    allocator: glib.std.mem.Allocator,
                 };
 
                 pub fn init(config: Config) !@This() {
@@ -775,21 +776,21 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 pub fn clearEventCallback(_: *@This()) void {}
             };
 
-            const Built = make(lib, Impl);
+            const Built = make(grt, Impl);
             var modem = try Built.init(.{ .allocator = allocator });
             defer modem.deinit();
 
-            try lib.testing.expectError(error.Unsupported, modem.dataOpen());
+            try grt.std.testing.expectError(error.Unsupported, modem.dataOpen());
             var buf: [8]u8 = undefined;
-            try lib.testing.expectError(error.Unsupported, modem.dataRead(&buf));
-            try lib.testing.expectError(error.Unsupported, modem.dataWrite("abc"));
-            try lib.testing.expectEqual(DataState.closed, modem.dataState());
+            try grt.std.testing.expectError(error.Unsupported, modem.dataRead(&buf));
+            try grt.std.testing.expectError(error.Unsupported, modem.dataWrite("abc"));
+            try grt.std.testing.expectEqual(DataState.closed, modem.dataState());
         }
 
-        fn forwardsPublicDataSurface(allocator: lib.mem.Allocator) !void {
+        fn forwardsPublicDataSurface(allocator: glib.std.mem.Allocator) !void {
             const Impl = struct {
                 pub const Config = struct {
-                    allocator: lib.mem.Allocator,
+                    allocator: glib.std.mem.Allocator,
                 };
 
                 data_state_value: DataState = .closed,
@@ -872,29 +873,29 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            const Built = make(lib, Impl);
+            const Built = make(grt, Impl);
             var modem = try Built.init(.{ .allocator = allocator });
             defer modem.deinit();
 
             try modem.dataOpen();
-            try lib.testing.expectEqual(DataState.open, modem.dataState());
+            try grt.std.testing.expectEqual(DataState.open, modem.dataState());
             modem.setDataReadTimeout(100);
             modem.setDataWriteTimeout(200);
             var buf: [4]u8 = undefined;
-            try lib.testing.expectEqual(@as(usize, 1), try modem.dataRead(&buf));
-            try lib.testing.expectEqual(@as(usize, 3), try modem.dataWrite("abc"));
+            try grt.std.testing.expectEqual(@as(usize, 1), try modem.dataRead(&buf));
+            try grt.std.testing.expectEqual(@as(usize, 3), try modem.dataWrite("abc"));
             modem.dataClose();
-            try lib.testing.expectEqual(DataState.closed, modem.dataState());
+            try grt.std.testing.expectEqual(DataState.closed, modem.dataState());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             TestCase.exposesVtableSurface() catch |err| {
@@ -916,7 +917,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

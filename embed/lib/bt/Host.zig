@@ -52,8 +52,8 @@ pub fn clearEventCallback(self: root) void {
     self.vtable.clearEventCallback(self.ptr);
 }
 
-pub fn make(comptime lib: type, comptime Impl: type, comptime Channel: fn (type) type) type {
-    _ = Channel;
+pub fn make(comptime grt: type, comptime Impl: type) type {
+    _ = grt;
     comptime {
         if (!@hasDecl(Impl, "Config")) @compileError("Host impl must define Config");
         if (!@hasDecl(Impl, "init")) @compileError("Host impl must define init");
@@ -72,7 +72,7 @@ pub fn make(comptime lib: type, comptime Impl: type, comptime Channel: fn (type)
         _ = @as(*const fn (*Impl) void, &Impl.clearEventCallback);
     }
 
-    const Allocator = lib.mem.Allocator;
+    const Allocator = glib.std.mem.Allocator;
     const Ctx = struct {
         allocator: Allocator,
         impl: Impl,
@@ -154,12 +154,12 @@ pub fn make(comptime lib: type, comptime Impl: type, comptime Channel: fn (type)
     };
 }
 
-pub fn makeHci(comptime lib: type, comptime Channel: fn (type) type) type {
-    const CentralImpl = CentralMod.make(lib);
-    const PeripheralImpl = PeripheralMod.make(lib);
-    const Base = make(lib, struct {
+pub fn makeHci(comptime grt: type) type {
+    const CentralImpl = CentralMod.make(grt);
+    const PeripheralImpl = PeripheralMod.make(grt);
+    const Base = make(grt, struct {
         pub const Config = struct {
-            allocator: lib.mem.Allocator,
+            allocator: glib.std.mem.Allocator,
             source_id: u32 = 0,
         };
 
@@ -230,7 +230,7 @@ pub fn makeHci(comptime lib: type, comptime Channel: fn (type) type) type {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
             self.emitEvent(.{ .peripheral = event });
         }
-    }, Channel);
+    });
 
     return struct {
         pub const Config = Base.Config;
@@ -242,11 +242,10 @@ pub fn makeHci(comptime lib: type, comptime Channel: fn (type) type) type {
 }
 
 pub fn makeHciTransport(
-    comptime lib: type,
-    comptime Channel: fn (type) type,
+    comptime grt: type,
 ) type {
-    const HciType = Hci.make(lib);
-    const Base = makeHci(lib, Channel);
+    const HciType = Hci.make(grt);
+    const Base = makeHci(grt);
 
     return struct {
         pub const Config = struct {
@@ -254,7 +253,7 @@ pub fn makeHciTransport(
             source_id: u32 = 0,
         };
 
-        pub fn init(allocator: lib.mem.Allocator, transport: Transport, config: Config) !root {
+        pub fn init(allocator: glib.std.mem.Allocator, transport: Transport, config: Config) !root {
             const hci_ptr = try allocator.create(HciType);
             errdefer allocator.destroy(hci_ptr);
             hci_ptr.* = HciType.init(transport, config.hci);
@@ -267,7 +266,7 @@ pub fn makeHciTransport(
             errdefer inner_host.deinit();
 
             const Storage = struct {
-                allocator: lib.mem.Allocator,
+                allocator: glib.std.mem.Allocator,
                 hci: *HciType,
                 host: root,
 
@@ -344,16 +343,9 @@ pub fn makeHciTransport(
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
-            const ChannelFactory = struct {
-                fn Channel(comptime T: type) type {
-                    _ = T;
-                    return void;
-                }
-            }.Channel;
-
             comptime {
                 _ = deinit;
                 _ = central;
@@ -365,21 +357,21 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 _ = make;
                 _ = makeHci;
                 _ = makeHciTransport;
-                _ = makeHci(lib, ChannelFactory).init;
-                _ = makeHciTransport(lib, ChannelFactory).init;
-                if (!@hasField(makeHciTransport(lib, ChannelFactory).Config, "source_id")) {
+                _ = makeHci(grt).init;
+                _ = makeHciTransport(grt).init;
+                if (!@hasField(makeHciTransport(grt).Config, "source_id")) {
                     @compileError("makeHciTransport config must expose source_id");
                 }
             }
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -390,7 +382,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

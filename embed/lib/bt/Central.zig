@@ -416,7 +416,7 @@ pub fn make(pointer: anytype) Central {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const Impl = struct {
@@ -453,19 +453,19 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var impl = Impl{};
             const central = make(&impl);
 
-            try lib.testing.expectError(error.Unexpected, central.gattWriteNoResp(1, 2, "x"));
-            try lib.testing.expectError(error.Unexpected, central.exchangeMtu(1, MAX_ATT_MTU));
-            try lib.testing.expectError(error.Unexpected, central.subscribeIndications(1, 2));
-            try lib.testing.expectEqual(DEFAULT_ATT_MTU, central.getAttMtu(1));
+            try grt.std.testing.expectError(error.Unexpected, central.gattWriteNoResp(1, 2, "x"));
+            try grt.std.testing.expectError(error.Unexpected, central.exchangeMtu(1, MAX_ATT_MTU));
+            try grt.std.testing.expectError(error.Unexpected, central.subscribeIndications(1, 2));
+            try grt.std.testing.expectEqual(DEFAULT_ATT_MTU, central.getAttMtu(1));
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -476,7 +476,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

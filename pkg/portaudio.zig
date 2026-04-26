@@ -3,6 +3,8 @@
 //! Usage:
 //!   const portaudio = @import("portaudio");
 
+const glib = @import("glib");
+const gstd = @import("gstd");
 const types = @import("portaudio/src/types.zig");
 const error_mod = @import("portaudio/src/error.zig");
 
@@ -44,54 +46,41 @@ test "portaudio/unit/imports" {
 
 test "portaudio/unit/root_surface_exposes_foundational_types" {
     const std = @import("std");
-    const testing = std.testing;
 
-    try testing.expect(@sizeOf(DeviceIndex) > 0);
-    try testing.expect(@sizeOf(HostApiIndex) > 0);
-    try testing.expectEqual(@intFromEnum(SampleFormat.int16), @as(c_ulong, 0x00000008));
-    try testing.expect(@sizeOf(PortAudio) > 0);
+    try std.testing.expect(@sizeOf(DeviceIndex) > 0);
+    try std.testing.expect(@sizeOf(HostApiIndex) > 0);
+    try std.testing.expectEqual(@intFromEnum(SampleFormat.int16), @as(c_ulong, 0x00000008));
+    try std.testing.expect(@sizeOf(PortAudio) > 0);
 }
 
 test "portaudio/unit/std" {
-    const lib = @import("std");
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .portaudio_unit_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .portaudio_unit_std);
     defer t.deinit();
 
-    t.run("portaudio", test_runner.unit.make(lib));
+    t.run("portaudio", test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "portaudio/unit/embed_std" {
-    const lib = @import("embed_std").std;
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .portaudio_unit_embed_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .portaudio_unit_embed_std);
     defer t.deinit();
 
-    t.run("portaudio", test_runner.unit.make(lib));
+    t.run("portaudio", test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "portaudio/integration/std" {
-    const lib = @import("std");
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .portaudio_integration_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .portaudio_integration_std);
     defer t.deinit();
 
-    t.run("portaudio", test_runner.integration.make(lib));
+    t.run("portaudio", test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "portaudio/integration/embed_std" {
-    const lib = @import("embed_std").std;
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .portaudio_integration_embed_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .portaudio_integration_embed_std);
     defer t.deinit();
 
-    t.run("portaudio", test_runner.integration.make(lib));
+    t.run("portaudio", test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }

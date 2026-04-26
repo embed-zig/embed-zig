@@ -876,9 +876,9 @@ fn comptimeEql(comptime a: []const u8, comptime b: []const u8) bool {
     return true;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn parses_story_json(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn parses_story_json(allocator: glib.std.mem.Allocator) !void {
             const source =
                 \\{
                 \\  "name": "counter story",
@@ -918,13 +918,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var parsed = comptime parseSlice(source);
             defer parsed.deinit();
 
-            try testing.expectEqualStrings("counter story", parsed.name);
-            try testing.expectEqualStrings("drives a counter through ticks and button input", parsed.description);
-            try testing.expectEqual(@as(usize, 3), parsed.steps.len);
+            try grt.std.testing.expectEqualStrings("counter story", parsed.name);
+            try grt.std.testing.expectEqualStrings("drives a counter through ticks and button input", parsed.description);
+            try grt.std.testing.expectEqual(@as(usize, 3), parsed.steps.len);
 
             if (parsed.steps[0].tick) |tick| {
-                try testing.expectEqual(@as(i128, 42), tick.interval);
-                try testing.expectEqual(@as(usize, 2), tick.n);
+                try grt.std.testing.expectEqual(@as(i128, 42), tick.interval);
+                try grt.std.testing.expectEqual(@as(usize, 2), tick.n);
             } else {
                 return error.ExpectedTickStep;
             }
@@ -940,14 +940,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             );
             defer input_value.deinit();
             switch (input_value.value) {
-                .object => |object| try testing.expect(object.get("raw_single_button") != null),
+                .object => |object| try grt.std.testing.expect(object.get("raw_single_button") != null),
                 else => return error.ExpectedDispatchObject,
             }
 
             if (parsed.steps[2].outputs.len != 1) {
                 return error.ExpectedStateCheckStep;
             }
-            try testing.expectEqualStrings("counter", parsed.steps[2].outputs[0].label);
+            try grt.std.testing.expectEqualStrings("counter", parsed.steps[2].outputs[0].label);
             var state_value = try glib.std.json.parseFromSlice(
                 glib.std.json.Value,
                 allocator,
@@ -956,12 +956,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             );
             defer state_value.deinit();
             switch (state_value.value) {
-                .object => |object| try testing.expect(object.get("ticks") != null),
+                .object => |object| try grt.std.testing.expect(object.get("ticks") != null),
                 else => return error.ExpectedStateObject,
             }
         }
 
-        fn parses_escaped_story_strings(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn parses_escaped_story_strings(allocator: glib.std.mem.Allocator) !void {
             _ = allocator;
 
             const source =
@@ -982,26 +982,25 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var parsed = comptime parseSlice(source);
             defer parsed.deinit();
 
-            try testing.expectEqualStrings("counter \xf0\x9f\x98\x80", parsed.name);
-            try testing.expectEqualStrings("line 1\nline 2", parsed.description);
+            try grt.std.testing.expectEqualStrings("counter \xf0\x9f\x98\x80", parsed.name);
+            try grt.std.testing.expectEqualStrings("line 1\nline 2", parsed.description);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.parses_story_json(testing, allocator) catch |err| {
+            TestCase.parses_story_json(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.parses_escaped_story_strings(testing, allocator) catch |err| {
+            TestCase.parses_escaped_story_strings(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -1009,7 +1008,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

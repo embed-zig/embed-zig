@@ -14,11 +14,11 @@ pub const Options = struct {
     },
 };
 
-pub fn make(comptime lib: type, device: anytype) glib.testing.TestRunner {
-    return makeWithOptions(lib, device, .{});
+pub fn make(comptime grt: type, device: anytype) glib.testing.TestRunner {
+    return makeWithOptions(grt, device, .{});
 }
 
-pub fn makeWithOptions(comptime lib: type, device: anytype, options: Options) glib.testing.TestRunner {
+pub fn makeWithOptions(comptime grt: type, device: anytype, options: Options) glib.testing.TestRunner {
     const DevicePtr = @TypeOf(device);
     comptime requireDevicePointer(DevicePtr);
 
@@ -26,27 +26,27 @@ pub fn makeWithOptions(comptime lib: type, device: anytype, options: Options) gl
         device: DevicePtr,
         options: Options,
 
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = allocator;
-            runSurface(lib, self.device, self.options) catch |err| {
+            runSurface(grt, self.device, self.options) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{
         .device = device,
         .options = options,
@@ -54,11 +54,10 @@ pub fn makeWithOptions(comptime lib: type, device: anytype, options: Options) gl
     return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
-pub fn runSurface(comptime lib: type, device: anytype, options: Options) !void {
-    const testing = lib.testing;
+pub fn runSurface(comptime grt: type, device: anytype, options: Options) !void {
     const ApHook = struct {
         fn cb(ctx: ?*anyopaque, _: wifi.Ap.Event) void {
-            const counter: *lib.atomic.Value(u32) = @ptrCast(@alignCast(ctx.?));
+            const counter: *grt.std.atomic.Value(u32) = @ptrCast(@alignCast(ctx.?));
             _ = counter.fetchAdd(1, .monotonic);
         }
     };
@@ -67,7 +66,7 @@ pub fn runSurface(comptime lib: type, device: anytype, options: Options) !void {
     try expectValidState(ap.getState());
     _ = ap.getMacAddr();
 
-    var hook_count = lib.atomic.Value(u32).init(0);
+    var hook_count = grt.std.atomic.Value(u32).init(0);
     ap.addEventHook(@ptrCast(&hook_count), ApHook.cb);
     defer ap.removeEventHook(@ptrCast(&hook_count), ApHook.cb);
 
@@ -84,7 +83,7 @@ pub fn runSurface(comptime lib: type, device: anytype, options: Options) !void {
         try expectValidState(ap.getState());
         const after_probe = hook_count.load(.acquire);
         if (start_supported) {
-            try testing.expect(after_probe > before_probe);
+            try grt.std.testing.expect(after_probe > before_probe);
         }
     }
 
@@ -103,7 +102,7 @@ fn requireDevicePointer(comptime T: type) void {
     }
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn runnerKeepsHookInstalledDuringProbe() !void {
             const Impl = struct {
@@ -168,20 +167,20 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var impl = Impl{};
             var device = Device{ .impl = &impl };
-            try runSurface(lib, &device, .{
+            try runSurface(grt, &device, .{
                 .probe_start = true,
             });
-            try lib.testing.expect(impl.saw_hook_during_start);
+            try grt.std.testing.expect(impl.saw_hook_during_start);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -192,7 +191,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

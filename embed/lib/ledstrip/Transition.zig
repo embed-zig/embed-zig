@@ -66,7 +66,7 @@ fn lerpChannel(cur: u8, tgt: u8, steps: u8) u8 {
     return @intCast(@as(i16, cur) + step);
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn stepTowardReachesTarget() !void {
             var color = Color.black;
@@ -76,7 +76,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 color = stepToward(color, target, 5);
             }
 
-            try lib.testing.expectEqual(target, color);
+            try grt.std.testing.expectEqual(target, color);
         }
 
         fn stepTowardSnapsWhenWithinRange() !void {
@@ -84,7 +84,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const target = Color.black;
             const stepped = stepToward(current, target, 5);
 
-            try lib.testing.expectEqual(Color.black, stepped);
+            try grt.std.testing.expectEqual(Color.black, stepped);
         }
 
         fn stepFrameConverges() !void {
@@ -98,7 +98,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 if (steps > 100) break;
             }
 
-            try lib.testing.expect(current.eql(target));
+            try grt.std.testing.expect(current.eql(target));
         }
 
         fn stepFrameReportsNoChangeWhenAlreadyEqual() !void {
@@ -106,7 +106,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var current = F.solid(Color.green);
             const target = F.solid(Color.green);
 
-            try lib.testing.expect(!stepFrame(2, &current, target, 8));
+            try grt.std.testing.expect(!stepFrame(2, &current, target, 8));
         }
 
         fn lerpFrameRemainingOneSnapsToTarget() !void {
@@ -114,8 +114,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var current = F.solid(Color.black);
             const target = F.solid(Color.white);
 
-            try lib.testing.expect(lerpFrame(2, &current, target, 1));
-            try lib.testing.expect(current.eql(target));
+            try grt.std.testing.expect(lerpFrame(2, &current, target, 1));
+            try grt.std.testing.expect(current.eql(target));
         }
 
         fn lerpFrameConvergesOverSteps() !void {
@@ -127,17 +127,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 _ = lerpFrame(2, &current, target, 8);
             }
 
-            try lib.testing.expect(current.eql(target));
+            try grt.std.testing.expect(current.eql(target));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -168,7 +168,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

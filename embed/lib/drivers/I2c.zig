@@ -76,7 +76,7 @@ pub fn init(pointer: anytype) I2c {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn dispatchesWriteReadAndWriteRead() !void {
             const Fake = struct {
@@ -117,22 +117,22 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const bus = I2c.init(&fake);
 
             try bus.write(0x1A, &.{ 0x01, 0x02, 0x03 });
-            try lib.testing.expectEqual(@as(Address, 0x1A), fake.last_write_addr);
-            try lib.testing.expectEqual(@as(usize, 3), fake.last_write_len);
-            try lib.testing.expectEqualSlices(u8, &.{ 0x01, 0x02, 0x03 }, fake.last_write[0..3]);
+            try grt.std.testing.expectEqual(@as(Address, 0x1A), fake.last_write_addr);
+            try grt.std.testing.expectEqual(@as(usize, 3), fake.last_write_len);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x01, 0x02, 0x03 }, fake.last_write[0..3]);
 
             var read_buf: [2]u8 = undefined;
             try bus.read(0x2B, &read_buf);
-            try lib.testing.expectEqual(@as(Address, 0x2B), fake.last_read_addr);
-            try lib.testing.expectEqual(@as(usize, 2), fake.last_read_len);
-            try lib.testing.expectEqualSlices(u8, &.{ 0x11, 0x22 }, &read_buf);
+            try grt.std.testing.expectEqual(@as(Address, 0x2B), fake.last_read_addr);
+            try grt.std.testing.expectEqual(@as(usize, 2), fake.last_read_len);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x11, 0x22 }, &read_buf);
 
             var rx: [3]u8 = undefined;
             try bus.writeRead(0x3C, &.{ 0x09, 0x0A }, &rx);
-            try lib.testing.expectEqual(@as(Address, 0x3C), fake.last_write_read_addr);
-            try lib.testing.expectEqual(@as(usize, 2), fake.last_write_read_tx_len);
-            try lib.testing.expectEqualSlices(u8, &.{ 0x09, 0x0A }, fake.last_write_read_tx[0..2]);
-            try lib.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC }, &rx);
+            try grt.std.testing.expectEqual(@as(Address, 0x3C), fake.last_write_read_addr);
+            try grt.std.testing.expectEqual(@as(usize, 2), fake.last_write_read_tx_len);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x09, 0x0A }, fake.last_write_read_tx[0..2]);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC }, &rx);
         }
 
         fn propagatesBackendErrors() !void {
@@ -156,26 +156,26 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var fake = Fake{ .fail_write = true };
             const bus = I2c.init(&fake);
-            try lib.testing.expectError(error.Timeout, bus.write(0x10, &.{0x00}));
+            try grt.std.testing.expectError(error.Timeout, bus.write(0x10, &.{0x00}));
 
             fake.fail_write = false;
             fake.fail_read = true;
             var buf: [1]u8 = undefined;
-            try lib.testing.expectError(error.BusError, bus.read(0x10, &buf));
+            try grt.std.testing.expectError(error.BusError, bus.read(0x10, &buf));
 
             fake.fail_read = false;
             fake.fail_write_read = true;
-            try lib.testing.expectError(error.Nack, bus.writeRead(0x10, &.{0x00}, &buf));
+            try grt.std.testing.expectError(error.Nack, bus.writeRead(0x10, &.{0x00}, &buf));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -190,7 +190,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

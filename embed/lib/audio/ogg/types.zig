@@ -41,32 +41,28 @@ fn maxInt32AsUsize() usize {
     return (@as(usize, 1) << (@bitSizeOf(i32) - 1)) - 1;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn testIntegerCastsPreserveValidValues() !void {
-            const testing = lib.testing;
-
-            try testing.expectEqual(@as(isize, 12), try usizeToIsize(12));
-            try testing.expectEqual(@as(usize, 7), try isizeToUsize(7));
-            try testing.expectEqual(@as(usize, 5), try int32ToUsize(5));
-            try testing.expectEqual(@as(i32, 9), try usizeToInt32(9));
+            try grt.std.testing.expectEqual(@as(isize, 12), try usizeToIsize(12));
+            try grt.std.testing.expectEqual(@as(usize, 7), try isizeToUsize(7));
+            try grt.std.testing.expectEqual(@as(usize, 5), try int32ToUsize(5));
+            try grt.std.testing.expectEqual(@as(i32, 9), try usizeToInt32(9));
         }
 
         fn testIntegerCastsRejectNegativeValues() !void {
-            const testing = lib.testing;
-
-            try testing.expectError(error.NegativeValue, isizeToUsize(-1));
-            try testing.expectError(error.NegativeValue, int32ToUsize(-1));
+            try grt.std.testing.expectError(error.NegativeValue, isizeToUsize(-1));
+            try grt.std.testing.expectError(error.NegativeValue, int32ToUsize(-1));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -81,7 +77,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

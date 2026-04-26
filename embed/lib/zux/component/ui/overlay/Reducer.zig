@@ -5,18 +5,18 @@ const Message = @import("../../../pipeline/Message.zig");
 const Subscriber = @import("../../../store/Subscriber.zig");
 const State = @import("State.zig");
 
-pub fn make(comptime lib: type) type {
-    const AtomicU64 = lib.atomic.Value(u64);
-    const Mutex = lib.Thread.Mutex;
-    const RwLock = lib.Thread.RwLock;
-    const SubscriberList = lib.ArrayList(*Subscriber);
+pub fn make(comptime grt: type) type {
+    const AtomicU64 = grt.std.atomic.Value(u64);
+    const Mutex = grt.std.Thread.Mutex;
+    const RwLock = grt.std.Thread.RwLock;
+    const SubscriberList = grt.std.ArrayList(*Subscriber);
 
     return struct {
         const Self = @This();
 
         pub const StateType = State;
 
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
 
         running_mu: Mutex = .{},
         running_state: State = .{},
@@ -29,7 +29,7 @@ pub fn make(comptime lib: type) type {
         subscribers_notifying: bool = false,
         tick_count: AtomicU64 = AtomicU64.init(0),
 
-        pub fn init(allocator: lib.mem.Allocator, initial: State) Self {
+        pub fn init(allocator: glib.std.mem.Allocator, initial: State) Self {
             return .{
                 .allocator = allocator,
                 .running_state = initial,
@@ -173,7 +173,7 @@ pub fn make(comptime lib: type) type {
         fn stateEql(a: State, b: State) bool {
             return a.visible == b.visible and
                 a.name_len == b.name_len and
-                lib.mem.eql(u8, a.name[0..], b.name[0..]) and
+                grt.std.mem.eql(u8, a.name[0..], b.name[0..]) and
                 a.blocking == b.blocking;
         }
 
@@ -189,11 +189,11 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
-    const OverlayStore = make(lib);
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const OverlayStore = make(grt);
 
     const TestCase = struct {
-        fn show_hide_and_patch_fields(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn show_hide_and_patch_fields(allocator: glib.std.mem.Allocator) !void {
             var overlay = OverlayStore.init(allocator, .{});
             defer overlay.deinit();
 
@@ -207,9 +207,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             {
                 const state = overlay.get();
-                try testing.expectEqual(false, state.visible);
-                try testing.expect(lib.mem.eql(u8, state.nameSlice(), ""));
-                try testing.expectEqual(false, state.blocking);
+                try grt.std.testing.expectEqual(false, state.visible);
+                try grt.std.testing.expect(grt.std.mem.eql(u8, state.nameSlice(), ""));
+                try grt.std.testing.expectEqual(false, state.blocking);
             }
 
             const show_message: Message = .{
@@ -222,21 +222,21 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 },
             };
-            try testing.expectEqual(@as(usize, 1), try OverlayStore.reduce(&overlay, show_message, emit));
+            try grt.std.testing.expectEqual(@as(usize, 1), try OverlayStore.reduce(&overlay, show_message, emit));
 
             {
                 const state = overlay.get();
-                try testing.expectEqual(false, state.visible);
+                try grt.std.testing.expectEqual(false, state.visible);
             }
             overlay.tick();
             {
                 const state = overlay.get();
-                try testing.expectEqual(true, state.visible);
-                try testing.expect(lib.mem.eql(u8, state.nameSlice(), "loading"));
-                try testing.expectEqual(true, state.blocking);
+                try grt.std.testing.expectEqual(true, state.visible);
+                try grt.std.testing.expect(grt.std.mem.eql(u8, state.nameSlice(), "loading"));
+                try grt.std.testing.expectEqual(true, state.blocking);
             }
 
-            try testing.expectEqual(@as(usize, 1), try OverlayStore.reduce(&overlay, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try OverlayStore.reduce(&overlay, .{
                 .origin = .manual,
                 .body = .{
                     .ui_overlay_set_blocking = .{
@@ -247,10 +247,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             overlay.tick();
             {
                 const state = overlay.get();
-                try testing.expectEqual(false, state.blocking);
+                try grt.std.testing.expectEqual(false, state.blocking);
             }
 
-            try testing.expectEqual(@as(usize, 1), try OverlayStore.reduce(&overlay, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try OverlayStore.reduce(&overlay, .{
                 .origin = .manual,
                 .body = .{
                     .ui_overlay_set_name = .{
@@ -262,10 +262,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             overlay.tick();
             {
                 const state = overlay.get();
-                try testing.expect(lib.mem.eql(u8, state.nameSlice(), "popup"));
+                try grt.std.testing.expect(grt.std.mem.eql(u8, state.nameSlice(), "popup"));
             }
 
-            try testing.expectEqual(@as(usize, 1), try OverlayStore.reduce(&overlay, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try OverlayStore.reduce(&overlay, .{
                 .origin = .manual,
                 .body = .{
                     .ui_overlay_hide = .{},
@@ -274,18 +274,18 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             overlay.tick();
             {
                 const state = overlay.get();
-                try testing.expectEqual(false, state.visible);
-                try testing.expect(lib.mem.eql(u8, state.nameSlice(), "popup"));
-                try testing.expectEqual(false, state.blocking);
+                try grt.std.testing.expectEqual(false, state.visible);
+                try grt.std.testing.expect(grt.std.mem.eql(u8, state.nameSlice(), "popup"));
+                try grt.std.testing.expectEqual(false, state.blocking);
             }
         }
 
-        fn noops_do_not_dirty_state(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn noops_do_not_dirty_state(allocator: glib.std.mem.Allocator) !void {
             var initial: State = .{
                 .visible = true,
                 .blocking = true,
             };
-            try testing.expect(try initial.setName("popup"));
+            try grt.std.testing.expect(try initial.setName("popup"));
 
             var overlay = OverlayStore.init(allocator, initial);
             defer overlay.deinit();
@@ -297,7 +297,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const emit = Emitter.init(&noop);
             const popup_name = try State.nameFields("popup");
 
-            try testing.expectEqual(@as(usize, 0), try OverlayStore.reduce(&overlay, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try OverlayStore.reduce(&overlay, .{
                 .origin = .manual,
                 .body = .{
                     .ui_overlay_show = .{
@@ -308,7 +308,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
 
-            try testing.expectEqual(@as(usize, 0), try OverlayStore.reduce(&overlay, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try OverlayStore.reduce(&overlay, .{
                 .origin = .manual,
                 .body = .{
                     .ui_overlay_set_name = .{
@@ -318,7 +318,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
 
-            try testing.expectEqual(@as(usize, 0), try OverlayStore.reduce(&overlay, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try OverlayStore.reduce(&overlay, .{
                 .origin = .manual,
                 .body = .{
                     .ui_overlay_set_blocking = .{
@@ -328,13 +328,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit));
         }
 
-        fn too_long_name_returns_error(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn too_long_name_returns_error(allocator: glib.std.mem.Allocator) !void {
             _ = allocator;
             var state: State = .{};
             const too_long_name = [_]u8{'x'} ** (State.max_name_len + 1);
             _ = state.setName(too_long_name[0..]) catch |err| {
-                try testing.expect(err == error.NameTooLong);
-                try testing.expect(lib.mem.eql(u8, state.nameSlice(), ""));
+                try grt.std.testing.expect(err == error.NameTooLong);
+                try grt.std.testing.expect(grt.std.mem.eql(u8, state.nameSlice(), ""));
                 return;
             };
 
@@ -343,31 +343,30 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.show_hide_and_patch_fields(testing, allocator) catch |err| {
+            TestCase.show_hide_and_patch_fields(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.noops_do_not_dirty_state(testing, allocator) catch |err| {
+            TestCase.noops_do_not_dirty_state(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.too_long_name_returns_error(testing, allocator) catch |err| {
+            TestCase.too_long_name_returns_error(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

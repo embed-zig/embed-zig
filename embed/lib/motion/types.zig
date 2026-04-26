@@ -101,54 +101,47 @@ pub const Thresholds = struct {
     };
 };
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn testAccelMagnitude() !void {
-            const testing = lib.testing;
-
             const unit: AccelData = .{ .x = 0, .y = 0, .z = 1.0 };
-            try testing.expectEqual(@as(f32, 1.0), unit.magnitude());
+            try grt.std.testing.expectEqual(@as(f32, 1.0), unit.magnitude());
 
             const diagonal: AccelData = .{ .x = 1.0, .y = 1.0, .z = 1.0 };
             try expectApproxEqual(diagonal.magnitude(), 1.7320508, 0.0001);
         }
 
         fn testGyroMagnitude() !void {
-            const testing = lib.testing;
-
             const stationary: GyroData = .{ .x = 0, .y = 0, .z = 0 };
-            try testing.expectEqual(@as(f32, 0.0), stationary.magnitude());
+            try grt.std.testing.expectEqual(@as(f32, 0.0), stationary.magnitude());
 
             const turn: GyroData = .{ .x = 3.0, .y = 4.0, .z = 12.0 };
             try expectApproxEqual(turn.magnitude(), 13.0, 0.0001);
         }
 
         fn testThresholdPresets() !void {
-            const testing = lib.testing;
-
-            try testing.expect(Thresholds.sensitive.shake_threshold_g < Thresholds.default.shake_threshold_g);
-            try testing.expect(Thresholds.insensitive.shake_threshold_g > Thresholds.default.shake_threshold_g);
-            try testing.expect(Thresholds.sensitive.tilt_threshold_deg < Thresholds.default.tilt_threshold_deg);
-            try testing.expect(Thresholds.insensitive.tilt_threshold_deg > Thresholds.default.tilt_threshold_deg);
-            try testing.expect(Thresholds.sensitive.free_fall_threshold_g > Thresholds.default.free_fall_threshold_g);
-            try testing.expect(Thresholds.insensitive.free_fall_threshold_g < Thresholds.default.free_fall_threshold_g);
-            try testing.expect(Thresholds.sensitive.flip_gyro_threshold_dps < Thresholds.default.flip_gyro_threshold_dps);
-            try testing.expect(Thresholds.insensitive.flip_gyro_threshold_dps > Thresholds.default.flip_gyro_threshold_dps);
+            try grt.std.testing.expect(Thresholds.sensitive.shake_threshold_g < Thresholds.default.shake_threshold_g);
+            try grt.std.testing.expect(Thresholds.insensitive.shake_threshold_g > Thresholds.default.shake_threshold_g);
+            try grt.std.testing.expect(Thresholds.sensitive.tilt_threshold_deg < Thresholds.default.tilt_threshold_deg);
+            try grt.std.testing.expect(Thresholds.insensitive.tilt_threshold_deg > Thresholds.default.tilt_threshold_deg);
+            try grt.std.testing.expect(Thresholds.sensitive.free_fall_threshold_g > Thresholds.default.free_fall_threshold_g);
+            try grt.std.testing.expect(Thresholds.insensitive.free_fall_threshold_g < Thresholds.default.free_fall_threshold_g);
+            try grt.std.testing.expect(Thresholds.sensitive.flip_gyro_threshold_dps < Thresholds.default.flip_gyro_threshold_dps);
+            try grt.std.testing.expect(Thresholds.insensitive.flip_gyro_threshold_dps > Thresholds.default.flip_gyro_threshold_dps);
         }
 
         fn expectApproxEqual(actual: f32, expected: f32, tolerance: f32) !void {
-            const testing = lib.testing;
-            try testing.expect(@abs(actual - expected) <= tolerance);
+            try grt.std.testing.expect(@abs(actual - expected) <= tolerance);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -167,7 +160,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

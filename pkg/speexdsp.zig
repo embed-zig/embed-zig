@@ -16,6 +16,8 @@
 //! sizing and sampling-rate configuration aligned and clear the link before
 //! tearing the echo down if the preprocess state will continue to run.
 
+const glib = @import("glib");
+const gstd = @import("gstd");
 const types = @import("speexdsp/src/types.zig");
 const error_mod = @import("speexdsp/src/error.zig");
 
@@ -60,53 +62,40 @@ test "speexdsp/unit_tests/imports" {
 
 test "speexdsp/unit_tests/root_surface_exposes_phase1_wrappers" {
     const std = @import("std");
-    const testing = std.testing;
 
-    try testing.expect(@sizeOf(Sample) == 2);
-    try testing.expect(resampler_quality_min <= resampler_quality_default);
-    try testing.expect(resampler_quality_default <= resampler_quality_max);
+    try std.testing.expect(@sizeOf(Sample) == 2);
+    try std.testing.expect(resampler_quality_min <= resampler_quality_default);
+    try std.testing.expect(resampler_quality_default <= resampler_quality_max);
 }
 
 test "speexdsp/unit_tests/std" {
-    const lib = @import("std");
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .speexdsp_unit_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .speexdsp_unit_std);
     defer t.deinit();
 
-    t.run("unit", test_runner.unit.make(lib));
+    t.run("unit", test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "speexdsp/unit_tests/embed_std" {
-    const lib = @import("embed_std").std;
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .speexdsp_unit_embed);
+    var t = glib.testing.T.new(gstd.runtime.std, .speexdsp_unit_embed);
     defer t.deinit();
 
-    t.run("unit", test_runner.unit.make(lib));
+    t.run("unit", test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "speexdsp/integration_tests/std" {
-    const lib = @import("std");
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .speexdsp_integration_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .speexdsp_integration_std);
     defer t.deinit();
 
-    t.run("integration", test_runner.integration.make(lib));
+    t.run("integration", test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "speexdsp/integration_tests/embed_std" {
-    const lib = @import("embed_std").std;
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .speexdsp_integration_embed);
+    var t = glib.testing.T.new(gstd.runtime.std, .speexdsp_integration_embed);
     defer t.deinit();
 
-    t.run("integration", test_runner.integration.make(lib));
+    t.run("integration", test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }

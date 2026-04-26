@@ -7,28 +7,28 @@ const Animator = @import("../Animator.zig");
 const LedStrip = @import("../LedStrip.zig");
 const animator_runner = @import("animator.zig");
 
-pub fn make(comptime lib: type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             t.parallel();
-            t.run("Color", Color.TestRunner(lib));
-            t.run("Frame", Frame.TestRunner(lib));
-            t.run("Transition", Transition.TestRunner(lib));
-            t.run("Animator", Animator.TestRunner(lib));
-            t.run("LedStrip", LedStrip.TestRunner(lib));
-            t.run("animator", animator_runner.make(lib));
+            t.run("Color", Color.TestRunner(grt));
+            t.run("Frame", Frame.TestRunner(grt));
+            t.run("Transition", Transition.TestRunner(grt));
+            t.run("Animator", Animator.TestRunner(grt));
+            t.run("LedStrip", LedStrip.TestRunner(grt));
+            t.run("animator", animator_runner.make(grt));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

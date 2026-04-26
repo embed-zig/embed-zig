@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const c = @cImport({
     @cInclude("config.h");
     @cInclude("speex/speex_echo.h");
@@ -67,16 +68,14 @@ pub const speex_resampler_skip_zeros = c.speex_resampler_skip_zeros;
 pub const speex_resampler_reset_mem = c.speex_resampler_reset_mem;
 pub const speex_resampler_strerror = c.speex_resampler_strerror;
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn exportsCoreSymbols() !void {
-            try lib.testing.expect(@sizeOf(spx_int16_t) == 2);
-            try lib.testing.expect(@sizeOf(spx_int32_t) == 4);
-            try lib.testing.expect(@sizeOf(*SpeexEchoState) > 0);
-            try lib.testing.expect(@sizeOf(*SpeexPreprocessState) > 0);
-            try lib.testing.expect(@sizeOf(*SpeexResamplerState) > 0);
+            try grt.std.testing.expect(@sizeOf(spx_int16_t) == 2);
+            try grt.std.testing.expect(@sizeOf(spx_int32_t) == 4);
+            try grt.std.testing.expect(@sizeOf(*SpeexEchoState) > 0);
+            try grt.std.testing.expect(@sizeOf(*SpeexPreprocessState) > 0);
+            try grt.std.testing.expect(@sizeOf(*SpeexResamplerState) > 0);
 
             _ = speex_echo_state_init;
             _ = speex_preprocess_state_init;
@@ -86,12 +85,12 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -102,7 +101,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -111,5 +110,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

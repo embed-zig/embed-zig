@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const Router = @This();
 const State = @import("State.zig");
 
@@ -39,17 +40,17 @@ pub fn item(self: Router, index: usize) ?Item {
     return self.vtable.item(self.ptr, index);
 }
 
-pub fn make(comptime lib: type) type {
-    const Mutex = lib.Thread.Mutex;
-    const RwLock = lib.Thread.RwLock;
-    const ItemList = lib.ArrayList(Item);
+pub fn make(comptime grt: type) type {
+    const Mutex = grt.std.Thread.Mutex;
+    const RwLock = grt.std.Thread.RwLock;
+    const ItemList = grt.std.ArrayList(Item);
 
     return struct {
         const Self = @This();
 
         pub const Error = error{OutOfMemory};
 
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
 
         running_mu: Mutex = .{},
         running_items: ItemList = .empty,
@@ -60,7 +61,7 @@ pub fn make(comptime lib: type) type {
         released_transitioning: bool = false,
         version_value: u64 = 0,
 
-        pub fn init(allocator: lib.mem.Allocator, initial: Item) Error!Self {
+        pub fn init(allocator: glib.std.mem.Allocator, initial: Item) Error!Self {
             var self: Self = .{
                 .allocator = allocator,
             };

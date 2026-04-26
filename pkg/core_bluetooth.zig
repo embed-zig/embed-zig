@@ -9,6 +9,8 @@
 //!   const Host = Bt.makeHost(cb.Host);
 //!   _ = Host;
 
+const glib = @import("glib");
+const gstd = @import("gstd");
 const std = @import("std");
 const bt = @import("bt");
 const CBCentral = @import("core_bluetooth/src/CBCentral.zig");
@@ -107,47 +109,35 @@ pub const test_runner = struct {
 };
 
 test "core_bluetooth/unit_tests/std" {
-    const lib = @import("std");
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .core_bluetooth_unit_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .core_bluetooth_unit_std);
     defer t.deinit();
 
-    t.run("unit", test_runner.unit.make(lib));
+    t.run("unit", test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "core_bluetooth/unit_tests/embed_std" {
-    const lib = @import("embed_std").std;
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .core_bluetooth_unit_embed_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .core_bluetooth_unit_embed_std);
     defer t.deinit();
 
-    t.run("unit", test_runner.unit.make(lib));
+    t.run("unit", test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "core_bluetooth/integration_tests/std" {
-    const lib = @import("std");
-    const testing = @import("testing");
+    @import("std").testing.log_level = .info;
 
-    lib.testing.log_level = .info;
-
-    var t = testing.T.new(lib, .core_bluetooth_integration_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .core_bluetooth_integration_std);
     defer t.deinit();
 
-    t.run("integration", test_runner.integration.make(lib));
+    t.run("integration", test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "core_bluetooth/integration_tests/embed_std" {
-    const lib = @import("embed_std").std;
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .core_bluetooth_integration_embed_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .core_bluetooth_integration_embed_std);
     defer t.deinit();
 
-    t.run("integration", test_runner.integration.make(lib));
+    t.run("integration", test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }

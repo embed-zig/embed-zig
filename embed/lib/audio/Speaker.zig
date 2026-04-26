@@ -4,8 +4,8 @@ const AudioSystem = @import("AudioSystem.zig");
 
 pub const Error = AudioSystem.Error;
 
-pub fn make(comptime lib: type, comptime samples_per_channel: usize) type {
-    _ = lib;
+pub fn make(comptime grt: type, comptime samples_per_channel: usize) type {
+    _ = grt;
 
     return struct {
         const Self = @This();

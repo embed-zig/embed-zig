@@ -293,6 +293,10 @@ pub const Tcp = struct {
 
     const tcp_ops = OpCommon(Tcp);
 
+    pub fn deinit(self: *Tcp) void {
+        self.close();
+    }
+
     pub fn close(self: *Tcp) void {
         if (self.closed) return;
         self.closed = true;
@@ -461,6 +465,10 @@ pub const Udp = struct {
     write_interrupt: bool = false,
 
     const udp_ops = OpCommon(Udp);
+
+    pub fn deinit(self: *Udp) void {
+        self.close();
+    }
 
     pub fn close(self: *Udp) void {
         if (self.closed) return;

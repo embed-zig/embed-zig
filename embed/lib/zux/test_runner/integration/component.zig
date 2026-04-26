@@ -3,7 +3,7 @@ const Builder = @import("../../spec/Builder.zig");
 const bt = @import("component/bt.zig");
 const imu = @import("component/imu.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const SpecType = comptime blk: {
         @setEvalBranchQuota(2_000_000);
         var builder = Builder.init();
@@ -37,30 +37,30 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
 
     const story_runner = comptime blk: {
         var spec = SpecType.init();
-        break :blk spec.testRunner(lib, .{
+        break :blk spec.testRunner(grt, .{
             .pipeline = .{
-                .tick_interval_ns = lib.time.ns_per_ms,
+                .tick_interval_ns = grt.std.time.ns_per_ms,
             },
-        }, Channel);
+        });
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("bt", bt.make(lib, Channel));
+            t.run("bt", bt.make(grt));
             t.run("stories", story_runner);
-            t.run("imu", imu.make(lib, Channel));
+            t.run("imu", imu.make(grt));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

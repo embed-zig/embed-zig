@@ -125,7 +125,7 @@ pub fn init(pointer: anytype) Uart {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn dispatchesReadWriteTimeoutsAndBaud() !void {
             const Fake = struct {
@@ -165,20 +165,20 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const uart = Uart.init(&fake);
 
             var buf: [3]u8 = undefined;
-            try lib.testing.expectEqual(@as(usize, 3), try uart.read(&buf));
-            try lib.testing.expectEqualSlices(u8, &.{ 0x41, 0x54, 0x0d }, &buf);
+            try grt.std.testing.expectEqual(@as(usize, 3), try uart.read(&buf));
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x41, 0x54, 0x0d }, &buf);
 
-            try lib.testing.expectEqual(@as(usize, 4), try uart.write("AT\r\n"));
-            try lib.testing.expectEqual(@as(usize, 4), fake.last_write_len);
-            try lib.testing.expectEqualSlices(u8, "AT\r\n", fake.last_write[0..4]);
+            try grt.std.testing.expectEqual(@as(usize, 4), try uart.write("AT\r\n"));
+            try grt.std.testing.expectEqual(@as(usize, 4), fake.last_write_len);
+            try grt.std.testing.expectEqualSlices(u8, "AT\r\n", fake.last_write[0..4]);
 
             uart.setReadTimeout(100);
             uart.setWriteTimeout(200);
-            try lib.testing.expectEqual(@as(?u32, 100), fake.read_timeout_ms);
-            try lib.testing.expectEqual(@as(?u32, 200), fake.write_timeout_ms);
+            try grt.std.testing.expectEqual(@as(?u32, 100), fake.read_timeout_ms);
+            try grt.std.testing.expectEqual(@as(?u32, 200), fake.write_timeout_ms);
 
             try uart.setBaud(.bps_921600);
-            try lib.testing.expectEqual(Baud.bps_921600, fake.baud);
+            try grt.std.testing.expectEqual(Baud.bps_921600, fake.baud);
         }
 
         fn propagatesBackendErrors() !void {
@@ -210,25 +210,25 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const uart = Uart.init(&fake);
 
             var buf: [1]u8 = undefined;
-            try lib.testing.expectError(error.TimedOut, uart.read(&buf));
+            try grt.std.testing.expectError(error.TimedOut, uart.read(&buf));
 
             fake.fail_read = false;
             fake.fail_write = true;
-            try lib.testing.expectError(error.Overrun, uart.write("A"));
+            try grt.std.testing.expectError(error.Overrun, uart.write("A"));
 
             fake.fail_write = false;
             fake.fail_baud = true;
-            try lib.testing.expectError(error.Unsupported, uart.setBaud(.bps_460800));
+            try grt.std.testing.expectError(error.Unsupported, uart.setBaud(.bps_460800));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -243,7 +243,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

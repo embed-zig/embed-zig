@@ -6,12 +6,12 @@ const Subscriber = @import("../../../store/Subscriber.zig");
 const Router = @import("Router.zig");
 const State = @import("State.zig");
 
-pub fn make(comptime lib: type) type {
-    const AtomicU64 = lib.atomic.Value(u64);
-    const Mutex = lib.Thread.Mutex;
-    const SubscriberList = lib.ArrayList(*Subscriber);
+pub fn make(comptime grt: type) type {
+    const AtomicU64 = grt.std.atomic.Value(u64);
+    const Mutex = grt.std.Thread.Mutex;
+    const SubscriberList = grt.std.ArrayList(*Subscriber);
     const Item = Router.Item;
-    const RouterImpl = Router.make(lib);
+    const RouterImpl = Router.make(grt);
 
     return struct {
         const Self = @This();
@@ -20,7 +20,7 @@ pub fn make(comptime lib: type) type {
         pub const StateType = State;
         pub const ItemType = Item;
 
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
         router_impl: RouterImpl,
 
         subscribers_mu: Mutex = .{},
@@ -28,7 +28,7 @@ pub fn make(comptime lib: type) type {
         subscribers_notifying: bool = false,
         tick_count: AtomicU64 = AtomicU64.init(0),
 
-        pub fn init(allocator: lib.mem.Allocator, initial: Item) Error!Self {
+        pub fn init(allocator: glib.std.mem.Allocator, initial: Item) Error!Self {
             return .{
                 .allocator = allocator,
                 .router_impl = try RouterImpl.init(allocator, initial),
@@ -151,11 +151,11 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
-    const RouteStore = make(lib);
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const RouteStore = make(grt);
 
     const TestCase = struct {
-        fn reduce_updates_version_and_router_snapshot(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn reduce_updates_version_and_router_snapshot(allocator: glib.std.mem.Allocator) !void {
             var route = try RouteStore.init(allocator, .{
                 .screen_id = 1,
             });
@@ -167,11 +167,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var noop = NoopSink{};
             const emit = Emitter.init(&noop);
 
-            try testing.expectEqual(@as(u64, 0), route.get().version);
-            try testing.expectEqual(@as(u32, 1), route.get().current_page);
-            try testing.expectEqual(false, route.get().transitioning);
+            try grt.std.testing.expectEqual(@as(u64, 0), route.get().version);
+            try grt.std.testing.expectEqual(@as(u32, 1), route.get().current_page);
+            try grt.std.testing.expectEqual(false, route.get().transitioning);
 
-            try testing.expectEqual(@as(usize, 1), try RouteStore.reduce(&route, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try RouteStore.reduce(&route, .{
                 .origin = .manual,
                 .body = .{
                     .ui_route_push = .{
@@ -180,22 +180,22 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
 
-            try testing.expectEqual(@as(u64, 0), route.get().version);
+            try grt.std.testing.expectEqual(@as(u64, 0), route.get().version);
             route.tick();
 
             const state = route.get();
             const router = route.router();
-            try testing.expectEqual(@as(u64, 1), state.version);
-            try testing.expectEqual(@as(u32, 2), state.current_page);
-            try testing.expectEqual(false, state.transitioning);
-            try testing.expectEqual(@as(u64, 1), router.version());
-            try testing.expectEqual(@as(u32, 2), router.currentPage());
-            try testing.expectEqual(@as(usize, 2), router.depth());
-            try testing.expectEqual(@as(u32, 1), router.item(0).?.screen_id);
-            try testing.expectEqual(@as(u32, 2), router.item(1).?.screen_id);
-            try testing.expectEqual(@as(u32, 7), router.item(1).?.arg0);
+            try grt.std.testing.expectEqual(@as(u64, 1), state.version);
+            try grt.std.testing.expectEqual(@as(u32, 2), state.current_page);
+            try grt.std.testing.expectEqual(false, state.transitioning);
+            try grt.std.testing.expectEqual(@as(u64, 1), router.version());
+            try grt.std.testing.expectEqual(@as(u32, 2), router.currentPage());
+            try grt.std.testing.expectEqual(@as(usize, 2), router.depth());
+            try grt.std.testing.expectEqual(@as(u32, 1), router.item(0).?.screen_id);
+            try grt.std.testing.expectEqual(@as(u32, 2), router.item(1).?.screen_id);
+            try grt.std.testing.expectEqual(@as(u32, 7), router.item(1).?.arg0);
 
-            try testing.expectEqual(@as(usize, 1), try RouteStore.reduce(&route, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try RouteStore.reduce(&route, .{
                 .origin = .manual,
                 .body = .{
                     .ui_route_set_transitioning = .{
@@ -204,10 +204,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
             route.tick();
-            try testing.expect(route.get().transitioning);
-            try testing.expect(route.router().transitioning());
+            try grt.std.testing.expect(route.get().transitioning);
+            try grt.std.testing.expect(route.router().transitioning());
 
-            try testing.expectEqual(@as(usize, 1), try RouteStore.reduce(&route, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try RouteStore.reduce(&route, .{
                 .origin = .manual,
                 .body = .{
                     .ui_route_replace = .{
@@ -218,13 +218,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             route.tick();
 
             const replaced = route.router();
-            try testing.expectEqual(@as(u32, 3), route.get().current_page);
-            try testing.expect(route.get().transitioning);
-            try testing.expectEqual(@as(u32, 1), replaced.item(0).?.screen_id);
-            try testing.expectEqual(@as(u32, 3), replaced.item(1).?.screen_id);
-            try testing.expectEqual(@as(u32, 9), replaced.item(1).?.arg1);
+            try grt.std.testing.expectEqual(@as(u32, 3), route.get().current_page);
+            try grt.std.testing.expect(route.get().transitioning);
+            try grt.std.testing.expectEqual(@as(u32, 1), replaced.item(0).?.screen_id);
+            try grt.std.testing.expectEqual(@as(u32, 3), replaced.item(1).?.screen_id);
+            try grt.std.testing.expectEqual(@as(u32, 9), replaced.item(1).?.arg1);
 
-            try testing.expectEqual(@as(usize, 1), try RouteStore.reduce(&route, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try RouteStore.reduce(&route, .{
                 .origin = .manual,
                 .body = .{
                     .ui_route_pop = .{},
@@ -232,38 +232,38 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit));
             route.tick();
 
-            try testing.expectEqual(@as(u32, 1), route.get().current_page);
-            try testing.expect(route.get().transitioning);
-            try testing.expectEqual(@as(usize, 1), route.router().depth());
+            try grt.std.testing.expectEqual(@as(u32, 1), route.get().current_page);
+            try grt.std.testing.expect(route.get().transitioning);
+            try grt.std.testing.expectEqual(@as(usize, 1), route.router().depth());
         }
 
-        fn pop_to_root_and_noop_tick_behave_as_expected(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn pop_to_root_and_noop_tick_behave_as_expected(allocator: glib.std.mem.Allocator) !void {
             var route = try RouteStore.init(allocator, .{
                 .screen_id = 10,
             });
             defer route.deinit();
 
-            try testing.expect(try route.push(.{ .screen_id = 11 }));
-            try testing.expect(try route.push(.{ .screen_id = 12 }));
-            try testing.expect(try route.push(.{ .screen_id = 13 }));
+            try grt.std.testing.expect(try route.push(.{ .screen_id = 11 }));
+            try grt.std.testing.expect(try route.push(.{ .screen_id = 12 }));
+            try grt.std.testing.expect(try route.push(.{ .screen_id = 13 }));
             route.tick();
 
-            try testing.expectEqual(@as(usize, 4), route.router().depth());
-            try testing.expectEqual(false, route.get().transitioning);
-            try testing.expect(route.popToRoot());
+            try grt.std.testing.expectEqual(@as(usize, 4), route.router().depth());
+            try grt.std.testing.expectEqual(false, route.get().transitioning);
+            try grt.std.testing.expect(route.popToRoot());
             route.tick();
 
-            try testing.expectEqual(@as(usize, 1), route.router().depth());
-            try testing.expectEqual(@as(u32, 10), route.router().item(0).?.screen_id);
-            try testing.expectEqual(false, route.get().transitioning);
+            try grt.std.testing.expectEqual(@as(usize, 1), route.router().depth());
+            try grt.std.testing.expectEqual(@as(u32, 10), route.router().item(0).?.screen_id);
+            try grt.std.testing.expectEqual(false, route.get().transitioning);
 
             const version = route.get().version;
             route.tick();
-            try testing.expectEqual(version, route.get().version);
-            try testing.expect(!route.pop());
+            try grt.std.testing.expectEqual(version, route.get().version);
+            try grt.std.testing.expect(!route.pop());
         }
 
-        fn push_supports_dynamic_depth(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn push_supports_dynamic_depth(allocator: glib.std.mem.Allocator) !void {
             var route = try RouteStore.init(allocator, .{
                 .screen_id = 20,
             });
@@ -271,42 +271,41 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             var i: u32 = 0;
             while (i < 16) : (i += 1) {
-                try testing.expect(try route.push(.{ .screen_id = 21 + i }));
+                try grt.std.testing.expect(try route.push(.{ .screen_id = 21 + i }));
             }
             route.tick();
 
-            try testing.expectEqual(@as(usize, 17), route.router().depth());
-            try testing.expectEqual(@as(u32, 36), route.get().current_page);
-            try testing.expectEqual(false, route.get().transitioning);
+            try grt.std.testing.expectEqual(@as(usize, 17), route.router().depth());
+            try grt.std.testing.expectEqual(@as(u32, 36), route.get().current_page);
+            try grt.std.testing.expectEqual(false, route.get().transitioning);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.reduce_updates_version_and_router_snapshot(testing, allocator) catch |err| {
+            TestCase.reduce_updates_version_and_router_snapshot(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.pop_to_root_and_noop_tick_behave_as_expected(testing, allocator) catch |err| {
+            TestCase.pop_to_root_and_noop_tick_behave_as_expected(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.push_supports_dynamic_depth(testing, allocator) catch |err| {
+            TestCase.push_supports_dynamic_depth(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 const types = @import("types.zig");
 
@@ -29,34 +30,30 @@ pub fn defaultOutputDevice(self: Self) types.DeviceIndex {
     return self.info.defaultOutputDevice;
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            makesHostApiInfo(lib) catch |err| {
+            makesHostApiInfo() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
 
-        fn makesHostApiInfo(comptime L: type) !void {
-            const testing = L.testing;
-
+        fn makesHostApiInfo() !void {
             var info = binding.PaHostApiInfo{
                 .structVersion = 1,
                 .type = 0,
@@ -67,15 +64,15 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             };
             const api = make(0, &info);
 
-            try testing.expectEqual(@as(types.HostApiIndex, 0), api.index);
-            try testing.expectEqual(@as(u32, 3), api.deviceCount());
-            try testing.expectEqual(@as(types.DeviceIndex, 1), api.defaultInputDevice());
-            try testing.expectEqual(@as(types.DeviceIndex, 2), api.defaultOutputDevice());
+            try grt.std.testing.expectEqual(@as(types.HostApiIndex, 0), api.index);
+            try grt.std.testing.expectEqual(@as(u32, 3), api.deviceCount());
+            try grt.std.testing.expectEqual(@as(types.DeviceIndex, 1), api.defaultInputDevice());
+            try grt.std.testing.expectEqual(@as(types.DeviceIndex, 2), api.defaultOutputDevice());
         }
     };
 
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

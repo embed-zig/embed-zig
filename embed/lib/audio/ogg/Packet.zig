@@ -65,11 +65,9 @@ pub fn clear(self: *Self) void {
     self.* = .{};
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn testBorrowedPacketExposesMetadataAndPayload() !void {
-            const testing = lib.testing;
-
             const bytes_in = [_]u8{ 0x01, 0x02, 0x03 };
             const borrowed = initBorrowed(bytes_in[0..], .{
                 .bos = true,
@@ -78,29 +76,25 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .packetno = 7,
             });
 
-            try testing.expectEqualSlices(u8, bytes_in[0..], borrowed.payload());
-            try testing.expectEqual(@as(usize, 3), borrowed.bytes());
-            try testing.expect(borrowed.bos);
-            try testing.expect(!borrowed.eos);
-            try testing.expectEqual(@as(i64, 42), borrowed.granulepos);
-            try testing.expectEqual(@as(i64, 7), borrowed.packetno);
+            try grt.std.testing.expectEqualSlices(u8, bytes_in[0..], borrowed.payload());
+            try grt.std.testing.expectEqual(@as(usize, 3), borrowed.bytes());
+            try grt.std.testing.expect(borrowed.bos);
+            try grt.std.testing.expect(!borrowed.eos);
+            try grt.std.testing.expectEqual(@as(i64, 42), borrowed.granulepos);
+            try grt.std.testing.expectEqual(@as(i64, 7), borrowed.packetno);
         }
 
-        fn testOwnedPacketCopiesInputBytes(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testOwnedPacketCopiesInputBytes(allocator: glib.std.mem.Allocator) !void {
             var source = [_]u8{ 0xaa, 0xbb, 0xcc };
             var owned = try initOwned(allocator, source[0..], .{});
             defer owned.clear();
 
             source[0] = 0x11;
-            try testing.expectEqualSlices(u8, &.{ 0xaa, 0xbb, 0xcc }, owned.payload());
-            try testing.expect(owned.owns_packet);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0xaa, 0xbb, 0xcc }, owned.payload());
+            try grt.std.testing.expect(owned.owns_packet);
         }
 
-        fn testClearResetsOwnedPacketState(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testClearResetsOwnedPacketState(allocator: glib.std.mem.Allocator) !void {
             var packet = try initOwned(allocator, &.{ 0xde, 0xad }, .{
                 .bos = true,
                 .eos = true,
@@ -109,23 +103,23 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             });
             packet.clear();
 
-            try testing.expectEqual(@as(usize, 0), packet.bytes());
-            try testing.expectEqualSlices(u8, &.{}, packet.payload());
-            try testing.expect(!packet.bos);
-            try testing.expect(!packet.eos);
-            try testing.expectEqual(@as(i64, 0), packet.granulepos);
-            try testing.expectEqual(@as(i64, 0), packet.packetno);
-            try testing.expect(!packet.owns_packet);
+            try grt.std.testing.expectEqual(@as(usize, 0), packet.bytes());
+            try grt.std.testing.expectEqualSlices(u8, &.{}, packet.payload());
+            try grt.std.testing.expect(!packet.bos);
+            try grt.std.testing.expect(!packet.eos);
+            try grt.std.testing.expectEqual(@as(i64, 0), packet.granulepos);
+            try grt.std.testing.expectEqual(@as(i64, 0), packet.packetno);
+            try grt.std.testing.expect(!packet.owns_packet);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             TestCase.testBorrowedPacketExposesMetadataAndPayload() catch |err| {
@@ -143,7 +137,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

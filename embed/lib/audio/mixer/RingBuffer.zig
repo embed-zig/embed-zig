@@ -2,9 +2,9 @@
 
 const glib = @import("glib");
 
-pub fn make(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
-    const Thread = lib.Thread;
+pub fn make(comptime grt: type) type {
+    const Allocator = glib.std.mem.Allocator;
+    const Thread = grt.std.Thread;
 
     return struct {
         allocator: Allocator,
@@ -142,42 +142,42 @@ fn clampToI16(value: f32) i16 {
     return @intFromFloat(value);
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
-    const Buffer = make(lib);
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const Buffer = make(grt);
 
     const TestCase = struct {
-        fn mixIntoAppliesGainAndClamps(testing: anytype) !void {
-            var buffer = try Buffer.init(lib.testing.allocator, 4);
+        fn mixIntoAppliesGainAndClamps() !void {
+            var buffer = try Buffer.init(grt.std.testing.allocator, 4);
             defer buffer.deinit();
 
             try buffer.write(&.{ 30000, -30000 });
 
             var out = [_]i16{ 30000, -30000 };
             const n = buffer.mixInto(&out, 1.0);
-            try testing.expectEqual(@as(usize, 2), n);
-            try testing.expectEqualSlices(i16, &.{ 32767, -32768 }, out[0..2]);
+            try grt.std.testing.expectEqual(@as(usize, 2), n);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 32767, -32768 }, out[0..2]);
         }
 
-        fn closeWriteDrainsThenReportsDrained(testing: anytype) !void {
-            var buffer = try Buffer.init(lib.testing.allocator, 4);
+        fn closeWriteDrainsThenReportsDrained() !void {
+            var buffer = try Buffer.init(grt.std.testing.allocator, 4);
             defer buffer.deinit();
 
             try buffer.write(&.{ 7, 8 });
             buffer.closeWrite();
-            try testing.expect(!buffer.isDrained());
+            try grt.std.testing.expect(!buffer.isDrained());
 
             var out: [4]i16 = @splat(0);
             const n = buffer.mixInto(&out, 1.0);
-            try testing.expectEqual(@as(usize, 2), n);
-            try testing.expectEqualSlices(i16, &.{ 7, 8 }, out[0..2]);
-            try testing.expect(buffer.isDrained());
+            try grt.std.testing.expectEqual(@as(usize, 2), n);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 7, 8 }, out[0..2]);
+            try grt.std.testing.expect(buffer.isDrained());
         }
 
-        fn closeWithErrorUnblocksBlockedWriter(testing: anytype) !void {
-            const Thread = lib.Thread;
-            const ns_per_ms = lib.time.ns_per_ms;
+        fn closeWithErrorUnblocksBlockedWriter() !void {
+            const Thread = grt.std.Thread;
+            const ns_per_ms = grt.std.time.ns_per_ms;
 
-            var buffer = try Buffer.init(lib.testing.allocator, 2);
+            var buffer = try Buffer.init(grt.std.testing.allocator, 2);
             defer buffer.deinit();
 
             try buffer.write(&.{ 1, 2 });
@@ -201,37 +201,36 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             buffer.closeWithError();
             worker.join();
 
-            try testing.expectEqual(error.Closed, state.result.?);
+            try grt.std.testing.expectEqual(error.Closed, state.result.?);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.mixIntoAppliesGainAndClamps(testing) catch |err| {
+            TestCase.mixIntoAppliesGainAndClamps() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.closeWriteDrainsThenReportsDrained(testing) catch |err| {
+            TestCase.closeWriteDrainsThenReportsDrained() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.closeWithErrorUnblocksBlockedWriter(testing) catch |err| {
+            TestCase.closeWithErrorUnblocksBlockedWriter() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

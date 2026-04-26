@@ -593,9 +593,9 @@ fn isDigit(ch: u8) bool {
     return ch >= '0' and ch <= '9';
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn parses_scalars_and_whitespace(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn parses_scalars_and_whitespace(allocator: glib.std.mem.Allocator) !void {
             _ = allocator;
 
             const source =
@@ -638,16 +638,16 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 };
             };
 
-            try testing.expectEqualStrings("name", parsed.name_key);
-            try testing.expectEqualStrings("counter", parsed.name_value);
-            try testing.expectEqualStrings("enabled", parsed.enabled_key);
-            try testing.expectEqual(true, parsed.enabled_value);
-            try testing.expectEqualStrings("count", parsed.count_key);
-            try testing.expectEqual(@as(i128, 42), parsed.count_value);
-            try testing.expectEqualStrings("none", parsed.none_key);
+            try grt.std.testing.expectEqualStrings("name", parsed.name_key);
+            try grt.std.testing.expectEqualStrings("counter", parsed.name_value);
+            try grt.std.testing.expectEqualStrings("enabled", parsed.enabled_key);
+            try grt.std.testing.expectEqual(true, parsed.enabled_value);
+            try grt.std.testing.expectEqualStrings("count", parsed.count_key);
+            try grt.std.testing.expectEqual(@as(i128, 42), parsed.count_value);
+            try grt.std.testing.expectEqualStrings("none", parsed.none_key);
         }
 
-        fn slices_nested_values(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn slices_nested_values(allocator: glib.std.mem.Allocator) !void {
             _ = allocator;
 
             const source =
@@ -688,15 +688,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 };
             };
 
-            try testing.expectEqualStrings("items", parsed.items_key);
-            try testing.expectEqualStrings("[1, {\"deep\": [true, false]}, 3]", parsed.items_slice);
-            try testing.expectEqual(@as(usize, 3), parsed.items_count);
-            try testing.expectEqualStrings("object", parsed.object_key);
-            try testing.expectEqualStrings("{\"left\": 1, \"right\": {\"ok\": true}}", parsed.object_slice);
-            try testing.expectEqual(@as(usize, 2), parsed.object_count);
+            try grt.std.testing.expectEqualStrings("items", parsed.items_key);
+            try grt.std.testing.expectEqualStrings("[1, {\"deep\": [true, false]}, 3]", parsed.items_slice);
+            try grt.std.testing.expectEqual(@as(usize, 3), parsed.items_count);
+            try grt.std.testing.expectEqualStrings("object", parsed.object_key);
+            try grt.std.testing.expectEqualStrings("{\"left\": 1, \"right\": {\"ok\": true}}", parsed.object_slice);
+            try grt.std.testing.expectEqual(@as(usize, 2), parsed.object_count);
         }
 
-        fn decodes_escaped_strings(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn decodes_escaped_strings(allocator: glib.std.mem.Allocator) !void {
             _ = allocator;
 
             const source =
@@ -724,31 +724,30 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 };
             };
 
-            try testing.expectEqualStrings("line 1\nline 2", parsed.first);
-            try testing.expectEqualStrings("quote: \"ok\"", parsed.second);
-            try testing.expectEqualStrings("\xf0\x9f\x98\x80", parsed.third);
+            try grt.std.testing.expectEqualStrings("line 1\nline 2", parsed.first);
+            try grt.std.testing.expectEqualStrings("quote: \"ok\"", parsed.second);
+            try grt.std.testing.expectEqualStrings("\xf0\x9f\x98\x80", parsed.third);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.parses_scalars_and_whitespace(testing, allocator) catch |err| {
+            TestCase.parses_scalars_and_whitespace(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.slices_nested_values(testing, allocator) catch |err| {
+            TestCase.slices_nested_values(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.decodes_escaped_strings(testing, allocator) catch |err| {
+            TestCase.decodes_escaped_strings(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -756,7 +755,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

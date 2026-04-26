@@ -1,21 +1,21 @@
 //! lvgl button test runner — button/widget tree smoke tests.
 //!
 //! Usage:
-//!   const runner = @import("lvgl/test_runner/integration/lvgl/button.zig").make(std);
+//!   const runner = @import("lvgl/test_runner/integration/lvgl/button.zig").make(gstd.runtime);
 
+const glib = @import("glib");
 const embed = @import("embed");
-const testing = @import("testing");
 const lvgl = @import("../../../../lvgl.zig");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type) testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             const Cases = struct {
                 fn buttonLabelTreeSmoke() !void {
@@ -34,15 +34,15 @@ pub fn make(comptime lib: type) testing.TestRunner {
                     var label = button.createLabel() orelse return error.OutOfMemory;
                     label.setText("hello lvgl");
 
-                    try lib.testing.expectEqual(screen.raw(), button_obj.parent().?.raw());
-                    try lib.testing.expectEqual(@as(u32, 1), screen.childCount());
-                    try lib.testing.expectEqual(@as(u32, 1), button_obj.childCount());
-                    try lib.testing.expectEqual(button_obj.raw(), label.asObj().parent().?.raw());
-                    try lib.testing.expectEqualStrings("hello lvgl", lib.mem.span(label.text()));
-                    try lib.testing.expectEqual(@as(i32, 18), button_obj.x());
-                    try lib.testing.expectEqual(@as(i32, 12), button_obj.y());
-                    try lib.testing.expectEqual(@as(i32, 96), button_obj.width());
-                    try lib.testing.expectEqual(@as(i32, 40), button_obj.height());
+                    try grt.std.testing.expectEqual(screen.raw(), button_obj.parent().?.raw());
+                    try grt.std.testing.expectEqual(@as(u32, 1), screen.childCount());
+                    try grt.std.testing.expectEqual(@as(u32, 1), button_obj.childCount());
+                    try grt.std.testing.expectEqual(button_obj.raw(), label.asObj().parent().?.raw());
+                    try grt.std.testing.expectEqualStrings("hello lvgl", grt.std.mem.span(label.text()));
+                    try grt.std.testing.expectEqual(@as(i32, 18), button_obj.x());
+                    try grt.std.testing.expectEqual(@as(i32, 12), button_obj.y());
+                    try grt.std.testing.expectEqual(@as(i32, 96), button_obj.width());
+                    try grt.std.testing.expectEqual(@as(i32, 40), button_obj.height());
                 }
 
                 fn buttonObjectApiSmoke() !void {
@@ -61,11 +61,11 @@ pub fn make(comptime lib: type) testing.TestRunner {
                     obj.addFlag(Flags.clickable);
                     obj.updateLayout();
 
-                    try lib.testing.expectEqual(@as(i32, 21), obj.x());
-                    try lib.testing.expectEqual(@as(i32, 13), obj.y());
-                    try lib.testing.expectEqual(@as(i32, 80), obj.width());
-                    try lib.testing.expectEqual(@as(i32, 32), obj.height());
-                    try lib.testing.expect(obj.hasFlag(Flags.clickable));
+                    try grt.std.testing.expectEqual(@as(i32, 21), obj.x());
+                    try grt.std.testing.expectEqual(@as(i32, 13), obj.y());
+                    try grt.std.testing.expectEqual(@as(i32, 80), obj.width());
+                    try grt.std.testing.expectEqual(@as(i32, 32), obj.height());
+                    try grt.std.testing.expect(obj.hasFlag(Flags.clickable));
                 }
             };
 
@@ -82,13 +82,13 @@ pub fn make(comptime lib: type) testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
-    return testing.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }

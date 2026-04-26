@@ -1,17 +1,17 @@
 const glib = @import("glib");
 const Subscriber = @import("Subscriber.zig");
 
-pub fn make(comptime lib: type, comptime state_config: anytype, comptime HandlerFn: type) type {
-    const AtomicBool = lib.atomic.Value(bool);
+pub fn make(comptime grt: type, comptime state_config: anytype, comptime HandlerFn: type) type {
+    const AtomicBool = grt.std.atomic.Value(bool);
     const Config = @TypeOf(state_config);
     const info = @typeInfo(Config);
     if (info != .@"struct") {
         @compileError("zux.store.Builder.make expects configured state nodes to be struct literals");
     }
 
-    const HandlerList = lib.ArrayList(HandlerFn);
-    const SubscriberList = lib.ArrayList(*Subscriber);
-    const NodeSubscriber = makeNodeSubscriber(lib);
+    const HandlerList = grt.std.ArrayList(HandlerFn);
+    const SubscriberList = grt.std.ArrayList(*Subscriber);
+    const NodeSubscriber = makeNodeSubscriber(grt);
     const fields_info = info.@"struct".fields;
 
     comptime var field_count: usize = 7;
@@ -20,7 +20,7 @@ pub fn make(comptime lib: type, comptime state_config: anytype, comptime Handler
         field_count += 1;
     }
 
-    var fields: [field_count]lib.builtin.Type.StructField = undefined;
+    var fields: [field_count]grt.std.builtin.Type.StructField = undefined;
     fields[0] = .{
         .name = "dirty",
         .type = AtomicBool,
@@ -75,7 +75,7 @@ pub fn make(comptime lib: type, comptime state_config: anytype, comptime Handler
     inline for (fields_info) |field| {
         if (comptimeEql(field.name, "stores")) continue;
 
-        const ChildType = make(lib, @field(state_config, field.name), HandlerFn);
+        const ChildType = make(grt, @field(state_config, field.name), HandlerFn);
         fields[i] = .{
             .name = field.name,
             .type = ChildType,
@@ -96,12 +96,12 @@ pub fn make(comptime lib: type, comptime state_config: anytype, comptime Handler
     });
 }
 
-pub fn init(comptime lib: type, comptime State: type, state: *State) void {
-    initState(lib, State, state, null);
+pub fn init(comptime grt: type, comptime State: type, state: *State) void {
+    initState(grt, State, state, null);
 }
 
-pub fn deinit(comptime lib: type, comptime State: type, allocator: lib.mem.Allocator, state: *State) void {
-    deinitState(lib, State, allocator, state);
+pub fn deinit(comptime grt: type, comptime State: type, allocator: glib.std.mem.Allocator, state: *State) void {
+    deinitState(grt, State, allocator, state);
 }
 
 pub fn bindStores(comptime Stores: type, comptime node_config: anytype, stores: *Stores, state: anytype) error{OutOfMemory}!void {
@@ -142,13 +142,13 @@ pub fn tick(comptime State: type, state: *State, stores: anytype) void {
     tickState(State, state, stores);
 }
 
-fn makeNodeSubscriber(comptime lib: type) type {
-    const AtomicBool = lib.atomic.Value(bool);
+fn makeNodeSubscriber(comptime grt: type) type {
+    const AtomicBool = grt.std.atomic.Value(bool);
 
     return struct {
         dirty: *AtomicBool,
         parent: ?*@This() = null,
-        subscribers: *lib.ArrayList(*Subscriber),
+        subscribers: *grt.std.ArrayList(*Subscriber),
         notifying: *bool,
 
         pub fn notify(self: *@This(), notification: Subscriber.Notification) void {
@@ -180,12 +180,12 @@ fn isMetaField(comptime name: []const u8) bool {
 }
 
 fn initState(
-    comptime lib: type,
+    comptime grt: type,
     comptime State: type,
     state: *State,
-    parent: ?*makeNodeSubscriber(lib),
+    parent: ?*makeNodeSubscriber(grt),
 ) void {
-    const AtomicBool = lib.atomic.Value(bool);
+    const AtomicBool = grt.std.atomic.Value(bool);
     const fields = @typeInfo(State).@"struct".fields;
 
     state.dirty = AtomicBool.init(false);
@@ -205,12 +205,12 @@ fn initState(
         if (comptime isMetaField(field.name)) {
             // Skip generated per-node metadata fields.
         } else {
-            initState(lib, field.type, &@field(state.*, field.name), &state.subscriber_impl);
+            initState(grt, field.type, &@field(state.*, field.name), &state.subscriber_impl);
         }
     }
 }
 
-fn deinitState(comptime lib: type, comptime State: type, allocator: lib.mem.Allocator, state: *State) void {
+fn deinitState(comptime grt: type, comptime State: type, allocator: glib.std.mem.Allocator, state: *State) void {
     const fields = @typeInfo(State).@"struct".fields;
 
     state.handlers.deinit(allocator);
@@ -220,7 +220,7 @@ fn deinitState(comptime lib: type, comptime State: type, allocator: lib.mem.Allo
         if (comptime isMetaField(field.name)) {
             // Skip generated per-node metadata fields.
         } else {
-            deinitState(lib, field.type, allocator, &@field(state.*, field.name));
+            deinitState(grt, field.type, allocator, &@field(state.*, field.name));
         }
     }
 }
@@ -582,16 +582,10 @@ fn splitPathHead(comptime path: []const u8) struct {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn builds_tree_shape(testing: anytype, _: lib.mem.Allocator) !void {
-            const StoreLib = struct {
-                pub const builtin = lib.builtin;
-                pub const atomic = lib.atomic;
-                pub const ArrayList = lib.ArrayList;
-            };
-
-            const StateTy = make(StoreLib, .{
+        fn builds_tree_shape(_: glib.std.mem.Allocator) !void {
+            const StateTy = make(grt, .{
                 .ui = .{
                     .stores = &.{ .wifi, .cellular },
                     .home = .{
@@ -603,37 +597,31 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, *const fn (*struct {}) void);
 
-            try testing.expect(@hasField(StateTy, "dirty"));
-            try testing.expect(@hasField(StateTy, "handlers"));
-            try testing.expect(@hasField(StateTy, "subscribers"));
-            try testing.expect(@hasField(StateTy, "subscriber_impl"));
-            try testing.expect(@hasField(StateTy, "subscriber"));
-            try testing.expect(@hasField(StateTy, "ticking"));
-            try testing.expect(@hasField(StateTy, "notifying"));
-            try testing.expect(@hasField(StateTy, "ui"));
-            try testing.expect(@hasField(StateTy, "device"));
-            try testing.expect(!@hasField(StateTy, "stores"));
+            try grt.std.testing.expect(@hasField(StateTy, "dirty"));
+            try grt.std.testing.expect(@hasField(StateTy, "handlers"));
+            try grt.std.testing.expect(@hasField(StateTy, "subscribers"));
+            try grt.std.testing.expect(@hasField(StateTy, "subscriber_impl"));
+            try grt.std.testing.expect(@hasField(StateTy, "subscriber"));
+            try grt.std.testing.expect(@hasField(StateTy, "ticking"));
+            try grt.std.testing.expect(@hasField(StateTy, "notifying"));
+            try grt.std.testing.expect(@hasField(StateTy, "ui"));
+            try grt.std.testing.expect(@hasField(StateTy, "device"));
+            try grt.std.testing.expect(!@hasField(StateTy, "stores"));
 
             const Ui = @FieldType(StateTy, "ui");
-            try testing.expect(@hasField(Ui, "dirty"));
-            try testing.expect(@hasField(Ui, "handlers"));
-            try testing.expect(@hasField(Ui, "subscribers"));
-            try testing.expect(@hasField(Ui, "subscriber_impl"));
-            try testing.expect(@hasField(Ui, "subscriber"));
-            try testing.expect(@hasField(Ui, "ticking"));
-            try testing.expect(@hasField(Ui, "notifying"));
-            try testing.expect(@hasField(Ui, "home"));
-            try testing.expect(!@hasField(Ui, "stores"));
+            try grt.std.testing.expect(@hasField(Ui, "dirty"));
+            try grt.std.testing.expect(@hasField(Ui, "handlers"));
+            try grt.std.testing.expect(@hasField(Ui, "subscribers"));
+            try grt.std.testing.expect(@hasField(Ui, "subscriber_impl"));
+            try grt.std.testing.expect(@hasField(Ui, "subscriber"));
+            try grt.std.testing.expect(@hasField(Ui, "ticking"));
+            try grt.std.testing.expect(@hasField(Ui, "notifying"));
+            try grt.std.testing.expect(@hasField(Ui, "home"));
+            try grt.std.testing.expect(!@hasField(Ui, "stores"));
         }
 
-        fn subscribers_notify_immediately(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const StoreLib = struct {
-                pub const builtin = lib.builtin;
-                pub const atomic = lib.atomic;
-                pub const ArrayList = lib.ArrayList;
-                pub const mem = lib.mem;
-            };
-            const StateTy = make(StoreLib, .{
+        fn subscribers_notify_immediately(allocator: glib.std.mem.Allocator) !void {
+            const StateTy = make(grt, .{
                 .ui = .{
                     .stores = &.{.wifi},
                     .home = .{
@@ -654,8 +642,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             var state: StateTy = undefined;
-            init(StoreLib, StateTy, &state);
-            defer deinit(StoreLib, StateTy, allocator, &state);
+            init(grt, StateTy, &state);
+            defer deinit(grt, StateTy, allocator, &state);
 
             var ui_impl = Impl{};
             var ui_subscriber = Subscriber.init(&ui_impl);
@@ -670,44 +658,43 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .tick_count = 3,
             });
 
-            try testing.expectEqual(@as(usize, 1), home_impl.count);
-            try testing.expectEqual(@as(usize, 1), ui_impl.count);
-            try testing.expectEqualStrings("wifi", home_impl.last_label);
-            try testing.expectEqual(@as(u64, 3), ui_impl.last_tick_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), home_impl.count);
+            try grt.std.testing.expectEqual(@as(usize, 1), ui_impl.count);
+            try grt.std.testing.expectEqualStrings("wifi", home_impl.last_label);
+            try grt.std.testing.expectEqual(@as(u64, 3), ui_impl.last_tick_count);
 
-            try testing.expect(unsubscribePath("ui/home", &state, &home_subscriber));
+            try grt.std.testing.expect(unsubscribePath("ui/home", &state, &home_subscriber));
             state.ui.home.subscriber.notify(.{
                 .label = "wifi",
                 .tick_count = 4,
             });
 
-            try testing.expectEqual(@as(usize, 1), home_impl.count);
-            try testing.expectEqual(@as(usize, 2), ui_impl.count);
+            try grt.std.testing.expectEqual(@as(usize, 1), home_impl.count);
+            try grt.std.testing.expectEqual(@as(usize, 2), ui_impl.count);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.builds_tree_shape(testing, allocator) catch |err| {
+            TestCase.builds_tree_shape(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.subscribers_notify_immediately(testing, allocator) catch |err| {
+            TestCase.subscribers_notify_immediately(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

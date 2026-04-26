@@ -554,8 +554,8 @@ pub fn link(
     const mod = b.modules.get("lvgl") orelse @panic("lvgl module missing");
     const lib = library orelse @panic("lvgl library missing");
     mod.addImport("embed", build_tests.createEmbedShim(b, target, optimize, gstd_dep));
+    mod.addImport("glib", b.dependency("glib", .{ .target = target, .optimize = optimize }).module("glib"));
     mod.addImport("drivers", build_tests.createDriversShim(b, target, optimize));
-    mod.addImport("testing", b.dependency("glib", .{ .target = target, .optimize = optimize }).module("testing"));
     mod.linkLibrary(lib);
 }
 
@@ -647,8 +647,7 @@ fn createConfigHeader(
     selected_header: std.Build.LazyPath,
 ) *std.Build.Step.ConfigHeader {
     const write_files = b.addWriteFiles();
-    const template = write_files.add(
-        "lvgl_config_header.template",
+    const template = write_files.add("lvgl_config_header.template",
         \\#ifndef EMBED_ZIG_LV_CONF_WRAPPER_H
         \\#define EMBED_ZIG_LV_CONF_WRAPPER_H
         \\

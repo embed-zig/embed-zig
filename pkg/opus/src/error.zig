@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 const Error = @import("types.zig").Error;
 
@@ -21,24 +22,22 @@ pub fn checkedPositive(code: c_int) Error!usize {
     return @intCast(code);
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            lib.testing.expectError(Error.BadArg, checkError(binding.OPUS_BAD_ARG)) catch |err| {
+            grt.std.testing.expectError(Error.BadArg, checkError(binding.OPUS_BAD_ARG)) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            lib.testing.expectError(Error.InvalidState, checkError(binding.OPUS_INVALID_STATE)) catch |err| {
+            grt.std.testing.expectError(Error.InvalidState, checkError(binding.OPUS_INVALID_STATE)) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -53,7 +52,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -62,5 +61,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

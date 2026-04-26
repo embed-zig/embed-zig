@@ -566,9 +566,9 @@ fn nextCaseStartOrSwitchEnd(comptime builder: anytype, comptime start: usize, co
     return switch_end_index;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn buildReturnsRootNode(testing: anytype) !void {
+        fn buildReturnsRootNode() !void {
             const Built = comptime blk: {
                 var builder = Builder(.{ .max_ops = 16 }).init();
                 builder.addNode(.a);
@@ -641,13 +641,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 },
             });
-            try testing.expectEqual(@as(usize, 1), emitted_button);
-            try testing.expectEqual(@as(usize, 1), a_impl.called);
-            try testing.expectEqual(@as(usize, 1), b_impl.called);
-            try testing.expectEqual(@as(usize, 1), c_impl.called);
-            try testing.expectEqual(@as(usize, 0), d_impl.called);
-            try testing.expectEqual(@as(usize, 1), e_impl.called);
-            try testing.expectEqual(@as(i128, 33), collector.last_timestamp_ns);
+            try grt.std.testing.expectEqual(@as(usize, 1), emitted_button);
+            try grt.std.testing.expectEqual(@as(usize, 1), a_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 1), b_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 1), c_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 0), d_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 1), e_impl.called);
+            try grt.std.testing.expectEqual(@as(i128, 33), collector.last_timestamp_ns);
 
             const emitted_raw = try root.process(.{
                 .origin = .source,
@@ -659,13 +659,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 },
             });
-            try testing.expectEqual(@as(usize, 1), emitted_raw);
-            try testing.expectEqual(@as(usize, 2), a_impl.called);
-            try testing.expectEqual(@as(usize, 1), b_impl.called);
-            try testing.expectEqual(@as(usize, 1), c_impl.called);
-            try testing.expectEqual(@as(usize, 1), d_impl.called);
-            try testing.expectEqual(@as(usize, 2), e_impl.called);
-            try testing.expectEqual(@as(i128, 40), collector.last_timestamp_ns);
+            try grt.std.testing.expectEqual(@as(usize, 1), emitted_raw);
+            try grt.std.testing.expectEqual(@as(usize, 2), a_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 1), b_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 1), c_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 1), d_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 2), e_impl.called);
+            try grt.std.testing.expectEqual(@as(i128, 40), collector.last_timestamp_ns);
 
             const emitted_tick = try root.process(.{
                 .origin = .timer,
@@ -674,17 +674,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     .tick = .{},
                 },
             });
-            try testing.expectEqual(@as(usize, 1), emitted_tick);
-            try testing.expectEqual(@as(usize, 3), a_impl.called);
-            try testing.expectEqual(@as(usize, 2), b_impl.called);
-            try testing.expectEqual(@as(usize, 2), c_impl.called);
-            try testing.expectEqual(@as(usize, 2), d_impl.called);
-            try testing.expectEqual(@as(usize, 4), e_impl.called);
-            try testing.expectEqual(@as(i128, 43), collector.last_timestamp_ns);
-            try testing.expectEqual(@as(usize, 4), collector.count);
+            try grt.std.testing.expectEqual(@as(usize, 1), emitted_tick);
+            try grt.std.testing.expectEqual(@as(usize, 3), a_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 2), b_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 2), c_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 2), d_impl.called);
+            try grt.std.testing.expectEqual(@as(usize, 4), e_impl.called);
+            try grt.std.testing.expectEqual(@as(i128, 43), collector.last_timestamp_ns);
+            try grt.std.testing.expectEqual(@as(usize, 4), collector.count);
         }
 
-        fn buildAllowsEmptyBuilder(testing: anytype) !void {
+        fn buildAllowsEmptyBuilder() !void {
             const Built = comptime blk: {
                 const builder = Builder(.{}).init();
                 break :blk builder.make();
@@ -712,12 +712,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expectEqual(@as(usize, 1), emitted);
-            try testing.expect(collector.called);
-            try testing.expectEqual(Message.Kind.tick, collector.last_kind.?);
+            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
+            try grt.std.testing.expect(collector.called);
+            try grt.std.testing.expectEqual(Message.Kind.tick, collector.last_kind.?);
         }
 
-        fn validateRejectsUnterminatedSwitch(testing: anytype) !void {
+        fn validateRejectsUnterminatedSwitch() !void {
             const result = comptime blk: {
                 var builder = Builder(.{}).init();
                 builder.beginSwitch();
@@ -726,10 +726,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 break :blk builder.validate();
             };
 
-            try testing.expectError(error.UnterminatedSwitch, result);
+            try grt.std.testing.expectError(error.UnterminatedSwitch, result);
         }
 
-        fn validateRejectsDuplicateCase(testing: anytype) !void {
+        fn validateRejectsDuplicateCase() !void {
             const result = comptime blk: {
                 var builder = Builder(.{}).init();
                 builder.beginSwitch();
@@ -741,10 +741,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 break :blk builder.validate();
             };
 
-            try testing.expectError(error.DuplicateCase, result);
+            try grt.std.testing.expectError(error.DuplicateCase, result);
         }
 
-        fn buildHandlesNestedSwitches(testing: anytype) !void {
+        fn buildHandlesNestedSwitches() !void {
             const Built = comptime blk: {
                 var builder = Builder(.{}).init();
                 builder.addNode(.a);
@@ -818,10 +818,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 },
             });
-            try testing.expectEqual(@as(usize, 3), trace.len);
-            try testing.expectEqual(@as(u8, 1), trace.ids[0]);
-            try testing.expectEqual(@as(u8, 2), trace.ids[1]);
-            try testing.expectEqual(@as(u8, 5), trace.ids[2]);
+            try grt.std.testing.expectEqual(@as(usize, 3), trace.len);
+            try grt.std.testing.expectEqual(@as(u8, 1), trace.ids[0]);
+            try grt.std.testing.expectEqual(@as(u8, 2), trace.ids[1]);
+            try grt.std.testing.expectEqual(@as(u8, 5), trace.ids[2]);
 
             trace.reset();
             _ = try root.process(.{
@@ -833,23 +833,22 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 },
             });
-            try testing.expectEqual(@as(usize, 3), trace.len);
-            try testing.expectEqual(@as(u8, 1), trace.ids[0]);
-            try testing.expectEqual(@as(u8, 4), trace.ids[1]);
-            try testing.expectEqual(@as(u8, 5), trace.ids[2]);
+            try grt.std.testing.expectEqual(@as(usize, 3), trace.len);
+            try grt.std.testing.expectEqual(@as(u8, 1), trace.ids[0]);
+            try grt.std.testing.expectEqual(@as(u8, 4), trace.ids[1]);
+            try grt.std.testing.expectEqual(@as(u8, 5), trace.ids[2]);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
             inline for (.{
                 TestCase.buildReturnsRootNode,
@@ -858,7 +857,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 TestCase.validateRejectsDuplicateCase,
                 TestCase.buildHandlesNestedSwitches,
             }) |case| {
-                case(testing) catch |err| {
+                case() catch |err| {
                     t.logFatal(@errorName(err));
                     return false;
                 };
@@ -866,7 +865,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

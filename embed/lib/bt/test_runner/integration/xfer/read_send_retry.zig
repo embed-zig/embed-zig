@@ -4,22 +4,21 @@ const harness_mod = @import("harness.zig");
 const read_mod = @import("../../../host/xfer/read.zig");
 const send_mod = @import("../../../host/xfer/send.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
-    return glib.testing.TestRunner.fromFn(lib, 96 * 1024, struct {
-        fn run(t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
+    return glib.testing.TestRunner.fromFn(grt.std, 96 * 1024, struct {
+        fn run(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
             _ = t;
-            try runCase(lib, Channel, allocator);
+            try runCase(grt, allocator);
         }
     }.run);
 }
 
-pub fn run(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.mem.Allocator) !void {
-    try runCase(lib, Channel, allocator);
+pub fn run(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
+    try runCase(grt, allocator);
 }
 
-fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const Harness = harness_mod.make(lib, Channel);
+fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
+    const Harness = harness_mod.make(grt);
 
     var harness = try Harness.init(allocator);
     defer harness.deinit();
@@ -28,13 +27,13 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
     harness_mod.fillPattern(&expected, 0x53);
 
     const ReadTask = struct {
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
         transport: Harness.Endpoint,
         result: ?[]u8 = null,
         err: ?anyerror = null,
 
         fn run(self: *@This()) void {
-            self.result = read_mod.read(lib, self.allocator, &self.transport, .{
+            self.result = read_mod.read(grt, self.allocator, &self.transport, .{
                 .att_mtu = 23,
                 .timeout_ms = 20,
                 .max_timeout_retries = 4,
@@ -46,7 +45,7 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
     };
 
     const SendTask = struct {
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
         transport: Harness.Endpoint,
         err: ?anyerror = null,
 
@@ -67,7 +66,7 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
         }
 
         fn run(self: *@This()) void {
-            send_mod.send(lib, self.allocator, &self.transport, null, dataFn, .{
+            send_mod.send(grt, self.allocator, &self.transport, null, dataFn, .{
                 .att_mtu = 23,
                 .timeout_ms = 20,
                 .send_redundancy = 1,
@@ -90,15 +89,15 @@ fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.
         .transport = server,
     };
 
-    const read_thread = try lib.Thread.spawn(.{}, ReadTask.run, .{&read_task});
-    const send_thread = try lib.Thread.spawn(.{}, SendTask.run, .{&send_task});
+    const read_thread = try grt.std.Thread.spawn(.{}, ReadTask.run, .{&read_task});
+    const send_thread = try grt.std.Thread.spawn(.{}, SendTask.run, .{&send_task});
     read_thread.join();
     send_thread.join();
 
-    try testing.expect(read_task.err == null);
-    try testing.expect(send_task.err == null);
-    try testing.expect(send_task.transport.dropped);
+    try grt.std.testing.expect(read_task.err == null);
+    try grt.std.testing.expect(send_task.err == null);
+    try grt.std.testing.expect(send_task.transport.dropped);
     const result = read_task.result orelse return error.MissingReadResult;
     defer allocator.free(result);
-    try testing.expectEqualSlices(u8, &expected, result);
+    try grt.std.testing.expectEqualSlices(u8, &expected, result);
 }

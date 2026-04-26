@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const c = @cImport({
     @cInclude("portaudio.h");
 });
@@ -96,37 +97,33 @@ pub const Pa_WriteStream = c.Pa_WriteStream;
 pub const Pa_GetStreamReadAvailable = c.Pa_GetStreamReadAvailable;
 pub const Pa_GetStreamWriteAvailable = c.Pa_GetStreamWriteAvailable;
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            exportsCorePortaudioSymbols(lib) catch |err| {
+            exportsCorePortaudioSymbols() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
 
-        fn exportsCorePortaudioSymbols(comptime L: type) !void {
-            const testing = L.testing;
-
-            try testing.expect(@sizeOf(PaDeviceInfo) > 0);
-            try testing.expect(@sizeOf(PaStreamParameters) > 0);
-            try testing.expect(@sizeOf(PaStreamInfo) > 0);
+        fn exportsCorePortaudioSymbols() !void {
+            try grt.std.testing.expect(@sizeOf(PaDeviceInfo) > 0);
+            try grt.std.testing.expect(@sizeOf(PaStreamParameters) > 0);
+            try grt.std.testing.expect(@sizeOf(PaStreamInfo) > 0);
 
             _ = Pa_Initialize;
             _ = Pa_OpenStream;
@@ -138,5 +135,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

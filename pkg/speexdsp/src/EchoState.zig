@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 const error_mod = @import("error.zig");
 const types = @import("types.zig");
@@ -91,13 +92,11 @@ fn fitsCInt(value: anytype) bool {
     return @as(u64, @intCast(value)) <= max;
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn rejectsInvalidInitArguments() !void {
-            try lib.testing.expectError(error.InvalidArgument, Self.init(0, 160));
-            try lib.testing.expectError(error.InvalidArgument, Self.init(160, 0));
+            try grt.std.testing.expectError(error.InvalidArgument, Self.init(0, 160));
+            try grt.std.testing.expectError(error.InvalidArgument, Self.init(160, 0));
         }
 
         fn rejectsInvalidFrameLengths() !void {
@@ -108,29 +107,29 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             var play = [_]types.Sample{0} ** 160;
             var out = [_]types.Sample{0} ** 160;
 
-            try lib.testing.expectError(error.InvalidArgument, echo.cancellation(rec[0..159], play[0..], out[0..]));
-            try lib.testing.expectError(error.InvalidArgument, echo.cancellation(rec[0..], play[0..159], out[0..]));
-            try lib.testing.expectError(error.InvalidArgument, echo.cancellation(rec[0..], play[0..], out[0..159]));
-            try lib.testing.expectError(error.InvalidArgument, echo.capture(rec[0..159], out[0..]));
-            try lib.testing.expectError(error.InvalidArgument, echo.capture(rec[0..], out[0..159]));
-            try lib.testing.expectError(error.InvalidArgument, echo.playback(play[0..159]));
+            try grt.std.testing.expectError(error.InvalidArgument, echo.cancellation(rec[0..159], play[0..], out[0..]));
+            try grt.std.testing.expectError(error.InvalidArgument, echo.cancellation(rec[0..], play[0..159], out[0..]));
+            try grt.std.testing.expectError(error.InvalidArgument, echo.cancellation(rec[0..], play[0..], out[0..159]));
+            try grt.std.testing.expectError(error.InvalidArgument, echo.capture(rec[0..159], out[0..]));
+            try grt.std.testing.expectError(error.InvalidArgument, echo.capture(rec[0..], out[0..159]));
+            try grt.std.testing.expectError(error.InvalidArgument, echo.playback(play[0..159]));
         }
 
         fn rejectsInvalidSamplingRate() !void {
             var echo = try Self.init(160, 1600);
             defer echo.deinit();
 
-            try lib.testing.expectError(error.InvalidArgument, echo.setSamplingRate(0));
+            try grt.std.testing.expectError(error.InvalidArgument, echo.setSamplingRate(0));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -149,7 +148,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -158,5 +157,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

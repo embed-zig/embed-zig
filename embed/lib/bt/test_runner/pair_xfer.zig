@@ -20,7 +20,7 @@ const xfer_char_uuid: u16 = 0x2A58;
 const timeout_ms: u32 = 5000;
 const reconnect_timeout_ms: u32 = 10000;
 
-pub fn makeCentral(comptime lib: type, comptime ClientType: type, host: anytype) glib.testing.TestRunner {
+pub fn makeCentral(comptime grt: type, comptime ClientType: type, host: anytype) glib.testing.TestRunner {
     const HostPtr = @TypeOf(host);
     comptime requireHostPointer(HostPtr);
 
@@ -33,7 +33,7 @@ pub fn makeCentral(comptime lib: type, comptime ClientType: type, host: anytype)
         }
 
         pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
-            runCentralRole(lib, ClientType, self.host, allocator) catch |err| {
+            runCentralRole(grt, ClientType, self.host, allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -42,16 +42,16 @@ pub fn makeCentral(comptime lib: type, comptime ClientType: type, host: anytype)
 
         pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{ .host = host };
     return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
-pub fn makePeripheral(comptime lib: type, comptime ServerType: type, host: anytype) glib.testing.TestRunner {
+pub fn makePeripheral(comptime grt: type, comptime ServerType: type, host: anytype) glib.testing.TestRunner {
     const HostPtr = @TypeOf(host);
     comptime requireHostPointer(HostPtr);
 
@@ -64,7 +64,7 @@ pub fn makePeripheral(comptime lib: type, comptime ServerType: type, host: anyty
         }
 
         pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
-            runPeripheralRole(lib, ServerType, self.host, allocator) catch |err| {
+            runPeripheralRole(grt, ServerType, self.host, allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -73,20 +73,18 @@ pub fn makePeripheral(comptime lib: type, comptime ServerType: type, host: anyty
 
         pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{ .host = host };
     return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
-fn runCentralRole(comptime lib: type, comptime ClientType: type, host: anytype, allocator: glib.std.mem.Allocator) !void {
-    const testing = lib.testing;
-
+fn runCentralRole(comptime grt: type, comptime ClientType: type, host: anytype, allocator: glib.std.mem.Allocator) !void {
     const State = struct {
-        mutex: lib.Thread.Mutex = .{},
+        mutex: grt.std.Thread.Mutex = .{},
         found: bool = false,
         addr: Central.BdAddr = .{0} ** 6,
         addr_type: Central.AddrType = .public,
@@ -125,29 +123,28 @@ fn runCentralRole(comptime lib: type, comptime ClientType: type, host: anytype, 
     central.addEventHook(@ptrCast(&state), Hook.cb);
     defer central.removeEventHook(@ptrCast(&state), Hook.cb);
 
-    const found = try discoverPeer(lib, central, &state);
+    const found = try discoverPeer(grt, central, &state);
     var conn = try client.connect(found.addr, found.addr_type, .{});
-    runPrimaryClientSession(lib, &conn, allocator) catch |err| {
+    runPrimaryClientSession(grt, &conn, allocator) catch |err| {
         conn.disconnect();
         return err;
     };
     conn.disconnect();
-    try waitForDisconnectCount(lib, &state, 1, timeout_ms);
+    try waitForDisconnectCount(grt, &state, 1, timeout_ms);
 
-    const found_again = try discoverPeer(lib, central, &state);
+    const found_again = try discoverPeer(grt, central, &state);
     var conn_again = try client.connect(found_again.addr, found_again.addr_type, .{});
-    runReconnectClientSession(lib, &conn_again, allocator) catch |err| {
+    runReconnectClientSession(grt, &conn_again, allocator) catch |err| {
         conn_again.disconnect();
         return err;
     };
     conn_again.disconnect();
-    try waitForDisconnectCount(lib, &state, 2, timeout_ms);
+    try waitForDisconnectCount(grt, &state, 2, timeout_ms);
 
-    try testing.expectEqual(@as(u32, 2), state.disconnected_count);
+    try grt.std.testing.expectEqual(@as(u32, 2), state.disconnected_count);
 }
 
-fn runPeripheralRole(comptime lib: type, comptime ServerType: type, host: anytype, allocator: glib.std.mem.Allocator) !void {
-    const testing = lib.testing;
+fn runPeripheralRole(comptime grt: type, comptime ServerType: type, host: anytype, allocator: glib.std.mem.Allocator) !void {
     const XferReadRequest = ServerType.XferReadRequest;
     const XferWriteRequest = ServerType.XferWriteRequest;
     var server = try ServerType.init(allocator);
@@ -156,7 +153,7 @@ fn runPeripheralRole(comptime lib: type, comptime ServerType: type, host: anytyp
     const peripheral = host.peripheral();
 
     const State = struct {
-        mutex: lib.Thread.Mutex = .{},
+        mutex: grt.std.Thread.Mutex = .{},
         connected_count: u32 = 0,
         disconnected_count: u32 = 0,
         conn_handle: u16 = 0,
@@ -292,7 +289,7 @@ fn runPeripheralRole(comptime lib: type, comptime ServerType: type, host: anytyp
             server.stopAdvertising();
             try startAdvertising(&server);
         }
-        lib.Thread.sleep(1 * 1_000_000);
+        grt.std.Thread.sleep(1 * 1_000_000);
     }
     if (waited_ms > reconnect_timeout_ms) return error.Timeout;
 
@@ -304,20 +301,18 @@ fn runPeripheralRole(comptime lib: type, comptime ServerType: type, host: anytyp
 
     state.mutex.lock();
     defer state.mutex.unlock();
-    try testing.expectEqual(@as(u32, 2), state.connected_count);
-    try testing.expectEqual(@as(u32, 2), state.disconnected_count);
-    try testing.expectEqual(@as(usize, 2), state.read_calls);
-    try testing.expectEqual(@as(usize, 1), state.write_calls);
-    try testing.expectEqual(@as(usize, 2), state.xfer_read_calls);
-    try testing.expectEqual(@as(usize, 1), state.xfer_write_calls);
-    try testing.expect(lib.mem.eql(u8, state.read_value[0..state.read_len], expected_read[0..expected_read_len]));
-    try testing.expect(lib.mem.eql(u8, state.plain_write_value[0..state.plain_write_len], expected_write));
-    try testing.expect(lib.mem.eql(u8, state.receiver_value[0..state.receiver_len], &expected_receiver));
+    try grt.std.testing.expectEqual(@as(u32, 2), state.connected_count);
+    try grt.std.testing.expectEqual(@as(u32, 2), state.disconnected_count);
+    try grt.std.testing.expectEqual(@as(usize, 2), state.read_calls);
+    try grt.std.testing.expectEqual(@as(usize, 1), state.write_calls);
+    try grt.std.testing.expectEqual(@as(usize, 2), state.xfer_read_calls);
+    try grt.std.testing.expectEqual(@as(usize, 1), state.xfer_write_calls);
+    try grt.std.testing.expect(grt.std.mem.eql(u8, state.read_value[0..state.read_len], expected_read[0..expected_read_len]));
+    try grt.std.testing.expect(grt.std.mem.eql(u8, state.plain_write_value[0..state.plain_write_len], expected_write));
+    try grt.std.testing.expect(grt.std.mem.eql(u8, state.receiver_value[0..state.receiver_len], &expected_receiver));
 }
 
-fn runPrimaryClientSession(comptime lib: type, conn: anytype, allocator: glib.std.mem.Allocator) !void {
-    const testing = lib.testing;
-
+fn runPrimaryClientSession(comptime grt: type, conn: anytype, allocator: glib.std.mem.Allocator) !void {
     var expected_read: [32]u8 = undefined;
     const expected_read_len = fillPlainReadPayload(&expected_read);
     var expected_alpha: [620]u8 = undefined;
@@ -330,7 +325,7 @@ fn runPrimaryClientSession(comptime lib: type, conn: anytype, allocator: glib.st
 
     var plain_read_buf: [32]u8 = undefined;
     const plain_read_len = try plain_char.read(&plain_read_buf);
-    try testing.expect(lib.mem.eql(u8, plain_read_buf[0..plain_read_len], expected_read[0..expected_read_len]));
+    try grt.std.testing.expect(grt.std.mem.eql(u8, plain_read_buf[0..plain_read_len], expected_read[0..expected_read_len]));
 
     try plain_char.write("plain-write");
 
@@ -340,15 +335,14 @@ fn runPrimaryClientSession(comptime lib: type, conn: anytype, allocator: glib.st
 
     const alpha = try xfer_char.readX(allocator);
     defer allocator.free(alpha);
-    try testing.expect(lib.mem.eql(u8, alpha, expected_alpha[0..]));
+    try grt.std.testing.expect(grt.std.mem.eql(u8, alpha, expected_alpha[0..]));
 
     const beta = try xfer_char.readX(allocator);
     defer allocator.free(beta);
-    try testing.expect(lib.mem.eql(u8, beta, expected_beta[0..]));
+    try grt.std.testing.expect(grt.std.mem.eql(u8, beta, expected_beta[0..]));
 }
 
-fn runReconnectClientSession(comptime lib: type, conn: anytype, allocator: glib.std.mem.Allocator) !void {
-    const testing = lib.testing;
+fn runReconnectClientSession(comptime grt: type, conn: anytype, allocator: glib.std.mem.Allocator) !void {
     _ = allocator;
 
     var expected_read: [32]u8 = undefined;
@@ -358,7 +352,7 @@ fn runReconnectClientSession(comptime lib: type, conn: anytype, allocator: glib.
 
     var plain_read_buf: [32]u8 = undefined;
     const plain_read_len = try plain_char.read(&plain_read_buf);
-    try testing.expect(lib.mem.eql(u8, plain_read_buf[0..plain_read_len], expected_read[0..expected_read_len]));
+    try grt.std.testing.expect(grt.std.mem.eql(u8, plain_read_buf[0..plain_read_len], expected_read[0..expected_read_len]));
 }
 
 const FoundDevice = struct {
@@ -366,7 +360,7 @@ const FoundDevice = struct {
     addr_type: Central.AddrType,
 };
 
-fn discoverPeer(comptime lib: type, c: Central, state: anytype) !FoundDevice {
+fn discoverPeer(comptime grt: type, c: Central, state: anytype) !FoundDevice {
     resetFound(state);
     try c.startScanning(.{
         .active = true,
@@ -374,7 +368,7 @@ fn discoverPeer(comptime lib: type, c: Central, state: anytype) !FoundDevice {
         .service_uuids = &.{service_uuid},
     });
     defer c.stopScanning();
-    return waitForFoundDevice(lib, state, timeout_ms);
+    return waitForFoundDevice(grt, state, timeout_ms);
 }
 
 fn resetFound(state: anytype) void {
@@ -383,7 +377,7 @@ fn resetFound(state: anytype) void {
     state.found = false;
 }
 
-fn waitForFoundDevice(comptime lib: type, state: anytype, wait_ms: u32) !FoundDevice {
+fn waitForFoundDevice(comptime grt: type, state: anytype, wait_ms: u32) !FoundDevice {
     var waited_ms: u32 = 0;
     while (waited_ms <= wait_ms) : (waited_ms += 1) {
         state.mutex.lock();
@@ -392,19 +386,19 @@ fn waitForFoundDevice(comptime lib: type, state: anytype, wait_ms: u32) !FoundDe
         const addr_type = state.addr_type;
         state.mutex.unlock();
         if (found) return .{ .addr = addr, .addr_type = addr_type };
-        lib.Thread.sleep(1 * 1_000_000);
+        grt.std.Thread.sleep(1 * 1_000_000);
     }
     return error.Timeout;
 }
 
-fn waitForDisconnectCount(comptime lib: type, state: anytype, want: u32, wait_ms: u32) !void {
+fn waitForDisconnectCount(comptime grt: type, state: anytype, want: u32, wait_ms: u32) !void {
     var waited_ms: u32 = 0;
     while (waited_ms <= wait_ms) : (waited_ms += 1) {
         state.mutex.lock();
         const disconnected_count = state.disconnected_count;
         state.mutex.unlock();
         if (disconnected_count >= want) return;
-        lib.Thread.sleep(1 * 1_000_000);
+        grt.std.Thread.sleep(1 * 1_000_000);
     }
     return error.Timeout;
 }

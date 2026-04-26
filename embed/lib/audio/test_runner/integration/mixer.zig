@@ -7,28 +7,28 @@ pub const gain_updates = @import("mixer/gain_updates.zig");
 pub const hot_path_alloc = @import("mixer/hot_path_alloc.zig");
 pub const multi_track_alloc = @import("mixer/multi_track_alloc.zig");
 
-pub fn make(comptime lib: type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             t.parallel();
-            t.run("backpressure", backpressure.make(lib));
-            t.run("close_with_error", close_with_error.make(lib));
-            t.run("concurrent_read_write", concurrent_read_write.make(lib));
-            t.run("gain_updates", gain_updates.make(lib));
-            t.run("hot_path_alloc", hot_path_alloc.make(lib));
-            t.run("multi_track_alloc", multi_track_alloc.make(lib));
+            t.run("backpressure", backpressure.make(grt));
+            t.run("close_with_error", close_with_error.make(grt));
+            t.run("concurrent_read_write", concurrent_read_write.make(grt));
+            t.run("gain_updates", gain_updates.make(grt));
+            t.run("hot_path_alloc", hot_path_alloc.make(grt));
+            t.run("multi_track_alloc", multi_track_alloc.make(grt));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

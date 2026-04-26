@@ -7,25 +7,25 @@ const ConnMod = @import("client/Conn.zig");
 const CharacteristicMod = @import("client/Characteristic.zig");
 const SubscriptionMod = @import("client/Subscription.zig");
 
-pub fn make(comptime lib: type) type {
+pub fn make(comptime grt: type) type {
     return struct {
         const Self = @This();
 
         pub const ConnectError = bt.Central.StartError || bt.Central.ConnectError;
         pub const GattError = bt.Central.GattError;
-        pub const Subscription = SubscriptionMod.Subscription(lib, Self);
-        pub const Characteristic = CharacteristicMod.Characteristic(lib, Self, Subscription);
-        pub const Conn = ConnMod.Conn(lib, Self, Characteristic);
+        pub const Subscription = SubscriptionMod.Subscription(grt, Self);
+        pub const Characteristic = CharacteristicMod.Characteristic(grt, Self, Subscription);
+        pub const Conn = ConnMod.Conn(grt, Self, Characteristic);
 
         const SubscriptionState = Subscription.State;
 
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
         central: ?bt.Central = null,
         hook_installed: bool = false,
-        mutex: lib.Thread.Mutex = .{},
+        mutex: grt.std.Thread.Mutex = .{},
         subscriptions: glib.std.ArrayListUnmanaged(*SubscriptionState) = .{},
 
-        pub fn init(allocator: lib.mem.Allocator) Self {
+        pub fn init(allocator: glib.std.mem.Allocator) Self {
             return .{
                 .allocator = allocator,
             };

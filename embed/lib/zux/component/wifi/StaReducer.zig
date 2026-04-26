@@ -104,13 +104,13 @@ pub fn deinit(self: *StaReducer) void {
     _ = self;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn reduceTracksStationState() !void {
             const StoreObject = @import("../../store/Object.zig");
 
-            const StaStore = StoreObject.make(lib, StaState, .wifi_sta);
-            var store = StaStore.init(lib.testing.allocator, .{});
+            const StaStore = StoreObject.make(grt, StaState, .wifi_sta);
+            var store = StaStore.init(grt.std.testing.allocator, .{});
             defer store.deinit();
             var reducer = StaReducer.init();
             defer reducer.deinit();
@@ -173,13 +173,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             store.tick();
             const connected = store.get();
-            try lib.testing.expect(connected.connected);
-            try lib.testing.expect(connected.has_ip);
-            try lib.testing.expectEqual(@as(u32, 31), connected.source_id);
-            try lib.testing.expectEqualStrings("wifi-lab", connected.ssid());
-            try lib.testing.expectEqual(@as(?i16, -41), connected.last_rssi);
-            try lib.testing.expectEqual(Addr.from4(.{ 192, 168, 4, 2 }), connected.address.?);
-            try lib.testing.expectEqual(Addr.from4(.{ 1, 1, 1, 1 }), connected.dns1.?);
+            try grt.std.testing.expect(connected.connected);
+            try grt.std.testing.expect(connected.has_ip);
+            try grt.std.testing.expectEqual(@as(u32, 31), connected.source_id);
+            try grt.std.testing.expectEqualStrings("wifi-lab", connected.ssid());
+            try grt.std.testing.expectEqual(@as(?i16, -41), connected.last_rssi);
+            try grt.std.testing.expectEqual(Addr.from4(.{ 192, 168, 4, 2 }), connected.address.?);
+            try grt.std.testing.expectEqual(Addr.from4(.{ 1, 1, 1, 1 }), connected.dns1.?);
 
             _ = try reducer.reduce(&store, .{
                 .origin = .source,
@@ -200,21 +200,21 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit);
             store.tick();
             const disconnected = store.get();
-            try lib.testing.expect(!disconnected.connected);
-            try lib.testing.expect(!disconnected.has_ip);
-            try lib.testing.expectEqual(@as(?u16, 7), disconnected.last_disconnect_reason);
-            try lib.testing.expectEqual(@as(?Addr, null), disconnected.address);
-            try lib.testing.expectEqualStrings("wifi-lab", disconnected.ssid());
+            try grt.std.testing.expect(!disconnected.connected);
+            try grt.std.testing.expect(!disconnected.has_ip);
+            try grt.std.testing.expectEqual(@as(?u16, 7), disconnected.last_disconnect_reason);
+            try grt.std.testing.expectEqual(@as(?Addr, null), disconnected.address);
+            try grt.std.testing.expectEqualStrings("wifi-lab", disconnected.ssid());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -225,7 +225,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

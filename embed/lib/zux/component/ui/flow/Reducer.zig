@@ -8,24 +8,24 @@ const Message = @import("../../../pipeline/Message.zig");
 const Subscriber = @import("../../../store/Subscriber.zig");
 
 pub fn make(
-    comptime lib: type,
+    comptime grt: type,
     comptime FlowState: type,
     comptime dag: Dag,
     comptime NodeLabel: type,
 ) type {
     comptime dag.validate();
 
-    const AtomicU64 = lib.atomic.Value(u64);
-    const Mutex = lib.Thread.Mutex;
-    const RwLock = lib.Thread.RwLock;
-    const SubscriberList = lib.ArrayList(*Subscriber);
+    const AtomicU64 = grt.std.atomic.Value(u64);
+    const Mutex = grt.std.Thread.Mutex;
+    const RwLock = grt.std.Thread.RwLock;
+    const SubscriberList = grt.std.ArrayList(*Subscriber);
 
     return struct {
         const Self = @This();
 
         pub const StateType = FlowState;
 
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
 
         running_mu: Mutex = .{},
         running_state: FlowState = .{},
@@ -38,7 +38,7 @@ pub fn make(
         subscribers_notifying: bool = false,
         tick_count: AtomicU64 = AtomicU64.init(0),
 
-        pub fn init(allocator: lib.mem.Allocator, initial: FlowState) Self {
+        pub fn init(allocator: glib.std.mem.Allocator, initial: FlowState) Self {
             return .{
                 .allocator = allocator,
                 .running_state = initial,
@@ -193,7 +193,7 @@ pub fn make(
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const LinearFlow = comptime blk: {
         var builder = Builder.init();
         builder.addNode("idle");
@@ -218,11 +218,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
         break :blk builder.build();
     };
 
-    const LinearFlowStore = LinearFlow.Reducer(lib);
-    const BranchFlowStore = BranchFlow.Reducer(lib);
+    const LinearFlowStore = LinearFlow.Reducer(grt);
+    const BranchFlowStore = BranchFlow.Reducer(grt);
 
     const TestCase = struct {
-        fn move_respects_allowed_edges_and_reset(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn move_respects_allowed_edges_and_reset(allocator: glib.std.mem.Allocator) !void {
             var flow = LinearFlowStore.init(allocator, .{});
             defer flow.deinit();
 
@@ -232,10 +232,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var noop = NoopSink{};
             const emit = Emitter.init(&noop);
 
-            try testing.expectEqual(LinearFlow.NodeLabel.idle, flow.get().node);
-            try testing.expect(LinearFlow.State.negativeEql(null, flow.get().negative));
+            try grt.std.testing.expectEqual(LinearFlow.NodeLabel.idle, flow.get().node);
+            try grt.std.testing.expect(LinearFlow.State.negativeEql(null, flow.get().negative));
 
-            try testing.expectEqual(@as(usize, 0), try LinearFlowStore.reduce(&flow, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try LinearFlowStore.reduce(&flow, .{
                 .origin = .manual,
                 .body = .{
                     .ui_flow_move = .{
@@ -245,10 +245,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
             flow.tick();
-            try testing.expectEqual(LinearFlow.NodeLabel.idle, flow.get().node);
-            try testing.expect(LinearFlow.State.negativeEql(null, flow.get().negative));
+            try grt.std.testing.expectEqual(LinearFlow.NodeLabel.idle, flow.get().node);
+            try grt.std.testing.expect(LinearFlow.State.negativeEql(null, flow.get().negative));
 
-            try testing.expectEqual(@as(usize, 1), try LinearFlowStore.reduce(&flow, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try LinearFlowStore.reduce(&flow, .{
                 .origin = .manual,
                 .body = .{
                     .ui_flow_move = .{
@@ -258,13 +258,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
             flow.tick();
-            try testing.expectEqual(LinearFlow.NodeLabel.idle, flow.get().node);
-            try testing.expect(LinearFlow.State.negativeEql(.{
+            try grt.std.testing.expectEqual(LinearFlow.NodeLabel.idle, flow.get().node);
+            try grt.std.testing.expect(LinearFlow.State.negativeEql(.{
                 .direction = .forward,
                 .edge = .found,
             }, flow.get().negative));
 
-            try testing.expectEqual(@as(usize, 0), try LinearFlowStore.reduce(&flow, .{
+            try grt.std.testing.expectEqual(@as(usize, 0), try LinearFlowStore.reduce(&flow, .{
                 .origin = .manual,
                 .body = .{
                     .ui_flow_move = .{
@@ -274,7 +274,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
 
-            try testing.expectEqual(@as(usize, 1), try LinearFlowStore.reduce(&flow, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try LinearFlowStore.reduce(&flow, .{
                 .origin = .manual,
                 .body = .{
                     .ui_flow_move = .{
@@ -284,10 +284,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
             flow.tick();
-            try testing.expectEqual(LinearFlow.NodeLabel.searching, flow.get().node);
-            try testing.expect(LinearFlow.State.negativeEql(null, flow.get().negative));
+            try grt.std.testing.expectEqual(LinearFlow.NodeLabel.searching, flow.get().node);
+            try grt.std.testing.expect(LinearFlow.State.negativeEql(null, flow.get().negative));
 
-            try testing.expectEqual(@as(usize, 1), try LinearFlowStore.reduce(&flow, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try LinearFlowStore.reduce(&flow, .{
                 .origin = .manual,
                 .body = .{
                     .ui_flow_move = .{
@@ -297,24 +297,24 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
             flow.tick();
-            try testing.expectEqual(LinearFlow.NodeLabel.searching, flow.get().node);
-            try testing.expect(LinearFlow.State.negativeEql(.{
+            try grt.std.testing.expectEqual(LinearFlow.NodeLabel.searching, flow.get().node);
+            try grt.std.testing.expect(LinearFlow.State.negativeEql(.{
                 .direction = .reverse,
                 .edge = .found,
             }, flow.get().negative));
 
-            try testing.expectEqual(@as(usize, 1), try LinearFlowStore.reduce(&flow, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try LinearFlowStore.reduce(&flow, .{
                 .origin = .manual,
                 .body = .{
                     .ui_flow_reset = .{},
                 },
             }, emit));
             flow.tick();
-            try testing.expectEqual(LinearFlow.NodeLabel.idle, flow.get().node);
-            try testing.expect(LinearFlow.State.negativeEql(null, flow.get().negative));
+            try grt.std.testing.expectEqual(LinearFlow.NodeLabel.idle, flow.get().node);
+            try grt.std.testing.expect(LinearFlow.State.negativeEql(null, flow.get().negative));
         }
 
-        fn branch_forward_and_reverse_moves_work(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn branch_forward_and_reverse_moves_work(allocator: glib.std.mem.Allocator) !void {
             var flow = BranchFlowStore.init(allocator, .{});
             defer flow.deinit();
 
@@ -324,9 +324,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var noop = NoopSink{};
             const emit = Emitter.init(&noop);
 
-            try testing.expectEqual(BranchFlow.NodeLabel.idle, flow.get().node);
+            try grt.std.testing.expectEqual(BranchFlow.NodeLabel.idle, flow.get().node);
 
-            try testing.expectEqual(@as(usize, 1), try BranchFlowStore.reduce(&flow, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try BranchFlowStore.reduce(&flow, .{
                 .origin = .manual,
                 .body = .{
                     .ui_flow_move = .{
@@ -336,10 +336,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
             flow.tick();
-            try testing.expectEqual(BranchFlow.NodeLabel.auto, flow.get().node);
-            try testing.expect(BranchFlow.State.negativeEql(null, flow.get().negative));
+            try grt.std.testing.expectEqual(BranchFlow.NodeLabel.auto, flow.get().node);
+            try grt.std.testing.expect(BranchFlow.State.negativeEql(null, flow.get().negative));
 
-            try testing.expectEqual(@as(usize, 1), try BranchFlowStore.reduce(&flow, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try BranchFlowStore.reduce(&flow, .{
                 .origin = .manual,
                 .body = .{
                     .ui_flow_move = .{
@@ -349,13 +349,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
             flow.tick();
-            try testing.expectEqual(BranchFlow.NodeLabel.auto, flow.get().node);
-            try testing.expect(BranchFlow.State.negativeEql(.{
+            try grt.std.testing.expectEqual(BranchFlow.NodeLabel.auto, flow.get().node);
+            try grt.std.testing.expect(BranchFlow.State.negativeEql(.{
                 .direction = .forward,
                 .edge = .choose_manual,
             }, flow.get().negative));
 
-            try testing.expectEqual(@as(usize, 1), try BranchFlowStore.reduce(&flow, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try BranchFlowStore.reduce(&flow, .{
                 .origin = .manual,
                 .body = .{
                     .ui_flow_move = .{
@@ -365,10 +365,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
             flow.tick();
-            try testing.expectEqual(BranchFlow.NodeLabel.done, flow.get().node);
-            try testing.expect(BranchFlow.State.negativeEql(null, flow.get().negative));
+            try grt.std.testing.expectEqual(BranchFlow.NodeLabel.done, flow.get().node);
+            try grt.std.testing.expect(BranchFlow.State.negativeEql(null, flow.get().negative));
 
-            try testing.expectEqual(@as(usize, 1), try BranchFlowStore.reduce(&flow, .{
+            try grt.std.testing.expectEqual(@as(usize, 1), try BranchFlowStore.reduce(&flow, .{
                 .origin = .manual,
                 .body = .{
                     .ui_flow_move = .{
@@ -378,33 +378,32 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             }, emit));
             flow.tick();
-            try testing.expectEqual(BranchFlow.NodeLabel.auto, flow.get().node);
-            try testing.expect(BranchFlow.State.negativeEql(null, flow.get().negative));
+            try grt.std.testing.expectEqual(BranchFlow.NodeLabel.auto, flow.get().node);
+            try grt.std.testing.expect(BranchFlow.State.negativeEql(null, flow.get().negative));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.move_respects_allowed_edges_and_reset(testing, allocator) catch |err| {
+            TestCase.move_respects_allowed_edges_and_reset(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.branch_forward_and_reverse_moves_work(testing, allocator) catch |err| {
+            TestCase.branch_forward_and_reverse_moves_work(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -43,9 +43,8 @@ pub const FlowTypeFactory = @TypeOf(struct {
 }.factory);
 
 pub fn make(
-    comptime lib: type,
+    comptime grt: type,
     comptime config: Config,
-    comptime Channel: fn (type) type,
 ) type {
     const StoreBuilderType = Store.Builder(config.store);
     const NodeBuilderType = NodeBuilder.Builder(config.node);
@@ -95,9 +94,9 @@ pub fn make(
         reducer_bindings: [config.max_reducers]ReducerBinding = undefined,
         reducer_count: usize = 0,
 
-        pub const Lib = lib;
+        pub const Lib = grt;
         pub const Config = config;
-        pub const ChannelType = Channel;
+        pub const ChannelType = grt.sync.Channel;
 
         pub fn init() Self {
             return .{
@@ -252,7 +251,7 @@ pub fn make(
         ) void {
             ensureComponentUnique(self, label, id);
             self.router_registry.add(label, id, initial_item);
-            self.store_builder.setStore(label, assembler_builder.makeRouterStoreType(lib, initial_item));
+            self.store_builder.setStore(label, assembler_builder.makeRouterStoreType(grt, initial_item));
         }
 
         pub fn addFlow(
@@ -273,7 +272,7 @@ pub fn make(
         ) void {
             ensureComponentUnique(self, label, id);
             self.overlay_registry.add(label, id, initial_state);
-            self.store_builder.setStore(label, assembler_builder.makeOverlayStoreType(lib, initial_state));
+            self.store_builder.setStore(label, assembler_builder.makeOverlayStoreType(grt, initial_state));
         }
 
         pub fn addSelection(
@@ -284,7 +283,7 @@ pub fn make(
         ) void {
             ensureComponentUnique(self, label, id);
             self.selection_registry.add(label, id, initial_state);
-            self.store_builder.setStore(label, assembler_builder.makeSelectionStoreType(lib, initial_state));
+            self.store_builder.setStore(label, assembler_builder.makeSelectionStoreType(grt, initial_state));
         }
 
         pub fn BuildConfig(comptime self: Self) type {
@@ -302,7 +301,7 @@ pub fn make(
 
         pub fn build(comptime self: Self, comptime build_config: self.BuildConfig()) type {
             return assembler_builder.init().build(BuildContext.make(.{
-                .lib = lib,
+                .grt = grt,
                 .assembler_config = config,
                 .build_config = build_config,
                 .registries = .{
@@ -325,7 +324,6 @@ pub fn make(
                 .render_count = self.render_count,
                 .reducer_bindings = self.reducer_bindings,
                 .reducer_count = self.reducer_count,
-                .channel = Channel,
             }));
         }
 

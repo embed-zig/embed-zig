@@ -30,7 +30,8 @@ pub fn deinit(self: root) void {
     self.vtable.deinit(self.ptr);
 }
 
-pub fn make(comptime lib: type, comptime Impl: type) type {
+pub fn make(comptime grt: type, comptime Impl: type) type {
+    _ = grt;
     comptime {
         if (!@hasDecl(Impl, "Config")) @compileError("Track impl must define Config");
         if (!@hasDecl(Impl, "init")) @compileError("Track impl must define init");
@@ -43,7 +44,7 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
         _ = @as(*const fn (*Impl) void, &Impl.deinit);
     }
 
-    const Allocator = lib.mem.Allocator;
+    const Allocator = glib.std.mem.Allocator;
     const Ctx = struct {
         allocator: Allocator,
         impl: Impl,
@@ -95,11 +96,11 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         const MakeImpl = struct {
             pub const Config = struct {
-                allocator: lib.mem.Allocator,
+                allocator: glib.std.mem.Allocator,
                 writes: *usize,
             };
 
@@ -121,47 +122,46 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }
         };
 
-        fn trackMakeSurface(testing: anytype) !void {
+        fn trackMakeSurface() !void {
             comptime {
                 _ = root.Format;
                 _ = root.Config;
                 _ = root.write;
                 _ = root.deinit;
                 _ = root.make;
-                _ = make(lib, MakeImpl).init;
+                _ = make(grt, MakeImpl).init;
             }
 
-            const TrackType = make(lib, MakeImpl);
+            const TrackType = make(grt, MakeImpl);
             var writes: usize = 0;
             const made = try TrackType.init(.{
-                .allocator = lib.testing.allocator,
+                .allocator = grt.std.testing.allocator,
                 .writes = &writes,
             });
             defer made.deinit();
             try made.write(.{ .rate = 16000 }, &.{ 1, 2 });
-            try testing.expectEqual(@as(usize, 2), writes);
+            try grt.std.testing.expectEqual(@as(usize, 2), writes);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.trackMakeSurface(testing) catch |err| {
+            TestCase.trackMakeSurface() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

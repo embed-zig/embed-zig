@@ -97,9 +97,9 @@ pub fn init(comptime T: type, impl: *T) Poller {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn initBindStartStopAndDeinit(testing: anytype) !void {
+        fn initBindStartStopAndDeinit() !void {
             const Impl = struct {
                 bound: bool = false,
                 started: bool = false,
@@ -133,41 +133,40 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var sink = Sink{};
             var poller = Poller.init(Impl, &impl);
 
-            try testing.expect((try poller.as(Impl)) == &impl);
-            try testing.expectError(error.TypeMismatch, poller.as(struct { x: u8 }));
+            try grt.std.testing.expect((try poller.as(Impl)) == &impl);
+            try grt.std.testing.expectError(error.TypeMismatch, poller.as(struct { x: u8 }));
 
             poller.bindOutput(Emitter.init(&sink));
             try poller.start(.{});
             poller.stop();
             poller.deinit();
 
-            try testing.expect(impl.bound);
-            try testing.expect(impl.started);
-            try testing.expect(impl.stopped);
-            try testing.expect(impl.deinited);
-            try testing.expectEqual(default_poll_interval_ns, impl.last_poll_interval_ns);
+            try grt.std.testing.expect(impl.bound);
+            try grt.std.testing.expect(impl.started);
+            try grt.std.testing.expect(impl.stopped);
+            try grt.std.testing.expect(impl.deinited);
+            try grt.std.testing.expectEqual(default_poll_interval_ns, impl.last_poll_interval_ns);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.initBindStartStopAndDeinit(testing) catch |err| {
+            TestCase.initBindStartStopAndDeinit() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

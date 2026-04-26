@@ -1,26 +1,25 @@
 //! lvgl animation test runner — tick, timer handler, and animation smoke tests.
 //!
 //! Usage:
-//!   const runner = @import("lvgl/test_runner/integration/lvgl/anim.zig").make(std);
+//!   const runner = @import("lvgl/test_runner/integration/lvgl/anim.zig").make(gstd.runtime);
 
+const glib = @import("glib");
 const embed = @import("embed");
-const testing = @import("testing");
 const lvgl = @import("../../../../lvgl.zig");
 
 const Tick = lvgl.Tick;
 const Anim = lvgl.Anim;
 
-pub fn make(comptime lib: type) testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const test_lib = lib.testing;
 
             const Cases = struct {
                 fn tickIncAndElaps() !void {
@@ -29,7 +28,7 @@ pub fn make(comptime lib: type) testing.TestRunner {
 
                     const t0 = Tick.get();
                     Tick.inc(33);
-                    try test_lib.expect(Tick.elaps(t0) >= 33);
+                    try grt.std.testing.expect(Tick.elaps(t0) >= 33);
                 }
 
                 fn timerHandlerSmoke() !void {
@@ -38,7 +37,7 @@ pub fn make(comptime lib: type) testing.TestRunner {
 
                     Tick.inc(1);
                     const next = Tick.timerHandler();
-                    try test_lib.expectEqual(Tick.no_timer_ready, next);
+                    try grt.std.testing.expectEqual(Tick.no_timer_ready, next);
                 }
 
                 fn animationRunsWithTickAndTimer() !void {
@@ -56,7 +55,7 @@ pub fn make(comptime lib: type) testing.TestRunner {
                     anim.setRepeatCount(1);
 
                     _ = anim.start();
-                    try test_lib.expectEqual(@as(i32, 0), current);
+                    try grt.std.testing.expectEqual(@as(i32, 0), current);
 
                     var i: u32 = 0;
                     while (current < 100 and i < 32) : (i += 1) {
@@ -64,7 +63,7 @@ pub fn make(comptime lib: type) testing.TestRunner {
                         _ = Tick.timerHandler();
                     }
 
-                    try test_lib.expectEqual(@as(i32, 100), current);
+                    try grt.std.testing.expectEqual(@as(i32, 100), current);
                 }
             };
 
@@ -83,15 +82,15 @@ pub fn make(comptime lib: type) testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
-    return testing.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }
 
 fn animExecForTickTest(var_: ?*anyopaque, value: i32) callconv(.c) void {

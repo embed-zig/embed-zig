@@ -3,7 +3,7 @@
 //! Holds a Transport, runs the event loop, and dispatches HCI events
 //! through the protocol layers (GAP, L2CAP, ATT, GATT).
 //!
-//! Takes `comptime lib: type` for platform primitives (Thread, Mutex, time).
+//! Takes `comptime grt: type` for platform primitives (Thread, Mutex, time).
 
 const glib = @import("glib");
 
@@ -17,7 +17,7 @@ const l2cap = @import("l2cap.zig");
 const att = @import("att.zig");
 const Gap = @import("Gap.zig");
 
-pub fn make(comptime lib: type) type {
+pub fn make(comptime grt: type) type {
     return struct {
         const Self = @This();
         const Role = Gap.Role;
@@ -30,7 +30,7 @@ pub fn make(comptime lib: type) type {
         };
 
         pub const Config = struct {
-            spawn_config: lib.Thread.SpawnConfig = .{
+            spawn_config: grt.std.Thread.SpawnConfig = .{
                 .stack_size = 4096,
             },
             transport_read_deadline_ms: u32 = 100,
@@ -44,11 +44,11 @@ pub fn make(comptime lib: type) type {
         gap: Gap = Gap.init(),
         central_reassembler: l2cap.Reassembler = .{},
         peripheral_reassembler: l2cap.Reassembler = .{},
-        mutex: lib.Thread.Mutex = .{},
-        cond: lib.Thread.Condition = .{},
+        mutex: grt.std.Thread.Mutex = .{},
+        cond: grt.std.Thread.Condition = .{},
         running: bool = false,
         initialized: bool = false,
-        recv_thread: ?lib.Thread = null,
+        recv_thread: ?grt.std.Thread = null,
         active_roles: u8 = 0,
         async_error: ?Api.Error = null,
         dispatching_peripheral_att: bool = false,
@@ -132,7 +132,7 @@ pub fn make(comptime lib: type) type {
             self.mutex.unlock();
 
             self.transport.setReadDeadline(null);
-            const thread = try lib.Thread.spawn(self.config.spawn_config, recvLoop, .{self});
+            const thread = try grt.std.Thread.spawn(self.config.spawn_config, recvLoop, .{self});
             self.mutex.lock();
             self.recv_thread = thread;
             self.mutex.unlock();
@@ -149,11 +149,11 @@ pub fn make(comptime lib: type) type {
 
             // Set event mask to receive LE Meta, Disconnection Complete, etc.
             var mask_buf: [8]u8 = undefined;
-            lib.mem.writeInt(u64, &mask_buf, 0x20001FFFFFFFFFFF, .little);
+            grt.std.mem.writeInt(u64, &mask_buf, 0x20001FFFFFFFFFFF, .little);
             try self.sendCommandSync(commands.SET_EVENT_MASK, &mask_buf);
 
             var le_mask_buf: [8]u8 = undefined;
-            lib.mem.writeInt(u64, &le_mask_buf, 0x000000000000001F, .little);
+            grt.std.mem.writeInt(u64, &le_mask_buf, 0x000000000000001F, .little);
             try self.sendCommandSync(commands.LE_SET_EVENT_MASK, &le_mask_buf);
 
             self.initialized = true;
@@ -166,7 +166,7 @@ pub fn make(comptime lib: type) type {
             self.async_error = null;
             self.cond.broadcast();
             self.mutex.unlock();
-            self.transport.setReadDeadline(lib.time.milliTimestamp() * 1_000_000);
+            self.transport.setReadDeadline(grt.std.time.milliTimestamp() * 1_000_000);
 
             if (self.recv_thread) |t| {
                 t.join();
@@ -203,7 +203,7 @@ pub fn make(comptime lib: type) type {
             while (!self.cmd_complete) {
                 if (self.async_error) |err| return err;
                 if (!self.running) return error.Disconnected;
-                self.cond.timedWait(&self.mutex, @as(u64, self.config.command_timeout_ms) * lib.time.ns_per_ms) catch |err| switch (err) {
+                self.cond.timedWait(&self.mutex, @as(u64, self.config.command_timeout_ms) * grt.std.time.ns_per_ms) catch |err| switch (err) {
                     error.Timeout => return error.Timeout,
                 };
             }
@@ -250,7 +250,7 @@ pub fn make(comptime lib: type) type {
                 if (self.async_error) |err| return err;
                 if (!self.running) return error.Disconnected;
                 if (self.gap.getRoleForHandle(conn_handle) == null) return error.Disconnected;
-                self.cond.timedWait(&self.mutex, @as(u64, self.config.att_response_timeout_ms) * lib.time.ns_per_ms) catch |err| switch (err) {
+                self.cond.timedWait(&self.mutex, @as(u64, self.config.att_response_timeout_ms) * grt.std.time.ns_per_ms) catch |err| switch (err) {
                     error.Timeout => return error.Timeout,
                 };
             }
@@ -390,7 +390,7 @@ pub fn make(comptime lib: type) type {
 
             if (opcode == att.HANDLE_VALUE_NOTIFICATION) {
                 if (role == .central and data.len >= 3) {
-                    const handle = lib.mem.readInt(u16, data[1..3], .little);
+                    const handle = grt.std.mem.readInt(u16, data[1..3], .little);
                     if (central_callbacks.on_notification) |cb| cb(central_callbacks.ctx, conn_handle, handle, data[3..]);
                 }
                 return;
@@ -401,7 +401,7 @@ pub fn make(comptime lib: type) type {
                 const conf = att.encodeConfirmation(&conf_buf);
                 self.sendAcl(conn_handle, conf) catch {};
                 if (role == .central and data.len >= 3) {
-                    const handle = lib.mem.readInt(u16, data[1..3], .little);
+                    const handle = grt.std.mem.readInt(u16, data[1..3], .little);
                     if (central_callbacks.on_notification) |cb| cb(central_callbacks.ctx, conn_handle, handle, data[3..]);
                 }
                 return;
@@ -476,7 +476,7 @@ pub fn make(comptime lib: type) type {
 
         fn ioDeadlineNs(self: *const Self, timeout_ms: u32) i64 {
             _ = self;
-            return lib.time.milliTimestamp() * 1_000_000 + @as(i64, timeout_ms) * 1_000_000;
+            return grt.std.time.milliTimestamp() * 1_000_000 + @as(i64, timeout_ms) * 1_000_000;
         }
 
         pub fn startScanning(self: *Self, config: Api.ScanConfig) Api.Error!void {
@@ -670,7 +670,7 @@ pub fn make(comptime lib: type) type {
 
         fn attErrorHandle(data: []const u8) u16 {
             if (data.len >= 3) {
-                return lib.mem.readInt(u16, data[1..3], .little);
+                return grt.std.mem.readInt(u16, data[1..3], .little);
             }
             return 0x0000;
         }
@@ -687,7 +687,7 @@ pub fn make(comptime lib: type) type {
             while (self.cmd_credits == 0) {
                 if (self.async_error) |err| return err;
                 if (!self.running) return error.Disconnected;
-                self.cond.timedWait(&self.mutex, @as(u64, self.config.command_timeout_ms) * lib.time.ns_per_ms) catch |err| switch (err) {
+                self.cond.timedWait(&self.mutex, @as(u64, self.config.command_timeout_ms) * grt.std.time.ns_per_ms) catch |err| switch (err) {
                     error.Timeout => return error.Timeout,
                 };
             }
@@ -748,11 +748,11 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             {
-                const Impl = make(lib);
+                const Impl = make(grt);
 
                 const Counter = struct {
                     fn onDisconnected(ctx: ?*anyopaque, _: u16, _: u8) void {
@@ -775,12 +775,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
                 hci.handleHciEvent(&.{ 0x04, 0x05, 0x04, 0x00, 0x40, 0x00, 0x13 });
 
-                try lib.testing.expectEqual(@as(u32, 0), central_disconnects);
-                try lib.testing.expectEqual(@as(u32, 0), peripheral_disconnects);
+                try grt.std.testing.expectEqual(@as(u32, 0), central_disconnects);
+                try grt.std.testing.expectEqual(@as(u32, 0), peripheral_disconnects);
             }
 
             {
-                const Impl = make(lib);
+                const Impl = make(grt);
 
                 const Counter = struct {
                     fn onConnected(ctx: ?*anyopaque, _: Api.Link) void {
@@ -798,25 +798,25 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
                 hci.handleHciEvent(&.{ 0x04, 0x3E, 0x13, 0x01, 0x08, 0x40, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x18, 0x00, 0x00, 0x00, 0xC8, 0x00 });
 
-                try lib.testing.expectEqual(@as(u32, 0), connected_count);
+                try grt.std.testing.expectEqual(@as(u32, 0), connected_count);
             }
 
             {
-                const Impl = make(lib);
+                const Impl = make(grt);
                 var err_buf: [att.MAX_PDU_LEN]u8 = undefined;
                 const mismatched = att.encodeErrorResponse(&err_buf, att.FIND_INFORMATION_REQUEST, 0x0001, .request_not_supported);
-                try lib.testing.expect(!Impl.attResponseMatches(att.WRITE_REQUEST, mismatched));
-                try lib.testing.expect(Impl.attResponseMatches(att.FIND_INFORMATION_REQUEST, mismatched));
+                try grt.std.testing.expect(!Impl.attResponseMatches(att.WRITE_REQUEST, mismatched));
+                try grt.std.testing.expect(Impl.attResponseMatches(att.FIND_INFORMATION_REQUEST, mismatched));
             }
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -827,7 +827,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

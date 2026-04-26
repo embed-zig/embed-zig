@@ -84,7 +84,7 @@ fn select(type_a: TypeA, cascade_code: u8, in_uid: []const u8, out_sak: *u8) Typ
     out_sak.* = rx[0];
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn activateSingleCascadeUid() !void {
             const Fake = struct {
@@ -127,10 +127,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var fake = Fake{};
             const card = try activate(TypeA.init(&fake));
 
-            try lib.testing.expectEqual(@as(u8, 0x04), card.atqa[0]);
-            try lib.testing.expectEqual(@as(u8, 0x00), card.atqa[1]);
-            try lib.testing.expectEqualSlices(u8, &.{ 0xDE, 0xAD, 0xBE, 0xEF, 0x22 }, card.uid[0..5]);
-            try lib.testing.expectEqual(@as(u8, 0x08), card.sak[0]);
+            try grt.std.testing.expectEqual(@as(u8, 0x04), card.atqa[0]);
+            try grt.std.testing.expectEqual(@as(u8, 0x00), card.atqa[1]);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0xDE, 0xAD, 0xBE, 0xEF, 0x22 }, card.uid[0..5]);
+            try grt.std.testing.expectEqual(@as(u8, 0x08), card.sak[0]);
         }
 
         fn activateTripleCascadeUid() !void {
@@ -189,12 +189,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var fake = Fake{};
             const card = try activate(TypeA.init(&fake));
 
-            try lib.testing.expectEqualSlices(u8, &.{ 0x10, 0x11, 0x12, 0x13, 0x00 }, card.uid[0..5]);
-            try lib.testing.expectEqualSlices(u8, &.{ 0x20, 0x21, 0x22, 0x23, 0x00 }, card.uid[5..10]);
-            try lib.testing.expectEqualSlices(u8, &.{ 0x30, 0x31, 0x32, 0x33, 0x00 }, card.uid[10..15]);
-            try lib.testing.expectEqual(@as(u8, 0x88), card.sak[0]);
-            try lib.testing.expectEqual(@as(u8, 0x88), card.sak[1]);
-            try lib.testing.expectEqual(@as(u8, 0x04), card.sak[2]);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x10, 0x11, 0x12, 0x13, 0x00 }, card.uid[0..5]);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x20, 0x21, 0x22, 0x23, 0x00 }, card.uid[5..10]);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x30, 0x31, 0x32, 0x33, 0x00 }, card.uid[10..15]);
+            try grt.std.testing.expectEqual(@as(u8, 0x88), card.sak[0]);
+            try grt.std.testing.expectEqual(@as(u8, 0x88), card.sak[1]);
+            try grt.std.testing.expectEqual(@as(u8, 0x04), card.sak[2]);
         }
 
         fn activateDoubleCascadeUid() !void {
@@ -245,10 +245,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var fake = Fake{};
             const card = try activate(TypeA.init(&fake));
 
-            try lib.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC, 0xDD, 0x00 }, card.uid[0..5]);
-            try lib.testing.expectEqualSlices(u8, &.{ 0x01, 0x02, 0x03, 0x00, 0x00 }, card.uid[5..10]);
-            try lib.testing.expectEqual(@as(u8, 0x88), card.sak[0]);
-            try lib.testing.expectEqual(@as(u8, 0x04), card.sak[1]);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0xAA, 0xBB, 0xCC, 0xDD, 0x00 }, card.uid[0..5]);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x01, 0x02, 0x03, 0x00, 0x00 }, card.uid[5..10]);
+            try grt.std.testing.expectEqual(@as(u8, 0x88), card.sak[0]);
+            try grt.std.testing.expectEqual(@as(u8, 0x04), card.sak[1]);
         }
 
         fn rejectsInvalidBcc() !void {
@@ -279,17 +279,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             var fake = Fake{};
-            try lib.testing.expectError(error.Protocol, activate(TypeA.init(&fake)));
+            try grt.std.testing.expectError(error.Protocol, activate(TypeA.init(&fake)));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -312,7 +312,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

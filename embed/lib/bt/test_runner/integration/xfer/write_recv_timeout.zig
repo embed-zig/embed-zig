@@ -3,28 +3,27 @@ const glib = @import("glib");
 const harness_mod = @import("harness.zig");
 const recv_mod = @import("../../../host/xfer/recv.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
-    return glib.testing.TestRunner.fromFn(lib, 96 * 1024, struct {
-        fn run(t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
+    return glib.testing.TestRunner.fromFn(grt.std, 96 * 1024, struct {
+        fn run(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
             _ = t;
-            try runCase(lib, Channel, allocator);
+            try runCase(grt, allocator);
         }
     }.run);
 }
 
-pub fn run(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.mem.Allocator) !void {
-    try runCase(lib, Channel, allocator);
+pub fn run(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
+    try runCase(grt, allocator);
 }
 
-fn runCase(comptime lib: type, comptime Channel: fn (type) type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const Harness = harness_mod.make(lib, Channel);
+fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
+    const Harness = harness_mod.make(grt);
 
     var harness = try Harness.init(allocator);
     defer harness.deinit();
 
     var server = harness.right();
-    try testing.expectError(error.Timeout, recv_mod.recv(lib, allocator, &server, .{
+    try grt.std.testing.expectError(error.Timeout, recv_mod.recv(grt, allocator, &server, .{
         .att_mtu = 23,
         .timeout_ms = 5,
         .max_timeout_retries = 2,

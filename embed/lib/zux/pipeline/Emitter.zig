@@ -39,9 +39,9 @@ pub fn init(pointer: anytype) Emitter {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn initAndEmit(testing: anytype) !void {
+        fn initAndEmit() !void {
             const Impl = struct {
                 called: bool = false,
                 last_timestamp_ns: i128 = 0,
@@ -65,30 +65,29 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(impl.called);
-            try testing.expectEqual(@as(i128, 9), impl.last_timestamp_ns);
+            try grt.std.testing.expect(impl.called);
+            try grt.std.testing.expectEqual(@as(i128, 9), impl.last_timestamp_ns);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.initAndEmit(testing) catch |err| {
+            TestCase.initAndEmit() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

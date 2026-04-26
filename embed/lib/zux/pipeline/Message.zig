@@ -23,9 +23,9 @@ pub fn kind(self: Message) Kind {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn tagTracksBodyVariant(testing: anytype) !void {
+        fn tagTracksBodyVariant() !void {
             const message: Message = .{
                 .origin = .source,
                 .timestamp_ns = 42,
@@ -37,12 +37,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             };
 
-            try testing.expectEqual(Kind.button_gesture, message.kind());
-            try testing.expectEqual(Origin.source, message.origin);
-            try testing.expectEqual(@as(i128, 42), message.timestamp_ns);
+            try grt.std.testing.expectEqual(Kind.button_gesture, message.kind());
+            try grt.std.testing.expectEqual(Origin.source, message.origin);
+            try grt.std.testing.expectEqual(@as(i128, 42), message.timestamp_ns);
         }
 
-        fn tickVariantUsesTickKind(testing: anytype) !void {
+        fn tickVariantUsesTickKind() !void {
             const message: Message = .{
                 .origin = .timer,
                 .timestamp_ns = 99,
@@ -51,35 +51,34 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             };
 
-            try testing.expectEqual(Kind.tick, message.kind());
-            try testing.expectEqual(Origin.timer, message.origin);
-            try testing.expectEqual(@as(i128, 99), message.timestamp_ns);
+            try grt.std.testing.expectEqual(Kind.tick, message.kind());
+            try grt.std.testing.expectEqual(Origin.timer, message.origin);
+            try grt.std.testing.expectEqual(@as(i128, 99), message.timestamp_ns);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.tagTracksBodyVariant(testing) catch |err| {
+            TestCase.tagTracksBodyVariant() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.tickVariantUsesTickKind(testing) catch |err| {
+            TestCase.tickVariantUsesTickKind() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

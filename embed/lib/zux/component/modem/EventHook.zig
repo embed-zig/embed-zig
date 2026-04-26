@@ -40,9 +40,9 @@ pub fn emitFn(ctx: *const anyopaque, source_id: u32, adapter_event: modem_api.Mo
     }) catch @panic("zux.component.modem.EventHook failed to forward event");
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn emitFnForwardsSignalThroughEmitter(testing: anytype) !void {
+        fn emitFnForwardsSignalThroughEmitter() !void {
             const Sink = struct {
                 called: bool = false,
                 last_source_id: u32 = 0,
@@ -74,12 +74,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(sink.called);
-            try testing.expectEqual(@as(u32, 51), sink.last_source_id);
-            try testing.expectEqual(@as(i16, -73), sink.last_rssi_dbm);
+            try grt.std.testing.expect(sink.called);
+            try grt.std.testing.expectEqual(@as(u32, 51), sink.last_source_id);
+            try grt.std.testing.expectEqual(@as(i16, -73), sink.last_rssi_dbm);
         }
 
-        fn emitFnForwardsApnThroughEmitter(testing: anytype) !void {
+        fn emitFnForwardsApnThroughEmitter() !void {
             const Sink = struct {
                 called: bool = false,
                 last_source_id: u32 = 0,
@@ -107,12 +107,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(sink.called);
-            try testing.expectEqual(@as(u32, 52), sink.last_source_id);
-            try testing.expectEqual(@as(usize, 8), sink.last_apn_len);
+            try grt.std.testing.expect(sink.called);
+            try grt.std.testing.expectEqual(@as(u32, 52), sink.last_source_id);
+            try grt.std.testing.expectEqual(@as(usize, 8), sink.last_apn_len);
         }
 
-        fn emitFnForwardsIncomingCallThroughEmitter(testing: anytype) !void {
+        fn emitFnForwardsIncomingCallThroughEmitter() !void {
             const Sink = struct {
                 called: bool = false,
                 last_source_id: u32 = 0,
@@ -146,13 +146,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(sink.called);
-            try testing.expectEqual(@as(u32, 53), sink.last_source_id);
-            try testing.expectEqual(@as(u8, 7), sink.last_call_id);
-            try testing.expectEqual(@as(usize, 14), sink.last_number_len);
+            try grt.std.testing.expect(sink.called);
+            try grt.std.testing.expectEqual(@as(u32, 53), sink.last_source_id);
+            try grt.std.testing.expectEqual(@as(u8, 7), sink.last_call_id);
+            try grt.std.testing.expectEqual(@as(usize, 14), sink.last_number_len);
         }
 
-        fn emitFnDropsInvalidApn(testing: anytype) !void {
+        fn emitFnDropsInvalidApn() !void {
             const Sink = struct {
                 called: bool = false,
 
@@ -172,10 +172,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(!sink.called);
+            try grt.std.testing.expect(!sink.called);
         }
 
-        fn emitFnDropsInvalidIncomingCall(testing: anytype) !void {
+        fn emitFnDropsInvalidIncomingCall() !void {
             const Sink = struct {
                 called: bool = false,
 
@@ -199,10 +199,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(!sink.called);
+            try grt.std.testing.expect(!sink.called);
         }
 
-        fn emitFnDropsInvalidSmsText(testing: anytype) !void {
+        fn emitFnDropsInvalidSmsText() !void {
             const Sink = struct {
                 called: bool = false,
 
@@ -225,49 +225,48 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(!sink.called);
+            try grt.std.testing.expect(!sink.called);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.emitFnForwardsSignalThroughEmitter(testing) catch |err| {
+            TestCase.emitFnForwardsSignalThroughEmitter() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.emitFnForwardsApnThroughEmitter(testing) catch |err| {
+            TestCase.emitFnForwardsApnThroughEmitter() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.emitFnForwardsIncomingCallThroughEmitter(testing) catch |err| {
+            TestCase.emitFnForwardsIncomingCallThroughEmitter() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.emitFnDropsInvalidApn(testing) catch |err| {
+            TestCase.emitFnDropsInvalidApn() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.emitFnDropsInvalidIncomingCall(testing) catch |err| {
+            TestCase.emitFnDropsInvalidIncomingCall() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.emitFnDropsInvalidSmsText(testing) catch |err| {
+            TestCase.emitFnDropsInvalidSmsText() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

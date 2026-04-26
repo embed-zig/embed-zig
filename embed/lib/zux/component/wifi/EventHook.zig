@@ -40,9 +40,9 @@ pub fn emitFn(ctx: *const anyopaque, source_id: u32, adapter_event: drivers.wifi
     }) catch @panic("zux.component.wifi.EventHook failed to forward event");
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn emitFnForwardsStaThroughEmitter(testing: anytype) !void {
+        fn emitFnForwardsStaThroughEmitter() !void {
             const Sink = struct {
                 called: bool = false,
                 last_source_id: u32 = 0,
@@ -76,12 +76,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(sink.called);
-            try testing.expectEqual(@as(u32, 31), sink.last_source_id);
-            try testing.expectEqual(@as(usize, 8), sink.last_ssid_len);
+            try grt.std.testing.expect(sink.called);
+            try grt.std.testing.expectEqual(@as(u32, 31), sink.last_source_id);
+            try grt.std.testing.expectEqual(@as(usize, 8), sink.last_ssid_len);
         }
 
-        fn emitFnForwardsApThroughEmitter(testing: anytype) !void {
+        fn emitFnForwardsApThroughEmitter() !void {
             const Sink = struct {
                 called: bool = false,
                 last_source_id: u32 = 0,
@@ -113,35 +113,34 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 },
             });
 
-            try testing.expect(sink.called);
-            try testing.expectEqual(@as(u32, 41), sink.last_source_id);
-            try testing.expectEqual(@as(usize, 6), sink.last_ssid_len);
+            try grt.std.testing.expect(sink.called);
+            try grt.std.testing.expectEqual(@as(u32, 41), sink.last_source_id);
+            try grt.std.testing.expectEqual(@as(usize, 6), sink.last_ssid_len);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.emitFnForwardsStaThroughEmitter(testing) catch |err| {
+            TestCase.emitFnForwardsStaThroughEmitter() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.emitFnForwardsApThroughEmitter(testing) catch |err| {
+            TestCase.emitFnForwardsApThroughEmitter() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

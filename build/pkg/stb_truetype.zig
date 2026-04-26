@@ -55,9 +55,14 @@ pub fn link(
         .target = target,
         .optimize = optimize,
     });
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const mod = b.modules.get("stb_truetype") orelse @panic("stb_truetype module missing");
     const lib = library orelse @panic("stb_truetype library missing");
     mod.addImport("embed", build_tests.createEmbedShim(b, target, optimize, gstd_dep));
+    mod.addImport("glib", glib_dep.module("glib"));
     mod.linkLibrary(lib);
 }
 

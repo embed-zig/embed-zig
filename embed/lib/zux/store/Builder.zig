@@ -113,20 +113,20 @@ pub fn Builder(comptime options: BuilderOptions) type {
             validateBuilderCounts(self.*, options) catch |err| @compileError(validationErrorMessage(err));
         }
 
-        pub fn make(comptime self: Self, comptime lib: type) type {
+        pub fn make(comptime self: Self, comptime grt: type) type {
             validateBuilder(self, options) catch |err| @compileError(validationErrorMessage(err));
 
             const stores_config = makeStoresConfig(self);
             const state_config = makeStateNodeConfig(self, "");
-            const Allocator = lib.mem.Allocator;
+            const Allocator = glib.std.mem.Allocator;
 
             return struct {
                 const Generated = @This();
 
-                pub const Lib = lib;
-                pub const Stores = StoreTypes.make(lib, stores_config);
+                pub const Lib = grt;
+                pub const Stores = StoreTypes.make(grt, stores_config);
                 pub const HandlerFn = *const fn (stores: *Stores) void;
-                pub const State = StoreState.make(lib, state_config, HandlerFn);
+                pub const State = StoreState.make(grt, state_config, HandlerFn);
                 pub const HandleError = error{
                     OutOfMemory,
                     InvalidPath,
@@ -142,7 +142,7 @@ pub fn Builder(comptime options: BuilderOptions) type {
 
                 pub fn init(allocator: Allocator, stores: Stores) !Generated {
                     const state = try allocator.create(State);
-                    StoreState.init(lib, State, state);
+                    StoreState.init(grt, State, state);
 
                     var self_store: Generated = .{
                         .allocator = allocator,
@@ -151,7 +151,7 @@ pub fn Builder(comptime options: BuilderOptions) type {
                     };
                     errdefer {
                         StoreState.unbindStores(Stores, state_config, &self_store.stores, self_store.state);
-                        StoreState.deinit(lib, State, allocator, state);
+                        StoreState.deinit(grt, State, allocator, state);
                         allocator.destroy(state);
                     }
 
@@ -161,7 +161,7 @@ pub fn Builder(comptime options: BuilderOptions) type {
 
                 pub fn deinit(self_store: *Generated) void {
                     StoreState.unbindStores(Stores, state_config, &self_store.stores, self_store.state);
-                    StoreState.deinit(lib, State, self_store.allocator, self_store.state);
+                    StoreState.deinit(grt, State, self_store.allocator, self_store.state);
                     self_store.allocator.destroy(self_store.state);
                 }
 
@@ -607,9 +607,9 @@ fn firstPathSeparatorIndex(comptime text: []const u8) ?usize {
     return null;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn set_store_and_state_tracks_counts_and_overwrites(testing: anytype, _: lib.mem.Allocator) !void {
+        fn set_store_and_state_tracks_counts_and_overwrites(_: glib.std.mem.Allocator) !void {
             const B = Builder(.{});
             const Wifi = struct {};
             const Cellular = struct {};
@@ -628,24 +628,24 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 break :blk next;
             };
 
-            try testing.expectEqual(@as(usize, 2), builder.store_count);
-            try testing.expectEqual(@as(usize, 3), builder.state_node_count);
-            try testing.expectEqual(@as(usize, 2), builder.store_ref_count);
+            try grt.std.testing.expectEqual(@as(usize, 2), builder.store_count);
+            try grt.std.testing.expectEqual(@as(usize, 3), builder.state_node_count);
+            try grt.std.testing.expectEqual(@as(usize, 2), builder.store_ref_count);
             const wifi_index = comptime builder.findStore("wifi").?;
-            try testing.expect(builder.store_bindings[wifi_index].StoreType == Wifi2);
+            try grt.std.testing.expect(builder.store_bindings[wifi_index].StoreType == Wifi2);
         }
 
-        fn validate_state_path_reports_errors(testing: anytype, _: lib.mem.Allocator) !void {
-            try testing.expectError(error.EmptyStatePath, validateStatePath("", 4));
-            try testing.expectError(error.DotSeparatedStatePath, validateStatePath(".ui", 4));
-            try testing.expectError(error.DotSeparatedStatePath, validateStatePath("ui..home", 4));
-            try testing.expectError(error.DotSeparatedStatePath, validateStatePath("ui.home", 4));
-            try testing.expectEqualStrings("ui/home", try validateStatePath("ui/home", 4));
-            try testing.expectError(error.ReservedStateField, validateStatePath("ui/stores", 4));
-            try testing.expectError(error.MaxDepthExceeded, validateStatePath("a/b/c", 2));
+        fn validate_state_path_reports_errors(_: glib.std.mem.Allocator) !void {
+            try grt.std.testing.expectError(error.EmptyStatePath, validateStatePath("", 4));
+            try grt.std.testing.expectError(error.DotSeparatedStatePath, validateStatePath(".ui", 4));
+            try grt.std.testing.expectError(error.DotSeparatedStatePath, validateStatePath("ui..home", 4));
+            try grt.std.testing.expectError(error.DotSeparatedStatePath, validateStatePath("ui.home", 4));
+            try grt.std.testing.expectEqualStrings("ui/home", try validateStatePath("ui/home", 4));
+            try grt.std.testing.expectError(error.ReservedStateField, validateStatePath("ui/stores", 4));
+            try grt.std.testing.expectError(error.MaxDepthExceeded, validateStatePath("a/b/c", 2));
         }
 
-        fn collect_labels_accepts_singles_tuples_and_dedupes(testing: anytype, _: lib.mem.Allocator) !void {
+        fn collect_labels_accepts_singles_tuples_and_dedupes(_: glib.std.mem.Allocator) !void {
             const result = comptime blk: {
                 var labels: [4][]const u8 = undefined;
                 var len: usize = 0;
@@ -656,20 +656,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 };
             };
 
-            try testing.expectEqual(@as(usize, 2), result.len);
-            try testing.expectEqualStrings("wifi", result.labels[0]);
-            try testing.expectEqualStrings("cellular", result.labels[1]);
+            try grt.std.testing.expectEqual(@as(usize, 2), result.len);
+            try grt.std.testing.expectEqualStrings("wifi", result.labels[0]);
+            try grt.std.testing.expectEqualStrings("cellular", result.labels[1]);
         }
 
-        fn make_builds_generated_store_type(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn make_builds_generated_store_type(allocator: glib.std.mem.Allocator) !void {
             const B = Builder(.{});
-
-            const StoreLib = struct {
-                pub const builtin = lib.builtin;
-                pub const atomic = lib.atomic;
-                pub const mem = lib.mem;
-                pub const ArrayList = lib.ArrayList;
-            };
 
             const Wifi = struct { value: u32 };
             const Cellular = struct { enabled: bool };
@@ -680,13 +673,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 builder.setStore(.cellular, Cellular);
                 builder.setState("ui", .{});
                 builder.setState("ui/home", .{});
-                break :blk builder.make(StoreLib);
+                break :blk builder.make(grt);
             };
 
-            try testing.expect(@hasField(AppStore.Stores, "wifi"));
-            try testing.expect(@hasField(AppStore.Stores, "cellular"));
-            try testing.expect(@hasField(AppStore.State, "ui"));
-            try testing.expect(@hasField(@FieldType(AppStore.State, "ui"), "home"));
+            try grt.std.testing.expect(@hasField(AppStore.Stores, "wifi"));
+            try grt.std.testing.expect(@hasField(AppStore.Stores, "cellular"));
+            try grt.std.testing.expect(@hasField(AppStore.State, "ui"));
+            try grt.std.testing.expect(@hasField(@FieldType(AppStore.State, "ui"), "home"));
 
             var store = try AppStore.init(allocator, .{
                 .wifi = .{ .value = 1 },
@@ -694,19 +687,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             });
             defer store.deinit();
 
-            try testing.expectEqual(@as(u32, 1), store.stores.wifi.value);
-            try testing.expect(store.stores.cellular.enabled);
+            try grt.std.testing.expectEqual(@as(u32, 1), store.stores.wifi.value);
+            try grt.std.testing.expect(store.stores.cellular.enabled);
         }
 
-        fn make_allows_state_before_store_when_labels_resolve(testing: anytype, _: lib.mem.Allocator) !void {
+        fn make_allows_state_before_store_when_labels_resolve(_: glib.std.mem.Allocator) !void {
             const B = Builder(.{});
-
-            const StoreLib = struct {
-                pub const builtin = lib.builtin;
-                pub const atomic = lib.atomic;
-                pub const mem = lib.mem;
-                pub const ArrayList = lib.ArrayList;
-            };
 
             const Wifi = struct { value: u32 };
 
@@ -714,14 +700,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 var builder = B.init();
                 builder.setState("ui/home", .{.wifi});
                 builder.setStore(.wifi, Wifi);
-                break :blk builder.make(StoreLib);
+                break :blk builder.make(grt);
             };
 
-            try testing.expect(@hasField(AppStore.State, "ui"));
-            try testing.expect(@hasField(@FieldType(AppStore.State, "ui"), "home"));
+            try grt.std.testing.expect(@hasField(AppStore.State, "ui"));
+            try grt.std.testing.expect(@hasField(@FieldType(AppStore.State, "ui"), "home"));
         }
 
-        fn validate_builder_reports_unknown_store_label(testing: anytype, _: lib.mem.Allocator) !void {
+        fn validate_builder_reports_unknown_store_label(_: glib.std.mem.Allocator) !void {
             const B = Builder(.{});
 
             const result = comptime blk: {
@@ -730,10 +716,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 break :blk validateBuilder(builder, .{});
             };
 
-            try testing.expectError(error.UnknownStoreLabel, result);
+            try grt.std.testing.expectError(error.UnknownStoreLabel, result);
         }
 
-        fn validate_builder_counts_reports_capacity_errors(testing: anytype, _: lib.mem.Allocator) !void {
+        fn validate_builder_counts_reports_capacity_errors(_: glib.std.mem.Allocator) !void {
             const store_limit = comptime validateBuilderCounts(.{
                 .store_count = 3,
                 .state_node_count = 1,
@@ -741,7 +727,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, .{
                 .max_stores = 2,
             });
-            try testing.expectError(error.MaxStoresExceeded, store_limit);
+            try grt.std.testing.expectError(error.MaxStoresExceeded, store_limit);
 
             const node_limit = comptime validateBuilderCounts(.{
                 .store_count = 1,
@@ -750,7 +736,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, .{
                 .max_state_nodes = 4,
             });
-            try testing.expectError(error.MaxStateNodesExceeded, node_limit);
+            try grt.std.testing.expectError(error.MaxStateNodesExceeded, node_limit);
 
             const ref_limit = comptime validateBuilderCounts(.{
                 .store_count = 1,
@@ -759,52 +745,51 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, .{
                 .max_store_refs = 5,
             });
-            try testing.expectError(error.MaxStoreRefsExceeded, ref_limit);
+            try grt.std.testing.expectError(error.MaxStoreRefsExceeded, ref_limit);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.set_store_and_state_tracks_counts_and_overwrites(testing, allocator) catch |err| {
+            TestCase.set_store_and_state_tracks_counts_and_overwrites(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.validate_state_path_reports_errors(testing, allocator) catch |err| {
+            TestCase.validate_state_path_reports_errors(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.collect_labels_accepts_singles_tuples_and_dedupes(testing, allocator) catch |err| {
+            TestCase.collect_labels_accepts_singles_tuples_and_dedupes(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.make_builds_generated_store_type(testing, allocator) catch |err| {
+            TestCase.make_builds_generated_store_type(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.make_allows_state_before_store_when_labels_resolve(testing, allocator) catch |err| {
+            TestCase.make_allows_state_before_store_when_labels_resolve(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.validate_builder_reports_unknown_store_label(testing, allocator) catch |err| {
+            TestCase.validate_builder_reports_unknown_store_label(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.validate_builder_counts_reports_capacity_errors(testing, allocator) catch |err| {
+            TestCase.validate_builder_counts_reports_capacity_errors(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

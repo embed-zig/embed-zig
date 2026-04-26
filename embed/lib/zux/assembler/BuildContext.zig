@@ -3,8 +3,8 @@ const Config = @import("Config.zig");
 pub fn make(comptime input: anytype) blk: {
     const Input = @TypeOf(input);
 
-    if (!@hasField(Input, "lib")) {
-        @compileError("zux.assembler.BuildContext.make requires .lib");
+    if (!@hasField(Input, "grt")) {
+        @compileError("zux.assembler.BuildContext.make requires .grt");
     }
     if (!@hasField(Input, "assembler_config")) {
         @compileError("zux.assembler.BuildContext.make requires .assembler_config");
@@ -45,12 +45,8 @@ pub fn make(comptime input: anytype) blk: {
     if (!@hasField(Input, "reducer_count")) {
         @compileError("zux.assembler.BuildContext.make requires .reducer_count");
     }
-    if (!@hasField(Input, "channel")) {
-        @compileError("zux.assembler.BuildContext.make requires .channel");
-    }
-
     break :blk struct {
-        lib: type,
+        grt: type,
         assembler_config: Config,
         build_config: @TypeOf(@field(input, "build_config")),
         registries: @TypeOf(@field(input, "registries")),
@@ -64,11 +60,10 @@ pub fn make(comptime input: anytype) blk: {
         render_count: @TypeOf(@field(input, "render_count")),
         reducer_bindings: @TypeOf(@field(input, "reducer_bindings")),
         reducer_count: @TypeOf(@field(input, "reducer_count")),
-        channel: @TypeOf(@field(input, "channel")),
     };
 } {
     return .{
-        .lib = @field(input, "lib"),
+        .grt = @field(input, "grt"),
         .assembler_config = @field(input, "assembler_config"),
         .build_config = @field(input, "build_config"),
         .registries = @field(input, "registries"),
@@ -82,6 +77,5 @@ pub fn make(comptime input: anytype) blk: {
         .render_count = @field(input, "render_count"),
         .reducer_bindings = @field(input, "reducer_bindings"),
         .reducer_count = @field(input, "reducer_count"),
-        .channel = @field(input, "channel"),
     };
 }

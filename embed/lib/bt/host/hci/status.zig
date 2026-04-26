@@ -82,23 +82,23 @@ pub const Status = enum(u8) {
     }
 };
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const s = Status.success;
-            try lib.testing.expect(s.isSuccess());
-            try lib.testing.expect(!Status.connection_timeout.isSuccess());
-            try lib.testing.expectEqual(Status.remote_user_terminated, Status.fromByte(0x13));
-            try lib.testing.expectEqual(@as(u8, 0x08), @intFromEnum(Status.connection_timeout));
+            try grt.std.testing.expect(s.isSuccess());
+            try grt.std.testing.expect(!Status.connection_timeout.isSuccess());
+            try grt.std.testing.expectEqual(Status.remote_user_terminated, Status.fromByte(0x13));
+            try grt.std.testing.expectEqual(@as(u8, 0x08), @intFromEnum(Status.connection_timeout));
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -109,7 +109,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -1,6 +1,6 @@
+const glib = @import("glib");
 const binding = @import("../binding.zig");
 const embed = @import("embed");
-const testing_api = @import("testing");
 const Style = @import("../Style.zig");
 const Event = @import("../Event.zig");
 const Flags = @import("Flags.zig");
@@ -185,14 +185,14 @@ pub fn sendEvent(
     return binding.lv_obj_send_event(self.handle, event_code, param);
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -200,7 +200,6 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             const Cases = struct {
                 fn geometrySettersRoundtripAfterLayoutUpdate() !void {
-                    const testing = lib.testing;
                     var fixture = try lvgl_testing.Fixture.init();
                     defer fixture.deinit();
 
@@ -212,14 +211,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     obj.setSize(33, 44);
                     obj.updateLayout();
 
-                    try testing.expectEqual(@as(i32, 11), obj.x());
-                    try testing.expectEqual(@as(i32, 22), obj.y());
-                    try testing.expectEqual(@as(i32, 33), obj.width());
-                    try testing.expectEqual(@as(i32, 44), obj.height());
+                    try grt.std.testing.expectEqual(@as(i32, 11), obj.x());
+                    try grt.std.testing.expectEqual(@as(i32, 22), obj.y());
+                    try grt.std.testing.expectEqual(@as(i32, 33), obj.width());
+                    try grt.std.testing.expectEqual(@as(i32, 44), obj.height());
                 }
 
                 fn flagsStateAndStylesUpdateThroughObjectApi() !void {
-                    const testing = lib.testing;
                     var fixture = try lvgl_testing.Fixture.init();
                     defer fixture.deinit();
 
@@ -227,17 +225,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     var obj = Self.create(&root_screen) orelse return error.OutOfMemory;
                     defer obj.delete();
 
-                    try testing.expect(!obj.hasFlag(Flags.hidden));
+                    try grt.std.testing.expect(!obj.hasFlag(Flags.hidden));
                     obj.addFlag(Flags.hidden);
-                    try testing.expect(obj.hasFlag(Flags.hidden));
+                    try grt.std.testing.expect(obj.hasFlag(Flags.hidden));
                     obj.removeFlag(Flags.hidden);
-                    try testing.expect(!obj.hasFlag(Flags.hidden));
+                    try grt.std.testing.expect(!obj.hasFlag(Flags.hidden));
 
-                    try testing.expect(!obj.hasState(State.pressed));
+                    try grt.std.testing.expect(!obj.hasState(State.pressed));
                     obj.addState(State.pressed);
-                    try testing.expect(obj.hasState(State.pressed));
+                    try grt.std.testing.expect(obj.hasState(State.pressed));
                     obj.removeState(State.pressed);
-                    try testing.expect(!obj.hasState(State.pressed));
+                    try grt.std.testing.expect(!obj.hasState(State.pressed));
 
                     var style = Style.init();
                     defer style.deinit();
@@ -245,27 +243,25 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     obj.setWidth(25);
                     obj.updateLayout();
-                    try testing.expectEqual(@as(i32, 25), obj.width());
+                    try grt.std.testing.expectEqual(@as(i32, 25), obj.width());
 
                     obj.addStyle(&style, State.user_4);
                     obj.addState(State.user_4);
                     binding.lv_obj_refresh_style(obj.raw(), binding.LV_PART_MAIN, Style.width_prop);
-                    try testing.expectEqual(
+                    try grt.std.testing.expectEqual(
                         @as(i32, 77),
                         binding.lv_obj_get_style_prop(obj.raw(), binding.LV_PART_MAIN, Style.width_prop).num,
                     );
 
                     obj.removeStyle(&style, State.user_4);
                     binding.lv_obj_refresh_style(obj.raw(), binding.LV_PART_MAIN, Style.width_prop);
-                    try testing.expectEqual(
+                    try grt.std.testing.expectEqual(
                         @as(i32, 25),
                         binding.lv_obj_get_style_prop(obj.raw(), binding.LV_PART_MAIN, Style.width_prop).num,
                     );
                 }
 
                 fn rawEventCallbackReceivesTargetPayloadAndUserData() !void {
-                    const testing = lib.testing;
-
                     const CallbackCtx = struct {
                         calls: usize = 0,
                         target: ?*binding.Obj = null,
@@ -296,14 +292,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     const custom_event = Event.codeFromInt(Event.registerId());
 
                     obj.addEventCallbackRaw(CallbackCtx.callback, custom_event, &ctx);
-                    try testing.expectEqual(@as(u32, 1), obj.eventCount());
+                    try grt.std.testing.expectEqual(@as(u32, 1), obj.eventCount());
 
                     _ = obj.sendEvent(custom_event, &payload);
 
-                    try testing.expectEqual(@as(usize, 1), ctx.calls);
-                    try testing.expectEqual(obj.raw(), ctx.target.?);
-                    try testing.expectEqual(@as(?*anyopaque, @ptrCast(&payload)), ctx.param);
-                    try testing.expectEqual(@as(?*anyopaque, @ptrCast(&ctx)), ctx.user_data);
+                    try grt.std.testing.expectEqual(@as(usize, 1), ctx.calls);
+                    try grt.std.testing.expectEqual(obj.raw(), ctx.target.?);
+                    try grt.std.testing.expectEqual(@as(?*anyopaque, @ptrCast(&payload)), ctx.param);
+                    try grt.std.testing.expectEqual(@as(?*anyopaque, @ptrCast(&ctx)), ctx.user_data);
                 }
             };
 
@@ -322,13 +318,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }

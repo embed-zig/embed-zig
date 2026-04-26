@@ -1,16 +1,16 @@
+const glib = @import("glib");
 const bt = @import("bt");
 const gstd = @import("gstd");
-const testing_api = @import("testing");
 const cb = @import("../../../core_bluetooth.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -18,7 +18,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             const Host = Bt.makeHost(cb.Host);
 
             var host = Host.init(undefined, .{
-                .allocator = lib.testing.allocator,
+                .allocator = grt.std.testing.allocator,
                 .source_id = 91,
             }) catch |err| {
                 t.logFatal(@errorName(err));
@@ -63,19 +63,19 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             };
             peripheral.stopAdvertising();
 
-            lib.testing.expectEqual(@as(usize, 1), sink.started_count) catch |err| {
+            grt.std.testing.expectEqual(@as(usize, 1), sink.started_count) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            lib.testing.expectEqual(@as(usize, 1), sink.stopped_count) catch |err| {
+            grt.std.testing.expectEqual(@as(usize, 1), sink.stopped_count) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            lib.testing.expectEqual(@as(u32, 91), sink.last_started_source_id) catch |err| {
+            grt.std.testing.expectEqual(@as(u32, 91), sink.last_started_source_id) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            lib.testing.expectEqual(@as(u32, 91), sink.last_stopped_source_id) catch |err| {
+            grt.std.testing.expectEqual(@as(u32, 91), sink.last_stopped_source_id) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -90,11 +90,11 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             };
             peripheral.stopAdvertising();
 
-            lib.testing.expectEqual(@as(usize, 1), sink.started_count) catch |err| {
+            grt.std.testing.expectEqual(@as(usize, 1), sink.started_count) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            lib.testing.expectEqual(@as(usize, 1), sink.stopped_count) catch |err| {
+            grt.std.testing.expectEqual(@as(usize, 1), sink.stopped_count) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -102,7 +102,7 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -111,5 +111,5 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

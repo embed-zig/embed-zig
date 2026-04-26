@@ -1,6 +1,6 @@
+const glib = @import("glib");
 const binding = @import("../binding.zig");
 const embed = @import("embed");
-const testing_api = @import("testing");
 const Obj = @import("../object/Obj.zig");
 const Flags = @import("../object/Flags.zig");
 const Label = @import("Label.zig");
@@ -35,23 +35,22 @@ pub fn createLabel(self: *const Self) ?Label {
     return Label.create(&obj);
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             const lvgl_testing = @import("../testing.zig");
-            const mem = lib.mem;
+            const mem = grt.std.mem;
 
             const Cases = struct {
                 fn composesObjectLayerAndCanHostChildLabel() !void {
-                    const testing = lib.testing;
                     var fixture = try lvgl_testing.Fixture.init();
                     defer fixture.deinit();
 
@@ -63,14 +62,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     var label = button.createLabel() orelse return error.OutOfMemory;
                     label.setText("press");
 
-                    try testing.expectEqual(screen.raw(), button_obj.parent().?.raw());
-                    try testing.expectEqual(@as(u32, 1), button_obj.childCount());
-                    try testing.expectEqual(button_obj.raw(), label.asObj().parent().?.raw());
-                    try testing.expectEqualStrings("press", mem.span(label.text()));
+                    try grt.std.testing.expectEqual(screen.raw(), button_obj.parent().?.raw());
+                    try grt.std.testing.expectEqual(@as(u32, 1), button_obj.childCount());
+                    try grt.std.testing.expectEqual(button_obj.raw(), label.asObj().parent().?.raw());
+                    try grt.std.testing.expectEqualStrings("press", mem.span(label.text()));
                 }
 
                 fn objectApiRemainsTheSourceOfGenericBehavior() !void {
-                    const testing = lib.testing;
                     var fixture = try lvgl_testing.Fixture.init();
                     defer fixture.deinit();
 
@@ -84,21 +82,19 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     obj.addFlag(Flags.clickable);
                     obj.updateLayout();
 
-                    try testing.expectEqual(@as(i32, 21), obj.x());
-                    try testing.expectEqual(@as(i32, 13), obj.y());
-                    try testing.expectEqual(@as(i32, 80), obj.width());
-                    try testing.expectEqual(@as(i32, 32), obj.height());
-                    try testing.expect(obj.hasFlag(Flags.clickable));
+                    try grt.std.testing.expectEqual(@as(i32, 21), obj.x());
+                    try grt.std.testing.expectEqual(@as(i32, 13), obj.y());
+                    try grt.std.testing.expectEqual(@as(i32, 80), obj.width());
+                    try grt.std.testing.expectEqual(@as(i32, 32), obj.height());
+                    try grt.std.testing.expect(obj.hasFlag(Flags.clickable));
                 }
 
                 fn rawAndObjectRoundtripPreserveHandle() !void {
-                    const testing = lib.testing;
-
                     const raw_handle: *binding.Obj = @ptrFromInt(1);
                     const button = Self.fromRaw(raw_handle);
 
-                    try testing.expectEqual(raw_handle, button.raw());
-                    try testing.expectEqual(raw_handle, button.asObj().raw());
+                    try grt.std.testing.expectEqual(raw_handle, button.raw());
+                    try grt.std.testing.expectEqual(raw_handle, button.asObj().raw());
                 }
             };
 
@@ -117,13 +113,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }

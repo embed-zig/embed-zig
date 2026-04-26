@@ -6,10 +6,10 @@ const zux_event = @import("../../../event.zig");
 
 const EventReceiver = zux_event.EventReceiver;
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn initAdaptsMockerHostUpdates(testing: anytype, allocator: lib.mem.Allocator) !void {
-            const World = bt.Mocker(lib, Channel);
+        fn initAdaptsMockerHostUpdates(allocator: glib.std.mem.Allocator) !void {
+            const World = bt.Mocker(grt);
             var world = World.init(allocator, .{});
             defer world.deinit();
 
@@ -91,25 +91,25 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
 
             var attempts: usize = 0;
             while (attempts < 50 and sink.found_count == 0) : (attempts += 1) {
-                lib.Thread.sleep(10 * lib.time.ns_per_ms);
+                grt.std.Thread.sleep(10 * grt.std.time.ns_per_ms);
             }
 
             advertiser.stopAdvertising();
 
-            try testing.expectEqual(@as(usize, 1), sink.started_count);
-            try testing.expectEqual(@as(usize, 1), sink.stopped_count);
-            try testing.expect(sink.found_count >= 1);
-            try testing.expectEqual(@as(u32, 22), sink.last_started_source_id);
-            try testing.expectEqual(@as(u32, 22), sink.last_stopped_source_id);
-            try testing.expectEqual(@as(u32, 11), sink.last_found_source_id);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.started_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.stopped_count);
+            try grt.std.testing.expect(sink.found_count >= 1);
+            try grt.std.testing.expectEqual(@as(u32, 22), sink.last_started_source_id);
+            try grt.std.testing.expectEqual(@as(u32, 22), sink.last_stopped_source_id);
+            try grt.std.testing.expectEqual(@as(u32, 11), sink.last_found_source_id);
         }
     };
 
     // Mocker world + polling loop; similar stack demand to BT xfer harness glue.
-    return glib.testing.TestRunner.fromFn(lib, 96 * 1024, struct {
-        fn run(t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
+    return glib.testing.TestRunner.fromFn(grt.std, 96 * 1024, struct {
+        fn run(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
             _ = t;
-            try TestCase.initAdaptsMockerHostUpdates(lib.testing, allocator);
+            try TestCase.initAdaptsMockerHostUpdates(allocator);
         }
     }.run);
 }

@@ -87,8 +87,8 @@ pub fn build(comptime self: Builder) type {
             dag.validate();
         }
 
-        pub fn Reducer(comptime lib: type) type {
-            return ReducerTemplate.make(lib, State, dag, NodeLabelType);
+        pub fn Reducer(comptime grt: type) type {
+            return ReducerTemplate.make(grt, State, dag, NodeLabelType);
         }
 
         pub fn initialState() State {

@@ -4,7 +4,7 @@ const common = @import("common.zig");
 const component_imu = @import("../../../../component/Imu.zig");
 const drivers = @import("drivers");
 
-fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
+fn TestCase(comptime grt: type, comptime BuiltApp: type) type {
     return struct {
         const Self = @This();
         const Failure = enum {
@@ -17,19 +17,19 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             wrong_motion_kind,
             motion_should_clear,
         };
-        const AtomicUsize = lib.atomic.Value(usize);
-        const AtomicU8 = lib.atomic.Value(u8);
+        const AtomicUsize = grt.std.atomic.Value(usize);
+        const AtomicU8 = grt.std.atomic.Value(u8);
 
         var callback_calls: AtomicUsize = AtomicUsize.init(0);
         var callback_failure: AtomicU8 = AtomicU8.init(0);
 
-        pub fn init(self: *Self, allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *Self, allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
             reset();
         }
 
-        pub fn run(self: *Self, t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *Self, t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             var dummy_imu = common.DummyImuImpl{};
@@ -78,7 +78,7 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             return true;
         }
 
-        pub fn deinit(self: *Self, allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *Self, allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -118,7 +118,7 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
 
         fn pushAccel(app: *BuiltApp, accel: BuiltApp.Imu.Vec3, sleep_ms: u64) !void {
             try app.imu_accel(.sensor, accel);
-            lib.Thread.sleep(sleep_ms * lib.time.ns_per_ms);
+            grt.std.Thread.sleep(sleep_ms * grt.std.time.ns_per_ms);
         }
 
         fn ensureCallbackCount(expected: usize, failure: Failure) !void {
@@ -178,7 +178,7 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
             while (attempts < 300) : (attempts += 1) {
                 if (currentFailure() != null) return error.CallbackFailed;
                 if (currentCallbackCalls() >= expected) return;
-                lib.Thread.sleep(10 * lib.time.ns_per_ms);
+                grt.std.Thread.sleep(10 * grt.std.time.ns_per_ms);
             }
             fail(.missing_callback_count);
             return error.TimedOut;
@@ -186,9 +186,9 @@ fn TestCase(comptime lib: type, comptime BuiltApp: type) type {
     };
 }
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
-    const BuiltApp = comptime common.makeBuiltApp(lib, Channel);
-    const Case = TestCase(lib, BuiltApp);
+pub fn make(comptime grt: type) glib.testing.TestRunner {
+    const BuiltApp = comptime common.makeBuiltApp(grt);
+    const Case = TestCase(grt, BuiltApp);
 
     const Holder = struct {
         var runner: Case = .{};

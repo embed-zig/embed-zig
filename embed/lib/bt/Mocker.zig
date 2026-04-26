@@ -10,9 +10,9 @@ const root = @import("../bt.zig");
 const host_mod = @import("Host.zig");
 const Hci = @import("mocker/Hci.zig").Hci;
 
-pub fn Mocker(comptime lib: type, comptime Channel: fn (type) type) type {
-    const HciImpl = Hci(lib);
-    const HostCtor = host_mod.makeHci(lib, Channel);
+pub fn Mocker(comptime grt: type) type {
+    const HciImpl = Hci(grt);
+    const HostCtor = host_mod.makeHci(grt);
 
     return struct {
         const Self = @This();
@@ -40,12 +40,12 @@ pub fn Mocker(comptime lib: type, comptime Channel: fn (type) type) type {
             position: Vec3,
         };
 
-        allocator: lib.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
         config: Config,
-        mutex: lib.Thread.Mutex = .{},
+        mutex: grt.std.Thread.Mutex = .{},
         nodes: glib.std.ArrayListUnmanaged(Node) = .{},
 
-        pub fn init(allocator: lib.mem.Allocator, config: Config) Self {
+        pub fn init(allocator: glib.std.mem.Allocator, config: Config) Self {
             return .{
                 .allocator = allocator,
                 .config = config,

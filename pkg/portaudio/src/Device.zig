@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 const types = @import("types.zig");
 
@@ -49,34 +50,30 @@ pub fn defaultSampleRate(self: Self) f64 {
     return self.info.defaultSampleRate;
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            makesDeviceInfo(lib) catch |err| {
+            makesDeviceInfo() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
 
-        fn makesDeviceInfo(comptime L: type) !void {
-            const testing = L.testing;
-
+        fn makesDeviceInfo() !void {
             var info = binding.PaDeviceInfo{
                 .structVersion = 2,
                 .name = "built-in",
@@ -91,15 +88,15 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             };
             const device = make(7, &info);
 
-            try testing.expectEqual(@as(types.DeviceIndex, 7), device.index);
-            try testing.expectEqual(@as(u32, 2), device.maxInputChannels());
-            try testing.expectEqual(@as(u32, 4), device.maxOutputChannels());
-            try testing.expectEqual(@as(f64, 48_000), device.defaultSampleRate());
+            try grt.std.testing.expectEqual(@as(types.DeviceIndex, 7), device.index);
+            try grt.std.testing.expectEqual(@as(u32, 2), device.maxInputChannels());
+            try grt.std.testing.expectEqual(@as(u32, 4), device.maxOutputChannels());
+            try grt.std.testing.expectEqual(@as(f64, 48_000), device.defaultSampleRate());
         }
     };
 
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

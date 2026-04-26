@@ -518,11 +518,9 @@ fn maxInt(comptime T: type) T {
     return (@as(T, 1) << (@typeInfo(T).int.bits - 1)) - 1 + (@as(T, 1) << (@typeInfo(T).int.bits - 1));
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn testPacketInPartsProducesExpectedPage(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testPacketInPartsProducesExpectedPage(allocator: glib.std.mem.Allocator) !void {
             var stream = try init(allocator, 0x11223344);
             defer stream.deinit();
 
@@ -530,17 +528,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             try stream.packetInParts(parts[0..], true, 9);
 
             var page = (try stream.pageOut()).?;
-            try testing.expect(try page.bos());
-            try testing.expect(try page.eos());
-            try testing.expectEqual(@as(u32, 0x11223344), try page.serialNo());
-            try testing.expectEqual(@as(u32, 0), try page.pageNo());
-            try testing.expectEqual(@as(usize, 1), try page.packetCount());
-            try testing.expectEqualSlices(u8, "abcdef", page.body);
+            try grt.std.testing.expect(try page.bos());
+            try grt.std.testing.expect(try page.eos());
+            try grt.std.testing.expectEqual(@as(u32, 0x11223344), try page.serialNo());
+            try grt.std.testing.expectEqual(@as(u32, 0), try page.pageNo());
+            try grt.std.testing.expectEqual(@as(usize, 1), try page.packetCount());
+            try grt.std.testing.expectEqualSlices(u8, "abcdef", page.body);
         }
 
-        fn testPageInRoundTripsPacketPeekAndPacketOut(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testPageInRoundTripsPacketPeekAndPacketOut(allocator: glib.std.mem.Allocator) !void {
             var encoder = try init(allocator, 7);
             defer encoder.deinit();
 
@@ -555,20 +551,20 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             switch (try decoder.packetPeek()) {
                 .packet => |packet| {
-                    try testing.expectEqualSlices(u8, "hello!", packet.payload());
-                    try testing.expect(packet.bos);
-                    try testing.expect(!packet.eos);
-                    try testing.expectEqual(@as(i64, 0), packet.granulepos);
-                    try testing.expectEqual(@as(i64, 0), packet.packetno);
+                    try grt.std.testing.expectEqualSlices(u8, "hello!", packet.payload());
+                    try grt.std.testing.expect(packet.bos);
+                    try grt.std.testing.expect(!packet.eos);
+                    try grt.std.testing.expectEqual(@as(i64, 0), packet.granulepos);
+                    try grt.std.testing.expectEqual(@as(i64, 0), packet.packetno);
                 },
                 else => return error.TestUnexpectedResult,
             }
 
             switch (try decoder.packetOut()) {
                 .packet => |packet| {
-                    try testing.expectEqualSlices(u8, "hello!", packet.payload());
-                    try testing.expect(packet.bos);
-                    try testing.expectEqual(@as(i64, 0), packet.packetno);
+                    try grt.std.testing.expectEqualSlices(u8, "hello!", packet.payload());
+                    try grt.std.testing.expect(packet.bos);
+                    try grt.std.testing.expectEqual(@as(i64, 0), packet.packetno);
                 },
                 else => return error.TestUnexpectedResult,
             }
@@ -579,30 +575,26 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }
         }
 
-        fn testResetSerialNoRestartsPageSequence(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testResetSerialNoRestartsPageSequence(allocator: glib.std.mem.Allocator) !void {
             var stream = try init(allocator, 1);
             defer stream.deinit();
 
             const first_packet = Packet.initBorrowed("a", .{});
             try stream.packetIn(&first_packet);
             var first_page = (try stream.flush()).?;
-            try testing.expectEqual(@as(u32, 1), try first_page.serialNo());
-            try testing.expectEqual(@as(u32, 0), try first_page.pageNo());
+            try grt.std.testing.expectEqual(@as(u32, 1), try first_page.serialNo());
+            try grt.std.testing.expectEqual(@as(u32, 0), try first_page.pageNo());
 
             try stream.resetSerialNo(99);
 
             const second_packet = Packet.initBorrowed("b", .{});
             try stream.packetIn(&second_packet);
             var second_page = (try stream.pageOut()).?;
-            try testing.expectEqual(@as(u32, 99), try second_page.serialNo());
-            try testing.expectEqual(@as(u32, 0), try second_page.pageNo());
+            try grt.std.testing.expectEqual(@as(u32, 99), try second_page.serialNo());
+            try grt.std.testing.expectEqual(@as(u32, 0), try second_page.pageNo());
         }
 
-        fn testPageInReportsPacketHoleAfterMissingPage(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn testPageInReportsPacketHoleAfterMissingPage(allocator: glib.std.mem.Allocator) !void {
             var encoder = try init(allocator, 42);
             defer encoder.deinit();
 
@@ -615,7 +607,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             try decoder.pageIn(&page0);
 
             switch (try decoder.packetOut()) {
-                .packet => |packet| try testing.expectEqualSlices(u8, "zero", packet.payload()),
+                .packet => |packet| try grt.std.testing.expectEqualSlices(u8, "zero", packet.payload()),
                 else => return error.TestUnexpectedResult,
             }
 
@@ -633,19 +625,19 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 else => return error.TestUnexpectedResult,
             }
             switch (try decoder.packetOut()) {
-                .packet => |packet| try testing.expectEqualSlices(u8, "two", packet.payload()),
+                .packet => |packet| try grt.std.testing.expectEqualSlices(u8, "two", packet.payload()),
                 else => return error.TestUnexpectedResult,
             }
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
 
             TestCase.testPacketInPartsProducesExpectedPage(allocator) catch |err| {
@@ -667,7 +659,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

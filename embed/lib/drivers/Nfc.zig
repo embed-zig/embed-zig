@@ -92,9 +92,9 @@ pub const Reader = struct {
     }
 };
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn initSetsAndClearsEventCallback(testing: anytype) !void {
+        fn initSetsAndClearsEventCallback() !void {
             const Impl = struct {
                 receiver_ctx: ?*const anyopaque = null,
                 emit_fn: ?CallbackFn = null,
@@ -118,33 +118,33 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }.emitFn;
 
             reader.setEventCallback(@ptrFromInt(callback_ctx), callback);
-            try testing.expectEqual(@as(?*const anyopaque, @ptrFromInt(callback_ctx)), impl.receiver_ctx);
-            try testing.expect(impl.emit_fn != null);
+            try grt.std.testing.expectEqual(@as(?*const anyopaque, @ptrFromInt(callback_ctx)), impl.receiver_ctx);
+            try grt.std.testing.expect(impl.emit_fn != null);
 
             reader.clearEventCallback();
-            try testing.expect(impl.receiver_ctx == null);
-            try testing.expect(impl.emit_fn == null);
+            try grt.std.testing.expect(impl.receiver_ctx == null);
+            try grt.std.testing.expect(impl.emit_fn == null);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            TestCase.initSetsAndClearsEventCallback(lib.testing) catch |err| {
+            TestCase.initSetsAndClearsEventCallback() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

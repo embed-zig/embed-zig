@@ -40,9 +40,9 @@ fn eventReceiverEmitUpdate(ctx: *const anyopaque, source_id: u32, adapter_event:
     receiver.emit(value);
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn setAndEmitReportsThroughEventReceiver(testing: anytype) !void {
+        fn setAndEmitReportsThroughEventReceiver() !void {
             const Sink = struct {
                 sta_scan_count: usize = 0,
                 sta_connected_count: usize = 0,
@@ -127,46 +127,45 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             component.setEventReceiver(&receiver);
             try adapter_impl.emit();
 
-            try testing.expectEqual(@as(usize, 1), sink.sta_scan_count);
-            try testing.expectEqual(@as(usize, 1), sink.sta_connected_count);
-            try testing.expectEqual(@as(usize, 1), sink.sta_disconnected_count);
-            try testing.expectEqual(@as(usize, 1), sink.sta_got_ip_count);
-            try testing.expectEqual(@as(usize, 1), sink.sta_lost_ip_count);
-            try testing.expectEqual(@as(usize, 1), sink.ap_started_count);
-            try testing.expectEqual(@as(usize, 1), sink.ap_stopped_count);
-            try testing.expectEqual(@as(usize, 1), sink.ap_client_joined_count);
-            try testing.expectEqual(@as(usize, 1), sink.ap_client_left_count);
-            try testing.expectEqual(@as(usize, 1), sink.ap_lease_granted_count);
-            try testing.expectEqual(@as(usize, 1), sink.ap_lease_released_count);
-            try testing.expectEqual(@as(u32, 41), sink.last_source_id);
-            try testing.expectEqual(@as(usize, 6), sink.last_ssid_len);
-            try testing.expectEqual(@as(u16, 7), sink.last_reason);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.sta_scan_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.sta_connected_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.sta_disconnected_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.sta_got_ip_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.sta_lost_ip_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.ap_started_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.ap_stopped_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.ap_client_joined_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.ap_client_left_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.ap_lease_granted_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.ap_lease_released_count);
+            try grt.std.testing.expectEqual(@as(u32, 41), sink.last_source_id);
+            try grt.std.testing.expectEqual(@as(usize, 6), sink.last_ssid_len);
+            try grt.std.testing.expectEqual(@as(u16, 7), sink.last_reason);
 
             component.clearEventReceiver();
-            try testing.expect(adapter_impl.receiver_ctx == null);
-            try testing.expect(adapter_impl.emit_fn == null);
+            try grt.std.testing.expect(adapter_impl.receiver_ctx == null);
+            try grt.std.testing.expect(adapter_impl.emit_fn == null);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.setAndEmitReportsThroughEventReceiver(testing) catch |err| {
+            TestCase.setAndEmitReportsThroughEventReceiver() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

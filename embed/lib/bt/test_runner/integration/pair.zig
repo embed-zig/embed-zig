@@ -3,7 +3,7 @@ const glib = @import("glib");
 const bt = @import("../../../bt.zig");
 const pair_runner = @import("../pair.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
@@ -14,8 +14,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
             _ = self;
             _ = allocator;
 
-            const Mocker = bt.Mocker(lib, Channel);
-            var mocker = Mocker.init(lib.testing.allocator, .{});
+            const Mocker = bt.Mocker(grt);
+            var mocker = Mocker.init(grt.std.testing.allocator, .{});
             defer mocker.deinit();
 
             var host_a = mocker.createHost(.{
@@ -39,10 +39,10 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
             defer host_b.deinit();
 
             t.parallel();
-            t.run("a/peripheral", pair_runner.makePeripheral(lib, &host_a));
-            t.run("b/peripheral", pair_runner.makePeripheral(lib, &host_b));
-            t.run("a/central", pair_runner.makeCentral(lib, &host_a));
-            t.run("b/central", pair_runner.makeCentral(lib, &host_b));
+            t.run("a/peripheral", pair_runner.makePeripheral(grt, &host_a));
+            t.run("b/peripheral", pair_runner.makePeripheral(grt, &host_b));
+            t.run("a/central", pair_runner.makeCentral(grt, &host_a));
+            t.run("b/central", pair_runner.makeCentral(grt, &host_b));
             return t.wait();
         }
 

@@ -36,4 +36,14 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2
-      - run: zig build test
+      - name: Test root package
+        run: zig build test --summary all
+      - name: Test embed package
+        working-directory: embed
+        run: zig build test --summary all
+      - name: Test gstd package
+        working-directory: gstd
+        run: zig build test --summary all
+      - name: Build glib package
+        working-directory: glib
+        run: zig build --summary all

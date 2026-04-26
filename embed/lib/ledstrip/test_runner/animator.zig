@@ -5,28 +5,27 @@ const AnimatorMod = @import("../Animator.zig");
 const Color = @import("../Color.zig");
 const LedStrip = @import("../LedStrip.zig");
 
-pub fn make(comptime lib: type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     // Fake strip + Animator: no host threads; shallow call depth.
-    return glib.testing.TestRunner.fromFn(lib, 32 * 1024, struct {
-        fn run(t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
+    return glib.testing.TestRunner.fromFn(grt.std, 32 * 1024, struct {
+        fn run(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
             _ = t;
-            try runAnimatorSuite(lib, allocator);
+            try runAnimatorSuite(grt, allocator);
         }
     }.run);
 }
 
-pub fn run(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    try runAnimatorSuite(lib, allocator);
+pub fn run(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
+    try runAnimatorSuite(grt, allocator);
 }
 
-fn runAnimatorSuite(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const Suite = SuiteType(lib);
+fn runAnimatorSuite(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
+    const Suite = SuiteType(grt);
     try Suite.exec(allocator);
 }
 
-fn SuiteType(comptime lib: type) type {
-    const testing = lib.testing;
-    const Allocator = lib.mem.Allocator;
+fn SuiteType(comptime grt: type) type {
+    const Allocator = glib.std.mem.Allocator;
     const max_fake_pixels = 8;
 
     const StripState = struct {
@@ -96,7 +95,7 @@ fn SuiteType(comptime lib: type) type {
         }
 
         fn resetStripState(state: *StripState, pixel_count: usize, fill: Color) !void {
-            try testing.expect(pixel_count <= state.pixels.len);
+            try grt.std.testing.expect(pixel_count <= state.pixels.len);
             state.* = .{ .pixel_count = pixel_count };
             @memset(&state.pixels, fill);
         }
@@ -110,7 +109,7 @@ fn SuiteType(comptime lib: type) type {
 
         fn expectPrefix(state: *const StripState, expected: []const Color) !void {
             for (expected, 0..) |color, index| {
-                try testing.expectEqual(color, state.pixels[index]);
+                try grt.std.testing.expectEqual(color, state.pixels[index]);
             }
         }
 
@@ -135,8 +134,8 @@ fn SuiteType(comptime lib: type) type {
 
             Anim.render(strip, &anim_state);
 
-            try testing.expectEqual(@as(usize, 4), strip_state.write_calls);
-            try testing.expectEqual(@as(usize, 1), strip_state.refresh_calls);
+            try grt.std.testing.expectEqual(@as(usize, 4), strip_state.write_calls);
+            try grt.std.testing.expectEqual(@as(usize, 1), strip_state.refresh_calls);
             try expectPrefix(&strip_state, anim_state.current.pixels[0..]);
         }
 
@@ -161,10 +160,10 @@ fn SuiteType(comptime lib: type) type {
 
             Anim.render(strip, &anim_state);
 
-            try testing.expectEqual(@as(usize, 2), strip_state.write_calls);
-            try testing.expectEqual(@as(usize, 1), strip_state.refresh_calls);
-            try testing.expectEqual(Color.red, strip_state.pixels[0]);
-            try testing.expectEqual(Color.green, strip_state.pixels[1]);
+            try grt.std.testing.expectEqual(@as(usize, 2), strip_state.write_calls);
+            try grt.std.testing.expectEqual(@as(usize, 1), strip_state.refresh_calls);
+            try grt.std.testing.expectEqual(Color.red, strip_state.pixels[0]);
+            try grt.std.testing.expectEqual(Color.green, strip_state.pixels[1]);
         }
 
         fn testRenderLongerStripPreservesTail(allocator: Allocator) !void {
@@ -189,11 +188,11 @@ fn SuiteType(comptime lib: type) type {
 
             Anim.render(strip, &anim_state);
 
-            try testing.expectEqual(@as(usize, 4), strip_state.write_calls);
-            try testing.expectEqual(@as(usize, 1), strip_state.refresh_calls);
+            try grt.std.testing.expectEqual(@as(usize, 4), strip_state.write_calls);
+            try grt.std.testing.expectEqual(@as(usize, 1), strip_state.refresh_calls);
             try expectPrefix(&strip_state, anim_state.current.pixels[0..]);
-            try testing.expectEqual(tail_color, strip_state.pixels[4]);
-            try testing.expectEqual(tail_color, strip_state.pixels[5]);
+            try grt.std.testing.expectEqual(tail_color, strip_state.pixels[4]);
+            try grt.std.testing.expectEqual(tail_color, strip_state.pixels[5]);
         }
 
         fn testRenderZeroCountStripRefreshes(allocator: Allocator) !void {
@@ -218,10 +217,10 @@ fn SuiteType(comptime lib: type) type {
 
             Anim.render(strip, &anim_state);
 
-            try testing.expectEqual(@as(usize, 0), strip_state.write_calls);
-            try testing.expectEqual(@as(usize, 1), strip_state.refresh_calls);
-            try testing.expectEqual(sentinel, strip_state.pixels[0]);
-            try testing.expectEqual(sentinel, strip_state.pixels[1]);
+            try grt.std.testing.expectEqual(@as(usize, 0), strip_state.write_calls);
+            try grt.std.testing.expectEqual(@as(usize, 1), strip_state.refresh_calls);
+            try grt.std.testing.expectEqual(sentinel, strip_state.pixels[0]);
+            try grt.std.testing.expectEqual(sentinel, strip_state.pixels[1]);
         }
 
         fn testRenderZeroPixelAnimatorRefreshes(allocator: Allocator) !void {
@@ -237,11 +236,11 @@ fn SuiteType(comptime lib: type) type {
 
             Anim.render(strip, &anim_state);
 
-            try testing.expectEqual(@as(usize, 0), strip_state.write_calls);
-            try testing.expectEqual(@as(usize, 1), strip_state.refresh_calls);
-            try testing.expectEqual(sentinel, strip_state.pixels[0]);
-            try testing.expectEqual(sentinel, strip_state.pixels[1]);
-            try testing.expectEqual(sentinel, strip_state.pixels[2]);
+            try grt.std.testing.expectEqual(@as(usize, 0), strip_state.write_calls);
+            try grt.std.testing.expectEqual(@as(usize, 1), strip_state.refresh_calls);
+            try grt.std.testing.expectEqual(sentinel, strip_state.pixels[0]);
+            try grt.std.testing.expectEqual(sentinel, strip_state.pixels[1]);
+            try grt.std.testing.expectEqual(sentinel, strip_state.pixels[2]);
         }
 
         fn testTickWithoutFramesPreservesCurrent(_: Allocator) !void {
@@ -251,8 +250,8 @@ fn SuiteType(comptime lib: type) type {
                 .current = F.solid(Color.red),
             };
 
-            try testing.expect(!Anim.tick(&state));
-            try testing.expectEqual(Color.red, state.current.pixels[0]);
+            try grt.std.testing.expect(!Anim.tick(&state));
+            try grt.std.testing.expectEqual(Color.red, state.current.pixels[0]);
         }
 
         fn testIntervalZeroAdvancesEveryTick(_: Allocator) !void {
@@ -267,13 +266,13 @@ fn SuiteType(comptime lib: type) type {
             });
             state.step_amount = 255;
 
-            try testing.expect(Anim.tick(&state));
-            try testing.expectEqual(@as(usize, 1), state.current_frame);
-            try testing.expectEqual(Color.blue, state.current.pixels[0]);
+            try grt.std.testing.expect(Anim.tick(&state));
+            try grt.std.testing.expectEqual(@as(usize, 1), state.current_frame);
+            try grt.std.testing.expectEqual(Color.blue, state.current.pixels[0]);
 
-            try testing.expect(Anim.tick(&state));
-            try testing.expectEqual(@as(usize, 0), state.current_frame);
-            try testing.expectEqual(Color.red, state.current.pixels[0]);
+            try grt.std.testing.expect(Anim.tick(&state));
+            try grt.std.testing.expectEqual(@as(usize, 0), state.current_frame);
+            try grt.std.testing.expectEqual(Color.red, state.current.pixels[0]);
         }
 
         fn testBrightnessExtremesApply(_: Allocator) !void {
@@ -285,16 +284,16 @@ fn SuiteType(comptime lib: type) type {
             zero_state.brightness = 0;
             zero_state.step_amount = 255;
 
-            try testing.expect(!Anim.tick(&zero_state));
-            try testing.expectEqual(Color.black, zero_state.current.pixels[0]);
+            try grt.std.testing.expect(!Anim.tick(&zero_state));
+            try grt.std.testing.expectEqual(Color.black, zero_state.current.pixels[0]);
 
             var full_state = Anim.State{};
             Anim.fixed(&full_state, .{ .frame = F.solid(Color.red) });
             full_state.brightness = 255;
             full_state.step_amount = 255;
 
-            try testing.expect(Anim.tick(&full_state));
-            try testing.expectEqual(Color.red, full_state.current.pixels[0]);
+            try grt.std.testing.expect(Anim.tick(&full_state));
+            try grt.std.testing.expectEqual(Color.red, full_state.current.pixels[0]);
         }
 
         fn testFlashAndPingpongDegradeAtCapacityOne(_: Allocator) !void {
@@ -306,16 +305,16 @@ fn SuiteType(comptime lib: type) type {
                 .frame = F.solid(Color.blue),
                 .interval = 3,
             });
-            try testing.expectEqual(@as(usize, 1), state.total_frames);
-            try testing.expectEqual(Color.blue, state.frames[0].pixels[0]);
+            try grt.std.testing.expectEqual(@as(usize, 1), state.total_frames);
+            try grt.std.testing.expectEqual(Color.blue, state.frames[0].pixels[0]);
 
             Anim.pingpong(&state, .{
                 .from = F.solid(Color.red),
                 .to = F.solid(Color.green),
                 .interval = 4,
             });
-            try testing.expectEqual(@as(usize, 1), state.total_frames);
-            try testing.expectEqual(Color.red, state.frames[0].pixels[0]);
+            try grt.std.testing.expectEqual(@as(usize, 1), state.total_frames);
+            try grt.std.testing.expectEqual(Color.red, state.frames[0].pixels[0]);
         }
 
         fn testRotateAnimClampsToCapacity(_: Allocator) !void {
@@ -336,9 +335,9 @@ fn SuiteType(comptime lib: type) type {
                 .interval = 1,
             });
 
-            try testing.expectEqual(@as(usize, 2), state.total_frames);
-            try testing.expect(state.frames[0].eql(frame));
-            try testing.expect(state.frames[1].eql(frame.rotate()));
+            try grt.std.testing.expectEqual(@as(usize, 2), state.total_frames);
+            try grt.std.testing.expect(state.frames[0].eql(frame));
+            try grt.std.testing.expect(state.frames[1].eql(frame.rotate()));
         }
 
         fn testStepAmountZeroDoesNotConverge(_: Allocator) !void {
@@ -351,11 +350,11 @@ fn SuiteType(comptime lib: type) type {
             Anim.fixed(&state, .{ .frame = F.solid(Color.white) });
             state.step_amount = 0;
 
-            try testing.expect(Anim.tick(&state));
-            try testing.expectEqual(Color.black, state.current.pixels[0]);
+            try grt.std.testing.expect(Anim.tick(&state));
+            try grt.std.testing.expectEqual(Color.black, state.current.pixels[0]);
 
-            try testing.expect(Anim.tick(&state));
-            try testing.expectEqual(Color.black, state.current.pixels[0]);
+            try grt.std.testing.expect(Anim.tick(&state));
+            try grt.std.testing.expectEqual(Color.black, state.current.pixels[0]);
         }
     };
 }

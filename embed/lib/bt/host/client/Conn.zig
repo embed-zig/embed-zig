@@ -2,8 +2,8 @@
 
 const bt = @import("../../../bt.zig");
 
-pub fn Conn(comptime lib: type, comptime ClientType: type, comptime CharacteristicType: type) type {
-    _ = lib;
+pub fn Conn(comptime grt: type, comptime ClientType: type, comptime CharacteristicType: type) type {
+    _ = grt;
 
     return struct {
         client: *ClientType,

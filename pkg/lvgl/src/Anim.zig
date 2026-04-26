@@ -1,5 +1,5 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
-const testing_api = @import("testing");
 
 const Self = @This();
 
@@ -93,11 +93,9 @@ pub fn deleteAll() void {
     binding.lv_anim_delete_all();
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Impl = struct {
-        fn descriptor_configures_core_fields(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn descriptor_configures_core_fields(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             var anim = try Self.init();
             defer anim.deinit();
             anim.setDuration(120);
@@ -109,47 +107,45 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             anim.setRepeatDelay(5);
             anim.setEarlyApply(true);
 
-            try testing.expectEqual(@as(i32, 120), binding.embed_lv_anim_get_duration(anim.rawConstPtr()));
-            try testing.expectEqual(@as(i32, -8), binding.embed_lv_anim_get_act_time(anim.rawConstPtr()));
-            try testing.expectEqual(@as(i32, 3), binding.embed_lv_anim_get_start_value(anim.rawConstPtr()));
-            try testing.expectEqual(@as(i32, 9), binding.embed_lv_anim_get_end_value(anim.rawConstPtr()));
-            try testing.expectEqual(@as(u32, 42), binding.embed_lv_anim_get_reverse_duration(anim.rawConstPtr()));
-            try testing.expectEqual(@as(u32, 7), binding.embed_lv_anim_get_reverse_delay(anim.rawConstPtr()));
-            try testing.expectEqual(@as(u32, 2), binding.embed_lv_anim_get_repeat_count(anim.rawConstPtr()));
-            try testing.expectEqual(@as(u32, 5), binding.embed_lv_anim_get_repeat_delay(anim.rawConstPtr()));
-            try testing.expect(binding.embed_lv_anim_get_early_apply(anim.rawConstPtr()) == 1);
+            try grt.std.testing.expectEqual(@as(i32, 120), binding.embed_lv_anim_get_duration(anim.rawConstPtr()));
+            try grt.std.testing.expectEqual(@as(i32, -8), binding.embed_lv_anim_get_act_time(anim.rawConstPtr()));
+            try grt.std.testing.expectEqual(@as(i32, 3), binding.embed_lv_anim_get_start_value(anim.rawConstPtr()));
+            try grt.std.testing.expectEqual(@as(i32, 9), binding.embed_lv_anim_get_end_value(anim.rawConstPtr()));
+            try grt.std.testing.expectEqual(@as(u32, 42), binding.embed_lv_anim_get_reverse_duration(anim.rawConstPtr()));
+            try grt.std.testing.expectEqual(@as(u32, 7), binding.embed_lv_anim_get_reverse_delay(anim.rawConstPtr()));
+            try grt.std.testing.expectEqual(@as(u32, 2), binding.embed_lv_anim_get_repeat_count(anim.rawConstPtr()));
+            try grt.std.testing.expectEqual(@as(u32, 5), binding.embed_lv_anim_get_repeat_delay(anim.rawConstPtr()));
+            try grt.std.testing.expect(binding.embed_lv_anim_get_early_apply(anim.rawConstPtr()) == 1);
         }
 
-        fn pause_state_toggles_through_lvgl_api(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn pause_state_toggles_through_lvgl_api(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             var anim = try Self.init();
             defer anim.deinit();
 
-            try testing.expect(!anim.isPaused());
+            try grt.std.testing.expect(!anim.isPaused());
             anim.pause();
-            try testing.expect(anim.isPaused());
+            try grt.std.testing.expect(anim.isPaused());
             anim.resumeAnim();
-            try testing.expect(!anim.isPaused());
+            try grt.std.testing.expect(!anim.isPaused());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("lvgl/unit_tests/Anim/descriptor_configures_core_fields", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.descriptor_configures_core_fields));
-            t.run("lvgl/unit_tests/Anim/pause_state_toggles_through_lvgl_api", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.pause_state_toggles_through_lvgl_api));
+            t.run("lvgl/unit_tests/Anim/descriptor_configures_core_fields", glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, Impl.descriptor_configures_core_fields));
+            t.run("lvgl/unit_tests/Anim/pause_state_toggles_through_lvgl_api", glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, Impl.pause_state_toggles_through_lvgl_api));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -158,5 +154,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

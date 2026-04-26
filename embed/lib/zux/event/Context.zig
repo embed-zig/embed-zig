@@ -13,44 +13,43 @@ pub fn cast(comptime T: type, ctx: Type) ?*T {
     return @ptrCast(@alignCast(ptr));
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn castReturnsTypedPointer(testing: anytype) !void {
+        fn castReturnsTypedPointer() !void {
             var value: u32 = 7;
             const ctx: Type = @ptrCast(&value);
             const casted = cast(u32, ctx).?;
 
-            try testing.expectEqual(@as(u32, 7), casted.*);
+            try grt.std.testing.expectEqual(@as(u32, 7), casted.*);
         }
 
-        fn castNullReturnsNull(testing: anytype) !void {
-            try testing.expect(cast(u32, null) == null);
+        fn castNullReturnsNull() !void {
+            try grt.std.testing.expect(cast(u32, null) == null);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.castReturnsTypedPointer(testing) catch |err| {
+            TestCase.castReturnsTypedPointer() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.castNullReturnsNull(testing) catch |err| {
+            TestCase.castNullReturnsNull() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

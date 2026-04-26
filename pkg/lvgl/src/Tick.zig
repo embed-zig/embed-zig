@@ -10,8 +10,8 @@
 //! `lv_tick_inc` is often safe from a tick interrupt when the tick counter access matches your
 //! platform’s alignment and LVGL’s expectations; still follow LVGL + your RTOS docs for ISR vs task.
 
+const glib = @import("glib");
 const binding = @import("binding.zig");
-const testing_api = @import("testing");
 
 pub const GetCb = binding.TickGetCb;
 pub const DelayCb = binding.DelayCb;
@@ -54,47 +54,43 @@ pub fn timerHandler() u32 {
     return binding.lv_timer_handler();
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Impl = struct {
-        fn inc_updates_elaps(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn inc_updates_elaps(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             binding.lv_init();
             defer binding.lv_deinit();
 
             const t0 = get();
             inc(41);
-            try testing.expect(elaps(t0) >= 41);
+            try grt.std.testing.expect(elaps(t0) >= 41);
         }
 
-        fn timer_handler_runs_after_tick(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-
+        fn timer_handler_runs_after_tick(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             binding.lv_init();
             defer binding.lv_deinit();
 
             inc(5);
             const next = timerHandler();
-            try testing.expectEqual(no_timer_ready, next);
+            try grt.std.testing.expectEqual(no_timer_ready, next);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("lvgl/unit_tests/Tick/inc_updates_elaps", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.inc_updates_elaps));
-            t.run("lvgl/unit_tests/Tick/timer_handler_runs_after_tick", testing_api.TestRunner.fromFn(lib, 1024 * 1024, Impl.timer_handler_runs_after_tick));
+            t.run("lvgl/unit_tests/Tick/inc_updates_elaps", glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, Impl.inc_updates_elaps));
+            t.run("lvgl/unit_tests/Tick/timer_handler_runs_after_tick", glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, Impl.timer_handler_runs_after_tick));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -103,5 +99,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

@@ -71,7 +71,7 @@ pub fn init(pointer: anytype) TypeA {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn dispatchesTransceiveWithExchangeFlags() !void {
             const Fake = struct {
@@ -110,15 +110,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .reset_collision = true,
             }, &rx);
 
-            try lib.testing.expectEqual(@as(usize, 16), bits);
-            try lib.testing.expectEqual(@as(usize, 1), fake.last_tx_len);
-            try lib.testing.expectEqual(@as(usize, 7), fake.last_tx_bits);
-            try lib.testing.expectEqual(@as(u32, 1), fake.last_timeout_ms);
-            try lib.testing.expect(!fake.last_tx_crc);
-            try lib.testing.expect(!fake.last_rx_crc);
-            try lib.testing.expect(fake.last_reset_collision);
-            try lib.testing.expectEqualSlices(u8, &.{0x26}, fake.last_tx[0..1]);
-            try lib.testing.expectEqualSlices(u8, &.{ 0x44, 0x00 }, &rx);
+            try grt.std.testing.expectEqual(@as(usize, 16), bits);
+            try grt.std.testing.expectEqual(@as(usize, 1), fake.last_tx_len);
+            try grt.std.testing.expectEqual(@as(usize, 7), fake.last_tx_bits);
+            try grt.std.testing.expectEqual(@as(u32, 1), fake.last_timeout_ms);
+            try grt.std.testing.expect(!fake.last_tx_crc);
+            try grt.std.testing.expect(!fake.last_rx_crc);
+            try grt.std.testing.expect(fake.last_reset_collision);
+            try grt.std.testing.expectEqualSlices(u8, &.{0x26}, fake.last_tx[0..1]);
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x44, 0x00 }, &rx);
         }
 
         fn validatesExchangeAndPropagatesErrors() !void {
@@ -135,38 +135,38 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const type_a = TypeA.init(&fake);
             var rx: [1]u8 = undefined;
 
-            try lib.testing.expectError(error.Timeout, type_a.transceive(.{
+            try grt.std.testing.expectError(error.Timeout, type_a.transceive(.{
                 .tx = &.{0x00},
                 .tx_bits = 8,
                 .timeout_ms = 1,
             }, &rx));
 
             fake.fail = false;
-            try lib.testing.expectError(error.InvalidArgument, type_a.transceive(.{
+            try grt.std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
                 .tx = &.{0x00},
                 .tx_bits = 9,
                 .timeout_ms = 1,
             }, &rx));
 
-            try lib.testing.expectError(error.InvalidArgument, type_a.transceive(.{
+            try grt.std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
                 .tx = &.{0x00},
                 .tx_bits = 8,
                 .timeout_ms = 0,
             }, &rx));
 
-            try lib.testing.expectError(error.InvalidArgument, type_a.transceive(.{
+            try grt.std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
                 .tx = &.{},
                 .tx_bits = 0,
                 .timeout_ms = 1,
             }, &rx));
 
-            try lib.testing.expectError(error.InvalidArgument, type_a.transceive(.{
+            try grt.std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
                 .tx = &.{0x00},
                 .tx_bits = 0,
                 .timeout_ms = 1,
             }, &rx));
 
-            try lib.testing.expectError(error.InvalidArgument, type_a.transceive(.{
+            try grt.std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
                 .tx = &.{0x00},
                 .tx_bits = 8,
                 .timeout_ms = max_timeout_ms + 1,
@@ -175,12 +175,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -195,7 +195,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

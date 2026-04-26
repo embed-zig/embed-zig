@@ -1979,9 +1979,9 @@ fn comptimeEql(comptime a: []const u8, comptime b: []const u8) bool {
     return true;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn parses_component_json_slice(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn parses_component_json_slice(allocator: glib.std.mem.Allocator) !void {
             const source =
                 \\{
                 \\  "label": "buttons",
@@ -1992,15 +1992,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var parsed = try parseAllocSliceWithKindPath(allocator, "button/single", source);
             defer parsed.deinit(allocator);
 
-            try testing.expectEqualStrings("buttons", parsed.label);
-            try testing.expectEqual(@as(u32, 7), parsed.id);
+            try grt.std.testing.expectEqualStrings("buttons", parsed.label);
+            try grt.std.testing.expectEqual(@as(u32, 7), parsed.id);
             switch (parsed.kind) {
                 .single_button => {},
                 else => return error.ExpectedSingleButtonComponent,
             }
         }
 
-        fn parses_component_flow_json_slice(testing: anytype, allocator: lib.mem.Allocator) !void {
+        fn parses_component_flow_json_slice(allocator: glib.std.mem.Allocator) !void {
             const source =
                 \\{
                 \\  "label": "pairing",
@@ -2021,16 +2021,16 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             var parsed = try parseAllocSliceWithKindPath(allocator, "ui/flow", source);
             defer parsed.deinit(allocator);
 
-            try testing.expectEqualStrings("pairing", parsed.label);
-            try testing.expectEqual(@as(u32, 31), parsed.id);
+            try grt.std.testing.expectEqualStrings("pairing", parsed.label);
+            try grt.std.testing.expectEqual(@as(u32, 31), parsed.id);
             switch (parsed.kind) {
                 .flow => |flow_component| {
-                    try testing.expectEqualStrings("idle", flow_component.initial);
-                    try testing.expectEqual(@as(usize, 4), flow_component.nodes.len);
-                    try testing.expectEqual(@as(usize, 4), flow_component.edges.len);
-                    try testing.expectEqualStrings("confirming", flow_component.nodes[2]);
-                    try testing.expectEqualStrings("searching", flow_component.edges[0].to);
-                    try testing.expectEqualStrings("reenter", flow_component.edges[1].event);
+                    try grt.std.testing.expectEqualStrings("idle", flow_component.initial);
+                    try grt.std.testing.expectEqual(@as(usize, 4), flow_component.nodes.len);
+                    try grt.std.testing.expectEqual(@as(usize, 4), flow_component.edges.len);
+                    try grt.std.testing.expectEqualStrings("confirming", flow_component.nodes[2]);
+                    try grt.std.testing.expectEqualStrings("searching", flow_component.edges[0].to);
+                    try grt.std.testing.expectEqualStrings("reenter", flow_component.edges[1].event);
                 },
                 else => return error.ExpectedFlowComponent,
             }
@@ -2038,20 +2038,19 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            const testing = lib.testing;
 
-            TestCase.parses_component_json_slice(testing, allocator) catch |err| {
+            TestCase.parses_component_json_slice(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.parses_component_flow_json_slice(testing, allocator) catch |err| {
+            TestCase.parses_component_flow_json_slice(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -2059,7 +2058,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

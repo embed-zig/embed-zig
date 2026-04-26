@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 
 pub const Sample = binding.spx_int16_t;
@@ -21,24 +22,22 @@ pub const InterleavedProcessResult = struct {
     output_frames_produced: usize,
 };
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn exposesExpectedAudioPrimitives() !void {
-            try lib.testing.expectEqual(@as(usize, 2), @sizeOf(Sample));
-            try lib.testing.expect(resampler_quality_min <= resampler_quality_default);
-            try lib.testing.expect(resampler_quality_default <= resampler_quality_max);
+            try grt.std.testing.expectEqual(@as(usize, 2), @sizeOf(Sample));
+            try grt.std.testing.expect(resampler_quality_min <= resampler_quality_default);
+            try grt.std.testing.expect(resampler_quality_default <= resampler_quality_max);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -49,7 +48,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -58,5 +57,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

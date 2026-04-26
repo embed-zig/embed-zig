@@ -1,10 +1,11 @@
 //! host.client.Characteristic — resolved characteristic bound to one connection.
 
+const glib = @import("glib");
 const att = @import("../att.zig");
 const bt = @import("../../../bt.zig");
 const xfer = @import("../xfer.zig");
 
-pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime SubscriptionType: type) type {
+pub fn Characteristic(comptime grt: type, comptime ClientType: type, comptime SubscriptionType: type) type {
     return struct {
         client: *ClientType,
         conn_handle: u16,
@@ -135,17 +136,17 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
         pub fn writeX(self: *Self, data: []const u8) !void {
             var transport = try WriteTx.init(self);
             const mtu = effectiveMtu(self);
-            return xfer.write(lib, self.client.allocator, &transport, data, .{
+            return xfer.write(grt, self.client.allocator, &transport, data, .{
                 .att_mtu = mtu,
                 .timeout_ms = default_write_timeout_ms,
                 .send_redundancy = default_send_redundancy,
             });
         }
 
-        pub fn readX(self: *Self, allocator: lib.mem.Allocator) ![]u8 {
+        pub fn readX(self: *Self, allocator: glib.std.mem.Allocator) ![]u8 {
             var transport = try ReadTx.init(self);
             const mtu = effectiveMtu(self);
-            return xfer.read(lib, allocator, &transport, .{
+            return xfer.read(grt, allocator, &transport, .{
                 .att_mtu = mtu,
                 .timeout_ms = default_read_timeout_ms,
                 .max_timeout_retries = default_read_max_retries,
@@ -200,7 +201,7 @@ pub fn Characteristic(comptime lib: type, comptime ClientType: type, comptime Su
                 self.write(data) catch |err| switch (err) {
                     error.AttError, error.Timeout => {
                         if (attempt + 1 < control_write_max_attempts) {
-                            lib.Thread.sleep(control_write_retry_delay_ns);
+                            grt.std.Thread.sleep(control_write_retry_delay_ns);
                             continue;
                         }
                         return err;

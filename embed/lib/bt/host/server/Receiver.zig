@@ -21,7 +21,7 @@ pub const Request = struct {
 
 pub const HandlerFn = *const fn (?*anyopaque, *const Request) void;
 
-pub fn make(comptime lib: type, comptime ServerType: type) type {
+pub fn make(comptime grt: type, comptime ServerType: type) type {
     return struct {
         const Self = @This();
         const Inbox = ServerType.ChannelFactory([]u8);
@@ -31,12 +31,12 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
             mux: *Self,
             subscription: Subscription,
             conn_handle: u16,
-            mutex: lib.Thread.Mutex = .{},
+            mutex: grt.std.Thread.Mutex = .{},
             closed: bool = false,
             ref_count: usize = 1,
             inbox: Inbox,
-            thread: ?lib.Thread = null,
-            worker_id: ?lib.Thread.Id = null,
+            thread: ?grt.std.Thread = null,
+            worker_id: ?grt.std.Thread.Id = null,
 
             const Transport = struct {
                 session: *Session,
@@ -67,7 +67,7 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
                 }
             };
 
-            fn init(allocator: lib.mem.Allocator, mux: *Self, subscription: Subscription) !*@This() {
+            fn init(allocator: glib.std.mem.Allocator, mux: *Self, subscription: Subscription) !*@This() {
                 const self = try allocator.create(@This());
                 errdefer allocator.destroy(self);
 
@@ -83,7 +83,7 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
                 errdefer self.subscription.deinit();
 
                 self.retain();
-                self.thread = try lib.Thread.spawn(.{}, task, .{self});
+                self.thread = try grt.std.Thread.spawn(.{}, task, .{self});
                 return self;
             }
 
@@ -162,9 +162,9 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
                 self.mutex.unlock();
             }
 
-            fn release(self: *@This(), allocator: lib.mem.Allocator) void {
-                const current_thread = lib.Thread.getCurrentId();
-                const thread: ?lib.Thread = blk: {
+            fn release(self: *@This(), allocator: glib.std.mem.Allocator) void {
+                const current_thread = grt.std.Thread.getCurrentId();
+                const thread: ?grt.std.Thread = blk: {
                     self.mutex.lock();
                     if (self.ref_count == 0) unreachable;
                     self.ref_count -= 1;
@@ -198,12 +198,12 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
             }
 
             fn task(self: *@This()) void {
-                self.worker_id = lib.Thread.getCurrentId();
+                self.worker_id = grt.std.Thread.getCurrentId();
                 defer self.release(self.mux.allocator);
                 defer self.finishTx();
 
                 var tx = Transport{ .session = self };
-                const data = xfer.recv(lib, self.mux.allocator, &tx, .{
+                const data = xfer.recv(grt, self.mux.allocator, &tx, .{
                     .att_mtu = self.subscription.attMtu(),
                     .timeout_ms = 5_000,
                 }) catch return;
@@ -225,13 +225,13 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
             }
         };
 
-        allocator: lib.mem.Allocator,
-        mutex: lib.Thread.Mutex = .{},
+        allocator: glib.std.mem.Allocator,
+        mutex: grt.std.Thread.Mutex = .{},
         receive_handler: ?HandlerFn = null,
         handler_ctx: ?*anyopaque = null,
-        sessions: lib.AutoHashMapUnmanaged(u16, *Session) = .{},
+        sessions: grt.std.AutoHashMapUnmanaged(u16, *Session) = .{},
 
-        pub fn init(allocator: lib.mem.Allocator) Self {
+        pub fn init(allocator: glib.std.mem.Allocator) Self {
             return .{
                 .allocator = allocator,
             };
@@ -358,7 +358,7 @@ pub fn make(comptime lib: type, comptime ServerType: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const DummySubscription = struct {
@@ -385,7 +385,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const Dummy = struct {
                 fn Channel(comptime T: type) type {
                     return struct {
-                        pub fn init(_: lib.mem.Allocator, _: usize) !@This() {
+                        pub fn init(_: glib.std.mem.Allocator, _: usize) !@This() {
                             return .{};
                         }
                         pub fn deinit(_: *@This()) void {}
@@ -434,8 +434,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }
             };
 
-            const Impl = make(lib, FakeServer);
-            var receiver = Impl.init(lib.testing.allocator);
+            const Impl = make(grt, FakeServer);
+            var receiver = Impl.init(grt.std.testing.allocator);
             defer receiver.deinit();
 
             var writer_state = WriterState{};
@@ -455,17 +455,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             Impl.onRequest(&receiver, &req, &rw);
 
-            try lib.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
-            try lib.testing.expectEqual(@as(?u8, @intFromEnum(att.ErrorCode.request_not_supported)), writer_state.err_code);
+            try grt.std.testing.expectEqual(@as(usize, 0), writer_state.ok_count);
+            try grt.std.testing.expectEqual(@as(?u8, @intFromEnum(att.ErrorCode.request_not_supported)), writer_state.err_code);
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -476,7 +476,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

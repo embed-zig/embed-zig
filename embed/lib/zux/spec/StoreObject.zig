@@ -193,9 +193,9 @@ fn isIdentContinue(ch: u8) bool {
     return isIdentStart(ch) or (ch >= '0' and ch <= '9');
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn parse_from_slice_generates_store_object_type(testing: anytype) !void {
+        fn parse_from_slice_generates_store_object_type() !void {
             const Spec = parseSlice(
                 \\{
                 \\  "label": "counter",
@@ -206,14 +206,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 \\}
             );
 
-            try testing.expectEqualStrings("counter", Spec.Label);
-            try testing.expect(@hasField(Spec.StateType, "ticks"));
-            try testing.expect(@hasField(Spec.StateType, "pressed"));
-            try testing.expect(@FieldType(Spec.StateType, "ticks") == usize);
-            try testing.expect(@FieldType(Spec.StateType, "pressed") == bool);
+            try grt.std.testing.expectEqualStrings("counter", Spec.Label);
+            try grt.std.testing.expect(@hasField(Spec.StateType, "ticks"));
+            try grt.std.testing.expect(@hasField(Spec.StateType, "pressed"));
+            try grt.std.testing.expect(@FieldType(Spec.StateType, "ticks") == usize);
+            try grt.std.testing.expect(@FieldType(Spec.StateType, "pressed") == bool);
         }
 
-        fn parse_from_slice_generates_nested_state_type(testing: anytype) !void {
+        fn parse_from_slice_generates_nested_state_type() !void {
             const Spec = parseSlice(
                 \\{
                 \\  "label": "session",
@@ -227,47 +227,46 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 \\}
             );
 
-            try testing.expectEqualStrings("session", Spec.Label);
-            try testing.expect(@hasField(Spec.StateType, "user"));
-            try testing.expect(@hasField(Spec.StateType, "active"));
-            try testing.expect(@FieldType(Spec.StateType, "active") == bool);
-            try testing.expect(@hasField(@FieldType(Spec.StateType, "user"), "name"));
-            try testing.expect(@hasField(@FieldType(Spec.StateType, "user"), "age"));
-            try testing.expect(@FieldType(@FieldType(Spec.StateType, "user"), "name") == []const u8);
-            try testing.expect(@FieldType(@FieldType(Spec.StateType, "user"), "age") == u32);
+            try grt.std.testing.expectEqualStrings("session", Spec.Label);
+            try grt.std.testing.expect(@hasField(Spec.StateType, "user"));
+            try grt.std.testing.expect(@hasField(Spec.StateType, "active"));
+            try grt.std.testing.expect(@FieldType(Spec.StateType, "active") == bool);
+            try grt.std.testing.expect(@hasField(@FieldType(Spec.StateType, "user"), "name"));
+            try grt.std.testing.expect(@hasField(@FieldType(Spec.StateType, "user"), "age"));
+            try grt.std.testing.expect(@FieldType(@FieldType(Spec.StateType, "user"), "name") == []const u8);
+            try grt.std.testing.expect(@FieldType(@FieldType(Spec.StateType, "user"), "age") == u32);
         }
 
-        fn make_preserves_label_and_state_type(testing: anytype) !void {
+        fn make_preserves_label_and_state_type() !void {
             const State = struct {
                 count: usize,
             };
             const Spec = make("counter", State);
 
-            try testing.expectEqualStrings("counter", Spec.Label);
-            try testing.expect(Spec.StateType == State);
+            try grt.std.testing.expectEqualStrings("counter", Spec.Label);
+            try grt.std.testing.expect(Spec.StateType == State);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.parse_from_slice_generates_store_object_type(testing) catch |err| {
+            TestCase.parse_from_slice_generates_store_object_type() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.parse_from_slice_generates_nested_state_type(testing) catch |err| {
+            TestCase.parse_from_slice_generates_nested_state_type() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.make_preserves_label_and_state_type(testing) catch |err| {
+            TestCase.make_preserves_label_and_state_type() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -275,7 +274,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

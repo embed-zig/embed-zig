@@ -1,29 +1,29 @@
+const glib = @import("glib");
 const builtin = @import("builtin");
-const testing_api = @import("testing");
 const types = @import("../src/types.zig");
 const EchoState = @import("../src/EchoState.zig");
 const PreprocessState = @import("../src/PreprocessState.zig");
 const Resampler = @import("../src/Resampler.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            runImpl(lib) catch |err| {
+            runImpl(grt) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -32,25 +32,24 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-fn runImpl(comptime lib: type) !void {
-    const testing = lib.testing;
-    const matrix_report = shouldReportMatrix(lib);
+fn runImpl(comptime grt: type) !void {
+    const matrix_report = shouldReportMatrix(grt);
 
     var echo = try EchoState.init(160, 1600);
     defer echo.deinit();
     try echo.setSamplingRate(16_000);
-    try testing.expectEqual(@as(u32, 16_000), try echo.samplingRate());
-    const synthetic_metrics = try runSyntheticAecScenario(lib, &echo);
-    maybeReportAecMetric(lib, matrix_report, "synthetic", synthetic_metrics);
+    try grt.std.testing.expectEqual(@as(u32, 16_000), try echo.samplingRate());
+    const synthetic_metrics = try runSyntheticAecScenario(grt, &echo);
+    maybeReportAecMetric(grt, matrix_report, "synthetic", synthetic_metrics);
     try expectAecImprovement(synthetic_metrics, 85, error.SyntheticAecTooWeak);
     echo.reset();
-    const playback_metrics = try runPlaybackCaptureScenario(lib, &echo);
-    maybeReportAecMetric(lib, matrix_report, "playback_capture", playback_metrics);
+    const playback_metrics = try runPlaybackCaptureScenario(grt, &echo);
+    maybeReportAecMetric(grt, matrix_report, "playback_capture", playback_metrics);
     try expectAecImprovement(playback_metrics, 95, error.PlaybackCaptureAecTooWeak);
-    try runResetRegressionScenario(lib, matrix_report);
+    try runResetRegressionScenario(grt, matrix_report);
     echo.reset();
 
     var preprocess = try PreprocessState.init(160, 16_000);
@@ -71,16 +70,16 @@ fn runImpl(comptime lib: type) !void {
     defer resampler.deinit();
 
     const rates = resampler.getRate();
-    try testing.expectEqual(@as(u32, 16_000), rates.in_rate);
-    try testing.expectEqual(@as(u32, 8_000), rates.out_rate);
-    try testing.expectEqual(types.resampler_quality_default, resampler.getQuality());
+    try grt.std.testing.expectEqual(@as(u32, 16_000), rates.in_rate);
+    try grt.std.testing.expectEqual(@as(u32, 8_000), rates.out_rate);
+    try grt.std.testing.expectEqual(types.resampler_quality_default, resampler.getQuality());
 
     try resampler.skipZeros();
     var resampled = [_]types.Sample{0} ** 160;
     const result = try resampler.processInterleavedInt(preprocess_frame[0..], resampled[0..]);
     const channels: usize = @intCast(resampler.channelCount());
-    try testing.expect(result.input_frames_consumed <= preprocess_frame.len / channels);
-    try testing.expect(result.output_frames_produced <= resampled.len / channels);
+    try grt.std.testing.expect(result.input_frames_consumed <= preprocess_frame.len / channels);
+    try grt.std.testing.expect(result.output_frames_produced <= resampled.len / channels);
 
     var channel_resampled = [_]types.Sample{0} ** 160;
     const direct_result = try resampler.processInt(0, preprocess_frame[0..], channel_resampled[0..]);
@@ -89,10 +88,10 @@ fn runImpl(comptime lib: type) !void {
 
     try resampler.setRate(8_000, 16_000);
     const updated = resampler.getRate();
-    try testing.expectEqual(@as(u32, 8_000), updated.in_rate);
-    try testing.expectEqual(@as(u32, 16_000), updated.out_rate);
+    try grt.std.testing.expectEqual(@as(u32, 8_000), updated.in_rate);
+    try grt.std.testing.expectEqual(@as(u32, 16_000), updated.out_rate);
     try resampler.setQuality(types.resampler_quality_voip);
-    try testing.expectEqual(types.resampler_quality_voip, resampler.getQuality());
+    try grt.std.testing.expectEqual(types.resampler_quality_voip, resampler.getQuality());
     try resampler.reset();
     _ = resampler.inputLatency();
     _ = resampler.outputLatency();
@@ -103,8 +102,7 @@ const AecMetrics = struct {
     output_residual_energy: i64,
 };
 
-fn runSyntheticAecScenario(comptime lib: type, echo: *EchoState) !AecMetrics {
-    const testing = lib.testing;
+fn runSyntheticAecScenario(comptime grt: type, echo: *EchoState) !AecMetrics {
     const frame_size = echo.frameSize();
     const frame_count: usize = 240;
     const warmup_frames: usize = 80;
@@ -112,14 +110,14 @@ fn runSyntheticAecScenario(comptime lib: type, echo: *EchoState) !AecMetrics {
     const delay_a: usize = 43;
     const delay_b: usize = 97;
 
-    const play = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(play);
-    const clean = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(clean);
-    const rec = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(rec);
-    const out = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(out);
+    const play = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(play);
+    const clean = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(clean);
+    const rec = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(rec);
+    const out = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(out);
 
     fillDeterministicNoise(play, 0x1234ABCD, 4);
     fillDeterministicNoise(clean, 0xABCD1234, 20);
@@ -145,22 +143,21 @@ fn runSyntheticAecScenario(comptime lib: type, echo: *EchoState) !AecMetrics {
     return computeResidualMetrics(rec, clean, out, warmup_frames * frame_size);
 }
 
-fn runPlaybackCaptureScenario(comptime lib: type, echo: *EchoState) !AecMetrics {
-    const testing = lib.testing;
+fn runPlaybackCaptureScenario(comptime grt: type, echo: *EchoState) !AecMetrics {
     const frame_size = echo.frameSize();
     const frame_count: usize = 320;
     const warmup_frames: usize = 140;
     const total_samples = frame_size * frame_count;
     const playback_delay_samples = 2 * frame_size;
 
-    const play = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(play);
-    const clean = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(clean);
-    const rec = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(rec);
-    const out = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(out);
+    const play = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(play);
+    const clean = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(clean);
+    const rec = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(rec);
+    const out = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(out);
 
     fillDeterministicNoise(play, 0x55667788, 5);
     fillDeterministicNoise(clean, 0x11223344, 28);
@@ -188,8 +185,7 @@ fn runPlaybackCaptureScenario(comptime lib: type, echo: *EchoState) !AecMetrics 
     return computeResidualMetrics(rec, clean, out, warmup_frames * frame_size);
 }
 
-fn runResetRegressionScenario(comptime lib: type, matrix_report: bool) !void {
-    const testing = lib.testing;
+fn runResetRegressionScenario(comptime grt: type, matrix_report: bool) !void {
     const frame_size: usize = 160;
     const total_samples = frame_size * 240;
 
@@ -201,26 +197,25 @@ fn runResetRegressionScenario(comptime lib: type, matrix_report: bool) !void {
     defer fresh_echo.deinit();
     try fresh_echo.setSamplingRate(16_000);
 
-    _ = try runSyntheticAecScenario(lib, &dirty_echo);
+    _ = try runSyntheticAecScenario(grt, &dirty_echo);
     dirty_echo.reset();
 
-    const dirty_out = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(dirty_out);
-    const fresh_out = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(fresh_out);
+    const dirty_out = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(dirty_out);
+    const fresh_out = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(fresh_out);
 
-    const dirty_metrics = try runSyntheticAecScenarioInto(lib, &dirty_echo, dirty_out);
-    const fresh_metrics = try runSyntheticAecScenarioInto(lib, &fresh_echo, fresh_out);
+    const dirty_metrics = try runSyntheticAecScenarioInto(grt, &dirty_echo, dirty_out);
+    const fresh_metrics = try runSyntheticAecScenarioInto(grt, &fresh_echo, fresh_out);
 
-    maybeReportAecMetric(lib, matrix_report, "reset_dirty", dirty_metrics);
-    maybeReportAecMetric(lib, matrix_report, "reset_fresh", fresh_metrics);
+    maybeReportAecMetric(grt, matrix_report, "reset_dirty", dirty_metrics);
+    maybeReportAecMetric(grt, matrix_report, "reset_fresh", fresh_metrics);
     try expectAecImprovement(dirty_metrics, 85, error.DirtyResetAecTooWeak);
     try expectAecImprovement(fresh_metrics, 85, error.FreshResetAecTooWeak);
     try expectComparableResidualRatios(fresh_metrics, dirty_metrics, 12);
 }
 
-fn runSyntheticAecScenarioInto(comptime lib: type, echo: *EchoState, out: []types.Sample) !AecMetrics {
-    const testing = lib.testing;
+fn runSyntheticAecScenarioInto(comptime grt: type, echo: *EchoState, out: []types.Sample) !AecMetrics {
     const frame_size = echo.frameSize();
     const frame_count: usize = 240;
     const warmup_frames: usize = 80;
@@ -230,12 +225,12 @@ fn runSyntheticAecScenarioInto(comptime lib: type, echo: *EchoState, out: []type
 
     if (out.len != total_samples) return error.InvalidOutputBuffer;
 
-    const play = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(play);
-    const clean = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(clean);
-    const rec = try testing.allocator.alloc(types.Sample, total_samples);
-    defer testing.allocator.free(rec);
+    const play = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(play);
+    const clean = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(clean);
+    const rec = try grt.std.testing.allocator.alloc(types.Sample, total_samples);
+    defer grt.std.testing.allocator.free(rec);
 
     fillDeterministicNoise(play, 0x1234ABCD, 4);
     fillDeterministicNoise(clean, 0xABCD1234, 20);
@@ -277,24 +272,24 @@ fn expectComparableResidualRatios(reference: AecMetrics, candidate: AecMetrics, 
     if (!(absI64(reference_ratio - candidate_ratio) <= max_delta_points)) return error.ResetResidualRatioDrift;
 }
 
-fn shouldReportMatrix(comptime lib: type) bool {
+fn shouldReportMatrix(comptime grt: type) bool {
     if (builtin.target.os.tag == .freestanding) return false;
-    if (!@hasDecl(lib, "process")) return false;
-    if (!@hasDecl(lib, "heap")) return false;
-    const value = lib.process.getEnvVarOwned(lib.heap.page_allocator, "SPEEXDSP_MATRIX_REPORT") catch return false;
-    defer lib.heap.page_allocator.free(value);
+    if (!@hasDecl(grt, "process")) return false;
+    if (!@hasDecl(grt, "heap")) return false;
+    const value = grt.std.process.getEnvVarOwned(grt.std.heap.page_allocator, "SPEEXDSP_MATRIX_REPORT") catch return false;
+    defer grt.std.heap.page_allocator.free(value);
     return value.len != 0;
 }
 
-fn maybeReportAecMetric(comptime lib: type, enabled: bool, scenario: []const u8, metrics: AecMetrics) void {
+fn maybeReportAecMetric(comptime grt: type, enabled: bool, scenario: []const u8, metrics: AecMetrics) void {
     if (!enabled) return;
     if (metrics.input_residual_energy <= 0) return;
     if (builtin.target.os.tag == .freestanding) return;
-    if (!@hasDecl(lib, "debug")) return;
+    if (!@hasDecl(grt, "debug")) return;
 
     const residual_percent = @divTrunc(metrics.output_residual_energy * 100, metrics.input_residual_energy);
     const improvement_percent = 100 - residual_percent;
-    lib.debug.print(
+    grt.std.debug.print(
         "SPEEXDSP_METRIC scenario={s} input_residual_energy={} output_residual_energy={} residual_percent={} improvement_percent={}\n",
         .{
             scenario,

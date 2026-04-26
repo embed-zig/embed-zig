@@ -1,6 +1,6 @@
+const glib = @import("glib");
 const embed = @import("embed");
 const display_api = @import("drivers");
-const testing = @import("testing");
 const Display = display_api.Display;
 const Fixture = @import("test_utils/Fixture.zig");
 const TestingDisplay = @import("test_utils/TestingDisplay.zig");
@@ -36,22 +36,22 @@ pub const Case = struct {
         try td.addTestCaseResult(0, &.{}, self.blank.comparer());
     }
 
-    pub fn makeRunner(self: *@This(), comptime lib: type, display: *Display) testing.TestRunner {
+    pub fn makeRunner(self: *@This(), comptime grt: type, display: *Display) glib.testing.TestRunner {
         _ = self;
-        return make(lib, display);
+        return make(grt, display);
     }
 };
 
-pub fn make(comptime lib: type, display: *Display) testing.TestRunner {
+pub fn make(comptime grt: type, display: *Display) glib.testing.TestRunner {
     const Runner = struct {
         display: *Display,
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = allocator;
             var fixture = Fixture.init(self.display) catch |err| {
                 t.logFatal(@errorName(err));
@@ -65,15 +65,15 @@ pub fn make(comptime lib: type, display: *Display) testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{
         .display = display,
     };
-    return testing.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }

@@ -8,28 +8,28 @@ const NodeBuilder = @import("../../pipeline/NodeBuilder.zig");
 const BranchNode = @import("../../pipeline/BranchNode.zig");
 const Pipeline = @import("../../pipeline/Pipeline.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
             t.parallel();
-            t.run("Message", Message.TestRunner(lib));
-            t.run("Emitter", Emitter.TestRunner(lib));
-            t.run("Node", Node.TestRunner(lib));
-            t.run("Poller", Poller.TestRunner(lib));
-            t.run("NodeBuilder", NodeBuilder.TestRunner(lib));
-            t.run("BranchNode", BranchNode.TestRunner(lib));
-            t.run("Pipeline", Pipeline.TestRunner(lib, Channel));
+            t.run("Message", Message.TestRunner(grt));
+            t.run("Emitter", Emitter.TestRunner(grt));
+            t.run("Node", Node.TestRunner(grt));
+            t.run("Poller", Poller.TestRunner(grt));
+            t.run("NodeBuilder", NodeBuilder.TestRunner(grt));
+            t.run("BranchNode", BranchNode.TestRunner(grt));
+            t.run("Pipeline", Pipeline.TestRunner(grt));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

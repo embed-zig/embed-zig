@@ -322,21 +322,17 @@ fn dominantFace(accel: AccelData) ?Face {
     return null;
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn testFirstSampleOnlySeedsBaseline() !void {
-            const testing = lib.testing;
-
             var detector = Detector.initDefault();
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
-            try testing.expect(!detector.hasPendingActions());
+            try grt.std.testing.expect(!detector.hasPendingActions());
         }
         fn testShakeEmitsAfterActivityReturnsQuiet() !void {
-            const testing = lib.testing;
-
             var detector = Detector.init(.{
                 .shake_threshold_g = 1.0,
                 .shake_min_duration_ms = 50,
@@ -344,24 +340,24 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .tilt_threshold_deg = 9999,
             });
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 2.0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 10,
             }) == null);
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = -2.0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 20,
             }) == null);
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 2.0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 30,
             }) == null);
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 80,
             }) == null);
@@ -373,22 +369,20 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             switch (action) {
                 .shake => |shake| {
-                    try testing.expect(shake.magnitude >= 1.0);
-                    try testing.expect(shake.duration_ms >= 50);
+                    try grt.std.testing.expect(shake.magnitude >= 1.0);
+                    try grt.std.testing.expect(shake.duration_ms >= 50);
                 },
-                else => try testing.expect(false),
+                else => try grt.std.testing.expect(false),
             }
         }
         fn testTiltEmitsAbsoluteAngles() !void {
-            const testing = lib.testing;
-
             var detector = Detector.init(.{
                 .shake_threshold_g = 9999,
                 .tilt_threshold_deg = 5.0,
                 .tilt_debounce_ms = 0,
             });
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
@@ -400,21 +394,19 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             switch (action) {
                 .tilt => |tilt| {
-                    try testing.expect(absf(tilt.pitch) > 20.0);
+                    try grt.std.testing.expect(absf(tilt.pitch) > 20.0);
                 },
-                else => try testing.expect(false),
+                else => try grt.std.testing.expect(false),
             }
         }
         fn testTiltDebounceBlocksRapidRepeat() !void {
-            const testing = lib.testing;
-
             var detector = Detector.init(.{
                 .shake_threshold_g = 9999,
                 .tilt_threshold_deg = 5.0,
                 .tilt_debounce_ms = 200,
             });
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
@@ -423,17 +415,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .accel = .{ .x = 0.5, .y = 0, .z = 0.866 },
                 .timestamp_ms = 100,
             });
-            try testing.expect(!detector.hasPendingActions());
+            try grt.std.testing.expect(!detector.hasPendingActions());
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0.7, .y = 0, .z = 0.714 },
                 .timestamp_ms = 150,
             }) == null);
-            try testing.expect(!detector.hasPendingActions());
+            try grt.std.testing.expect(!detector.hasPendingActions());
         }
         fn testSpeakerLikeSmallVibrationStaysQuiet() !void {
-            const testing = lib.testing;
-
             var detector = Detector.init(.{
                 .shake_threshold_g = 1.0,
                 .shake_min_duration_ms = 50,
@@ -441,7 +431,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .tilt_threshold_deg = 9999,
             });
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
@@ -458,16 +448,14 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .{ .ts = 120, .x = 0.00 },
                 .{ .ts = 180, .x = 0.00 },
             }) |sample| {
-                try testing.expect(detector.update(.{
+                try grt.std.testing.expect(detector.update(.{
                     .accel = .{ .x = sample.x, .y = 0, .z = 1.0 },
                     .timestamp_ms = sample.ts,
                 }) == null);
-                try testing.expect(!detector.hasPendingActions());
+                try grt.std.testing.expect(!detector.hasPendingActions());
             }
         }
         fn testSlowReorientationDoesNotLookLikeShake() !void {
-            const testing = lib.testing;
-
             var detector = Detector.init(.{
                 .shake_threshold_g = 1.0,
                 .shake_min_duration_ms = 50,
@@ -482,13 +470,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .{ .accel = .{ .x = 0.5000, .y = 0, .z = 0.8660 }, .timestamp_ms = 300 },
                 .{ .accel = .{ .x = 0.6428, .y = 0, .z = 0.7660 }, .timestamp_ms = 400 },
             }) |sample| {
-                try testing.expect(detector.update(sample) == null);
-                try testing.expect(!detector.hasPendingActions());
+                try grt.std.testing.expect(detector.update(sample) == null);
+                try grt.std.testing.expect(!detector.hasPendingActions());
             }
         }
         fn testHumanShakeStillWinsAfterSmallVibrationNoise() !void {
-            const testing = lib.testing;
-
             var detector = Detector.init(.{
                 .shake_threshold_g = 1.0,
                 .shake_min_duration_ms = 50,
@@ -506,7 +492,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .{ .accel = .{ .x = 2.0, .y = 0, .z = 1.0 }, .timestamp_ms = 90 },
                 .{ .accel = .{ .x = 0.0, .y = 0, .z = 1.0 }, .timestamp_ms = 140 },
             }) |sample| {
-                try testing.expect(detector.update(sample) == null);
+                try grt.std.testing.expect(detector.update(sample) == null);
             }
 
             const action = detector.update(.{
@@ -516,32 +502,30 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             switch (action) {
                 .shake => |shake| {
-                    try testing.expect(shake.magnitude >= 1.0);
-                    try testing.expect(shake.duration_ms >= 80);
+                    try grt.std.testing.expect(shake.magnitude >= 1.0);
+                    try grt.std.testing.expect(shake.duration_ms >= 80);
                 },
-                else => try testing.expect(false),
+                else => try grt.std.testing.expect(false),
             }
-            try testing.expect(!detector.hasPendingActions());
+            try grt.std.testing.expect(!detector.hasPendingActions());
         }
         fn testTiltCanFireAgainAfterDebounceWindow() !void {
-            const testing = lib.testing;
-
             var detector = Detector.init(.{
                 .shake_threshold_g = 9999,
                 .tilt_threshold_deg = 5.0,
                 .tilt_debounce_ms = 200,
             });
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0.5, .y = 0, .z = 0.866 },
                 .timestamp_ms = 100,
             }) == null);
-            try testing.expect(!detector.hasPendingActions());
+            try grt.std.testing.expect(!detector.hasPendingActions());
 
             const action = detector.update(.{
                 .accel = .{ .x = 0.7, .y = 0, .z = 0.714 },
@@ -550,14 +534,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             switch (action) {
                 .tilt => |tilt| {
-                    try testing.expect(absf(tilt.pitch) > 20.0);
+                    try grt.std.testing.expect(absf(tilt.pitch) > 20.0);
                 },
-                else => try testing.expect(false),
+                else => try grt.std.testing.expect(false),
             }
         }
         fn testFlipNeedsRecentTurnAndFaceChange() !void {
-            const testing = lib.testing;
-
             var detector = Detector.init(.{
                 .shake_threshold_g = 9999,
                 .tilt_threshold_deg = 9999,
@@ -566,20 +548,20 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .flip_debounce_ms = 0,
             });
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = -1.0 },
                 .timestamp_ms = 100,
             }) == null);
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 200,
             }) == null);
-            try testing.expect(detector.updateGyro(.{
+            try grt.std.testing.expect(detector.updateGyro(.{
                 .gyro = .{ .x = 0, .y = 0, .z = 140.0 },
                 .timestamp_ms = 220,
             }) == null);
@@ -591,15 +573,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             switch (action) {
                 .flip => |flip| {
-                    try testing.expectEqual(Face.up, flip.from);
-                    try testing.expectEqual(Face.down, flip.to);
+                    try grt.std.testing.expectEqual(Face.up, flip.from);
+                    try grt.std.testing.expectEqual(Face.down, flip.to);
                 },
-                else => try testing.expect(false),
+                else => try grt.std.testing.expect(false),
             }
         }
         fn testFreeFallNeedsSustainedLowMagnitude() !void {
-            const testing = lib.testing;
-
             var detector = Detector.init(.{
                 .shake_threshold_g = 9999,
                 .tilt_threshold_deg = 9999,
@@ -607,15 +587,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .free_fall_min_duration_ms = 120,
             });
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
                 .timestamp_ms = 0,
             }) == null);
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0.05, .y = 0.02, .z = 0.08 },
                 .timestamp_ms = 40,
             }) == null);
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0.02, .y = 0.01, .z = 0.06 },
                 .timestamp_ms = 100,
             }) == null);
@@ -627,15 +607,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             switch (action) {
                 .free_fall => |free_fall| {
-                    try testing.expect(free_fall.duration_ms >= 120);
-                    try testing.expect(free_fall.min_magnitude <= 0.1);
+                    try grt.std.testing.expect(free_fall.duration_ms >= 120);
+                    try grt.std.testing.expect(free_fall.min_magnitude <= 0.1);
                 },
-                else => try testing.expect(false),
+                else => try grt.std.testing.expect(false),
             }
         }
         fn testQueueOverflowDropsOldestAction() !void {
-            const testing = lib.testing;
-
             var detector = Detector.initDefault();
 
             detector.queueAction(.{ .shake = .{ .magnitude = 1.0, .duration_ms = 1 } });
@@ -644,7 +622,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             detector.queueAction(.{ .shake = .{ .magnitude = 4.0, .duration_ms = 4 } });
             detector.queueAction(.{ .shake = .{ .magnitude = 5.0, .duration_ms = 5 } });
 
-            try testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
+            try grt.std.testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
 
             const first = detector.nextAction().?;
             const second = detector.nextAction().?;
@@ -655,11 +633,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             try expectShakeDuration(second, 3);
             try expectShakeDuration(third, 4);
             try expectShakeDuration(fourth, 5);
-            try testing.expect(detector.nextAction() == null);
+            try grt.std.testing.expect(detector.nextAction() == null);
         }
         fn testQueueOverflowAfterWrapPreservesFifoOrder() !void {
-            const testing = lib.testing;
-
             var detector = Detector.initDefault();
 
             detector.queueAction(.{ .shake = .{ .magnitude = 1.0, .duration_ms = 1 } });
@@ -672,30 +648,28 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             detector.queueAction(.{ .shake = .{ .magnitude = 5.0, .duration_ms = 5 } });
             detector.queueAction(.{ .shake = .{ .magnitude = 6.0, .duration_ms = 6 } });
 
-            try testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
+            try grt.std.testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
             try expectShakeDuration(detector.nextAction().?, 3);
             try expectShakeDuration(detector.nextAction().?, 4);
             try expectShakeDuration(detector.nextAction().?, 5);
             try expectShakeDuration(detector.nextAction().?, 6);
-            try testing.expect(detector.nextAction() == null);
+            try grt.std.testing.expect(detector.nextAction() == null);
         }
         fn expectShakeDuration(action: Action, expected_duration_ms: u32) !void {
-            const testing = lib.testing;
-
             switch (action) {
-                .shake => |shake| try testing.expectEqual(expected_duration_ms, shake.duration_ms),
-                else => try testing.expect(false),
+                .shake => |shake| try grt.std.testing.expectEqual(expected_duration_ms, shake.duration_ms),
+                else => try grt.std.testing.expect(false),
             }
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -750,7 +724,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

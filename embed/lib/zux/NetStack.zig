@@ -627,9 +627,9 @@ fn eventReceiverEmitUpdate(ctx: *const anyopaque, update: Update) void {
     receiver.emit(value);
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn makeEventCopiesDhcpAndDnsFields(testing: anytype) !void {
+        fn makeEventCopiesDhcpAndDnsFields() !void {
             const dns = [_]glib.net.netip.Addr{
                 glib.net.netip.Addr.from4(.{ 1, 1, 1, 1 }),
                 glib.net.netip.Addr.from4(.{ 8, 8, 8, 8 }),
@@ -649,20 +649,20 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             switch (value) {
                 .netstack_dhcp_lease_acquired => |lease| {
-                    try testing.expectEqual(@as(u32, 51), lease.source_id);
-                    try testing.expectEqual(@as(u32, 7), lease.netif_id);
-                    try testing.expectEqual(@as(u32, 7200), lease.lease_time_s);
-                    try testing.expectEqual(@as([4]u8, .{ 192, 168, 10, 23 }), lease.addr.as4().?);
-                    try testing.expectEqual(@as([4]u8, .{ 192, 168, 10, 1 }), lease.gateway.as4().?);
-                    try testing.expectEqual(@as(usize, 2), lease.dnsServers().len);
-                    try testing.expectEqual(@as([4]u8, .{ 1, 1, 1, 1 }), lease.dnsServers()[0].as4().?);
-                    try testing.expectEqual(@as([4]u8, .{ 8, 8, 8, 8 }), lease.dnsServers()[1].as4().?);
+                    try grt.std.testing.expectEqual(@as(u32, 51), lease.source_id);
+                    try grt.std.testing.expectEqual(@as(u32, 7), lease.netif_id);
+                    try grt.std.testing.expectEqual(@as(u32, 7200), lease.lease_time_s);
+                    try grt.std.testing.expectEqual(@as([4]u8, .{ 192, 168, 10, 23 }), lease.addr.as4().?);
+                    try grt.std.testing.expectEqual(@as([4]u8, .{ 192, 168, 10, 1 }), lease.gateway.as4().?);
+                    try grt.std.testing.expectEqual(@as(usize, 2), lease.dnsServers().len);
+                    try grt.std.testing.expectEqual(@as([4]u8, .{ 1, 1, 1, 1 }), lease.dnsServers()[0].as4().?);
+                    try grt.std.testing.expectEqual(@as([4]u8, .{ 8, 8, 8, 8 }), lease.dnsServers()[1].as4().?);
                 },
-                else => try testing.expect(false),
+                else => try grt.std.testing.expect(false),
             }
         }
 
-        fn makeEventCopiesNetifMetadata(testing: anytype) !void {
+        fn makeEventCopiesNetifMetadata() !void {
             const value = try makeEvent(.{
                 .netif_created = .{
                     .source_id = 60,
@@ -674,16 +674,16 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             switch (value) {
                 .netstack_netif_created => |netif| {
-                    try testing.expectEqual(@as(u32, 60), netif.source_id);
-                    try testing.expectEqual(@as(u32, 2), netif.netif_id);
-                    try testing.expectEqual(@as(NetifType, .wifi), netif.netif_type);
-                    try testing.expectEqualStrings("wlan0", netif.name());
+                    try grt.std.testing.expectEqual(@as(u32, 60), netif.source_id);
+                    try grt.std.testing.expectEqual(@as(u32, 2), netif.netif_id);
+                    try grt.std.testing.expectEqual(@as(NetifType, .wifi), netif.netif_type);
+                    try grt.std.testing.expectEqualStrings("wlan0", netif.name());
                 },
-                else => try testing.expect(false),
+                else => try grt.std.testing.expect(false),
             }
         }
 
-        fn makeEventMapsPppFields(testing: anytype) !void {
+        fn makeEventMapsPppFields() !void {
             const value = try makeEvent(.{
                 .ppp_up = .{
                     .source_id = 61,
@@ -695,16 +695,16 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             switch (value) {
                 .netstack_ppp_up => |ppp| {
-                    try testing.expectEqual(@as(u32, 61), ppp.source_id);
-                    try testing.expectEqual(@as(u32, 9), ppp.netif_id);
-                    try testing.expectEqual(@as([4]u8, .{ 10, 64, 0, 2 }), ppp.local_addr.as4().?);
-                    try testing.expectEqual(@as([4]u8, .{ 10, 64, 0, 1 }), ppp.peer_addr.as4().?);
+                    try grt.std.testing.expectEqual(@as(u32, 61), ppp.source_id);
+                    try grt.std.testing.expectEqual(@as(u32, 9), ppp.netif_id);
+                    try grt.std.testing.expectEqual(@as([4]u8, .{ 10, 64, 0, 2 }), ppp.local_addr.as4().?);
+                    try grt.std.testing.expectEqual(@as([4]u8, .{ 10, 64, 0, 1 }), ppp.peer_addr.as4().?);
                 },
-                else => try testing.expect(false),
+                else => try grt.std.testing.expect(false),
             }
         }
 
-        fn registerAndEmitUpdatesThroughCallback(testing: anytype) !void {
+        fn registerAndEmitUpdatesThroughCallback() !void {
             const Sink = struct {
                 created_count: usize = 0,
                 destroyed_count: usize = 0,
@@ -884,55 +884,54 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             netstack.setEventReceiver(&receiver);
             try impl.emit();
 
-            try testing.expectEqual(@as(usize, 1), sink.created_count);
-            try testing.expectEqual(@as(usize, 1), sink.destroyed_count);
-            try testing.expectEqual(@as(usize, 1), sink.up_count);
-            try testing.expectEqual(@as(usize, 1), sink.dns_count);
-            try testing.expectEqual(@as(usize, 1), sink.ppp_down_count);
-            try testing.expectEqual(@as(u32, 3), sink.last_netif_id);
-            try testing.expectEqual(@as(usize, 2), sink.last_dns_count);
-            try testing.expectEqual(@as(?NetifType, .ppp), sink.last_netif_type);
-            try testing.expectEqual(@as(usize, 4), sink.last_netif_name_len);
-            try testing.expectEqual(@as(?PppPhase, .running), sink.last_ppp_phase);
-            try testing.expectEqual(@as(?PppDownReason, .carrier_lost), sink.last_ppp_down_reason);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.created_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.destroyed_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.up_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.dns_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.ppp_down_count);
+            try grt.std.testing.expectEqual(@as(u32, 3), sink.last_netif_id);
+            try grt.std.testing.expectEqual(@as(usize, 2), sink.last_dns_count);
+            try grt.std.testing.expectEqual(@as(?NetifType, .ppp), sink.last_netif_type);
+            try grt.std.testing.expectEqual(@as(usize, 4), sink.last_netif_name_len);
+            try grt.std.testing.expectEqual(@as(?PppPhase, .running), sink.last_ppp_phase);
+            try grt.std.testing.expectEqual(@as(?PppDownReason, .carrier_lost), sink.last_ppp_down_reason);
 
             netstack.clearEventReceiver();
-            try testing.expect(impl.receiver_ctx == null);
-            try testing.expect(impl.emit_fn == null);
+            try grt.std.testing.expect(impl.receiver_ctx == null);
+            try grt.std.testing.expect(impl.emit_fn == null);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.makeEventCopiesDhcpAndDnsFields(testing) catch |err| {
+            TestCase.makeEventCopiesDhcpAndDnsFields() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.makeEventCopiesNetifMetadata(testing) catch |err| {
+            TestCase.makeEventCopiesNetifMetadata() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.makeEventMapsPppFields(testing) catch |err| {
+            TestCase.makeEventMapsPppFields() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.registerAndEmitUpdatesThroughCallback(testing) catch |err| {
+            TestCase.registerAndEmitUpdatesThroughCallback() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

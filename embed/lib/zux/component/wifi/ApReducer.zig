@@ -167,15 +167,15 @@ fn syncClientSummary(state: *ApState, self: *ApReducer) void {
     state.client_count = @intCast(@min(self.clients.count(), max_count));
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn reduceTracksActiveClients() !void {
             const StoreObject = @import("../../store/Object.zig");
 
-            const ApStore = StoreObject.make(lib, ApState, .wifi_ap);
-            var store = ApStore.init(lib.testing.allocator, .{});
+            const ApStore = StoreObject.make(grt, ApState, .wifi_ap);
+            var store = ApStore.init(grt.std.testing.allocator, .{});
             defer store.deinit();
-            var reducer = ApReducer.init(lib.testing.allocator);
+            var reducer = ApReducer.init(grt.std.testing.allocator);
             defer reducer.deinit();
 
             const NoopSink = struct {
@@ -235,12 +235,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             store.tick();
             const active = store.get();
-            try lib.testing.expect(active.active);
-            try lib.testing.expectEqual(@as(u32, 41), active.source_id);
-            try lib.testing.expectEqualStrings("esp-ap", active.ssid());
-            try lib.testing.expectEqual(@as(u16, 2), active.client_count);
-            try lib.testing.expectEqual(@as(u16, 4), active.last_client_aid);
-            try lib.testing.expectEqual(Addr.from4(.{ 192, 168, 4, 11 }), active.last_client_ip.?);
+            try grt.std.testing.expect(active.active);
+            try grt.std.testing.expectEqual(@as(u32, 41), active.source_id);
+            try grt.std.testing.expectEqualStrings("esp-ap", active.ssid());
+            try grt.std.testing.expectEqual(@as(u16, 2), active.client_count);
+            try grt.std.testing.expectEqual(@as(u16, 4), active.last_client_aid);
+            try grt.std.testing.expectEqual(Addr.from4(.{ 192, 168, 4, 11 }), active.last_client_ip.?);
 
             _ = try reducer.reduce(&store, .{
                 .origin = .source,
@@ -263,19 +263,19 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             }, emit);
             store.tick();
             const stopped = store.get();
-            try lib.testing.expect(!stopped.active);
-            try lib.testing.expectEqual(@as(u16, 0), stopped.client_count);
-            try lib.testing.expectEqual(@as(?MacAddr, .{ 1, 2, 3, 4, 5, 6 }), stopped.last_client_mac);
+            try grt.std.testing.expect(!stopped.active);
+            try grt.std.testing.expectEqual(@as(u16, 0), stopped.client_count);
+            try grt.std.testing.expectEqual(@as(?MacAddr, .{ 1, 2, 3, 4, 5, 6 }), stopped.last_client_mac);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -286,7 +286,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 const types = @import("types.zig");
 
@@ -176,20 +177,16 @@ fn maxCIntValue() comptime_int {
     return (@as(comptime_int, 1) << (@typeInfo(c_int).int.bits - 1)) - 1;
 }
 
-pub fn TestRunner(comptime lib: type, comptime font_bytes: []const u8) @import("testing").TestRunner {
-    const embed = @import("embed");
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type, comptime font_bytes: []const u8) glib.testing.TestRunner {
     const Runner = struct {
-        const testing = lib.testing;
         const embedded_codepoint: u21 = 0x4E2D;
 
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -220,9 +217,9 @@ pub fn TestRunner(comptime lib: type, comptime font_bytes: []const u8) @import("
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
 
         fn runRejectsInvalidInputs() !void {
@@ -230,21 +227,21 @@ pub fn TestRunner(comptime lib: type, comptime font_bytes: []const u8) @import("
             const invalid = [_]u8{ 0x00, 0x01, 0x02, 0x03 };
             const ascii_noise = [_]u8{ 'n', 'o', 't', '-', 'a', '-', 'f', 'o', 'n', 't' };
 
-            try testing.expectError(InitError.InvalidFont, Self.init(empty[0..]));
-            try testing.expectError(InitError.InvalidFont, Self.init(invalid[0..]));
-            try testing.expectError(InitError.InvalidFont, Self.init(ascii_noise[0..]));
-            try testing.expectError(InitError.InvalidFont, Self.initOffset(invalid[0..], 2));
-            try testing.expectError(InitError.InvalidFont, Self.initOffset(ascii_noise[0..], ascii_noise.len));
+            try grt.std.testing.expectError(InitError.InvalidFont, Self.init(empty[0..]));
+            try grt.std.testing.expectError(InitError.InvalidFont, Self.init(invalid[0..]));
+            try grt.std.testing.expectError(InitError.InvalidFont, Self.init(ascii_noise[0..]));
+            try grt.std.testing.expectError(InitError.InvalidFont, Self.initOffset(invalid[0..], 2));
+            try grt.std.testing.expectError(InitError.InvalidFont, Self.initOffset(ascii_noise[0..], ascii_noise.len));
         }
 
         fn runInitOffsetAcceptsValidFontAtZeroOffset() !void {
             const font = try Self.initOffset(font_bytes, 0);
 
-            try testing.expect(font.glyphIndex(embedded_codepoint) > 0);
+            try grt.std.testing.expect(font.glyphIndex(embedded_codepoint) > 0);
         }
 
         fn runInitOffsetRejectsOffsetsTooLargeForCInt() !void {
-            try testing.expectError(
+            try grt.std.testing.expectError(
                 InitError.OffsetTooLarge,
                 intCastFontOffset(@as(usize, maxCIntValue()) + 1),
             );
@@ -257,11 +254,11 @@ pub fn TestRunner(comptime lib: type, comptime font_bytes: []const u8) @import("
             const width: usize = @intCast(glyph_box.width());
             const height: usize = @intCast(glyph_box.height());
 
-            try testing.expect(width > 0);
-            try testing.expect(height > 0);
+            try grt.std.testing.expect(width > 0);
+            try grt.std.testing.expect(height > 0);
 
             var invalid_stride_bitmap = [_]u8{0} ** 4;
-            try testing.expectError(
+            try grt.std.testing.expectError(
                 RenderCodepointBitmapError.InvalidStride,
                 font.renderCodepointBitmap(
                     invalid_stride_bitmap[0..],
@@ -276,12 +273,12 @@ pub fn TestRunner(comptime lib: type, comptime font_bytes: []const u8) @import("
 
             const stride = width + 3;
             const required_len = try requiredBitmapLen(width, height, stride);
-            try testing.expect(required_len > 0);
+            try grt.std.testing.expect(required_len > 0);
 
-            const too_small_bitmap = try testing.allocator.alloc(u8, required_len - 1);
-            defer testing.allocator.free(too_small_bitmap);
+            const too_small_bitmap = try grt.std.testing.allocator.alloc(u8, required_len - 1);
+            defer grt.std.testing.allocator.free(too_small_bitmap);
 
-            try testing.expectError(
+            try grt.std.testing.expectError(
                 RenderCodepointBitmapError.BufferTooSmall,
                 font.renderCodepointBitmap(
                     too_small_bitmap,
@@ -304,20 +301,20 @@ pub fn TestRunner(comptime lib: type, comptime font_bytes: []const u8) @import("
         }
 
         fn runRenderCodepointBitmapReportsSizeLimitErrors() !void {
-            const max_usize = lib.math.maxInt(usize);
+            const max_usize = grt.std.math.maxInt(usize);
 
-            try testing.expectError(
+            try grt.std.testing.expectError(
                 RenderCodepointBitmapError.DimensionTooLarge,
                 intCastBitmapDimension(@as(usize, maxCIntValue()) + 1),
             );
-            try testing.expectError(
+            try grt.std.testing.expectError(
                 RenderCodepointBitmapError.BitmapTooLarge,
                 requiredBitmapLen(1, 2, max_usize),
             );
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }

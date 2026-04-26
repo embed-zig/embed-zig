@@ -67,7 +67,8 @@ pub fn deinit(self: root) void {
     self.vtable.deinit(self.ptr);
 }
 
-pub fn make(comptime lib: type, comptime Impl: type) type {
+pub fn make(comptime grt: type, comptime Impl: type) type {
+    _ = grt;
     comptime {
         if (!@hasDecl(Impl, "Config")) @compileError("TrackCtrl impl must define Config");
         if (!@hasDecl(Impl, "init")) @compileError("TrackCtrl impl must define init");
@@ -88,7 +89,7 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
         _ = @as(*const fn (*Impl) void, &Impl.deinit);
     }
 
-    const Allocator = lib.mem.Allocator;
+    const Allocator = glib.std.mem.Allocator;
     const Ctx = struct {
         allocator: Allocator,
         impl: Impl,
@@ -243,7 +244,7 @@ pub fn make(comptime lib: type, comptime Impl: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         const State = struct {
             current_gain: f32 = 1.0,
@@ -253,7 +254,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
         const MakeImpl = struct {
             pub const Config = struct {
-                allocator: lib.mem.Allocator,
+                allocator: glib.std.mem.Allocator,
                 state: *State,
             };
 
@@ -286,7 +287,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             pub fn deinit(_: *@This()) void {}
         };
 
-        fn trackCtrlMakeSurface(testing: anytype) !void {
+        fn trackCtrlMakeSurface() !void {
             comptime {
                 _ = root.setGain;
                 _ = root.gain;
@@ -297,42 +298,41 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 _ = root.closeWithError;
                 _ = root.deinit;
                 _ = root.make;
-                _ = make(lib, MakeImpl).init;
+                _ = make(grt, MakeImpl).init;
             }
 
-            const TrackCtrlType = make(lib, MakeImpl);
+            const TrackCtrlType = make(grt, MakeImpl);
             var state = State{};
             const made = try TrackCtrlType.init(.{
-                .allocator = lib.testing.allocator,
+                .allocator = grt.std.testing.allocator,
                 .state = &state,
             });
             defer made.deinit();
             made.setGain(0.5);
-            try testing.expectEqual(@as(f32, 0.5), made.gain());
-            try testing.expectEqualStrings("made", made.label());
-            try testing.expectEqual(@as(usize, 11), made.readBytes());
+            try grt.std.testing.expectEqual(@as(f32, 0.5), made.gain());
+            try grt.std.testing.expectEqualStrings("made", made.label());
+            try grt.std.testing.expectEqual(@as(usize, 11), made.readBytes());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
-            TestCase.trackCtrlMakeSurface(testing) catch |err| {
+            TestCase.trackCtrlMakeSurface() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -19,21 +19,20 @@ const PairingFlow = blk: {
     break :blk builder.build();
 };
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            const testing = lib.testing;
 
             const TestCase = struct {
                 fn make_uses_store_and_node_builder_config() !void {
-                    const AssemblerType = Assembler.make(lib, .{
+                    const AssemblerType = Assembler.make(grt, .{
                         .store = .{
                             .max_stores = 8,
                             .max_state_nodes = 32,
@@ -55,41 +54,41 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                         .max_overlays = 2,
                         .max_routers = 2,
                         .max_selections = 2,
-                    }, Channel);
+                    });
 
                     const assembler = comptime AssemblerType.init();
-                    try testing.expect(AssemblerType.Lib == lib);
-                    try testing.expectEqual(@as(usize, 8), assembler.store_builder.store_bindings.len);
-                    try testing.expectEqual(@as(usize, 32), assembler.store_builder.state_bindings.len);
-                    try testing.expectEqual(@as(usize, 24), assembler.node_builder.ops.len);
-                    try testing.expectEqual(AssemblerType.Config.max_reducers, assembler.reducer_bindings.len);
-                    try testing.expectEqual(@as(usize, 4), assembler.adc_button_registry.periphs.len);
-                    try testing.expectEqual(@as(usize, 6), assembler.gpio_button_registry.periphs.len);
-                    try testing.expectEqual(@as(usize, 2), assembler.imu_registry.periphs.len);
-                    try testing.expectEqual(@as(usize, 3), assembler.ledstrip_registry.periphs.len);
-                    try testing.expectEqual(@as(usize, 2), assembler.modem_registry.periphs.len);
-                    try testing.expectEqual(@as(usize, 2), assembler.nfc_registry.periphs.len);
-                    try testing.expectEqual(@as(usize, 2), assembler.wifi_sta_registry.periphs.len);
-                    try testing.expectEqual(@as(usize, 2), assembler.wifi_ap_registry.periphs.len);
-                    try testing.expectEqual(@as(usize, 2), assembler.flow_registry.periphs.len);
-                    try testing.expectEqual(@as(usize, 2), assembler.overlay_registry.periphs.len);
-                    try testing.expectEqual(@as(usize, 2), assembler.router_registry.periphs.len);
-                    try testing.expectEqual(@as(usize, 2), assembler.selection_registry.periphs.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.store_builder.store_count);
-                    try testing.expectEqual(@as(usize, 0), assembler.node_builder.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.adc_button_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.gpio_button_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.imu_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.ledstrip_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.modem_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.nfc_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.wifi_sta_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.wifi_ap_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.flow_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.overlay_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.router_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.selection_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.reducer_count);
+                    try grt.std.testing.expect(AssemblerType.Lib == grt);
+                    try grt.std.testing.expectEqual(@as(usize, 8), assembler.store_builder.store_bindings.len);
+                    try grt.std.testing.expectEqual(@as(usize, 32), assembler.store_builder.state_bindings.len);
+                    try grt.std.testing.expectEqual(@as(usize, 24), assembler.node_builder.ops.len);
+                    try grt.std.testing.expectEqual(AssemblerType.Config.max_reducers, assembler.reducer_bindings.len);
+                    try grt.std.testing.expectEqual(@as(usize, 4), assembler.adc_button_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 6), assembler.gpio_button_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 2), assembler.imu_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 3), assembler.ledstrip_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 2), assembler.modem_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 2), assembler.nfc_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 2), assembler.wifi_sta_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 2), assembler.wifi_ap_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 2), assembler.flow_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 2), assembler.overlay_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 2), assembler.router_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 2), assembler.selection_registry.periphs.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.store_builder.store_count);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.node_builder.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.adc_button_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.gpio_button_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.imu_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.ledstrip_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.modem_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.nfc_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.wifi_sta_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.wifi_ap_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.flow_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.overlay_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.router_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.selection_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.reducer_count);
                 }
 
                 fn reexports_store_and_node_builder_methods() !void {
@@ -112,7 +111,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     }.factory;
 
                     const assembler = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{}, Channel);
+                        const AssemblerType = Assembler.make(grt, .{});
                         var next = AssemblerType.init();
                         next.setStore(.wifi, WifiStore);
                         next.setState("ui/home", .{.wifi});
@@ -125,23 +124,23 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                         break :blk next;
                     };
 
-                    try testing.expectEqual(@as(usize, 1), assembler.store_builder.store_count);
-                    try testing.expectEqual(@as(usize, 1), assembler.store_builder.state_binding_count);
-                    try testing.expectEqual(@as(usize, 2), assembler.node_builder.tag_len);
-                    try testing.expectEqual(@as(usize, 1), assembler.node_builder.switch_count);
-                    try testing.expectEqual(@as(usize, 5), assembler.node_builder.len);
-                    try testing.expectEqual(@as(usize, 1), assembler.reducer_count);
-                    try testing.expect(lib.mem.eql(u8, "wifi_reducer", assembler.reducer_bindings[0].name));
-                    try testing.expectEqual(@as(usize, 0), assembler.adc_button_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.gpio_button_registry.len);
-                    try testing.expectEqual(@as(usize, 0), assembler.ledstrip_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.store_builder.store_count);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.store_builder.state_binding_count);
+                    try grt.std.testing.expectEqual(@as(usize, 2), assembler.node_builder.tag_len);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.node_builder.switch_count);
+                    try grt.std.testing.expectEqual(@as(usize, 5), assembler.node_builder.len);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.reducer_count);
+                    try grt.std.testing.expect(grt.std.mem.eql(u8, "wifi_reducer", assembler.reducer_bindings[0].name));
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.adc_button_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.gpio_button_registry.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.ledstrip_registry.len);
                 }
 
                 fn build_auto_wires_configured_reducers() !void {
                     const CounterState = struct {
                         ticks: usize = 0,
                     };
-                    const CounterStore = Store.Object.make(lib, CounterState, .counter);
+                    const CounterStore = Store.Object.make(grt, CounterState, .counter);
                     const CounterReducerFactory = struct {
                         fn factory(
                             comptime StoresType: type,
@@ -168,9 +167,9 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     }.factory;
 
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{
+                        const AssemblerType = Assembler.make(grt, .{
                             .max_reducers = 2,
-                        }, Channel);
+                        });
                         var next = AssemblerType.init();
                         next.setStore(.counter, CounterStore);
                         next.addReducer(.counter, CounterReducerFactory);
@@ -179,14 +178,14 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                         break :blk next.build(build_config);
                     };
 
-                    try testing.expect(@hasField(Built.Root.Config, "counter"));
+                    try grt.std.testing.expect(@hasField(Built.Root.Config, "counter"));
 
                     var app = try Built.init(.{
-                        .allocator = testing.allocator,
+                        .allocator = grt.std.testing.allocator,
                     });
                     defer app.deinit();
 
-                    try testing.expectEqual(@as(usize, 0), app.store.stores.counter.get().ticks);
+                    try grt.std.testing.expectEqual(@as(usize, 0), app.store.stores.counter.get().ticks);
                     _ = try app.impl.runtime.root.process(.{
                         .origin = .manual,
                         .timestamp_ns = 0,
@@ -196,7 +195,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                             },
                         },
                     });
-                    try testing.expectEqual(@as(usize, 1), app.store.stores.counter.get().ticks);
+                    try grt.std.testing.expectEqual(@as(usize, 1), app.store.stores.counter.get().ticks);
                 }
 
                 fn manual_start_disables_auto_ticks_and_dispatch_processes_messages() !void {
@@ -204,7 +203,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                         ticks: usize = 0,
                         pressed: bool = false,
                     };
-                    const CounterStore = Store.Object.make(lib, CounterState, .counter);
+                    const CounterStore = Store.Object.make(grt, CounterState, .counter);
                     const CounterReducerFactory = struct {
                         fn factory(
                             comptime StoresType: type,
@@ -239,9 +238,9 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     }.factory;
 
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{
+                        const AssemblerType = Assembler.make(grt, .{
                             .max_reducers = 1,
-                        }, Channel);
+                        });
                         var next = AssemblerType.init();
                         next.setStore(.counter, CounterStore);
                         next.addReducer(.counter, CounterReducerFactory);
@@ -251,13 +250,13 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     };
 
                     var app = try Built.init(.{
-                        .allocator = testing.allocator,
+                        .allocator = grt.std.testing.allocator,
                     });
                     defer app.deinit();
 
                     try app.start(.{ .ticker = .manual });
-                    lib.Thread.sleep(3 * lib.time.ns_per_ms);
-                    try testing.expectEqual(@as(usize, 0), app.store.stores.counter.get().ticks);
+                    grt.std.Thread.sleep(3 * grt.std.time.ns_per_ms);
+                    try grt.std.testing.expectEqual(@as(usize, 0), app.store.stores.counter.get().ticks);
 
                     try app.dispatch(.{
                         .origin = .timer,
@@ -268,7 +267,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                             },
                         },
                     });
-                    try testing.expectEqual(@as(usize, 1), app.store.stores.counter.get().ticks);
+                    try grt.std.testing.expectEqual(@as(usize, 1), app.store.stores.counter.get().ticks);
 
                     try app.dispatch(.{
                         .origin = .manual,
@@ -282,8 +281,8 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     });
                     switch (app.impl.last_event.?) {
                         .raw_single_button => |event_value| {
-                            try testing.expectEqual(@as(u32, 7), event_value.source_id);
-                            try testing.expect(event_value.pressed);
+                            try grt.std.testing.expectEqual(@as(u32, 7), event_value.source_id);
+                            try grt.std.testing.expect(event_value.pressed);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -297,11 +296,11 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                             },
                         },
                     });
-                    try testing.expectEqual(@as(usize, 2), app.store.stores.counter.get().ticks);
-                    try testing.expect(app.store.stores.counter.get().pressed);
+                    try grt.std.testing.expectEqual(@as(usize, 2), app.store.stores.counter.get().ticks);
+                    try grt.std.testing.expect(app.store.stores.counter.get().pressed);
 
                     try app.stop();
-                    try testing.expectError(error.NotStarted, app.dispatch(.{
+                    try grt.std.testing.expectError(error.NotStarted, app.dispatch(.{
                         .origin = .timer,
                         .timestamp_ns = 0,
                         .body = .{
@@ -314,22 +313,22 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
 
                 fn add_grouped_button_records_registry_entry() !void {
                     const assembler = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{
+                        const AssemblerType = Assembler.make(grt, .{
                             .max_adc_buttons = 2,
-                        }, Channel);
+                        });
                         var next = AssemblerType.init();
                         next.addGroupedButton(.buttons, 7, 3);
                         break :blk next;
                     };
 
-                    try testing.expectEqual(@as(usize, 1), assembler.adc_button_registry.len);
-                    try testing.expectEqual(@as(u32, 7), assembler.adc_button_registry.periphs[0].id);
-                    try testing.expectEqual(@as(usize, 3), assembler.adc_button_registry.periphs[0].button_count);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.adc_button_registry.len);
+                    try grt.std.testing.expectEqual(@as(u32, 7), assembler.adc_button_registry.periphs[0].id);
+                    try grt.std.testing.expectEqual(@as(usize, 3), assembler.adc_button_registry.periphs[0].button_count);
                 }
 
                 fn build_config_exposes_added_labels() !void {
                     const BuildConfig = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{
+                        const AssemblerType = Assembler.make(grt, .{
                             .max_adc_buttons = 2,
                             .max_imu = 1,
                             .max_led_strips = 1,
@@ -337,7 +336,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                             .max_nfc = 1,
                             .max_wifi_sta = 1,
                             .max_wifi_ap = 1,
-                        }, Channel);
+                        });
                         var next = AssemblerType.init();
                         next.addGroupedButton(.buttons, 7, 3);
                         next.addImu(.imu, 13);
@@ -349,39 +348,39 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                         break :blk next.BuildConfig();
                     };
 
-                    try testing.expect(@hasField(BuildConfig, "buttons"));
-                    try testing.expect(@hasField(BuildConfig, "imu"));
-                    try testing.expect(@hasField(BuildConfig, "strip"));
-                    try testing.expect(@hasField(BuildConfig, "modem"));
-                    try testing.expect(@hasField(BuildConfig, "nfc"));
-                    try testing.expect(@hasField(BuildConfig, "sta"));
-                    try testing.expect(@hasField(BuildConfig, "ap"));
+                    try grt.std.testing.expect(@hasField(BuildConfig, "buttons"));
+                    try grt.std.testing.expect(@hasField(BuildConfig, "imu"));
+                    try grt.std.testing.expect(@hasField(BuildConfig, "strip"));
+                    try grt.std.testing.expect(@hasField(BuildConfig, "modem"));
+                    try grt.std.testing.expect(@hasField(BuildConfig, "nfc"));
+                    try grt.std.testing.expect(@hasField(BuildConfig, "sta"));
+                    try grt.std.testing.expect(@hasField(BuildConfig, "ap"));
                 }
 
                 fn add_led_strip_records_registry_entry() !void {
                     const assembler = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{
+                        const AssemblerType = Assembler.make(grt, .{
                             .max_led_strips = 2,
-                        }, Channel);
+                        });
                         var next = AssemblerType.init();
                         next.addLedStrip(.strip, 9, 4);
                         break :blk next;
                     };
 
-                    try testing.expectEqual(@as(usize, 1), assembler.ledstrip_registry.len);
-                    try testing.expectEqual(@as(u32, 9), assembler.ledstrip_registry.periphs[0].id);
-                    try testing.expectEqual(@as(usize, 4), assembler.ledstrip_registry.periphs[0].pixel_count);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.ledstrip_registry.len);
+                    try grt.std.testing.expectEqual(@as(u32, 9), assembler.ledstrip_registry.periphs[0].id);
+                    try grt.std.testing.expectEqual(@as(usize, 4), assembler.ledstrip_registry.periphs[0].pixel_count);
                 }
 
                 fn add_component_registries_record_entries() !void {
                     const assembler = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{
+                        const AssemblerType = Assembler.make(grt, .{
                             .max_imu = 1,
                             .max_modem = 1,
                             .max_nfc = 1,
                             .max_wifi_sta = 1,
                             .max_wifi_ap = 1,
-                        }, Channel);
+                        });
                         var next = AssemblerType.init();
                         next.addImu(.imu, 13);
                         next.addModem(.modem, 15);
@@ -391,26 +390,26 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                         break :blk next;
                     };
 
-                    try testing.expectEqual(@as(usize, 1), assembler.imu_registry.len);
-                    try testing.expectEqual(@as(u32, 13), assembler.imu_registry.periphs[0].id);
-                    try testing.expectEqual(@as(usize, 1), assembler.modem_registry.len);
-                    try testing.expectEqual(@as(u32, 15), assembler.modem_registry.periphs[0].id);
-                    try testing.expectEqual(@as(usize, 1), assembler.nfc_registry.len);
-                    try testing.expectEqual(@as(u32, 17), assembler.nfc_registry.periphs[0].id);
-                    try testing.expectEqual(@as(usize, 1), assembler.wifi_sta_registry.len);
-                    try testing.expectEqual(@as(u32, 19), assembler.wifi_sta_registry.periphs[0].id);
-                    try testing.expectEqual(@as(usize, 1), assembler.wifi_ap_registry.len);
-                    try testing.expectEqual(@as(u32, 21), assembler.wifi_ap_registry.periphs[0].id);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.imu_registry.len);
+                    try grt.std.testing.expectEqual(@as(u32, 13), assembler.imu_registry.periphs[0].id);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.modem_registry.len);
+                    try grt.std.testing.expectEqual(@as(u32, 15), assembler.modem_registry.periphs[0].id);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.nfc_registry.len);
+                    try grt.std.testing.expectEqual(@as(u32, 17), assembler.nfc_registry.periphs[0].id);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.wifi_sta_registry.len);
+                    try grt.std.testing.expectEqual(@as(u32, 19), assembler.wifi_sta_registry.periphs[0].id);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.wifi_ap_registry.len);
+                    try grt.std.testing.expectEqual(@as(u32, 21), assembler.wifi_ap_registry.periphs[0].id);
                 }
 
                 fn add_ui_registries_record_entries() !void {
                     const assembler = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{
+                        const AssemblerType = Assembler.make(grt, .{
                             .max_flows = 1,
                             .max_overlays = 1,
                             .max_routers = 1,
                             .max_selections = 1,
-                        }, Channel);
+                        });
                         var next = AssemblerType.init();
                         next.addFlow(.pairing, 31, PairingFlow);
                         next.addOverlay(.loading, 41, overlay.State{});
@@ -425,30 +424,30 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                         break :blk next;
                     };
 
-                    try testing.expectEqual(@as(usize, 1), assembler.flow_registry.len);
-                    try testing.expectEqual(@as(u32, 31), assembler.flow_registry.periphs[0].id);
-                    try testing.expect(@hasDecl(assembler.flow_registry.periphs[0].FlowType, "Reducer"));
-                    try testing.expectEqual(@as(usize, 1), assembler.overlay_registry.len);
-                    try testing.expectEqual(@as(u32, 41), assembler.overlay_registry.periphs[0].id);
-                    try testing.expect(!assembler.overlay_registry.periphs[0].initial_state.visible);
-                    try testing.expectEqual(@as(usize, 1), assembler.router_registry.len);
-                    try testing.expectEqual(@as(u32, 51), assembler.router_registry.periphs[0].id);
-                    try testing.expectEqual(@as(u32, 5), assembler.router_registry.periphs[0].initial_item.screen_id);
-                    try testing.expectEqual(@as(usize, 1), assembler.selection_registry.len);
-                    try testing.expectEqual(@as(u32, 61), assembler.selection_registry.periphs[0].id);
-                    try testing.expectEqual(@as(usize, 3), assembler.selection_registry.periphs[0].initial_state.count);
-                    try testing.expectEqual(@as(usize, 3), assembler.store_builder.store_count);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.flow_registry.len);
+                    try grt.std.testing.expectEqual(@as(u32, 31), assembler.flow_registry.periphs[0].id);
+                    try grt.std.testing.expect(@hasDecl(assembler.flow_registry.periphs[0].FlowType, "Reducer"));
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.overlay_registry.len);
+                    try grt.std.testing.expectEqual(@as(u32, 41), assembler.overlay_registry.periphs[0].id);
+                    try grt.std.testing.expect(!assembler.overlay_registry.periphs[0].initial_state.visible);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.router_registry.len);
+                    try grt.std.testing.expectEqual(@as(u32, 51), assembler.router_registry.periphs[0].id);
+                    try grt.std.testing.expectEqual(@as(u32, 5), assembler.router_registry.periphs[0].initial_item.screen_id);
+                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.selection_registry.len);
+                    try grt.std.testing.expectEqual(@as(u32, 61), assembler.selection_registry.periphs[0].id);
+                    try grt.std.testing.expectEqual(@as(usize, 3), assembler.selection_registry.periphs[0].initial_state.count);
+                    try grt.std.testing.expectEqual(@as(usize, 3), assembler.store_builder.store_count);
                 }
 
                 fn component_duplicate_detector_rejects_reused_labels_and_ids() !void {
                     const assembler = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{
+                        const AssemblerType = Assembler.make(grt, .{
                             .max_gpio_buttons = 1,
                             .max_flows = 1,
                             .max_overlays = 1,
                             .max_routers = 1,
                             .max_selections = 1,
-                        }, Channel);
+                        });
                         var next = AssemblerType.init();
                         next.addSingleButton(.shared, 7);
                         next.addFlow(.pairing, 31, PairingFlow);
@@ -458,7 +457,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                         break :blk next;
                     };
 
-                    try testing.expect(!registry_unique.isUniqueAcross(
+                    try grt.std.testing.expect(!registry_unique.isUniqueAcross(
                         .{
                             assembler.gpio_button_registry,
                             assembler.flow_registry,
@@ -469,7 +468,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                         .shared,
                         99,
                     ));
-                    try testing.expect(!registry_unique.isUniqueAcross(
+                    try grt.std.testing.expect(!registry_unique.isUniqueAcross(
                         .{
                             assembler.gpio_button_registry,
                             assembler.flow_registry,
@@ -480,7 +479,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                         .fresh,
                         31,
                     ));
-                    try testing.expect(registry_unique.isUniqueAcross(
+                    try grt.std.testing.expect(registry_unique.isUniqueAcross(
                         .{
                             assembler.gpio_button_registry,
                             assembler.flow_registry,
@@ -495,20 +494,20 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
 
                 fn build_without_optional_ui_still_returns_valid_app() !void {
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{}, Channel);
+                        const AssemblerType = Assembler.make(grt, .{});
                         var next = AssemblerType.init();
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{};
                         break :blk next.build(build_config);
                     };
 
-                    try testing.expectEqual(@as(usize, 0), @typeInfo(Built.FlowLabel).@"enum".fields.len);
-                    try testing.expectEqual(@as(usize, 0), @typeInfo(Built.RouterLabel).@"enum".fields.len);
-                    try testing.expectEqual(@as(usize, 0), @typeInfo(Built.OverlayLabel).@"enum".fields.len);
-                    try testing.expectEqual(@as(usize, 0), @typeInfo(Built.SelectionLabel).@"enum".fields.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), @typeInfo(Built.FlowLabel).@"enum".fields.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), @typeInfo(Built.RouterLabel).@"enum".fields.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), @typeInfo(Built.OverlayLabel).@"enum".fields.len);
+                    try grt.std.testing.expectEqual(@as(usize, 0), @typeInfo(Built.SelectionLabel).@"enum".fields.len);
 
                     var app = try Built.init(.{
-                        .allocator = testing.allocator,
+                        .allocator = grt.std.testing.allocator,
                     });
                     try app.start(.{});
                     try app.stop();
@@ -517,12 +516,12 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
 
                 fn ui_source_ids_follow_configured_ids() !void {
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{
+                        const AssemblerType = Assembler.make(grt, .{
                             .max_flows = 2,
                             .max_overlays = 2,
                             .max_routers = 2,
                             .max_selections = 2,
-                        }, Channel);
+                        });
                         var next = AssemblerType.init();
                         next.addFlow(.pairing_a, 31, PairingFlow);
                         next.addFlow(.pairing_b, 32, PairingFlow);
@@ -547,7 +546,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     };
 
                     var app = try Built.init(.{
-                        .allocator = testing.allocator,
+                        .allocator = grt.std.testing.allocator,
                     });
                     defer app.deinit();
 
@@ -557,7 +556,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     try app.push_route(.nav_a, .{ .screen_id = 8 });
                     switch (app.impl.last_event.?) {
                         .ui_route_push => |event_value| {
-                            try testing.expectEqual(@as(u32, 51), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 51), event_value.source_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -565,7 +564,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     try app.push_route(.nav_b, .{ .screen_id = 9 });
                     switch (app.impl.last_event.?) {
                         .ui_route_push => |event_value| {
-                            try testing.expectEqual(@as(u32, 52), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 52), event_value.source_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -573,7 +572,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     try app.move_flow(.pairing_a, .forward, .start);
                     switch (app.impl.last_event.?) {
                         .ui_flow_move => |event_value| {
-                            try testing.expectEqual(@as(u32, 31), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 31), event_value.source_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -581,7 +580,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     try app.move_flow(.pairing_b, .forward, .start);
                     switch (app.impl.last_event.?) {
                         .ui_flow_move => |event_value| {
-                            try testing.expectEqual(@as(u32, 32), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 32), event_value.source_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -589,7 +588,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     try app.reset_flow(.pairing_b);
                     switch (app.impl.last_event.?) {
                         .ui_flow_reset => |event_value| {
-                            try testing.expectEqual(@as(u32, 32), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 32), event_value.source_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -597,7 +596,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     try app.show_overlay(.loading_a, "base", false);
                     switch (app.impl.last_event.?) {
                         .ui_overlay_show => |event_value| {
-                            try testing.expectEqual(@as(u32, 41), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 41), event_value.source_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -605,7 +604,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     try app.show_overlay(.loading_b, "busy", true);
                     switch (app.impl.last_event.?) {
                         .ui_overlay_show => |event_value| {
-                            try testing.expectEqual(@as(u32, 42), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 42), event_value.source_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -613,7 +612,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     try app.hide_overlay(.loading_b);
                     switch (app.impl.last_event.?) {
                         .ui_overlay_hide => |event_value| {
-                            try testing.expectEqual(@as(u32, 42), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 42), event_value.source_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -621,7 +620,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     try app.next_selection(.menu_a);
                     switch (app.impl.last_event.?) {
                         .ui_selection_next => |event_value| {
-                            try testing.expectEqual(@as(u32, 61), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 61), event_value.source_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -629,7 +628,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     try app.next_selection(.menu_b);
                     switch (app.impl.last_event.?) {
                         .ui_selection_next => |event_value| {
-                            try testing.expectEqual(@as(u32, 62), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 62), event_value.source_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -637,7 +636,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     try app.reset_selection(.menu_b);
                     switch (app.impl.last_event.?) {
                         .ui_selection_reset => |event_value| {
-                            try testing.expectEqual(@as(u32, 62), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 62), event_value.source_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
@@ -645,13 +644,13 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
 
                 fn built_app_exposes_registry_metadata() !void {
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{
+                        const AssemblerType = Assembler.make(grt, .{
                             .max_adc_buttons = 1,
                             .max_flows = 1,
                             .max_overlays = 1,
                             .max_routers = 1,
                             .max_selections = 1,
-                        }, Channel);
+                        });
                         var next = AssemblerType.init();
                         next.addGroupedButton(.buttons, 7, 3);
                         next.addFlow(.pairing, 31, PairingFlow);
@@ -674,18 +673,18 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                         .selection_id = Built.registries.selection.periphs[0].id,
                     };
 
-                    try testing.expect(@hasDecl(Built, "Registries"));
-                    try testing.expect(@hasDecl(Built, "registries"));
-                    try testing.expectEqual(@as(usize, 1), Built.registries.adc_button.len);
-                    try testing.expectEqual(@as(usize, 1), Built.registries.flow.len);
-                    try testing.expectEqual(@as(usize, 1), Built.registries.overlay.len);
-                    try testing.expectEqual(@as(usize, 1), Built.registries.router.len);
-                    try testing.expectEqual(@as(usize, 1), Built.registries.selection.len);
-                    try testing.expectEqual(@as(u32, 7), meta.grouped_button_id);
-                    try testing.expectEqual(@as(u32, 31), meta.flow_id);
-                    try testing.expectEqual(@as(u32, 41), meta.overlay_id);
-                    try testing.expectEqual(@as(u32, 51), meta.router_id);
-                    try testing.expectEqual(@as(u32, 61), meta.selection_id);
+                    try grt.std.testing.expect(@hasDecl(Built, "Registries"));
+                    try grt.std.testing.expect(@hasDecl(Built, "registries"));
+                    try grt.std.testing.expectEqual(@as(usize, 1), Built.registries.adc_button.len);
+                    try grt.std.testing.expectEqual(@as(usize, 1), Built.registries.flow.len);
+                    try grt.std.testing.expectEqual(@as(usize, 1), Built.registries.overlay.len);
+                    try grt.std.testing.expectEqual(@as(usize, 1), Built.registries.router.len);
+                    try grt.std.testing.expectEqual(@as(usize, 1), Built.registries.selection.len);
+                    try grt.std.testing.expectEqual(@as(u32, 7), meta.grouped_button_id);
+                    try grt.std.testing.expectEqual(@as(u32, 31), meta.flow_id);
+                    try grt.std.testing.expectEqual(@as(u32, 41), meta.overlay_id);
+                    try grt.std.testing.expectEqual(@as(u32, 51), meta.router_id);
+                    try grt.std.testing.expectEqual(@as(u32, 61), meta.selection_id);
                 }
 
                 fn build_returns_app_methods() !void {
@@ -693,16 +692,16 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     const ledstrip_mod = @import("ledstrip");
 
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{
+                        const AssemblerType = Assembler.make(grt, .{
                             .max_adc_buttons = 2,
                             .max_led_strips = 1,
                             .pipeline = .{
-                                .tick_interval_ns = 7 * lib.time.ns_per_ms,
+                                .tick_interval_ns = 7 * grt.std.time.ns_per_ms,
                                 .spawn_config = .{
                                     .stack_size = 64 * 1024,
                                 },
                             },
-                        }, Channel);
+                        });
                         var next = AssemblerType.init();
                         next.addGroupedButton(.buttons, 7, 3);
                         next.addLedStrip(.strip, 11, 4);
@@ -724,43 +723,43 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                         break :blk next.build(build_config);
                     };
 
-                    try testing.expect(@hasDecl(Built, "PeriphLabel"));
-                    try testing.expect(@hasDecl(Built, "InitConfig"));
-                    try testing.expect(@hasDecl(Built, "start"));
-                    try testing.expect(@hasDecl(Built, "stop"));
-                    try testing.expect(@hasDecl(Built, "press_single_button"));
-                    try testing.expect(@hasDecl(Built, "release_single_button"));
-                    try testing.expect(@hasDecl(Built, "press_grouped_button"));
-                    try testing.expect(@hasDecl(Built, "release_grouped_button"));
-                    try testing.expect(@hasDecl(Built, "set_led_strip_animated"));
-                    try testing.expect(@hasDecl(Built, "set_led_strip_pixels"));
-                    try testing.expect(@hasDecl(Built, "set_led_strip_flash"));
-                    try testing.expect(@hasDecl(Built, "set_led_strip_pingpong"));
-                    try testing.expect(@hasDecl(Built, "set_led_strip_rotate"));
-                    try testing.expect(@hasDecl(Built, "router"));
-                    try testing.expect(@hasDecl(Built, "push_route"));
-                    try testing.expect(@hasDecl(Built, "move_flow"));
-                    try testing.expect(@hasDecl(Built, "available_moves"));
-                    try testing.expect(@hasDecl(Built, "show_overlay"));
-                    try testing.expect(@hasDecl(Built, "next_selection"));
-                    try testing.expectEqual(@as(usize, 1), Built.poller_count);
-                    try testing.expectEqual(@as(usize, 4), Built.pixel_count);
-                    try testing.expectEqual(@as(usize, 4), Built.LedStrip(.strip).pixel_count);
-                    try testing.expectEqual(@as(usize, 4), Built.LedStrip(.strip).FrameType.pixel_count);
-                    try testing.expectEqual(@as(u64, 7 * lib.time.ns_per_ms), Built.ImplType.pipeline_config.tick_interval_ns);
+                    try grt.std.testing.expect(@hasDecl(Built, "PeriphLabel"));
+                    try grt.std.testing.expect(@hasDecl(Built, "InitConfig"));
+                    try grt.std.testing.expect(@hasDecl(Built, "start"));
+                    try grt.std.testing.expect(@hasDecl(Built, "stop"));
+                    try grt.std.testing.expect(@hasDecl(Built, "press_single_button"));
+                    try grt.std.testing.expect(@hasDecl(Built, "release_single_button"));
+                    try grt.std.testing.expect(@hasDecl(Built, "press_grouped_button"));
+                    try grt.std.testing.expect(@hasDecl(Built, "release_grouped_button"));
+                    try grt.std.testing.expect(@hasDecl(Built, "set_led_strip_animated"));
+                    try grt.std.testing.expect(@hasDecl(Built, "set_led_strip_pixels"));
+                    try grt.std.testing.expect(@hasDecl(Built, "set_led_strip_flash"));
+                    try grt.std.testing.expect(@hasDecl(Built, "set_led_strip_pingpong"));
+                    try grt.std.testing.expect(@hasDecl(Built, "set_led_strip_rotate"));
+                    try grt.std.testing.expect(@hasDecl(Built, "router"));
+                    try grt.std.testing.expect(@hasDecl(Built, "push_route"));
+                    try grt.std.testing.expect(@hasDecl(Built, "move_flow"));
+                    try grt.std.testing.expect(@hasDecl(Built, "available_moves"));
+                    try grt.std.testing.expect(@hasDecl(Built, "show_overlay"));
+                    try grt.std.testing.expect(@hasDecl(Built, "next_selection"));
+                    try grt.std.testing.expectEqual(@as(usize, 1), Built.poller_count);
+                    try grt.std.testing.expectEqual(@as(usize, 4), Built.pixel_count);
+                    try grt.std.testing.expectEqual(@as(usize, 4), Built.LedStrip(.strip).pixel_count);
+                    try grt.std.testing.expectEqual(@as(usize, 4), Built.LedStrip(.strip).FrameType.pixel_count);
+                    try grt.std.testing.expectEqual(@as(u64, 7 * grt.std.time.ns_per_ms), Built.ImplType.pipeline_config.tick_interval_ns);
                     if (@hasField(@TypeOf(Built.ImplType.pipeline_config.spawn_config), "stack_size")) {
-                        try testing.expectEqual(
+                        try grt.std.testing.expectEqual(
                             @as(usize, 64 * 1024),
                             Built.ImplType.pipeline_config.spawn_config.stack_size,
                         );
                     }
-                    try testing.expectEqualStrings("buttons", @typeInfo(Built.PeriphLabel).@"enum".fields[0].name);
-                    try testing.expect(@hasField(Built.Store.Stores, "buttons"));
-                    try testing.expect(@hasField(Built.Store.Stores, "strip"));
-                    try testing.expect(@hasField(Built.Store.Stores, "pairing"));
-                    try testing.expect(@hasField(Built.Store.Stores, "loading"));
-                    try testing.expect(@hasField(Built.Store.Stores, "nav"));
-                    try testing.expect(@hasField(Built.Store.Stores, "menu"));
+                    try grt.std.testing.expectEqualStrings("buttons", @typeInfo(Built.PeriphLabel).@"enum".fields[0].name);
+                    try grt.std.testing.expect(@hasField(Built.Store.Stores, "buttons"));
+                    try grt.std.testing.expect(@hasField(Built.Store.Stores, "strip"));
+                    try grt.std.testing.expect(@hasField(Built.Store.Stores, "pairing"));
+                    try grt.std.testing.expect(@hasField(Built.Store.Stores, "loading"));
+                    try grt.std.testing.expect(@hasField(Built.Store.Stores, "nav"));
+                    try grt.std.testing.expect(@hasField(Built.Store.Stores, "menu"));
 
                     const MockGrouped = struct {
                         pub fn pressedButtonId(_: *@This()) !?u32 {
@@ -808,125 +807,125 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     var mock_grouped = MockGrouped{};
                     var dummy_strip = DummyStrip{};
                     var app = try Built.init(.{
-                        .allocator = testing.allocator,
+                        .allocator = grt.std.testing.allocator,
                         .buttons = drivers.button.Grouped.init(MockGrouped, &mock_grouped),
                         .strip = dummy_strip.handle(),
                     });
                     try app.start(.{});
-                    try testing.expectEqual(@as(u32, 5), app.router(.nav).currentPage());
-                    const moves = try app.available_moves(.pairing, testing.allocator);
-                    defer testing.allocator.free(moves);
-                    try testing.expectEqual(@as(usize, 1), moves.len);
-                    try testing.expect(moves[0].direction == .forward);
-                    try testing.expect(moves[0].edge == .start);
-                    try testing.expectError(error.InvalidPeriphKind, app.press_single_button(.buttons));
-                    try testing.expectError(error.InvalidPeriphKind, app.release_single_button(.buttons));
-                    try testing.expectError(error.InvalidPeriphKind, app.set_led_strip_pixels(.buttons, Built.FrameType{}, 1));
+                    try grt.std.testing.expectEqual(@as(u32, 5), app.router(.nav).currentPage());
+                    const moves = try app.available_moves(.pairing, grt.std.testing.allocator);
+                    defer grt.std.testing.allocator.free(moves);
+                    try grt.std.testing.expectEqual(@as(usize, 1), moves.len);
+                    try grt.std.testing.expect(moves[0].direction == .forward);
+                    try grt.std.testing.expect(moves[0].edge == .start);
+                    try grt.std.testing.expectError(error.InvalidPeriphKind, app.press_single_button(.buttons));
+                    try grt.std.testing.expectError(error.InvalidPeriphKind, app.release_single_button(.buttons));
+                    try grt.std.testing.expectError(error.InvalidPeriphKind, app.set_led_strip_pixels(.buttons, Built.FrameType{}, 1));
                     try app.press_grouped_button(.buttons, 1);
                     switch (app.impl.last_event.?) {
                         .raw_grouped_button => |event_value| {
-                            try testing.expectEqual(@as(u32, 7), event_value.source_id);
-                            try testing.expectEqual(@as(?u32, 1), event_value.button_id);
-                            try testing.expect(event_value.pressed);
+                            try grt.std.testing.expectEqual(@as(u32, 7), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(?u32, 1), event_value.button_id);
+                            try grt.std.testing.expect(event_value.pressed);
                         },
                         else => return error.UnexpectedMessage,
                     }
                     try app.release_grouped_button(.buttons);
                     switch (app.impl.last_event.?) {
                         .raw_grouped_button => |event_value| {
-                            try testing.expectEqual(@as(u32, 7), event_value.source_id);
-                            try testing.expectEqual(@as(?u32, 1), event_value.button_id);
-                            try testing.expect(!event_value.pressed);
+                            try grt.std.testing.expectEqual(@as(u32, 7), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(?u32, 1), event_value.button_id);
+                            try grt.std.testing.expect(!event_value.pressed);
                         },
                         else => return error.UnexpectedMessage,
                     }
                     try app.set_led_strip_pixels(.strip, Built.FrameType{}, 200);
                     switch (app.impl.last_event.?) {
                         .ledstrip_set_pixels => |event_value| {
-                            try testing.expectEqual(@as(u32, 11), event_value.source_id);
-                            try testing.expectEqual(@as(usize, 4), event_value.pixels.len);
-                            try testing.expectEqual(@as(u8, 200), event_value.brightness);
+                            try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(usize, 4), event_value.pixels.len);
+                            try grt.std.testing.expectEqual(@as(u8, 200), event_value.brightness);
                         },
                         else => return error.UnexpectedMessage,
                     }
                     try app.set_led_strip_animated(.strip, Built.FrameType{}, 128, 42);
                     switch (app.impl.last_event.?) {
                         .ledstrip_set => |event_value| {
-                            try testing.expectEqual(@as(u32, 11), event_value.source_id);
-                            try testing.expectEqual(@as(u8, 128), event_value.brightness);
-                            try testing.expectEqual(@as(u32, 42), event_value.duration);
+                            try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u8, 128), event_value.brightness);
+                            try grt.std.testing.expectEqual(@as(u32, 42), event_value.duration);
                         },
                         else => return error.UnexpectedMessage,
                     }
                     try app.set_led_strip_flash(.strip, Built.FrameType{}, 111, 5_000_000, 12_000_000);
                     switch (app.impl.last_event.?) {
                         .ledstrip_flash => |event_value| {
-                            try testing.expectEqual(@as(u32, 11), event_value.source_id);
-                            try testing.expectEqual(@as(u8, 111), event_value.brightness);
-                            try testing.expectEqual(@as(u64, 5_000_000), event_value.duration_ns);
-                            try testing.expectEqual(@as(u64, 12_000_000), event_value.interval_ns);
+                            try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u8, 111), event_value.brightness);
+                            try grt.std.testing.expectEqual(@as(u64, 5_000_000), event_value.duration_ns);
+                            try grt.std.testing.expectEqual(@as(u64, 12_000_000), event_value.interval_ns);
                         },
                         else => return error.UnexpectedMessage,
                     }
                     try app.set_led_strip_pingpong(.strip, Built.FrameType{}, Built.FrameType{}, 99, 9_000_000, 21_000_000);
                     switch (app.impl.last_event.?) {
                         .ledstrip_pingpong => |event_value| {
-                            try testing.expectEqual(@as(u32, 11), event_value.source_id);
-                            try testing.expectEqual(@as(u8, 99), event_value.brightness);
-                            try testing.expectEqual(@as(u64, 9_000_000), event_value.duration_ns);
-                            try testing.expectEqual(@as(u64, 21_000_000), event_value.interval_ns);
+                            try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u8, 99), event_value.brightness);
+                            try grt.std.testing.expectEqual(@as(u64, 9_000_000), event_value.duration_ns);
+                            try grt.std.testing.expectEqual(@as(u64, 21_000_000), event_value.interval_ns);
                         },
                         else => return error.UnexpectedMessage,
                     }
                     try app.set_led_strip_rotate(.strip, Built.FrameType{}, 77, 3_000_000, 7_000_000);
                     switch (app.impl.last_event.?) {
                         .ledstrip_rotate => |event_value| {
-                            try testing.expectEqual(@as(u32, 11), event_value.source_id);
-                            try testing.expectEqual(@as(u8, 77), event_value.brightness);
-                            try testing.expectEqual(@as(u64, 3_000_000), event_value.duration_ns);
-                            try testing.expectEqual(@as(u64, 7_000_000), event_value.interval_ns);
+                            try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u8, 77), event_value.brightness);
+                            try grt.std.testing.expectEqual(@as(u64, 3_000_000), event_value.duration_ns);
+                            try grt.std.testing.expectEqual(@as(u64, 7_000_000), event_value.interval_ns);
                         },
                         else => return error.UnexpectedMessage,
                     }
                     try app.push_route(.nav, .{ .screen_id = 9 });
                     switch (app.impl.last_event.?) {
                         .ui_route_push => |event_value| {
-                            try testing.expectEqual(@as(u32, 51), event_value.source_id);
-                            try testing.expectEqual(@as(u32, 9), event_value.item.screen_id);
+                            try grt.std.testing.expectEqual(@as(u32, 51), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 9), event_value.item.screen_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
                     try app.move_flow(.pairing, .forward, .start);
                     switch (app.impl.last_event.?) {
                         .ui_flow_move => |event_value| {
-                            try testing.expectEqual(@as(u32, 31), event_value.source_id);
-                            try testing.expect(event_value.direction == .forward);
+                            try grt.std.testing.expectEqual(@as(u32, 31), event_value.source_id);
+                            try grt.std.testing.expect(event_value.direction == .forward);
                         },
                         else => return error.UnexpectedMessage,
                     }
                     try app.show_overlay(.loading, "sync", true);
                     switch (app.impl.last_event.?) {
                         .ui_overlay_show => |event_value| {
-                            try testing.expectEqual(@as(u32, 41), event_value.source_id);
-                            try testing.expectEqual(@as(u8, 4), event_value.name_len);
-                            try testing.expect(event_value.blocking);
+                            try grt.std.testing.expectEqual(@as(u32, 41), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u8, 4), event_value.name_len);
+                            try grt.std.testing.expect(event_value.blocking);
                         },
                         else => return error.UnexpectedMessage,
                     }
                     try app.next_selection(.menu);
                     switch (app.impl.last_event.?) {
                         .ui_selection_next => |event_value| {
-                            try testing.expectEqual(@as(u32, 61), event_value.source_id);
+                            try grt.std.testing.expectEqual(@as(u32, 61), event_value.source_id);
                         },
                         else => return error.UnexpectedMessage,
                     }
                     try app.stop();
-                    try testing.expectError(error.NotStarted, app.release_grouped_button(.buttons));
+                    try grt.std.testing.expectError(error.NotStarted, app.release_grouped_button(.buttons));
                     app.deinit();
                 }
 
                 fn render_subscriber_runs_on_store_commit() !void {
-                    const CounterStore = Store.Object.make(lib, struct {
+                    const CounterStore = Store.Object.make(grt, struct {
                         value: u32 = 0,
                     }, .counter);
                     const RenderNamespace = struct {
@@ -947,7 +946,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     const RenderFactory = RenderNamespace.factory;
 
                     const Built = comptime blk: {
-                        const AssemblerType = Assembler.make(lib, .{
+                        const AssemblerType = Assembler.make(grt, .{
                             .max_handles = 1,
                             .store = .{
                                 .max_stores = 1,
@@ -955,7 +954,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                                 .max_store_refs = 4,
                                 .max_depth = 4,
                             },
-                        }, Channel);
+                        });
                         var next = AssemblerType.init();
                         next.setStore(.counter, CounterStore);
                         next.setState("ui", .{.counter});
@@ -969,19 +968,19 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
                     RenderNamespace.last_value = 0;
 
                     var app = try Built.init(.{
-                        .allocator = testing.allocator,
+                        .allocator = grt.std.testing.allocator,
                     });
                     defer app.deinit();
 
                     app.impl.runtime.store.stores.counter.patch(.{
                         .value = 7,
                     });
-                    try testing.expectEqual(@as(usize, 0), RenderNamespace.call_count);
+                    try grt.std.testing.expectEqual(@as(usize, 0), RenderNamespace.call_count);
 
                     app.impl.runtime.store.stores.counter.tick();
 
-                    try testing.expectEqual(@as(usize, 1), RenderNamespace.call_count);
-                    try testing.expectEqual(@as(u32, 7), RenderNamespace.last_value);
+                    try grt.std.testing.expectEqual(@as(usize, 1), RenderNamespace.call_count);
+                    try grt.std.testing.expectEqual(@as(u32, 7), RenderNamespace.last_value);
                 }
             };
 
@@ -1048,7 +1047,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.T
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

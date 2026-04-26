@@ -2,15 +2,14 @@ const glib = @import("glib");
 const MixerMod = @import("../../../Mixer.zig");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type) glib.testing.TestRunner {
-    const DefaultMixerType = MixerMod.make(lib);
+pub fn make(comptime grt: type) glib.testing.TestRunner {
+    const DefaultMixerType = MixerMod.make(grt);
     const Track = MixerMod.Track;
 
     const TestCase = struct {
-        fn run(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const Atomic = lib.atomic.Value;
-            const Thread = lib.Thread;
+        fn run(allocator: glib.std.mem.Allocator) !void {
+            const Atomic = grt.std.atomic.Value;
+            const Thread = grt.std.Thread;
 
             const mixer = try DefaultMixerType.init(.{
                 .allocator = allocator,
@@ -44,33 +43,33 @@ pub fn make(comptime lib: type) glib.testing.TestRunner {
                 }
             }.run, .{&state});
 
-            try test_utils.waitUntilTrue(lib, &state.started, error.WriterDidNotStart);
+            try test_utils.waitUntilTrue(grt, &state.started, error.WriterDidNotStart);
 
             for (0..1000) |_| {
                 if (state.finished.load(.acquire)) break;
                 Thread.yield() catch {};
             }
-            try testing.expect(!state.finished.load(.acquire));
+            try grt.std.testing.expect(!state.finished.load(.acquire));
 
             var out: [4]i16 = undefined;
             const first = mixer.read(&out) orelse return error.UnexpectedTerminalRead;
-            try testing.expectEqual(@as(usize, 2), first);
-            try testing.expectEqualSlices(i16, &.{ 1, 2 }, out[0..first]);
+            try grt.std.testing.expectEqual(@as(usize, 2), first);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 1, 2 }, out[0..first]);
 
             writer.join();
             if (state.result) |err| return err;
 
             mixer.closeWrite();
             const second = mixer.read(&out) orelse return error.UnexpectedTerminalRead;
-            try testing.expectEqual(@as(usize, 2), second);
-            try testing.expectEqualSlices(i16, &.{ 3, 4 }, out[0..second]);
-            try testing.expectEqual(@as(?usize, null), mixer.read(&out));
+            try grt.std.testing.expectEqual(@as(usize, 2), second);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 3, 4 }, out[0..second]);
+            try grt.std.testing.expectEqual(@as(?usize, null), mixer.read(&out));
         }
     };
 
     // One extra thread + small mixer buffers; worker only orchestrates (spawned thread has its own stack).
-    return glib.testing.TestRunner.fromFn(lib, 96 * 1024, struct {
-        fn run(t: *glib.testing.T, allocator: lib.mem.Allocator) !void {
+    return glib.testing.TestRunner.fromFn(grt.std, 96 * 1024, struct {
+        fn run(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
             _ = t;
             try TestCase.run(allocator);
         }

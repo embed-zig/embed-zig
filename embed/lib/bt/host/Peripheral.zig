@@ -9,15 +9,15 @@ const root = @import("../../bt.zig");
 const bt = @import("../Peripheral.zig");
 const att = @import("att.zig");
 
-pub fn make(comptime lib: type) type {
+pub fn make(comptime grt: type) type {
     return struct {
         const Self = @This();
 
         hci: root.Hci,
         state: bt.State = .idle,
         started: bool = false,
-        mutex: lib.Thread.Mutex = .{},
-        allocator: lib.mem.Allocator,
+        mutex: grt.std.Thread.Mutex = .{},
+        allocator: glib.std.mem.Allocator,
         hooks: glib.std.ArrayListUnmanaged(EventHook) = .{},
         subscription_hooks: glib.std.ArrayListUnmanaged(SubscriptionHook) = .{},
         services: glib.std.ArrayListUnmanaged(ServiceEntry) = .{},
@@ -80,7 +80,7 @@ pub fn make(comptime lib: type) type {
             }
         };
 
-        pub fn init(hci: root.Hci, allocator: lib.mem.Allocator) Self {
+        pub fn init(hci: root.Hci, allocator: glib.std.mem.Allocator) Self {
             return .{ .hci = hci, .allocator = allocator };
         }
 
@@ -731,10 +731,10 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
-            const Impl = make(lib);
+            const Impl = make(grt);
             const findCharHandle = struct {
                 fn get(peripheral: *Impl, char_uuid: u16) ?u16 {
                     for (peripheral.chars.items) |entry| {
@@ -747,11 +747,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             {
                 var peripheral = Impl{
                     .hci = undefined,
-                    .allocator = lib.testing.allocator,
+                    .allocator = grt.std.testing.allocator,
                 };
-                defer peripheral.chars.deinit(lib.testing.allocator);
-                defer peripheral.hooks.deinit(lib.testing.allocator);
-                defer peripheral.services.deinit(lib.testing.allocator);
+                defer peripheral.chars.deinit(grt.std.testing.allocator);
+                defer peripheral.hooks.deinit(grt.std.testing.allocator);
+                defer peripheral.services.deinit(grt.std.testing.allocator);
 
                 peripheral.setConfig(.{
                     .services = &.{
@@ -762,8 +762,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     },
                 });
 
-                try lib.testing.expectEqual(@as(?u16, 3), findCharHandle(&peripheral, 0x2A37));
-                try lib.testing.expectEqual(@as(?u16, 6), findCharHandle(&peripheral, 0x2A38));
+                try grt.std.testing.expectEqual(@as(?u16, 3), findCharHandle(&peripheral, 0x2A37));
+                try grt.std.testing.expectEqual(@as(?u16, 6), findCharHandle(&peripheral, 0x2A38));
 
                 const dummy_a = struct {
                     fn handler(_: ?*anyopaque, _: *const bt.Request, _: *bt.ResponseWriter) void {}
@@ -773,19 +773,19 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 };
 
                 peripheral.setRequestHandler(null, dummy_a.handler);
-                try lib.testing.expectEqual(@as(?bt.RequestHandlerFn, dummy_a.handler), peripheral.request_handler);
+                try grt.std.testing.expectEqual(@as(?bt.RequestHandlerFn, dummy_a.handler), peripheral.request_handler);
                 peripheral.setRequestHandler(null, dummy_b.handler);
-                try lib.testing.expectEqual(@as(?bt.RequestHandlerFn, dummy_b.handler), peripheral.request_handler);
+                try grt.std.testing.expectEqual(@as(?bt.RequestHandlerFn, dummy_b.handler), peripheral.request_handler);
             }
 
             {
                 var peripheral = Impl{
                     .hci = undefined,
-                    .allocator = lib.testing.allocator,
+                    .allocator = grt.std.testing.allocator,
                 };
-                defer peripheral.chars.deinit(lib.testing.allocator);
-                defer peripheral.hooks.deinit(lib.testing.allocator);
-                defer peripheral.services.deinit(lib.testing.allocator);
+                defer peripheral.chars.deinit(grt.std.testing.allocator);
+                defer peripheral.hooks.deinit(grt.std.testing.allocator);
+                defer peripheral.services.deinit(grt.std.testing.allocator);
 
                 const dummy = struct {
                     fn handler(_: ?*anyopaque, _: *const bt.Request, rw: *bt.ResponseWriter) void {
@@ -803,16 +803,16 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 });
                 peripheral.setRequestHandler(null, dummy.handler);
 
-                try lib.testing.expectEqual(@as(u8, 0x12), peripheral.chars.items[0].config.properties());
-                try lib.testing.expect(peripheral.chars.items[0].cccd_handle != 0);
-                try lib.testing.expectEqual(@as(u8, 0x08), peripheral.chars.items[1].config.properties());
-                try lib.testing.expectEqual(@as(u16, 0), peripheral.chars.items[1].cccd_handle);
+                try grt.std.testing.expectEqual(@as(u8, 0x12), peripheral.chars.items[0].config.properties());
+                try grt.std.testing.expect(peripheral.chars.items[0].cccd_handle != 0);
+                try grt.std.testing.expectEqual(@as(u8, 0x08), peripheral.chars.items[1].config.properties());
+                try grt.std.testing.expectEqual(@as(u16, 0), peripheral.chars.items[1].cccd_handle);
 
                 var out: [att.MAX_PDU_LEN]u8 = undefined;
 
                 const read_denied_len = peripheral.handleRead(1, peripheral.chars.items[1].value_handle, &out);
                 switch (att.decodePdu(out[0..read_denied_len]).?) {
-                    .error_response => |err| try lib.testing.expectEqual(att.ErrorCode.read_not_permitted, err.error_code),
+                    .error_response => |err| try grt.std.testing.expectEqual(att.ErrorCode.read_not_permitted, err.error_code),
                     else => return error.ExpectedReadNotPermitted,
                 }
 
@@ -825,7 +825,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     true,
                 );
                 switch (att.decodePdu(out[0..write_denied_len]).?) {
-                    .error_response => |err| try lib.testing.expectEqual(att.ErrorCode.write_not_permitted, err.error_code),
+                    .error_response => |err| try grt.std.testing.expectEqual(att.ErrorCode.write_not_permitted, err.error_code),
                     else => return error.ExpectedWriteNotPermitted,
                 }
             }
@@ -833,11 +833,11 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             {
                 var peripheral = Impl{
                     .hci = undefined,
-                    .allocator = lib.testing.allocator,
+                    .allocator = grt.std.testing.allocator,
                 };
-                defer peripheral.chars.deinit(lib.testing.allocator);
-                defer peripheral.hooks.deinit(lib.testing.allocator);
-                defer peripheral.services.deinit(lib.testing.allocator);
+                defer peripheral.chars.deinit(grt.std.testing.allocator);
+                defer peripheral.hooks.deinit(grt.std.testing.allocator);
+                defer peripheral.services.deinit(grt.std.testing.allocator);
 
                 peripheral.setConfig(.{
                     .services = &.{
@@ -857,19 +857,19 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                     true,
                 );
                 switch (att.decodePdu(out[0..resp_len]).?) {
-                    .error_response => |err| try lib.testing.expectEqual(att.ErrorCode.invalid_attribute_value_length, err.error_code),
+                    .error_response => |err| try grt.std.testing.expectEqual(att.ErrorCode.invalid_attribute_value_length, err.error_code),
                     else => return error.ExpectedInvalidLength,
                 }
             }
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -880,7 +880,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

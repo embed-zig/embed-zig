@@ -1,5 +1,3 @@
-const glib = @import("glib");
-
 const Assembler = @import("zux/Assembler.zig");
 const Config = @import("zux/assembler/Config.zig");
 
@@ -19,11 +17,10 @@ pub const spec = struct {
 };
 
 pub fn assemble(
-    comptime lib: type,
+    comptime grt: type,
     comptime config: Config,
-    comptime Channel: glib.sync.channel.ChannelType,
 ) type {
-    return Assembler.make(lib, config, Channel);
+    return Assembler.make(grt, config);
 }
 
 pub const test_runner = struct {

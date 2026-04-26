@@ -286,7 +286,7 @@ pub fn isHigh(self: *Self, pin: Pin) !bool {
 pub fn isLow(self: *Self, pin: Pin) !bool {
     return (try self.read(pin)) == .low;
 }
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn setDirectionAndWriteUpdateCachedRegisters() !void {
             const FakeI2c = struct {
@@ -315,21 +315,21 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             try gpio.setDirection(.pin6, .output);
             try gpio.write(.pin6, .low);
 
-            try lib.testing.expectEqual(@as(usize, 2), fake.write_count);
-            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.config), 0xBF }, fake.writes[0]);
-            try lib.testing.expectEqual([2]u8{ @intFromEnum(Register.output), 0xBF }, fake.writes[1]);
-            try lib.testing.expectEqual(@as(u8, 0xBF), gpio.getConfigAll());
-            try lib.testing.expectEqual(@as(u8, 0xBF), gpio.getOutputAll());
+            try grt.std.testing.expectEqual(@as(usize, 2), fake.write_count);
+            try grt.std.testing.expectEqual([2]u8{ @intFromEnum(Register.config), 0xBF }, fake.writes[0]);
+            try grt.std.testing.expectEqual([2]u8{ @intFromEnum(Register.output), 0xBF }, fake.writes[1]);
+            try grt.std.testing.expectEqual(@as(u8, 0xBF), gpio.getConfigAll());
+            try grt.std.testing.expectEqual(@as(u8, 0xBF), gpio.getOutputAll());
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -340,7 +340,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

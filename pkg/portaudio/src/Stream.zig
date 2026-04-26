@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const binding = @import("binding.zig");
 const error_mod = @import("error.zig");
 const types = @import("types.zig");
@@ -89,24 +90,22 @@ pub fn frameSampleCount(self: Self, frames: usize) usize {
     return frames * self.channel_count;
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
-    const testing_api = @import("testing");
-
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            modeGuardsRejectWrongDirection(lib) catch |err| {
+            modeGuardsRejectWrongDirection() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            frameLengthChecksFollowChannelCount(lib) catch |err| {
+            frameLengthChecksFollowChannelCount() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
@@ -117,35 +116,31 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
 
-        fn modeGuardsRejectWrongDirection(comptime L: type) !void {
-            const testing = L.testing;
-
+        fn modeGuardsRejectWrongDirection() !void {
             var input_stream = make(undefined, .input, 1);
             var output_stream = make(undefined, .output, 1);
             var read_buf = [_]i16{0};
 
-            try testing.expectError(
+            try grt.std.testing.expectError(
                 error_mod.Error.CanNotWriteToAnInputOnlyStream,
                 input_stream.write(&.{1}, 1),
             );
-            try testing.expectError(
+            try grt.std.testing.expectError(
                 error_mod.Error.CanNotReadFromAnOutputOnlyStream,
                 output_stream.read(read_buf[0..], 1),
             );
         }
 
-        fn frameLengthChecksFollowChannelCount(comptime L: type) !void {
-            const testing = L.testing;
-
+        fn frameLengthChecksFollowChannelCount() !void {
             var duplex_stream = make(undefined, .duplex, 2);
 
-            try testing.expectEqual(@as(usize, 8), duplex_stream.frameSampleCount(4));
-            try testing.expectError(error_mod.Error.BufferTooSmall, duplex_stream.write(&.{ 1, 2, 3 }, 2));
+            try grt.std.testing.expectEqual(@as(usize, 8), duplex_stream.frameSampleCount(4));
+            try grt.std.testing.expectError(error_mod.Error.BufferTooSmall, duplex_stream.write(&.{ 1, 2, 3 }, 2));
         }
 
         fn deinitIsNoopWhenAlreadyClosed() !void {
@@ -158,5 +153,5 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

@@ -68,19 +68,16 @@ pub fn encodeChecksum(crc: u32) [checksum_field_len]u8 {
     };
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn testUpdateMatchesBitwiseReference() !void {
-            const testing = lib.testing;
             const sample = [_]u8{ 0x4f, 0x67, 0x67, 0x53, 0x00, 0xff, 0x11, 0x22, 0x33, 0x44, 0xaa, 0xbb, 0xcc };
 
-            try testing.expectEqual(referenceUpdate(0, sample[0..]), update(0, sample[0..]));
-            try testing.expectEqual(referenceUpdate(0x12345678, sample[0..]), update(0x12345678, sample[0..]));
+            try grt.std.testing.expectEqual(referenceUpdate(0, sample[0..]), update(0, sample[0..]));
+            try grt.std.testing.expectEqual(referenceUpdate(0x12345678, sample[0..]), update(0x12345678, sample[0..]));
         }
 
         fn testPageChecksumAndEncodingMatchExpectedValues() !void {
-            const testing = lib.testing;
-
             var header = [_]u8{
                 0x4f, 0x67, 0x67, 0x53, 0x00, 0x02, 0x01, 0x02,
                 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x13, 0x37,
@@ -90,9 +87,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const body = [_]u8{ 0xde, 0xad, 0xbe, 0xef, 0x00, 0x11, 0x22, 0x33, 0x44 };
 
             const expected = referenceUpdate(referenceUpdate(0, header[0..]), body[0..]);
-            try testing.expectEqual(expected, pageChecksum(header[0..], body[0..]));
+            try grt.std.testing.expectEqual(expected, pageChecksum(header[0..], body[0..]));
 
-            try testing.expectEqualSlices(u8, &.{ 0x78, 0x56, 0x34, 0x12 }, &encodeChecksum(0x12345678));
+            try grt.std.testing.expectEqualSlices(u8, &.{ 0x78, 0x56, 0x34, 0x12 }, &encodeChecksum(0x12345678));
         }
 
         fn referenceUpdate(initial_crc: u32, buffer: []const u8) u32 {
@@ -113,12 +110,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -133,7 +130,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

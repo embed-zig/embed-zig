@@ -30,7 +30,7 @@ pub const DataFn = *const fn (
 ) anyerror![]u8;
 
 pub fn send(
-    comptime lib: type,
+    comptime grt: type,
     allocator: glib.std.mem.Allocator,
     transport: anytype,
     data_ctx: ?*anyopaque,
@@ -96,7 +96,7 @@ pub fn send(
 
     var reply_tx = ReplyTx{ .inner = transport };
     handed_off = true;
-    return write_xfer.write(lib, allocator, &reply_tx, payload, .{
+    return write_xfer.write(grt, allocator, &reply_tx, payload, .{
         .att_mtu = config.att_mtu,
         .timeout_ms = config.timeout_ms,
         .send_redundancy = config.send_redundancy,
@@ -104,7 +104,7 @@ pub fn send(
     });
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const invalid_read_start = [_]u8{ 0xFF, 0xFF, 0x00, 0x03 };
@@ -144,9 +144,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             var invalid_transport = InvalidStartTransport{};
-            try lib.testing.expectError(error.InvalidReadStart, send(
-                lib,
-                lib.testing.allocator,
+            try grt.std.testing.expectError(error.InvalidReadStart, send(
+                grt,
+                grt.std.testing.allocator,
                 &invalid_transport,
                 null,
                 struct {
@@ -156,7 +156,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }.dataFn,
                 .{},
             ));
-            try lib.testing.expect(invalid_transport.deinited);
+            try grt.std.testing.expect(invalid_transport.deinited);
 
             const OversizedStartTransport = struct {
                 deinited: bool = false,
@@ -192,9 +192,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             var oversized_transport = OversizedStartTransport{};
-            try lib.testing.expectError(error.InvalidReadStart, send(
-                lib,
-                lib.testing.allocator,
+            try grt.std.testing.expectError(error.InvalidReadStart, send(
+                grt,
+                grt.std.testing.allocator,
                 &oversized_transport,
                 null,
                 struct {
@@ -204,7 +204,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }.dataFn,
                 .{},
             ));
-            try lib.testing.expect(oversized_transport.deinited);
+            try grt.std.testing.expect(oversized_transport.deinited);
 
             const EmptyPayloadTransport = struct {
                 write_count: usize = 0,
@@ -242,9 +242,9 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             var empty_transport = EmptyPayloadTransport{};
-            try lib.testing.expectError(error.EmptyData, send(
-                lib,
-                lib.testing.allocator,
+            try grt.std.testing.expectError(error.EmptyData, send(
+                grt,
+                grt.std.testing.allocator,
                 &empty_transport,
                 null,
                 struct {
@@ -254,8 +254,8 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 }.dataFn,
                 .{},
             ));
-            try lib.testing.expectEqual(@as(usize, 0), empty_transport.write_count);
-            try lib.testing.expect(empty_transport.deinited);
+            try grt.std.testing.expectEqual(@as(usize, 0), empty_transport.write_count);
+            try grt.std.testing.expect(empty_transport.deinited);
         }
     };
     const Runner = struct {

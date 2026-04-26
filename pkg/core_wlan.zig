@@ -8,9 +8,10 @@
 //!   const core_wlan = @import("core_wlan");
 //!   const CoreWlanWifi = drivers.wifi.Wifi.make(std, core_wlan.Wifi);
 
+const glib = @import("glib");
+const gstd = @import("gstd");
 const embed = @import("embed");
 const drivers = @import("drivers");
-const testing_api = @import("testing");
 const CWSta = @import("core_wlan/src/CWSta.zig");
 const CWApUnsupported = @import("core_wlan/src/CWApUnsupported.zig");
 const wifi = drivers.wifi;
@@ -26,7 +27,7 @@ pub const Wifi = struct {
     pub const StaConfig = CWSta.Config;
     pub const ApConfig = CWApUnsupported.Config;
     pub const Config = struct {
-        allocator: embed.mem.Allocator,
+        allocator: glib.std.mem.Allocator,
         source_id: u32 = 0,
         sta: StaConfig = .{},
         ap: ApConfig = .{},
@@ -109,12 +110,12 @@ pub const Wifi = struct {
     }
 };
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn rootSurfaceExposesWifiContract() !void {
             const Impl = Wifi;
             comptime {
-                _ = wifi.Wifi.make(lib, Impl).init;
+                _ = wifi.Wifi.make(grt, Impl).init;
                 _ = Wifi.sta;
                 _ = Wifi.ap;
                 _ = Wifi.setEventCallback;
@@ -140,7 +141,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             };
 
             var device = try Wifi.init(.{
-                .allocator = lib.testing.allocator,
+                .allocator = gstd.runtime.std.testing.allocator,
                 .source_id = 41,
             });
             defer device.deinit();
@@ -148,23 +149,23 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var sink = Sink{};
             device.setEventCallback(@ptrCast(&sink), Sink.cb);
             Wifi.onStaEvent(@ptrCast(&device), .{ .lost_ip = {} });
-            try lib.testing.expectEqual(@as(usize, 1), sink.hits);
-            try lib.testing.expectEqual(@as(u32, 41), sink.last_source_id);
-            try lib.testing.expect(sink.saw_sta_event);
+            try gstd.runtime.std.testing.expectEqual(@as(usize, 1), sink.hits);
+            try gstd.runtime.std.testing.expectEqual(@as(u32, 41), sink.last_source_id);
+            try gstd.runtime.std.testing.expect(sink.saw_sta_event);
 
             device.clearEventCallback();
             Wifi.onStaEvent(@ptrCast(&device), .{ .lost_ip = {} });
-            try lib.testing.expectEqual(@as(usize, 1), sink.hits);
+            try gstd.runtime.std.testing.expectEqual(@as(usize, 1), sink.hits);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -179,7 +180,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -188,51 +189,39 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }
 
 test "core_wlan/unit_tests/std" {
-    const lib = @import("std");
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .core_wlan_unit_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .core_wlan_unit_std);
     defer t.deinit();
 
-    t.run("unit", test_runner.unit.make(lib));
+    t.run("unit", test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "core_wlan/unit_tests/embed_std" {
-    const lib = @import("embed_std").std;
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .core_wlan_unit_embed_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .core_wlan_unit_embed_std);
     defer t.deinit();
 
-    t.run("unit", test_runner.unit.make(lib));
+    t.run("unit", test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "core_wlan/integration_tests/std" {
-    const lib = @import("std");
-    const testing = @import("testing");
+    @import("std").testing.log_level = .info;
 
-    lib.testing.log_level = .info;
-
-    var t = testing.T.new(lib, .core_wlan_integration_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .core_wlan_integration_std);
     defer t.deinit();
 
-    t.run("integration", test_runner.integration.make(lib));
+    t.run("integration", test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "core_wlan/integration_tests/embed_std" {
-    const lib = @import("embed_std").std;
-    const testing = @import("testing");
-
-    var t = testing.T.new(lib, .core_wlan_integration_embed_std);
+    var t = glib.testing.T.new(gstd.runtime.std, .core_wlan_integration_embed_std);
     defer t.deinit();
 
-    t.run("integration", test_runner.integration.make(lib));
+    t.run("integration", test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }

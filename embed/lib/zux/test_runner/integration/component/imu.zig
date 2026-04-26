@@ -6,26 +6,26 @@ const free_fall = @import("imu/free_fall.zig");
 const shake = @import("imu/shake.zig");
 const tilt = @import("imu/tilt.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) glib.testing.TestRunner {
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("shake", shake.make(lib, Channel));
-            t.run("tilt", tilt.make(lib, Channel));
-            t.run("flip", flip.make(lib, Channel));
-            t.run("free_fall", free_fall.make(lib, Channel));
-            t.run("flip_then_shake", flip_then_shake.make(lib, Channel));
+            t.run("shake", shake.make(grt));
+            t.run("tilt", tilt.make(grt));
+            t.run("flip", flip.make(grt));
+            t.run("free_fall", free_fall.make(grt));
+            t.run("flip_then_shake", flip_then_shake.make(grt));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

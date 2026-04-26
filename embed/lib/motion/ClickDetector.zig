@@ -182,21 +182,19 @@ fn elapsedNs(start_ns: i128, end_ns: i128) u64 {
     return @intCast(delta_ns);
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn testClickEmitsAfterQuietWindow() !void {
-            const testing = lib.testing;
-
             var press_ctx_value: u8 = 1;
             var release_ctx_value: u8 = 2;
             var detector = ClickDetector.initDefault();
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .timestamp_ns = 10,
                 .pressed = true,
                 .ctx = @ptrCast(&press_ctx_value),
             }) == null);
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .timestamp_ns = 20,
                 .pressed = false,
                 .ctx = @ptrCast(&release_ctx_value),
@@ -204,24 +202,22 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             const action = detector.flush(20 + @as(i128, default_multi_click_window_ns)).?;
             switch (action.gesture) {
-                .click => |count| try testing.expectEqual(@as(u16, 1), count),
-                else => try testing.expect(false),
+                .click => |count| try grt.std.testing.expectEqual(@as(u16, 1), count),
+                else => try grt.std.testing.expect(false),
             }
-            try testing.expect(action.ctx == @as(Context, @ptrCast(&release_ctx_value)));
+            try grt.std.testing.expect(action.ctx == @as(Context, @ptrCast(&release_ctx_value)));
         }
 
         fn testMultiClickAccumulatesWithinWindow() !void {
-            const testing = lib.testing;
-
             var last_ctx_value: u8 = 3;
             var detector = ClickDetector.initDefault();
 
             inline for ([_]i128{ 10, 30, 50, 70 }) |start_ns| {
-                try testing.expect(detector.update(.{
+                try grt.std.testing.expect(detector.update(.{
                     .timestamp_ns = start_ns,
                     .pressed = true,
                 }) == null);
-                try testing.expect(detector.update(.{
+                try grt.std.testing.expect(detector.update(.{
                     .timestamp_ns = start_ns + 10,
                     .pressed = false,
                     .ctx = @ptrCast(&last_ctx_value),
@@ -230,19 +226,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             const action = detector.flush(80 + @as(i128, default_multi_click_window_ns)).?;
             switch (action.gesture) {
-                .click => |count| try testing.expectEqual(@as(u16, 4), count),
-                else => try testing.expect(false),
+                .click => |count| try grt.std.testing.expectEqual(@as(u16, 4), count),
+                else => try grt.std.testing.expect(false),
             }
-            try testing.expect(action.ctx == @as(Context, @ptrCast(&last_ctx_value)));
+            try grt.std.testing.expect(action.ctx == @as(Context, @ptrCast(&last_ctx_value)));
         }
 
         fn testLongPressEmitsOnFlush() !void {
-            const testing = lib.testing;
-
             var press_ctx_value: u8 = 4;
             var detector = ClickDetector.initDefault();
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .timestamp_ns = 10,
                 .pressed = true,
                 .ctx = @ptrCast(&press_ctx_value),
@@ -250,12 +244,10 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
 
             const action = detector.flush(10 + @as(i128, default_long_press_ns) + 25).?;
             try expectLongPressDuration(action, default_long_press_ns + 25);
-            try testing.expect(action.ctx == @as(Context, @ptrCast(&press_ctx_value)));
+            try grt.std.testing.expect(action.ctx == @as(Context, @ptrCast(&press_ctx_value)));
         }
 
         fn testReleaseAfterFlushedLongPressEmitsUpdatedDuration() !void {
-            const testing = lib.testing;
-
             var detector = ClickDetector.initDefault();
             _ = detector.update(.{
                 .timestamp_ns = 10,
@@ -269,14 +261,12 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
                 .pressed = false,
             }).?;
             try expectLongPressDuration(release_action, default_long_press_ns + 10);
-            try testing.expect(!detector.hasPendingActions());
+            try grt.std.testing.expect(!detector.hasPendingActions());
         }
 
         fn testHeldSamplesAfterLongPressEmitCumulativeDuration() !void {
-            const testing = lib.testing;
-
             var detector = ClickDetector.initDefault();
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .timestamp_ns = 10,
                 .pressed = true,
             }) == null);
@@ -293,18 +283,16 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const third_action = detector.flush(10 + @as(i128, default_long_press_ns) * 2 + 50).?;
             try expectLongPressDuration(third_action, default_long_press_ns * 2 + 50);
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .timestamp_ns = 10 + @as(i128, default_long_press_ns) * 2 + 50,
                 .pressed = false,
             }) == null);
-            try testing.expect(!detector.hasPendingActions());
+            try grt.std.testing.expect(!detector.hasPendingActions());
         }
 
         fn testReleaseAtSameTimestampDoesNotDuplicateLongPress() !void {
-            const testing = lib.testing;
-
             var detector = ClickDetector.initDefault();
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .timestamp_ns = 10,
                 .pressed = true,
             }) == null);
@@ -313,15 +301,13 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             const first_action = detector.flush(held_ns).?;
             try expectLongPressDuration(first_action, default_long_press_ns + 20);
 
-            try testing.expect(detector.update(.{
+            try grt.std.testing.expect(detector.update(.{
                 .timestamp_ns = held_ns,
                 .pressed = false,
             }) == null);
         }
 
         fn testQueueOverflowDropsOldestAction() !void {
-            const testing = lib.testing;
-
             var detector = ClickDetector.initDefault();
 
             detector.queueAction(.{ .gesture = .{ .click = 1 }, .ctx = null });
@@ -330,17 +316,15 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             detector.queueAction(.{ .gesture = .{ .click = 4 }, .ctx = null });
             detector.queueAction(.{ .gesture = .{ .click = 5 }, .ctx = null });
 
-            try testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
+            try grt.std.testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
             try expectClickCount(detector.nextAction().?, 2);
             try expectClickCount(detector.nextAction().?, 3);
             try expectClickCount(detector.nextAction().?, 4);
             try expectClickCount(detector.nextAction().?, 5);
-            try testing.expect(detector.nextAction() == null);
+            try grt.std.testing.expect(detector.nextAction() == null);
         }
 
         fn testQueueOverflowAfterWrapPreservesFifoOrder() !void {
-            const testing = lib.testing;
-
             var detector = ClickDetector.initDefault();
 
             detector.queueAction(.{ .gesture = .{ .click = 1 }, .ctx = null });
@@ -353,40 +337,36 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             detector.queueAction(.{ .gesture = .{ .click = 5 }, .ctx = null });
             detector.queueAction(.{ .gesture = .{ .click = 6 }, .ctx = null });
 
-            try testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
+            try grt.std.testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
             try expectClickCount(detector.nextAction().?, 3);
             try expectClickCount(detector.nextAction().?, 4);
             try expectClickCount(detector.nextAction().?, 5);
             try expectClickCount(detector.nextAction().?, 6);
-            try testing.expect(detector.nextAction() == null);
+            try grt.std.testing.expect(detector.nextAction() == null);
         }
 
         fn expectClickCount(action: Action, expected_count: u16) !void {
-            const testing = lib.testing;
-
             switch (action.gesture) {
-                .click => |count| try testing.expectEqual(expected_count, count),
-                else => try testing.expect(false),
+                .click => |count| try grt.std.testing.expectEqual(expected_count, count),
+                else => try grt.std.testing.expect(false),
             }
         }
 
         fn expectLongPressDuration(action: Action, expected_held_ns: u64) !void {
-            const testing = lib.testing;
-
             switch (action.gesture) {
-                .long_press_ns => |held_ns| try testing.expectEqual(expected_held_ns, held_ns),
-                else => try testing.expect(false),
+                .long_press_ns => |held_ns| try grt.std.testing.expectEqual(expected_held_ns, held_ns),
+                else => try grt.std.testing.expect(false),
             }
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -425,7 +405,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

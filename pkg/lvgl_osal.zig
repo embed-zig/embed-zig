@@ -11,15 +11,13 @@ const c = @cImport({
     @cInclude("src/osal/lv_os.h");
 });
 
-pub fn make(comptime gz: type, comptime allocator: gz.std.mem.Allocator) type {
+pub fn make(comptime grt: type, comptime allocator: glib.std.mem.Allocator) type {
     comptime {
-        if (!glib.runtime.is(gz)) @compileError("lvgl_osal.make requires a glib runtime namespace");
+        if (!glib.runtime.is(grt)) @compileError("lvgl_osal.make requires a glib runtime namespace");
     }
 
-    const lib = gz.std;
-
     return struct {
-        const Thread = lib.Thread;
+        const Thread = grt.std.Thread;
         const ThreadCallback = *const fn (?*anyopaque) callconv(.c) void;
 
         const MutexImpl = struct {
@@ -169,13 +167,13 @@ pub fn make(comptime gz: type, comptime allocator: gz.std.mem.Allocator) type {
 
         fn normalizeStackSize(stack_size: usize) usize {
             if (stack_size == 0) return 0;
-            if (stack_size < lib.heap.pageSize()) return 0;
+            if (stack_size < grt.std.heap.pageSize()) return 0;
             return stack_size;
         }
 
         fn clampPriority(prio: c_int, fallback: u8) u8 {
             if (prio < 0) return fallback;
-            if (prio > @as(c_int, lib.math.maxInt(u8))) return lib.math.maxInt(u8);
+            if (prio > @as(c_int, grt.std.math.maxInt(u8))) return grt.std.math.maxInt(u8);
             return @intCast(prio);
         }
 

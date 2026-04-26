@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const stdz = @import("stdz");
 const testing_mod = @import("testing");
 
@@ -30,7 +31,9 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
 
             t.run("thread", thread.make(lib));
             t.run("log", log.make(lib));
-            t.run("posix", posix.make(lib));
+            if (builtin.target.os.tag != .windows) {
+                t.run("posix", posix.make(lib));
+            }
             t.run("time", time.make(lib));
             t.run("atomic", atomic.make(lib));
             t.run("heap", heap.make(lib));

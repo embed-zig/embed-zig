@@ -4,14 +4,14 @@
 //! This backend translates those calls into the `drivers.wifi.Sta` interface and
 //! emits best-effort events from operations initiated through this adapter.
 
+const glib = @import("glib");
 const embed = @import("embed");
 const std = @import("embed_std").std;
 const drivers = @import("drivers");
-const testing_api = @import("testing");
 const wifi = drivers.wifi;
 const Sta = wifi.Sta;
 const objc = @import("objc.zig");
-const Allocator = embed.mem.Allocator;
+const Allocator = glib.std.mem.Allocator;
 
 const CWSta = @This();
 
@@ -373,10 +373,10 @@ fn parseMacAddress(value: []const u8) ?Sta.MacAddr {
     return addr;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn parseMacAddressParsesColonSeparatedHexBytes() !void {
-            try lib.testing.expectEqual(
+            try grt.std.testing.expectEqual(
                 Sta.MacAddr{ 0x10, 0x20, 0x30, 0x40, 0x50, 0x60 },
                 parseMacAddress("10:20:30:40:50:60").?,
             );
@@ -384,12 +384,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -400,7 +400,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -409,5 +409,5 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     const Holder = struct {
         var runner: Runner = .{};
     };
-    return testing_api.TestRunner.make(Runner).new(&Holder.runner);
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

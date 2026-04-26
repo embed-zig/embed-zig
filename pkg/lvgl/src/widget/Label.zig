@@ -1,6 +1,6 @@
+const glib = @import("glib");
 const binding = @import("../binding.zig");
 const embed = @import("embed");
-const testing_api = @import("testing");
 const Obj = @import("../object/Obj.zig");
 
 const Self = @This();
@@ -56,23 +56,22 @@ pub fn longMode(self: *const Self) LongMode {
     return binding.lv_label_get_long_mode(self.handle);
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: embed.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: embed.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             const lvgl_testing = @import("../testing.zig");
-            const mem = lib.mem;
+            const mem = grt.std.mem;
 
             const Cases = struct {
                 fn composesObjectLayerAndStoresText() !void {
-                    const testing = lib.testing;
                     var fixture = try lvgl_testing.Fixture.init();
                     defer fixture.deinit();
 
@@ -83,12 +82,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     label.setText("hello");
 
-                    try testing.expectEqual(screen.raw(), obj.parent().?.raw());
-                    try testing.expectEqualStrings("hello", mem.span(label.text()));
+                    try grt.std.testing.expectEqual(screen.raw(), obj.parent().?.raw());
+                    try grt.std.testing.expectEqualStrings("hello", mem.span(label.text()));
                 }
 
                 fn longModeRoundtripsThroughWrapper() !void {
-                    const testing = lib.testing;
                     var fixture = try lvgl_testing.Fixture.init();
                     defer fixture.deinit();
 
@@ -99,11 +97,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     label.setLongMode(long_mode_scroll);
 
-                    try testing.expectEqual(long_mode_scroll, label.longMode());
+                    try grt.std.testing.expectEqual(long_mode_scroll, label.longMode());
                 }
 
                 fn staticTextStillParticipatesInObjectApi() !void {
-                    const testing = lib.testing;
                     var fixture = try lvgl_testing.Fixture.init();
                     defer fixture.deinit();
 
@@ -117,13 +114,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     obj.setPos(14, 9);
                     obj.updateLayout();
 
-                    try testing.expectEqualStrings("fixed", mem.span(label.text()));
-                    try testing.expectEqual(@as(i32, 14), obj.x());
-                    try testing.expectEqual(@as(i32, 9), obj.y());
+                    try grt.std.testing.expectEqualStrings("fixed", mem.span(label.text()));
+                    try grt.std.testing.expectEqual(@as(i32, 14), obj.x());
+                    try grt.std.testing.expectEqual(@as(i32, 9), obj.y());
                 }
 
                 fn staticTextUsesBorrowedStorage() !void {
-                    const testing = lib.testing;
                     var fixture = try lvgl_testing.Fixture.init();
                     defer fixture.deinit();
 
@@ -136,7 +132,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     const borrowed_text = borrowed[0.. :0];
                     label.setTextStatic(borrowed_text);
 
-                    try testing.expectEqual(@intFromPtr(borrowed_text.ptr), @intFromPtr(label.text()));
+                    try grt.std.testing.expectEqual(@intFromPtr(borrowed_text.ptr), @intFromPtr(label.text()));
                 }
             };
 
@@ -159,13 +155,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: embed.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            grt.std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = grt.std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
-    return testing_api.TestRunner.make(Runner).new(runner);
+    return glib.testing.TestRunner.make(Runner).new(runner);
 }

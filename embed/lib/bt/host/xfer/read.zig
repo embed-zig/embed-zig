@@ -19,11 +19,12 @@ pub const Config = struct {
 };
 
 pub fn read(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
+    comptime grt: type,
+    allocator: glib.std.mem.Allocator,
     transport: anytype,
     config: Config,
 ) ![]u8 {
+    _ = grt;
     const TransportPtr = @TypeOf(transport);
     const Transport = switch (@typeInfo(TransportPtr)) {
         .pointer => |ptr| ptr.child,
@@ -135,7 +136,7 @@ fn sendMissingReadChunks(transport: anytype, rcvmask: []const u8, total: u16, ma
     }
 }
 
-pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const HappyTransport = struct {
@@ -182,17 +183,17 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             var transport = HappyTransport.init();
-            const payload_bytes = try read(lib, lib.testing.allocator, &transport, .{
+            const payload_bytes = try read(grt, grt.std.testing.allocator, &transport, .{
                 .att_mtu = 9,
             });
-            defer lib.testing.allocator.free(payload_bytes);
+            defer grt.std.testing.allocator.free(payload_bytes);
 
-            try lib.testing.expectEqual(@as(usize, 5), payload_bytes.len);
-            try lib.testing.expectEqualSlices(u8, "hello", payload_bytes);
-            try lib.testing.expect(transport.deinited);
-            try lib.testing.expectEqual(@as(usize, 2), transport.write_count);
-            try lib.testing.expectEqualSlices(u8, &Chunk.read_start_magic, transport.writes[0][0..transport.write_lens[0]]);
-            try lib.testing.expectEqualSlices(u8, &Chunk.ack_signal, transport.writes[1][0..transport.write_lens[1]]);
+            try grt.std.testing.expectEqual(@as(usize, 5), payload_bytes.len);
+            try grt.std.testing.expectEqualSlices(u8, "hello", payload_bytes);
+            try grt.std.testing.expect(transport.deinited);
+            try grt.std.testing.expectEqual(@as(usize, 2), transport.write_count);
+            try grt.std.testing.expectEqualSlices(u8, &Chunk.read_start_magic, transport.writes[0][0..transport.write_lens[0]]);
+            try grt.std.testing.expectEqualSlices(u8, &Chunk.ack_signal, transport.writes[1][0..transport.write_lens[1]]);
 
             const Step = union(enum) {
                 payload: usize,
@@ -255,29 +256,29 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             };
 
             var retry_transport = RetryTransport.init();
-            const retry_payload = try read(lib, lib.testing.allocator, &retry_transport, .{
+            const retry_payload = try read(grt, grt.std.testing.allocator, &retry_transport, .{
                 .att_mtu = 9,
             });
-            defer lib.testing.allocator.free(retry_payload);
+            defer grt.std.testing.allocator.free(retry_payload);
 
             var expected_loss: [Chunk.max_mtu]u8 = undefined;
             const expected = Chunk.encodeLossList(&.{2}, &expected_loss);
-            try lib.testing.expectEqual(@as(usize, 5), retry_payload.len);
-            try lib.testing.expectEqualSlices(u8, "hello", retry_payload);
-            try lib.testing.expect(retry_transport.deinited);
-            try lib.testing.expectEqual(@as(usize, 3), retry_transport.write_count);
-            try lib.testing.expectEqualSlices(u8, &Chunk.read_start_magic, retry_transport.writes[0][0..retry_transport.write_lens[0]]);
-            try lib.testing.expectEqualSlices(u8, expected, retry_transport.writes[1][0..retry_transport.write_lens[1]]);
-            try lib.testing.expectEqualSlices(u8, &Chunk.ack_signal, retry_transport.writes[2][0..retry_transport.write_lens[2]]);
+            try grt.std.testing.expectEqual(@as(usize, 5), retry_payload.len);
+            try grt.std.testing.expectEqualSlices(u8, "hello", retry_payload);
+            try grt.std.testing.expect(retry_transport.deinited);
+            try grt.std.testing.expectEqual(@as(usize, 3), retry_transport.write_count);
+            try grt.std.testing.expectEqualSlices(u8, &Chunk.read_start_magic, retry_transport.writes[0][0..retry_transport.write_lens[0]]);
+            try grt.std.testing.expectEqualSlices(u8, expected, retry_transport.writes[1][0..retry_transport.write_lens[1]]);
+            try grt.std.testing.expectEqualSlices(u8, &Chunk.ack_signal, retry_transport.writes[2][0..retry_transport.write_lens[2]]);
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *glib.testing.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -288,7 +289,7 @@ pub fn TestRunner(comptime lib: type) glib.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
