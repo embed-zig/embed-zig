@@ -198,7 +198,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             t.run("record", record.TestRunner(lib));
             t.run("client_handshake", client_handshake.TestRunner(lib));
             t.run("server_handshake", server_handshake.TestRunner(lib));
-            t.run("make2_conn_context", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
+            t.run("make2_conn_context", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, struct {
                 fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
                     const net_root = @import("../net.zig");
                     const ContextApi = @import("context").make(lib);

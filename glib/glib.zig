@@ -120,6 +120,7 @@ pub const sync = @import("sync");
 pub const io = @import("io");
 pub const mime = @import("mime");
 pub const net = @import("net");
+pub const crypto = @import("crypto");
 pub const runtime = struct {
     const runtime_ns = @This();
     const TypeMarker = struct {};

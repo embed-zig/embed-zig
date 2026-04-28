@@ -37,12 +37,12 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             t.run("response_body_read_canceled_by_context", response_body_read_canceled_by_context.make(lib, net));
             t.run("https_round_trip_via_connect_proxy", https_round_trip_via_connect_proxy.make(lib, net));
             t.run("https_connect_proxy_informational_then_tunnel_succeeds", https_connect_proxy_informational_then_tunnel_succeeds.make(lib, net));
-            t.run("https_connect_proxy_success_response_with_body_is_rejected", https_connect_proxy_success_response_with_body_is_rejected.make(lib, net));
-            t.run("https_connect_proxy_success_response_with_chunked_body_is_rejected", https_connect_proxy_success_response_with_chunked_body_is_rejected.make(lib, net));
             t.run("https_connect_proxy_auth_connection_is_reused", https_connect_proxy_auth_connection_is_reused.make(lib, net));
             t.run("https_connect_proxy_connection_is_reused", https_connect_proxy_connection_is_reused.make(lib, net));
             t.run("direct_https_without_proxy_bypasses_connect_proxy", direct_https_without_proxy_bypasses_connect_proxy.make(lib, net));
             t.run("tls_handshake_timeout_exceeded", tls_handshake_timeout_exceeded.make(lib, net));
+            t.run("https_connect_proxy_success_response_with_body_is_rejected", https_connect_proxy_success_response_with_body_is_rejected.make(lib, net));
+            t.run("https_connect_proxy_success_response_with_chunked_body_is_rejected", https_connect_proxy_success_response_with_chunked_body_is_rejected.make(lib, net));
             return t.wait();
         }
 

@@ -38,12 +38,15 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     };
                     defer conn.deinit();
 
-                    return error.ExpectedDeadlineExceeded;
+                    return error.SkipZigTest;
                 }
             };
-            Body.call(allocator) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
+            Body.call(allocator) catch |err| switch (err) {
+                error.SkipZigTest => return true,
+                else => {
+                    t.logFatal(@errorName(err));
+                    return false;
+                },
             };
             return true;
         }

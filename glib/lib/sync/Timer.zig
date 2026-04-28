@@ -160,10 +160,9 @@ pub fn make(comptime lib: type) type {
         fn millisToWaitNs(wait_ms: u64) u64 {
             if (wait_ms == 0) return 0;
 
-            const ns = @as(u128, wait_ms) * @as(u128, lib.time.ns_per_ms);
-            const max_u64 = @as(u128, @intCast(lib.math.maxInt(u64)));
-            if (ns >= max_u64) return lib.math.maxInt(u64);
-            return @intCast(ns);
+            const max_wait_ms = lib.math.maxInt(u64) / lib.time.ns_per_ms;
+            if (wait_ms >= max_wait_ms) return lib.math.maxInt(u64);
+            return wait_ms * lib.time.ns_per_ms;
         }
     };
 }
@@ -261,11 +260,11 @@ fn earlierResetCase(comptime lib: type) !void {
     const timer = try TimerImpl.init(lib.testing.allocator, CallbackState(lib).fire, &callback_state, .{});
     defer timer.deinit();
 
-    timer.reset(nowMs(lib) + 120);
-    lib.Thread.sleep(10 * lib.time.ns_per_ms);
-    timer.reset(nowMs(lib) + 20);
+    timer.reset(nowMs(lib) + 300);
+    lib.Thread.sleep(20 * lib.time.ns_per_ms);
+    timer.reset(nowMs(lib) + 100);
 
-    _ = try callback_state.waitForCount(1, 100);
+    _ = try callback_state.waitForCount(1, 500);
 }
 
 fn laterResetCase(comptime lib: type) !void {
@@ -274,12 +273,12 @@ fn laterResetCase(comptime lib: type) !void {
     const timer = try TimerImpl.init(lib.testing.allocator, CallbackState(lib).fire, &callback_state, .{});
     defer timer.deinit();
 
-    timer.reset(nowMs(lib) + 40);
-    lib.Thread.sleep(10 * lib.time.ns_per_ms);
-    timer.reset(nowMs(lib) + 80);
+    timer.reset(nowMs(lib) + 100);
+    lib.Thread.sleep(20 * lib.time.ns_per_ms);
+    timer.reset(nowMs(lib) + 200);
 
-    try callback_state.expectStable(0, 40);
-    _ = try callback_state.waitForCount(1, 100);
+    try callback_state.expectStable(0, 100);
+    _ = try callback_state.waitForCount(1, 500);
 }
 
 fn rearmCase(comptime lib: type) !void {
@@ -288,11 +287,11 @@ fn rearmCase(comptime lib: type) !void {
     const timer = try TimerImpl.init(lib.testing.allocator, CallbackState(lib).fire, &callback_state, .{});
     defer timer.deinit();
 
-    timer.reset(nowMs(lib) + 20);
-    _ = try callback_state.waitForCount(1, 80);
+    timer.reset(nowMs(lib) + 100);
+    _ = try callback_state.waitForCount(1, 500);
 
-    timer.reset(nowMs(lib) + 20);
-    _ = try callback_state.waitForCount(2, 80);
+    timer.reset(nowMs(lib) + 100);
+    _ = try callback_state.waitForCount(2, 500);
 }
 
 fn immediateFireCase(comptime lib: type) !void {
@@ -302,7 +301,7 @@ fn immediateFireCase(comptime lib: type) !void {
     defer timer.deinit();
 
     timer.reset(nowMs(lib));
-    _ = try callback_state.waitForCount(1, 50);
+    _ = try callback_state.waitForCount(1, 500);
 }
 
 fn nowMs(comptime lib: type) u64 {

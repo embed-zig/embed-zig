@@ -16,6 +16,7 @@ const Modem = @import("../Modem.zig");
 const wifi = @import("../wifi.zig");
 const Qmi8658 = @import("../imu/qmi8658.zig");
 const Nfc = @import("../Nfc.zig");
+const Rgb = @import("../display/Rgb.zig");
 const Tca9554 = @import("../gpio/tca9554.zig");
 const TypeA = @import("../nfc/io/TypeA.zig");
 const type_a = @import("../nfc/fm175xx/type_a.zig");
@@ -50,6 +51,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("wifi", wifi.test_runner.unit.make(grt));
             t.run("Qmi8658", Qmi8658.TestRunner(grt));
             t.run("Nfc", Nfc.TestRunner(grt));
+            t.run("Display/Rgb", Rgb.TestRunner(grt));
             t.run("Tca9554", Tca9554.TestRunner(grt));
             t.run("TypeA", TypeA.TestRunner(grt));
             t.run("type_a", type_a.TestRunner(grt));

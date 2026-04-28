@@ -2946,6 +2946,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 source.mu.unlock();
 
                 mock_conn.mu.lock();
+                while (!mock_conn.closed) mock_conn.cond.wait(&mock_conn.mu);
                 try testing.expect(mock_conn.closed);
                 try testing.expect(mock_conn.close_before_write_finished);
                 mock_conn.allow_write_return = true;

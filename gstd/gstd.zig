@@ -10,3 +10,7 @@ pub const runtime = glib.runtime.make(.{
     .channel_factory = ChannelType.ChannelFactory,
     .net_impl = net_backend.impl,
 });
+
+pub const test_support = struct {
+    pub const net = net_backend.posix_impl;
+};

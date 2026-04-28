@@ -1,0 +1,69 @@
+pub const meta = .{
+    .source_file = sourceFile(),
+    .module = "embed/zux",
+    .labels = &.{ "integration", "unit" },
+};
+
+fn sourceFile() []const u8 {
+    return @src().file;
+}
+
+const embed = @import("embed");
+const glib = @import("glib");
+const gstd = @import("gstd");
+const bt = embed.bt;
+const ledstrip = embed.ledstrip;
+const drivers = embed.drivers;
+const motion = embed.motion;
+const audio = embed.audio;
+const zux = embed.zux;
+
+test "embed/zux/unit/std" {
+    const std = @import("std");
+
+    std.testing.log_level = .info;
+
+    var t = glib.testing.T.new(gstd.runtime.std, .zux);
+    defer t.deinit();
+
+    t.run("embed/zux/unit/std", zux.test_runner.unit.make(gstd.runtime));
+    if (!t.wait()) return error.TestFailed;
+}
+
+test "embed/zux/unit/gstd" {
+    const std = @import("std");
+
+    std.testing.log_level = .info;
+
+    var t = glib.testing.T.new(gstd.runtime.std, .zux);
+    defer t.deinit();
+
+    t.run("embed/zux/unit/gstd", zux.test_runner.unit.make(gstd.runtime));
+    if (!t.wait()) return error.TestFailed;
+}
+
+test "embed/zux/integration/std" {
+    const std = @import("std");
+
+    std.testing.log_level = .info;
+
+    var t = glib.testing.T.new(gstd.runtime.std, .zux);
+    defer t.deinit();
+    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
+
+    t.run("embed/zux/integration/std", zux.test_runner.integration.make(gstd.runtime));
+    if (!t.wait()) return error.TestFailed;
+}
+
+test "embed/zux/integration/gstd" {
+    const std = @import("std");
+
+    std.testing.log_level = .info;
+
+    var t = glib.testing.T.new(gstd.runtime.std, .zux);
+    defer t.deinit();
+    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
+
+    t.run("embed/zux/integration/gstd", zux.test_runner.integration.make(gstd.runtime));
+    if (!t.wait()) return error.TestFailed;
+}

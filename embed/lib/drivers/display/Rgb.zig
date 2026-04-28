@@ -25,22 +25,62 @@ pub fn from565(pixel: u16) Self {
     );
 }
 
-test "drivers/unit_tests/Display/Rgb/cmp_compares_all_channels" {
-    try glib.std.testing.expect(init(1, 2, 3).cmp(init(1, 2, 3)));
-    try glib.std.testing.expect(!init(1, 2, 3).cmp(init(1, 2, 4)));
-}
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const TestCase = struct {
+        fn cmpComparesAllChannels() !void {
+            try grt.std.testing.expect(init(1, 2, 3).cmp(init(1, 2, 3)));
+            try grt.std.testing.expect(!init(1, 2, 3).cmp(init(1, 2, 4)));
+        }
 
-test "drivers/unit_tests/Display/Rgb/from565_decodes_common_colors" {
-    try glib.std.testing.expect(init(0, 0, 0).cmp(from565(0x0000)));
-    try glib.std.testing.expect(init(255, 255, 255).cmp(from565(0xFFFF)));
-    try glib.std.testing.expect(init(255, 0, 0).cmp(from565(0xF800)));
-    try glib.std.testing.expect(init(0, 255, 0).cmp(from565(0x07E0)));
-    try glib.std.testing.expect(init(0, 0, 255).cmp(from565(0x001F)));
-}
+        fn from565DecodesCommonColors() !void {
+            try grt.std.testing.expect(init(0, 0, 0).cmp(from565(0x0000)));
+            try grt.std.testing.expect(init(255, 255, 255).cmp(from565(0xFFFF)));
+            try grt.std.testing.expect(init(255, 0, 0).cmp(from565(0xF800)));
+            try grt.std.testing.expect(init(0, 255, 0).cmp(from565(0x07E0)));
+            try grt.std.testing.expect(init(0, 0, 255).cmp(from565(0x001F)));
+        }
 
-test "drivers/unit_tests/Display/Rgb/from565_expands_partial_channels" {
-    const decoded = from565(0x8410);
-    try glib.std.testing.expectEqual(@as(u8, 132), decoded.r);
-    try glib.std.testing.expectEqual(@as(u8, 130), decoded.g);
-    try glib.std.testing.expectEqual(@as(u8, 132), decoded.b);
+        fn from565ExpandsPartialChannels() !void {
+            const decoded = from565(0x8410);
+            try grt.std.testing.expectEqual(@as(u8, 132), decoded.r);
+            try grt.std.testing.expectEqual(@as(u8, 130), decoded.g);
+            try grt.std.testing.expectEqual(@as(u8, 132), decoded.b);
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            TestCase.cmpComparesAllChannels() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.from565DecodesCommonColors() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.from565ExpandsPartialChannels() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

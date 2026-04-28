@@ -9,15 +9,11 @@ can run in tests, on desktop targets, and on embedded systems.
 
 ## Modules
 
-- `embed`: platform-facing runtime surface
-- `context`: cancellation, deadlines, and request-scoped state
-- `sync`: channels, racing, and concurrency helpers
-- `io`: generic IO helpers
-- `net`: networking, resolver, TLS, HTTP, and socket layers
-- `mime`: MIME parsing and formatting
-- `bt`: Bluetooth host stack
-- `ledstrip`: LED frame, transition, and animator helpers
-- `zux`: snapshot-driven state runtime
+- `glib`: portable library implementations and runtime contracts
+- `gstd`: std-backed host compatibility layer
+- `embed`: embedded implementation namespace
+- `thirdparty/*`: explicitly exported third-party modules such as `lvgl`,
+  `mbedtls`, `opus`, and platform packages
 
 ## Requirements
 
@@ -37,6 +33,8 @@ const embed = dep.module("embed");
 const core_bluetooth = dep.module("core_bluetooth");
 const core_wlan = dep.module("core_wlan");
 const lvgl = dep.module("lvgl");
+const lvgl_osal = dep.module("lvgl_osal");
+const mbedtls = dep.module("mbedtls");
 const opus = dep.module("opus");
 const portaudio = dep.module("portaudio");
 const speexdsp = dep.module("speexdsp");
@@ -44,11 +42,11 @@ const stb_truetype = dep.module("stb_truetype");
 ```
 
 The package name is `embed_zig`. The top-level package exposes core modules
-`glib`, `gstd`, and `embed`, plus package-backed modules such as
-`core_bluetooth`, `core_wlan`, `lvgl`, `opus`, `portaudio`, `speexdsp`, and
-`stb_truetype`. The `lvgl` package also exports `lvgl_osal` for its custom OS
-adapter. The `embed` namespace contains `bt`, `drivers`, `motion`, `audio`,
-`ledstrip`, and `zux`.
+`glib`, `gstd`, and `embed`, plus thirdparty modules exported directly from the
+`thirdparty` package dependency: `core_bluetooth`, `core_wlan`, `lvgl`,
+`lvgl_osal`, `mbedtls`, `opus`, `portaudio`, `speexdsp`, and `stb_truetype`.
+The `embed` namespace contains `bt`, `drivers`, `motion`, `audio`, `ledstrip`,
+and `zux`.
 
 ## Build And Test
 
@@ -64,13 +62,14 @@ zig build test
 - [`embed/lib/bt/README.md`](embed/lib/bt/README.md)
 - [`embed/lib/drivers/README.md`](embed/lib/drivers/README.md)
 - [`embed/lib/zux/README.md`](embed/lib/zux/README.md)
-- [`pkg/core_bluetooth/README.md`](pkg/core_bluetooth/README.md)
-- [`pkg/core_wlan/README.md`](pkg/core_wlan/README.md)
-- [`pkg/lvgl/README.md`](pkg/lvgl/README.md)
-- [`pkg/opus/README.md`](pkg/opus/README.md)
-- [`pkg/portaudio/README.md`](pkg/portaudio/README.md)
-- [`pkg/speexdsp/README.md`](pkg/speexdsp/README.md)
-- [`pkg/stb_truetype/README.md`](pkg/stb_truetype/README.md)
+- [`thirdparty/pkg/core_bluetooth/README.md`](thirdparty/pkg/core_bluetooth/README.md)
+- [`thirdparty/pkg/core_wlan/README.md`](thirdparty/pkg/core_wlan/README.md)
+- [`thirdparty/pkg/lvgl/README.md`](thirdparty/pkg/lvgl/README.md)
+- [`thirdparty/pkg/mbedtls/README.md`](thirdparty/pkg/mbedtls/README.md)
+- [`thirdparty/pkg/opus/README.md`](thirdparty/pkg/opus/README.md)
+- [`thirdparty/pkg/portaudio/README.md`](thirdparty/pkg/portaudio/README.md)
+- [`thirdparty/pkg/speexdsp/README.md`](thirdparty/pkg/speexdsp/README.md)
+- [`thirdparty/pkg/stb_truetype/README.md`](thirdparty/pkg/stb_truetype/README.md)
 
 ## Contributing
 

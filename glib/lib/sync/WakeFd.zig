@@ -115,10 +115,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             try testing.expectEqual(@as(usize, 1), ready);
             try testing.expect((poll_fds[0].revents & test_lib.posix.POLL.IN) != 0);
 
-            wake.drain();
-            poll_fds[0].revents = 0;
-            const drained = try test_lib.posix.poll(poll_fds[0..], 0);
-            try testing.expectEqual(@as(usize, 0), drained);
+            try expectDrained(test_lib, &wake);
         }
 
         fn drainIsIdempotentCase(comptime test_lib: type) !void {
@@ -130,8 +127,6 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             wake.drain();
             wake.signal();
             wake.signal();
-            wake.drain();
-            wake.drain();
 
             var poll_fds = [_]test_lib.posix.pollfd{
                 .{
@@ -140,7 +135,30 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     .revents = 0,
                 },
             };
-            const ready = try test_lib.posix.poll(poll_fds[0..], 0);
+            const ready = try test_lib.posix.poll(poll_fds[0..], 50);
+            try testing.expectEqual(@as(usize, 1), ready);
+
+            try expectDrained(test_lib, &wake);
+            wake.drain();
+        }
+
+        fn expectDrained(comptime test_lib: type, wake: *const WakeFd) !void {
+            const testing = test_lib.testing;
+            var poll_fds = [_]test_lib.posix.pollfd{
+                .{
+                    .fd = wake.recv_fd,
+                    .events = test_lib.posix.POLL.IN,
+                    .revents = 0,
+                },
+            };
+
+            var ready: usize = 0;
+            for (0..8) |_| {
+                wake.drain();
+                poll_fds[0].revents = 0;
+                ready = try test_lib.posix.poll(poll_fds[0..], 2);
+                if (ready == 0) return;
+            }
             try testing.expectEqual(@as(usize, 0), ready);
         }
     };

@@ -6,6 +6,9 @@
         .glib = .{
             .path = "../glib",
         },
+        .thirdparty = .{
+            .path = "../thirdparty",
+        },
     },
     .paths = .{
         "README.md",

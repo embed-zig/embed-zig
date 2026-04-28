@@ -170,6 +170,23 @@ fn hmacTests(comptime lib: type) !void {
         ctx.final(&out2);
 
         if (!lib.mem.eql(u8, &out1, &out2)) return error.HmacStreamingMismatch;
+
+        var long_key: [300]u8 = undefined;
+        var long_msg: [9000]u8 = undefined;
+        @memset(&long_key, 0x5a);
+        @memset(&long_msg, 0xa5);
+
+        var long_out1: [H.mac_length]u8 = undefined;
+        H.create(&long_out1, &long_msg, &long_key);
+
+        var long_ctx = H.init(&long_key);
+        long_ctx.update(long_msg[0..4096]);
+        long_ctx.update(long_msg[4096..8192]);
+        long_ctx.update(long_msg[8192..]);
+        var long_out2: [H.mac_length]u8 = undefined;
+        long_ctx.final(&long_out2);
+
+        if (!lib.mem.eql(u8, &long_out1, &long_out2)) return error.HmacLargeStreamingMismatch;
     }
 }
 
@@ -383,6 +400,7 @@ fn certificateTests(comptime lib: type) !void {
         .index = 0,
     };
     const parsed = try cert.parse();
+    if (parsed.subjectAltName().len == 0) return error.CertificateSubjectAltNameMissing;
     try parsed.verifyHostName("example.com");
 
     if (parsed.verifyHostName("wrong.example.com")) |_| {

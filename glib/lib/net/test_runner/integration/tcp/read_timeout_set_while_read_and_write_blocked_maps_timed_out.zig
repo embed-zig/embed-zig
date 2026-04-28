@@ -14,22 +14,28 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
         pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn waitUntilReadWaiting(conn: *net.TcpConn, comptime thread_lib: type) void {
+                fn waitUntilReadWaiting(conn: *net.TcpConn, ctx: anytype, comptime thread_lib: type) !void {
+                    const deadline = thread_lib.time.nanoTimestamp() + 2 * thread_lib.time.ns_per_s;
                     while (true) {
                         conn.read_mu.lock();
                         const waiting = conn.read_waiting;
                         conn.read_mu.unlock();
                         if (waiting) return;
+                        if (ctx.err != null) return error.ReadWorkerExitedBeforeWait;
+                        if (thread_lib.time.nanoTimestamp() >= deadline) return error.ExpectedReadWaiting;
                         thread_lib.Thread.sleep(thread_lib.time.ns_per_ms);
                     }
                 }
 
-                fn waitUntilWriteWaiting(conn: *net.TcpConn, comptime thread_lib: type) void {
+                fn waitUntilWriteWaiting(conn: *net.TcpConn, ctx: anytype, comptime thread_lib: type) !void {
+                    const deadline = thread_lib.time.nanoTimestamp() + 2 * thread_lib.time.ns_per_s;
                     while (true) {
                         conn.write_mu.lock();
                         const waiting = conn.write_waiting;
                         conn.write_mu.unlock();
                         if (waiting) return;
+                        if (ctx.err != null) return error.WriteWorkerExitedBeforeWait;
+                        if (thread_lib.time.nanoTimestamp() >= deadline) return error.ExpectedWriteWaiting;
                         thread_lib.Thread.sleep(thread_lib.time.ns_per_ms);
                     }
                 }
@@ -103,8 +109,8 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
 
                     read_ready.waitUntilReady();
                     write_ready.waitUntilReady();
-                    waitUntilReadWaiting(client, lib);
-                    waitUntilWriteWaiting(client, lib);
+                    try waitUntilReadWaiting(client, &read_ctx, lib);
+                    try waitUntilWriteWaiting(client, &write_ctx, lib);
 
                     client_conn.setReadTimeout(30);
 

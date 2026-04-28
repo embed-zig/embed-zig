@@ -566,7 +566,6 @@ pub fn Conn(comptime lib: type, comptime net: type) type {
     };
 }
 
-
 pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
     return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
@@ -581,14 +580,14 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 const CH = @import("client_handshake.zig").make(lib);
                 const fixtures = @import("test_fixtures.zig");
                 const Ecdsa = lib.crypto.sign.ecdsa.EcdsaP256Sha256;
-                
+
                 const RawConn = struct {
                     read_buf: [32768]u8 = undefined,
                     read_len: usize = 0,
                     read_pos: usize = 0,
                     write_buf: [32768]u8 = undefined,
                     write_len: usize = 0,
-                
+
                     pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         if (self.read_pos >= self.read_len) return error.EndOfStream;
                         const n = @min(buf.len, self.read_len - self.read_pos);
@@ -596,38 +595,38 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         self.read_pos += n;
                         return n;
                     }
-                
+
                     pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         @memcpy(self.write_buf[self.write_len..][0..buf.len], buf);
                         self.write_len += buf.len;
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 const SinkConn = struct {
                     target: *RawConn,
-                
+
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         @memcpy(self.target.read_buf[self.target.read_len..][0..buf.len], buf);
                         self.target.read_len += buf.len;
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 const Helper = struct {
                     fn cipherFromTrafficSecret(secret: [K.MAX_TLS13_SECRET_LEN]u8, suite: C.CipherSuite) !R.CipherState() {
                         const profile = suite.tls13Profile() orelse return error.TestUnexpectedResult;
@@ -643,16 +642,16 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         }
                         return R.CipherState().init(suite, key[0..key_len], &iv);
                     }
-                
+
                     fn appendServerFlight(raw: *RawConn, hs: *CH.ClientHandshake(NetConn)) !void {
                         hs.state = .wait_server_hello;
-                
+
                         var client_hello: [1024]u8 = undefined;
                         _ = try hs.encodeClientHello(&client_hello);
-                
+
                         const server_secret = [_]u8{0x42} ** lib.crypto.dh.X25519.secret_length;
                         const server_public = try lib.crypto.dh.X25519.recoverPublicKey(server_secret);
-                
+
                         var ext_buf: [128]u8 = undefined;
                         var ext_builder = E.ExtensionBuilder.init(&ext_buf);
                         try ext_builder.addSelectedVersion(.tls_1_3);
@@ -661,11 +660,11 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                             .key_exchange = &server_public,
                         });
                         const ext_data = ext_builder.getData();
-                
+
                         var sink = SinkConn{ .target = raw };
                         var plain_records = R.RecordLayer(*SinkConn).init(&sink);
                         plain_records.setVersion(.tls_1_2);
-                
+
                         var server_hello: [256]u8 = undefined;
                         var pos: usize = C.HandshakeHeader.SIZE;
                         lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(C.ProtocolVersion.tls_1_2), .big);
@@ -687,16 +686,16 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                             .length = @intCast(pos - C.HandshakeHeader.SIZE),
                         };
                         try server_hello_header.serialize(server_hello[0..C.HandshakeHeader.SIZE]);
-                
+
                         var record_buf: [C.MAX_CIPHERTEXT_LEN_TLS12]u8 = undefined;
                         var write_plaintext_buf: [C.MAX_PLAINTEXT_LEN + 1]u8 = undefined;
                         _ = try plain_records.writeRecord(.handshake, server_hello[0..pos], &record_buf, &write_plaintext_buf);
                         try hs.processHandshake(server_hello[0..pos]);
-                
+
                         var encrypted_records = R.RecordLayer(*SinkConn).init(&sink);
                         encrypted_records.setVersion(.tls_1_3);
                         encrypted_records.setWriteCipher(try cipherFromTrafficSecret(hs.server_handshake_traffic_secret, hs.cipher_suite));
-                
+
                         var encrypted_extensions = [_]u8{
                             @intFromEnum(C.HandshakeType.encrypted_extensions),
                             0x00,
@@ -707,7 +706,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         };
                         _ = try encrypted_records.writeRecord(.handshake, &encrypted_extensions, &record_buf, &write_plaintext_buf);
                         try hs.processHandshake(&encrypted_extensions);
-                
+
                         var certificate_msg: [4 + 1 + 3 + 3 + fixtures.self_signed_cert_der.len + 2]u8 = undefined;
                         var cert_pos: usize = 4;
                         certificate_msg[cert_pos] = 0;
@@ -727,7 +726,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         try certificate_header.serialize(certificate_msg[0..4]);
                         _ = try encrypted_records.writeRecord(.handshake, certificate_msg[0..cert_pos], &record_buf, &write_plaintext_buf);
                         try hs.processHandshake(certificate_msg[0..cert_pos]);
-                
+
                         const context_string = "TLS 1.3, server CertificateVerify";
                         const transcript_before_cert_verify = hs.transcript_hash.peekSha256();
                         var cert_verify_input: [64 + context_string.len + 1 + transcript_before_cert_verify.len]u8 = undefined;
@@ -735,13 +734,13 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         @memcpy(cert_verify_input[64..][0..context_string.len], context_string);
                         cert_verify_input[64 + context_string.len] = 0;
                         @memcpy(cert_verify_input[64 + context_string.len + 1 ..][0..transcript_before_cert_verify.len], transcript_before_cert_verify[0..]);
-                
+
                         const sk = try Ecdsa.SecretKey.fromBytes(fixtures.self_signed_key_scalar);
                         const kp = try Ecdsa.KeyPair.fromSecretKey(sk);
                         const sig = try kp.sign(cert_verify_input[0..], null);
                         var sig_der_buf: [Ecdsa.Signature.der_encoded_length_max]u8 = undefined;
                         const sig_der = sig.toDer(&sig_der_buf);
-                
+
                         var cert_verify_msg: [4 + 2 + 2 + Ecdsa.Signature.der_encoded_length_max]u8 = undefined;
                         var cv_pos: usize = 4;
                         lib.mem.writeInt(u16, cert_verify_msg[cv_pos..][0..2], @intFromEnum(C.SignatureScheme.ecdsa_secp256r1_sha256), .big);
@@ -757,12 +756,12 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         try cert_verify_header.serialize(cert_verify_msg[0..4]);
                         _ = try encrypted_records.writeRecord(.handshake, cert_verify_msg[0..cv_pos], &record_buf, &write_plaintext_buf);
                         try hs.processHandshake(cert_verify_msg[0..cv_pos]);
-                
+
                         const transcript_before_server_finished = hs.transcript_hash.peekSha256();
                         var server_ts: [K.HkdfSha256.prk_length]u8 = undefined;
                         @memcpy(server_ts[0..], hs.server_handshake_traffic_secret[0..K.HkdfSha256.prk_length]);
                         const expected_server_verify_data = K.finishedVerifyDataSha256(server_ts, &transcript_before_server_finished);
-                
+
                         var server_finished: [4 + expected_server_verify_data.len]u8 = undefined;
                         const server_finished_header: C.HandshakeHeader = .{
                             .msg_type = .finished,
@@ -773,21 +772,21 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         _ = try encrypted_records.writeRecord(.handshake, &server_finished, &record_buf, &write_plaintext_buf);
                     }
                 };
-                
+
                 var raw = RawConn{};
                 var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                     .server_name = "example.com",
                     .verification = .hostname_only,
                 });
                 defer conn.deinit();
-                
+
                 const typed_before = try conn.as(ConnType);
                 var flight_hs = typed_before.handshake_state;
                 try Helper.appendServerFlight(&raw, &flight_hs);
-                
+
                 const n = try conn.write("ping");
                 try testing.expectEqual(@as(usize, 4), n);
-                
+
                 const typed = try conn.as(ConnType);
                 try testing.expect(typed.handshake_complete);
                 try testing.expectEqual(CH.HandshakeState.connected, typed.handshake_state.state);
@@ -798,138 +797,138 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 const ConnType = root.Conn(lib, net);
                 const CH = @import("client_handshake.zig").make(lib);
                 const R = @import("record.zig").make(lib);
-                
+
                 const RawConn = struct {
                     fail_writes: bool = false,
-                
+
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(self: *@This(), _: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         if (self.fail_writes) return error.ConnectionRefused;
                         return 0;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 const key = [_]u8{0x11} ** 16;
                 const iv = [_]u8{0x22} ** 12;
-                
+
                 var raw = RawConn{ .fail_writes = true };
                 var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                     .server_name = "example.com",
                     .insecure_skip_verify = true,
                 });
                 defer conn.deinit();
-                
+
                 const typed = try conn.as(ConnType);
                 typed.handshake_complete = true;
                 typed.handshake_state.state = CH.HandshakeState.connected;
                 typed.handshake_state.records.setVersion(.tls_1_3);
                 typed.handshake_state.records.setWriteCipher(try R.CipherState().init(.TLS_AES_128_GCM_SHA256, &key, &iv));
-                
+
                 try testing.expectError(error.ConnectionRefused, conn.write("ping"));
             }
 
             {
                 const ConnType = root.Conn(lib, net);
-                
+
                 const RawConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.TimedOut;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var raw = RawConn{};
                 var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                     .server_name = "example.com",
                     .insecure_skip_verify = true,
                 });
                 defer conn.deinit();
-                
+
                 var buf: [8]u8 = undefined;
                 try testing.expectError(error.TimedOut, conn.read(&buf));
             }
 
             {
                 const ConnType = root.Conn(lib, net);
-                
+
                 const RawConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), _: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.ConnectionRefused;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var raw = RawConn{};
                 var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                     .server_name = "example.com",
                     .insecure_skip_verify = true,
                 });
                 defer conn.deinit();
-                
+
                 try testing.expectError(error.ConnectionRefused, conn.write("ping"));
             }
 
             {
                 const ConnType = root.Conn(lib, net);
                 const CH = @import("client_handshake.zig").make(lib);
-                
+
                 const Helper = struct {
                     fn expectReadError(comptime expected: anyerror) !void {
                         const RawConn = struct {
                             pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                                 return expected;
                             }
-                
+
                             pub fn write(_: *@This(), _: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                                 return 0;
                             }
-                
+
                             pub fn close(_: *@This()) void {}
                             pub fn deinit(_: *@This()) void {}
                             pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                             pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                         };
-                
+
                         var raw = RawConn{};
                         var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                             .server_name = "example.com",
                             .insecure_skip_verify = true,
                         });
                         defer conn.deinit();
-                
+
                         const typed = try conn.as(ConnType);
                         typed.handshake_complete = true;
                         typed.handshake_state.state = CH.HandshakeState.connected;
-                
+
                         var buf: [8]u8 = undefined;
                         try testing.expectError(expected, conn.read(&buf));
                     }
                 };
-                
+
                 inline for (.{ error.ConnectionRefused, error.ConnectionReset, error.BrokenPipe, error.TimedOut }) |expected| {
                     try Helper.expectReadError(expected);
                 }
@@ -940,12 +939,12 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 const CH = @import("client_handshake.zig").make(lib);
                 const C = @import("common.zig").make(lib);
                 const R = @import("record.zig").make(lib);
-                
+
                 const RawConn = struct {
                     read_buf: [C.RecordHeader.SIZE + C.MAX_CIPHERTEXT_LEN]u8 = undefined,
                     read_len: usize = 0,
                     read_pos: usize = 0,
-                
+
                     pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         if (self.read_pos >= self.read_len) return error.EndOfStream;
                         const n = @min(buf.len, self.read_len - self.read_pos);
@@ -953,23 +952,23 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         self.read_pos += n;
                         return n;
                     }
-                
+
                     pub fn write(_: *@This(), _: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return 0;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 const key = [_]u8{0x55} ** 16;
                 const iv = [_]u8{0x66} ** 12;
                 const payload_len = C.MAX_PLAINTEXT_LEN;
                 const padding_len = 1;
                 const ciphertext_len = payload_len + 1 + padding_len;
-                
+
                 var raw = RawConn{};
                 const header = C.RecordHeader{
                     .content_type = .application_data,
@@ -977,12 +976,12 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                     .length = @intCast(ciphertext_len + 16),
                 };
                 try header.serialize(raw.read_buf[0..C.RecordHeader.SIZE]);
-                
+
                 var inner_plaintext: [C.MAX_PLAINTEXT_LEN + 2]u8 = undefined;
                 @memset(inner_plaintext[0..payload_len], 'a');
                 inner_plaintext[payload_len] = @intFromEnum(C.ContentType.application_data);
                 inner_plaintext[payload_len + 1] = 0;
-                
+
                 var tag: [16]u8 = undefined;
                 const cipher = try R.CipherState().init(.TLS_AES_128_GCM_SHA256, &key, &iv);
                 switch (cipher) {
@@ -997,19 +996,19 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 }
                 @memcpy(raw.read_buf[C.RecordHeader.SIZE + ciphertext_len ..][0..16], &tag);
                 raw.read_len = C.RecordHeader.SIZE + ciphertext_len + 16;
-                
+
                 var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                     .server_name = "example.com",
                     .insecure_skip_verify = true,
                 });
                 defer conn.deinit();
-                
+
                 const typed = try conn.as(ConnType);
                 typed.handshake_complete = true;
                 typed.handshake_state.state = CH.HandshakeState.connected;
                 typed.handshake_state.records.setVersion(.tls_1_3);
                 typed.handshake_state.records.setReadCipher(try R.CipherState().init(.TLS_AES_128_GCM_SHA256, &key, &iv));
-                
+
                 var buf: [1]u8 = undefined;
                 try testing.expectEqual(@as(usize, 1), try conn.read(&buf));
                 try testing.expectEqual(@as(u8, 'a'), buf[0]);
@@ -1018,14 +1017,14 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             {
                 const ConnType = root.Conn(lib, net);
                 const common = @import("common.zig").make(lib);
-                
+
                 const Helper = struct {
                     const RawConn = struct {
                         read_buf: [256]u8 = undefined,
                         read_len: usize = 0,
                         read_pos: usize = 0,
                         write_calls: usize = 0,
-                
+
                         pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                             if (self.read_pos >= self.read_len) return error.EndOfStream;
                             const n = @min(buf.len, self.read_len - self.read_pos);
@@ -1033,18 +1032,18 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                             self.read_pos += n;
                             return n;
                         }
-                
+
                         pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                             self.write_calls += 1;
                             return buf.len;
                         }
-                
+
                         pub fn close(_: *@This()) void {}
                         pub fn deinit(_: *@This()) void {}
                         pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                         pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                     };
-                
+
                     fn appendAlert(raw: *RawConn, level: common.AlertLevel, description: common.AlertDescription) void {
                         raw.read_len = 7;
                         raw.read_pos = 0;
@@ -1056,23 +1055,23 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         raw.read_buf[5] = @intFromEnum(level);
                         raw.read_buf[6] = @intFromEnum(description);
                     }
-                
+
                     fn expectPeerAlert(comptime description: common.AlertDescription, comptime expected: anyerror) !void {
                         var raw = RawConn{};
                         appendAlert(&raw, .fatal, description);
-                
+
                         var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                             .server_name = "example.com",
                             .insecure_skip_verify = true,
                         });
                         defer conn.deinit();
-                
+
                         const typed = try conn.as(ConnType);
                         try testing.expectError(expected, typed.handshake());
                         try testing.expectEqual(@as(usize, 1), raw.write_calls);
                     }
                 };
-                
+
                 try Helper.expectPeerAlert(.close_notify, error.RecordIoFailed);
                 try Helper.expectPeerAlert(.bad_record_mac, error.BadRecordMac);
                 try Helper.expectPeerAlert(.unknown_ca, error.UnknownCa);
@@ -1082,13 +1081,13 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             {
                 const ConnType = root.Conn(lib, net);
                 const common = @import("common.zig").make(lib);
-                
+
                 const RawConn = struct {
                     read_buf: [8]u8 = undefined,
                     read_len: usize = 0,
                     read_pos: usize = 0,
                     write_calls: usize = 0,
-                
+
                     pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         if (self.read_pos >= self.read_len) return error.EndOfStream;
                         const n = @min(buf.len, self.read_len - self.read_pos);
@@ -1096,18 +1095,18 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         self.read_pos += n;
                         return n;
                     }
-                
+
                     pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         self.write_calls += 1;
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var raw = RawConn{};
                 raw.read_len = common.RecordHeader.SIZE;
                 raw.read_buf[0] = @intFromEnum(common.ContentType.handshake);
@@ -1115,13 +1114,13 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 raw.read_buf[2] = 0x03;
                 raw.read_buf[3] = 0x00;
                 raw.read_buf[4] = 0x03;
-                
+
                 var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                     .server_name = "example.com",
                     .insecure_skip_verify = true,
                 });
                 defer conn.deinit();
-                
+
                 const typed = try conn.as(ConnType);
                 try testing.expectError(error.InvalidHandshake, typed.handshake());
                 try testing.expectEqual(@as(usize, 2), raw.write_calls);
@@ -1129,36 +1128,36 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
             {
                 const ConnType = root.Conn(lib, net);
-                
+
                 const RawConn = struct {
                     write_calls: usize = 0,
-                
+
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         self.write_calls += 1;
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var raw = RawConn{};
                 var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                     .server_name = "example.com",
                     .insecure_skip_verify = true,
                 });
                 defer conn.deinit();
-                
+
                 const typed = try conn.as(ConnType);
                 typed.handshake_state.state = .wait_finished;
                 typed.handshake_state.server_finished_received = true;
-                
+
                 try testing.expectEqual(error.RecordIoFailed, typed.mapHandshakeFlightWriteError(error.RecordIoFailed));
                 inline for (.{ error.ConnectionRefused, error.ConnectionReset, error.BrokenPipe, error.TimedOut }) |expected| {
                     try testing.expectEqual(expected, typed.mapHandshakeFlightWriteError(expected));
@@ -1168,58 +1167,58 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
             {
                 const ConnType = root.Conn(lib, net);
-                
+
                 const RawConn = struct {
                     write_calls: usize = 0,
-                
+
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         self.write_calls += 1;
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var raw = RawConn{};
                 var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                     .server_name = "example.com",
                     .insecure_skip_verify = true,
                 });
                 defer conn.deinit();
-                
+
                 const typed = try conn.as(ConnType);
                 typed.handshake_state.state = .wait_finished;
                 typed.handshake_state.server_finished_received = true;
-                
+
                 try testing.expectEqual(error.BufferTooSmall, typed.mapHandshakeFlightWriteError(error.BufferTooSmall));
                 try testing.expectEqual(@as(usize, 1), raw.write_calls);
             }
 
             {
                 const ConnType = root.Conn(lib, net);
-                
+
                 const RawConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var raw = RawConn{};
                 var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                     .server_name = "example.com",
@@ -1235,35 +1234,35 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 const C = @import("common.zig").make(lib);
                 const E = @import("extensions.zig").make(lib);
                 const CH = @import("client_handshake.zig").make(lib);
-                
+
                 const RawConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var raw = RawConn{};
                 var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                     .server_name = "example.com",
                     .insecure_skip_verify = true,
                 });
                 defer conn.deinit();
-                
+
                 const typed = try conn.as(ConnType);
                 typed.handshake_state.state = .wait_server_hello;
-                
+
                 const server_secret = [_]u8{0x42} ** lib.crypto.dh.X25519.secret_length;
                 const server_public = try lib.crypto.dh.X25519.recoverPublicKey(server_secret);
-                
+
                 var ext_buf: [128]u8 = undefined;
                 var ext_builder = E.ExtensionBuilder.init(&ext_buf);
                 try ext_builder.addSelectedVersion(.tls_1_3);
@@ -1272,7 +1271,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                     .key_exchange = &server_public,
                 });
                 const ext_data = ext_builder.getData();
-                
+
                 var server_hello: [256]u8 = undefined;
                 var pos: usize = C.HandshakeHeader.SIZE;
                 lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(C.ProtocolVersion.tls_1_2), .big);
@@ -1293,12 +1292,12 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                     .msg_type = .server_hello,
                     .length = @intCast(pos - C.HandshakeHeader.SIZE),
                 }).serialize(server_hello[0..C.HandshakeHeader.SIZE]);
-                
+
                 const split = C.HandshakeHeader.SIZE + 8;
                 try typed.consumeHandshakeRecord(server_hello[0..split]);
                 try testing.expectEqual(@as(usize, split), typed.handshake_msg_len);
                 try testing.expectEqual(CH.HandshakeState.wait_server_hello, typed.handshake_state.state);
-                
+
                 try typed.consumeHandshakeRecord(server_hello[split..pos]);
                 try testing.expectEqual(@as(usize, 0), typed.handshake_msg_len);
                 try testing.expectEqual(CH.HandshakeState.wait_encrypted_extensions, typed.handshake_state.state);
@@ -1308,12 +1307,12 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 const ConnType = root.Conn(lib, net);
                 const CH = @import("client_handshake.zig").make(lib);
                 const C = @import("common.zig").make(lib);
-                
+
                 const RawConn = struct {
                     read_buf: [16]u8 = undefined,
                     read_len: usize = 0,
                     read_pos: usize = 0,
-                
+
                     pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         if (self.read_pos >= self.read_len) return error.EndOfStream;
                         const n = @min(buf.len, self.read_len - self.read_pos);
@@ -1321,17 +1320,17 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         self.read_pos += n;
                         return n;
                     }
-                
+
                     pub fn write(_: *@This(), _: []const u8) error{ ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return 0;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var raw = RawConn{};
                 raw.read_len = 6;
                 raw.read_buf[0] = @intFromEnum(C.ContentType.change_cipher_spec);
@@ -1340,21 +1339,20 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 raw.read_buf[3] = 0x00;
                 raw.read_buf[4] = 0x01;
                 raw.read_buf[5] = @intFromEnum(C.ChangeCipherSpecType.change_cipher_spec);
-                
+
                 var conn = try ConnType.init(testing.allocator, NetConn.init(&raw), .{
                     .server_name = "example.com",
                     .insecure_skip_verify = true,
                 });
                 defer conn.deinit();
-                
+
                 const typed = try conn.as(ConnType);
                 typed.handshake_complete = true;
                 typed.handshake_state.state = CH.HandshakeState.connected;
-                
+
                 var buf: [8]u8 = undefined;
                 try testing.expectError(error.Unexpected, conn.read(&buf));
             }
-
         }
     }.run);
 }

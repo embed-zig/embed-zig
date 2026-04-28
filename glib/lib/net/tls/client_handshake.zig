@@ -1331,10 +1331,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             {
                 const client = make(lib);
-                
+
                 var a = try client.KeyExchange.generate(.x25519);
                 var b = try client.KeyExchange.generate(.x25519);
-                
+
                 const secret_a = try a.computeSharedSecret(b.publicKey());
                 const secret_b = try b.computeSharedSecret(a.publicKey());
                 try testing.expectEqualSlices(u8, secret_a, secret_b);
@@ -1343,29 +1343,29 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             {
                 const client = make(lib);
                 const tls_common = @import("common.zig").make(lib);
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).init(&conn, "example.com", testing.allocator, false);
-                
+
                 var buf: [1024]u8 = undefined;
                 const len = try hs.encodeClientHello(&buf);
                 try testing.expect(len > tls_common.HandshakeHeader.SIZE);
-                
+
                 const header = try tls_common.HandshakeHeader.parse(buf[0..tls_common.HandshakeHeader.SIZE]);
                 try testing.expectEqual(tls_common.HandshakeType.client_hello, header.msg_type);
                 try testing.expectEqual(@as(usize, header.length), len - tls_common.HandshakeHeader.SIZE);
@@ -1376,22 +1376,22 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const client = make(lib);
                 const tls_common = @import("common.zig").make(lib);
                 const tls_ext = @import("extensions.zig").make(lib);
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
                     .hostname = "example.com",
@@ -1400,29 +1400,29 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     .min_version = .tls_1_3,
                     .max_version = .tls_1_3,
                 });
-                
+
                 var buf: [1024]u8 = undefined;
                 const len = try hs.encodeClientHello(&buf);
                 const header = try tls_common.HandshakeHeader.parse(buf[0..tls_common.HandshakeHeader.SIZE]);
                 const body = buf[tls_common.HandshakeHeader.SIZE..len][0..header.length];
-                
+
                 var pos: usize = 0;
                 pos += 2; // legacy_version
                 pos += 32; // client_random
                 pos += 1 + body[pos]; // session_id
-                
+
                 const cipher_suites_len = lib.mem.readInt(u16, body[pos..][0..2], .big);
                 pos += 2 + cipher_suites_len;
-                
+
                 const compression_methods_len = body[pos];
                 pos += 1 + compression_methods_len;
-                
+
                 const extensions_len = lib.mem.readInt(u16, body[pos..][0..2], .big);
                 pos += 2;
-                
+
                 const exts = try tls_ext.parseExtensions(body[pos..][0..extensions_len], testing.allocator);
                 defer testing.allocator.free(exts);
-                
+
                 const supported_versions = tls_ext.findExtension(exts, .supported_versions).?;
                 try testing.expectEqualSlices(u8, &.{ 0x02, 0x03, 0x04 }, supported_versions.data);
             }
@@ -1431,22 +1431,22 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const client = make(lib);
                 const tls_common = @import("common.zig").make(lib);
                 const tls_ext = @import("extensions.zig").make(lib);
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
                     .hostname = "example.com",
@@ -1455,29 +1455,29 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     .min_version = .tls_1_2,
                     .max_version = .tls_1_2,
                 });
-                
+
                 var buf: [1024]u8 = undefined;
                 const len = try hs.encodeClientHello(&buf);
                 const header = try tls_common.HandshakeHeader.parse(buf[0..tls_common.HandshakeHeader.SIZE]);
                 const body = buf[tls_common.HandshakeHeader.SIZE..len][0..header.length];
-                
+
                 var pos: usize = 0;
                 pos += 2;
                 pos += 32;
                 pos += 1 + body[pos];
-                
+
                 const cipher_suites_len = lib.mem.readInt(u16, body[pos..][0..2], .big);
                 pos += 2 + cipher_suites_len;
-                
+
                 const compression_methods_len = body[pos];
                 pos += 1 + compression_methods_len;
-                
+
                 const extensions_len = lib.mem.readInt(u16, body[pos..][0..2], .big);
                 pos += 2;
-                
+
                 const exts = try tls_ext.parseExtensions(body[pos..][0..extensions_len], testing.allocator);
                 defer testing.allocator.free(exts);
-                
+
                 const supported_versions = tls_ext.findExtension(exts, .supported_versions).?;
                 try testing.expectEqualSlices(u8, &.{ 0x02, 0x03, 0x03 }, supported_versions.data);
             }
@@ -1485,22 +1485,22 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             {
                 const client = make(lib);
                 const tls_common = @import("common.zig").make(lib);
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
                     .hostname = "example.com",
@@ -1510,17 +1510,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     .max_version = .tls_1_2,
                     .tls12_cipher_suites = &.{.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256},
                 });
-                
+
                 var buf: [1024]u8 = undefined;
                 const len = try hs.encodeClientHello(&buf);
                 const header = try tls_common.HandshakeHeader.parse(buf[0..tls_common.HandshakeHeader.SIZE]);
                 const body = buf[tls_common.HandshakeHeader.SIZE..len][0..header.length];
-                
+
                 var pos: usize = 0;
                 pos += 2;
                 pos += 32;
                 pos += 1 + body[pos];
-                
+
                 const cipher_suites_len = lib.mem.readInt(u16, body[pos..][0..2], .big);
                 pos += 2;
                 try testing.expectEqual(@as(u16, 2), cipher_suites_len);
@@ -1534,31 +1534,31 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const tls_record = @import("record.zig").make(lib);
                 const fixtures = @import("test_fixtures.zig");
                 const Ecdsa = lib.crypto.sign.ecdsa.EcdsaP256Sha256;
-                
+
                 const MockConn = struct {
                     write_buf: [4096]u8 = undefined,
                     write_len: usize = 0,
-                
+
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         @memcpy(self.write_buf[self.write_len..][0..buf.len], buf);
                         self.write_len += buf.len;
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 const ReadConn = struct {
                     data: []const u8,
                     pos: usize = 0,
-                
+
                     pub fn read(self: *@This(), buf: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         if (self.pos >= self.data.len) return error.EndOfStream;
                         const n = @min(buf.len, self.data.len - self.pos);
@@ -1566,17 +1566,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         self.pos += n;
                         return n;
                     }
-                
+
                     pub fn write(_: *@This(), _: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.Unexpected;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
                     .hostname = "example.com",
@@ -1586,10 +1586,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     .max_version = .tls_1_2,
                 });
                 hs.state = .wait_server_hello;
-                
+
                 var client_hello: [1024]u8 = undefined;
                 const client_hello_len = try hs.encodeClientHello(&client_hello);
-                
+
                 var server_hello: [256]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
                 lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
@@ -1612,7 +1612,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 try hs.processHandshake(server_hello[0..pos]);
                 try testing.expectEqual(client.HandshakeState.wait_certificate, hs.state);
                 try testing.expectEqual(tls_common.ProtocolVersion.tls_1_2, hs.version);
-                
+
                 var certificate_msg: [4 + 3 + 3 + fixtures.self_signed_cert_der.len]u8 = undefined;
                 var cert_pos: usize = 4;
                 lib.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], 3 + fixtures.self_signed_cert_der.len, .big);
@@ -1628,14 +1628,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 try certificate_header.serialize(certificate_msg[0..4]);
                 try hs.processHandshake(certificate_msg[0..cert_pos]);
                 try testing.expectEqual(client.HandshakeState.wait_server_key_exchange, hs.state);
-                
+
                 const cert_sk = try Ecdsa.SecretKey.fromBytes(fixtures.self_signed_key_scalar);
                 const cert_kp = try Ecdsa.KeyPair.fromSecretKey(cert_sk);
                 const eph_scalar = [_]u8{0} ** 31 ++ [_]u8{1};
                 const eph_sk = try Ecdsa.SecretKey.fromBytes(eph_scalar);
                 const eph_kp = try Ecdsa.KeyPair.fromSecretKey(eph_sk);
                 const server_pub = eph_kp.public_key.toUncompressedSec1();
-                
+
                 var ske_msg: [512]u8 = undefined;
                 var ske_pos: usize = 4;
                 ske_msg[ske_pos] = 0x03;
@@ -1647,7 +1647,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 @memcpy(ske_msg[ske_pos..][0..server_pub.len], &server_pub);
                 ske_pos += server_pub.len;
                 const params = ske_msg[4..ske_pos];
-                
+
                 var signed_message: [32 + 32 + 1 + 2 + 1 + 65]u8 = undefined;
                 var signed_pos: usize = 0;
                 @memcpy(signed_message[signed_pos..][0..32], &hs.client_random);
@@ -1656,18 +1656,18 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 signed_pos += 32;
                 @memcpy(signed_message[signed_pos..][0..params.len], params);
                 signed_pos += params.len;
-                
+
                 const ske_sig = try cert_kp.sign(signed_message[0..signed_pos], null);
                 var sig_der_buf: [Ecdsa.Signature.der_encoded_length_max]u8 = undefined;
                 const sig_der = ske_sig.toDer(&sig_der_buf);
-                
+
                 lib.mem.writeInt(u16, ske_msg[ske_pos..][0..2], @intFromEnum(tls_common.SignatureScheme.ecdsa_secp256r1_sha256), .big);
                 ske_pos += 2;
                 lib.mem.writeInt(u16, ske_msg[ske_pos..][0..2], @intCast(sig_der.len), .big);
                 ske_pos += 2;
                 @memcpy(ske_msg[ske_pos..][0..sig_der.len], sig_der);
                 ske_pos += sig_der.len;
-                
+
                 const ske_header: tls_common.HandshakeHeader = .{
                     .msg_type = .server_key_exchange,
                     .length = @intCast(ske_pos - 4),
@@ -1675,7 +1675,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 try ske_header.serialize(ske_msg[0..4]);
                 try hs.processHandshake(ske_msg[0..ske_pos]);
                 try testing.expectEqual(client.HandshakeState.wait_server_hello_done, hs.state);
-                
+
                 var shd_msg: [4]u8 = undefined;
                 const shd_header: tls_common.HandshakeHeader = .{
                     .msg_type = .server_hello_done,
@@ -1684,19 +1684,19 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 try shd_header.serialize(&shd_msg);
                 try hs.processHandshake(&shd_msg);
                 try testing.expect(hs.shouldSendClientFinished());
-                
+
                 var tls12_seed_ms: [64]u8 = undefined;
                 @memcpy(tls12_seed_ms[0..32], &hs.client_random);
                 @memcpy(tls12_seed_ms[32..], &hs.server_random);
                 var expected_master_secret: [48]u8 = undefined;
                 K.tls12PrfSha256(&expected_master_secret, hs.tls12_shared_secret[0..hs.tls12_shared_secret_len], "master secret", &tls12_seed_ms);
-                
+
                 var handshake_buf: [256]u8 = undefined;
                 var record_buf: [512]u8 = undefined;
                 try hs.writeClientFlight(&handshake_buf, &record_buf);
                 try testing.expectEqual(client.HandshakeState.wait_finished, hs.state);
                 try testing.expectEqualSlices(u8, &expected_master_secret, &hs.tls12_master_secret);
-                
+
                 var offset: usize = 0;
                 const cke_record = try tls_common.RecordHeader.parse(conn.write_buf[offset..][0..tls_common.RecordHeader.SIZE]);
                 try testing.expectEqual(tls_common.ContentType.handshake, cke_record.content_type);
@@ -1710,25 +1710,25 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 transcript_before_client_finished.update(&shd_msg);
                 transcript_before_client_finished.update(conn.write_buf[offset + tls_common.RecordHeader.SIZE .. offset + cke_record_len]);
                 offset += cke_record_len;
-                
+
                 const ccs_record = try tls_common.RecordHeader.parse(conn.write_buf[offset..][0..tls_common.RecordHeader.SIZE]);
                 try testing.expectEqual(tls_common.ContentType.change_cipher_spec, ccs_record.content_type);
                 offset += tls_common.RecordHeader.SIZE + ccs_record.length;
-                
+
                 const finished_record = try tls_common.RecordHeader.parse(conn.write_buf[offset..][0..tls_common.RecordHeader.SIZE]);
                 const finished_total_len = tls_common.RecordHeader.SIZE + finished_record.length;
                 var read_conn = ReadConn{ .data = conn.write_buf[offset..][0..finished_total_len] };
                 var layer = tls_record.RecordLayer(*ReadConn).init(&read_conn);
                 layer.setVersion(.tls_1_2);
                 layer.setReadCipher(hs.tls12_client_cipher);
-                
+
                 var cipher_buf: [256]u8 = undefined;
                 var plaintext_out: [256]u8 = undefined;
                 const finished_res = try layer.readRecord(&cipher_buf, &plaintext_out);
                 try testing.expectEqual(tls_common.ContentType.handshake, finished_res.content_type);
                 const finished_header = try tls_common.HandshakeHeader.parse(plaintext_out[0..4]);
                 try testing.expectEqual(tls_common.HandshakeType.finished, finished_header.msg_type);
-                
+
                 const transcript_before_finished = transcript_before_client_finished.peekSha256();
                 var expected_client_verify: [12]u8 = undefined;
                 K.tls12PrfSha256(&expected_client_verify, &expected_master_secret, "client finished", &transcript_before_finished);
@@ -1737,14 +1737,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     &expected_client_verify,
                     plaintext_out[4 .. 4 + finished_header.length],
                 );
-                
+
                 const transcript_after_client_finished = hs.transcript_hash.peekSha256();
                 var expected_server_verify: [12]u8 = undefined;
                 K.tls12PrfSha256(&expected_server_verify, &expected_master_secret, "server finished", &transcript_after_client_finished);
                 try testing.expectEqualSlices(u8, &expected_server_verify, &hs.tls12_expected_server_verify_data);
-                
+
                 try hs.processChangeCipherSpec(&.{@intFromEnum(tls_common.ChangeCipherSpecType.change_cipher_spec)});
-                
+
                 var server_finished_msg: [4 + 12]u8 = undefined;
                 const server_finished_header: tls_common.HandshakeHeader = .{
                     .msg_type = .finished,
@@ -1759,22 +1759,22 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             {
                 const client = make(lib);
                 const tls_common = @import("common.zig").make(lib);
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
                     .hostname = "example.com",
@@ -1785,7 +1785,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 });
                 hs.version = .tls_1_2;
                 hs.state = .wait_server_hello_done;
-                
+
                 var msg: [5]u8 = undefined;
                 const header: tls_common.HandshakeHeader = .{
                     .msg_type = .server_hello_done,
@@ -1793,7 +1793,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 };
                 try header.serialize(msg[0..tls_common.HandshakeHeader.SIZE]);
                 msg[tls_common.HandshakeHeader.SIZE] = 0xAA;
-                
+
                 try testing.expectError(error.InvalidHandshake, hs.processHandshake(&msg));
             }
 
@@ -1803,27 +1803,27 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     const client = make(lib);
                     const tls_common = @import("common.zig").make(lib);
                     const tls_ext = @import("extensions.zig").make(lib);
-                    
+
                     const MockConn = struct {
                         write_buf: [4096]u8 = undefined,
                         write_len: usize = 0,
-                    
+
                         pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                             return error.EndOfStream;
                         }
-                    
+
                         pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                             @memcpy(self.write_buf[self.write_len..][0..buf.len], buf);
                             self.write_len += buf.len;
                             return buf.len;
                         }
-                    
+
                         pub fn close(_: *@This()) void {}
                         pub fn deinit(_: *@This()) void {}
                         pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                         pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                     };
-                    
+
                     const ParsedClientHello = struct {
                         record_header: tls_common.RecordHeader,
                         handshake_header: tls_common.HandshakeHeader,
@@ -1832,40 +1832,40 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         compression_methods: []const u8,
                         extensions_data: []const u8,
                     };
-                    
+
                     const Helpers = struct {
                         fn parseClientHello(bytes: []const u8) !ParsedClientHello {
                             const record_header = try tls_common.RecordHeader.parse(bytes[0..tls_common.RecordHeader.SIZE]);
                             const record_len = tls_common.RecordHeader.SIZE + record_header.length;
                             try testing.expect(bytes.len >= record_len);
-                    
+
                             const handshake = bytes[tls_common.RecordHeader.SIZE..record_len];
                             const handshake_header = try tls_common.HandshakeHeader.parse(handshake[0..tls_common.HandshakeHeader.SIZE]);
                             const body = handshake[tls_common.HandshakeHeader.SIZE .. tls_common.HandshakeHeader.SIZE + handshake_header.length];
-                    
+
                             var pos: usize = 0;
                             pos += 2;
                             pos += 32;
-                    
+
                             const session_id_len = body[pos];
                             pos += 1;
                             const session_id = body[pos..][0..session_id_len];
                             pos += session_id_len;
-                    
+
                             const cipher_suites_len = std.mem.readInt(u16, body[pos..][0..2], .big);
                             pos += 2;
                             const cipher_suites = body[pos..][0..cipher_suites_len];
                             pos += cipher_suites_len;
-                    
+
                             const compression_methods_len = body[pos];
                             pos += 1;
                             const compression_methods = body[pos..][0..compression_methods_len];
                             pos += compression_methods_len;
-                    
+
                             const extensions_len = std.mem.readInt(u16, body[pos..][0..2], .big);
                             pos += 2;
                             const extensions_data = body[pos..][0..extensions_len];
-                    
+
                             return .{
                                 .record_header = record_header,
                                 .handshake_header = handshake_header,
@@ -1875,7 +1875,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                                 .extensions_data = extensions_data,
                             };
                         }
-                    
+
                         fn expectSubsequence(needle: []const u8, haystack: []const u8) !void {
                             var j: usize = 0;
                             var i: usize = 0;
@@ -1886,7 +1886,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                             }
                             try testing.expectEqual(needle.len, j);
                         }
-                    
+
                         fn expectContainsCipherSuite(encoded: []const u8, suite: tls_common.CipherSuite) !void {
                             var i: usize = 0;
                             while (i + 1 < encoded.len) : (i += 2) {
@@ -1895,7 +1895,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                             }
                             return error.TestUnexpectedResult;
                         }
-                    
+
                         fn expectNotContainsCipherSuite(encoded: []const u8, suite: tls_common.CipherSuite) !void {
                             var i: usize = 0;
                             while (i + 1 < encoded.len) : (i += 2) {
@@ -1904,19 +1904,19 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                             }
                         }
                     };
-                    
+
                     var conn = MockConn{};
                     var hs = try client.ClientHandshake(*MockConn).init(&conn, "example.com", testing.allocator, false);
                     var handshake_buf: [4096]u8 = undefined;
                     var record_buf: [4096]u8 = undefined;
                     _ = try hs.sendClientHello(&handshake_buf, &record_buf);
                     const ours = try Helpers.parseClientHello(conn.write_buf[0..conn.write_len]);
-                    
+
                     var input_backing: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
                     var input = std.Io.Reader.fixed(input_backing[0..]);
                     input.seek = 0;
                     input.end = 0;
-                    
+
                     var output_backing: [4096]u8 = undefined;
                     var output = std.Io.Writer.fixed(output_backing[0..]);
                     var std_read_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
@@ -1928,19 +1928,19 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         .write_buffer = &std_write_buf,
                     }) catch {};
                     const std_hello = try Helpers.parseClientHello(output.buffered());
-                    
+
                     try testing.expectEqual(std_hello.record_header.content_type, ours.record_header.content_type);
                     try testing.expectEqual(std_hello.handshake_header.msg_type, ours.handshake_header.msg_type);
                     try testing.expectEqual(std_hello.record_header.legacy_version, ours.record_header.legacy_version);
                     try testing.expectEqual(@as(usize, 32), ours.session_id.len);
                     try testing.expectEqual(std_hello.session_id.len, ours.session_id.len);
                     try testing.expectEqualSlices(u8, std_hello.compression_methods, ours.compression_methods);
-                    
+
                     const our_exts = try tls_ext.parseExtensions(ours.extensions_data, testing.allocator);
                     defer testing.allocator.free(our_exts);
                     const std_exts = try tls_ext.parseExtensions(std_hello.extensions_data, testing.allocator);
                     defer testing.allocator.free(std_exts);
-                    
+
                     for ([_]tls_common.ExtensionType{
                         .server_name,
                         .supported_versions,
@@ -1951,10 +1951,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         const std_ext = tls_ext.findExtension(std_exts, ext_type).?;
                         try testing.expectEqualSlices(u8, std_ext.data, our_ext.data);
                     }
-                    
+
                     const our_groups = tls_ext.findExtension(our_exts, .supported_groups).?;
                     try testing.expectEqualSlices(u8, &.{ 0x00, 0x06, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18 }, our_groups.data);
-                    
+
                     const our_key_share = tls_ext.findExtension(our_exts, .key_share).?;
                     const std_key_share = tls_ext.findExtension(std_exts, .key_share).?;
                     try testing.expect(our_key_share.data.len > 0);
@@ -1971,32 +1971,32 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const client = make(lib);
                 const tls_ext = @import("extensions.zig").make(lib);
                 const tls_common = @import("common.zig").make(lib);
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).init(&conn, "example.com", testing.allocator, false);
                 hs.state = .wait_server_hello;
-                
+
                 var client_hello: [1024]u8 = undefined;
                 _ = try hs.encodeClientHello(&client_hello);
-                
+
                 const server_secret = [_]u8{0x42} ** lib.crypto.dh.X25519.secret_length;
                 const server_public = try lib.crypto.dh.X25519.recoverPublicKey(server_secret);
-                
+
                 var ext_buf: [128]u8 = undefined;
                 var ext_builder = tls_ext.ExtensionBuilder.init(&ext_buf);
                 try ext_builder.addSelectedVersion(.tls_1_3);
@@ -2005,7 +2005,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     .key_exchange = &server_public,
                 });
                 const ext_data = ext_builder.getData();
-                
+
                 var server_hello: [256]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
                 lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
@@ -2022,13 +2022,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pos += 2;
                 @memcpy(server_hello[pos..][0..ext_data.len], ext_data);
                 pos += ext_data.len;
-                
+
                 const header: tls_common.HandshakeHeader = .{
                     .msg_type = .server_hello,
                     .length = @intCast(pos - tls_common.HandshakeHeader.SIZE),
                 };
                 try header.serialize(server_hello[0..tls_common.HandshakeHeader.SIZE]);
-                
+
                 try hs.processHandshake(server_hello[0..pos]);
                 try testing.expectEqual(client.HandshakeState.wait_encrypted_extensions, hs.state);
                 try testing.expectEqual(tls_common.ProtocolVersion.tls_1_3, hs.version);
@@ -2041,31 +2041,31 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const client = make(lib);
                 const tls_ext = @import("extensions.zig").make(lib);
                 const tls_common = @import("common.zig").make(lib);
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).init(&conn, "example.com", testing.allocator, false);
                 hs.state = .wait_server_hello;
-                
+
                 var ext_buf: [64]u8 = undefined;
                 var ext_builder = tls_ext.ExtensionBuilder.init(&ext_buf);
                 try ext_builder.addSelectedVersion(.tls_1_3);
                 const ext_data = ext_builder.getData();
-                
+
                 var server_hello: [256]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
                 lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
@@ -2082,13 +2082,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pos += 2;
                 @memcpy(server_hello[pos..][0..ext_data.len], ext_data);
                 pos += ext_data.len;
-                
+
                 const header: tls_common.HandshakeHeader = .{
                     .msg_type = .server_hello,
                     .length = @intCast(pos - tls_common.HandshakeHeader.SIZE),
                 };
                 try header.serialize(server_hello[0..tls_common.HandshakeHeader.SIZE]);
-                
+
                 try testing.expectError(error.MissingExtension, hs.processHandshake(server_hello[0..pos]));
             }
 
@@ -2096,29 +2096,29 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const client = make(lib);
                 const tls_ext = @import("extensions.zig").make(lib);
                 const tls_common = @import("common.zig").make(lib);
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).init(&conn, "example.com", testing.allocator, false);
                 hs.state = .wait_server_hello;
-                
+
                 const server_secret = [_]u8{0x24} ** lib.crypto.dh.X25519.secret_length;
                 const server_public = try lib.crypto.dh.X25519.recoverPublicKey(server_secret);
-                
+
                 var ext_buf: [128]u8 = undefined;
                 var ext_builder = tls_ext.ExtensionBuilder.init(&ext_buf);
                 try ext_builder.addSelectedVersion(.tls_1_2);
@@ -2127,7 +2127,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     .key_exchange = &server_public,
                 });
                 const ext_data = ext_builder.getData();
-                
+
                 var server_hello: [256]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
                 lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
@@ -2144,39 +2144,39 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pos += 2;
                 @memcpy(server_hello[pos..][0..ext_data.len], ext_data);
                 pos += ext_data.len;
-                
+
                 const header: tls_common.HandshakeHeader = .{
                     .msg_type = .server_hello,
                     .length = @intCast(pos - tls_common.HandshakeHeader.SIZE),
                 };
                 try header.serialize(server_hello[0..tls_common.HandshakeHeader.SIZE]);
-                
+
                 try testing.expectError(error.UnsupportedVersion, hs.processHandshake(server_hello[0..pos]));
             }
 
             {
                 const client = make(lib);
                 const tls_common = @import("common.zig").make(lib);
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).init(&conn, "example.com", testing.allocator, false);
                 hs.state = .wait_server_hello;
-                
+
                 var server_hello: [128]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
                 lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
@@ -2191,13 +2191,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pos += 1;
                 lib.mem.writeInt(u16, server_hello[pos..][0..2], 0, .big);
                 pos += 2;
-                
+
                 const header: tls_common.HandshakeHeader = .{
                     .msg_type = .server_hello,
                     .length = @intCast(pos - tls_common.HandshakeHeader.SIZE),
                 };
                 try header.serialize(server_hello[0..tls_common.HandshakeHeader.SIZE]);
-                
+
                 try hs.processHandshake(server_hello[0..pos]);
                 try testing.expectEqual(client.HandshakeState.wait_certificate, hs.state);
                 try testing.expectEqual(tls_common.ProtocolVersion.tls_1_2, hs.version);
@@ -2207,26 +2207,26 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             {
                 const client = make(lib);
                 const tls_common = @import("common.zig").make(lib);
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).init(&conn, "example.com", testing.allocator, false);
                 hs.state = .wait_server_hello;
-                
+
                 var server_hello: [128]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
                 lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
@@ -2241,13 +2241,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pos += 1;
                 lib.mem.writeInt(u16, server_hello[pos..][0..2], 0, .big);
                 pos += 2;
-                
+
                 const header: tls_common.HandshakeHeader = .{
                     .msg_type = .server_hello,
                     .length = @intCast(pos - tls_common.HandshakeHeader.SIZE),
                 };
                 try header.serialize(server_hello[0..tls_common.HandshakeHeader.SIZE]);
-                
+
                 try hs.processHandshake(server_hello[0..pos]);
                 try testing.expectEqual(client.HandshakeState.wait_certificate, hs.state);
                 try testing.expectEqual(tls_common.ProtocolVersion.tls_1_2, hs.version);
@@ -2257,26 +2257,26 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             {
                 const client = make(lib);
                 const tls_common = @import("common.zig").make(lib);
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).init(&conn, "example.com", testing.allocator, false);
                 hs.state = .wait_server_hello;
-                
+
                 var server_hello: [128]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
                 lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
@@ -2293,13 +2293,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pos += 1;
                 lib.mem.writeInt(u16, server_hello[pos..][0..2], 0, .big);
                 pos += 2;
-                
+
                 const header: tls_common.HandshakeHeader = .{
                     .msg_type = .server_hello,
                     .length = @intCast(pos - tls_common.HandshakeHeader.SIZE),
                 };
                 try header.serialize(server_hello[0..tls_common.HandshakeHeader.SIZE]);
-                
+
                 try testing.expectError(error.InvalidHandshake, hs.processHandshake(server_hello[0..pos]));
             }
 
@@ -2308,27 +2308,27 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const tls_ext = @import("extensions.zig").make(lib);
                 const tls_common = @import("common.zig").make(lib);
                 const Ecdsa = lib.crypto.sign.ecdsa.EcdsaP256Sha256;
-                
+
                 const MockConn = struct {
                     write_buf: [4096]u8 = undefined,
                     write_len: usize = 0,
-                
+
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(self: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         @memcpy(self.write_buf[self.write_len..][0..buf.len], buf);
                         self.write_len += buf.len;
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 const cert_der = [_]u8{
                     0x30, 0x82, 0x01, 0x99, 0x30, 0x82, 0x01, 0x3f, 0xa0, 0x03, 0x02, 0x01,
                     0x02, 0x02, 0x14, 0x1f, 0x30, 0x92, 0xee, 0x83, 0xf5, 0xf2, 0x00, 0x6f,
@@ -2372,17 +2372,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     0x20, 0x28, 0xf7, 0x4b, 0x84, 0xe3, 0xbc, 0x86,
                     0xb7, 0x3e, 0x34, 0x8e, 0x51, 0x06, 0x69, 0x17,
                 };
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).init(&conn, "example.com", testing.allocator, false);
                 hs.state = .wait_server_hello;
-                
+
                 var client_hello: [1024]u8 = undefined;
                 _ = try hs.encodeClientHello(&client_hello);
-                
+
                 const server_secret = [_]u8{0x42} ** lib.crypto.dh.X25519.secret_length;
                 const server_public = try lib.crypto.dh.X25519.recoverPublicKey(server_secret);
-                
+
                 var ext_buf: [128]u8 = undefined;
                 var ext_builder = tls_ext.ExtensionBuilder.init(&ext_buf);
                 try ext_builder.addSelectedVersion(.tls_1_3);
@@ -2391,7 +2391,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     .key_exchange = &server_public,
                 });
                 const ext_data = ext_builder.getData();
-                
+
                 var server_hello: [256]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
                 lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
@@ -2414,7 +2414,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 };
                 try server_hello_header.serialize(server_hello[0..tls_common.HandshakeHeader.SIZE]);
                 try hs.processHandshake(server_hello[0..pos]);
-                
+
                 var encrypted_extensions = [_]u8{
                     @intFromEnum(tls_common.HandshakeType.encrypted_extensions),
                     0x00,
@@ -2425,7 +2425,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 };
                 try hs.processHandshake(&encrypted_extensions);
                 try testing.expectEqual(client.HandshakeState.wait_certificate, hs.state);
-                
+
                 var certificate_msg: [4 + 1 + 3 + 3 + cert_der.len + 2]u8 = undefined;
                 var cert_pos: usize = 4;
                 certificate_msg[cert_pos] = 0;
@@ -2445,7 +2445,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 try certificate_header.serialize(certificate_msg[0..4]);
                 try hs.processHandshake(certificate_msg[0..cert_pos]);
                 try testing.expectEqual(client.HandshakeState.wait_certificate_verify, hs.state);
-                
+
                 const context_string = "TLS 1.3, server CertificateVerify";
                 const transcript_before_cert_verify = hs.transcript_hash.peekSha256();
                 var cert_verify_input: [64 + context_string.len + 1 + transcript_before_cert_verify.len]u8 = undefined;
@@ -2453,13 +2453,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 @memcpy(cert_verify_input[64..][0..context_string.len], context_string);
                 cert_verify_input[64 + context_string.len] = 0;
                 @memcpy(cert_verify_input[64 + context_string.len + 1 ..][0..transcript_before_cert_verify.len], transcript_before_cert_verify[0..]);
-                
+
                 const sk = try Ecdsa.SecretKey.fromBytes(key_scalar);
                 const kp = try Ecdsa.KeyPair.fromSecretKey(sk);
                 const sig = try kp.sign(cert_verify_input[0..], null);
                 var sig_der_buf: [Ecdsa.Signature.der_encoded_length_max]u8 = undefined;
                 const sig_der = sig.toDer(&sig_der_buf);
-                
+
                 var cert_verify_msg: [4 + 2 + 2 + Ecdsa.Signature.der_encoded_length_max]u8 = undefined;
                 var cv_pos: usize = 4;
                 lib.mem.writeInt(u16, cert_verify_msg[cv_pos..][0..2], @intFromEnum(tls_common.SignatureScheme.ecdsa_secp256r1_sha256), .big);
@@ -2475,12 +2475,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 try cert_verify_header.serialize(cert_verify_msg[0..4]);
                 try hs.processHandshake(cert_verify_msg[0..cv_pos]);
                 try testing.expectEqual(client.HandshakeState.wait_finished, hs.state);
-                
+
                 const transcript_before_server_finished = hs.transcript_hash.peekSha256();
                 var server_ts: [K.HkdfSha256.prk_length]u8 = undefined;
                 @memcpy(server_ts[0..], hs.server_handshake_traffic_secret[0..K.HkdfSha256.prk_length]);
                 const expected_server_verify_data = K.finishedVerifyDataSha256(server_ts, &transcript_before_server_finished);
-                
+
                 var server_finished: [4 + expected_server_verify_data.len]u8 = undefined;
                 const server_finished_header: tls_common.HandshakeHeader = .{
                     .msg_type = .finished,
@@ -2489,12 +2489,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 try server_finished_header.serialize(server_finished[0..4]);
                 @memcpy(server_finished[4..], &expected_server_verify_data);
                 try hs.processHandshake(&server_finished);
-                
+
                 const transcript_before_client_finished = hs.transcript_hash.peekSha256();
                 var client_ts: [K.HkdfSha256.prk_length]u8 = undefined;
                 @memcpy(client_ts[0..], hs.client_handshake_traffic_secret[0..K.HkdfSha256.prk_length]);
                 const expected_client_verify_data = K.finishedVerifyDataSha256(client_ts, &transcript_before_client_finished);
-                
+
                 var handshake_buf: [128]u8 = undefined;
                 var record_buf: [256]u8 = undefined;
                 const client_finished_len = try hs.writeClientFinished(&handshake_buf, &record_buf);
@@ -2509,28 +2509,28 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const client = make(lib);
                 const tls_common = @import("common.zig").make(lib);
                 const fixtures = @import("test_fixtures.zig");
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var bundle: lib.crypto.Certificate.Bundle = .{};
                 defer bundle.deinit(testing.allocator);
                 const decoded_start: u32 = @intCast(bundle.bytes.items.len);
                 try bundle.bytes.appendSlice(testing.allocator, fixtures.chain_root_der[0..]);
                 try bundle.parseCert(testing.allocator, decoded_start, @intCast(@divTrunc(lib.time.milliTimestamp(), 1000)));
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
                     .hostname = "example.com",
@@ -2538,7 +2538,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     .verification = .{ .bundle = &bundle },
                 });
                 hs.state = .wait_certificate;
-                
+
                 const certs_len = 3 + fixtures.chain_leaf_der.len + 2 + 3 + fixtures.chain_root_der.len + 2;
                 var certificate_msg: [4 + 1 + 3 + certs_len]u8 = undefined;
                 var pos: usize = 4;
@@ -2558,13 +2558,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pos += fixtures.chain_root_der.len;
                 lib.mem.writeInt(u16, certificate_msg[pos..][0..2], 0, .big);
                 pos += 2;
-                
+
                 const certificate_header: tls_common.HandshakeHeader = .{
                     .msg_type = .certificate,
                     .length = @intCast(pos - 4),
                 };
                 try certificate_header.serialize(certificate_msg[0..4]);
-                
+
                 try hs.processHandshake(certificate_msg[0..pos]);
                 try testing.expectEqual(client.HandshakeState.wait_certificate_verify, hs.state);
                 try testing.expectEqual(@as(usize, fixtures.chain_leaf_der.len), hs.server_cert_der_len);
@@ -2574,25 +2574,25 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const client = make(lib);
                 const tls_common = @import("common.zig").make(lib);
                 const fixtures = @import("test_fixtures.zig");
-                
+
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
                         return error.EndOfStream;
                     }
-                
+
                     pub fn write(_: *@This(), buf: []const u8) error{ ConnectionReset, BrokenPipe, TimedOut, Unexpected }!usize {
                         return buf.len;
                     }
-                
+
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
                     pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
                     pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
                 };
-                
+
                 var bundle: lib.crypto.Certificate.Bundle = .{};
                 defer bundle.deinit(testing.allocator);
-                
+
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
                     .hostname = "example.com",
@@ -2600,7 +2600,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     .verification = .{ .bundle = &bundle },
                 });
                 hs.state = .wait_certificate;
-                
+
                 const certs_len = 3 + fixtures.chain_leaf_der.len + 2 + 3 + fixtures.chain_root_der.len + 2;
                 var certificate_msg: [4 + 1 + 3 + certs_len]u8 = undefined;
                 var pos: usize = 4;
@@ -2620,16 +2620,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pos += fixtures.chain_root_der.len;
                 lib.mem.writeInt(u16, certificate_msg[pos..][0..2], 0, .big);
                 pos += 2;
-                
+
                 const certificate_header: tls_common.HandshakeHeader = .{
                     .msg_type = .certificate,
                     .length = @intCast(pos - 4),
                 };
                 try certificate_header.serialize(certificate_msg[0..4]);
-                
+
                 try testing.expectError(error.UnknownCa, hs.processHandshake(certificate_msg[0..pos]));
             }
-
         }
     }.run);
 }

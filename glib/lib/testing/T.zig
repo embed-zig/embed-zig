@@ -162,16 +162,17 @@ fn formatMemoryUsage(buf: []u8, bytes: usize) []const u8 {
         return stdz_mod.fmt.bufPrint(buf, "{d} B", .{bytes}) catch unreachable;
     }
 
-    const bytes_u128: u128 = bytes;
+    const byte_count: u128 = bytes;
     var unit_idx: usize = 0;
     var unit_size: u128 = 1;
-    while (unit_idx + 1 < units.len and bytes_u128 >= unit_size * 1024) {
+    while (unit_idx + 1 < units.len) {
+        if (byte_count / unit_size < 1024) break;
         unit_idx += 1;
         unit_size *= 1024;
     }
 
-    var whole = bytes_u128 / unit_size;
-    const remainder = bytes_u128 % unit_size;
+    var whole = byte_count / unit_size;
+    const remainder = byte_count % unit_size;
     var frac = (remainder * 1000 + unit_size / 2) / unit_size;
     if (frac == 1000) {
         whole += 1;
@@ -786,6 +787,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerHandle {
             try std.testing.expectEqualStrings("1.000 KiB", formatMemoryUsage(&buf, 1024));
             try std.testing.expectEqualStrings("1.500 KiB", formatMemoryUsage(&buf, 1536));
             try std.testing.expectEqualStrings("15.640 MiB", formatMemoryUsage(&buf, 16399707));
+            try std.testing.expect(formatMemoryUsage(&buf, std.math.maxInt(usize)).len > 0);
         }
         fn testContextCancelLogs() !void {
             const std = @import("std");

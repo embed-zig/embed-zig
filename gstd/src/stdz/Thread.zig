@@ -14,6 +14,11 @@ const native_os = builtin.os.tag;
 const std_max_name_len = std.Thread.max_name_len;
 const contract_max_name_len = 128;
 
+// Zig 0.15 does not expose Linux _SC_THREAD_STACK_MIN in std.c._SC. Both glibc
+// and musl use this sysconf id, and pthreads rejects stacks below its value.
+const linux_sc_thread_stack_min: c_int = 75;
+const linux_pthread_stack_min_fallback = 128 * 1024;
+
 pub const default_stack_size = std.Thread.SpawnConfig.default_stack_size;
 
 pub const Id = std.Thread.Id;
@@ -24,11 +29,29 @@ pub const Condition = @import("Thread/Condition.zig");
 pub const RwLock = @import("Thread/RwLock.zig");
 
 pub fn spawn(config: glib.std.Thread.SpawnConfig, comptime f: anytype, args: anytype) glib.std.Thread.SpawnError!Self {
+    var spawn_config = config;
+    if (spawn_config.stack_size == 0) {
+        spawn_config.stack_size = default_stack_size;
+    }
+    spawn_config.stack_size = normalizeStackSize(spawn_config.stack_size);
+
     const handle = try std.Thread.spawn(.{
-        .stack_size = config.stack_size,
-        .allocator = config.allocator,
+        .stack_size = spawn_config.stack_size,
+        .allocator = spawn_config.allocator,
     }, f, args);
     return .{ .handle = handle };
+}
+
+fn normalizeStackSize(stack_size: usize) usize {
+    if (comptime native_os == .linux and std.Thread.use_pthreads) {
+        const pthread_stack_min = blk: {
+            const min = std.c.sysconf(linux_sc_thread_stack_min);
+            if (min > 0) break :blk @as(usize, @intCast(min));
+            break :blk linux_pthread_stack_min_fallback;
+        };
+        return @max(stack_size, pthread_stack_min);
+    }
+    return stack_size;
 }
 
 pub fn join(self: Self) void {

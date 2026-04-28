@@ -1,5 +1,4 @@
 const std = @import("std");
-const build_tests = @import("build/tests.zig");
 
 const lib_embed = @import("build/lib/embed.zig");
 
@@ -19,7 +18,6 @@ pub fn build(b: *std.Build) void {
         linkLibrary(@field(Libraries, decl.name), b, target, optimize);
     }
 
-    build_tests.create(b, target, optimize, Libraries);
 }
 
 fn linkLibrary(

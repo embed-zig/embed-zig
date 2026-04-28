@@ -67,6 +67,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                     ctx.err = error.ShortWrite;
                                     return;
                                 }
+                                if (seq % 8 == 7) Thread.sleep(lib.time.ns_per_ms);
                             }
                         }
                     };

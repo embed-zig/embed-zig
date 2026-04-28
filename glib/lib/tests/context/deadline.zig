@@ -333,12 +333,17 @@ fn deadlineParentCancelDoesNotReenterSharedLockUnderPendingWriterCase(comptime l
     const FakeCtxApi = context_root.make(FakeLib);
     var fake_ctx_ns = try FakeCtxApi.init(allocator);
     defer fake_ctx_ns.deinit();
+    TrackingThread.Condition.resetHooks();
+    defer TrackingThread.Condition.resetHooks();
 
     const bg = fake_ctx_ns.background();
     var parent = try fake_ctx_ns.withCancel(bg);
     defer parent.deinit();
+    TrackingThread.Condition.armTimedWaitHook();
     var child = try fake_ctx_ns.withDeadline(parent, lib.time.nanoTimestamp() + 60000 * lib.time.ns_per_ms);
     defer child.deinit();
+    TrackingThread.Condition.waitForTimedWaitHook();
+    TrackingThread.Condition.releaseTimedWaitHook();
 
     const root_lock: *TrackingThread.RwLock = @ptrCast(@alignCast(parent.vtable.treeLockFn(parent.ptr)));
     root_lock.armPendingWriterForTest();

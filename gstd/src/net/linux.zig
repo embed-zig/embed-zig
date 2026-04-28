@@ -3,6 +3,7 @@ const glib = @import("glib");
 
 const posix = std.posix;
 const linux = std.os.linux;
+const poll_rdhup: i16 = @intCast(linux.POLL.RDHUP);
 
 const EncodeSockAddrError = error{
     InvalidAddress,
@@ -118,47 +119,40 @@ fn remainingTimeoutMs(started: std.time.Instant, total_ms: u32) glib.net.runtime
 fn OpCommon(comptime Self: type) type {
     return struct {
         fn initPoll(self: *Self) !void {
-            self.epfd = try posix.epoll_create1(linux.EPOLL.CLOEXEC);
-            errdefer posix.close(self.epfd);
+            self.read_wakefd = try posix.eventfd(0, linux.EFD.CLOEXEC | linux.EFD.NONBLOCK);
+            errdefer posix.close(self.read_wakefd);
 
-            self.wakefd = try posix.eventfd(0, linux.EFD.CLOEXEC | linux.EFD.NONBLOCK);
-            errdefer posix.close(self.wakefd);
-
-            var sock_ev = linux.epoll_event{
-                .events = linux.EPOLL.IN | linux.EPOLL.OUT | linux.EPOLL.ERR | linux.EPOLL.HUP | linux.EPOLL.RDHUP,
-                .data = .{ .fd = self.sock },
-            };
-            try posix.epoll_ctl(self.epfd, linux.EPOLL.CTL_ADD, self.sock, &sock_ev);
-
-            var wake_ev = linux.epoll_event{
-                .events = linux.EPOLL.IN,
-                .data = .{ .fd = self.wakefd },
-            };
-            try posix.epoll_ctl(self.epfd, linux.EPOLL.CTL_ADD, self.wakefd, &wake_ev);
+            self.write_wakefd = try posix.eventfd(0, linux.EFD.CLOEXEC | linux.EFD.NONBLOCK);
+            errdefer posix.close(self.write_wakefd);
         }
 
         fn deinitPoll(self: *Self) void {
-            if (self.wakefd != -1) {
-                posix.close(self.wakefd);
-                self.wakefd = -1;
+            if (self.read_wakefd != -1) {
+                posix.close(self.read_wakefd);
+                self.read_wakefd = -1;
             }
-            if (self.epfd != -1) {
-                posix.close(self.epfd);
-                self.epfd = -1;
+            if (self.write_wakefd != -1) {
+                posix.close(self.write_wakefd);
+                self.write_wakefd = -1;
             }
         }
 
         fn triggerWake(self: *Self) void {
-            if (self.wakefd == -1) return;
-            var one: u64 = 1;
-            _ = posix.write(self.wakefd, std.mem.asBytes(&one)) catch {};
+            triggerWakeFd(self.read_wakefd);
+            triggerWakeFd(self.write_wakefd);
         }
 
-        fn drainWake(self: *Self) void {
-            if (self.wakefd == -1) return;
+        fn triggerWakeFd(fd: posix.fd_t) void {
+            if (fd == -1) return;
+            var one: u64 = 1;
+            _ = posix.write(fd, std.mem.asBytes(&one)) catch {};
+        }
+
+        fn drainWakeFd(fd: posix.fd_t) void {
+            if (fd == -1) return;
             while (true) {
                 var count: u64 = 0;
-                _ = posix.read(self.wakefd, std.mem.asBytes(&count)) catch |err| switch (err) {
+                _ = posix.read(fd, std.mem.asBytes(&count)) catch |err| switch (err) {
                     error.WouldBlock => return,
                     else => return,
                 };
@@ -170,7 +164,10 @@ fn OpCommon(comptime Self: type) type {
                 .read_interrupt => @atomicStore(bool, &self.read_interrupt, true, .release),
                 .write_interrupt => @atomicStore(bool, &self.write_interrupt, true, .release),
             }
-            self.triggerWake();
+            switch (ev) {
+                .read_interrupt => triggerWakeFd(self.read_wakefd),
+                .write_interrupt => triggerWakeFd(self.write_wakefd),
+            }
         }
 
         fn takeReadInterrupt(self: *Self, want: glib.net.runtime.PollEvents) bool {
@@ -203,24 +200,46 @@ fn OpCommon(comptime Self: type) type {
                 else
                     -1;
 
-                var evs: [8]linux.epoll_event = undefined;
-                const n = posix.epoll_wait(self.epfd, &evs, timeout);
+                var fds: [3]posix.pollfd = undefined;
+                var fd_count: usize = 0;
+
+                var sock_events: i16 = @intCast(posix.POLL.ERR | posix.POLL.HUP);
+                sock_events |= poll_rdhup;
+                if (want.read) sock_events |= @intCast(posix.POLL.IN);
+                if (want.write) sock_events |= @intCast(posix.POLL.OUT);
+                fds[fd_count] = .{ .fd = self.sock, .events = sock_events, .revents = 0 };
+                fd_count += 1;
+
+                const read_wake_index: ?usize = if (want.read_interrupt) blk: {
+                    fds[fd_count] = .{ .fd = self.read_wakefd, .events = @intCast(posix.POLL.IN), .revents = 0 };
+                    defer fd_count += 1;
+                    break :blk fd_count;
+                } else null;
+                const write_wake_index: ?usize = if (want.write_interrupt) blk: {
+                    fds[fd_count] = .{ .fd = self.write_wakefd, .events = @intCast(posix.POLL.IN), .revents = 0 };
+                    defer fd_count += 1;
+                    break :blk fd_count;
+                } else null;
+
+                const n = posix.poll(fds[0..fd_count], timeout) catch return error.Unexpected;
                 if (n == 0) return error.TimedOut;
 
-                for (evs[0..n]) |ev| {
-                    const revents = ev.events;
-                    if (ev.data.fd == self.wakefd) {
-                        drainWake(self);
-                        if (takeReadInterrupt(self, want)) out.read_interrupt = true;
-                        if (takeWriteInterrupt(self, want)) out.write_interrupt = true;
-                        continue;
-                    }
+                const sock_revents = fds[0].revents;
+                if ((sock_revents & @as(i16, @intCast(posix.POLL.IN))) != 0) out.read = true;
+                if ((sock_revents & @as(i16, @intCast(posix.POLL.OUT))) != 0) out.write = true;
+                if ((sock_revents & @as(i16, @intCast(posix.POLL.ERR))) != 0) out.failed = true;
+                if ((sock_revents & (@as(i16, @intCast(posix.POLL.HUP)) | poll_rdhup)) != 0) out.hup = true;
 
-                    if (ev.data.fd == self.sock) {
-                        if ((revents & linux.EPOLL.IN) != 0) out.read = true;
-                        if ((revents & linux.EPOLL.OUT) != 0) out.write = true;
-                        if ((revents & linux.EPOLL.ERR) != 0) out.failed = true;
-                        if ((revents & (linux.EPOLL.HUP | linux.EPOLL.RDHUP)) != 0) out.hup = true;
+                if (read_wake_index) |index| {
+                    if ((fds[index].revents & @as(i16, @intCast(posix.POLL.IN))) != 0) {
+                        drainWakeFd(self.read_wakefd);
+                        if (takeReadInterrupt(self, want)) out.read_interrupt = true;
+                    }
+                }
+                if (write_wake_index) |index| {
+                    if ((fds[index].revents & @as(i16, @intCast(posix.POLL.IN))) != 0) {
+                        drainWakeFd(self.write_wakefd);
+                        if (takeWriteInterrupt(self, want)) out.write_interrupt = true;
                     }
                 }
 
@@ -236,14 +255,18 @@ fn OpCommon(comptime Self: type) type {
 
 pub const Tcp = struct {
     sock: posix.socket_t = -1,
-    epfd: posix.fd_t = -1,
-    wakefd: posix.fd_t = -1,
+    read_wakefd: posix.fd_t = -1,
+    write_wakefd: posix.fd_t = -1,
     closed: bool = false,
 
     read_interrupt: bool = false,
     write_interrupt: bool = false,
 
     const tcp_ops = OpCommon(Tcp);
+
+    pub fn deinit(self: *Tcp) void {
+        self.close();
+    }
 
     pub fn close(self: *Tcp) void {
         if (self.closed) return;
@@ -305,7 +328,6 @@ pub const Tcp = struct {
             error.ProcessFdQuotaExceeded,
             error.SystemFdQuotaExceeded,
             error.SystemResources,
-            error.UserResourceLimitReached,
             => error.Unexpected,
             else => error.Unexpected,
         };
@@ -342,7 +364,7 @@ pub const Tcp = struct {
 
     pub fn send(self: *Tcp, buf: []const u8) glib.net.runtime.SocketError!usize {
         if (self.closed) return error.Closed;
-        return posix.send(self.sock, buf, 0) catch |err| return socketErr(err);
+        return posix.sendto(self.sock, buf, 0, null, 0) catch |err| return socketErr(err);
     }
 
     pub fn localAddr(self: *Tcp) glib.net.runtime.SocketError!glib.net.netip.AddrPort {
@@ -393,14 +415,18 @@ pub const Tcp = struct {
 
 pub const Udp = struct {
     sock: posix.socket_t = -1,
-    epfd: posix.fd_t = -1,
-    wakefd: posix.fd_t = -1,
+    read_wakefd: posix.fd_t = -1,
+    write_wakefd: posix.fd_t = -1,
     closed: bool = false,
 
     read_interrupt: bool = false,
     write_interrupt: bool = false,
 
     const udp_ops = OpCommon(Udp);
+
+    pub fn deinit(self: *Udp) void {
+        self.close();
+    }
 
     pub fn close(self: *Udp) void {
         if (self.closed) return;
@@ -461,7 +487,7 @@ pub const Udp = struct {
 
     pub fn send(self: *Udp, buf: []const u8) glib.net.runtime.SocketError!usize {
         if (self.closed) return error.Closed;
-        return posix.send(self.sock, buf, 0) catch |err| return socketErr(err);
+        return posix.sendto(self.sock, buf, 0, null, 0) catch |err| return socketErr(err);
     }
 
     pub fn sendTo(self: *Udp, buf: []const u8, dst: glib.net.netip.AddrPort) glib.net.runtime.SocketError!usize {
@@ -620,7 +646,6 @@ pub fn tcp(domain: glib.net.runtime.Domain) glib.net.runtime.CreateError!Tcp {
             error.ProcessFdQuotaExceeded,
             error.SystemFdQuotaExceeded,
             error.SystemResources,
-            error.UserResourceLimitReached,
             => error.SystemResources,
             else => error.Unexpected,
         };
@@ -644,7 +669,6 @@ pub fn udp(domain: glib.net.runtime.Domain) glib.net.runtime.CreateError!Udp {
             error.ProcessFdQuotaExceeded,
             error.SystemFdQuotaExceeded,
             error.SystemResources,
-            error.UserResourceLimitReached,
             => error.SystemResources,
             else => error.Unexpected,
         };

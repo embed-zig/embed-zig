@@ -49,8 +49,8 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             t.run("listener_accepts_tls_client", listener_accepts_tls_client.make(lib, net));
             t.run("dialer_connects_to_tls_listener", dialer_connects_to_tls_listener.make(lib, net));
             t.run("dial_context_connects_to_tls_listener", dial_context_connects_to_tls_listener.make(lib, net));
-            t.run("dial_context_canceled_before_start", dial_context_canceled_before_start.make(lib, net));
             t.run("conn_concurrent_bidirectional_rw", conn_concurrent_bidirectional_rw.make(lib, net));
+            t.run("dial_context_canceled_before_start", dial_context_canceled_before_start.make(lib, net));
             t.run("dialer_rejects_udp", dialer_rejects_udp.make(lib, net));
             t.run("invalid_listener_config_rejected", invalid_listener_config_rejected.make(lib, net));
             return t.wait();

@@ -651,7 +651,74 @@ pub fn SharedLockTrackingThreadType(comptime lib: type) type {
         pub const max_name_len = lib.Thread.max_name_len;
         pub const Id = lib.Thread.Id;
         pub const Mutex = lib.Thread.Mutex;
-        pub const Condition = lib.Thread.Condition;
+        pub const Condition = struct {
+            impl: lib.Thread.Condition = .{},
+
+            const ConditionSelf = @This();
+
+            pub var intercept_next_timed_wait: bool = false;
+            pub var timed_wait_intercepted: bool = false;
+            pub var release_wait: bool = false;
+            pub var gate_mu: lib.Thread.Mutex = .{};
+            pub var gate_cond: lib.Thread.Condition = .{};
+
+            pub fn armTimedWaitHook() void {
+                gate_mu.lock();
+                intercept_next_timed_wait = true;
+                timed_wait_intercepted = false;
+                release_wait = false;
+                gate_mu.unlock();
+            }
+
+            pub fn waitForTimedWaitHook() void {
+                gate_mu.lock();
+                defer gate_mu.unlock();
+                while (!timed_wait_intercepted) {
+                    gate_cond.wait(&gate_mu);
+                }
+            }
+
+            pub fn releaseTimedWaitHook() void {
+                gate_mu.lock();
+                release_wait = true;
+                gate_mu.unlock();
+                gate_cond.broadcast();
+            }
+
+            pub fn resetHooks() void {
+                gate_mu.lock();
+                intercept_next_timed_wait = false;
+                timed_wait_intercepted = false;
+                release_wait = false;
+                gate_mu.unlock();
+            }
+
+            pub fn wait(self: *ConditionSelf, mu: *Mutex) void {
+                self.impl.wait(mu);
+            }
+
+            pub fn timedWait(self: *ConditionSelf, mu: *Mutex, ns: u64) anyerror!void {
+                if (intercept_next_timed_wait) {
+                    gate_mu.lock();
+                    intercept_next_timed_wait = false;
+                    timed_wait_intercepted = true;
+                    gate_cond.broadcast();
+                    while (!release_wait) {
+                        gate_cond.wait(&gate_mu);
+                    }
+                    gate_mu.unlock();
+                }
+                try self.impl.timedWait(mu, ns);
+            }
+
+            pub fn signal(self: *ConditionSelf) void {
+                self.impl.signal();
+            }
+
+            pub fn broadcast(self: *ConditionSelf) void {
+                self.impl.broadcast();
+            }
+        };
         pub const RwLock = struct {
             impl: lib.Thread.RwLock = .{},
             mu: lib.Thread.Mutex = .{},

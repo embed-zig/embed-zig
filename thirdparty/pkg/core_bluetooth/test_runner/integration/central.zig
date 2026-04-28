@@ -1,0 +1,41 @@
+const glib = @import("glib");
+const bt = @import("embed").bt;
+const cb = @import("../../../core_bluetooth.zig");
+
+pub fn make(comptime grt: type) glib.testing.TestRunner {
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            const Bt = bt.make(grt);
+            const Host = Bt.makeHost(cb.Host);
+
+            var host = Host.init(undefined, .{
+                .allocator = grt.std.testing.allocator,
+            }) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            defer host.deinit();
+
+            t.run("central", bt.test_runner.integration.central.makeWithHost(grt, &host));
+            return t.wait();
+        }
+
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
+}
