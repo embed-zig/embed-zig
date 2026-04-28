@@ -16,7 +16,7 @@ test "glib/crypto/unit/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .crypto);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .crypto);
     defer t.deinit();
 
     t.run("glib/crypto/unit/gstd", glib.crypto.test_runner.unit.make(gstd.runtime.std));

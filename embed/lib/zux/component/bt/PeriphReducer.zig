@@ -15,7 +15,7 @@ const Connection = struct {
     peer_addr_type: bt.Peripheral.AddrType,
     interval: u16,
     latency: u16,
-    timeout: u16,
+    supervision_timeout: glib.time.duration.Duration,
     mtu: ?u16 = null,
 };
 
@@ -65,7 +65,7 @@ pub fn reduce(self: *PeriphReducer, store: anytype, message: Message, emit: Emit
                 .peer_addr_type = value.peer_addr_type,
                 .interval = value.interval,
                 .latency = value.latency,
-                .timeout = value.timeout,
+                .supervision_timeout = value.supervision_timeout,
                 .mtu = previous_mtu,
             };
 
@@ -82,7 +82,7 @@ pub fn reduce(self: *PeriphReducer, store: anytype, message: Message, emit: Emit
                     state.last_peer_addr_type = arg.event_value.peer_addr_type;
                     state.last_interval = arg.event_value.interval;
                     state.last_latency = arg.event_value.latency;
-                    state.last_timeout = arg.event_value.timeout;
+                    state.last_supervision_timeout = arg.event_value.supervision_timeout;
                     syncConnectionSummary(state, arg.reducer);
                 }
             }.apply);
@@ -171,7 +171,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .peer_addr_type = .public,
                         .interval = 30,
                         .latency = 0,
-                        .timeout = 300,
+                        .supervision_timeout = 3 * glib.time.duration.Second,
                     },
                 },
             }, emit);
@@ -185,7 +185,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .peer_addr_type = .public,
                         .interval = 30,
                         .latency = 0,
-                        .timeout = 300,
+                        .supervision_timeout = 3 * glib.time.duration.Second,
                     },
                 },
             }, emit);
@@ -199,7 +199,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .peer_addr_type = .random,
                         .interval = 24,
                         .latency = 1,
-                        .timeout = 200,
+                        .supervision_timeout = 2 * glib.time.duration.Second,
                     },
                 },
             }, emit);

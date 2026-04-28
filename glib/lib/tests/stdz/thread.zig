@@ -1,7 +1,7 @@
 const stdz = @import("stdz");
 const testing_mod = @import("testing");
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -12,46 +12,46 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("spawn_clamps_stack_size_to_page_size", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("spawn_clamps_stack_size_to_page_size", testing_mod.TestRunner.fromFn(std, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try spawnClampsStackSizeToPageSize(lib);
+                    try spawnClampsStackSizeToPageSize(std);
                 }
             }.run));
-            t.run("condition_make_accepts_matching_mutex_impl", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("condition_make_accepts_matching_mutex_impl", testing_mod.TestRunner.fromFn(std, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try conditionMakeCase(lib);
+                    try conditionMakeCase(std);
                 }
             }.run));
-            t.run("thread_api", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("thread_api", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try threadTests(lib);
+                    try threadTests(std);
                 }
             }.run));
-            t.run("mutex", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("mutex", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try mutexTests(lib);
+                    try mutexTests(std);
                 }
             }.run));
-            t.run("condition", testing_mod.TestRunner.fromFn(lib, 48 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("condition", testing_mod.TestRunner.fromFn(std, 48 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try conditionTests(lib);
+                    try conditionTests(std);
                 }
             }.run));
-            t.run("rwlock", testing_mod.TestRunner.fromFn(lib, 48 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("rwlock", testing_mod.TestRunner.fromFn(std, 48 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try rwlockTests(lib);
+                    try rwlockTests(std);
                 }
             }.run));
             return t.wait();
@@ -59,21 +59,21 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
 }
 
-fn conditionMakeCase(comptime lib: type) !void {
-    _ = lib;
+fn conditionMakeCase(comptime std: type) !void {
+    _ = std;
     try conditionMakeAcceptsMatchingMutexImpl();
 }
 
-fn spawnClampsStackSizeToPageSize(comptime lib: type) !void {
+fn spawnClampsStackSizeToPageSize(comptime std: type) !void {
     const ThreadApi = @import("stdz").Thread;
     const Heap = struct {
         pub fn pageSize() usize {
@@ -148,7 +148,7 @@ fn spawnClampsStackSizeToPageSize(comptime lib: type) !void {
         fn run() void {}
     }.run, .{});
 
-    try lib.testing.expectEqual(@as(usize, 4096), Impl.last_stack_size);
+    try std.testing.expectEqual(@as(usize, 4096), Impl.last_stack_size);
 }
 
 fn conditionMakeAcceptsMatchingMutexImpl() !void {
@@ -177,27 +177,27 @@ fn conditionMakeAcceptsMatchingMutexImpl() !void {
     cond.broadcast();
 }
 
-fn threadTests(comptime lib: type) !void {
-    _ = try lib.Thread.getCpuCount();
-    _ = lib.Thread.getCurrentId();
+fn threadTests(comptime std: type) !void {
+    _ = try std.Thread.getCpuCount();
+    _ = std.Thread.getCurrentId();
 
-    var t = try lib.Thread.spawn(.{}, struct {
+    var t = try std.Thread.spawn(.{}, struct {
         fn work(l: type) void {
             _ = l;
         }
-    }.work, .{lib});
+    }.work, .{std});
     t.join();
 
-    try lib.Thread.yield();
-    lib.Thread.sleep(1_000_000);
+    try std.Thread.yield();
+    std.Thread.sleep(1_000_000);
 
     {
-        var counter = lib.atomic.Value(u32).init(0);
+        var counter = std.atomic.Value(u32).init(0);
         const N = 4;
-        var threads: [N]lib.Thread = undefined;
+        var threads: [N]std.Thread = undefined;
         for (0..N) |i| {
-            threads[i] = try lib.Thread.spawn(.{}, struct {
-                fn inc(c: *lib.atomic.Value(u32)) void {
+            threads[i] = try std.Thread.spawn(.{}, struct {
+                fn inc(c: *std.atomic.Value(u32)) void {
                     _ = c.fetchAdd(1, .seq_cst);
                 }
             }.inc, .{&counter});
@@ -208,15 +208,15 @@ fn threadTests(comptime lib: type) !void {
     }
 
     {
-        var detached = try lib.Thread.spawn(.{}, struct {
+        var detached = try std.Thread.spawn(.{}, struct {
             fn noop() void {}
         }.noop, .{});
         detached.detach();
     }
 }
 
-fn mutexTests(comptime lib: type) !void {
-    var mutex = lib.Thread.Mutex{};
+fn mutexTests(comptime std: type) !void {
+    var mutex = std.Thread.Mutex{};
 
     mutex.lock();
     mutex.unlock();
@@ -234,10 +234,10 @@ fn mutexTests(comptime lib: type) !void {
         var shared: u64 = 0;
         const N = 4;
         const ITERS = 1000;
-        var threads: [N]lib.Thread = undefined;
+        var threads: [N]std.Thread = undefined;
         for (0..N) |i| {
-            threads[i] = try lib.Thread.spawn(.{}, struct {
-                fn work(m: *lib.Thread.Mutex, s: *u64) void {
+            threads[i] = try std.Thread.spawn(.{}, struct {
+                fn work(m: *std.Thread.Mutex, s: *u64) void {
                     for (0..ITERS) |_| {
                         m.lock();
                         s.* += 1;
@@ -251,17 +251,17 @@ fn mutexTests(comptime lib: type) !void {
     }
 }
 
-fn conditionTests(comptime lib: type) !void {
+fn conditionTests(comptime std: type) !void {
     const Shared = struct {
-        mutex: lib.Thread.Mutex = .{},
-        cond: lib.Thread.Condition = .{},
+        mutex: std.Thread.Mutex = .{},
+        cond: std.Thread.Condition = .{},
         ready: bool = false,
         value: u32 = 0,
     };
 
     var shared = Shared{};
 
-    const waiter = try lib.Thread.spawn(.{}, struct {
+    const waiter = try std.Thread.spawn(.{}, struct {
         fn wait(s: *Shared) void {
             s.mutex.lock();
             while (!s.ready) s.cond.wait(&s.mutex);
@@ -270,7 +270,7 @@ fn conditionTests(comptime lib: type) !void {
         }
     }.wait, .{&shared});
 
-    lib.Thread.sleep(5_000_000);
+    std.Thread.sleep(5_000_000);
 
     shared.mutex.lock();
     shared.ready = true;
@@ -282,16 +282,16 @@ fn conditionTests(comptime lib: type) !void {
 
     {
         const BShared = struct {
-            mutex: lib.Thread.Mutex = .{},
-            cond: lib.Thread.Condition = .{},
+            mutex: std.Thread.Mutex = .{},
+            cond: std.Thread.Condition = .{},
             go: bool = false,
             count: u32 = 0,
         };
         var bs = BShared{};
         const N = 3;
-        var threads: [N]lib.Thread = undefined;
+        var threads: [N]std.Thread = undefined;
         for (0..N) |i| {
-            threads[i] = try lib.Thread.spawn(.{}, struct {
+            threads[i] = try std.Thread.spawn(.{}, struct {
                 fn wait(s: *BShared) void {
                     s.mutex.lock();
                     while (!s.go) s.cond.wait(&s.mutex);
@@ -301,7 +301,7 @@ fn conditionTests(comptime lib: type) !void {
             }.wait, .{&bs});
         }
 
-        lib.Thread.sleep(5_000_000);
+        std.Thread.sleep(5_000_000);
 
         bs.mutex.lock();
         bs.go = true;
@@ -313,8 +313,8 @@ fn conditionTests(comptime lib: type) !void {
     }
 }
 
-fn rwlockTests(comptime lib: type) !void {
-    var rw = lib.Thread.RwLock{};
+fn rwlockTests(comptime std: type) !void {
+    var rw = std.Thread.RwLock{};
 
     rw.lockShared();
     rw.unlockShared();
@@ -343,12 +343,12 @@ fn rwlockTests(comptime lib: type) !void {
 
     {
         var data: u64 = 0;
-        var mutex_rw = lib.Thread.RwLock{};
+        var mutex_rw = std.Thread.RwLock{};
         const READERS = 4;
         const WRITER_ITERS = 100;
 
-        const writer = try lib.Thread.spawn(.{}, struct {
-            fn work(rw_ptr: *lib.Thread.RwLock, d: *u64) void {
+        const writer = try std.Thread.spawn(.{}, struct {
+            fn work(rw_ptr: *std.Thread.RwLock, d: *u64) void {
                 for (0..WRITER_ITERS) |_| {
                     rw_ptr.lock();
                     d.* += 1;
@@ -357,10 +357,10 @@ fn rwlockTests(comptime lib: type) !void {
             }
         }.work, .{ &mutex_rw, &data });
 
-        var readers: [READERS]lib.Thread = undefined;
+        var readers: [READERS]std.Thread = undefined;
         for (0..READERS) |i| {
-            readers[i] = try lib.Thread.spawn(.{}, struct {
-                fn read(rw_ptr: *lib.Thread.RwLock, d: *u64) void {
+            readers[i] = try std.Thread.spawn(.{}, struct {
+                fn read(rw_ptr: *std.Thread.RwLock, d: *u64) void {
                     for (0..WRITER_ITERS) |_| {
                         rw_ptr.lockShared();
                         _ = d.*;

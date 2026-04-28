@@ -6,15 +6,15 @@ const Node = @import("Node.zig");
 
 pub fn Config(comptime grt: type) type {
     return struct {
-        tick_interval_ns: u64 = 10 * glib.std.time.ns_per_ms,
+        tick_interval: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond,
         spawn_config: grt.std.Thread.SpawnConfig = .{},
     };
 }
 
 pub fn make(comptime grt: type, comptime config: Config(grt)) type {
     comptime {
-        if (config.tick_interval_ns == 0) {
-            @compileError("zux.pipeline.Pipeline.Config.tick_interval_ns must be > 0");
+        if (config.tick_interval <= 0) {
+            @compileError("zux.pipeline.Pipeline.Config.tick_interval must be > 0");
         }
     }
 
@@ -25,7 +25,7 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
         pub const Allocator = glib.std.mem.Allocator;
         pub const Worker = grt.std.Thread;
         pub const default_capacity: usize = 64;
-        pub const default_poll_timeout_ns: u32 = 10 * 1000 * 1000;
+        pub const default_poll_timeout: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond;
         pub const pipeline_config = config;
         const BoolAtomic = grt.std.atomic.Value(bool);
         const PollerList = grt.std.ArrayList(PollWorker);
@@ -64,7 +64,7 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
         receivers: ReceiverList = .empty,
 
         stopping: BoolAtomic = BoolAtomic.init(false),
-        tick_interval_ns: u64 = config.tick_interval_ns,
+        tick_interval: glib.time.duration.Duration = config.tick_interval,
         tick_seq: u64 = 0,
 
         pub fn init(allocator: Allocator) !Self {
@@ -72,7 +72,7 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
                 .allocator = allocator,
                 .outbound = null,
                 .inbox = try MessageChannel.make(allocator, default_capacity),
-                .tick_interval_ns = config.tick_interval_ns,
+                .tick_interval = config.tick_interval,
             };
         }
 
@@ -84,7 +84,7 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
         pub fn emit(self: *Self, body: Message.Event) !void {
             return self.inject(.{
                 .origin = .manual,
-                .timestamp_ns = grt.std.time.nanoTimestamp(),
+                .timestamp = grt.time.instant.now(),
                 .body = body,
             });
         }
@@ -93,7 +93,7 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
             self.tick_seq +%= 1;
             return self.inject(.{
                 .origin = .timer,
-                .timestamp_ns = grt.std.time.nanoTimestamp(),
+                .timestamp = grt.time.instant.now(),
                 .body = .{ .tick = .{ .seq = self.tick_seq } },
             });
         }
@@ -104,7 +104,7 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
 
         pub fn pollFrom(self: *Self, comptime Source: type, source: *Source) !void {
             comptime {
-                _ = @as(*const fn (*Source, ?u32) anyerror!Message.Event, &Source.poll);
+                _ = @as(*const fn (*Source, ?glib.time.duration.Duration) anyerror!Message.Event, &Source.poll);
             }
 
             self.mu.lock();
@@ -138,7 +138,7 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
                     const p: *Self = @ptrCast(@alignCast(ctx));
                     p.inject(.{
                         .origin = .source,
-                        .timestamp_ns = grt.std.time.nanoTimestamp(),
+                        .timestamp = grt.time.instant.now(),
                         .body = body,
                     }) catch |err| {
                         if (!p.stopping.load(.acquire)) {
@@ -242,7 +242,7 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
 
         fn tickLoop(self: *Self) !void {
             while (!self.stopping.load(.acquire)) {
-                Worker.sleep(self.tick_interval_ns);
+                Worker.sleep(@intCast(self.tick_interval));
                 if (self.stopping.load(.acquire)) return;
 
                 self.tick() catch |err| {
@@ -254,13 +254,13 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
 
         fn pollLoop(self: *Self, comptime Source: type, source: *Source) !void {
             while (!self.stopping.load(.acquire)) {
-                const body = source.poll(default_poll_timeout_ns) catch |err| switch (err) {
+                const body = source.poll(default_poll_timeout) catch |err| switch (err) {
                     error.Timeout => continue,
                     else => return err,
                 };
                 self.inject(.{
                     .origin = .source,
-                    .timestamp_ns = grt.std.time.nanoTimestamp(),
+                    .timestamp = grt.time.instant.now(),
                     .body = body,
                 }) catch |err| {
                     if (self.stopping.load(.acquire)) return;
@@ -276,7 +276,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         pub const mem = grt.std.mem;
         pub const Thread = grt.std.Thread;
         pub const atomic = grt.std.atomic;
-        pub const time = grt.std.time;
         pub const debug = grt.std.debug;
         pub const log = grt.std.log;
         pub const ArrayList = grt.std.ArrayList;
@@ -310,13 +309,14 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 cv: HarnessLib.Thread.Condition = .{},
                 pending: ?Message.Event = null,
 
-                pub fn poll(self: *@This(), timeout_ns: ?u32) !Message.Event {
+                pub fn poll(self: *@This(), timeout: ?glib.time.duration.Duration) !Message.Event {
                     self.mu.lock();
                     defer self.mu.unlock();
 
                     while (self.pending == null) {
-                        if (timeout_ns) |wait_ns| {
-                            self.cv.timedWait(&self.mu, wait_ns) catch |err| switch (err) {
+                        if (timeout) |duration| {
+                            if (duration <= 0) return error.Timeout;
+                            self.cv.timedWait(&self.mu, @intCast(duration)) catch |err| switch (err) {
                                 error.Timeout => return error.Timeout,
                             };
                         } else {
@@ -356,7 +356,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var attempts: usize = 0;
             while (attempts < 200 and root_impl.seen_count.load(.acquire) == 0) : (attempts += 1) {
-                HarnessLib.Thread.sleep(HarnessLib.time.ns_per_ms);
+                HarnessLib.Thread.sleep(@as(u64, @intCast(grt.time.duration.MilliSecond)));
             }
 
             try grt.std.testing.expectEqual(@as(u32, 1), root_impl.seen_count.load(.acquire));
@@ -377,7 +377,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
         fn startEmitsTickMessages(allocator: glib.std.mem.Allocator) !void {
             const TestPipeline = make(grt, .{
-                .tick_interval_ns = HarnessLib.time.ns_per_ms,
+                .tick_interval = grt.time.duration.MilliSecond,
             });
             const AtomicU32 = HarnessLib.atomic.Value(u32);
             const AtomicU8 = HarnessLib.atomic.Value(u8);
@@ -410,7 +410,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var attempts: usize = 0;
             while (attempts < 50 and root_impl.tick_count.load(.acquire) == 0) : (attempts += 1) {
-                HarnessLib.Thread.sleep(HarnessLib.time.ns_per_ms);
+                HarnessLib.Thread.sleep(@as(u64, @intCast(grt.time.duration.MilliSecond)));
             }
 
             try grt.std.testing.expect(root_impl.tick_count.load(.acquire) > 0);
@@ -422,7 +422,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
         fn manualTickInjectsTickMessage(allocator: glib.std.mem.Allocator) !void {
             const TestPipeline = make(grt, .{
-                .tick_interval_ns = 100 * HarnessLib.time.ns_per_ms,
+                .tick_interval = 100 * grt.time.duration.MilliSecond,
             });
             const AtomicU32 = HarnessLib.atomic.Value(u32);
 
@@ -453,7 +453,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var attempts: usize = 0;
             while (attempts < 50 and root_impl.tick_count.load(.acquire) == 0) : (attempts += 1) {
-                HarnessLib.Thread.sleep(HarnessLib.time.ns_per_ms);
+                HarnessLib.Thread.sleep(@as(u64, @intCast(grt.time.duration.MilliSecond)));
             }
 
             try grt.std.testing.expect(root_impl.tick_count.load(.acquire) > 0);
@@ -464,7 +464,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
         fn manualEmitWrapsBodyWithManualOrigin(allocator: glib.std.mem.Allocator) !void {
             const TestPipeline = make(grt, .{
-                .tick_interval_ns = 100 * HarnessLib.time.ns_per_ms,
+                .tick_interval = 100 * grt.time.duration.MilliSecond,
             });
             const AtomicU8 = HarnessLib.atomic.Value(u8);
             const AtomicU32 = HarnessLib.atomic.Value(u32);
@@ -503,7 +503,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var attempts: usize = 0;
             while (attempts < 50 and root_impl.last_source_id.load(.acquire) == 0) : (attempts += 1) {
-                HarnessLib.Thread.sleep(HarnessLib.time.ns_per_ms);
+                HarnessLib.Thread.sleep(@as(u64, @intCast(grt.time.duration.MilliSecond)));
             }
 
             try grt.std.testing.expectEqual(@intFromEnum(Message.Origin.manual), root_impl.last_origin.load(.acquire));
@@ -515,7 +515,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
         fn hookOnForwardsCallbackBodiesAndUnsetsReceiverOnStop(allocator: glib.std.mem.Allocator) !void {
             const TestPipeline = make(grt, .{
-                .tick_interval_ns = 100 * HarnessLib.time.ns_per_ms,
+                .tick_interval = 100 * grt.time.duration.MilliSecond,
             });
             const AtomicU8 = HarnessLib.atomic.Value(u8);
             const AtomicU32 = HarnessLib.atomic.Value(u32);
@@ -575,7 +575,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var attempts: usize = 0;
             while (attempts < 50 and root_impl.count.load(.acquire) == 0) : (attempts += 1) {
-                HarnessLib.Thread.sleep(HarnessLib.time.ns_per_ms);
+                HarnessLib.Thread.sleep(@as(u64, @intCast(grt.time.duration.MilliSecond)));
             }
 
             try grt.std.testing.expectEqual(@as(u32, 1), root_impl.count.load(.acquire));

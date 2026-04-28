@@ -248,7 +248,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const ledstrip_pixel_count = ledStripPixelCount(ledstrip_registry);
     const ledstrip_frame_capacity = ledStripFrameCapacity(ledstrip_registry);
     const runtime_pipeline_config: Pipeline.Config(context.grt) = .{
-        .tick_interval_ns = context.assembler_config.pipeline.tick_interval_ns,
+        .tick_interval = context.assembler_config.pipeline.tick_interval,
         .spawn_config = adaptSpawnConfig(
             context.grt.std.Thread.SpawnConfig,
             context.assembler_config.pipeline.spawn_config,
@@ -297,7 +297,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         }
 
         pub fn start(self: *@This(), config: Poller.Config) !void {
-            self.inner.poll_interval_ns = config.poll_interval_ns;
+            self.inner.poll_interval = config.poll_interval;
             self.inner.spawn_config = adaptSpawnConfig(
                 context.grt.std.Thread.SpawnConfig,
                 config.spawn_config,
@@ -317,7 +317,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         ledstrip_component.Reducer.make(
             ledstrip_pixel_count,
             ledstrip_frame_capacity,
-            runtime_pipeline_config.tick_interval_ns,
+            runtime_pipeline_config.tick_interval,
         )
     else
         void;
@@ -1357,12 +1357,12 @@ pub fn build(builder: root, comptime context: anytype) type {
                     self.started = true;
                     return;
                 },
-                .interval_ms => |interval_ms| {
-                    if (interval_ms == 0) return error.InvalidStartConfig;
-                    self.runtime.pipeline.tick_interval_ns = @as(u64, interval_ms) * Lib.std.time.ns_per_ms;
+                .interval => |interval| {
+                    if (interval <= 0) return error.InvalidStartConfig;
+                    self.runtime.pipeline.tick_interval = interval;
                 },
             } else {
-                self.runtime.pipeline.tick_interval_ns = runtime_pipeline_config.tick_interval_ns;
+                self.runtime.pipeline.tick_interval = runtime_pipeline_config.tick_interval;
             }
 
             try self.runtime.pipeline.start();
@@ -1658,8 +1658,8 @@ pub fn build(builder: root, comptime context: anytype) type {
             label: PeriphLabel,
             frame: FrameType,
             brightness: u8,
-            duration_ns: u64,
-            interval_ns: u64,
+            duration: glib.time.duration.Duration,
+            interval: glib.time.duration.Duration,
         ) !void {
             if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
@@ -1668,8 +1668,8 @@ pub fn build(builder: root, comptime context: anytype) type {
                     .source_id = periphId(label),
                     .pixels = frame.pixels[0..],
                     .brightness = brightness,
-                    .duration_ns = duration_ns,
-                    .interval_ns = interval_ns,
+                    .duration = duration,
+                    .interval = interval,
                 },
             });
         }
@@ -1680,8 +1680,8 @@ pub fn build(builder: root, comptime context: anytype) type {
             from_frame: FrameType,
             to_frame: FrameType,
             brightness: u8,
-            duration_ns: u64,
-            interval_ns: u64,
+            duration: glib.time.duration.Duration,
+            interval: glib.time.duration.Duration,
         ) !void {
             if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
@@ -1691,8 +1691,8 @@ pub fn build(builder: root, comptime context: anytype) type {
                     .from_pixels = from_frame.pixels[0..],
                     .to_pixels = to_frame.pixels[0..],
                     .brightness = brightness,
-                    .duration_ns = duration_ns,
-                    .interval_ns = interval_ns,
+                    .duration = duration,
+                    .interval = interval,
                 },
             });
         }
@@ -1702,8 +1702,8 @@ pub fn build(builder: root, comptime context: anytype) type {
             label: PeriphLabel,
             frame: FrameType,
             brightness: u8,
-            duration_ns: u64,
-            interval_ns: u64,
+            duration: glib.time.duration.Duration,
+            interval: glib.time.duration.Duration,
         ) !void {
             if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
@@ -1712,8 +1712,8 @@ pub fn build(builder: root, comptime context: anytype) type {
                     .source_id = periphId(label),
                     .pixels = frame.pixels[0..],
                     .brightness = brightness,
-                    .duration_ns = duration_ns,
-                    .interval_ns = interval_ns,
+                    .duration = duration,
+                    .interval = interval,
                 },
             });
         }
@@ -2056,7 +2056,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         fn emitBody(self: *Self, body: Message.Event) !void {
             try self.dispatch(.{
                 .origin = .manual,
-                .timestamp_ns = Lib.std.time.nanoTimestamp(),
+                .timestamp = Lib.time.instant.now(),
                 .body = body,
             });
         }

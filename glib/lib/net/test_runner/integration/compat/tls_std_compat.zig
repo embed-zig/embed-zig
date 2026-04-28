@@ -1,14 +1,14 @@
 //! TLS std-compat tests — host-only interoperability coverage.
 //!
 //! These tests validate interoperability between `stdz-zig` TLS server paths
-//! and `std.crypto.tls.Client`. They are intentionally separate from the
+//! and `host_std.crypto.tls.Client`. They are intentionally separate from the
 //! embedded-friendly TLS runner because they depend on Zig stdlib TLS and host
 //! networking APIs.
 //!
 //! This runner is host-only and is intended to be invoked from `lib/net.zig`'s
 //! `net/compat_tests/std` block.
 
-const std = @import("std");
+const host_std = @import("std");
 const stdz = @import("stdz");
 const testing_api = @import("testing");
 const net_root = @import("../../../net.zig");
@@ -16,7 +16,7 @@ const fixtures = @import("../../../tls/test_fixtures.zig");
 const kdf_mod = @import("../../../tls/kdf.zig");
 const AddrPort = net_root.netip.AddrPort;
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
@@ -27,7 +27,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
-            runImpl(lib, net, t, allocator) catch |err| {
+            runImpl(std, net, t, allocator) catch |err| {
                 t.logErrorf("tls_std_compat runner failed: {}", .{err});
                 return false;
             };
@@ -36,16 +36,16 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-fn runImpl(comptime lib: type, comptime Net: type, t: *testing_api.T, alloc: lib.mem.Allocator) !void {
+fn runImpl(comptime std: type, comptime Net: type, t: *testing_api.T, alloc: std.mem.Allocator) !void {
     _ = t;
     try kdfMatchesStdTlsHelpers();
     try serverInteroperatesWithStdTlsClient(Net, alloc);
@@ -54,26 +54,26 @@ fn runImpl(comptime lib: type, comptime Net: type, t: *testing_api.T, alloc: lib
 
 fn kdfMatchesStdTlsHelpers() !void {
     const K = kdf_mod.make(std);
-    const HmacSha384 = std.crypto.auth.hmac.sha2.HmacSha384;
-    const HkdfSha384 = std.crypto.kdf.hkdf.Hkdf(HmacSha384);
+    const HmacSha384 = host_std.crypto.auth.hmac.sha2.HmacSha384;
+    const HkdfSha384 = host_std.crypto.kdf.hkdf.Hkdf(HmacSha384);
 
     const secret: [K.HkdfSha384.prk_length]u8 = [_]u8{0x5a} ** K.HkdfSha384.prk_length;
     const transcript: [K.Sha384.digest_length]u8 = [_]u8{0x33} ** K.Sha384.digest_length;
 
     const ours = K.finishedVerifyDataSha384(secret, &transcript);
-    const finished_key = std.crypto.tls.hkdfExpandLabel(
+    const finished_key = host_std.crypto.tls.hkdfExpandLabel(
         HkdfSha384,
         secret,
         "finished",
         "",
         HmacSha384.key_length,
     );
-    const expected = std.crypto.tls.hmac(HmacSha384, &transcript, finished_key);
+    const expected = host_std.crypto.tls.hmac(HmacSha384, &transcript, finished_key);
 
-    try std.testing.expectEqualSlices(u8, &expected, &ours);
+    try host_std.testing.expectEqualSlices(u8, &expected, &ours);
 }
 
-fn serverInteroperatesWithStdTlsClient(comptime Net: type, allocator: std.mem.Allocator) !void {
+fn serverInteroperatesWithStdTlsClient(comptime Net: type, allocator: host_std.mem.Allocator) !void {
     var ln = try Net.TcpListener.init(allocator, .{
         .address = AddrPort.from4(.{ 127, 0, 0, 1 }, 0),
     });
@@ -83,8 +83,8 @@ fn serverInteroperatesWithStdTlsClient(comptime Net: type, allocator: std.mem.Al
     const port = try ln_impl.port();
 
     var server_result: ?anyerror = null;
-    var server_thread = try std.Thread.spawn(.{}, struct {
-        fn run(listener: *Net.TcpListener, tls_allocator: std.mem.Allocator, result: *?anyerror) void {
+    var server_thread = try host_std.Thread.spawn(.{}, struct {
+        fn run(listener: *Net.TcpListener, tls_allocator: host_std.mem.Allocator, result: *?anyerror) void {
             var conn = listener.accept() catch |err| {
                 result.* = err;
                 return;
@@ -111,7 +111,7 @@ fn serverInteroperatesWithStdTlsClient(comptime Net: type, allocator: std.mem.Al
                 result.* = err;
                 return;
             };
-            if (!std.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
+            if (!host_std.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
         }
     }.run, .{ ln_impl, allocator, &server_result });
     defer server_thread.join();
@@ -119,16 +119,16 @@ fn serverInteroperatesWithStdTlsClient(comptime Net: type, allocator: std.mem.Al
     const stream = try tcpConnectStream(AddrPort.from4(.{ 127, 0, 0, 1 }, port));
     defer stream.close();
 
-    var input_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
-    var output_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
-    var tls_read_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
-    var tls_write_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+    var input_buf: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+    var output_buf: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+    var tls_read_buf: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+    var tls_write_buf: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
 
     var input = stream.reader(&input_buf);
     var output = stream.writer(&output_buf);
     const input_io = input.interface();
     const output_io = &output.interface;
-    var client = try std.crypto.tls.Client.init(input_io, output_io, .{
+    var client = try host_std.crypto.tls.Client.init(input_io, output_io, .{
         .host = .no_verification,
         .ca = .no_verification,
         .read_buffer = &tls_read_buf,
@@ -141,12 +141,12 @@ fn serverInteroperatesWithStdTlsClient(comptime Net: type, allocator: std.mem.Al
 
     var resp: [4]u8 = undefined;
     try client.reader.readSliceAll(&resp);
-    try std.testing.expectEqualStrings("pong", &resp);
+    try host_std.testing.expectEqualStrings("pong", &resp);
 
     if (server_result) |err| return err;
 }
 
-fn serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(comptime Net: type, allocator: std.mem.Allocator) !void {
+fn serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(comptime Net: type, allocator: host_std.mem.Allocator) !void {
     for ([_]Net.tls.CipherSuite{
         .TLS_AES_128_GCM_SHA256,
         .TLS_AES_256_GCM_SHA384,
@@ -161,8 +161,8 @@ fn serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(comptime Net: 
         const port = try ln_impl.port();
 
         var server_result: ?anyerror = null;
-        var server_thread = try std.Thread.spawn(.{}, struct {
-            fn run(listener: *Net.TcpListener, tls_allocator: std.mem.Allocator, wanted_suite: Net.tls.CipherSuite, result: *?anyerror) void {
+        var server_thread = try host_std.Thread.spawn(.{}, struct {
+            fn run(listener: *Net.TcpListener, tls_allocator: host_std.mem.Allocator, wanted_suite: Net.tls.CipherSuite, result: *?anyerror) void {
                 var conn = listener.accept() catch |err| {
                     result.* = err;
                     return;
@@ -202,7 +202,7 @@ fn serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(comptime Net: 
                     result.* = err;
                     return;
                 };
-                if (!std.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
+                if (!host_std.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
             }
         }.run, .{ ln_impl, allocator, suite, &server_result });
         defer server_thread.join();
@@ -210,16 +210,16 @@ fn serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(comptime Net: 
         const stream = try tcpConnectStream(AddrPort.from4(.{ 127, 0, 0, 1 }, port));
         defer stream.close();
 
-        var input_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
-        var output_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
-        var tls_read_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
-        var tls_write_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+        var input_buf: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+        var output_buf: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+        var tls_read_buf: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+        var tls_write_buf: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
 
         var input = stream.reader(&input_buf);
         var output = stream.writer(&output_buf);
         const input_io = input.interface();
         const output_io = &output.interface;
-        var client = try std.crypto.tls.Client.init(input_io, output_io, .{
+        var client = try host_std.crypto.tls.Client.init(input_io, output_io, .{
             .host = .no_verification,
             .ca = .no_verification,
             .read_buffer = &tls_read_buf,
@@ -232,7 +232,7 @@ fn serverInteroperatesWithStdTlsClientAcrossConfiguredTls13Suites(comptime Net: 
 
         var resp: [4]u8 = undefined;
         try client.reader.readSliceAll(&resp);
-        try std.testing.expectEqualStrings("pong", &resp);
+        try host_std.testing.expectEqualStrings("pong", &resp);
 
         if (server_result) |err| return err;
     }
@@ -256,47 +256,47 @@ fn writeAll(conn: net_root.Conn, buf: []const u8) !void {
     }
 }
 
-fn tcpConnectStream(addr: AddrPort) !std.net.Stream {
+fn tcpConnectStream(addr: AddrPort) !host_std.net.Stream {
     const encoded = try encodeSockAddr(addr);
-    const fd = try std.posix.socket(socketFamily(addr), std.posix.SOCK.STREAM, 0);
-    errdefer std.posix.close(fd);
-    try std.posix.connect(fd, @ptrCast(&encoded.storage), encoded.len);
+    const fd = try host_std.posix.socket(socketFamily(addr), host_std.posix.SOCK.STREAM, 0);
+    errdefer host_std.posix.close(fd);
+    try host_std.posix.connect(fd, @ptrCast(&encoded.storage), encoded.len);
     return .{ .handle = fd };
 }
 
 const EncodedSockAddr = struct {
-    storage: std.posix.sockaddr.storage,
-    len: std.posix.socklen_t,
+    storage: host_std.posix.sockaddr.storage,
+    len: host_std.posix.socklen_t,
 };
 
 fn encodeSockAddr(addr_port: AddrPort) !EncodedSockAddr {
-    var storage: std.posix.sockaddr.storage = undefined;
+    var storage: host_std.posix.sockaddr.storage = undefined;
     zeroStorage(&storage);
 
     const ip = addr_port.addr();
     if (ip.is4()) {
-        const sa: *std.posix.sockaddr.in = @ptrCast(@alignCast(&storage));
+        const sa: *host_std.posix.sockaddr.in = @ptrCast(@alignCast(&storage));
         sa.* = .{
-            .port = std.mem.nativeToBig(u16, addr_port.port()),
+            .port = host_std.mem.nativeToBig(u16, addr_port.port()),
             .addr = @as(*align(1) const u32, @ptrCast(&ip.as4().?)).*,
         };
         return .{
             .storage = storage,
-            .len = @sizeOf(std.posix.sockaddr.in),
+            .len = @sizeOf(host_std.posix.sockaddr.in),
         };
     }
 
     if (ip.is6()) {
-        const sa: *std.posix.sockaddr.in6 = @ptrCast(@alignCast(&storage));
+        const sa: *host_std.posix.sockaddr.in6 = @ptrCast(@alignCast(&storage));
         sa.* = .{
-            .port = std.mem.nativeToBig(u16, addr_port.port()),
+            .port = host_std.mem.nativeToBig(u16, addr_port.port()),
             .flowinfo = 0,
             .addr = ip.as16().?,
             .scope_id = try parseScopeId(ip),
         };
         return .{
             .storage = storage,
-            .len = @sizeOf(std.posix.sockaddr.in6),
+            .len = @sizeOf(host_std.posix.sockaddr.in6),
         };
     }
 
@@ -304,11 +304,11 @@ fn encodeSockAddr(addr_port: AddrPort) !EncodedSockAddr {
 }
 
 fn socketFamily(addr_port: AddrPort) u32 {
-    return if (addr_port.addr().is4()) std.posix.AF.INET else std.posix.AF.INET6;
+    return if (addr_port.addr().is4()) host_std.posix.AF.INET else host_std.posix.AF.INET6;
 }
 
-fn zeroStorage(storage: *std.posix.sockaddr.storage) void {
-    const bytes: *[@sizeOf(std.posix.sockaddr.storage)]u8 = @ptrCast(storage);
+fn zeroStorage(storage: *host_std.posix.sockaddr.storage) void {
+    const bytes: *[@sizeOf(host_std.posix.sockaddr.storage)]u8 = @ptrCast(storage);
     @memset(bytes, 0);
 }
 

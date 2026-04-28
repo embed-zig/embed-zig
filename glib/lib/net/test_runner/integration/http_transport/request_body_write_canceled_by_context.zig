@@ -3,8 +3,8 @@ const context_mod = @import("context");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Utils = test_utils.make2(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(std, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
@@ -14,23 +14,23 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: lib.mem.Allocator) bool {
+        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: std.mem.Allocator) bool {
             _ = runner;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Http = Utils.Http;
                     const testing = struct {
-                        pub var allocator: lib.mem.Allocator = undefined;
-                        pub const expect = lib.testing.expect;
-                        pub const expectEqual = lib.testing.expectEqual;
-                        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-                        pub const expectError = lib.testing.expectError;
+                        pub var allocator: std.mem.Allocator = undefined;
+                        pub const expect = std.testing.expect;
+                        pub const expectEqual = std.testing.expectEqual;
+                        pub const expectEqualStrings = std.testing.expectEqualStrings;
+                        pub const expectError = std.testing.expectError;
                     };
                     testing.allocator = a;
-                    const test_spawn_config: lib.Thread.SpawnConfig = .{};
+                    const test_spawn_config: std.Thread.SpawnConfig = .{};
 
-                    const Mutex = lib.Thread.Mutex;
-                    const Condition = lib.Thread.Condition;
+                    const Mutex = std.Thread.Mutex;
+                    const Condition = std.Thread.Condition;
 
                     const WaitState = struct {
                         mutex: Mutex = .{},
@@ -44,11 +44,11 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             self.mutex.unlock();
                         }
 
-                        fn wait(self: *@This(), timeout_ms: u32) !void {
+                        fn wait(self: *@This(), timeout: net.time.duration.Duration) !void {
                             self.mutex.lock();
                             defer self.mutex.unlock();
                             if (self.client_done) return;
-                            self.cond.timedWait(&self.mutex, @as(u64, timeout_ms) * lib.time.ns_per_ms) catch return error.TestUnexpectedResult;
+                            self.cond.timedWait(&self.mutex, @intCast(timeout)) catch return error.TestUnexpectedResult;
                             if (!self.client_done) return error.TestUnexpectedResult;
                         }
                     };
@@ -90,27 +90,28 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             };
                         }
 
-                        fn waitTimeout(self: *@This(), timeout_ms: u32) bool {
+                        fn waitTimeout(self: *@This(), timeout: net.time.duration.Duration) bool {
                             self.mutex.lock();
                             defer self.mutex.unlock();
                             if (self.finished) return true;
-                            self.cond.timedWait(&self.mutex, @as(u64, timeout_ms) * lib.time.ns_per_ms) catch {};
+                            self.cond.timedWait(&self.mutex, @intCast(timeout)) catch {};
                             return self.finished;
                         }
                     };
-                    try Utils.withServerState(testing.allocator, 
+                    try Utils.withServerState(
+                        testing.allocator,
                         WaitState{},
                         struct {
                             fn run(conn: net.Conn, state: *WaitState) !void {
                                 var req_buf: [4096]u8 = undefined;
                                 const req_head = try Utils.readRequestHead(conn, &req_buf);
                                 try testing.expect(Utils.hasRequestLine(req_head, "POST /upload-cancel HTTP/1.1"));
-                                try state.wait(2000);
+                                try state.wait(2000 * net.time.duration.MilliSecond);
                             }
                         }.run,
                         struct {
-                            fn run(_: lib.mem.Allocator, port: u16, state: *WaitState) !void {
-                                const Context = context_mod.make(lib);
+                            fn run(_: std.mem.Allocator, port: u16, state: *WaitState) !void {
+                                const Context = context_mod.make(std, net.time);
                                 var ctx_api = try Context.init(testing.allocator);
                                 defer ctx_api.deinit();
                                 var ctx = try ctx_api.withCancel(ctx_api.background());
@@ -121,7 +122,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 defer if (transport_active) transport.deinit();
                                 defer state.signal();
 
-                                const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/upload-cancel", .{port});
+                                const url = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/upload-cancel", .{port});
                                 defer testing.allocator.free(url);
 
                                 const payload_len = 32 * 1024 * 1024;
@@ -138,10 +139,10 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                     .transport = &transport,
                                     .req = &req,
                                 };
-                                var thread = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
+                                var thread = try std.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
                                 var joined = false;
                                 defer if (!joined) thread.join();
-                                try testing.expect(!task.waitTimeout(120));
+                                try testing.expect(!task.waitTimeout(120 * net.time.duration.MilliSecond));
                                 ctx.cancel();
                                 thread.join();
                                 joined = true;
@@ -151,7 +152,6 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             }
                         }.run,
                     );
-                            
                 }
             };
             Body.call(run_allocator) catch |err| {

@@ -39,7 +39,7 @@ pub fn reduce(self: *CentralReducer, store: anytype, message: Message, emit: Emi
                     state.peer_addr_type = event_value.peer_addr_type;
                     state.interval = event_value.interval;
                     state.latency = event_value.latency;
-                    state.timeout = event_value.timeout;
+                    state.supervision_timeout = event_value.supervision_timeout;
                 }
             }.apply);
         },
@@ -51,7 +51,7 @@ pub fn reduce(self: *CentralReducer, store: anytype, message: Message, emit: Emi
                     state.conn_handle = null;
                     state.interval = 0;
                     state.latency = 0;
-                    state.timeout = 0;
+                    state.supervision_timeout = 0;
                 }
             }.apply);
         },
@@ -127,7 +127,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .peer_addr_type = .random,
                         .interval = 24,
                         .latency = 1,
-                        .timeout = 200,
+                        .supervision_timeout = 2 * glib.time.duration.Second,
                     },
                 },
             }, emit));

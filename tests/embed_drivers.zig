@@ -23,7 +23,7 @@ test "embed/drivers/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .drivers);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .drivers);
     defer t.deinit();
 
     t.run("embed/drivers/unit/std", drivers.test_runner.unit.make(gstd.runtime));
@@ -35,7 +35,7 @@ test "embed/drivers/unit/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .drivers);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .drivers);
     defer t.deinit();
 
     t.run("embed/drivers/unit/gstd", drivers.test_runner.unit.make(gstd.runtime));

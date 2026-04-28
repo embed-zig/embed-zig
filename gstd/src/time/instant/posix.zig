@@ -1,7 +1,7 @@
 const std = @import("std");
+const glib = @import("glib");
 
 const posix = std.posix;
-const ns_per_s = 1_000_000_000;
 
 pub fn now() u64 {
     const ts = posix.clock_gettime(posix.CLOCK.MONOTONIC) catch unreachable;
@@ -9,5 +9,8 @@ pub fn now() u64 {
 }
 
 fn timespecToNs(ts: posix.timespec) u64 {
-    return (@as(u64, @intCast(ts.sec)) * ns_per_s) + @as(u32, @intCast(ts.nsec));
+    return @intCast(
+        (@as(glib.time.duration.Duration, @intCast(ts.sec)) * glib.time.duration.Second) +
+            @as(glib.time.duration.Duration, @intCast(ts.nsec)),
+    );
 }

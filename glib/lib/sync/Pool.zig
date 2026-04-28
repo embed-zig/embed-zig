@@ -1,7 +1,7 @@
 //! Pool coordination primitive — thread-safe reusable object storage.
 //!
 //! `Pool.init(&impl)` erases a concrete pool implementation behind a small
-//! vtable. `Pool.make(lib, T)` builds a mutex-protected pool of `T` values.
+//! vtable. `Pool.make(std, T)` builds a mutex-protected pool of `T` values.
 //! Callers can either fetch typed pointers with `getTyped()` / `putTyped()` or
 //! use the erased wrapper when type information is managed externally.
 
@@ -68,19 +68,19 @@ pub fn init(pointer: anytype) Pool {
     };
 }
 
-pub fn make(comptime lib: type, comptime T: type) type {
+pub fn make(comptime std: type, comptime T: type) type {
     return struct {
         allocator: stdz.mem.Allocator,
         new_fn: ?New,
         new_ctx: ?*anyopaque,
-        mutex: lib.Thread.Mutex = .{},
-        free_entries: lib.DoublyLinkedList = .{},
+        mutex: std.Thread.Mutex = .{},
+        free_entries: std.DoublyLinkedList = .{},
         created_count: usize = 0,
         free_count: usize = 0,
 
         const Self = @This();
         const Entry = struct {
-            free_node: lib.DoublyLinkedList.Node = .{},
+            free_node: std.DoublyLinkedList.Node = .{},
             in_pool: bool = false,
             item: T = undefined,
         };
@@ -123,7 +123,7 @@ pub fn make(comptime lib: type, comptime T: type) type {
                     return null;
                 }
             else
-                lib.mem.zeroes(T);
+                std.mem.zeroes(T);
             self.created_count += 1;
             return &entry.item;
         }
@@ -138,7 +138,7 @@ pub fn make(comptime lib: type, comptime T: type) type {
             self.mutex.lock();
             defer self.mutex.unlock();
 
-            lib.debug.assert(!entry.in_pool);
+            std.debug.assert(!entry.in_pool);
             entry.in_pool = true;
             self.free_entries.append(&entry.free_node);
             self.free_count += 1;
@@ -163,7 +163,7 @@ pub fn make(comptime lib: type, comptime T: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -174,23 +174,23 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            reuseCase(lib) catch |err| {
+            reuseCase(std) catch |err| {
                 t.logErrorf("sync.Pool reuse failed: {}", .{err});
                 return false;
             };
-            newCase(lib) catch |err| {
+            newCase(std) catch |err| {
                 t.logErrorf("sync.Pool new failed: {}", .{err});
                 return false;
             };
-            zeroInitCase(lib) catch |err| {
+            zeroInitCase(std) catch |err| {
                 t.logErrorf("sync.Pool zero init failed: {}", .{err});
                 return false;
             };
-            newReturnsNullCase(lib) catch |err| {
+            newReturnsNullCase(std) catch |err| {
                 t.logErrorf("sync.Pool null new failed: {}", .{err});
                 return false;
             };
-            erasedWrapperCase(lib) catch |err| {
+            erasedWrapperCase(std) catch |err| {
                 t.logErrorf("sync.Pool erased wrapper failed: {}", .{err});
                 return false;
             };
@@ -209,38 +209,38 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-fn reuseCase(comptime lib: type) !void {
+fn reuseCase(comptime std: type) !void {
     const Item = struct {
         value: usize = 0,
     };
-    const TypedPool = Pool.make(lib, Item);
+    const TypedPool = Pool.make(std, Item);
 
-    var pool = TypedPool.init(lib.testing.allocator, null, null);
+    var pool = TypedPool.init(std.testing.allocator, null, null);
     defer pool.deinit();
 
     const first = pool.getTyped() orelse return error.TestExpectedFirstItem;
-    try lib.testing.expectEqual(@as(usize, 1), pool.created_count);
-    try lib.testing.expectEqual(@as(usize, 0), pool.free_count);
+    try std.testing.expectEqual(@as(usize, 1), pool.created_count);
+    try std.testing.expectEqual(@as(usize, 0), pool.free_count);
 
     first.value = 41;
     pool.putTyped(first);
-    try lib.testing.expectEqual(@as(usize, 1), pool.created_count);
-    try lib.testing.expectEqual(@as(usize, 1), pool.free_count);
+    try std.testing.expectEqual(@as(usize, 1), pool.created_count);
+    try std.testing.expectEqual(@as(usize, 1), pool.free_count);
 
     const second = pool.getTyped() orelse return error.TestExpectedSecondItem;
-    try lib.testing.expect(second == first);
-    try lib.testing.expectEqual(@as(usize, 41), second.value);
-    try lib.testing.expectEqual(@as(usize, 1), pool.created_count);
-    try lib.testing.expectEqual(@as(usize, 0), pool.free_count);
+    try std.testing.expect(second == first);
+    try std.testing.expectEqual(@as(usize, 41), second.value);
+    try std.testing.expectEqual(@as(usize, 1), pool.created_count);
+    try std.testing.expectEqual(@as(usize, 0), pool.free_count);
 
     pool.putTyped(second);
 }
 
-fn newCase(comptime lib: type) !void {
+fn newCase(comptime std: type) !void {
     const Item = struct {
         value: usize = 0,
     };
-    const TypedPool = Pool.make(lib, Item);
+    const TypedPool = Pool.make(std, Item);
     const State = struct {
         next_value: usize = 7,
         allocator_ptr: usize = 0,
@@ -256,68 +256,68 @@ fn newCase(comptime lib: type) !void {
     };
 
     var state = State{};
-    var pool = TypedPool.init(lib.testing.allocator, Hooks.newItem, @ptrCast(&state));
+    var pool = TypedPool.init(std.testing.allocator, Hooks.newItem, @ptrCast(&state));
     defer pool.deinit();
 
     const first = pool.getTyped() orelse return error.TestExpectedFirstItem;
     const second = pool.getTyped() orelse return error.TestExpectedSecondItem;
-    try lib.testing.expectEqual(@as(usize, 7), first.value);
-    try lib.testing.expectEqual(@as(usize, 8), second.value);
-    try lib.testing.expectEqual(@intFromPtr(lib.testing.allocator.ptr), state.allocator_ptr);
-    try lib.testing.expectEqual(@as(usize, 2), pool.created_count);
-    try lib.testing.expectEqual(@as(usize, 0), pool.free_count);
+    try std.testing.expectEqual(@as(usize, 7), first.value);
+    try std.testing.expectEqual(@as(usize, 8), second.value);
+    try std.testing.expectEqual(@intFromPtr(std.testing.allocator.ptr), state.allocator_ptr);
+    try std.testing.expectEqual(@as(usize, 2), pool.created_count);
+    try std.testing.expectEqual(@as(usize, 0), pool.free_count);
     pool.putTyped(first);
     pool.putTyped(second);
-    try lib.testing.expectEqual(@as(usize, 2), pool.free_count);
+    try std.testing.expectEqual(@as(usize, 2), pool.free_count);
 }
 
-fn zeroInitCase(comptime lib: type) !void {
+fn zeroInitCase(comptime std: type) !void {
     const Item = struct {
         a: usize,
         b: bool,
     };
-    const TypedPool = Pool.make(lib, Item);
+    const TypedPool = Pool.make(std, Item);
 
-    var pool = TypedPool.init(lib.testing.allocator, null, null);
+    var pool = TypedPool.init(std.testing.allocator, null, null);
     defer pool.deinit();
 
     const item = pool.getTyped() orelse return error.TestExpectedItem;
-    try lib.testing.expectEqual(@as(usize, 0), item.a);
-    try lib.testing.expectEqual(false, item.b);
+    try std.testing.expectEqual(@as(usize, 0), item.a);
+    try std.testing.expectEqual(false, item.b);
     pool.putTyped(item);
 }
 
-fn newReturnsNullCase(comptime lib: type) !void {
+fn newReturnsNullCase(comptime std: type) !void {
     const Item = struct {
         value: usize = 0,
     };
-    const TypedPool = Pool.make(lib, Item);
+    const TypedPool = Pool.make(std, Item);
     const Hooks = struct {
         fn newItem(_: ?*anyopaque, _: stdz.mem.Allocator) ?Item {
             return null;
         }
     };
 
-    var pool = TypedPool.init(lib.testing.allocator, Hooks.newItem, null);
+    var pool = TypedPool.init(std.testing.allocator, Hooks.newItem, null);
     defer pool.deinit();
 
-    try lib.testing.expect(pool.getTyped() == null);
-    try lib.testing.expectEqual(@as(usize, 0), pool.created_count);
-    try lib.testing.expectEqual(@as(usize, 0), pool.free_count);
+    try std.testing.expect(pool.getTyped() == null);
+    try std.testing.expectEqual(@as(usize, 0), pool.created_count);
+    try std.testing.expectEqual(@as(usize, 0), pool.free_count);
 }
 
-fn erasedWrapperCase(comptime lib: type) !void {
+fn erasedWrapperCase(comptime std: type) !void {
     const Item = struct {
         value: usize = 0,
     };
-    const TypedPool = Pool.make(lib, Item);
+    const TypedPool = Pool.make(std, Item);
     const Hooks = struct {
         fn newItem(_: ?*anyopaque, _: stdz.mem.Allocator) ?Item {
             return .{};
         }
     };
 
-    var typed = TypedPool.init(lib.testing.allocator, Hooks.newItem, null);
+    var typed = TypedPool.init(std.testing.allocator, Hooks.newItem, null);
     const erased = Pool.init(&typed);
 
     const raw = erased.get() orelse return error.TestExpectedErasedItem;
@@ -327,8 +327,8 @@ fn erasedWrapperCase(comptime lib: type) !void {
 
     const recycled_raw = erased.get() orelse return error.TestExpectedErasedItem;
     const recycled: *Item = @ptrCast(@alignCast(recycled_raw));
-    try lib.testing.expect(recycled == item);
-    try lib.testing.expectEqual(@as(usize, 55), recycled.value);
+    try std.testing.expect(recycled == item);
+    try std.testing.expectEqual(@as(usize, 55), recycled.value);
     erased.put(recycled_raw);
 
     erased.deinit();

@@ -16,7 +16,7 @@ test "thirdparty/lvgl/unit" {
     _ = @import("thirdparty_lvgl_osal.zig");
 
     const std = @import("std");
-    var t = glib.testing.T.new(std, .lvgl_unit);
+    var t = glib.testing.T.new(std, gstd.runtime.time, .lvgl_unit);
     defer t.deinit();
     t.run("unit", lvgl.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
@@ -27,7 +27,7 @@ test "thirdparty/lvgl/integration" {
 
     const std = @import("std");
     std.testing.log_level = .info;
-    var t = glib.testing.T.new(std, .lvgl_integration);
+    var t = glib.testing.T.new(std, gstd.runtime.time, .lvgl_integration);
     defer t.deinit();
     var testing_display = lvgl.IntegrationTestingDisplay.initPassthrough(std.testing.allocator, 320, 240, null);
     defer testing_display.deinit();

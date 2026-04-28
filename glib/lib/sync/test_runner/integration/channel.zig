@@ -1,7 +1,7 @@
 //! Channel 行为一致性测试运行器
 //!
-//! 本文件接受一个已经构造好的 Channel 类型工厂（通过 comptime 参数传入），
-//! 内部直接经由 `(u32)` 实例化测试对象，
+//! 本文件接受一个平台 Channel factory（通过 comptime 参数传入），
+//! 内部绑定到传入的 std namespace 后经由 `(u32)` 实例化测试对象，
 //! 运行全部测试，验证其行为与 Go channel 语义一致。
 //!
 //! 注意：本 runner 只使用 channel contract 暴露的 API（init/deinit/send/recv/recvTimeout/close），
@@ -10,7 +10,7 @@
 //!
 //! 用法示例：
 //! ```
-//! const runner = @import("sync/test_runner/integration/channel.zig").make(lib, @import("sync").Channel(lib, platform.ChannelFactory));
+//! const runner = @import("sync/test_runner/integration/channel.zig").make(std, time, platform.ChannelFactory);
 //! t.run("sync/channel", runner);
 //! ```
 //!
@@ -141,6 +141,7 @@
 
 const stdz = @import("stdz");
 const testing_api = @import("testing");
+const Channel = @import("../../Channel.zig");
 
 // 无缓冲 channel（U1–U12）
 const unbuffered_init = @import("channel/unbuffered_init.zig");
@@ -225,7 +226,7 @@ const rapid_close_send = @import("channel/rapid_close_send.zig");
 // 有缓冲：数据读尽后多余接收者（空缓冲 wakeup token）
 const buffered_recv_empty_after_drain = @import("channel/buffered_recv_empty_after_drain.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime time: type, comptime ChannelFactory: Channel.FactoryType) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -237,75 +238,75 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
             _ = allocator;
 
             t.parallel();
-            t.run("unbufferedInit", unbuffered_init.make(lib, Channel));
-            t.run("unbufferedRendezvous", unbuffered_rendezvous.make(lib, Channel));
-            t.run("unbufferedSendBlocks", unbuffered_send_blocks.make(lib, Channel));
-            t.run("unbufferedRecvBlocks", unbuffered_recv_blocks.make(lib, Channel));
-            t.run("unbufferedMultiRound", unbuffered_multi_round.make(lib, Channel));
-            t.run("unbufferedCloseWakesRecv", unbuffered_close_wakes_recv.make(lib, Channel));
-            t.run("unbufferedCloseWakesSend", unbuffered_close_wakes_send.make(lib, Channel));
-            t.run("unbufferedSendAfterClose", unbuffered_send_after_close.make(lib, Channel));
-            t.run("unbufferedRecvAfterClose", unbuffered_recv_after_close.make(lib, Channel));
-            t.run("unbufferedSpsc", unbuffered_spsc.make(lib, Channel));
-            t.run("unbufferedMpsc", unbuffered_mpsc.make(lib, Channel));
-            t.run("unbufferedDeinit", unbuffered_deinit.make(lib, Channel));
-            t.run("initBuffered", init_buffered.make(lib, Channel));
-            t.run("initialStateBuffered", initial_state_buffered.make(lib, Channel));
-            t.run("deinitClean", deinit_clean.make(lib, Channel));
-            t.run("sendRecvSingle", send_recv_single.make(lib, Channel));
-            t.run("fifoOrder", fifo_order.make(lib, Channel));
-            t.run("ringWrap", ring_wrap.make(lib, Channel));
-            t.run("sendRecvInterleaved", send_recv_interleaved.make(lib, Channel));
-            t.run("recvReturnsCorrectValue", recv_returns_correct_value.make(lib, Channel));
-            t.run("sendReturnsOk", send_returns_ok.make(lib, Channel));
-            t.run("bufferedSendImmediate", buffered_send_immediate.make(lib, Channel));
-            t.run("fillBufferExactly", fill_buffer_exactly.make(lib, Channel));
-            t.run("capacityOne", capacity_one.make(lib, Channel));
-            t.run("ringWrapExtended", ring_wrap_extended.make(lib, Channel));
-            t.run("fillDrainTokenBalance", fill_drain_token_balance.make(lib, Channel));
-            t.run("multiRoundFillDrain", multi_round_fill_drain.make(lib, Channel));
-            t.run("closeSuccess", close_success.make(lib, Channel));
-            t.run("sendAfterClose", send_after_close.make(lib, Channel));
-            t.run("multiSendAfterClose", multi_send_after_close.make(lib, Channel));
-            t.run("closeFlushBufferedData", close_flush_buffered_data.make(lib, Channel));
-            t.run("recvAfterCloseEmpty", recv_after_close_empty.make(lib, Channel));
-            t.run("multiRecvAfterClose", multi_recv_after_close.make(lib, Channel));
-            t.run("closeFlushFullFlow", close_flush_full_flow.make(lib, Channel));
-            t.run("resourceSafetyNormal", resource_safety_normal.make(lib, Channel));
-            t.run("resourceSafetyUnconsumed", resource_safety_unconsumed.make(lib, Channel));
-            t.run("resourceSafetyCloseAndDeinit", resource_safety_close_and_deinit.make(lib, Channel));
-            t.run("sendBlocksWhenFull", send_blocks_when_full.make(lib, Channel));
-            t.run("recvUnblocksSend", recv_unblocks_send.make(lib, Channel));
-            t.run("recvBlocksWhenEmpty", recv_blocks_when_empty.make(lib, Channel));
-            t.run("sendUnblocksRecv", send_unblocks_recv.make(lib, Channel));
-            t.run("recvWokenBySend", recv_woken_by_send.make(lib, Channel));
-            t.run("sendWokenByRecv", send_woken_by_recv.make(lib, Channel));
-            t.run("sendTimeoutContract", send_timeout_contract.make(lib, Channel));
-            t.run("recvTimeoutContract", recv_timeout_contract.make(lib, Channel));
-            t.run("recvWokenByClose", recv_woken_by_close.make(lib, Channel));
-            t.run("sendWokenByClose", send_woken_by_close.make(lib, Channel));
-            t.run("closeWakesMultiRecv", close_wakes_multi_recv.make(lib, Channel));
-            t.run("closeWakesMultiSend", close_wakes_multi_send.make(lib, Channel));
-            t.run("highThroughputNoDeadlock", high_throughput_no_deadlock.make(lib, Channel));
-            t.run("spscNoDrop", spsc_no_drop.make(lib, Channel));
-            t.run("mpscNoDrop", mpsc_no_drop.make(lib, Channel));
-            t.run("spmcNoDuplicate", spmc_no_duplicate.make(lib, Channel));
-            t.run("mpmcIntegrity", mpmc_integrity.make(lib, Channel));
-            t.run("concurrentCloseRecv", concurrent_close_recv.make(lib, Channel));
-            t.run("concurrentCloseSend", concurrent_close_send.make(lib, Channel));
-            t.run("rapidCloseRecv", rapid_close_recv.make(lib, Channel));
-            t.run("rapidCloseSend", rapid_close_send.make(lib, Channel));
-            t.run("bufferedRecvEmptyAfterDrain", buffered_recv_empty_after_drain.make(lib, Channel));
+            t.run("unbufferedInit", unbuffered_init.make(std, time, ChannelFactory));
+            t.run("unbufferedRendezvous", unbuffered_rendezvous.make(std, time, ChannelFactory));
+            t.run("unbufferedSendBlocks", unbuffered_send_blocks.make(std, time, ChannelFactory));
+            t.run("unbufferedRecvBlocks", unbuffered_recv_blocks.make(std, time, ChannelFactory));
+            t.run("unbufferedMultiRound", unbuffered_multi_round.make(std, time, ChannelFactory));
+            t.run("unbufferedCloseWakesRecv", unbuffered_close_wakes_recv.make(std, time, ChannelFactory));
+            t.run("unbufferedCloseWakesSend", unbuffered_close_wakes_send.make(std, time, ChannelFactory));
+            t.run("unbufferedSendAfterClose", unbuffered_send_after_close.make(std, time, ChannelFactory));
+            t.run("unbufferedRecvAfterClose", unbuffered_recv_after_close.make(std, time, ChannelFactory));
+            t.run("unbufferedSpsc", unbuffered_spsc.make(std, time, ChannelFactory));
+            t.run("unbufferedMpsc", unbuffered_mpsc.make(std, time, ChannelFactory));
+            t.run("unbufferedDeinit", unbuffered_deinit.make(std, time, ChannelFactory));
+            t.run("initBuffered", init_buffered.make(std, time, ChannelFactory));
+            t.run("initialStateBuffered", initial_state_buffered.make(std, time, ChannelFactory));
+            t.run("deinitClean", deinit_clean.make(std, time, ChannelFactory));
+            t.run("sendRecvSingle", send_recv_single.make(std, time, ChannelFactory));
+            t.run("fifoOrder", fifo_order.make(std, time, ChannelFactory));
+            t.run("ringWrap", ring_wrap.make(std, time, ChannelFactory));
+            t.run("sendRecvInterleaved", send_recv_interleaved.make(std, time, ChannelFactory));
+            t.run("recvReturnsCorrectValue", recv_returns_correct_value.make(std, time, ChannelFactory));
+            t.run("sendReturnsOk", send_returns_ok.make(std, time, ChannelFactory));
+            t.run("bufferedSendImmediate", buffered_send_immediate.make(std, time, ChannelFactory));
+            t.run("fillBufferExactly", fill_buffer_exactly.make(std, time, ChannelFactory));
+            t.run("capacityOne", capacity_one.make(std, time, ChannelFactory));
+            t.run("ringWrapExtended", ring_wrap_extended.make(std, time, ChannelFactory));
+            t.run("fillDrainTokenBalance", fill_drain_token_balance.make(std, time, ChannelFactory));
+            t.run("multiRoundFillDrain", multi_round_fill_drain.make(std, time, ChannelFactory));
+            t.run("closeSuccess", close_success.make(std, time, ChannelFactory));
+            t.run("sendAfterClose", send_after_close.make(std, time, ChannelFactory));
+            t.run("multiSendAfterClose", multi_send_after_close.make(std, time, ChannelFactory));
+            t.run("closeFlushBufferedData", close_flush_buffered_data.make(std, time, ChannelFactory));
+            t.run("recvAfterCloseEmpty", recv_after_close_empty.make(std, time, ChannelFactory));
+            t.run("multiRecvAfterClose", multi_recv_after_close.make(std, time, ChannelFactory));
+            t.run("closeFlushFullFlow", close_flush_full_flow.make(std, time, ChannelFactory));
+            t.run("resourceSafetyNormal", resource_safety_normal.make(std, time, ChannelFactory));
+            t.run("resourceSafetyUnconsumed", resource_safety_unconsumed.make(std, time, ChannelFactory));
+            t.run("resourceSafetyCloseAndDeinit", resource_safety_close_and_deinit.make(std, time, ChannelFactory));
+            t.run("sendBlocksWhenFull", send_blocks_when_full.make(std, time, ChannelFactory));
+            t.run("recvUnblocksSend", recv_unblocks_send.make(std, time, ChannelFactory));
+            t.run("recvBlocksWhenEmpty", recv_blocks_when_empty.make(std, time, ChannelFactory));
+            t.run("sendUnblocksRecv", send_unblocks_recv.make(std, time, ChannelFactory));
+            t.run("recvWokenBySend", recv_woken_by_send.make(std, time, ChannelFactory));
+            t.run("sendWokenByRecv", send_woken_by_recv.make(std, time, ChannelFactory));
+            t.run("sendTimeoutContract", send_timeout_contract.make(std, time, ChannelFactory));
+            t.run("recvTimeoutContract", recv_timeout_contract.make(std, time, ChannelFactory));
+            t.run("recvWokenByClose", recv_woken_by_close.make(std, time, ChannelFactory));
+            t.run("sendWokenByClose", send_woken_by_close.make(std, time, ChannelFactory));
+            t.run("closeWakesMultiRecv", close_wakes_multi_recv.make(std, time, ChannelFactory));
+            t.run("closeWakesMultiSend", close_wakes_multi_send.make(std, time, ChannelFactory));
+            t.run("highThroughputNoDeadlock", high_throughput_no_deadlock.make(std, time, ChannelFactory));
+            t.run("spscNoDrop", spsc_no_drop.make(std, time, ChannelFactory));
+            t.run("mpscNoDrop", mpsc_no_drop.make(std, time, ChannelFactory));
+            t.run("spmcNoDuplicate", spmc_no_duplicate.make(std, time, ChannelFactory));
+            t.run("mpmcIntegrity", mpmc_integrity.make(std, time, ChannelFactory));
+            t.run("concurrentCloseRecv", concurrent_close_recv.make(std, time, ChannelFactory));
+            t.run("concurrentCloseSend", concurrent_close_send.make(std, time, ChannelFactory));
+            t.run("rapidCloseRecv", rapid_close_recv.make(std, time, ChannelFactory));
+            t.run("rapidCloseSend", rapid_close_send.make(std, time, ChannelFactory));
+            t.run("bufferedRecvEmptyAfterDrain", buffered_recv_empty_after_drain.make(std, time, ChannelFactory));
             return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_api.TestRunner.make(Runner).new(runner);
 }

@@ -497,11 +497,11 @@ const adapter_vtable = modem_api.Modem.VTable{
             return .closed;
         }
     }.call,
-    .setDataReadTimeout = struct {
-        fn call(_: *anyopaque, _: ?u32) void {}
+    .setDataReadDeadline = struct {
+        fn call(_: *anyopaque, _: ?glib.time.instant.Time) void {}
     }.call,
-    .setDataWriteTimeout = struct {
-        fn call(_: *anyopaque, _: ?u32) void {}
+    .setDataWriteDeadline = struct {
+        fn call(_: *anyopaque, _: ?glib.time.instant.Time) void {}
     }.call,
     .setEventCallback = struct {
         fn call(ptr: *anyopaque, ctx: *const anyopaque, emit_fn: CallbackFn) void {

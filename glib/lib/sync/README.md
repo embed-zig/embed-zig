@@ -5,32 +5,34 @@ runtime layer.
 
 Today it has a few main pieces:
 
-- `Channel(lib, factory)` for typed channels with close semantics
-- `Pool.make(lib, T)` for thread-safe object reuse
-- `Racer(lib, T)` for "first result wins" task coordination
-- `Timer.make(lib)` for resettable deadline callbacks
-- `WakeFd.make(lib)` for fd-backed wake/interrupt signaling
+- `Channel(std, factory)` for typed channels with close semantics
+- `Pool.make(std, T)` for thread-safe object reuse
+- `Racer(std, time, T)` for "first result wins" task coordination
+- `Timer.make(std, time)` for resettable deadline callbacks
+- `WakeFd.make(std)` for fd-backed wake/interrupt signaling
 
 ## Quick start
 
 ```zig
 const sync = @import("sync");
 
-const Channel = sync.Channel(lib, platform.ChannelFactory);
+const Channel = sync.Channel(std, platform.ChannelFactory);
 const IntChan = Channel(u32);
-const BytesPool = sync.Pool.make(lib, [256]u8);
-const U32Racer = sync.Racer(lib, u32);
-const TimerImpl = sync.Timer.make(lib);
-const WakeFdImpl = sync.WakeFd.make(lib);
+const BytesPool = sync.Pool.make(std, [256]u8);
+const U32Racer = sync.Racer(std, time, u32);
+const TimerImpl = sync.Timer.make(std, time);
+const WakeFdImpl = sync.WakeFd.make(std);
 ```
 
 `Channel` is parameterized by a platform channel factory, which is first bound to
-the sealed `lib` namespace and then exposed as a typed channel constructor.
-`Pool.make(lib, T)`, `Racer(lib, T)`, and `Timer.make(lib)` are built from the sealed `lib`
+the sealed `std` namespace and then exposed as a typed channel constructor.
+`Pool.make(std, T)` is built from the sealed `std`
 namespace so they can use the runtime's allocator, thread, timing, and shared
-data-structure primitives. `Timer.make(lib)` uses that runtime to run a
-background worker that waits for absolute millisecond deadlines.
-`WakeFd.make(lib)` builds a tiny fd-backed wake primitive suitable for
+data-structure primitives. `Racer(std, time, T)` and `Timer.make(std, time)`
+receive the platform `std` shape and monotonic `time` source separately for
+deadline checks. `Timer.make(std, time)` runs a background worker that waits for
+absolute monotonic deadlines.
+`WakeFd.make(std)` builds a tiny fd-backed wake primitive suitable for
 interrupting blocking waits from another thread or cancellation path.
 
 ## Package shape
@@ -61,6 +63,6 @@ lib/sync/
   test trees
 
 For a std-backed host implementation, use
-`@import("gstd").runtime.sync.Channel` with the `glib.sync` test runners and
-helpers. `gstd` exposes the pre-instantiated runtime namespace instead of
+`@import("gstd").runtime.sync.ChannelFactory` with the `glib.sync` test runners
+and helpers. `gstd` exposes the pre-instantiated runtime namespace instead of
 re-exporting `sync` directly.

@@ -1,3 +1,4 @@
+const time_mod = @import("time");
 const NetConn = @import("Conn.zig");
 const NetListener = @import("Listener.zig");
 const ChannelConn = @import("cmux/Conn.zig");
@@ -5,10 +6,10 @@ const control = @import("cmux/control.zig");
 const frame = @import("cmux/frame.zig");
 const Session = @import("cmux/Session.zig");
 
-pub fn Cmux(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
-    const SessionType = Session.make(lib);
-    const ChannelConnType = ChannelConn.make(lib);
+pub fn Cmux(comptime std: type, comptime time: type) type {
+    const Allocator = std.mem.Allocator;
+    const SessionType = Session.make(std, time);
+    const ChannelConnType = ChannelConn.make(std, time);
 
     return struct {
         allocator: Allocator,
@@ -108,21 +109,21 @@ pub fn Cmux(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
+pub fn TestRunner(comptime std: type, comptime time: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
-    const Tp = Cmux(lib);
-    const Thread = lib.Thread;
+    const Tp = Cmux(std, time);
+    const Thread = std.Thread;
 
     const TestCase = struct {
         const Pipe = struct {
             mutex: Thread.Mutex = .{},
             cond: Thread.Condition = .{},
             closed: bool = false,
-            data: lib.ArrayList(u8) = .{},
+            data: std.ArrayList(u8) = .{},
         };
 
         const PairState = struct {
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             mutex: Thread.Mutex = .{},
             refs: usize = 2,
             ab: Pipe = .{},
@@ -130,12 +131,12 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         };
 
         const Endpoint = struct {
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             pair: *PairState,
             inbound: *Pipe,
             outbound: *Pipe,
             closed: bool = false,
-            read_timeout_ms: ?u32 = null,
+            read_deadline: ?time_mod.instant.Time = null,
 
             pub fn read(self: *@This(), buf: []u8) NetConn.ReadError!usize {
                 if (self.closed) return error.EndOfStream;
@@ -145,8 +146,13 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 defer self.inbound.mutex.unlock();
 
                 while (self.inbound.data.items.len == 0 and !self.inbound.closed and !self.closed) {
-                    if (self.read_timeout_ms) |timeout_ms| {
-                        self.inbound.cond.timedWait(&self.inbound.mutex, timeout_ms * lib.time.ns_per_ms) catch return error.TimedOut;
+                    if (self.read_deadline) |deadline| {
+                        const remaining = @max(time_mod.instant.sub(deadline, time.instant.now()), 0);
+                        if (remaining == 0) return error.TimedOut;
+                        self.inbound.cond.timedWait(
+                            &self.inbound.mutex,
+                            @intCast(remaining),
+                        ) catch return error.TimedOut;
                     } else {
                         self.inbound.cond.wait(&self.inbound.mutex);
                     }
@@ -160,7 +166,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 if (n == self.inbound.data.items.len) {
                     self.inbound.data.clearRetainingCapacity();
                 } else {
-                    lib.mem.copyForwards(u8, self.inbound.data.items[0 .. self.inbound.data.items.len - n], self.inbound.data.items[n..self.inbound.data.items.len]);
+                    std.mem.copyForwards(u8, self.inbound.data.items[0 .. self.inbound.data.items.len - n], self.inbound.data.items[n..self.inbound.data.items.len]);
                     self.inbound.data.items.len -= n;
                 }
                 return n;
@@ -193,7 +199,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             pub fn deinit(self: *@This()) void {
                 self.close();
                 self.pair.mutex.lock();
-                lib.debug.assert(self.pair.refs > 0);
+                std.debug.assert(self.pair.refs > 0);
                 self.pair.refs -= 1;
                 const refs = self.pair.refs;
                 self.pair.mutex.unlock();
@@ -205,17 +211,17 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 self.allocator.destroy(self);
             }
 
-            pub fn setReadTimeout(self: *@This(), ms: ?u32) void {
-                self.read_timeout_ms = ms;
+            pub fn setReadDeadline(self: *@This(), deadline: ?time_mod.instant.Time) void {
+                self.read_deadline = deadline;
             }
 
-            pub fn setWriteTimeout(self: *@This(), ms: ?u32) void {
+            pub fn setWriteDeadline(self: *@This(), deadline: ?time_mod.instant.Time) void {
                 _ = self;
-                _ = ms;
+                _ = deadline;
             }
         };
 
-        fn makePair(allocator: lib.mem.Allocator) !struct { a: NetConn, b: NetConn } {
+        fn makePair(allocator: std.mem.Allocator) !struct { a: NetConn, b: NetConn } {
             const pair = try allocator.create(PairState);
             errdefer allocator.destroy(pair);
             pair.* = .{
@@ -246,7 +252,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             };
         }
 
-        fn dialRejectsZero(allocator: lib.mem.Allocator) !void {
+        fn dialRejectsZero(allocator: std.mem.Allocator) !void {
             const pair = try makePair(allocator);
 
             const responder = try Tp.init(allocator, pair.b, .{ .role = .responder });
@@ -254,15 +260,15 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             const initiator = try Tp.init(allocator, pair.a, .{ .role = .initiator });
             defer initiator.deinit();
 
-            try lib.testing.expectError(error.InvalidDLCI, initiator.dial(0));
+            try std.testing.expectError(error.InvalidDLCI, initiator.dial(0));
         }
 
-        fn initRejectsInvalidOptions(allocator: lib.mem.Allocator) !void {
+        fn initRejectsInvalidOptions(allocator: std.mem.Allocator) !void {
             {
                 const pair = try makePair(allocator);
                 defer pair.a.deinit();
                 defer pair.b.deinit();
-                try lib.testing.expectError(error.InvalidOptions, Tp.init(allocator, pair.a, .{
+                try std.testing.expectError(error.InvalidOptions, Tp.init(allocator, pair.a, .{
                     .role = .initiator,
                     .read_buffer_size = 0,
                 }));
@@ -272,7 +278,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 const pair = try makePair(allocator);
                 defer pair.a.deinit();
                 defer pair.b.deinit();
-                try lib.testing.expectError(error.InvalidOptions, Tp.init(allocator, pair.a, .{
+                try std.testing.expectError(error.InvalidOptions, Tp.init(allocator, pair.a, .{
                     .role = .initiator,
                     .write_buffer_size = 0,
                 }));
@@ -282,14 +288,14 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 const pair = try makePair(allocator);
                 defer pair.a.deinit();
                 defer pair.b.deinit();
-                try lib.testing.expectError(error.InvalidOptions, Tp.init(allocator, pair.a, .{
+                try std.testing.expectError(error.InvalidOptions, Tp.init(allocator, pair.a, .{
                     .role = .initiator,
                     .max_accept_queue = 0,
                 }));
             }
         }
 
-        fn dialTransfersData(allocator: lib.mem.Allocator) !void {
+        fn dialTransfersData(allocator: std.mem.Allocator) !void {
             const pair = try makePair(allocator);
 
             const responder = try Tp.init(allocator, pair.b, .{ .role = .responder });
@@ -307,14 +313,14 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             _ = try local.write("ping");
             var buf: [16]u8 = undefined;
             const n = try remote.read(&buf);
-            try lib.testing.expectEqualStrings("ping", buf[0..n]);
+            try std.testing.expectEqualStrings("ping", buf[0..n]);
 
             _ = try remote.write("pong");
             const m = try local.read(&buf);
-            try lib.testing.expectEqualStrings("pong", buf[0..m]);
+            try std.testing.expectEqualStrings("pong", buf[0..m]);
         }
 
-        fn closeReleasesBlockedAccept(allocator: lib.mem.Allocator) !void {
+        fn closeReleasesBlockedAccept(allocator: std.mem.Allocator) !void {
             const pair = try makePair(allocator);
 
             const responder = try Tp.init(allocator, pair.b, .{ .role = .responder });
@@ -339,11 +345,11 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
             responder.close();
             worker.join();
-            try lib.testing.expect(result.closed);
-            try lib.testing.expect(!result.unexpected);
+            try std.testing.expect(result.closed);
+            try std.testing.expect(!result.unexpected);
         }
 
-        fn closeReleasesBlockedRead(allocator: lib.mem.Allocator) !void {
+        fn closeReleasesBlockedRead(allocator: std.mem.Allocator) !void {
             const pair = try makePair(allocator);
 
             const responder = try Tp.init(allocator, pair.b, .{ .role = .responder });
@@ -374,11 +380,11 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
             initiator.close();
             worker.join();
-            try lib.testing.expect(result.eof);
-            try lib.testing.expect(!result.unexpected);
+            try std.testing.expect(result.eof);
+            try std.testing.expect(!result.unexpected);
         }
 
-        fn rejectsWhenAcceptQueueIsFull(allocator: lib.mem.Allocator) !void {
+        fn rejectsWhenAcceptQueueIsFull(allocator: std.mem.Allocator) !void {
             const pair = try makePair(allocator);
 
             const responder = try Tp.init(allocator, pair.b, .{
@@ -394,10 +400,10 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             var first = try initiator.dial(5);
             defer first.deinit();
 
-            try lib.testing.expectError(error.Rejected, initiator.dial(7));
+            try std.testing.expectError(error.Rejected, initiator.dial(7));
         }
 
-        fn invalidCrClosesBlockedAccept(allocator: lib.mem.Allocator) !void {
+        fn invalidCrClosesBlockedAccept(allocator: std.mem.Allocator) !void {
             const pair = try makePair(allocator);
             defer pair.a.deinit();
 
@@ -430,60 +436,60 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             _ = try pair.a.write(encoded);
 
             worker.join();
-            try lib.testing.expect(result.closed);
-            try lib.testing.expect(!result.unexpected);
+            try std.testing.expect(result.closed);
+            try std.testing.expect(!result.unexpected);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
-            t.run("frame", frame.TestRunner(lib));
-            t.run("dialRejectsZero", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("frame", frame.TestRunner(std));
+            t.run("dialRejectsZero", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(_: *testing_api.T, case_allocator: std.mem.Allocator) !void {
                     try TestCase.dialRejectsZero(case_allocator);
                 }
             }.run));
-            t.run("initRejectsInvalidOptions", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("initRejectsInvalidOptions", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(_: *testing_api.T, case_allocator: std.mem.Allocator) !void {
                     try TestCase.initRejectsInvalidOptions(case_allocator);
                 }
             }.run));
-            t.run("dialTransfersData", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("dialTransfersData", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(_: *testing_api.T, case_allocator: std.mem.Allocator) !void {
                     try TestCase.dialTransfersData(case_allocator);
                 }
             }.run));
-            t.run("closeReleasesBlockedAccept", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("closeReleasesBlockedAccept", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(_: *testing_api.T, case_allocator: std.mem.Allocator) !void {
                     try TestCase.closeReleasesBlockedAccept(case_allocator);
                 }
             }.run));
-            t.run("closeReleasesBlockedRead", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("closeReleasesBlockedRead", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(_: *testing_api.T, case_allocator: std.mem.Allocator) !void {
                     try TestCase.closeReleasesBlockedRead(case_allocator);
                 }
             }.run));
-            t.run("rejectsWhenAcceptQueueIsFull", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("rejectsWhenAcceptQueueIsFull", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(_: *testing_api.T, case_allocator: std.mem.Allocator) !void {
                     try TestCase.rejectsWhenAcceptQueueIsFull(case_allocator);
                 }
             }.run));
-            t.run("invalidCrClosesBlockedAccept", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("invalidCrClosesBlockedAccept", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(_: *testing_api.T, case_allocator: std.mem.Allocator) !void {
                     try TestCase.invalidCrClosesBlockedAccept(case_allocator);
                 }
             }.run));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -494,4 +500,3 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     };
     return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
-

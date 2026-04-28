@@ -23,7 +23,7 @@ test "embed/motion/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .motion);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .motion);
     defer t.deinit();
 
     t.run("embed/motion/unit/std", motion.test_runner.unit.make(gstd.runtime));
@@ -35,7 +35,7 @@ test "embed/motion/unit/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .motion);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .motion);
     defer t.deinit();
 
     t.run("embed/motion/unit/gstd", motion.test_runner.unit.make(gstd.runtime));

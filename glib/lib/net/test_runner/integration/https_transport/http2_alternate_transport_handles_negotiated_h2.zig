@@ -2,8 +2,8 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Utils = test_utils.make(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make(std, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 3 * 1024 * 1024 },
@@ -13,21 +13,21 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: lib.mem.Allocator) bool {
+        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: std.mem.Allocator) bool {
             _ = runner;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = Utils.Net;
                     const Http = Utils.Http;
-                    const Thread = lib.Thread;
-                    const test_spawn_config: lib.Thread.SpawnConfig = Utils.test_spawn_config;
+                    const Thread = std.Thread;
+                    const test_spawn_config: std.Thread.SpawnConfig = Utils.test_spawn_config;
                     const testing = struct {
-                        pub var allocator: lib.mem.Allocator = undefined;
-                        pub const expect = lib.testing.expect;
-                        pub const expectEqual = lib.testing.expectEqual;
-                        pub const expectEqualSlices = lib.testing.expectEqualSlices;
-                        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-                        pub const expectError = lib.testing.expectError;
+                        pub var allocator: std.mem.Allocator = undefined;
+                        pub const expect = std.testing.expect;
+                        pub const expectEqual = std.testing.expectEqual;
+                        pub const expectEqualSlices = std.testing.expectEqualSlices;
+                        pub const expectEqualStrings = std.testing.expectEqualStrings;
+                        pub const expectError = std.testing.expectError;
                     };
                     testing.allocator = a;
 
@@ -115,7 +115,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     });
                     defer transport.deinit();
 
-                    const raw_url = try lib.fmt.allocPrint(testing.allocator, "https://127.0.0.1:{d}/hook-h2", .{port});
+                    const raw_url = try std.fmt.allocPrint(testing.allocator, "https://127.0.0.1:{d}/hook-h2", .{port});
                     defer testing.allocator.free(raw_url);
 
                     var req = try Http.Request.init(testing.allocator, "GET", raw_url);

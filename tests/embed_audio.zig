@@ -23,7 +23,7 @@ test "embed/audio/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .audio);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .audio);
     defer t.deinit();
 
     t.run("embed/audio/unit/std", audio.test_runner.unit.make(gstd.runtime));
@@ -35,7 +35,7 @@ test "embed/audio/unit/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .audio);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .audio);
     defer t.deinit();
 
     t.run("embed/audio/unit/gstd", audio.test_runner.unit.make(gstd.runtime));
@@ -47,9 +47,9 @@ test "embed/audio/integration/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .audio);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .audio);
     defer t.deinit();
-    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
+    t.timeout(20 * glib.time.duration.Second);
 
     t.run("embed/audio/integration/std", audio.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
@@ -60,9 +60,9 @@ test "embed/audio/integration/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .audio);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .audio);
     defer t.deinit();
-    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
+    t.timeout(20 * glib.time.duration.Second);
 
     t.run("embed/audio/integration/gstd", audio.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;

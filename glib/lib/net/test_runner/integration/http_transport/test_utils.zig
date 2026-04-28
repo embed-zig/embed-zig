@@ -2,7 +2,7 @@
 
 const io = @import("io");
 
-pub fn make2(comptime lib: type, comptime net: type) type {
+pub fn make2(comptime std: type, comptime net: type) type {
     const NetNs = net;
     const HttpNs = NetNs.http;
     const AddrPort = net.netip.AddrPort;
@@ -10,13 +10,13 @@ pub fn make2(comptime lib: type, comptime net: type) type {
     return struct {
         pub const Http = HttpNs;
         pub const Net = NetNs;
-        pub const test_spawn_config: lib.Thread.SpawnConfig = .{};
+        pub const test_spawn_config: std.Thread.SpawnConfig = .{};
 
         pub const testing = struct {
-            pub const expect = lib.testing.expect;
-            pub const expectEqual = lib.testing.expectEqual;
-            pub const expectEqualStrings = lib.testing.expectEqualStrings;
-            pub const expectError = lib.testing.expectError;
+            pub const expect = std.testing.expect;
+            pub const expectEqual = std.testing.expectEqual;
+            pub const expectEqualStrings = std.testing.expectEqualStrings;
+            pub const expectError = std.testing.expectError;
         };
 
         pub fn addr4(port: u16) AddrPort {
@@ -29,7 +29,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
         }
 
         pub fn withTwoRequestKeepAliveServer(
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             spec: anytype,
             comptime ClientFn: anytype,
         ) !usize {
@@ -43,7 +43,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
             var accept_count: usize = 0;
             var server_result: ?anyerror = null;
 
-            var server_thread = try lib.Thread.spawn(.{}, struct {
+            var server_thread = try std.Thread.spawn(.{}, struct {
                 fn run(tcp_listener: *NetNs.TcpListener, server_spec: @TypeOf(spec), accepts: *usize, result: *?anyerror) void {
                     serveTwoKeepAliveRequests(tcp_listener, server_spec, accepts) catch |err| {
                         result.* = err;
@@ -67,7 +67,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
         }
 
         pub fn withStaleIdleRetryServer(
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             spec: anytype,
             comptime ClientFn: anytype,
         ) !usize {
@@ -81,7 +81,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
             var accept_count: usize = 0;
             var server_result: ?anyerror = null;
 
-            var server_thread = try lib.Thread.spawn(.{}, struct {
+            var server_thread = try std.Thread.spawn(.{}, struct {
                 fn run(tcp_listener: *NetNs.TcpListener, server_spec: @TypeOf(spec), accepts: *usize, result: *?anyerror) void {
                     serveStaleIdleRetryRequests(tcp_listener, server_spec, accepts) catch |err| {
                         result.* = err;
@@ -105,7 +105,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
         }
 
         pub fn withRedirectServer(
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             spec: anytype,
             comptime ClientFn: anytype,
         ) !usize {
@@ -119,7 +119,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
             var accept_count: usize = 0;
             var server_result: ?anyerror = null;
 
-            var server_thread = try lib.Thread.spawn(.{}, struct {
+            var server_thread = try std.Thread.spawn(.{}, struct {
                 fn run(tcp_listener: *NetNs.TcpListener, server_spec: @TypeOf(spec), accepts: *usize, result: *?anyerror) void {
                     serveRedirectRequests(tcp_listener, server_spec, accepts) catch |err| {
                         result.* = err;
@@ -143,7 +143,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
         }
 
         pub fn withOneShotServer(
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             spec: anytype,
             comptime ClientFn: anytype,
         ) !void {
@@ -155,7 +155,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
             const listener_impl = try ln.as(NetNs.TcpListener);
             const port = try listenerPort(ln, NetNs);
             var server_result: ?anyerror = null;
-            var server_thread = try lib.Thread.spawn(.{}, struct {
+            var server_thread = try std.Thread.spawn(.{}, struct {
                 fn run(tcp_listener: *NetNs.TcpListener, server_spec: @TypeOf(spec), result: *?anyerror) void {
                     var conn = tcp_listener.accept() catch |err| switch (err) {
                         error.Closed => return,
@@ -191,12 +191,12 @@ pub fn make2(comptime lib: type, comptime net: type) type {
                     const content_type = serverContentType(server_spec);
 
                     if (serverDelayMs(server_spec) != 0) {
-                        lib.Thread.sleep(@as(u64, serverDelayMs(server_spec)) * lib.time.ns_per_ms);
+                        std.Thread.sleep(@intCast(@as(net.time.duration.Duration, @intCast(serverDelayMs(server_spec))) * net.time.duration.MilliSecond));
                     }
 
                     const reason = HttpNs.status.text(status_code) orelse "Unknown";
                     var head_buf: [256]u8 = undefined;
-                    const head = lib.fmt.bufPrint(
+                    const head = std.fmt.bufPrint(
                         &head_buf,
                         "HTTP/1.1 {d} {s}\r\nContent-Length: {d}\r\nContent-Type: {s}\r\nConnection: close\r\n\r\n",
                         .{ status_code, reason, body.len, content_type },
@@ -240,7 +240,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
         }
 
         pub fn withServerState(
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             state_init: anytype,
             comptime ServerFn: anytype,
             comptime ClientFn: anytype,
@@ -256,7 +256,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
             const port = try listenerPort(ln, NetNs);
             var server_result: ?anyerror = null;
 
-            var server_thread = try lib.Thread.spawn(.{}, struct {
+            var server_thread = try std.Thread.spawn(.{}, struct {
                 fn run(tcp_listener: *NetNs.TcpListener, state_ptr: *State, result: *?anyerror) void {
                     var conn = tcp_listener.accept() catch |err| switch (err) {
                         error.Closed => return,
@@ -293,33 +293,33 @@ pub fn make2(comptime lib: type, comptime net: type) type {
                 const n = try conn.read(buf[filled..]);
                 if (n == 0) break;
                 filled += n;
-                if (lib.mem.indexOf(u8, buf[0..filled], "\r\n\r\n") != null) break;
+                if (std.mem.indexOf(u8, buf[0..filled], "\r\n\r\n") != null) break;
             }
             return buf[0..filled];
         }
 
         pub fn hasRequestLine(req_head: []const u8, expected: []const u8) bool {
-            const line_end = lib.mem.indexOf(u8, req_head, "\r\n") orelse req_head.len;
-            return lib.mem.eql(u8, req_head[0..line_end], expected);
+            const line_end = std.mem.indexOf(u8, req_head, "\r\n") orelse req_head.len;
+            return std.mem.eql(u8, req_head[0..line_end], expected);
         }
 
         pub fn requestBodyMatches(conn: net.Conn, req_head: []const u8, expected: []const u8) bool {
             var c = conn;
-            const head_end = lib.mem.indexOf(u8, req_head, "\r\n\r\n") orelse return false;
+            const head_end = std.mem.indexOf(u8, req_head, "\r\n\r\n") orelse return false;
             const content_length_value = headerValue(req_head[0..head_end], Http.Header.content_length) orelse return false;
-            const content_length = lib.fmt.parseInt(usize, content_length_value, 10) catch return false;
+            const content_length = std.fmt.parseInt(usize, content_length_value, 10) catch return false;
             if (content_length != expected.len) return false;
 
             const prefix = req_head[head_end + 4 ..];
             if (prefix.len > expected.len) return false;
-            if (!lib.mem.eql(u8, prefix, expected[0..prefix.len])) return false;
+            if (!std.mem.eql(u8, prefix, expected[0..prefix.len])) return false;
 
             var matched: usize = prefix.len;
             var buf: [1024]u8 = undefined;
             while (matched < expected.len) {
                 const want = @min(buf.len, expected.len - matched);
                 io.readFull(@TypeOf(c), &c, buf[0..want]) catch return false;
-                if (!lib.mem.eql(u8, buf[0..want], expected[matched..][0..want])) return false;
+                if (!std.mem.eql(u8, buf[0..want], expected[matched..][0..want])) return false;
                 matched += want;
             }
 
@@ -329,17 +329,17 @@ pub fn make2(comptime lib: type, comptime net: type) type {
         pub fn headerValue(head: []const u8, name: []const u8) ?[]const u8 {
             var line_start: usize = 0;
             while (line_start < head.len) {
-                const rel_end = lib.mem.indexOf(u8, head[line_start..], "\r\n") orelse head.len - line_start;
+                const rel_end = std.mem.indexOf(u8, head[line_start..], "\r\n") orelse head.len - line_start;
                 const line = head[line_start .. line_start + rel_end];
-                const colon = lib.mem.indexOfScalar(u8, line, ':') orelse {
+                const colon = std.mem.indexOfScalar(u8, line, ':') orelse {
                     if (line_start + rel_end == head.len) break;
                     line_start += rel_end + 2;
                     continue;
                 };
 
-                const header_name = lib.mem.trim(u8, line[0..colon], " ");
+                const header_name = std.mem.trim(u8, line[0..colon], " ");
                 if (HttpNs.Header.init(header_name, "").is(name)) {
-                    return lib.mem.trim(u8, line[colon + 1 ..], " ");
+                    return std.mem.trim(u8, line[colon + 1 ..], " ");
                 }
                 if (line_start + rel_end == head.len) break;
                 line_start += rel_end + 2;
@@ -352,15 +352,15 @@ pub fn make2(comptime lib: type, comptime net: type) type {
             var count: usize = 0;
             var line_start: usize = 0;
             while (line_start < head.len) {
-                const rel_end = lib.mem.indexOf(u8, head[line_start..], "\r\n") orelse head.len - line_start;
+                const rel_end = std.mem.indexOf(u8, head[line_start..], "\r\n") orelse head.len - line_start;
                 const line = head[line_start .. line_start + rel_end];
-                const colon = lib.mem.indexOfScalar(u8, line, ':') orelse {
+                const colon = std.mem.indexOfScalar(u8, line, ':') orelse {
                     if (line_start + rel_end == head.len) break;
                     line_start += rel_end + 2;
                     continue;
                 };
 
-                const header_name = lib.mem.trim(u8, line[0..colon], " ");
+                const header_name = std.mem.trim(u8, line[0..colon], " ");
                 if (HttpNs.Header.init(header_name, "").is(name)) count += 1;
                 if (line_start + rel_end == head.len) break;
                 line_start += rel_end + 2;
@@ -369,19 +369,19 @@ pub fn make2(comptime lib: type, comptime net: type) type {
         }
 
         pub fn readUntilTerminator(
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             conn: net.Conn,
             prefix: []const u8,
             terminator: []const u8,
         ) ![]u8 {
             var c = conn;
-            var bytes = try lib.ArrayList(u8).initCapacity(allocator, prefix.len);
+            var bytes = try std.ArrayList(u8).initCapacity(allocator, prefix.len);
             errdefer bytes.deinit(allocator);
             try bytes.appendSlice(allocator, prefix);
 
             var buf: [128]u8 = undefined;
             while (true) {
-                if (bytes.items.len >= terminator.len and lib.mem.eql(u8, bytes.items[bytes.items.len - terminator.len ..], terminator)) {
+                if (bytes.items.len >= terminator.len and std.mem.eql(u8, bytes.items[bytes.items.len - terminator.len ..], terminator)) {
                     return bytes.toOwnedSlice(allocator);
                 }
 
@@ -400,11 +400,11 @@ pub fn make2(comptime lib: type, comptime net: type) type {
             try io.readFull(@TypeOf(c), &c, out[prefix.len..]);
         }
 
-        pub fn readBody(allocator: lib.mem.Allocator, resp: HttpNs.Response) ![]u8 {
+        pub fn readBody(allocator: std.mem.Allocator, resp: HttpNs.Response) ![]u8 {
             const body = resp.body() orelse return allocator.dupe(u8, "");
 
             var reader = body;
-            var bytes = try lib.ArrayList(u8).initCapacity(allocator, 0);
+            var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
             errdefer bytes.deinit(allocator);
 
             var buf: [256]u8 = undefined;
@@ -425,12 +425,12 @@ pub fn make2(comptime lib: type, comptime net: type) type {
 
                 _ = try serveKeepAliveRequest(conn, spec.first_request_line, spec.first_body, false);
 
-                conn.setReadTimeout(twoRequestReuseWaitTimeoutMs(spec));
+                conn.setReadDeadline(net.time.instant.add(net.time.instant.now(), twoRequestReuseWaitTimeout(spec)));
                 const reused = serveKeepAliveRequest(conn, spec.second_request_line, spec.second_body, true) catch |err| switch (err) {
                     error.TimedOut, error.EndOfStream => false,
                     else => return err,
                 };
-                conn.setReadTimeout(null);
+                conn.setReadDeadline(null);
                 if (reused) return;
             }
 
@@ -454,7 +454,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
                 try testing.expect(hasRequestLine(req_head, spec.warmup_request_line));
 
                 var head_buf: [256]u8 = undefined;
-                const head = try lib.fmt.bufPrint(
+                const head = try std.fmt.bufPrint(
                     &head_buf,
                     "HTTP/1.1 200 OK\r\nContent-Length: {d}\r\nConnection: keep-alive\r\n\r\n",
                     .{spec.warmup_body.len},
@@ -478,7 +478,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
             }
 
             var head_buf: [256]u8 = undefined;
-            const head = try lib.fmt.bufPrint(
+            const head = try std.fmt.bufPrint(
                 &head_buf,
                 "HTTP/1.1 200 OK\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n",
                 .{spec.retry_response_body.len},
@@ -498,23 +498,23 @@ pub fn make2(comptime lib: type, comptime net: type) type {
                 try testing.expect(hasRequestLine(req_head, spec.first_request_line));
 
                 var first_head_buf: [256]u8 = undefined;
-                const first_head = try lib.fmt.bufPrint(
+                const first_head = try std.fmt.bufPrint(
                     &first_head_buf,
                     "HTTP/1.1 302 Found\r\nLocation: {s}\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n",
                     .{spec.location},
                 );
                 try io.writeAll(@TypeOf(c), &c, first_head);
-                conn.setReadTimeout(redirectReuseWaitTimeoutMs(spec));
+                conn.setReadDeadline(net.time.instant.add(net.time.instant.now(), redirectReuseWaitTimeout(spec)));
                 const next_req_head = readRequestHead(conn, &req_buf) catch |err| switch (err) {
                     error.TimedOut, error.EndOfStream => &.{},
                     else => return err,
                 };
-                conn.setReadTimeout(null);
+                conn.setReadDeadline(null);
 
                 if (next_req_head.len != 0) {
                     try testing.expect(hasRequestLine(next_req_head, spec.second_request_line));
                     var second_head_buf: [256]u8 = undefined;
-                    const second_head = try lib.fmt.bufPrint(
+                    const second_head = try std.fmt.bufPrint(
                         &second_head_buf,
                         "HTTP/1.1 {d} OK\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n",
                         .{ redirectFinalStatusCode(spec), spec.final_body.len },
@@ -539,7 +539,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
             try testing.expect(hasRequestLine(second_head, spec.second_request_line));
 
             var second_head_buf: [256]u8 = undefined;
-            const final_head = try lib.fmt.bufPrint(
+            const final_head = try std.fmt.bufPrint(
                 &second_head_buf,
                 "HTTP/1.1 {d} OK\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n",
                 .{ redirectFinalStatusCode(spec), spec.final_body.len },
@@ -563,9 +563,9 @@ pub fn make2(comptime lib: type, comptime net: type) type {
             return spec.delay_ms;
         }
 
-        fn twoRequestReuseWaitTimeoutMs(spec: anytype) u32 {
-            if (!@hasField(@TypeOf(spec), "reuse_wait_timeout_ms")) return 100;
-            return spec.reuse_wait_timeout_ms;
+        fn twoRequestReuseWaitTimeout(spec: anytype) net.time.duration.Duration {
+            if (!@hasField(@TypeOf(spec), "reuse_wait_timeout")) return 100 * net.time.duration.MilliSecond;
+            return spec.reuse_wait_timeout;
         }
 
         fn staleIdleRetryRequestBody(spec: anytype) ?[]const u8 {
@@ -578,9 +578,9 @@ pub fn make2(comptime lib: type, comptime net: type) type {
             return spec.final_status_code;
         }
 
-        fn redirectReuseWaitTimeoutMs(spec: anytype) u32 {
-            if (!@hasField(@TypeOf(spec), "reuse_wait_timeout_ms")) return 100;
-            return spec.reuse_wait_timeout_ms;
+        fn redirectReuseWaitTimeout(spec: anytype) net.time.duration.Duration {
+            if (!@hasField(@TypeOf(spec), "reuse_wait_timeout")) return 100 * net.time.duration.MilliSecond;
+            return spec.reuse_wait_timeout;
         }
 
         fn serveKeepAliveRequest(conn: net.Conn, expected_request_line: []const u8, body: []const u8, close_conn: bool) !bool {
@@ -591,7 +591,7 @@ pub fn make2(comptime lib: type, comptime net: type) type {
             try testing.expect(hasRequestLine(req_head, expected_request_line));
 
             var head_buf: [256]u8 = undefined;
-            const head = try lib.fmt.bufPrint(
+            const head = try std.fmt.bufPrint(
                 &head_buf,
                 "HTTP/1.1 200 OK\r\nContent-Length: {d}\r\nConnection: {s}\r\n\r\n",
                 .{ body.len, if (close_conn) "close" else "keep-alive" },

@@ -2,11 +2,11 @@
 //!
 //! Usage:
 //!   const sync = @import("sync");
-//!   const U32Racer = sync.Racer(lib, u32);
-//!   const Channel = sync.Channel(lib, platform.ChannelFactory);
+//!   const U32Racer = sync.Racer(std, time, u32);
+//!   const Channel = sync.Channel(std, platform.ChannelFactory);
 //!   const IntChan = Channel(u32);
-//!   const TimerImpl = sync.Timer.make(lib);
-//!   const BytesPool = sync.Pool.make(lib, [256]u8);
+//!   const TimerImpl = sync.Timer.make(std, time);
+//!   const BytesPool = sync.Pool.make(std, [256]u8);
 //!
 //!   var racer = try U32Racer.init(allocator);
 //!   defer racer.deinit();
@@ -23,12 +23,12 @@ pub const Pool = @import("sync/Pool.zig");
 pub const Timer = @import("sync/Timer.zig");
 pub const WakeFd = @import("sync/WakeFd.zig");
 
-pub fn Channel(comptime lib: type, comptime factory: channel.FactoryType) channel.ChannelType {
-    return channel.make(factory(lib));
+pub fn Channel(comptime std: type, comptime factory: channel.FactoryType) channel.ChannelType {
+    return channel.make(factory(std));
 }
 
-pub fn Racer(comptime lib: type, comptime T: type) type {
-    return racer_mod.Racer(lib, T);
+pub fn Racer(comptime std: type, comptime time: type, comptime T: type) type {
+    return racer_mod.Racer(std, time, T);
 }
 
 pub const test_runner = struct {

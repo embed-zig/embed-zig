@@ -1,7 +1,7 @@
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) type {
-    const common = @import("common.zig").make(lib);
+pub fn make(comptime std: type) type {
+    const common = @import("common.zig").make(std);
 
     return struct {
         pub const AlertError = error{
@@ -124,12 +124,12 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const common = @import("common.zig").make(lib);
-            const alert = make(lib);
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const common = @import("common.zig").make(std);
+            const alert = make(std);
 
             const expected = common.Alert{
                 .level = .fatal,

@@ -1,6 +1,6 @@
 //! url — zero-allocation URL parser (RFC 3986).
 //!
-//! Pure string slicing, no platform dependency, no comptime lib needed.
+//! Pure string slicing, no platform dependency, no comptime std injection needed.
 //! Works at both runtime and comptime.
 //!
 //! Usage:
@@ -202,10 +202,10 @@ fn eql(a: []const u8, b: []const u8) bool {
     return true;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
+            const testing = std.testing;
 
             {
                 const u = try parse("https://user:pass@example.com:8080/path?q=1#frag");

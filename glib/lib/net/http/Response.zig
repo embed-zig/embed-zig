@@ -5,7 +5,7 @@
 //! The originating request is embedded by value so the response can
 //! safely outlive the caller's local request variable.
 
-const std = @import("std");
+const host_std = @import("std");
 const Header = @import("Header.zig");
 const Request = @import("Request.zig");
 const ReadCloser = @import("ReadCloser.zig");
@@ -50,10 +50,10 @@ pub fn deinit(self: *Response) void {
     self.* = undefined;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
+            const testing = std.testing;
 
             const MockBody = struct {
                 payload: []const u8 = "hello",

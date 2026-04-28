@@ -22,12 +22,12 @@ pub fn Characteristic(comptime grt: type, comptime ClientType: type, comptime Su
         const PROP_WRITE: u8 = 0x08;
         const PROP_NOTIFY: u8 = 0x10;
         const PROP_INDICATE: u8 = 0x20;
-        const default_read_timeout_ms: u32 = 1_000;
+        const default_read_timeout: glib.time.duration.Duration = glib.time.duration.Second;
         const default_read_max_retries: u8 = 5;
-        const default_write_timeout_ms: u32 = 5_000;
+        const default_write_timeout: glib.time.duration.Duration = 5 * glib.time.duration.Second;
         const default_send_redundancy: u8 = 3;
         const control_write_max_attempts: u32 = 3;
-        const control_write_retry_delay_ns: u64 = 1_000_000;
+        const control_write_retry_delay: glib.time.duration.Duration = glib.time.duration.MilliSecond;
         const ReadTx = struct {
             characteristic: *Self,
             subscription: SubscriptionType,
@@ -41,8 +41,8 @@ pub fn Characteristic(comptime grt: type, comptime ClientType: type, comptime Su
                 };
             }
 
-            pub fn read(self: *Transport, timeout_ms: u32, out: []u8) !usize {
-                const notif = self.subscription.next(timeout_ms) catch |err| switch (err) {
+            pub fn read(self: *Transport, timeout: glib.time.duration.Duration, out: []u8) !usize {
+                const notif = self.subscription.next(timeout) catch |err| switch (err) {
                     error.TimedOut => return error.Timeout,
                     else => return err,
                 } orelse return error.Closed;
@@ -75,8 +75,8 @@ pub fn Characteristic(comptime grt: type, comptime ClientType: type, comptime Su
                 };
             }
 
-            pub fn read(self: *Transport, timeout_ms: u32, out: []u8) anyerror!usize {
-                const notif = (try self.subscription.next(timeout_ms)) orelse return error.Closed;
+            pub fn read(self: *Transport, timeout: glib.time.duration.Duration, out: []u8) anyerror!usize {
+                const notif = (try self.subscription.next(timeout)) orelse return error.Closed;
                 const payload = notif.payload();
                 if (payload.len > out.len) return error.NoSpaceLeft;
                 @memcpy(out[0..payload.len], payload);
@@ -138,7 +138,7 @@ pub fn Characteristic(comptime grt: type, comptime ClientType: type, comptime Su
             const mtu = effectiveMtu(self);
             return xfer.write(grt, self.client.allocator, &transport, data, .{
                 .att_mtu = mtu,
-                .timeout_ms = default_write_timeout_ms,
+                .timeout = default_write_timeout,
                 .send_redundancy = default_send_redundancy,
             });
         }
@@ -148,7 +148,7 @@ pub fn Characteristic(comptime grt: type, comptime ClientType: type, comptime Su
             const mtu = effectiveMtu(self);
             return xfer.read(grt, allocator, &transport, .{
                 .att_mtu = mtu,
-                .timeout_ms = default_read_timeout_ms,
+                .timeout = default_read_timeout,
                 .max_timeout_retries = default_read_max_retries,
             }) catch |err| switch (err) {
                 error.Closed => return error.SubscriptionClosed,
@@ -201,7 +201,7 @@ pub fn Characteristic(comptime grt: type, comptime ClientType: type, comptime Su
                 self.write(data) catch |err| switch (err) {
                     error.AttError, error.Timeout => {
                         if (attempt + 1 < control_write_max_attempts) {
-                            grt.std.Thread.sleep(control_write_retry_delay_ns);
+                            grt.std.Thread.sleep(@intCast(control_write_retry_delay));
                             continue;
                         }
                         return err;

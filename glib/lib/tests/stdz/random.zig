@@ -13,7 +13,7 @@ const ByteSource = struct {
     }
 };
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -24,46 +24,46 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("bytes_and_boolean", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("bytes_and_boolean", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try bytesAndBooleanTests(lib);
+                    try bytesAndBooleanTests(std);
                 }
             }.run));
-            t.run("enum_and_int", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("enum_and_int", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try enumAndIntTests(lib);
+                    try enumAndIntTests(std);
                 }
             }.run));
-            t.run("range", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("range", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try rangeTests(lib);
+                    try rangeTests(std);
                 }
             }.run));
-            t.run("float", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("float", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try floatTests(lib);
+                    try floatTests(std);
                 }
             }.run));
-            t.run("shuffle", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("shuffle", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try shuffleTests(lib);
+                    try shuffleTests(std);
                 }
             }.run));
-            t.run("weighted_and_limit", testing_mod.TestRunner.fromFn(lib, 16 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("weighted_and_limit", testing_mod.TestRunner.fromFn(std, 16 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try weightedAndLimitTests(lib);
+                    try weightedAndLimitTests(std);
                 }
             }.run));
             return t.wait();
@@ -71,18 +71,18 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
 }
 
-fn bytesAndBooleanTests(comptime lib: type) !void {
+fn bytesAndBooleanTests(comptime std: type) !void {
     var src = ByteSource{};
-    var rng = lib.Random.init(&src, ByteSource.fill);
+    var rng = std.Random.init(&src, ByteSource.fill);
 
     var bytes: [17]u8 = undefined;
     rng.bytes(&bytes);
@@ -98,18 +98,18 @@ fn bytesAndBooleanTests(comptime lib: type) !void {
 
     var src_a = ByteSource{};
     var src_b = ByteSource{};
-    var rng_a = lib.Random.init(&src_a, ByteSource.fill);
-    var rng_b = lib.Random.init(&src_b, ByteSource.fill);
+    var rng_a = std.Random.init(&src_a, ByteSource.fill);
+    var rng_b = std.Random.init(&src_b, ByteSource.fill);
     for (0..16) |_| {
         if (rng_a.boolean() != rng_b.boolean()) return error.RandomBooleanDeterminismMismatch;
     }
 }
 
-fn enumAndIntTests(comptime lib: type) !void {
+fn enumAndIntTests(comptime std: type) !void {
     var src_a = ByteSource{};
     var src_b = ByteSource{};
-    var rng_a = lib.Random.init(&src_a, ByteSource.fill);
-    var rng_b = lib.Random.init(&src_b, ByteSource.fill);
+    var rng_a = std.Random.init(&src_a, ByteSource.fill);
+    var rng_b = std.Random.init(&src_b, ByteSource.fill);
 
     const enum_value = rng_a.enumValue(TestEnum);
     if (enum_value != rng_b.enumValue(TestEnum)) return error.RandomEnumValueDeterminismMismatch;
@@ -125,11 +125,11 @@ fn enumAndIntTests(comptime lib: type) !void {
     if (rng_a.int(i16) != rng_b.int(i16)) return error.RandomIntI16DeterminismMismatch;
 }
 
-fn rangeTests(comptime lib: type) !void {
+fn rangeTests(comptime std: type) !void {
     var src_a = ByteSource{};
     var src_b = ByteSource{};
-    var rng_a = lib.Random.init(&src_a, ByteSource.fill);
-    var rng_b = lib.Random.init(&src_b, ByteSource.fill);
+    var rng_a = std.Random.init(&src_a, ByteSource.fill);
+    var rng_b = std.Random.init(&src_b, ByteSource.fill);
 
     const less_than_biased = rng_a.uintLessThanBiased(u16, 1000);
     if (less_than_biased != rng_b.uintLessThanBiased(u16, 1000))
@@ -172,11 +172,11 @@ fn rangeTests(comptime lib: type) !void {
     if (int_at_most < -100 or int_at_most > 100) return error.RandomIntRangeAtMostOutOfRange;
 }
 
-fn floatTests(comptime lib: type) !void {
+fn floatTests(comptime std: type) !void {
     var src_a = ByteSource{};
     var src_b = ByteSource{};
-    var rng_a = lib.Random.init(&src_a, ByteSource.fill);
-    var rng_b = lib.Random.init(&src_b, ByteSource.fill);
+    var rng_a = std.Random.init(&src_a, ByteSource.fill);
+    var rng_b = std.Random.init(&src_b, ByteSource.fill);
 
     const f32_value = rng_a.float(f32);
     if (@as(u32, @bitCast(f32_value)) != @as(u32, @bitCast(rng_b.float(f32))))
@@ -201,12 +201,12 @@ fn floatTests(comptime lib: type) !void {
     if (!isFiniteFloat(exp_value) or exp_value < 0) return error.RandomFloatExpOutOfRange;
 }
 
-fn shuffleTests(comptime lib: type) !void {
+fn shuffleTests(comptime std: type) !void {
     {
         var src_a = ByteSource{};
         var src_b = ByteSource{};
-        var rng_a = lib.Random.init(&src_a, ByteSource.fill);
-        var rng_b = lib.Random.init(&src_b, ByteSource.fill);
+        var rng_a = std.Random.init(&src_a, ByteSource.fill);
+        var rng_b = std.Random.init(&src_b, ByteSource.fill);
 
         const original = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7 };
         var buf_a = original;
@@ -214,15 +214,15 @@ fn shuffleTests(comptime lib: type) !void {
         rng_a.shuffle(u8, &buf_a);
         rng_b.shuffle(u8, &buf_b);
 
-        if (!lib.mem.eql(u8, &buf_a, &buf_b)) return error.RandomShuffleDeterminismMismatch;
+        if (!std.mem.eql(u8, &buf_a, &buf_b)) return error.RandomShuffleDeterminismMismatch;
         if (!isPermutation(&original, &buf_a)) return error.RandomShufflePermutationMismatch;
     }
 
     {
         var src_a = ByteSource{};
         var src_b = ByteSource{};
-        var rng_a = lib.Random.init(&src_a, ByteSource.fill);
-        var rng_b = lib.Random.init(&src_b, ByteSource.fill);
+        var rng_a = std.Random.init(&src_a, ByteSource.fill);
+        var rng_b = std.Random.init(&src_b, ByteSource.fill);
 
         const original = [_]u8{ 10, 11, 12, 13, 14, 15, 16, 17 };
         var buf_a = original;
@@ -230,23 +230,23 @@ fn shuffleTests(comptime lib: type) !void {
         rng_a.shuffleWithIndex(u8, &buf_a, u8);
         rng_b.shuffleWithIndex(u8, &buf_b, u8);
 
-        if (!lib.mem.eql(u8, &buf_a, &buf_b)) return error.RandomShuffleWithIndexDeterminismMismatch;
+        if (!std.mem.eql(u8, &buf_a, &buf_b)) return error.RandomShuffleWithIndexDeterminismMismatch;
         if (!isPermutation(&original, &buf_a)) return error.RandomShuffleWithIndexPermutationMismatch;
     }
 }
 
-fn weightedAndLimitTests(comptime lib: type) !void {
+fn weightedAndLimitTests(comptime std: type) !void {
     var src_a = ByteSource{};
     var src_b = ByteSource{};
-    var rng_a = lib.Random.init(&src_a, ByteSource.fill);
-    var rng_b = lib.Random.init(&src_b, ByteSource.fill);
+    var rng_a = std.Random.init(&src_a, ByteSource.fill);
+    var rng_b = std.Random.init(&src_b, ByteSource.fill);
 
     const proportions = [_]u8{ 1, 3, 7, 9 };
     const index = rng_a.weightedIndex(u8, &proportions);
     if (index != rng_b.weightedIndex(u8, &proportions)) return error.RandomWeightedIndexDeterminismMismatch;
     if (index >= proportions.len) return error.RandomWeightedIndexOutOfRange;
 
-    const limited = lib.Random.limitRangeBiased(u16, 0xBEEF, 10);
+    const limited = std.Random.limitRangeBiased(u16, 0xBEEF, 10);
     if (limited >= 10) return error.RandomLimitRangeBiasedOutOfRange;
 }
 

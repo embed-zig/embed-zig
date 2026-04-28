@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const Context = @import("../../event/Context.zig");
 const ledstrip = @import("ledstrip");
 
@@ -28,8 +29,8 @@ pub const Flash = struct {
     source_id: u32,
     pixels: Pixels,
     brightness: u8 = 255,
-    duration_ns: u64,
-    interval_ns: u64,
+    duration: glib.time.duration.Duration,
+    interval: glib.time.duration.Duration,
     ctx: Context.Type = null,
 };
 
@@ -40,8 +41,8 @@ pub const Pingpong = struct {
     from_pixels: Pixels,
     to_pixels: Pixels,
     brightness: u8 = 255,
-    duration_ns: u64,
-    interval_ns: u64,
+    duration: glib.time.duration.Duration,
+    interval: glib.time.duration.Duration,
     ctx: Context.Type = null,
 };
 
@@ -51,7 +52,7 @@ pub const Rotate = struct {
     source_id: u32,
     pixels: Pixels,
     brightness: u8 = 255,
-    duration_ns: u64,
-    interval_ns: u64,
+    duration: glib.time.duration.Duration,
+    interval: glib.time.duration.Duration,
     ctx: Context.Type = null,
 };

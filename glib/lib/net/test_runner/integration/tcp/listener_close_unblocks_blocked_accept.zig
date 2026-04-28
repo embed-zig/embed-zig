@@ -2,7 +2,7 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -11,7 +11,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
                 fn waitUntilAcceptWaiting(listener: *net.TcpListener, comptime thread_lib: type) void {
@@ -20,14 +20,14 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         const waiting = listener.accept_waiting;
                         listener.state_mu.unlock();
                         if (waiting) return;
-                        thread_lib.Thread.sleep(thread_lib.time.ns_per_ms);
+                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
                     }
                 }
 
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
-                    const ReadyCounter = test_utils.ReadyCounter(lib);
-                    const Thread = lib.Thread;
+                    const ReadyCounter = test_utils.ReadyCounter(std);
+                    const Thread = std.Thread;
 
                     var ln = try Net.listen(a, .{ .address = test_utils.addr4(.{ 127, 0, 0, 1 }, 0) });
                     defer ln.deinit();
@@ -50,7 +50,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     }.run, .{ listener, &ready, &accept_err });
 
                     ready.waitUntilReady();
-                    waitUntilAcceptWaiting(listener, lib);
+                    waitUntilAcceptWaiting(listener, std);
                     listener.close();
                     accept_thread.join();
 

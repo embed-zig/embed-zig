@@ -95,30 +95,30 @@ fn TestCase(comptime grt: type, comptime BuiltApp: type) type {
 
         fn driveSequence(app: *BuiltApp) !void {
             // Baseline: held steady with small handling noise first.
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 1.0 }, 40);
-            try pushAccel(app, .{ .x = 0.08, .y = 0.02, .z = 0.96 }, 40);
-            try pushAccel(app, .{ .x = 0.02, .y = 0.00, .z = 1.03 }, 40);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 1.0 }, 40 * glib.time.duration.MilliSecond);
+            try pushAccel(app, .{ .x = 0.08, .y = 0.02, .z = 0.96 }, 40 * glib.time.duration.MilliSecond);
+            try pushAccel(app, .{ .x = 0.02, .y = 0.00, .z = 1.03 }, 40 * glib.time.duration.MilliSecond);
             try ensureCallbackCount(0, .callback_during_prelude);
 
             // The device slips into a real low-g drop window.
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 0.64 }, 40);
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 0.41 }, 40);
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 0.21 }, 50);
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 0.10 }, 50);
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 0.05 }, 40);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 0.64 }, 40 * glib.time.duration.MilliSecond);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 0.41 }, 40 * glib.time.duration.MilliSecond);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 0.21 }, 50 * glib.time.duration.MilliSecond);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 0.10 }, 50 * glib.time.duration.MilliSecond);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 0.05 }, 40 * glib.time.duration.MilliSecond);
             try app.imu_accel(.sensor, .{ .x = 0.00, .y = 0.00, .z = 0.03 });
             try waitForCallbackCount(1);
 
             // After impact/recovery, the transient free-fall motion should clear.
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 1.0 }, 40);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 1.0 }, 40 * glib.time.duration.MilliSecond);
             try waitForCallbackCount(2);
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 1.0 }, 40);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 1.0 }, 40 * glib.time.duration.MilliSecond);
             try ensureCallbackCount(2, .callback_after_recovery);
         }
 
-        fn pushAccel(app: *BuiltApp, accel: BuiltApp.Imu.Vec3, sleep_ms: u64) !void {
+        fn pushAccel(app: *BuiltApp, accel: BuiltApp.Imu.Vec3, sleep_duration: glib.time.duration.Duration) !void {
             try app.imu_accel(.sensor, accel);
-            grt.std.Thread.sleep(sleep_ms * grt.std.time.ns_per_ms);
+            grt.std.Thread.sleep(@intCast(sleep_duration));
         }
 
         fn ensureCallbackCount(expected: usize, failure: Failure) !void {
@@ -174,11 +174,12 @@ fn TestCase(comptime grt: type, comptime BuiltApp: type) type {
         }
 
         fn waitForCallbackCount(expected: usize) !void {
+            const poll_interval = 10 * glib.time.duration.MilliSecond;
             var attempts: usize = 0;
             while (attempts < 300) : (attempts += 1) {
                 if (currentFailure() != null) return error.CallbackFailed;
                 if (currentCallbackCalls() >= expected) return;
-                grt.std.Thread.sleep(10 * grt.std.time.ns_per_ms);
+                grt.std.Thread.sleep(@intCast(poll_interval));
             }
             fail(.missing_callback_count);
             return error.TimedOut;

@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const Context = @import("../../event/Context.zig");
 
 pub const Single = struct {
@@ -22,7 +23,7 @@ pub const Detected = struct {
 
     pub const Value = union(enum) {
         click: u16,
-        long_press_ns: u64,
+        long_press: glib.time.duration.Duration,
     };
 
     source_id: u32,

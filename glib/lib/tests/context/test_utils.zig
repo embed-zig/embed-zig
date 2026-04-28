@@ -1,5 +1,7 @@
 //! Context test utilities — shared helpers and fake types for integration/context test runners.
-const Context = @import("context").Context;
+const context_mod = @import("context");
+const time_mod = @import("time");
+const Context = context_mod.Context;
 
 fn tree(ctx: Context) *Context.TreeLink {
     return ctx.vtable.treeFn(ctx.ptr);
@@ -71,17 +73,17 @@ fn detachAndReparentChildrenForTest(ctx: Context) void {
     reparent(ctx, null);
 }
 
-pub fn LockCancelParentType(comptime lib: type) type {
+pub fn LockCancelParentType(comptime std: type) type {
     return struct {
         tree: Context.TreeLink = .{},
-        tree_rw: lib.Thread.RwLock = .{},
-        mu: lib.Thread.Mutex = .{},
+        tree_rw: std.Thread.RwLock = .{},
+        mu: std.Thread.Mutex = .{},
         cause: ?anyerror = null,
         cancel_on_next_lock: bool = false,
 
         const Self = @This();
 
-        pub fn context(self: *Self, allocator: lib.mem.Allocator) Context {
+        pub fn context(self: *Self, allocator: std.mem.Allocator) Context {
             const ctx = Context.init(self, &vtable, allocator);
             self.tree.ctx = ctx;
             return ctx;
@@ -110,11 +112,11 @@ pub fn LockCancelParentType(comptime lib: type) type {
             return errFn(ptr);
         }
 
-        fn deadlineFn(_: *anyopaque) ?i128 {
+        fn deadlineFn(_: *anyopaque) ?time_mod.instant.Time {
             return null;
         }
 
-        fn deadlineNoLockFn(_: *anyopaque) ?i128 {
+        fn deadlineNoLockFn(_: *anyopaque) ?time_mod.instant.Time {
             return null;
         }
 
@@ -126,7 +128,7 @@ pub fn LockCancelParentType(comptime lib: type) type {
             return null;
         }
 
-        fn waitFn(ptr: *anyopaque, _: ?i64) ?anyerror {
+        fn waitFn(ptr: *anyopaque, _: ?time_mod.duration.Duration) ?anyerror {
             return errFn(ptr);
         }
 
@@ -206,23 +208,23 @@ pub fn LockCancelParentType(comptime lib: type) type {
     };
 }
 
-pub fn ReparentableDeadlineParentType(comptime lib: type) type {
+pub fn ReparentableDeadlineParentType(comptime std: type) type {
     return struct {
         tree: Context.TreeLink = .{},
-        tree_rw: *lib.Thread.RwLock = undefined,
-        deadline_ns: i128 = 0,
+        tree_rw: *std.Thread.RwLock = undefined,
+        deadline: time_mod.instant.Time = 0,
 
         const Self = @This();
 
-        pub fn context(self: *Self, allocator: lib.mem.Allocator, parent: Context, deadline_ns: i128) Context {
+        pub fn context(self: *Self, allocator: std.mem.Allocator, parent: Context, deadline: time_mod.instant.Time) Context {
             const ctx = Context.init(self, &vtable, allocator);
             self.* = .{
                 .tree = .{
                     .ctx = ctx,
                     .parent = parent,
                 },
-                .tree_rw = treeLock(parent, lib.Thread.RwLock),
-                .deadline_ns = deadline_ns,
+                .tree_rw = treeLock(parent, std.Thread.RwLock),
+                .deadline = deadline,
             };
             attachChildForTest(parent, ctx);
             return ctx;
@@ -241,18 +243,18 @@ pub fn ReparentableDeadlineParentType(comptime lib: type) type {
             return errNoLockFn(ptr);
         }
 
-        fn deadlineNoLockFn(ptr: *anyopaque) ?i128 {
+        fn deadlineNoLockFn(ptr: *anyopaque) ?time_mod.instant.Time {
             const self: *Self = @ptrCast(@alignCast(ptr));
             const parent = self.tree.parent;
             if (parent) |p| {
                 if (p.vtable.deadlineNoLockFn(p.ptr)) |parent_deadline| {
-                    return @min(parent_deadline, self.deadline_ns);
+                    return @min(parent_deadline, self.deadline);
                 }
             }
-            return self.deadline_ns;
+            return self.deadline;
         }
 
-        fn deadlineFn(ptr: *anyopaque) ?i128 {
+        fn deadlineFn(ptr: *anyopaque) ?time_mod.instant.Time {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
@@ -272,7 +274,7 @@ pub fn ReparentableDeadlineParentType(comptime lib: type) type {
             return valueNoLockFn(ptr, key);
         }
 
-        fn waitFn(ptr: *anyopaque, _: ?i64) ?anyerror {
+        fn waitFn(ptr: *anyopaque, _: ?time_mod.duration.Duration) ?anyerror {
             return errFn(ptr);
         }
 
@@ -345,28 +347,28 @@ pub fn ReparentableDeadlineParentType(comptime lib: type) type {
     };
 }
 
-pub fn ReparentGateThreadType(comptime lib: type) type {
+pub fn ReparentGateThreadType(comptime std: type) type {
     return struct {
-        pub const SpawnConfig = lib.Thread.SpawnConfig;
-        pub const SpawnError = lib.Thread.SpawnError;
-        pub const YieldError = lib.Thread.YieldError;
-        pub const CpuCountError = lib.Thread.CpuCountError;
-        pub const SetNameError = lib.Thread.SetNameError;
-        pub const GetNameError = lib.Thread.GetNameError;
-        pub const max_name_len = lib.Thread.max_name_len;
-        pub const Id = lib.Thread.Id;
-        pub const Mutex = lib.Thread.Mutex;
-        pub const RwLock = lib.Thread.RwLock;
+        pub const SpawnConfig = std.Thread.SpawnConfig;
+        pub const SpawnError = std.Thread.SpawnError;
+        pub const YieldError = std.Thread.YieldError;
+        pub const CpuCountError = std.Thread.CpuCountError;
+        pub const SetNameError = std.Thread.SetNameError;
+        pub const GetNameError = std.Thread.GetNameError;
+        pub const max_name_len = std.Thread.max_name_len;
+        pub const Id = std.Thread.Id;
+        pub const Mutex = std.Thread.Mutex;
+        pub const RwLock = std.Thread.RwLock;
         pub const Condition = struct {
-            impl: lib.Thread.Condition = .{},
+            impl: std.Thread.Condition = .{},
 
             const ConditionSelf = @This();
 
             pub var intercept_next_timed_wait: bool = false;
             pub var timed_wait_intercepted: bool = false;
             pub var release_wait: bool = false;
-            pub var gate_mu: lib.Thread.Mutex = .{};
-            pub var gate_cond: lib.Thread.Condition = .{};
+            pub var gate_mu: std.Thread.Mutex = .{};
+            pub var gate_cond: std.Thread.Condition = .{};
 
             pub fn armTimedWaitHook() void {
                 gate_mu.lock();
@@ -428,10 +430,10 @@ pub fn ReparentGateThreadType(comptime lib: type) type {
 
         const Self = @This();
 
-        impl: lib.Thread = undefined,
+        impl: std.Thread = undefined,
 
         pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) SpawnError!Self {
-            return .{ .impl = try lib.Thread.spawn(config, f, args) };
+            return .{ .impl = try std.Thread.spawn(config, f, args) };
         }
 
         pub fn join(self: Self) void {
@@ -443,44 +445,44 @@ pub fn ReparentGateThreadType(comptime lib: type) type {
         }
 
         pub fn yield() YieldError!void {
-            return lib.Thread.yield();
+            return std.Thread.yield();
         }
 
         pub fn sleep(ns: u64) void {
-            lib.Thread.sleep(ns);
+            std.Thread.sleep(ns);
         }
 
         pub fn getCpuCount() CpuCountError!usize {
-            return lib.Thread.getCpuCount();
+            return std.Thread.getCpuCount();
         }
 
         pub fn getCurrentId() Id {
-            return lib.Thread.getCurrentId();
+            return std.Thread.getCurrentId();
         }
 
         pub fn setName(name: []const u8) SetNameError!void {
-            return lib.Thread.setName(name);
+            return std.Thread.setName(name);
         }
 
         pub fn getName(buf: *[max_name_len:0]u8) GetNameError!?[]const u8 {
-            return lib.Thread.getName(buf);
+            return std.Thread.getName(buf);
         }
     };
 }
 
-pub fn FailingSpawnThreadType(comptime lib: type) type {
+pub fn FailingSpawnThreadType(comptime std: type) type {
     return struct {
-        pub const SpawnConfig = lib.Thread.SpawnConfig;
-        pub const SpawnError = lib.Thread.SpawnError;
-        pub const YieldError = lib.Thread.YieldError;
-        pub const CpuCountError = lib.Thread.CpuCountError;
-        pub const SetNameError = lib.Thread.SetNameError;
-        pub const GetNameError = lib.Thread.GetNameError;
-        pub const max_name_len = lib.Thread.max_name_len;
-        pub const Id = lib.Thread.Id;
-        pub const Mutex = lib.Thread.Mutex;
-        pub const Condition = lib.Thread.Condition;
-        pub const RwLock = lib.Thread.RwLock;
+        pub const SpawnConfig = std.Thread.SpawnConfig;
+        pub const SpawnError = std.Thread.SpawnError;
+        pub const YieldError = std.Thread.YieldError;
+        pub const CpuCountError = std.Thread.CpuCountError;
+        pub const SetNameError = std.Thread.SetNameError;
+        pub const GetNameError = std.Thread.GetNameError;
+        pub const max_name_len = std.Thread.max_name_len;
+        pub const Id = std.Thread.Id;
+        pub const Mutex = std.Thread.Mutex;
+        pub const Condition = std.Thread.Condition;
+        pub const RwLock = std.Thread.RwLock;
 
         const Self = @This();
 
@@ -495,54 +497,54 @@ pub fn FailingSpawnThreadType(comptime lib: type) type {
         pub fn detach(_: Self) void {}
 
         pub fn yield() YieldError!void {
-            return lib.Thread.yield();
+            return std.Thread.yield();
         }
 
         pub fn sleep(ns: u64) void {
-            lib.Thread.sleep(ns);
+            std.Thread.sleep(ns);
         }
 
         pub fn getCpuCount() CpuCountError!usize {
-            return lib.Thread.getCpuCount();
+            return std.Thread.getCpuCount();
         }
 
         pub fn getCurrentId() Id {
-            return lib.Thread.getCurrentId();
+            return std.Thread.getCurrentId();
         }
 
         pub fn setName(name: []const u8) SetNameError!void {
-            return lib.Thread.setName(name);
+            return std.Thread.setName(name);
         }
 
         pub fn getName(buf: *[max_name_len:0]u8) GetNameError!?[]const u8 {
-            return lib.Thread.getName(buf);
+            return std.Thread.getName(buf);
         }
     };
 }
 
-pub fn CapturingSleepThreadType(comptime lib: type) type {
+pub fn CapturingSleepThreadType(comptime std: type) type {
     return struct {
-        pub const SpawnConfig = lib.Thread.SpawnConfig;
-        pub const SpawnError = lib.Thread.SpawnError;
-        pub const YieldError = lib.Thread.YieldError;
-        pub const CpuCountError = lib.Thread.CpuCountError;
-        pub const SetNameError = lib.Thread.SetNameError;
-        pub const GetNameError = lib.Thread.GetNameError;
-        pub const max_name_len = lib.Thread.max_name_len;
-        pub const Id = lib.Thread.Id;
-        pub const Mutex = lib.Thread.Mutex;
-        pub const Condition = lib.Thread.Condition;
-        pub const RwLock = lib.Thread.RwLock;
+        pub const SpawnConfig = std.Thread.SpawnConfig;
+        pub const SpawnError = std.Thread.SpawnError;
+        pub const YieldError = std.Thread.YieldError;
+        pub const CpuCountError = std.Thread.CpuCountError;
+        pub const SetNameError = std.Thread.SetNameError;
+        pub const GetNameError = std.Thread.GetNameError;
+        pub const max_name_len = std.Thread.max_name_len;
+        pub const Id = std.Thread.Id;
+        pub const Mutex = std.Thread.Mutex;
+        pub const Condition = std.Thread.Condition;
+        pub const RwLock = std.Thread.RwLock;
 
         const Self = @This();
 
-        impl: lib.Thread = undefined,
+        impl: std.Thread = undefined,
 
         pub var sleep_calls: usize = 0;
         pub var last_sleep_ns: u64 = 0;
 
         pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) SpawnError!Self {
-            return .{ .impl = try lib.Thread.spawn(config, f, args) };
+            return .{ .impl = try std.Thread.spawn(config, f, args) };
         }
 
         pub fn join(self: Self) void {
@@ -554,55 +556,55 @@ pub fn CapturingSleepThreadType(comptime lib: type) type {
         }
 
         pub fn yield() YieldError!void {
-            return lib.Thread.yield();
+            return std.Thread.yield();
         }
 
         pub fn sleep(ns: u64) void {
             sleep_calls += 1;
             last_sleep_ns = ns;
-            lib.Thread.sleep(ns);
+            std.Thread.sleep(ns);
         }
 
         pub fn getCpuCount() CpuCountError!usize {
-            return lib.Thread.getCpuCount();
+            return std.Thread.getCpuCount();
         }
 
         pub fn getCurrentId() Id {
-            return lib.Thread.getCurrentId();
+            return std.Thread.getCurrentId();
         }
 
         pub fn setName(name: []const u8) SetNameError!void {
-            return lib.Thread.setName(name);
+            return std.Thread.setName(name);
         }
 
         pub fn getName(buf: *[max_name_len:0]u8) GetNameError!?[]const u8 {
-            return lib.Thread.getName(buf);
+            return std.Thread.getName(buf);
         }
     };
 }
 
-pub fn CountingJoinThreadType(comptime lib: type) type {
+pub fn CountingJoinThreadType(comptime std: type) type {
     return struct {
-        pub const SpawnConfig = lib.Thread.SpawnConfig;
-        pub const SpawnError = lib.Thread.SpawnError;
-        pub const YieldError = lib.Thread.YieldError;
-        pub const CpuCountError = lib.Thread.CpuCountError;
-        pub const SetNameError = lib.Thread.SetNameError;
-        pub const GetNameError = lib.Thread.GetNameError;
-        pub const max_name_len = lib.Thread.max_name_len;
-        pub const Id = lib.Thread.Id;
-        pub const Mutex = lib.Thread.Mutex;
-        pub const Condition = lib.Thread.Condition;
-        pub const RwLock = lib.Thread.RwLock;
+        pub const SpawnConfig = std.Thread.SpawnConfig;
+        pub const SpawnError = std.Thread.SpawnError;
+        pub const YieldError = std.Thread.YieldError;
+        pub const CpuCountError = std.Thread.CpuCountError;
+        pub const SetNameError = std.Thread.SetNameError;
+        pub const GetNameError = std.Thread.GetNameError;
+        pub const max_name_len = std.Thread.max_name_len;
+        pub const Id = std.Thread.Id;
+        pub const Mutex = std.Thread.Mutex;
+        pub const Condition = std.Thread.Condition;
+        pub const RwLock = std.Thread.RwLock;
 
         const Self = @This();
 
-        impl: lib.Thread = undefined,
+        impl: std.Thread = undefined,
 
         pub var join_calls: usize = 0;
 
         pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) SpawnError!Self {
-            return .{ .impl = try lib.Thread.spawn(config, f, args) };
+            return .{ .impl = try std.Thread.spawn(config, f, args) };
         }
 
         pub fn join(self: Self) void {
@@ -615,52 +617,52 @@ pub fn CountingJoinThreadType(comptime lib: type) type {
         }
 
         pub fn yield() YieldError!void {
-            return lib.Thread.yield();
+            return std.Thread.yield();
         }
 
         pub fn sleep(ns: u64) void {
-            lib.Thread.sleep(ns);
+            std.Thread.sleep(ns);
         }
 
         pub fn getCpuCount() CpuCountError!usize {
-            return lib.Thread.getCpuCount();
+            return std.Thread.getCpuCount();
         }
 
         pub fn getCurrentId() Id {
-            return lib.Thread.getCurrentId();
+            return std.Thread.getCurrentId();
         }
 
         pub fn setName(name: []const u8) SetNameError!void {
-            return lib.Thread.setName(name);
+            return std.Thread.setName(name);
         }
 
         pub fn getName(buf: *[max_name_len:0]u8) GetNameError!?[]const u8 {
-            return lib.Thread.getName(buf);
+            return std.Thread.getName(buf);
         }
     };
 }
 
-pub fn SharedLockTrackingThreadType(comptime lib: type) type {
+pub fn SharedLockTrackingThreadType(comptime std: type) type {
     return struct {
-        pub const SpawnConfig = lib.Thread.SpawnConfig;
-        pub const SpawnError = lib.Thread.SpawnError;
-        pub const YieldError = lib.Thread.YieldError;
-        pub const CpuCountError = lib.Thread.CpuCountError;
-        pub const SetNameError = lib.Thread.SetNameError;
-        pub const GetNameError = lib.Thread.GetNameError;
-        pub const max_name_len = lib.Thread.max_name_len;
-        pub const Id = lib.Thread.Id;
-        pub const Mutex = lib.Thread.Mutex;
+        pub const SpawnConfig = std.Thread.SpawnConfig;
+        pub const SpawnError = std.Thread.SpawnError;
+        pub const YieldError = std.Thread.YieldError;
+        pub const CpuCountError = std.Thread.CpuCountError;
+        pub const SetNameError = std.Thread.SetNameError;
+        pub const GetNameError = std.Thread.GetNameError;
+        pub const max_name_len = std.Thread.max_name_len;
+        pub const Id = std.Thread.Id;
+        pub const Mutex = std.Thread.Mutex;
         pub const Condition = struct {
-            impl: lib.Thread.Condition = .{},
+            impl: std.Thread.Condition = .{},
 
             const ConditionSelf = @This();
 
             pub var intercept_next_timed_wait: bool = false;
             pub var timed_wait_intercepted: bool = false;
             pub var release_wait: bool = false;
-            pub var gate_mu: lib.Thread.Mutex = .{};
-            pub var gate_cond: lib.Thread.Condition = .{};
+            pub var gate_mu: std.Thread.Mutex = .{};
+            pub var gate_cond: std.Thread.Condition = .{};
 
             pub fn armTimedWaitHook() void {
                 gate_mu.lock();
@@ -720,8 +722,8 @@ pub fn SharedLockTrackingThreadType(comptime lib: type) type {
             }
         };
         pub const RwLock = struct {
-            impl: lib.Thread.RwLock = .{},
-            mu: lib.Thread.Mutex = .{},
+            impl: std.Thread.RwLock = .{},
+            mu: std.Thread.Mutex = .{},
             shared_depth: usize = 0,
             writer_pending_for_test: bool = false,
             nested_shared_while_writer_pending: bool = false,
@@ -768,10 +770,10 @@ pub fn SharedLockTrackingThreadType(comptime lib: type) type {
 
         const Self = @This();
 
-        impl: lib.Thread = undefined,
+        impl: std.Thread = undefined,
 
         pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) SpawnError!Self {
-            return .{ .impl = try lib.Thread.spawn(config, f, args) };
+            return .{ .impl = try std.Thread.spawn(config, f, args) };
         }
 
         pub fn join(self: Self) void {
@@ -783,27 +785,27 @@ pub fn SharedLockTrackingThreadType(comptime lib: type) type {
         }
 
         pub fn yield() YieldError!void {
-            return lib.Thread.yield();
+            return std.Thread.yield();
         }
 
         pub fn sleep(ns: u64) void {
-            lib.Thread.sleep(ns);
+            std.Thread.sleep(ns);
         }
 
         pub fn getCpuCount() CpuCountError!usize {
-            return lib.Thread.getCpuCount();
+            return std.Thread.getCpuCount();
         }
 
         pub fn getCurrentId() Id {
-            return lib.Thread.getCurrentId();
+            return std.Thread.getCurrentId();
         }
 
         pub fn setName(name: []const u8) SetNameError!void {
-            return lib.Thread.setName(name);
+            return std.Thread.setName(name);
         }
 
         pub fn getName(buf: *[max_name_len:0]u8) GetNameError!?[]const u8 {
-            return lib.Thread.getName(buf);
+            return std.Thread.getName(buf);
         }
     };
 }

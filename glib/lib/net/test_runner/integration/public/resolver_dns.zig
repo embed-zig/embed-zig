@@ -18,7 +18,7 @@ const stdz = @import("stdz");
 const resolver_mod = @import("../../../Resolver.zig");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type, comptime net: type, comptime ips: []const []const u8, comptime server_name: []const u8) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type, comptime ips: []const []const u8, comptime server_name: []const u8) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
@@ -29,7 +29,7 @@ pub fn make(comptime lib: type, comptime net: type, comptime ips: []const []cons
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
-            runImpl(lib, net, t, allocator, ips, server_name) catch |err| {
+            runImpl(std, net, t, allocator, ips, server_name) catch |err| {
                 t.logErrorf("resolver_dns runner failed: {}", .{err});
                 return false;
             };
@@ -38,35 +38,35 @@ pub fn make(comptime lib: type, comptime net: type, comptime ips: []const []cons
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_api.TestRunner.make(Runner).new(runner);
 }
 
 fn runImpl(
-    comptime lib: type,
+    comptime std: type,
     comptime net: type,
     t: *testing_api.T,
-    alloc: lib.mem.Allocator,
+    alloc: std.mem.Allocator,
     comptime ips: []const []const u8,
     comptime server_name: []const u8,
 ) !void {
     _ = t;
-    const R = resolver_mod.Resolver(lib, net);
+    const R = resolver_mod.Resolver(std, net);
     const Addr = net.netip.Addr;
     const testing = struct {
-        pub var allocator: lib.mem.Allocator = undefined;
-        pub const expect = lib.testing.expect;
-        pub const expectEqual = lib.testing.expectEqual;
-        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-        pub const expectError = lib.testing.expectError;
+        pub var allocator: std.mem.Allocator = undefined;
+        pub const expect = std.testing.expect;
+        pub const expectEqual = std.testing.expectEqual;
+        pub const expectEqualStrings = std.testing.expectEqualStrings;
+        pub const expectError = std.testing.expectError;
     };
     testing.allocator = alloc;
-    const resolver_spawn_config: lib.Thread.SpawnConfig = .{
+    const resolver_spawn_config: std.Thread.SpawnConfig = .{
         .stack_size = 128 * 1024,
     };
 
@@ -80,7 +80,7 @@ fn runImpl(
             var resolver = try R.init(testing.allocator, .{
                 .servers = &.{R.Server.init(ips[0], .udp)},
                 .mode = .ipv4_only,
-                .timeout_ms = 3000,
+                .timeout = 3000 * net.time.duration.MilliSecond,
                 .attempts = 2,
                 .spawn_config = resolver_spawn_config,
             });
@@ -95,7 +95,7 @@ fn runImpl(
             var resolver = try R.init(testing.allocator, .{
                 .servers = &.{R.Server.init(ips[0], .tcp)},
                 .mode = .ipv4_only,
-                .timeout_ms = 3000,
+                .timeout = 3000 * net.time.duration.MilliSecond,
                 .attempts = 2,
                 .spawn_config = resolver_spawn_config,
             });
@@ -110,7 +110,7 @@ fn runImpl(
             var resolver = try R.init(testing.allocator, .{
                 .servers = &.{R.Server.init(ips[0], .tls)},
                 .mode = .ipv4_only,
-                .timeout_ms = 5000,
+                .timeout = 5000 * net.time.duration.MilliSecond,
                 .attempts = 2,
                 .spawn_config = resolver_spawn_config,
             });
@@ -125,7 +125,7 @@ fn runImpl(
             var resolver = try R.init(testing.allocator, .{
                 .servers = &.{R.Server.init(ips[0], .doh)},
                 .mode = .ipv4_only,
-                .timeout_ms = 5000,
+                .timeout = 5000 * net.time.duration.MilliSecond,
                 .attempts = 2,
                 .spawn_config = resolver_spawn_config,
             });
@@ -143,7 +143,7 @@ fn runImpl(
                     R.Server.init(ips[1], .tcp),
                 },
                 .mode = .ipv4_only,
-                .timeout_ms = 3000,
+                .timeout = 3000 * net.time.duration.MilliSecond,
                 .attempts = 2,
                 .spawn_config = resolver_spawn_config,
             });

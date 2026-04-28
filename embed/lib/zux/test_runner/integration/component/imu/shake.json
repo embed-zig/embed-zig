@@ -12,7 +12,7 @@
               "motion": {
                 "shake": {
                   "magnitude": 2.5,
-                  "duration_ms": 120
+                  "duration": 120000000
                 }
               }
             }
@@ -67,7 +67,7 @@
               "motion": {
                 "shake": {
                   "magnitude": 2.3,
-                  "duration_ms": 110
+                  "duration": 110000000
                 }
               }
             }

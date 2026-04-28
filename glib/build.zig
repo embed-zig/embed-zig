@@ -28,10 +28,12 @@ pub fn build(b: *std.Build) void {
     lib_stdz.link(stdz_mod);
     lib_context.link(context_mod, .{
         .stdz = stdz_mod,
+        .time = time_mod,
     });
     lib_testing.link(testing_mod, .{
         .context = context_mod,
         .stdz = stdz_mod,
+        .time = time_mod,
     });
     lib_time.link(time_mod, .{
         .testing = testing_mod,
@@ -40,6 +42,7 @@ pub fn build(b: *std.Build) void {
         .context = context_mod,
         .stdz = stdz_mod,
         .testing = testing_mod,
+        .time = time_mod,
     });
     lib_io.link(io_mod, .{
         .stdz = stdz_mod,
@@ -51,6 +54,7 @@ pub fn build(b: *std.Build) void {
     });
     lib_net.link(net_mod, .{
         .stdz = stdz_mod,
+        .time = time_mod,
         .sync = sync_mod,
         .context = context_mod,
         .io = io_mod,

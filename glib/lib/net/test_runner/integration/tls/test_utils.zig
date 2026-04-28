@@ -23,8 +23,8 @@ pub fn writeAll(conn: net_mod.Conn, buf: []const u8) !void {
 }
 
 pub fn runLoopbackCase(
-    comptime lib: type,
-    alloc: lib.mem.Allocator,
+    comptime std: type,
+    alloc: std.mem.Allocator,
     comptime NetType: type,
     min_version: NetType.tls.ProtocolVersion,
     max_version: NetType.tls.ProtocolVersion,
@@ -33,7 +33,7 @@ pub fn runLoopbackCase(
     client_tls13_cipher_suites: ?[]const NetType.tls.CipherSuite,
     server_tls13_cipher_suites: ?[]const NetType.tls.CipherSuite,
 ) !void {
-    const Thread = lib.Thread;
+    const Thread = std.Thread;
     const test_spawn_config: Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 };
 
     var server_config: NetType.tls.ServerConfig = .{
@@ -99,7 +99,7 @@ pub fn runLoopbackCase(
                 result.* = err;
                 return;
             };
-            if (!lib.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
+            if (!std.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
         }
     }.run, .{ tls_l, expected_version, expected_suite, &server_result });
     defer server_thread.join();
@@ -119,15 +119,15 @@ pub fn runLoopbackCase(
 
     const typed = try conn.as(NetType.tls.Conn);
     try typed.handshake();
-    try lib.testing.expectEqual(expected_version, typed.handshake_state.version);
+    try std.testing.expectEqual(expected_version, typed.handshake_state.version);
     if (expected_suite) |suite| {
-        try lib.testing.expectEqual(suite, typed.handshake_state.cipher_suite);
+        try std.testing.expectEqual(suite, typed.handshake_state.cipher_suite);
     }
 
     try writeAll(conn, "ping");
     var resp: [4]u8 = undefined;
     try readAll(conn, &resp);
-    try lib.testing.expectEqualStrings("pong", &resp);
+    try std.testing.expectEqualStrings("pong", &resp);
     if (server_result) |err| return err;
 }
 

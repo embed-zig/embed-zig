@@ -2,18 +2,18 @@ const testing_api = @import("testing");
 const http_harness = @import("test_utils/http_harness.zig");
 const raw_http = @import("test_utils/raw_http.zig");
 
-fn concurrentRequests(comptime lib: type, comptime net: type, alloc: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const thread = lib.Thread;
+fn concurrentRequests(comptime std: type, comptime net: type, alloc: std.mem.Allocator) !void {
+    const testing = std.testing;
+    const thread = std.Thread;
 
     const worker_count = 8;
     const round_count = 2;
 
     const Body = struct {
-        fn run(cmux: *net.Cmux, a: lib.mem.Allocator) !void {
+        fn run(cmux: *net.Cmux, a: std.mem.Allocator) !void {
             const Worker = struct {
                 cmux: *net.Cmux,
-                arena: lib.mem.Allocator,
+                arena: std.mem.Allocator,
                 dlci: u16,
                 round_idx: usize,
                 worker_idx: usize,
@@ -26,28 +26,28 @@ fn concurrentRequests(comptime lib: type, comptime net: type, alloc: lib.mem.All
                 }
 
                 fn run(self: *@This()) !void {
-                    var conn = try http_harness.dialHttpChannel(lib, net, self.cmux, self.dlci);
+                    var conn = try http_harness.dialHttpChannel(std, net, self.cmux, self.dlci);
                     defer conn.deinit();
 
-                    const target = try lib.fmt.allocPrint(
+                    const target = try std.fmt.allocPrint(
                         self.arena,
                         "/echo?id=r{d}w{d}",
                         .{ self.round_idx, self.worker_idx },
                     );
                     defer self.arena.free(target);
 
-                    try raw_http.writeRawRequest(lib, self.arena, &conn, .{
+                    try raw_http.writeRawRequest(std, self.arena, &conn, .{
                         .target = target,
                     });
 
-                    const resp = try raw_http.readRawResponse(lib, net, self.arena, conn);
+                    const resp = try raw_http.readRawResponse(std, net, self.arena, conn);
                     defer self.arena.free(resp.head);
                     defer self.arena.free(resp.body);
 
-                    try testing.expectEqual(@as(u16, 200), try raw_http.responseStatusCode(lib, resp.head));
+                    try testing.expectEqual(@as(u16, 200), try raw_http.responseStatusCode(std, resp.head));
 
                     var expect_buf: [32]u8 = undefined;
-                    const expect = lib.fmt.bufPrint(
+                    const expect = std.fmt.bufPrint(
                         &expect_buf,
                         "echo:r{d}w{d}",
                         .{ self.round_idx, self.worker_idx },
@@ -82,15 +82,15 @@ fn concurrentRequests(comptime lib: type, comptime net: type, alloc: lib.mem.All
         }
     };
 
-    try http_harness.withCmuxHttpServerOptions(lib, net, alloc, http_harness.HarnessOptions(lib){
+    try http_harness.withCmuxHttpServerOptions(std, net, alloc, http_harness.HarnessOptions(std){
         .max_accept_queue = 9,
     }, Body.run);
 }
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            try concurrentRequests(lib, net, allocator);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            try concurrentRequests(std, net, allocator);
         }
     }.run);
 }

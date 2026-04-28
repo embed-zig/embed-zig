@@ -1,8 +1,8 @@
 const stdz = @import("stdz");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) type {
-    const posix = lib.posix;
+pub fn make(comptime std: type) type {
+    const posix = std.posix;
 
     return struct {
         recv_fd: posix.socket_t,
@@ -94,8 +94,9 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    const WakeFd = make(lib);
+pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunner {
+    _ = time;
+    const WakeFd = make(std);
     const Cases = struct {
         fn initAndSignalCase(comptime test_lib: type) !void {
             const testing = test_lib.testing;
@@ -173,11 +174,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            Cases.initAndSignalCase(lib) catch |err| {
+            Cases.initAndSignalCase(std) catch |err| {
                 t.logErrorf("sync.WakeFd init/signal failed: {}", .{err});
                 return false;
             };
-            Cases.drainIsIdempotentCase(lib) catch |err| {
+            Cases.drainIsIdempotentCase(std) catch |err| {
                 t.logErrorf("sync.WakeFd drain failed: {}", .{err});
                 return false;
             };

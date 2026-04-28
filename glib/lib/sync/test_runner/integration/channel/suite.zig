@@ -1,38 +1,39 @@
 //! Shared Channel contract integration suite (per-case runners invoke methods here).
 
-pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
-    const Ch = Channel(u32);
-    const Thread = lib.Thread;
-    const Allocator = lib.mem.Allocator;
-    const Atomic = lib.atomic.Value;
-    const time = lib.time;
-    const testing = lib.testing;
+const Channel = @import("../../../Channel.zig");
+pub fn Suite(comptime std: type, comptime time: type, comptime ChannelFactory: Channel.FactoryType) type {
+    const BoundChannel = Channel.make(ChannelFactory(std));
+    const Ch = BoundChannel(u32);
+    const Thread = std.Thread;
+    const Allocator = std.mem.Allocator;
+    const Atomic = std.atomic.Value;
+    const testing = std.testing;
     const Event = u32;
 
     return struct {
-        fn waitForTrue(flag: *Atomic(bool), timeout_ms: u64) !void {
-            var elapsed_ms: u64 = 0;
-            while (elapsed_ms < timeout_ms) : (elapsed_ms += 1) {
+        fn waitForTrue(flag: *Atomic(bool), timeout: time.duration.Duration) !void {
+            var elapsed: time.duration.Duration = 0;
+            while (elapsed < timeout) : (elapsed += time.duration.MilliSecond) {
                 if (flag.load(.acquire)) return;
-                Thread.sleep(time.ns_per_ms);
+                Thread.sleep(@intCast(time.duration.MilliSecond));
             }
             return error.TimeoutWaitingForFlag;
         }
 
-        fn waitForCount(flag: *Atomic(u32), expected: u32, timeout_ms: u64) !void {
-            var elapsed_ms: u64 = 0;
-            while (elapsed_ms < timeout_ms) : (elapsed_ms += 1) {
+        fn waitForCount(flag: *Atomic(u32), expected: u32, timeout: time.duration.Duration) !void {
+            var elapsed: time.duration.Duration = 0;
+            while (elapsed < timeout) : (elapsed += time.duration.MilliSecond) {
                 if (flag.load(.acquire) >= expected) return;
-                Thread.sleep(time.ns_per_ms);
+                Thread.sleep(@intCast(time.duration.MilliSecond));
             }
             return error.TimeoutWaitingForCount;
         }
 
-        fn expectStaysFalse(flag: *Atomic(bool), duration_ms: u64) !void {
-            var elapsed_ms: u64 = 0;
-            while (elapsed_ms < duration_ms) : (elapsed_ms += 1) {
+        fn expectStaysFalse(flag: *Atomic(bool), duration: time.duration.Duration) !void {
+            var elapsed: time.duration.Duration = 0;
+            while (elapsed < duration) : (elapsed += time.duration.MilliSecond) {
                 if (flag.load(.acquire)) return error.FlagSetUnexpectedly;
-                Thread.sleep(time.ns_per_ms);
+                Thread.sleep(@intCast(time.duration.MilliSecond));
             }
         }
 
@@ -198,8 +199,8 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &finished });
 
-            try waitForTrue(&entered, 200);
-            try expectStaysFalse(&finished, 50);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
+            try expectStaysFalse(&finished, 50 * time.duration.MilliSecond);
 
             _ = try ch.recv();
             t.join();
@@ -224,7 +225,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &send_ok });
 
-            try waitForTrue(&entered, 200);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
 
             const r = try ch.recv();
             try testing.expect(r.ok);
@@ -256,8 +257,8 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &finished });
 
-            try waitForTrue(&entered, 200);
-            try expectStaysFalse(&finished, 50);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
+            try expectStaysFalse(&finished, 50 * time.duration.MilliSecond);
 
             _ = try ch.send(42);
             t.join();
@@ -282,7 +283,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &recv_ok, &recv_val });
 
-            try waitForTrue(&entered, 200);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
             _ = try ch.send(0xBEEF);
             t.join();
 
@@ -474,7 +475,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &recv_ok, &recv_val });
 
-            try waitForTrue(&entered, 200);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
             _ = try ch.send(0xCAFE);
             t.join();
 
@@ -499,7 +500,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &send_ok });
 
-            try waitForTrue(&entered, 200);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
             _ = try ch.recv();
             t.join();
 
@@ -511,28 +512,28 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 var ch = try Ch.make(allocator, 0);
                 defer ch.deinit();
 
-                try testing.expectError(error.Timeout, ch.sendTimeout(0xD00D, 5));
-                try testing.expectError(error.Timeout, ch.recvTimeout(5));
+                try testing.expectError(error.Timeout, ch.sendTimeout(0xD00D, 5 * time.duration.MilliSecond));
+                try testing.expectError(error.Timeout, ch.recvTimeout(5 * time.duration.MilliSecond));
 
                 var recv_ok = Atomic(bool).init(false);
                 var recv_val = Atomic(Event).init(0);
                 const receiver = try Thread.spawn(.{}, struct {
                     fn run(c: *Ch, ok: *Atomic(bool), value: *Atomic(Event)) void {
-                        Thread.sleep(time.ns_per_ms);
+                        Thread.sleep(@intCast(time.duration.MilliSecond));
                         const r = c.recv() catch return;
                         ok.store(r.ok, .release);
                         if (r.ok) value.store(r.value, .release);
                     }
                 }.run, .{ &ch, &recv_ok, &recv_val });
 
-                const sent = try ch.sendTimeout(0xBEEF, 200);
+                const sent = try ch.sendTimeout(0xBEEF, 200 * time.duration.MilliSecond);
                 try testing.expect(sent.ok);
                 receiver.join();
                 try testing.expect(recv_ok.load(.acquire));
                 try testing.expectEqual(@as(Event, 0xBEEF), recv_val.load(.acquire));
 
                 ch.close();
-                const closed = try ch.sendTimeout(0xBEEF, 5);
+                const closed = try ch.sendTimeout(0xBEEF, 5 * time.duration.MilliSecond);
                 try testing.expect(!closed.ok);
             }
 
@@ -541,20 +542,20 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 defer ch.deinit();
 
                 _ = try ch.send(1);
-                try testing.expectError(error.Timeout, ch.sendTimeout(0xD00D, 5));
+                try testing.expectError(error.Timeout, ch.sendTimeout(0xD00D, 5 * time.duration.MilliSecond));
 
                 var recv_ok = Atomic(bool).init(false);
                 var recv_val = Atomic(Event).init(0);
                 const receiver = try Thread.spawn(.{}, struct {
                     fn run(c: *Ch, ok: *Atomic(bool), value: *Atomic(Event)) void {
-                        Thread.sleep(time.ns_per_ms);
+                        Thread.sleep(@intCast(time.duration.MilliSecond));
                         const r = c.recv() catch return;
                         ok.store(r.ok, .release);
                         if (r.ok) value.store(r.value, .release);
                     }
                 }.run, .{ &ch, &recv_ok, &recv_val });
 
-                const sent = try ch.sendTimeout(0xD00D, 200);
+                const sent = try ch.sendTimeout(0xD00D, 200 * time.duration.MilliSecond);
                 try testing.expect(sent.ok);
                 receiver.join();
                 try testing.expect(recv_ok.load(.acquire));
@@ -565,7 +566,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 try testing.expectEqual(@as(Event, 0xD00D), queued.value);
 
                 ch.close();
-                const closed = try ch.sendTimeout(0xBEEF, 5);
+                const closed = try ch.sendTimeout(0xBEEF, 5 * time.duration.MilliSecond);
                 try testing.expect(!closed.ok);
             }
         }
@@ -577,22 +578,22 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 var ch = try Ch.make(allocator, capacity);
                 defer ch.deinit();
 
-                try testing.expectError(error.Timeout, ch.recvTimeout(5));
+                try testing.expectError(error.Timeout, ch.recvTimeout(5 * time.duration.MilliSecond));
 
                 const sender = try Thread.spawn(.{}, struct {
                     fn run(c: *Ch) void {
-                        Thread.sleep(time.ns_per_ms);
+                        Thread.sleep(@intCast(time.duration.MilliSecond));
                         _ = c.send(0xD00D) catch {};
                     }
                 }.run, .{&ch});
 
-                const r = try ch.recvTimeout(200);
+                const r = try ch.recvTimeout(200 * time.duration.MilliSecond);
                 try testing.expect(r.ok);
                 try testing.expectEqual(@as(Event, 0xD00D), r.value);
                 sender.join();
 
                 ch.close();
-                const closed = try ch.recvTimeout(5);
+                const closed = try ch.recvTimeout(5 * time.duration.MilliSecond);
                 try testing.expect(!closed.ok);
             }
         }
@@ -614,7 +615,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &recv_ok });
 
-            try waitForTrue(&entered, 200);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
             ch.close();
             t.join();
 
@@ -641,7 +642,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &send_ok });
 
-            try waitForTrue(&entered, 200);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
             ch.close();
             t.join();
 
@@ -672,7 +673,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }.run, .{ &ch, &started, &done_count });
             }
 
-            try waitForCount(&started, @as(u32, N), 200);
+            try waitForCount(&started, @as(u32, N), 200 * time.duration.MilliSecond);
             ch.close();
 
             for (0..N) |i| {
@@ -709,7 +710,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }.run, .{ &ch, &started, &done_count });
             }
 
-            try waitForCount(&started, @as(u32, N), 200);
+            try waitForCount(&started, @as(u32, N), 200 * time.duration.MilliSecond);
             ch.close();
 
             for (0..N) |i| {
@@ -1001,7 +1002,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }.run, .{ &ch, &started, &recv_count });
             }
 
-            try waitForCount(&started, @as(u32, N), 200);
+            try waitForCount(&started, @as(u32, N), 200 * time.duration.MilliSecond);
             ch.close();
 
             for (0..N) |i| {
@@ -1044,7 +1045,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }.run, .{ &ch, &started, @as(Event, @intCast(i)), &send_success[i], &send_ok_count, &send_fail_count });
             }
 
-            try waitForCount(&started, @as(u32, N), 200);
+            try waitForCount(&started, @as(u32, N), 200 * time.duration.MilliSecond);
             ch.close();
 
             for (0..N) |i| {
@@ -1164,7 +1165,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }.run, .{ &ch, &started, &ok_count, &fail_count });
             }
 
-            try waitForCount(&started, @as(u32, RECEIVERS), 200);
+            try waitForCount(&started, @as(u32, RECEIVERS), 200 * time.duration.MilliSecond);
             ch.close();
 
             for (0..RECEIVERS) |i| {
@@ -1204,7 +1205,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &recv_val, &recv_ok });
 
-            try waitForTrue(&entered, 200);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
             const s = try ch.send(0xDEAD);
             try testing.expect(s.ok);
             t.join();
@@ -1227,8 +1228,8 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &finished });
 
-            try waitForTrue(&entered, 200);
-            try expectStaysFalse(&finished, 50);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
+            try expectStaysFalse(&finished, 50 * time.duration.MilliSecond);
 
             _ = try ch.recv();
             t.join();
@@ -1249,8 +1250,8 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &finished });
 
-            try waitForTrue(&entered, 200);
-            try expectStaysFalse(&finished, 50);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
+            try expectStaysFalse(&finished, 50 * time.duration.MilliSecond);
 
             _ = try ch.send(42);
             t.join();
@@ -1296,7 +1297,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &recv_ok });
 
-            try waitForTrue(&entered, 200);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
             ch.close();
             t.join();
 
@@ -1320,7 +1321,7 @@ pub fn Suite(comptime lib: type, comptime Channel: fn (type) type) type {
                 }
             }.run, .{ &ch, &entered, &send_ok });
 
-            try waitForTrue(&entered, 200);
+            try waitForTrue(&entered, 200 * time.duration.MilliSecond);
             ch.close();
             t.join();
 

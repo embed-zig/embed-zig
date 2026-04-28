@@ -29,28 +29,28 @@ test "thirdparty/portaudio/unit/root_surface_exposes_foundational_types" {
 }
 
 test "thirdparty/portaudio/unit/std" {
-    var t = glib.testing.T.new(gstd.runtime.std, .portaudio_unit_std);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .portaudio_unit_std);
     defer t.deinit();
     t.run("portaudio", portaudio.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "thirdparty/portaudio/unit/embed_std" {
-    var t = glib.testing.T.new(gstd.runtime.std, .portaudio_unit_embed_std);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .portaudio_unit_embed_std);
     defer t.deinit();
     t.run("portaudio", portaudio.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "thirdparty/portaudio/integration/std" {
-    var t = glib.testing.T.new(gstd.runtime.std, .portaudio_integration_std);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .portaudio_integration_std);
     defer t.deinit();
     t.run("portaudio", portaudio.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "thirdparty/portaudio/integration/embed_std" {
-    var t = glib.testing.T.new(gstd.runtime.std, .portaudio_integration_embed_std);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .portaudio_integration_embed_std);
     defer t.deinit();
     t.run("portaudio", portaudio.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;

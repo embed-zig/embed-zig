@@ -23,7 +23,7 @@ test "embed/zux/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .zux);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .zux);
     defer t.deinit();
 
     t.run("embed/zux/unit/std", zux.test_runner.unit.make(gstd.runtime));
@@ -35,7 +35,7 @@ test "embed/zux/unit/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .zux);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .zux);
     defer t.deinit();
 
     t.run("embed/zux/unit/gstd", zux.test_runner.unit.make(gstd.runtime));
@@ -47,9 +47,9 @@ test "embed/zux/integration/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .zux);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .zux);
     defer t.deinit();
-    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
+    t.timeout(20 * glib.time.duration.Second);
 
     t.run("embed/zux/integration/std", zux.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
@@ -60,9 +60,9 @@ test "embed/zux/integration/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .zux);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .zux);
     defer t.deinit();
-    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
+    t.timeout(20 * glib.time.duration.Second);
 
     t.run("embed/zux/integration/gstd", zux.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;

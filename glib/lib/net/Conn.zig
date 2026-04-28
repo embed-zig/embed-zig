@@ -1,7 +1,7 @@
 //! Conn — type-erased bidirectional byte stream (like Go's net.Conn).
 //!
 //! Uses a VTable for runtime dispatch, same pattern as std.mem.Allocator.
-//! Any concrete type with read/write/close/deinit plus timeout setter methods
+//! Any concrete type with read/write/close/deinit plus deadline setter methods
 //! can be wrapped into a Conn.
 //!
 //!   var conn = try net.dial(allocator, .tcp, addr);
@@ -16,6 +16,8 @@
 //! same time, but concurrent operations in the same direction are not part of
 //! the shared Conn contract.
 
+const time_mod = @import("time");
+
 const Conn = @This();
 
 ptr: *anyopaque,
@@ -27,8 +29,8 @@ pub const VTable = struct {
     write: *const fn (ptr: *anyopaque, buf: []const u8) WriteError!usize,
     close: *const fn (ptr: *anyopaque) void,
     deinit: *const fn (ptr: *anyopaque) void,
-    setReadTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
-    setWriteTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
+    setReadDeadline: *const fn (ptr: *anyopaque, deadline: ?time_mod.instant.Time) void,
+    setWriteDeadline: *const fn (ptr: *anyopaque, deadline: ?time_mod.instant.Time) void,
 };
 
 pub const ReadError = error{
@@ -85,12 +87,12 @@ pub fn deinit(self: Conn) void {
     self.vtable.deinit(self.ptr);
 }
 
-pub fn setReadTimeout(self: Conn, ms: ?u32) void {
-    self.vtable.setReadTimeout(self.ptr, ms);
+pub fn setReadDeadline(self: Conn, deadline: ?time_mod.instant.Time) void {
+    self.vtable.setReadDeadline(self.ptr, deadline);
 }
 
-pub fn setWriteTimeout(self: Conn, ms: ?u32) void {
-    self.vtable.setWriteTimeout(self.ptr, ms);
+pub fn setWriteDeadline(self: Conn, deadline: ?time_mod.instant.Time) void {
+    self.vtable.setWriteDeadline(self.ptr, deadline);
 }
 
 /// Wrap a pointer to any concrete type that matches the `Conn` vtable contract.
@@ -100,8 +102,8 @@ pub fn setWriteTimeout(self: Conn, ms: ?u32) void {
 ///   fn write(*Self, []const u8) WriteError!usize
 ///   fn close(*Self) void
 ///   fn deinit(*Self) void
-///   fn setReadTimeout(*Self, ?u32) void
-///   fn setWriteTimeout(*Self, ?u32) void
+///   fn setReadDeadline(*Self, ?time_mod.instant.Time) void
+///   fn setWriteDeadline(*Self, ?time_mod.instant.Time) void
 pub fn init(pointer: anytype) Conn {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);
@@ -129,21 +131,21 @@ pub fn init(pointer: anytype) Conn {
             .write = writeFn,
             .close = closeFn,
             .deinit = deinitFn,
-            .setReadTimeout = setReadTimeoutFn,
-            .setWriteTimeout = setWriteTimeoutFn,
+            .setReadDeadline = setReadDeadlineFn,
+            .setWriteDeadline = setWriteDeadlineFn,
         };
 
         fn deinitFn(ptr: *anyopaque) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             self.deinit();
         }
-        fn setReadTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+        fn setReadDeadlineFn(ptr: *anyopaque, deadline: ?time_mod.instant.Time) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            self.setReadTimeout(ms);
+            self.setReadDeadline(deadline);
         }
-        fn setWriteTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+        fn setWriteDeadlineFn(ptr: *anyopaque, deadline: ?time_mod.instant.Time) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            self.setWriteTimeout(ms);
+            self.setWriteDeadline(deadline);
         }
     };
 

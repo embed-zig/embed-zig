@@ -1,4 +1,3 @@
-
 const AddrPort = @import("../../../../netip/AddrPort.zig");
 
 pub const stream_read_total_bytes: usize = 2048;
@@ -6,8 +5,8 @@ pub const stream_read_chunk_bytes: usize = 256;
 pub const stream_write_total_bytes: usize = 400;
 pub const stream_write_chunk_bytes: usize = 100;
 
-pub fn HarnessOptions(comptime lib: type) type {
-    _ = lib;
+pub fn HarnessOptions(comptime std: type) type {
+    _ = std;
     return struct {
         max_accept_queue: usize = 8,
         read_buffer_size: usize = 1024,
@@ -16,32 +15,32 @@ pub fn HarnessOptions(comptime lib: type) type {
 }
 
 pub fn dialHttpChannel(
-    comptime lib: type,
+    comptime std: type,
     comptime net: type,
     cmux: *net.Cmux,
     dlci: u16,
 ) !net.Conn {
-    _ = lib;
+    _ = std;
     return cmux.dial(dlci);
 }
 
 pub fn withCmuxHttpServer(
-    comptime lib: type,
+    comptime std: type,
     comptime net: type,
-    alloc: lib.mem.Allocator,
-    body: *const fn (*net.Cmux, lib.mem.Allocator) anyerror!void,
+    alloc: std.mem.Allocator,
+    body: *const fn (*net.Cmux, std.mem.Allocator) anyerror!void,
 ) !void {
-    return withCmuxHttpServerOptions(lib, net, alloc, .{}, body);
+    return withCmuxHttpServerOptions(std, net, alloc, .{}, body);
 }
 
 pub fn withCmuxHttpServerOptions(
-    comptime lib: type,
+    comptime std: type,
     comptime net: type,
-    alloc: lib.mem.Allocator,
-    harness_options: HarnessOptions(lib),
-    body: *const fn (*net.Cmux, lib.mem.Allocator) anyerror!void,
+    alloc: std.mem.Allocator,
+    harness_options: HarnessOptions(std),
+    body: *const fn (*net.Cmux, std.mem.Allocator) anyerror!void,
 ) !void {
-    const thread = lib.Thread;
+    const thread = std.Thread;
 
     const test_spawn_config: thread.SpawnConfig = .{ .stack_size = 1024 * 1024 };
 
@@ -51,19 +50,19 @@ pub fn withCmuxHttpServerOptions(
     try tcp_impl.listen();
     const port = try tcp_impl.port();
 
-    var ready: gate(lib) = .{};
-    var shared: serverShared(lib) = .{};
+    var ready: gate(std) = .{};
+    var shared: serverShared(std) = .{};
 
     var server_thread = try thread.spawn(test_spawn_config, struct {
         fn exec(
-            alloc2: lib.mem.Allocator,
+            alloc2: std.mem.Allocator,
             ln: net.Listener,
-            shared_ptr: *serverShared(lib),
-            ready_ptr: *gate(lib),
-            spawn_cfg: lib.Thread.SpawnConfig,
-            harness_options_arg: HarnessOptions(lib),
+            shared_ptr: *serverShared(std),
+            ready_ptr: *gate(std),
+            spawn_cfg: std.Thread.SpawnConfig,
+            harness_options_arg: HarnessOptions(std),
         ) void {
-            serverThreadMain(lib, net, alloc2, ln, shared_ptr, ready_ptr, spawn_cfg, harness_options_arg);
+            serverThreadMain(std, net, alloc2, ln, shared_ptr, ready_ptr, spawn_cfg, harness_options_arg);
         }
     }.exec, .{ alloc, tcp_listener, &shared, &ready, test_spawn_config, harness_options });
     defer {
@@ -99,11 +98,11 @@ pub fn withCmuxHttpServerOptions(
     }
 }
 
-pub fn registerRoutes(comptime lib: type, comptime net: type, server: *httpServer(net)) !void {
-    try registerEchoRoute(lib, net, server);
-    try registerPingRoute(lib, net, server);
-    try registerStreamReadRoute(lib, net, server);
-    try registerStreamWriteRoute(lib, net, server);
+pub fn registerRoutes(comptime std: type, comptime net: type, server: *httpServer(net)) !void {
+    try registerEchoRoute(std, net, server);
+    try registerPingRoute(std, net, server);
+    try registerStreamReadRoute(std, net, server);
+    try registerStreamWriteRoute(std, net, server);
 }
 
 fn addr4(port: u16) AddrPort {
@@ -114,17 +113,17 @@ fn httpServer(comptime net: type) type {
     return net.http.Server;
 }
 
-fn serverShared(comptime lib: type) type {
+fn serverShared(comptime std: type) type {
     return struct {
-        mutex: lib.Thread.Mutex = .{},
+        mutex: std.Thread.Mutex = .{},
         serve_err: ?anyerror = null,
     };
 }
 
-fn gate(comptime lib: type) type {
+fn gate(comptime std: type) type {
     return struct {
-        mutex: lib.Thread.Mutex = .{},
-        cond: lib.Thread.Condition = .{},
+        mutex: std.Thread.Mutex = .{},
+        cond: std.Thread.Condition = .{},
         open: bool = false,
 
         fn signal(self: *@This()) void {
@@ -143,14 +142,14 @@ fn gate(comptime lib: type) type {
 }
 
 fn serverThreadMain(
-    comptime lib: type,
+    comptime std: type,
     comptime net: type,
-    alloc: lib.mem.Allocator,
+    alloc: std.mem.Allocator,
     tcp_listener: net.Listener,
-    shared: *serverShared(lib),
-    ready: *gate(lib),
-    test_spawn_config: lib.Thread.SpawnConfig,
-    harness_options: HarnessOptions(lib),
+    shared: *serverShared(std),
+    ready: *gate(std),
+    test_spawn_config: std.Thread.SpawnConfig,
+    harness_options: HarnessOptions(std),
 ) void {
     const http = net.http;
     const cmux_type = net.Cmux;
@@ -188,7 +187,7 @@ fn serverThreadMain(
     };
     defer server.deinit();
 
-    registerRoutes(lib, net, &server) catch |err| {
+    registerRoutes(std, net, &server) catch |err| {
         shared.mutex.lock();
         shared.serve_err = err;
         shared.mutex.unlock();
@@ -205,30 +204,30 @@ fn serverThreadMain(
     };
 }
 
-fn registerEchoRoute(comptime lib: type, comptime net: type, server: *httpServer(net)) !void {
+fn registerEchoRoute(comptime std: type, comptime net: type, server: *httpServer(net)) !void {
     const http = net.http;
 
     try server.handleFunc("/echo", struct {
         fn run(rw: *http.ResponseWriter, req: *http.Request) void {
             const q = req.url.raw_query;
             const prefix = "id=";
-            if (!lib.mem.startsWith(u8, q, prefix)) return;
+            if (!std.mem.startsWith(u8, q, prefix)) return;
 
             var id_slice = q[prefix.len..];
-            if (lib.mem.indexOfScalar(u8, id_slice, '&')) |i| id_slice = id_slice[0..i];
+            if (std.mem.indexOfScalar(u8, id_slice, '&')) |i| id_slice = id_slice[0..i];
 
             var body_buf: [64]u8 = undefined;
-            const body = lib.fmt.bufPrint(&body_buf, "echo:{s}", .{id_slice}) catch return;
+            const body = std.fmt.bufPrint(&body_buf, "echo:{s}", .{id_slice}) catch return;
             var cl_buf: [16]u8 = undefined;
-            const cl = lib.fmt.bufPrint(&cl_buf, "{d}", .{body.len}) catch return;
+            const cl = std.fmt.bufPrint(&cl_buf, "{d}", .{body.len}) catch return;
             rw.setHeader(http.Header.content_length, cl) catch return;
             _ = rw.write(body) catch {};
         }
     }.run);
 }
 
-fn registerPingRoute(comptime lib: type, comptime net: type, server: *httpServer(net)) !void {
-    _ = lib;
+fn registerPingRoute(comptime std: type, comptime net: type, server: *httpServer(net)) !void {
+    _ = std;
     const http = net.http;
 
     try server.handleFunc("/ping", struct {
@@ -239,14 +238,14 @@ fn registerPingRoute(comptime lib: type, comptime net: type, server: *httpServer
     }.run);
 }
 
-fn registerStreamReadRoute(comptime lib: type, comptime net: type, server: *httpServer(net)) !void {
+fn registerStreamReadRoute(comptime std: type, comptime net: type, server: *httpServer(net)) !void {
     const http = net.http;
-    const thread = lib.Thread;
+    const thread = std.Thread;
 
     try server.handleFunc("/stream/read", struct {
         fn run(rw: *http.ResponseWriter, _: *http.Request) void {
             var cl_buf: [16]u8 = undefined;
-            const cl = lib.fmt.bufPrint(&cl_buf, "{d}", .{stream_read_total_bytes}) catch return;
+            const cl = std.fmt.bufPrint(&cl_buf, "{d}", .{stream_read_total_bytes}) catch return;
             rw.setHeader(http.Header.content_length, cl) catch return;
 
             var chunk: [stream_read_chunk_bytes]u8 = undefined;
@@ -255,13 +254,13 @@ fn registerStreamReadRoute(comptime lib: type, comptime net: type, server: *http
             var sent: usize = 0;
             while (sent < stream_read_total_bytes) : (sent += chunk.len) {
                 _ = rw.write(chunk[0..]) catch return;
-                thread.sleep(2 * lib.time.ns_per_ms);
+                thread.sleep(@intCast(2 * net.time.duration.MilliSecond));
             }
         }
     }.run);
 }
 
-fn registerStreamWriteRoute(comptime lib: type, comptime net: type, server: *httpServer(net)) !void {
+fn registerStreamWriteRoute(comptime std: type, comptime net: type, server: *httpServer(net)) !void {
     const http = net.http;
 
     try server.handleFunc("/stream/write", struct {
@@ -280,13 +279,13 @@ fn registerStreamWriteRoute(comptime lib: type, comptime net: type, server: *htt
             }
 
             var body_buf: [64]u8 = undefined;
-            const body = lib.fmt.bufPrint(
+            const body = std.fmt.bufPrint(
                 &body_buf,
                 "bytes={d} reads={d}",
                 .{ total_bytes, read_calls },
             ) catch return;
             var cl_buf: [16]u8 = undefined;
-            const cl = lib.fmt.bufPrint(&cl_buf, "{d}", .{body.len}) catch return;
+            const cl = std.fmt.bufPrint(&cl_buf, "{d}", .{body.len}) catch return;
             rw.setHeader(http.Header.content_length, cl) catch return;
             _ = rw.write(body) catch {};
         }

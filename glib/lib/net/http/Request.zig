@@ -4,7 +4,7 @@
 //! It intentionally starts as a small client-oriented subset and can grow
 //! as the parser/server/client layers land.
 
-const std = @import("std");
+const host_std = @import("std");
 const url_mod = @import("../url.zig");
 const Context = @import("context").Context;
 const ReadCloser = @import("ReadCloser.zig");
@@ -51,7 +51,7 @@ pub const GetBody = struct {
     }
 };
 
-allocator: std.mem.Allocator,
+allocator: host_std.mem.Allocator,
 method: []const u8 = "GET",
 url: url_mod.Url,
 proto: []const u8 = "HTTP/1.1",
@@ -69,11 +69,11 @@ host: []const u8 = "",
 close: bool = false,
 ctx: ?Context = null,
 
-pub fn init(allocator: std.mem.Allocator, method: []const u8, raw_url: []const u8) url_mod.ParseError!Request {
+pub fn init(allocator: host_std.mem.Allocator, method: []const u8, raw_url: []const u8) url_mod.ParseError!Request {
     return initParsed(allocator, method, try url_mod.parse(raw_url));
 }
 
-pub fn initParsed(allocator: std.mem.Allocator, method: []const u8, parsed_url: url_mod.Url) Request {
+pub fn initParsed(allocator: host_std.mem.Allocator, method: []const u8, parsed_url: url_mod.Url) Request {
     return .{
         .allocator = allocator,
         .method = if (method.len == 0) "GET" else method,
@@ -133,12 +133,12 @@ pub fn withTrailers(self: Request, trailers: []const Header) Request {
     return req;
 }
 
-pub fn addHeader(self: *Request, name: []const u8, value: []const u8) std.mem.Allocator.Error!void {
+pub fn addHeader(self: *Request, name: []const u8, value: []const u8) host_std.mem.Allocator.Error!void {
     const extra = [_]Header{Header.init(name, value)};
     try self.addHeaders(&extra);
 }
 
-pub fn addHeaders(self: *Request, headers: []const Header) std.mem.Allocator.Error!void {
+pub fn addHeaders(self: *Request, headers: []const Header) host_std.mem.Allocator.Error!void {
     if (headers.len == 0) return;
 
     const old_owned = self.owned_header_storage;
@@ -153,10 +153,10 @@ pub fn addHeaders(self: *Request, headers: []const Header) std.mem.Allocator.Err
     if (old_owned) |owned| self.allocator.free(owned);
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
+pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
 
             {
                 const req = try Request.init(allocator, "", "https://example.com/api?q=1");
@@ -184,19 +184,20 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             {
                 const req = try Request.init(allocator, "GET", "https://example.com");
-                const ContextApi = @import("context").make(lib);
+                const ContextApi = @import("context").make(std, time);
                 var context_api = try ContextApi.init(allocator);
                 defer context_api.deinit();
+                const deadline: @import("time").instant.Time = 5000;
                 var deadline_ctx = try context_api.withDeadline(
                     context_api.background(),
-                    5000,
+                    deadline,
                 );
                 defer deadline_ctx.deinit();
 
                 const req_with_ctx = req.withContext(deadline_ctx);
                 try testing.expect(req.context() == null);
                 try testing.expect(req_with_ctx.context() != null);
-                try testing.expectEqual(@as(?i128, 5000), req_with_ctx.context().?.deadline());
+                try testing.expectEqual(@as(?@import("time").instant.Time, deadline), req_with_ctx.context().?.deadline());
             }
 
             {
@@ -240,11 +241,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             {
                 const Factory = struct {
-                    allocator: lib.mem.Allocator,
+                    allocator: std.mem.Allocator,
                     payload: []const u8,
 
                     const Body = struct {
-                        allocator: lib.mem.Allocator,
+                        allocator: std.mem.Allocator,
                         payload: []const u8,
                         offset: usize = 0,
 

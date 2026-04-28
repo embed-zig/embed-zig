@@ -1,10 +1,11 @@
 //! Timer coordination primitive — resettable deadline callback worker.
 //!
 //! `Timer.init(&impl)` erases a concrete timer implementation behind a small
-//! vtable. `Timer.make(lib)` builds a default thread-backed implementation that
-//! waits for an absolute millisecond deadline and invokes a callback once.
+//! vtable. `Timer.make(std, time)` builds a default thread-backed implementation that
+//! waits for an absolute monotonic deadline and invokes a callback once.
 
 const stdz = @import("stdz");
+const time_mod = @import("time");
 const testing_api = @import("testing");
 
 const Timer = @This();
@@ -15,12 +16,12 @@ vtable: *const VTable,
 pub const Callback = *const fn (ctx: *anyopaque) void;
 
 pub const VTable = struct {
-    reset: *const fn (ptr: *anyopaque, deadline_ms: ?u64) void,
+    reset: *const fn (ptr: *anyopaque, deadline: ?time_mod.instant.Time) void,
     deinit: *const fn (ptr: *anyopaque) void,
 };
 
-pub fn reset(self: Timer, deadline_ms: ?u64) void {
-    self.vtable.reset(self.ptr, deadline_ms);
+pub fn reset(self: Timer, deadline: ?time_mod.instant.Time) void {
+    self.vtable.reset(self.ptr, deadline);
 }
 
 pub fn deinit(self: Timer) void {
@@ -36,9 +37,9 @@ pub fn init(pointer: anytype) Timer {
     const Impl = info.pointer.child;
 
     const Gen = struct {
-        fn resetFn(ptr: *anyopaque, deadline_ms: ?u64) void {
+        fn resetFn(ptr: *anyopaque, deadline: ?time_mod.instant.Time) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            self.reset(deadline_ms);
+            self.reset(deadline);
         }
 
         fn deinitFn(ptr: *anyopaque) void {
@@ -58,19 +59,19 @@ pub fn init(pointer: anytype) Timer {
     };
 }
 
-pub fn make(comptime lib: type) type {
+pub fn make(comptime std: type, comptime time: type) type {
     return struct {
-        pub const SpawnConfig = lib.Thread.SpawnConfig;
+        pub const SpawnConfig = std.Thread.SpawnConfig;
 
         allocator: stdz.mem.Allocator,
         callback: Timer.Callback,
         callback_ctx: *anyopaque,
         spawn_config: SpawnConfig,
-        mutex: lib.Thread.Mutex = .{},
-        cond: lib.Thread.Condition = .{},
-        deadline_ms: ?u64 = null,
+        mutex: std.Thread.Mutex = .{},
+        cond: std.Thread.Condition = .{},
+        deadline: ?time.instant.Time = null,
         shutting_down: bool = false,
-        thread: ?lib.Thread = null,
+        thread: ?std.Thread = null,
 
         const Self = @This();
 
@@ -90,7 +91,7 @@ pub fn make(comptime lib: type) type {
                 .spawn_config = spawn_config,
             };
 
-            self.thread = try lib.Thread.spawn(self.spawn_config, struct {
+            self.thread = try std.Thread.spawn(self.spawn_config, struct {
                 fn run(timer: *Self) void {
                     timer.threadMain();
                 }
@@ -99,18 +100,18 @@ pub fn make(comptime lib: type) type {
             return self;
         }
 
-        pub fn reset(self: *Self, deadline_ms: ?u64) void {
+        pub fn reset(self: *Self, deadline: ?time.instant.Time) void {
             self.mutex.lock();
             defer self.mutex.unlock();
 
-            self.deadline_ms = deadline_ms;
+            self.deadline = deadline;
             self.cond.signal();
         }
 
         pub fn deinit(self: *Self) void {
             self.mutex.lock();
             self.shutting_down = true;
-            self.deadline_ms = null;
+            self.deadline = null;
             self.cond.broadcast();
             self.mutex.unlock();
 
@@ -133,41 +134,28 @@ pub fn make(comptime lib: type) type {
             defer self.mutex.unlock();
 
             while (!self.shutting_down) {
-                const deadline_ms = self.deadline_ms orelse {
+                const deadline = self.deadline orelse {
                     self.cond.wait(&self.mutex);
                     continue;
                 };
 
-                const now_ms = currentMs();
-                if (deadline_ms <= now_ms) {
-                    self.deadline_ms = null;
+                const remaining = time.instant.sub(deadline, time.instant.now());
+                if (remaining <= 0) {
+                    self.deadline = null;
                     return true;
                 }
 
-                self.cond.timedWait(&self.mutex, millisToWaitNs(deadline_ms - now_ms)) catch |err| switch (err) {
+                self.cond.timedWait(&self.mutex, @intCast(remaining)) catch |err| switch (err) {
                     error.Timeout => {},
                 };
             }
 
             return false;
         }
-
-        fn currentMs() u64 {
-            const now = lib.time.milliTimestamp();
-            return if (now <= 0) 0 else @intCast(now);
-        }
-
-        fn millisToWaitNs(wait_ms: u64) u64 {
-            if (wait_ms == 0) return 0;
-
-            const max_wait_ms = lib.math.maxInt(u64) / lib.time.ns_per_ms;
-            if (wait_ms >= max_wait_ms) return lib.math.maxInt(u64);
-            return wait_ms * lib.time.ns_per_ms;
-        }
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -178,27 +166,27 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             _ = self;
             _ = allocator;
 
-            erasedWrapperCase(lib) catch |err| {
+            erasedWrapperCase(std) catch |err| {
                 t.logErrorf("sync.Timer erased wrapper failed: {}", .{err});
                 return false;
             };
-            resetNullCase(lib) catch |err| {
+            resetNullCase(std, time) catch |err| {
                 t.logErrorf("sync.Timer reset(null) failed: {}", .{err});
                 return false;
             };
-            earlierResetCase(lib) catch |err| {
+            earlierResetCase(std, time) catch |err| {
                 t.logErrorf("sync.Timer earlier reset failed: {}", .{err});
                 return false;
             };
-            laterResetCase(lib) catch |err| {
+            laterResetCase(std, time) catch |err| {
                 t.logErrorf("sync.Timer later reset failed: {}", .{err});
                 return false;
             };
-            rearmCase(lib) catch |err| {
+            rearmCase(std, time) catch |err| {
                 t.logErrorf("sync.Timer rearm failed: {}", .{err});
                 return false;
             };
-            immediateFireCase(lib) catch |err| {
+            immediateFireCase(std, time) catch |err| {
                 t.logErrorf("sync.Timer immediate fire failed: {}", .{err});
                 return false;
             };
@@ -217,13 +205,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
     return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-fn erasedWrapperCase(comptime lib: type) !void {
+fn erasedWrapperCase(comptime std: type) !void {
     const Mock = struct {
-        deadline_ms: ?u64 = 99,
+        deadline: ?time_mod.instant.Time = 99,
         deinit_called: bool = false,
 
-        pub fn reset(self: *@This(), deadline_ms: ?u64) void {
-            self.deadline_ms = deadline_ms;
+        pub fn reset(self: *@This(), deadline: ?time_mod.instant.Time) void {
+            self.deadline = deadline;
         }
 
         pub fn deinit(self: *@This()) void {
@@ -234,87 +222,82 @@ fn erasedWrapperCase(comptime lib: type) !void {
     var mock = Mock{};
     const timer = Timer.init(&mock);
     timer.reset(123);
-    try lib.testing.expectEqual(@as(?u64, 123), mock.deadline_ms);
+    try std.testing.expectEqual(@as(?time_mod.instant.Time, 123), mock.deadline);
     timer.reset(null);
-    try lib.testing.expectEqual(@as(?u64, null), mock.deadline_ms);
+    try std.testing.expectEqual(@as(?time_mod.instant.Time, null), mock.deadline);
     timer.deinit();
-    try lib.testing.expect(mock.deinit_called);
+    try std.testing.expect(mock.deinit_called);
 }
 
-fn resetNullCase(comptime lib: type) !void {
-    const TimerImpl = make(lib);
-    var callback_state = CallbackState(lib){};
-    const timer = try TimerImpl.init(lib.testing.allocator, CallbackState(lib).fire, &callback_state, .{});
+fn resetNullCase(comptime std: type, comptime time: type) !void {
+    const TimerImpl = make(std, time);
+    var callback_state = CallbackState(std, time){};
+    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(std, time).fire, &callback_state, .{});
     defer timer.deinit();
 
-    timer.reset(nowMs(lib) + 50);
-    lib.Thread.sleep(10 * lib.time.ns_per_ms);
+    timer.reset(time.instant.add(time.instant.now(), 50 * time.duration.MilliSecond));
+    std.Thread.sleep(@intCast(10 * time.duration.MilliSecond));
     timer.reset(null);
 
-    try callback_state.expectStable(0, 100);
+    try callback_state.expectStable(0, 100 * time.duration.MilliSecond);
 }
 
-fn earlierResetCase(comptime lib: type) !void {
-    const TimerImpl = make(lib);
-    var callback_state = CallbackState(lib){};
-    const timer = try TimerImpl.init(lib.testing.allocator, CallbackState(lib).fire, &callback_state, .{});
+fn earlierResetCase(comptime std: type, comptime time: type) !void {
+    const TimerImpl = make(std, time);
+    var callback_state = CallbackState(std, time){};
+    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(std, time).fire, &callback_state, .{});
     defer timer.deinit();
 
-    timer.reset(nowMs(lib) + 300);
-    lib.Thread.sleep(20 * lib.time.ns_per_ms);
-    timer.reset(nowMs(lib) + 100);
+    timer.reset(time.instant.add(time.instant.now(), 120 * time.duration.MilliSecond));
+    std.Thread.sleep(@intCast(10 * time.duration.MilliSecond));
+    timer.reset(time.instant.add(time.instant.now(), 20 * time.duration.MilliSecond));
 
-    _ = try callback_state.waitForCount(1, 500);
+    _ = try callback_state.waitForCount(1, 100 * time.duration.MilliSecond);
 }
 
-fn laterResetCase(comptime lib: type) !void {
-    const TimerImpl = make(lib);
-    var callback_state = CallbackState(lib){};
-    const timer = try TimerImpl.init(lib.testing.allocator, CallbackState(lib).fire, &callback_state, .{});
+fn laterResetCase(comptime std: type, comptime time: type) !void {
+    const TimerImpl = make(std, time);
+    var callback_state = CallbackState(std, time){};
+    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(std, time).fire, &callback_state, .{});
     defer timer.deinit();
 
-    timer.reset(nowMs(lib) + 100);
-    lib.Thread.sleep(20 * lib.time.ns_per_ms);
-    timer.reset(nowMs(lib) + 200);
+    timer.reset(time.instant.add(time.instant.now(), 40 * time.duration.MilliSecond));
+    std.Thread.sleep(@intCast(10 * time.duration.MilliSecond));
+    timer.reset(time.instant.add(time.instant.now(), 80 * time.duration.MilliSecond));
 
-    try callback_state.expectStable(0, 100);
-    _ = try callback_state.waitForCount(1, 500);
+    try callback_state.expectStable(0, 40 * time.duration.MilliSecond);
+    _ = try callback_state.waitForCount(1, 100 * time.duration.MilliSecond);
 }
 
-fn rearmCase(comptime lib: type) !void {
-    const TimerImpl = make(lib);
-    var callback_state = CallbackState(lib){};
-    const timer = try TimerImpl.init(lib.testing.allocator, CallbackState(lib).fire, &callback_state, .{});
+fn rearmCase(comptime std: type, comptime time: type) !void {
+    const TimerImpl = make(std, time);
+    var callback_state = CallbackState(std, time){};
+    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(std, time).fire, &callback_state, .{});
     defer timer.deinit();
 
-    timer.reset(nowMs(lib) + 100);
-    _ = try callback_state.waitForCount(1, 500);
+    timer.reset(time.instant.add(time.instant.now(), 20 * time.duration.MilliSecond));
+    _ = try callback_state.waitForCount(1, 80 * time.duration.MilliSecond);
 
-    timer.reset(nowMs(lib) + 100);
-    _ = try callback_state.waitForCount(2, 500);
+    timer.reset(time.instant.add(time.instant.now(), 20 * time.duration.MilliSecond));
+    _ = try callback_state.waitForCount(2, 80 * time.duration.MilliSecond);
 }
 
-fn immediateFireCase(comptime lib: type) !void {
-    const TimerImpl = make(lib);
-    var callback_state = CallbackState(lib){};
-    const timer = try TimerImpl.init(lib.testing.allocator, CallbackState(lib).fire, &callback_state, .{});
+fn immediateFireCase(comptime std: type, comptime time: type) !void {
+    const TimerImpl = make(std, time);
+    var callback_state = CallbackState(std, time){};
+    const timer = try TimerImpl.init(std.testing.allocator, CallbackState(std, time).fire, &callback_state, .{});
     defer timer.deinit();
 
-    timer.reset(nowMs(lib));
-    _ = try callback_state.waitForCount(1, 500);
+    timer.reset(time.instant.now());
+    _ = try callback_state.waitForCount(1, 50 * time.duration.MilliSecond);
 }
 
-fn nowMs(comptime lib: type) u64 {
-    const now = lib.time.milliTimestamp();
-    return if (now <= 0) 0 else @intCast(now);
-}
-
-fn CallbackState(comptime lib: type) type {
+fn CallbackState(comptime std: type, comptime time: type) type {
     return struct {
-        mutex: lib.Thread.Mutex = .{},
-        cond: lib.Thread.Condition = .{},
+        mutex: std.Thread.Mutex = .{},
+        cond: std.Thread.Condition = .{},
         fire_count: usize = 0,
-        last_fire_ms: u64 = 0,
+        last_fire: time.instant.Time = 0,
 
         const Self = @This();
 
@@ -322,31 +305,31 @@ fn CallbackState(comptime lib: type) type {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.mutex.lock();
             self.fire_count += 1;
-            self.last_fire_ms = nowMs(lib);
+            self.last_fire = time.instant.now();
             self.cond.broadcast();
             self.mutex.unlock();
         }
 
-        fn waitForCount(self: *Self, expected: usize, timeout_ms: u64) !u64 {
-            const start_ms = nowMs(lib);
+        fn waitForCount(self: *Self, expected: usize, timeout: time.duration.Duration) !time.instant.Time {
+            const started = time.instant.now();
 
             self.mutex.lock();
             defer self.mutex.unlock();
 
             while (self.fire_count < expected) {
-                const elapsed_ms = nowMs(lib) - start_ms;
-                if (elapsed_ms >= timeout_ms) return error.TestTimeout;
-                const remaining_ms = timeout_ms - elapsed_ms;
-                self.cond.timedWait(&self.mutex, remaining_ms * lib.time.ns_per_ms) catch |err| switch (err) {
+                const elapsed = time.instant.sub(time.instant.now(), started);
+                if (elapsed >= timeout) return error.TestTimeout;
+                const remaining = timeout - elapsed;
+                self.cond.timedWait(&self.mutex, @intCast(remaining)) catch |err| switch (err) {
                     error.Timeout => return error.TestTimeout,
                 };
             }
 
-            return self.last_fire_ms;
+            return self.last_fire;
         }
 
-        fn expectStable(self: *Self, expected: usize, wait_ms: u64) !void {
-            const start_ms = nowMs(lib);
+        fn expectStable(self: *Self, expected: usize, duration: time.duration.Duration) !void {
+            const started = time.instant.now();
 
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -354,10 +337,10 @@ fn CallbackState(comptime lib: type) type {
             if (self.fire_count != expected) return error.TestUnexpectedFireCount;
 
             while (true) {
-                const elapsed_ms = nowMs(lib) - start_ms;
-                if (elapsed_ms >= wait_ms) return;
-                const remaining_ms = wait_ms - elapsed_ms;
-                self.cond.timedWait(&self.mutex, remaining_ms * lib.time.ns_per_ms) catch |err| switch (err) {
+                const elapsed = time.instant.sub(time.instant.now(), started);
+                if (elapsed >= duration) return;
+                const remaining = duration - elapsed;
+                self.cond.timedWait(&self.mutex, @intCast(remaining)) catch |err| switch (err) {
                     error.Timeout => return,
                 };
                 if (self.fire_count != expected) return error.TestUnexpectedFireCount;

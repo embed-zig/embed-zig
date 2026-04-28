@@ -93,8 +93,8 @@ pub fn addr6(text: []const u8, port: u16) !net_mod.netip.AddrPort {
     return net_mod.netip.AddrPort.init(try net_mod.netip.Addr.parse(text), port);
 }
 
-pub fn StartGate(comptime lib: type) type {
-    const Thread = lib.Thread;
+pub fn StartGate(comptime std: type) type {
+    const Thread = std.Thread;
     return struct {
         mutex: Thread.Mutex = .{},
         cond: Thread.Condition = .{},
@@ -119,8 +119,8 @@ pub fn StartGate(comptime lib: type) type {
     };
 }
 
-pub fn ReadyCounter(comptime lib: type) type {
-    const Thread = lib.Thread;
+pub fn ReadyCounter(comptime std: type) type {
+    const Thread = std.Thread;
     return struct {
         mutex: Thread.Mutex = .{},
         cond: Thread.Condition = .{},

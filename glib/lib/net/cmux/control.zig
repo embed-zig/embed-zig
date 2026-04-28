@@ -46,4 +46,3 @@ pub fn frameTypeName(frame_type: FrameType) []const u8 {
         .uih => "UIH",
     };
 }
-

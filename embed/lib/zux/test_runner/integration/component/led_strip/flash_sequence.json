@@ -70,8 +70,8 @@
                 }
               ],
               "brightness": 128,
-              "duration_ns": 8000000,
-              "interval_ns": 8000000
+              "duration": 8000000,
+              "interval": 8000000
             }
           }
         ]

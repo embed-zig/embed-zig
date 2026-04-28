@@ -13,31 +13,31 @@ const textproto_mod = @import("../textproto.zig");
 const tls_mod = @import("../tls.zig");
 const url_mod = @import("../url.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             t.parallel();
-            t.run("netip", netip_mod.TestRunner(lib));
-            t.run("url", url_mod.TestRunner(lib));
-            t.run("http", http_mod.TestRunner(lib, net));
-            t.run("textproto", textproto_mod.TestRunner(lib));
-            t.run("cmux", cmux_mod.TestRunner(lib));
-            t.run("ntp", ntp_mod.TestRunner(lib, net));
-            t.run("resolver", resolver_mod.TestRunner(lib, net));
-            t.run("tls", tls_mod.TestRunner(lib, net));
-            t.run("TcpListener", tcp_listener.TestRunner(lib, net));
+            t.run("netip", netip_mod.TestRunner(std));
+            t.run("url", url_mod.TestRunner(std));
+            t.run("http", http_mod.TestRunner(std, net));
+            t.run("textproto", textproto_mod.TestRunner(std));
+            t.run("cmux", cmux_mod.TestRunner(std, net.time));
+            t.run("ntp", ntp_mod.TestRunner(std, net));
+            t.run("resolver", resolver_mod.TestRunner(std, net));
+            t.run("tls", tls_mod.TestRunner(std, net));
+            t.run("TcpListener", tcp_listener.TestRunner(std, net));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -1,32 +1,32 @@
-const std = @import("std");
+const host_std = @import("std");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             const Body = struct {
                 fn expectAddrEq(a: net.netip.AddrPort, b: net.netip.AddrPort) !void {
-                    try std.testing.expectEqual(a.port(), b.port());
+                    try host_std.testing.expectEqual(a.port(), b.port());
                     if (a.addr().as4()) |a4| {
                         const b4 = b.addr().as4().?;
-                        try std.testing.expectEqualSlices(u8, &a4, &b4);
+                        try host_std.testing.expectEqualSlices(u8, &a4, &b4);
                         return;
                     }
                     const a16 = a.addr().as16().?;
                     const b16 = b.addr().as16().?;
-                    try std.testing.expectEqualSlices(u8, &a16, &b16);
+                    try host_std.testing.expectEqualSlices(u8, &a16, &b16);
                 }
 
                 fn waitConnect(sock: *net.Runtime.Tcp) !void {
-                    _ = try sock.poll(.{ .write = true, .failed = true, .hup = true, .write_interrupt = true }, 1000);
+                    _ = try sock.poll(.{ .write = true, .failed = true, .hup = true, .write_interrupt = true }, @intCast(1000 * net.time.duration.MilliSecond));
                     try sock.finishConnect();
                 }
 
@@ -41,7 +41,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     while (true) {
                         return listener.accept(remote) catch |err| switch (err) {
                             error.WouldBlock => {
-                                _ = try listener.poll(.{ .read = true, .read_interrupt = true }, 1000);
+                                _ = try listener.poll(.{ .read = true, .read_interrupt = true }, @intCast(1000 * net.time.duration.MilliSecond));
                                 continue;
                             },
                             else => return err,
@@ -54,7 +54,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     while (off < buf.len) {
                         const n = sock.send(buf[off..]) catch |err| switch (err) {
                             error.WouldBlock => {
-                                _ = try sock.poll(.{ .write = true, .write_interrupt = true }, 1000);
+                                _ = try sock.poll(.{ .write = true, .write_interrupt = true }, @intCast(1000 * net.time.duration.MilliSecond));
                                 continue;
                             },
                             else => return err,
@@ -68,7 +68,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     while (off < buf.len) {
                         const n = sock.recv(buf[off..]) catch |err| switch (err) {
                             error.WouldBlock => {
-                                _ = try sock.poll(.{ .read = true, .read_interrupt = true, .hup = true }, 1000);
+                                _ = try sock.poll(.{ .read = true, .read_interrupt = true, .hup = true }, @intCast(1000 * net.time.duration.MilliSecond));
                                 continue;
                             },
                             else => return err,
@@ -92,8 +92,8 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     try listener.listen(8);
 
                     const listen_addr = try listener.localAddr();
-                    try std.testing.expectEqualSlices(u8, &.{ 127, 0, 0, 1 }, &listen_addr.addr().as4().?);
-                    try std.testing.expect(listen_addr.port() != 0);
+                    try host_std.testing.expectEqualSlices(u8, &.{ 127, 0, 0, 1 }, &listen_addr.addr().as4().?);
+                    try host_std.testing.expect(listen_addr.port() != 0);
 
                     var client = try Runtime.tcp(.inet);
                     defer {
@@ -124,14 +124,14 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
 
                     var req_buf: [request.len]u8 = undefined;
                     try recvExact(&server, &req_buf);
-                    try std.testing.expectEqualStrings(request, &req_buf);
+                    try host_std.testing.expectEqualStrings(request, &req_buf);
 
                     const response = "pong runtime tcp";
                     try sendAll(&server, response);
 
                     var resp_buf: [response.len]u8 = undefined;
                     try recvExact(&client, &resp_buf);
-                    try std.testing.expectEqualStrings(response, &resp_buf);
+                    try host_std.testing.expectEqualStrings(response, &resp_buf);
                 }
             };
 
@@ -142,7 +142,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

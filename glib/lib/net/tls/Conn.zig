@@ -1,24 +1,25 @@
+const time_mod = @import("time");
 const NetConn = @import("../Conn.zig");
 const context_mod = @import("context");
 const root = @This();
 
-pub fn Conn(comptime lib: type, comptime net: type) type {
-    const common = @import("common.zig").make(lib);
-    const alert = @import("alert.zig").make(lib);
-    const kdf = @import("kdf.zig").make(lib);
-    const record = @import("record.zig").make(lib);
-    const client_handshake = @import("client_handshake.zig").make(lib);
-    const Allocator = lib.mem.Allocator;
-    const Mutex = lib.Thread.Mutex;
-    const TcpConn = @import("../TcpConn.zig").TcpConn(lib, net);
-    const BundleRescanReturn = @typeInfo(@TypeOf(lib.crypto.Certificate.Bundle.rescan)).@"fn".return_type.?;
+pub fn Conn(comptime std: type, comptime net: type) type {
+    const common = @import("common.zig").make(std);
+    const alert = @import("alert.zig").make(std);
+    const kdf = @import("kdf.zig").make(std);
+    const record = @import("record.zig").make(std);
+    const client_handshake = @import("client_handshake.zig").make(std, net.time);
+    const Allocator = std.mem.Allocator;
+    const Mutex = std.Thread.Mutex;
+    const TcpConn = @import("../TcpConn.zig").TcpConn(std, net);
+    const BundleRescanReturn = @typeInfo(@TypeOf(std.crypto.Certificate.Bundle.rescan)).@"fn".return_type.?;
     const BundleRescanError = @typeInfo(BundleRescanReturn).error_union.error_set;
 
     return struct {
         pub const Config = struct {
             server_name: []const u8,
             insecure_skip_verify: bool = false,
-            root_cas: ?*const lib.crypto.Certificate.Bundle = null,
+            root_cas: ?*const std.crypto.Certificate.Bundle = null,
             min_version: common.ProtocolVersion = .tls_1_2,
             max_version: common.ProtocolVersion = .tls_1_3,
             verification: ?client_handshake.VerificationMode = null,
@@ -44,7 +45,7 @@ pub fn Conn(comptime lib: type, comptime net: type) type {
         allocator: Allocator,
         inner: NetConn,
         handshake_state: client_handshake.ClientHandshake(NetConn),
-        owned_root_cas: ?lib.crypto.Certificate.Bundle = null,
+        owned_root_cas: ?std.crypto.Certificate.Bundle = null,
         handshake_complete: bool = false,
         closed: bool = false,
         handshake_mu: Mutex = .{},
@@ -225,12 +226,12 @@ pub fn Conn(comptime lib: type, comptime net: type) type {
             self.allocator.destroy(self);
         }
 
-        pub fn setReadTimeout(self: *Self, ms: ?u32) void {
-            self.inner.setReadTimeout(ms);
+        pub fn setReadDeadline(self: *Self, deadline: ?time_mod.instant.Time) void {
+            self.inner.setReadDeadline(deadline);
         }
 
-        pub fn setWriteTimeout(self: *Self, ms: ?u32) void {
-            self.inner.setWriteTimeout(ms);
+        pub fn setWriteDeadline(self: *Self, deadline: ?time_mod.instant.Time) void {
+            self.inner.setWriteDeadline(deadline);
         }
 
         pub fn setReadContext(self: *Self, ctx: ?context_mod.Context) Allocator.Error!void {
@@ -566,20 +567,20 @@ pub fn Conn(comptime lib: type, comptime net: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
+pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
+            const testing = std.testing;
             {
-                const ConnType = root.Conn(lib, net);
-                const C = @import("common.zig").make(lib);
-                const E = @import("extensions.zig").make(lib);
-                const K = @import("kdf.zig").make(lib);
-                const R = @import("record.zig").make(lib);
-                const CH = @import("client_handshake.zig").make(lib);
+                const ConnType = root.Conn(std, net);
+                const C = @import("common.zig").make(std);
+                const E = @import("extensions.zig").make(std);
+                const K = @import("kdf.zig").make(std);
+                const R = @import("record.zig").make(std);
+                const CH = @import("client_handshake.zig").make(std, net.time);
                 const fixtures = @import("test_fixtures.zig");
-                const Ecdsa = lib.crypto.sign.ecdsa.EcdsaP256Sha256;
+                const Ecdsa = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 
                 const RawConn = struct {
                     read_buf: [32768]u8 = undefined,
@@ -604,8 +605,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const SinkConn = struct {
@@ -623,8 +624,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const Helper = struct {
@@ -649,8 +650,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         var client_hello: [1024]u8 = undefined;
                         _ = try hs.encodeClientHello(&client_hello);
 
-                        const server_secret = [_]u8{0x42} ** lib.crypto.dh.X25519.secret_length;
-                        const server_public = try lib.crypto.dh.X25519.recoverPublicKey(server_secret);
+                        const server_secret = [_]u8{0x42} ** std.crypto.dh.X25519.secret_length;
+                        const server_public = try std.crypto.dh.X25519.recoverPublicKey(server_secret);
 
                         var ext_buf: [128]u8 = undefined;
                         var ext_builder = E.ExtensionBuilder.init(&ext_buf);
@@ -667,17 +668,17 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                         var server_hello: [256]u8 = undefined;
                         var pos: usize = C.HandshakeHeader.SIZE;
-                        lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(C.ProtocolVersion.tls_1_2), .big);
+                        std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(C.ProtocolVersion.tls_1_2), .big);
                         pos += 2;
                         @memset(server_hello[pos..][0..32], 0xAA);
                         pos += 32;
                         server_hello[pos] = 0;
                         pos += 1;
-                        lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(C.CipherSuite.TLS_AES_128_GCM_SHA256), .big);
+                        std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(C.CipherSuite.TLS_AES_128_GCM_SHA256), .big);
                         pos += 2;
                         server_hello[pos] = 0;
                         pos += 1;
-                        lib.mem.writeInt(u16, server_hello[pos..][0..2], @intCast(ext_data.len), .big);
+                        std.mem.writeInt(u16, server_hello[pos..][0..2], @intCast(ext_data.len), .big);
                         pos += 2;
                         @memcpy(server_hello[pos..][0..ext_data.len], ext_data);
                         pos += ext_data.len;
@@ -711,13 +712,13 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         var cert_pos: usize = 4;
                         certificate_msg[cert_pos] = 0;
                         cert_pos += 1;
-                        lib.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], 3 + fixtures.self_signed_cert_der.len + 2, .big);
+                        std.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], 3 + fixtures.self_signed_cert_der.len + 2, .big);
                         cert_pos += 3;
-                        lib.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], fixtures.self_signed_cert_der.len, .big);
+                        std.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], fixtures.self_signed_cert_der.len, .big);
                         cert_pos += 3;
                         @memcpy(certificate_msg[cert_pos..][0..fixtures.self_signed_cert_der.len], fixtures.self_signed_cert_der[0..]);
                         cert_pos += fixtures.self_signed_cert_der.len;
-                        lib.mem.writeInt(u16, certificate_msg[cert_pos..][0..2], 0, .big);
+                        std.mem.writeInt(u16, certificate_msg[cert_pos..][0..2], 0, .big);
                         cert_pos += 2;
                         const certificate_header: C.HandshakeHeader = .{
                             .msg_type = .certificate,
@@ -743,9 +744,9 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                         var cert_verify_msg: [4 + 2 + 2 + Ecdsa.Signature.der_encoded_length_max]u8 = undefined;
                         var cv_pos: usize = 4;
-                        lib.mem.writeInt(u16, cert_verify_msg[cv_pos..][0..2], @intFromEnum(C.SignatureScheme.ecdsa_secp256r1_sha256), .big);
+                        std.mem.writeInt(u16, cert_verify_msg[cv_pos..][0..2], @intFromEnum(C.SignatureScheme.ecdsa_secp256r1_sha256), .big);
                         cv_pos += 2;
-                        lib.mem.writeInt(u16, cert_verify_msg[cv_pos..][0..2], @intCast(sig_der.len), .big);
+                        std.mem.writeInt(u16, cert_verify_msg[cv_pos..][0..2], @intCast(sig_der.len), .big);
                         cv_pos += 2;
                         @memcpy(cert_verify_msg[cv_pos..][0..sig_der.len], sig_der);
                         cv_pos += sig_der.len;
@@ -794,9 +795,9 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             }
 
             {
-                const ConnType = root.Conn(lib, net);
-                const CH = @import("client_handshake.zig").make(lib);
-                const R = @import("record.zig").make(lib);
+                const ConnType = root.Conn(std, net);
+                const CH = @import("client_handshake.zig").make(std, net.time);
+                const R = @import("record.zig").make(std);
 
                 const RawConn = struct {
                     fail_writes: bool = false,
@@ -812,8 +813,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const key = [_]u8{0x11} ** 16;
@@ -836,7 +837,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             }
 
             {
-                const ConnType = root.Conn(lib, net);
+                const ConnType = root.Conn(std, net);
 
                 const RawConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -849,8 +850,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var raw = RawConn{};
@@ -865,7 +866,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             }
 
             {
-                const ConnType = root.Conn(lib, net);
+                const ConnType = root.Conn(std, net);
 
                 const RawConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -878,8 +879,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var raw = RawConn{};
@@ -893,8 +894,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             }
 
             {
-                const ConnType = root.Conn(lib, net);
-                const CH = @import("client_handshake.zig").make(lib);
+                const ConnType = root.Conn(std, net);
+                const CH = @import("client_handshake.zig").make(std, net.time);
 
                 const Helper = struct {
                     fn expectReadError(comptime expected: anyerror) !void {
@@ -909,8 +910,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                             pub fn close(_: *@This()) void {}
                             pub fn deinit(_: *@This()) void {}
-                            pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                            pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                            pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                            pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                         };
 
                         var raw = RawConn{};
@@ -935,10 +936,10 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             }
 
             {
-                const ConnType = root.Conn(lib, net);
-                const CH = @import("client_handshake.zig").make(lib);
-                const C = @import("common.zig").make(lib);
-                const R = @import("record.zig").make(lib);
+                const ConnType = root.Conn(std, net);
+                const CH = @import("client_handshake.zig").make(std, net.time);
+                const C = @import("common.zig").make(std);
+                const R = @import("record.zig").make(std);
 
                 const RawConn = struct {
                     read_buf: [C.RecordHeader.SIZE + C.MAX_CIPHERTEXT_LEN]u8 = undefined,
@@ -959,8 +960,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const key = [_]u8{0x55} ** 16;
@@ -1015,8 +1016,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             }
 
             {
-                const ConnType = root.Conn(lib, net);
-                const common = @import("common.zig").make(lib);
+                const ConnType = root.Conn(std, net);
+                const common = @import("common.zig").make(std);
 
                 const Helper = struct {
                     const RawConn = struct {
@@ -1040,8 +1041,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                         pub fn close(_: *@This()) void {}
                         pub fn deinit(_: *@This()) void {}
-                        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                        pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                        pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                     };
 
                     fn appendAlert(raw: *RawConn, level: common.AlertLevel, description: common.AlertDescription) void {
@@ -1079,8 +1080,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             }
 
             {
-                const ConnType = root.Conn(lib, net);
-                const common = @import("common.zig").make(lib);
+                const ConnType = root.Conn(std, net);
+                const common = @import("common.zig").make(std);
 
                 const RawConn = struct {
                     read_buf: [8]u8 = undefined,
@@ -1103,8 +1104,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var raw = RawConn{};
@@ -1127,7 +1128,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             }
 
             {
-                const ConnType = root.Conn(lib, net);
+                const ConnType = root.Conn(std, net);
 
                 const RawConn = struct {
                     write_calls: usize = 0,
@@ -1143,8 +1144,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var raw = RawConn{};
@@ -1166,7 +1167,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             }
 
             {
-                const ConnType = root.Conn(lib, net);
+                const ConnType = root.Conn(std, net);
 
                 const RawConn = struct {
                     write_calls: usize = 0,
@@ -1182,8 +1183,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var raw = RawConn{};
@@ -1202,7 +1203,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             }
 
             {
-                const ConnType = root.Conn(lib, net);
+                const ConnType = root.Conn(std, net);
 
                 const RawConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -1215,8 +1216,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var raw = RawConn{};
@@ -1230,10 +1231,10 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             }
 
             {
-                const ConnType = root.Conn(lib, net);
-                const C = @import("common.zig").make(lib);
-                const E = @import("extensions.zig").make(lib);
-                const CH = @import("client_handshake.zig").make(lib);
+                const ConnType = root.Conn(std, net);
+                const C = @import("common.zig").make(std);
+                const E = @import("extensions.zig").make(std);
+                const CH = @import("client_handshake.zig").make(std, net.time);
 
                 const RawConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -1246,8 +1247,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var raw = RawConn{};
@@ -1260,8 +1261,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 const typed = try conn.as(ConnType);
                 typed.handshake_state.state = .wait_server_hello;
 
-                const server_secret = [_]u8{0x42} ** lib.crypto.dh.X25519.secret_length;
-                const server_public = try lib.crypto.dh.X25519.recoverPublicKey(server_secret);
+                const server_secret = [_]u8{0x42} ** std.crypto.dh.X25519.secret_length;
+                const server_public = try std.crypto.dh.X25519.recoverPublicKey(server_secret);
 
                 var ext_buf: [128]u8 = undefined;
                 var ext_builder = E.ExtensionBuilder.init(&ext_buf);
@@ -1274,17 +1275,17 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                 var server_hello: [256]u8 = undefined;
                 var pos: usize = C.HandshakeHeader.SIZE;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(C.ProtocolVersion.tls_1_2), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(C.ProtocolVersion.tls_1_2), .big);
                 pos += 2;
                 @memset(server_hello[pos..][0..32], 0xAA);
                 pos += 32;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(C.CipherSuite.TLS_AES_128_GCM_SHA256), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(C.CipherSuite.TLS_AES_128_GCM_SHA256), .big);
                 pos += 2;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intCast(ext_data.len), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intCast(ext_data.len), .big);
                 pos += 2;
                 @memcpy(server_hello[pos..][0..ext_data.len], ext_data);
                 pos += ext_data.len;
@@ -1304,9 +1305,9 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             }
 
             {
-                const ConnType = root.Conn(lib, net);
-                const CH = @import("client_handshake.zig").make(lib);
-                const C = @import("common.zig").make(lib);
+                const ConnType = root.Conn(std, net);
+                const CH = @import("client_handshake.zig").make(std, net.time);
+                const C = @import("common.zig").make(std);
 
                 const RawConn = struct {
                     read_buf: [16]u8 = undefined,
@@ -1327,8 +1328,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var raw = RawConn{};

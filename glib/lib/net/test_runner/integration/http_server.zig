@@ -5,64 +5,64 @@ const context_mod = @import("context");
 const fixtures = @import("../../tls/test_fixtures.zig");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Cases = Suite(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Cases = Suite(std, net);
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("basic_get", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.basicGet));
-            t.run("head_bodyless", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.headBodyless));
-            t.run("keep_alive_sequential_requests", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.keepAliveSequentialRequests));
-            t.run("unread_body_forces_close", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.unreadBodyForcesClose));
-            t.run("malformed_request_gets_bad_request", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.malformedRequestGetsBadRequest));
-            t.run("conflicting_length_and_chunked_gets_bad_request", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.conflictingLengthAndChunkedGetsBadRequest));
-            t.run("chunked_request_body_round_trips", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.chunkedRequestBodyRoundTrips));
-            t.run("flush_streams_chunked_response", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.flushStreamsChunkedResponse));
-            t.run("mux_routes_and_redirects", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.muxRoutesAndRedirects));
-            t.run("read_header_timeout_closes_slow_header", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.readHeaderTimeoutClosesSlowHeader));
-            t.run("idle_timeout_closes_keep_alive_conn", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.idleTimeoutClosesKeepAliveConn));
-            t.run("shutdown_waits_for_active_handler", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.shutdownWaitsForActiveHandler));
-            t.run("close_interrupts_idle_keep_alive", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.closeInterruptsIdleKeepAlive));
-            t.run("tls_wrapped_listener_serves_request", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.tlsWrappedListenerServesRequest));
-            t.run("wrapped_listener_serves_request", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, Cases.wrappedListenerServesRequest));
+            t.run("basic_get", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.basicGet));
+            t.run("head_bodyless", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.headBodyless));
+            t.run("keep_alive_sequential_requests", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.keepAliveSequentialRequests));
+            t.run("unread_body_forces_close", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.unreadBodyForcesClose));
+            t.run("malformed_request_gets_bad_request", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.malformedRequestGetsBadRequest));
+            t.run("conflicting_length_and_chunked_gets_bad_request", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.conflictingLengthAndChunkedGetsBadRequest));
+            t.run("chunked_request_body_round_trips", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.chunkedRequestBodyRoundTrips));
+            t.run("flush_streams_chunked_response", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.flushStreamsChunkedResponse));
+            t.run("mux_routes_and_redirects", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.muxRoutesAndRedirects));
+            t.run("read_header_timeout_closes_slow_header", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.readHeaderTimeoutClosesSlowHeader));
+            t.run("idle_timeout_closes_keep_alive_conn", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.idleTimeoutClosesKeepAliveConn));
+            t.run("shutdown_waits_for_active_handler", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.shutdownWaitsForActiveHandler));
+            t.run("close_interrupts_idle_keep_alive", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.closeInterruptsIdleKeepAlive));
+            t.run("tls_wrapped_listener_serves_request", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.tlsWrappedListenerServesRequest));
+            t.run("wrapped_listener_serves_request", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, Cases.wrappedListenerServesRequest));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-fn Suite(comptime lib: type, comptime net: type) type {
+fn Suite(comptime std: type, comptime net: type) type {
     const Net = net;
     const Http = Net.http;
-    const Thread = lib.Thread;
+    const Thread = std.Thread;
     return struct {
-        const expect = lib.testing.expect;
-        const expectEqual = lib.testing.expectEqual;
-        const expectEqualStrings = lib.testing.expectEqualStrings;
-        const expectError = lib.testing.expectError;
+        const expect = std.testing.expect;
+        const expectEqual = std.testing.expectEqual;
+        const expectEqualStrings = std.testing.expectEqualStrings;
+        const expectError = std.testing.expectError;
 
         fn addr4(port: u16) net.netip.AddrPort {
             return net.netip.AddrPort.from4(.{ 127, 0, 0, 1 }, port);
         }
 
         const ServerRun = struct {
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             listener: net.Listener,
             port: u16,
             server_err: *?anyerror,
@@ -115,11 +115,11 @@ fn Suite(comptime lib: type, comptime net: type) type {
                 self.mutex.unlock();
             }
 
-            fn waitFor(self: *@This(), timeout_ms: u32) bool {
+            fn waitFor(self: *@This(), timeout: net.time.duration.Duration) bool {
                 self.mutex.lock();
                 defer self.mutex.unlock();
                 if (self.finished) return true;
-                self.cond.timedWait(&self.mutex, @as(u64, timeout_ms) * lib.time.ns_per_ms) catch {};
+                self.cond.timedWait(&self.mutex, @intCast(timeout)) catch {};
                 return self.finished;
             }
         };
@@ -144,10 +144,10 @@ fn Suite(comptime lib: type, comptime net: type) type {
             }
         };
 
-        fn basicGet(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn basicGet(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{
-                .idle_timeout_ms = 20,
+                .idle_timeout = 20 * net.time.duration.MilliSecond,
             });
             defer server.deinit();
             try server.handleFunc("/hello", struct {
@@ -171,7 +171,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             try srv_run.stop(&server);
         }
 
-        fn headBodyless(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn headBodyless(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{});
             defer server.deinit();
@@ -196,7 +196,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             try srv_run.stop(&server);
         }
 
-        fn keepAliveSequentialRequests(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn keepAliveSequentialRequests(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{});
             defer server.deinit();
@@ -226,7 +226,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             try expectEqualStrings("ok", second.body);
         }
 
-        fn unreadBodyForcesClose(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn unreadBodyForcesClose(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{});
             defer server.deinit();
@@ -258,7 +258,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             try expectEqual(@as(usize, 0), n);
         }
 
-        fn malformedRequestGetsBadRequest(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn malformedRequestGetsBadRequest(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{});
             defer server.deinit();
@@ -278,10 +278,10 @@ fn Suite(comptime lib: type, comptime net: type) type {
             const resp = try readRawResponse(allocator, conn, .{});
             defer allocator.free(resp.head);
             defer allocator.free(resp.body);
-            try expect(lib.mem.startsWith(u8, firstLine(resp.head), "HTTP/1.1 400"));
+            try expect(std.mem.startsWith(u8, firstLine(resp.head), "HTTP/1.1 400"));
         }
 
-        fn conflictingLengthAndChunkedGetsBadRequest(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn conflictingLengthAndChunkedGetsBadRequest(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{});
             defer server.deinit();
@@ -305,15 +305,15 @@ fn Suite(comptime lib: type, comptime net: type) type {
             const resp = try readRawResponse(allocator, conn, .{});
             defer allocator.free(resp.head);
             defer allocator.free(resp.body);
-            try expect(lib.mem.startsWith(u8, firstLine(resp.head), "HTTP/1.1 400"));
+            try expect(std.mem.startsWith(u8, firstLine(resp.head), "HTTP/1.1 400"));
         }
 
-        fn chunkedRequestBodyRoundTrips(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn chunkedRequestBodyRoundTrips(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{});
             defer server.deinit();
             const ChunkedHandler = struct {
-                allocator: lib.mem.Allocator,
+                allocator: std.mem.Allocator,
 
                 pub fn serveHTTP(self: *@This(), rw: *Http.ResponseWriter, req: *Http.Request) void {
                     const body = req.body() orelse {
@@ -322,7 +322,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
                     };
                     var reader = body;
                     var buf: [16]u8 = undefined;
-                    var out = lib.ArrayList(u8){};
+                    var out = std.ArrayList(u8){};
                     defer out.deinit(self.allocator);
                     while (true) {
                         const n = reader.read(&buf) catch {
@@ -359,7 +359,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             try expectEqualStrings("abcdef", resp.body);
         }
 
-        fn flushStreamsChunkedResponse(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn flushStreamsChunkedResponse(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{});
             defer server.deinit();
@@ -390,26 +390,26 @@ fn Suite(comptime lib: type, comptime net: type) type {
 
             var conn = try Net.dial(allocator, .tcp, addr4(srv_run.port));
             defer conn.deinit();
-            conn.setReadTimeout(200);
-            defer conn.setReadTimeout(null);
+            conn.setReadDeadline(net.time.instant.add(net.time.instant.now(), 200 * net.time.duration.MilliSecond));
+            defer conn.setReadDeadline(null);
 
             try io.writeAll(@TypeOf(conn), &conn, "GET /stream HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n");
             first_chunk_flushed.wait();
 
-            var partial = lib.ArrayList(u8){};
+            var partial = std.ArrayList(u8){};
             defer partial.deinit(allocator);
             var buf: [256]u8 = undefined;
-            while (lib.mem.indexOf(u8, partial.items, "1\r\na\r\n") == null) {
+            while (std.mem.indexOf(u8, partial.items, "1\r\na\r\n") == null) {
                 const n = try conn.read(&buf);
                 if (n == 0) return error.EndOfStream;
                 try partial.appendSlice(allocator, buf[0..n]);
             }
 
-            try expect(lib.mem.indexOf(u8, partial.items, "HTTP/1.1 200 OK\r\n") != null);
-            try expect(lib.mem.indexOf(u8, partial.items, "Transfer-Encoding: chunked\r\n") != null);
-            try expect(lib.mem.indexOf(u8, partial.items, "1\r\na\r\n") != null);
-            try expect(lib.mem.indexOf(u8, partial.items, "1\r\nb\r\n") == null);
-            try expect(lib.mem.indexOf(u8, partial.items, "0\r\n\r\n") == null);
+            try expect(std.mem.indexOf(u8, partial.items, "HTTP/1.1 200 OK\r\n") != null);
+            try expect(std.mem.indexOf(u8, partial.items, "Transfer-Encoding: chunked\r\n") != null);
+            try expect(std.mem.indexOf(u8, partial.items, "1\r\na\r\n") != null);
+            try expect(std.mem.indexOf(u8, partial.items, "1\r\nb\r\n") == null);
+            try expect(std.mem.indexOf(u8, partial.items, "0\r\n\r\n") == null);
 
             release.signal();
 
@@ -425,10 +425,10 @@ fn Suite(comptime lib: type, comptime net: type) type {
                 try partial.appendSlice(allocator, buf[0..n]);
             }
 
-            try expect(lib.mem.indexOf(u8, partial.items, "1\r\na\r\n1\r\nb\r\n0\r\n\r\n") != null);
+            try expect(std.mem.indexOf(u8, partial.items, "1\r\na\r\n1\r\nb\r\n0\r\n\r\n") != null);
         }
 
-        fn muxRoutesAndRedirects(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn muxRoutesAndRedirects(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             const exercise = struct {
                 const ExactHandler = struct {
@@ -466,7 +466,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
                     }
                 };
 
-                fn run(case_allocator: lib.mem.Allocator, case_server_spawn_config: Thread.SpawnConfig, comptime use_static: bool) !void {
+                fn run(case_allocator: std.mem.Allocator, case_server_spawn_config: Thread.SpawnConfig, comptime use_static: bool) !void {
                     var exact_handler = ExactHandler{};
                     var api_handler = ApiHandler{};
 
@@ -546,7 +546,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
                     }
                 }
 
-                fn assertNoCatchAllMatrix(case_allocator: lib.mem.Allocator, port: u16) !void {
+                fn assertNoCatchAllMatrix(case_allocator: std.mem.Allocator, port: u16) !void {
                     const exact = try requestRawGet(case_allocator, port, "/exact");
                     defer case_allocator.free(exact.head);
                     defer case_allocator.free(exact.body);
@@ -562,22 +562,22 @@ fn Suite(comptime lib: type, comptime net: type) type {
                     const slash = try requestRawGet(case_allocator, port, "/api");
                     defer case_allocator.free(slash.head);
                     defer case_allocator.free(slash.body);
-                    try expect(lib.mem.startsWith(u8, firstLine(slash.head), "HTTP/1.1 301"));
+                    try expect(std.mem.startsWith(u8, firstLine(slash.head), "HTTP/1.1 301"));
                     try expectEqualStrings("/api/", headerValue(slash.head, Http.Header.location) orelse "");
 
                     const cleaned = try requestRawGet(case_allocator, port, "/api/../api/users");
                     defer case_allocator.free(cleaned.head);
                     defer case_allocator.free(cleaned.body);
-                    try expect(lib.mem.startsWith(u8, firstLine(cleaned.head), "HTTP/1.1 301"));
+                    try expect(std.mem.startsWith(u8, firstLine(cleaned.head), "HTTP/1.1 301"));
                     try expectEqualStrings("/api/users", headerValue(cleaned.head, Http.Header.location) orelse "");
 
                     const missing = try requestRawGet(case_allocator, port, "/missing");
                     defer case_allocator.free(missing.head);
                     defer case_allocator.free(missing.body);
-                    try expect(lib.mem.startsWith(u8, firstLine(missing.head), "HTTP/1.1 404"));
+                    try expect(std.mem.startsWith(u8, firstLine(missing.head), "HTTP/1.1 404"));
                 }
 
-                fn assertCatchAllMatrix(case_allocator: lib.mem.Allocator, port: u16) !void {
+                fn assertCatchAllMatrix(case_allocator: std.mem.Allocator, port: u16) !void {
                     const api = try requestRawGet(case_allocator, port, "/api/users");
                     defer case_allocator.free(api.head);
                     defer case_allocator.free(api.body);
@@ -591,11 +591,11 @@ fn Suite(comptime lib: type, comptime net: type) type {
                     try expectEqualStrings("root", root.body);
                 }
 
-                fn assertExactAndSubtreeMatrix(case_allocator: lib.mem.Allocator, port: u16) !void {
+                fn assertExactAndSubtreeMatrix(case_allocator: std.mem.Allocator, port: u16) !void {
                     const redirect = try requestRawGet(case_allocator, port, "/pair");
                     defer case_allocator.free(redirect.head);
                     defer case_allocator.free(redirect.body);
-                    try expect(lib.mem.startsWith(u8, firstLine(redirect.head), "HTTP/1.1 301"));
+                    try expect(std.mem.startsWith(u8, firstLine(redirect.head), "HTTP/1.1 301"));
                     try expectEqualStrings("/pair/", headerValue(redirect.head, Http.Header.location) orelse "");
 
                     const subtree = try requestRawGet(case_allocator, port, "/pair/");
@@ -616,10 +616,10 @@ fn Suite(comptime lib: type, comptime net: type) type {
             try exercise.run(allocator, server_spawn_config, true);
         }
 
-        fn readHeaderTimeoutClosesSlowHeader(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn readHeaderTimeoutClosesSlowHeader(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{
-                .read_header_timeout_ms = 20,
+                .read_header_timeout = 20 * net.time.duration.MilliSecond,
             });
             defer server.deinit();
             try server.handleFunc("/slow", struct {
@@ -635,7 +635,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             var conn = try Net.dial(allocator, .tcp, addr4(srv_run.port));
             defer conn.deinit();
             try io.writeAll(@TypeOf(conn), &conn, "GET /slow HTTP/1.1\r\n");
-            Thread.sleep(40 * lib.time.ns_per_ms);
+            Thread.sleep(@intCast(40 * net.time.duration.MilliSecond));
             try io.writeAll(@TypeOf(conn), &conn, "Host: example.com\r\nConnection: close\r\n\r\n");
 
             var buf: [64]u8 = undefined;
@@ -644,14 +644,14 @@ fn Suite(comptime lib: type, comptime net: type) type {
                 return;
             };
             if (n != 0) {
-                try expect(lib.mem.startsWith(u8, buf[0..n], "HTTP/1.1 400"));
+                try expect(std.mem.startsWith(u8, buf[0..n], "HTTP/1.1 400"));
             }
         }
 
-        fn idleTimeoutClosesKeepAliveConn(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn idleTimeoutClosesKeepAliveConn(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{
-                .idle_timeout_ms = 20,
+                .idle_timeout = 20 * net.time.duration.MilliSecond,
             });
             defer server.deinit();
             try server.handleFunc("/idle-timeout", struct {
@@ -672,7 +672,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             defer allocator.free(first.body);
             try expectEqualStrings("ok", first.body);
 
-            Thread.sleep(40 * lib.time.ns_per_ms);
+            Thread.sleep(@intCast(40 * net.time.duration.MilliSecond));
             try io.writeAll(@TypeOf(conn), &conn, "GET /idle-timeout HTTP/1.1\r\nHost: example.com\r\n\r\n");
             var buf: [64]u8 = undefined;
             const n = conn.read(&buf) catch |err| {
@@ -682,7 +682,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             try expectEqual(@as(usize, 0), n);
         }
 
-        fn shutdownWaitsForActiveHandler(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn shutdownWaitsForActiveHandler(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             const request_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             const shutdown_spawn_config: Thread.SpawnConfig = .{ .stack_size = 256 * 1024 };
@@ -709,7 +709,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
 
             var transport = try Http.Transport.init(allocator, .{});
             defer transport.deinit();
-            const raw_url = try lib.fmt.allocPrint(allocator, "http://127.0.0.1:{d}/slow", .{srv_run.port});
+            const raw_url = try std.fmt.allocPrint(allocator, "http://127.0.0.1:{d}/slow", .{srv_run.port});
             defer allocator.free(raw_url);
             var req = try Http.Request.init(allocator, "GET", raw_url);
             req.close = true;
@@ -733,19 +733,19 @@ fn Suite(comptime lib: type, comptime net: type) type {
             var request_thread = try Thread.spawn(request_spawn_config, RoundTripTask.exec, .{&round_trip});
             entered.wait();
 
-            const ContextNs = context_mod.make(lib);
-            var ctx_ns = try ContextNs.init(allocator);
-            defer ctx_ns.deinit();
-            var shutdown_ctx = try ctx_ns.withTimeout(ctx_ns.background(), 200 * lib.time.ns_per_ms);
+            const ContextNs = context_mod.make(std, net.time);
+            var ctx_api = try ContextNs.init(allocator);
+            defer ctx_api.deinit();
+            var shutdown_ctx = try ctx_api.withTimeout(ctx_api.background(), 200 * net.time.duration.MilliSecond);
             defer shutdown_ctx.deinit();
 
             var shutdown_task = ShutdownTask{ .server = &server, .ctx = shutdown_ctx };
             var shutdown_thread = try Thread.spawn(shutdown_spawn_config, ShutdownTask.run, .{&shutdown_task});
             defer shutdown_thread.join();
 
-            try expect(!shutdown_task.waitFor(20));
+            try expect(!shutdown_task.waitFor(20 * net.time.duration.MilliSecond));
             release.signal();
-            try expect(shutdown_task.waitFor(200));
+            try expect(shutdown_task.waitFor(200 * net.time.duration.MilliSecond));
             try expect(shutdown_task.err == null);
             request_thread.join();
             if (round_trip.err) |err| return err;
@@ -756,7 +756,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             try expectEqualStrings("done", body);
         }
 
-        fn closeInterruptsIdleKeepAlive(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn closeInterruptsIdleKeepAlive(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{});
             defer server.deinit();
@@ -786,7 +786,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             try expectEqual(@as(usize, 0), n);
         }
 
-        fn tlsWrappedListenerServesRequest(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn tlsWrappedListenerServesRequest(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{});
             defer server.deinit();
@@ -802,7 +802,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
 
             var transport = try Http.Transport.init(allocator, tlsTransportOptions());
             defer transport.deinit();
-            const raw_url = try lib.fmt.allocPrint(allocator, "https://127.0.0.1:{d}/secure", .{srv_run.port});
+            const raw_url = try std.fmt.allocPrint(allocator, "https://127.0.0.1:{d}/secure", .{srv_run.port});
             defer allocator.free(raw_url);
 
             var req = try Http.Request.init(allocator, "GET", raw_url);
@@ -815,7 +815,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             try expectEqualStrings("secure", body);
         }
 
-        fn wrappedListenerServesRequest(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn wrappedListenerServesRequest(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             const server_spawn_config: Thread.SpawnConfig = .{ .stack_size = 2 * 1024 * 1024 };
             var server = try Http.Server.init(allocator, .{});
             defer server.deinit();
@@ -856,7 +856,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             try expectEqualStrings("wrapped", resp.body);
         }
 
-        fn startPlainServer(allocator: lib.mem.Allocator, server: *Http.Server, server_spawn_config: Thread.SpawnConfig) !ServerRun {
+        fn startPlainServer(allocator: std.mem.Allocator, server: *Http.Server, server_spawn_config: Thread.SpawnConfig) !ServerRun {
             const listener = try Net.listen(allocator, .{ .address = addr4(0) });
             errdefer listener.deinit();
             const port = try listenerPort(listener, Net);
@@ -880,7 +880,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
             return run;
         }
 
-        fn startTlsServer(allocator: lib.mem.Allocator, server: *Http.Server, server_spawn_config: Thread.SpawnConfig) !ServerRun {
+        fn startTlsServer(allocator: std.mem.Allocator, server: *Http.Server, server_spawn_config: Thread.SpawnConfig) !ServerRun {
             const listener = try Net.tls.listen(allocator, .{ .address = addr4(0) }, tlsServerConfig());
             errdefer listener.deinit();
             const port = try tlsListenerPort(listener, Net);
@@ -904,10 +904,10 @@ fn Suite(comptime lib: type, comptime net: type) type {
             return run;
         }
 
-        fn requestRawGet(allocator: lib.mem.Allocator, port: u16, target: []const u8) !RawResponse {
+        fn requestRawGet(allocator: std.mem.Allocator, port: u16, target: []const u8) !RawResponse {
             var conn = try Net.dial(allocator, .tcp, addr4(port));
             defer conn.deinit();
-            const raw = try lib.fmt.allocPrint(
+            const raw = try std.fmt.allocPrint(
                 allocator,
                 "GET {s} HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n",
                 .{target},
@@ -926,9 +926,9 @@ fn Suite(comptime lib: type, comptime net: type) type {
             request_method: ?[]const u8 = null,
         };
 
-        fn readRawResponse(allocator: lib.mem.Allocator, conn: net.Conn, options: ReadRawResponseOptions) !RawResponse {
+        fn readRawResponse(allocator: std.mem.Allocator, conn: net.Conn, options: ReadRawResponseOptions) !RawResponse {
             var c = conn;
-            var bytes = try lib.ArrayList(u8).initCapacity(allocator, 0);
+            var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
             defer bytes.deinit(allocator);
             var buf: [256]u8 = undefined;
 
@@ -937,7 +937,7 @@ fn Suite(comptime lib: type, comptime net: type) type {
                 const n = try c.read(&buf);
                 if (n == 0) return error.EndOfStream;
                 try bytes.appendSlice(allocator, buf[0..n]);
-                if (lib.mem.indexOf(u8, bytes.items, "\r\n\r\n")) |end| head_end = end;
+                if (std.mem.indexOf(u8, bytes.items, "\r\n\r\n")) |end| head_end = end;
             }
 
             const split = head_end.? + 4;
@@ -954,12 +954,12 @@ fn Suite(comptime lib: type, comptime net: type) type {
             }
 
             if (headerValue(head, Http.Header.content_length)) |value| {
-                const content_length = try lib.fmt.parseInt(usize, value, 10);
+                const content_length = try std.fmt.parseInt(usize, value, 10);
                 const body = try readFixedBody(allocator, c, prefix, content_length);
                 return .{ .head = head, .body = body };
             }
             if (headerValue(head, Http.Header.transfer_encoding)) |value| {
-                if (lib.ascii.eqlIgnoreCase(value, "chunked")) {
+                if (std.ascii.eqlIgnoreCase(value, "chunked")) {
                     const body = try readChunkedBody(allocator, c, prefix);
                     return .{ .head = head, .body = body };
                 }
@@ -970,8 +970,8 @@ fn Suite(comptime lib: type, comptime net: type) type {
             };
         }
 
-        fn readFixedBody(allocator: lib.mem.Allocator, conn: net.Conn, prefix: []const u8, total_len: usize) ![]u8 {
-            var bytes = try lib.ArrayList(u8).initCapacity(allocator, total_len);
+        fn readFixedBody(allocator: std.mem.Allocator, conn: net.Conn, prefix: []const u8, total_len: usize) ![]u8 {
+            var bytes = try std.ArrayList(u8).initCapacity(allocator, total_len);
             errdefer bytes.deinit(allocator);
             try bytes.appendSlice(allocator, prefix[0..@min(prefix.len, total_len)]);
             var c = conn;
@@ -985,15 +985,15 @@ fn Suite(comptime lib: type, comptime net: type) type {
             return bytes.toOwnedSlice(allocator);
         }
 
-        fn readChunkedBody(allocator: lib.mem.Allocator, conn: net.Conn, prefix: []const u8) ![]u8 {
+        fn readChunkedBody(allocator: std.mem.Allocator, conn: net.Conn, prefix: []const u8) ![]u8 {
             var stream = io.PrefixReader(net.Conn).init(conn, prefix);
-            var body = lib.ArrayList(u8){};
+            var body = std.ArrayList(u8){};
             defer body.deinit(allocator);
             var line_buf: [128]u8 = undefined;
             while (true) {
                 const line = try stream.readLine(&line_buf);
-                const semi = lib.mem.indexOfScalar(u8, line, ';') orelse line.len;
-                const size = try lib.fmt.parseInt(usize, lib.mem.trim(u8, line[0..semi], " "), 16);
+                const semi = std.mem.indexOfScalar(u8, line, ';') orelse line.len;
+                const size = try std.fmt.parseInt(usize, std.mem.trim(u8, line[0..semi], " "), 16);
                 if (size == 0) {
                     try stream.expectCrlf();
                     break;
@@ -1009,39 +1009,39 @@ fn Suite(comptime lib: type, comptime net: type) type {
 
         fn responseStatusCode(head: []const u8) !u16 {
             const line = firstLine(head);
-            var parts = lib.mem.tokenizeAny(u8, line, " ");
+            var parts = std.mem.tokenizeAny(u8, line, " ");
             _ = parts.next() orelse return error.BadResponse;
             const code = parts.next() orelse return error.BadResponse;
-            return try lib.fmt.parseInt(u16, code, 10);
+            return try std.fmt.parseInt(u16, code, 10);
         }
 
         fn responseBodyAllowed(request_method: ?[]const u8, status_code: u16) bool {
             if (status_code >= 100 and status_code < 200) return false;
             if (status_code == Http.status.no_content or status_code == Http.status.not_modified) return false;
             if (request_method) |method| {
-                if (lib.ascii.eqlIgnoreCase(method, "HEAD")) return false;
+                if (std.ascii.eqlIgnoreCase(method, "HEAD")) return false;
             }
             return true;
         }
 
         fn firstLine(head: []const u8) []const u8 {
-            const end = lib.mem.indexOf(u8, head, "\r\n") orelse head.len;
+            const end = std.mem.indexOf(u8, head, "\r\n") orelse head.len;
             return head[0..end];
         }
 
         fn headerValue(head: []const u8, name: []const u8) ?[]const u8 {
             var line_start: usize = 0;
             while (line_start < head.len) {
-                const rel_end = lib.mem.indexOf(u8, head[line_start..], "\r\n") orelse head.len - line_start;
+                const rel_end = std.mem.indexOf(u8, head[line_start..], "\r\n") orelse head.len - line_start;
                 const line = head[line_start .. line_start + rel_end];
-                const colon = lib.mem.indexOfScalar(u8, line, ':') orelse {
+                const colon = std.mem.indexOfScalar(u8, line, ':') orelse {
                     if (line_start + rel_end == head.len) break;
                     line_start += rel_end + 2;
                     continue;
                 };
-                const header_name = lib.mem.trim(u8, line[0..colon], " ");
+                const header_name = std.mem.trim(u8, line[0..colon], " ");
                 if (Http.Header.init(header_name, "").is(name)) {
-                    return lib.mem.trim(u8, line[colon + 1 ..], " ");
+                    return std.mem.trim(u8, line[colon + 1 ..], " ");
                 }
                 if (line_start + rel_end == head.len) break;
                 line_start += rel_end + 2;
@@ -1049,10 +1049,10 @@ fn Suite(comptime lib: type, comptime net: type) type {
             return null;
         }
 
-        fn readBody(allocator: lib.mem.Allocator, resp: Http.Response) ![]u8 {
+        fn readBody(allocator: std.mem.Allocator, resp: Http.Response) ![]u8 {
             const body = resp.body() orelse return allocator.dupe(u8, "");
             var reader = body;
-            var bytes = try lib.ArrayList(u8).initCapacity(allocator, 0);
+            var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
             errdefer bytes.deinit(allocator);
             var buf: [256]u8 = undefined;
             while (true) {

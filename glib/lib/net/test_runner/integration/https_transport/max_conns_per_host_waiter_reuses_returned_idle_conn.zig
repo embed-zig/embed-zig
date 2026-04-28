@@ -2,8 +2,8 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Utils = test_utils.make(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make(std, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 3 * 1024 * 1024 },
@@ -13,21 +13,21 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: lib.mem.Allocator) bool {
+        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: std.mem.Allocator) bool {
             _ = runner;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = Utils.Net;
                     const Http = Utils.Http;
-                    const Thread = lib.Thread;
-                    const test_spawn_config: lib.Thread.SpawnConfig = Utils.test_spawn_config;
+                    const Thread = std.Thread;
+                    const test_spawn_config: std.Thread.SpawnConfig = Utils.test_spawn_config;
                     const testing = struct {
-                        pub var allocator: lib.mem.Allocator = undefined;
-                        pub const expect = lib.testing.expect;
-                        pub const expectEqual = lib.testing.expectEqual;
-                        pub const expectEqualSlices = lib.testing.expectEqualSlices;
-                        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-                        pub const expectError = lib.testing.expectError;
+                        pub var allocator: std.mem.Allocator = undefined;
+                        pub const expect = std.testing.expect;
+                        pub const expectEqual = std.testing.expectEqual;
+                        pub const expectEqualSlices = std.testing.expectEqualSlices;
+                        pub const expectEqualStrings = std.testing.expectEqualStrings;
+                        pub const expectError = std.testing.expectError;
                     };
                     testing.allocator = a;
 
@@ -58,11 +58,11 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             };
                         }
 
-                        fn waitTimeout(self: *@This(), timeout_ms: u32) bool {
+                        fn waitTimeout(self: *@This(), timeout: net.time.duration.Duration) bool {
                             self.mutex.lock();
                             defer self.mutex.unlock();
                             if (self.finished) return true;
-                            self.cond.timedWait(&self.mutex, @as(u64, timeout_ms) * lib.time.ns_per_ms) catch {};
+                            self.cond.timedWait(&self.mutex, @intCast(timeout)) catch {};
                             return self.finished;
                         }
                     };
@@ -100,7 +100,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 return;
                             };
 
-                            conn.setReadTimeout(200);
+                            conn.setReadDeadline(net.time.instant.add(net.time.instant.now(), 200 * net.time.duration.MilliSecond));
                             const reused = Utils.serveKeepAliveRequest(conn, "GET /cap-reuse-2 HTTP/1.1", "second over tls", true) catch |err| switch (err) {
                                 error.EndOfStream,
                                 error.TimedOut,
@@ -122,7 +122,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     });
                     defer transport.deinit();
 
-                    const first_url = try lib.fmt.allocPrint(testing.allocator, "https://127.0.0.1:{d}/cap-reuse-1", .{port});
+                    const first_url = try std.fmt.allocPrint(testing.allocator, "https://127.0.0.1:{d}/cap-reuse-1", .{port});
                     defer testing.allocator.free(first_url);
                     var req1 = try Http.Request.init(testing.allocator, "GET", first_url);
                     var resp1 = try transport.roundTrip(&req1);
@@ -131,7 +131,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var first: [1]u8 = undefined;
                     try testing.expectEqual(@as(usize, 1), try body1.read(&first));
 
-                    const second_url = try lib.fmt.allocPrint(testing.allocator, "https://127.0.0.1:{d}/cap-reuse-2", .{port});
+                    const second_url = try std.fmt.allocPrint(testing.allocator, "https://127.0.0.1:{d}/cap-reuse-2", .{port});
                     defer testing.allocator.free(second_url);
                     var req2 = try Http.Request.init(testing.allocator, "GET", second_url);
                     var task = RoundTripTask{
@@ -142,7 +142,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var joined = false;
                     defer if (!joined) thread.join();
 
-                    try testing.expect(!task.waitTimeout(120));
+                    try testing.expect(!task.waitTimeout(120 * net.time.duration.MilliSecond));
                     const rest = try Utils.readBody(testing.allocator, resp1);
                     defer testing.allocator.free(rest);
                     thread.join();

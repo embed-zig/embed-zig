@@ -3,7 +3,7 @@ const context_mod = @import("context");
 const testing_api = @import("testing");
 const test_utils = @import("../tcp/test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -12,11 +12,11 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
-                    const Context = context_mod.make(lib);
+                fn call(a: std.mem.Allocator) !void {
+                    const Context = context_mod.make(std, net.time);
 
                     var ctx_api = try Context.init(a);
                     defer ctx_api.deinit();
@@ -26,7 +26,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     cancel_ctx.cancel();
 
                     var d = net.Dialer.init(a, .{});
-                    try lib.testing.expectError(
+                    try std.testing.expectError(
                         error.Canceled,
                         d.dialContext(cancel_ctx, .udp, test_utils.addr4(.{ 127, 0, 0, 1 }, 1)),
                     );

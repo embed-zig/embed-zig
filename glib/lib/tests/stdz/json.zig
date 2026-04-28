@@ -1,14 +1,14 @@
 //! JSON compatibility runner — exercises the `stdz.json` std-shaped surface.
 //!
 //! Usage:
-//!   try @import("lib/tests/stdz/json.zig").run(std);
-//!   try @import("lib/tests/stdz/json.zig").run(stdz);
+//!   try @import("std/tests/stdz/json.zig").run(std);
+//!   try @import("std/tests/stdz/json.zig").run(stdz);
 
 const stdz = @import("stdz");
-const std = @import("std");
+const host_std = @import("std");
 const testing_mod = @import("testing");
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -19,49 +19,49 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("declaration_parity", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("declaration_parity", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try jsonDeclarationParityCase(lib);
+                    try jsonDeclarationParityCase(std);
                 }
             }.run));
-            t.run("type_identity", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("type_identity", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try jsonTypeIdentityCase(lib);
+                    try jsonTypeIdentityCase(std);
                 }
             }.run));
-            t.run("parse_from_slice_struct", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("parse_from_slice_struct", testing_mod.TestRunner.fromFn(std, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
-                    try parseFromSliceStructTests(lib, sub_allocator);
+                    try parseFromSliceStructTests(std, sub_allocator);
                 }
             }.run));
-            t.run("parse_from_value", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("parse_from_value", testing_mod.TestRunner.fromFn(std, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
-                    try parseFromValueTests(lib, sub_allocator);
+                    try parseFromValueTests(std, sub_allocator);
                 }
             }.run));
-            t.run("scanner", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("scanner", testing_mod.TestRunner.fromFn(std, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
-                    try scannerTests(lib, sub_allocator);
+                    try scannerTests(std, sub_allocator);
                 }
             }.run));
-            t.run("reader_backed_parse", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("reader_backed_parse", testing_mod.TestRunner.fromFn(std, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
-                    try readerBackedParseTests(lib, sub_allocator);
+                    try readerBackedParseTests(std, sub_allocator);
                 }
             }.run));
-            t.run("stringify", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("stringify", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try stringifyTests(lib);
+                    try stringifyTests(std);
                 }
             }.run));
             return t.wait();
@@ -69,53 +69,53 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
 }
 
 const json = @This();
 
-fn jsonDeclarationParityCase(comptime lib: type) !void {
-    inline for (comptime std.meta.declarations(std.json)) |decl| {
-        try lib.testing.expect(@hasDecl(stdz.json, decl.name));
+fn jsonDeclarationParityCase(comptime std: type) !void {
+    inline for (comptime host_std.meta.declarations(host_std.json)) |decl| {
+        try std.testing.expect(@hasDecl(stdz.json, decl.name));
     }
-    inline for (comptime std.meta.declarations(stdz.json)) |decl| {
-        try lib.testing.expect(@hasDecl(std.json, decl.name));
+    inline for (comptime host_std.meta.declarations(stdz.json)) |decl| {
+        try std.testing.expect(@hasDecl(host_std.json, decl.name));
     }
 }
 
-fn jsonTypeIdentityCase(comptime lib: type) !void {
-    try lib.testing.expect(stdz.json.ObjectMap == std.json.ObjectMap);
-    try lib.testing.expect(stdz.json.Array == std.json.Array);
-    try lib.testing.expect(stdz.json.Value == std.json.Value);
-    try lib.testing.expect(stdz.json.ArrayHashMap == std.json.ArrayHashMap);
-    try lib.testing.expect(stdz.json.Scanner == std.json.Scanner);
-    try lib.testing.expect(stdz.json.Reader == std.json.Reader);
-    try lib.testing.expect(stdz.json.Token == std.json.Token);
-    try lib.testing.expect(stdz.json.ParseOptions == std.json.ParseOptions);
-    try lib.testing.expect(stdz.json.Stringify == std.json.Stringify);
-    try lib.testing.expect(@TypeOf(stdz.json.parseFromSlice) == @TypeOf(std.json.parseFromSlice));
-    try lib.testing.expect(@TypeOf(stdz.json.parseFromTokenSource) == @TypeOf(std.json.parseFromTokenSource));
-    try lib.testing.expect(@TypeOf(stdz.json.parseFromValue) == @TypeOf(std.json.parseFromValue));
-    try lib.testing.expect(@TypeOf(stdz.json.fmt) == @TypeOf(std.json.fmt));
-    try lib.testing.expect(@TypeOf(stdz.json.Formatter) == @TypeOf(std.json.Formatter));
+fn jsonTypeIdentityCase(comptime std: type) !void {
+    try std.testing.expect(stdz.json.ObjectMap == host_std.json.ObjectMap);
+    try std.testing.expect(stdz.json.Array == host_std.json.Array);
+    try std.testing.expect(stdz.json.Value == host_std.json.Value);
+    try std.testing.expect(stdz.json.ArrayHashMap == host_std.json.ArrayHashMap);
+    try std.testing.expect(stdz.json.Scanner == host_std.json.Scanner);
+    try std.testing.expect(stdz.json.Reader == host_std.json.Reader);
+    try std.testing.expect(stdz.json.Token == host_std.json.Token);
+    try std.testing.expect(stdz.json.ParseOptions == host_std.json.ParseOptions);
+    try std.testing.expect(stdz.json.Stringify == host_std.json.Stringify);
+    try std.testing.expect(@TypeOf(stdz.json.parseFromSlice) == @TypeOf(host_std.json.parseFromSlice));
+    try std.testing.expect(@TypeOf(stdz.json.parseFromTokenSource) == @TypeOf(host_std.json.parseFromTokenSource));
+    try std.testing.expect(@TypeOf(stdz.json.parseFromValue) == @TypeOf(host_std.json.parseFromValue));
+    try std.testing.expect(@TypeOf(stdz.json.fmt) == @TypeOf(host_std.json.fmt));
+    try std.testing.expect(@TypeOf(stdz.json.Formatter) == @TypeOf(host_std.json.Formatter));
 }
 
-pub fn run(comptime lib: type) !void {
-    try parseFromSliceStructTests(lib, lib.testing.allocator);
-    try parseFromValueTests(lib, lib.testing.allocator);
-    try scannerTests(lib, lib.testing.allocator);
-    try readerBackedParseTests(lib, lib.testing.allocator);
-    try stringifyTests(lib);
+pub fn run(comptime std: type) !void {
+    try parseFromSliceStructTests(std, std.testing.allocator);
+    try parseFromValueTests(std, std.testing.allocator);
+    try scannerTests(std, std.testing.allocator);
+    try readerBackedParseTests(std, std.testing.allocator);
+    try stringifyTests(std);
 }
 
-fn parseFromSliceStructTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
+fn parseFromSliceStructTests(comptime std: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
     const Config = struct {
         name: []const u8,
         enabled: bool,
@@ -123,7 +123,7 @@ fn parseFromSliceStructTests(comptime lib: type, allocator: lib.mem.Allocator) !
         tags: []const []const u8,
     };
 
-    var parsed = try lib.json.parseFromSlice(
+    var parsed = try std.json.parseFromSlice(
         Config,
         allocator,
         "{\"name\":\"sensor\",\"enabled\":true,\"tags\":[\"rx\",\"tx\"]}",
@@ -139,15 +139,15 @@ fn parseFromSliceStructTests(comptime lib: type, allocator: lib.mem.Allocator) !
     try testing.expectEqualStrings("tx", parsed.value.tags[1]);
 }
 
-fn parseFromValueTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
+fn parseFromValueTests(comptime std: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
     const Payload = struct {
         count: u8,
         label: []const u8,
     };
 
-    var parsed_value = try lib.json.parseFromSlice(
-        lib.json.Value,
+    var parsed_value = try std.json.parseFromSlice(
+        std.json.Value,
         allocator,
         "{\"count\":7,\"label\":\"ready\"}",
         .{},
@@ -171,20 +171,20 @@ fn parseFromValueTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
         else => return error.ExpectedObjectValue,
     }
 
-    var typed = try lib.json.parseFromValue(Payload, allocator, parsed_value.value, .{});
+    var typed = try std.json.parseFromValue(Payload, allocator, parsed_value.value, .{});
     defer typed.deinit();
 
     try testing.expectEqual(@as(u8, 7), typed.value.count);
     try testing.expectEqualStrings("ready", typed.value.label);
 }
 
-fn scannerTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
+fn scannerTests(comptime std: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
 
-    var scanner = lib.json.Scanner.initCompleteInput(allocator, "{\"sensor\":123,\"ok\":true}");
+    var scanner = std.json.Scanner.initCompleteInput(allocator, "{\"sensor\":123,\"ok\":true}");
     defer scanner.deinit();
 
-    try testing.expectEqual(lib.json.Token.object_begin, try scanner.next());
+    try testing.expectEqual(std.json.Token.object_begin, try scanner.next());
 
     switch (try scanner.next()) {
         .string => |name| try testing.expectEqualStrings("sensor", name),
@@ -198,35 +198,35 @@ fn scannerTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
         .string => |name| try testing.expectEqualStrings("ok", name),
         else => return error.ExpectedOkKey,
     }
-    try testing.expectEqual(lib.json.Token.true, try scanner.next());
-    try testing.expectEqual(lib.json.Token.object_end, try scanner.next());
-    try testing.expectEqual(lib.json.Token.end_of_document, try scanner.next());
+    try testing.expectEqual(std.json.Token.true, try scanner.next());
+    try testing.expectEqual(std.json.Token.object_end, try scanner.next());
+    try testing.expectEqual(std.json.Token.end_of_document, try scanner.next());
 }
 
-fn readerBackedParseTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
+fn readerBackedParseTests(comptime std: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
     const Packet = struct {
         sensor: []const u8,
         sample_rate: u8,
     };
 
-    var io_reader: lib.Io.Reader = .fixed("{\"sensor\":\"temp\",\"sample_rate\":50}");
-    var reader = lib.json.Reader.init(allocator, &io_reader);
+    var io_reader: std.Io.Reader = .fixed("{\"sensor\":\"temp\",\"sample_rate\":50}");
+    var reader = std.json.Reader.init(allocator, &io_reader);
     defer reader.deinit();
 
-    var parsed = try lib.json.parseFromTokenSource(Packet, allocator, &reader, .{});
+    var parsed = try std.json.parseFromTokenSource(Packet, allocator, &reader, .{});
     defer parsed.deinit();
 
     try testing.expectEqualStrings("temp", parsed.value.sensor);
     try testing.expectEqual(@as(u8, 50), parsed.value.sample_rate);
 }
 
-fn stringifyTests(comptime lib: type) !void {
-    const testing = lib.testing;
+fn stringifyTests(comptime std: type) !void {
+    const testing = std.testing;
 
     var out_buf: [256]u8 = undefined;
-    var out: lib.Io.Writer = .fixed(&out_buf);
-    var stream: lib.json.Stringify = .{
+    var out: std.Io.Writer = .fixed(&out_buf);
+    var stream: std.json.Stringify = .{
         .writer = &out,
         .options = .{ .whitespace = .minified },
     };
@@ -249,10 +249,10 @@ fn stringifyTests(comptime lib: type) !void {
     };
 
     var fmt_buf: [256]u8 = undefined;
-    const rendered = try lib.fmt.bufPrint(
+    const rendered = try std.fmt.bufPrint(
         &fmt_buf,
         "{f}",
-        .{lib.json.fmt(Msg{ .ready = true, .name = "rx" }, .{})},
+        .{std.json.fmt(Msg{ .ready = true, .name = "rx" }, .{})},
     );
     try testing.expectEqualStrings("{\"ready\":true,\"name\":\"rx\"}", rendered);
 }

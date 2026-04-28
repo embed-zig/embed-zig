@@ -4,7 +4,7 @@ const tls_fixtures = @import("../../../../net/tls/test_fixtures.zig");
 const tcp_test_utils = @import("../tcp/test_utils.zig");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
@@ -13,12 +13,12 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
-                    const Thread = lib.Thread;
+                    const Thread = std.Thread;
                     const test_spawn_config: Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 };
 
                     var ln = try Net.tls.listen(a, .{
@@ -62,7 +62,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 result.* = err;
                                 return;
                             };
-                            if (!lib.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
+                            if (!std.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
                         }
                     }.run, .{ tls_listener, &server_result });
                     defer server_thread.join();
@@ -81,7 +81,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     try test_utils.writeAll(conn, "ping");
                     var resp: [4]u8 = undefined;
                     try test_utils.readAll(conn, &resp);
-                    try lib.testing.expectEqualStrings("pong", &resp);
+                    try std.testing.expectEqualStrings("pong", &resp);
 
                     if (server_result) |err| return err;
                 }

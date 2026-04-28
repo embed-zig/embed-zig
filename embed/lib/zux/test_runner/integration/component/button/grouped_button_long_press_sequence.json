@@ -30,7 +30,7 @@
               "button_id": 3,
               "gesture_kind": "long_press",
               "click_count": 0,
-              "long_press_ns": 500000000
+              "long_press": 500000000
             }
           }
         ]
@@ -50,7 +50,7 @@
               "button_id": 3,
               "gesture_kind": "long_press",
               "click_count": 0,
-              "long_press_ns": 600000000
+              "long_press": 600000000
             }
           }
         ]
@@ -70,7 +70,7 @@
               "button_id": 3,
               "gesture_kind": "long_press",
               "click_count": 0,
-              "long_press_ns": 750000000
+              "long_press": 750000000
             }
           }
         ]

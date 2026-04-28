@@ -20,20 +20,20 @@ const NetListener = @import("Listener.zig");
 const tcp_listener = @import("TcpListener.zig");
 const Context = @import("context").Context;
 
-pub fn make(comptime lib: type, comptime net: type) type {
-    const C = common.make(lib);
-    const A = alert.make(lib);
-    const E = extensions.make(lib);
-    const K = kdf.make(lib);
-    const R = record.make(lib);
-    const CH = client_handshake.make(lib);
-    const SH = server_handshake.make(lib);
-    const TC = conn_impl.Conn(lib, net);
-    const SC = server_conn_impl.ServerConn(lib, net);
-    const TL = listener_impl.Listener(lib, net);
-    const TlsDialer = dialer_impl.Dialer(lib, net);
-    const NTL = tcp_listener.TcpListener(lib, net);
-    const NetDialer = @import("Dialer.zig").Dialer(lib, net);
+pub fn make(comptime std: type, comptime net: type) type {
+    const C = common.make(std);
+    const A = alert.make(std);
+    const E = extensions.make(std);
+    const K = kdf.make(std);
+    const R = record.make(std);
+    const CH = client_handshake.make(std, net.time);
+    const SH = server_handshake.make(std);
+    const TC = conn_impl.Conn(std, net);
+    const SC = server_conn_impl.ServerConn(std, net);
+    const TL = listener_impl.Listener(std, net);
+    const TlsDialer = dialer_impl.Dialer(std, net);
+    const NTL = tcp_listener.TcpListener(std, net);
+    const NetDialer = @import("Dialer.zig").Dialer(std, net);
 
     return struct {
         pub const ProtocolVersion = C.ProtocolVersion;
@@ -133,16 +133,16 @@ pub fn make(comptime lib: type, comptime net: type) type {
         pub const Network = TlsDialer.Network;
         pub const ListenOptions = NTL.Options;
 
-        pub fn client(allocator: lib.mem.Allocator, inner: NetConn, config: Config) TC.InitError!NetConn {
+        pub fn client(allocator: std.mem.Allocator, inner: NetConn, config: Config) TC.InitError!NetConn {
             return TC.init(allocator, inner, config);
         }
 
-        pub fn server(allocator: lib.mem.Allocator, inner: NetConn, config: ServerConfig) SC.InitError!NetConn {
+        pub fn server(allocator: std.mem.Allocator, inner: NetConn, config: ServerConfig) SC.InitError!NetConn {
             return SC.init(allocator, inner, config);
         }
 
         pub fn dial(
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             network: Network,
             addr: netip.AddrPort,
             config: Config,
@@ -154,7 +154,7 @@ pub fn make(comptime lib: type, comptime net: type) type {
 
         pub fn dialContext(
             ctx: Context,
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             network: Network,
             addr: netip.AddrPort,
             config: Config,
@@ -164,11 +164,11 @@ pub fn make(comptime lib: type, comptime net: type) type {
             return d.dialContext(ctx, network, addr);
         }
 
-        pub fn newListener(allocator: lib.mem.Allocator, inner: NetListener, config: ServerConfig) !NetListener {
+        pub fn newListener(allocator: std.mem.Allocator, inner: NetListener, config: ServerConfig) !NetListener {
             return TL.init(allocator, inner, config);
         }
 
-        pub fn listen(allocator: lib.mem.Allocator, opts: ListenOptions, config: ServerConfig) !NetListener {
+        pub fn listen(allocator: std.mem.Allocator, opts: ListenOptions, config: ServerConfig) !NetListener {
             var inner = try NTL.init(allocator, opts);
             errdefer inner.deinit();
             var ln = try TL.init(allocator, inner, config);
@@ -179,29 +179,29 @@ pub fn make(comptime lib: type, comptime net: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
+pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(_: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(_: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = allocator;
 
-            t.run("alert", alert.TestRunner(lib));
-            t.run("common", common.TestRunner(lib));
-            t.run("extensions", extensions.TestRunner(lib));
-            t.run("kdf", kdf.TestRunner(lib));
-            t.run("record", record.TestRunner(lib));
-            t.run("client_handshake", client_handshake.TestRunner(lib));
-            t.run("server_handshake", server_handshake.TestRunner(lib));
-            t.run("make2_conn_context", testing_api.TestRunner.fromFn(lib, 2 * 1024 * 1024, struct {
-                fn run(_: *testing_api.T, case_allocator: lib.mem.Allocator) !void {
+            t.run("alert", alert.TestRunner(std));
+            t.run("common", common.TestRunner(std));
+            t.run("extensions", extensions.TestRunner(std));
+            t.run("kdf", kdf.TestRunner(std));
+            t.run("record", record.TestRunner(std));
+            t.run("client_handshake", client_handshake.TestRunner(std, net.time));
+            t.run("server_handshake", server_handshake.TestRunner(std, net.time));
+            t.run("make2_conn_context", testing_api.TestRunner.fromFn(std, 2 * 1024 * 1024, struct {
+                fn run(_: *testing_api.T, case_allocator: std.mem.Allocator) !void {
                     const net_root = @import("../net.zig");
-                    const ContextApi = @import("context").make(lib);
+                    const ContextApi = @import("context").make(std, net.time);
                     const runtime_mod = net_root.runtime;
                     const FakeRuntimeImpl = struct {
                         pub const Tcp = struct {
@@ -277,10 +277,10 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                                 _ = opt;
                             }
 
-                            pub fn poll(self: *@This(), want: runtime_mod.PollEvents, timeout_ms: ?u32) runtime_mod.PollError!runtime_mod.PollEvents {
+                            pub fn poll(self: *@This(), want: runtime_mod.PollEvents, timeout: ?net.time.duration.Duration) runtime_mod.PollError!runtime_mod.PollEvents {
                                 _ = self;
                                 _ = want;
-                                _ = timeout_ms;
+                                _ = timeout;
                                 return error.Unexpected;
                             }
                         };
@@ -356,10 +356,10 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                                 _ = opt;
                             }
 
-                            pub fn poll(self: *@This(), want: runtime_mod.PollEvents, timeout_ms: ?u32) runtime_mod.PollError!runtime_mod.PollEvents {
+                            pub fn poll(self: *@This(), want: runtime_mod.PollEvents, timeout: ?net.time.duration.Duration) runtime_mod.PollError!runtime_mod.PollEvents {
                                 _ = self;
                                 _ = want;
-                                _ = timeout_ms;
+                                _ = timeout;
                                 return error.Unexpected;
                             }
                         };
@@ -374,7 +374,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                             return .{};
                         }
                     };
-                    const FakeNet = net_root.make(lib, FakeRuntimeImpl);
+                    const FakeNet = net_root.make(std, net.time, FakeRuntimeImpl);
 
                     var ctx_api = try ContextApi.init(case_allocator);
                     defer ctx_api.deinit();
@@ -397,21 +397,21 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     try typed_tls.setReadContext(io_ctx);
                     try typed_tls.setWriteContext(io_ctx);
-                    try lib.testing.expect(typed_tcp.read_ctx != null);
-                    try lib.testing.expect(typed_tcp.write_ctx != null);
+                    try std.testing.expect(typed_tcp.read_ctx != null);
+                    try std.testing.expect(typed_tcp.write_ctx != null);
 
                     try typed_tls.setReadContext(null);
                     try typed_tls.setWriteContext(null);
-                    try lib.testing.expect(typed_tcp.read_ctx == null);
-                    try lib.testing.expect(typed_tcp.write_ctx == null);
+                    try std.testing.expect(typed_tcp.read_ctx == null);
+                    try std.testing.expect(typed_tcp.write_ctx == null);
                 }
             }.run));
-            t.run("Conn", conn_impl.TestRunner(lib, net));
-            t.run("ServerConn", server_conn_impl.TestRunner(lib, net));
+            t.run("Conn", conn_impl.TestRunner(std, net));
+            t.run("ServerConn", server_conn_impl.TestRunner(std, net));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

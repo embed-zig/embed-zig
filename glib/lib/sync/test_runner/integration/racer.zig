@@ -1,7 +1,7 @@
 //! Racer test runner — exercises first-winner semantics and wait behavior.
 //!
 //! Accepts any type with the same shape as std
-//! (lib.Thread, lib.atomic, lib.mem, lib.meta).
+//! (std.Thread, std.atomic, std.mem, std.meta).
 //! Can be compiled into firmware main.zig — no reliance on file-scope tests.
 //!
 //! Usage:
@@ -13,44 +13,44 @@ const context_mod = @import("context");
 const stdz = @import("stdz");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime time: type) testing_api.TestRunner {
     const W = struct {
-        fn spawnAllocator(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn spawnAllocator(t: *testing_api.T, allocator: std.mem.Allocator) !void {
             _ = t;
-            try spawnAllocatorTests(lib, allocator);
+            try spawnAllocatorTests(std, time, allocator);
         }
-        fn zeroTask(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn zeroTask(t: *testing_api.T, allocator: std.mem.Allocator) !void {
             _ = t;
-            try zeroTaskTests(lib, allocator);
+            try zeroTaskTests(std, time, allocator);
         }
-        fn firstWinner(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn firstWinner(t: *testing_api.T, allocator: std.mem.Allocator) !void {
             _ = t;
-            try firstWinnerTests(lib, allocator);
+            try firstWinnerTests(std, time, allocator);
         }
-        fn raceContext(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn raceContext(t: *testing_api.T, allocator: std.mem.Allocator) !void {
             _ = t;
-            try raceContextTests(lib, allocator);
+            try raceContextTests(std, time, allocator);
         }
-        fn cancel(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn cancel(t: *testing_api.T, allocator: std.mem.Allocator) !void {
             _ = t;
-            try cancelTests(lib, allocator);
+            try cancelTests(std, time, allocator);
         }
-        fn doneAndWait(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn doneAndWait(t: *testing_api.T, allocator: std.mem.Allocator) !void {
             _ = t;
-            try doneAndWaitTests(lib, allocator);
+            try doneAndWaitTests(std, time, allocator);
         }
-        fn doneSignalRejection(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn doneSignalRejection(t: *testing_api.T, allocator: std.mem.Allocator) !void {
             _ = t;
-            try doneSignalPublishesRejectionBeforeReadyFlagTests(lib, allocator);
+            try doneSignalPublishesRejectionBeforeReadyFlagTests(std, time, allocator);
         }
-        fn exhausted(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn exhausted(t: *testing_api.T, allocator: std.mem.Allocator) !void {
             _ = t;
-            try exhaustedTests(lib, allocator);
+            try exhaustedTests(std, time, allocator);
         }
-        fn initOom(t: *testing_api.T, allocator: lib.mem.Allocator) !void {
+        fn initOom(t: *testing_api.T, allocator: std.mem.Allocator) !void {
             _ = t;
             _ = allocator;
-            try initOomTests(lib);
+            try initOomTests(std, time);
         }
     };
 
@@ -65,49 +65,49 @@ pub fn make(comptime lib: type) testing_api.TestRunner {
             _ = allocator;
             t.parallel();
             // Worker stacks: only this thread runs the suite body; spawned helpers use `Thread.spawn` defaults.
-            t.run("spawn_allocator", testing_api.TestRunner.fromFn(lib, 48 * 1024, W.spawnAllocator));
-            t.run("zero_task", testing_api.TestRunner.fromFn(lib, 48 * 1024, W.zeroTask));
-            t.run("first_winner", testing_api.TestRunner.fromFn(lib, 128 * 1024, W.firstWinner));
-            t.run("race_context", testing_api.TestRunner.fromFn(lib, 192 * 1024, W.raceContext));
-            t.run("cancel", testing_api.TestRunner.fromFn(lib, 128 * 1024, W.cancel));
-            t.run("done_and_wait", testing_api.TestRunner.fromFn(lib, 128 * 1024, W.doneAndWait));
-            t.run("done_signal_rejection", testing_api.TestRunner.fromFn(lib, 128 * 1024, W.doneSignalRejection));
-            t.run("exhausted", testing_api.TestRunner.fromFn(lib, 64 * 1024, W.exhausted));
-            t.run("init_oom", testing_api.TestRunner.fromFn(lib, 40 * 1024, W.initOom));
+            t.run("spawn_allocator", testing_api.TestRunner.fromFn(std, 48 * 1024, W.spawnAllocator));
+            t.run("zero_task", testing_api.TestRunner.fromFn(std, 48 * 1024, W.zeroTask));
+            t.run("first_winner", testing_api.TestRunner.fromFn(std, 128 * 1024, W.firstWinner));
+            t.run("race_context", testing_api.TestRunner.fromFn(std, 192 * 1024, W.raceContext));
+            t.run("cancel", testing_api.TestRunner.fromFn(std, 128 * 1024, W.cancel));
+            t.run("done_and_wait", testing_api.TestRunner.fromFn(std, 128 * 1024, W.doneAndWait));
+            t.run("done_signal_rejection", testing_api.TestRunner.fromFn(std, 128 * 1024, W.doneSignalRejection));
+            t.run("exhausted", testing_api.TestRunner.fromFn(std, 64 * 1024, W.exhausted));
+            t.run("init_oom", testing_api.TestRunner.fromFn(std, 40 * 1024, W.initOom));
             return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_api.TestRunner.make(Runner).new(runner);
 }
 
-pub fn run(comptime lib: type) !void {
-    try runSequentialSuite(lib, lib.testing.allocator);
+pub fn run(comptime std: type, comptime time: type) !void {
+    try runSequentialSuite(std, time, std.testing.allocator);
 }
 
-fn runSequentialSuite(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    try spawnAllocatorTests(lib, allocator);
-    try zeroTaskTests(lib, allocator);
-    try firstWinnerTests(lib, allocator);
-    try raceContextTests(lib, allocator);
-    try cancelTests(lib, allocator);
-    try doneAndWaitTests(lib, allocator);
-    try doneSignalPublishesRejectionBeforeReadyFlagTests(lib, allocator);
-    try exhaustedTests(lib, allocator);
-    try initOomTests(lib);
+fn runSequentialSuite(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    try spawnAllocatorTests(std, time, allocator);
+    try zeroTaskTests(std, time, allocator);
+    try firstWinnerTests(std, time, allocator);
+    try raceContextTests(std, time, allocator);
+    try cancelTests(std, time, allocator);
+    try doneAndWaitTests(std, time, allocator);
+    try doneSignalPublishesRejectionBeforeReadyFlagTests(std, time, allocator);
+    try exhaustedTests(std, time, allocator);
+    try initOomTests(std, time);
 }
 
-fn zeroTaskTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const Context = context_mod.make(lib);
-    const R = root.Racer(lib, u32);
+fn zeroTaskTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
+    const Context = context_mod.make(std, time);
+    const R = root.Racer(std, time, u32);
 
     {
         var racer = try R.init(allocator);
@@ -155,11 +155,11 @@ fn zeroTaskTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     }
 }
 
-fn firstWinnerTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const R = root.Racer(lib, u32);
-    const BoolAtomic = lib.atomic.Value(bool);
-    const U32Atomic = lib.atomic.Value(u32);
+fn firstWinnerTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
+    const R = root.Racer(std, time, u32);
+    const BoolAtomic = std.atomic.Value(bool);
+    const U32Atomic = std.atomic.Value(u32);
 
     var racer = try R.init(allocator);
     defer racer.deinit();
@@ -183,12 +183,12 @@ fn firstWinnerTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
         ) void {
             _ = started_count.fetchAdd(1, .acq_rel);
             while (!gate.load(.acquire)) {
-                l.Thread.sleep(l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(time.duration.MilliSecond));
             }
             result.store(ctx.success(value), .release);
             attempted.store(true, .release);
         }
-    }.run, .{ lib, &started, &release_second, &second_attempted, &second_won, 2 });
+    }.run, .{ std, &started, &release_second, &second_attempted, &second_won, 2 });
 
     try racer.spawn(.{}, struct {
         fn run(
@@ -202,16 +202,16 @@ fn firstWinnerTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
         ) void {
             _ = started_count.fetchAdd(1, .acq_rel);
             while (!gate.load(.acquire)) {
-                l.Thread.sleep(l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(time.duration.MilliSecond));
             }
             result.store(ctx.success(value), .release);
             attempted.store(true, .release);
         }
-    }.run, .{ lib, &started, &release_first, &first_attempted, &first_won, 1 });
+    }.run, .{ std, &started, &release_first, &first_attempted, &first_won, 1 });
 
-    try waitForCount(lib, &started, 2, 200);
+    try waitForCount(std, time, &started, 2, 200 * time.duration.MilliSecond);
     release_first.store(true, .release);
-    try waitForTrue(lib, &first_attempted, 200);
+    try waitForTrue(std, time, &first_attempted, 200 * time.duration.MilliSecond);
     try testing.expect(first_won.load(.acquire));
 
     switch (racer.race()) {
@@ -220,7 +220,7 @@ fn firstWinnerTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     }
 
     release_second.store(true, .release);
-    try waitForTrue(lib, &second_attempted, 200);
+    try waitForTrue(std, time, &second_attempted, 200 * time.duration.MilliSecond);
     try testing.expect(!second_won.load(.acquire));
 
     switch (racer.race()) {
@@ -235,13 +235,13 @@ fn firstWinnerTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     racer.wait();
 }
 
-fn raceContextTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const Context = context_mod.make(lib);
+fn raceContextTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
+    const Context = context_mod.make(std, time);
     var context = try Context.init(allocator);
     defer context.deinit();
-    const R = root.Racer(lib, u32);
-    const log = lib.log.scoped(.racer);
+    const R = root.Racer(std, time, u32);
+    const log = std.log.scoped(.racer);
 
     {
         var racer = try R.init(allocator);
@@ -249,10 +249,10 @@ fn raceContextTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
 
         try racer.spawn(.{}, struct {
             fn run(state: R.State, l: type) void {
-                l.Thread.sleep(5 * l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
                 _ = state.success(3);
             }
-        }.run, .{lib});
+        }.run, .{std});
 
         switch (try racer.raceContext(context.background())) {
             .winner => |value| try testing.expectEqual(@as(u32, 3), value),
@@ -267,9 +267,9 @@ fn raceContextTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
         try racer.spawn(.{}, struct {
             fn run(state: R.State, l: type) void {
                 _ = state;
-                l.Thread.sleep(20 * l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(20 * time.duration.MilliSecond));
             }
-        }.run, .{lib});
+        }.run, .{std});
 
         var cancel_ctx = try context.withCancel(context.background());
         defer cancel_ctx.deinit();
@@ -284,12 +284,12 @@ fn raceContextTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
 
         try racer.spawn(.{}, struct {
             fn run(state: R.State, l: type) void {
-                l.Thread.sleep(5 * l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
                 _ = state.success(11);
             }
-        }.run, .{lib});
+        }.run, .{std});
 
-        var timeout_ctx = try context.withTimeout(context.background(), 200 * lib.time.ns_per_ms);
+        var timeout_ctx = try context.withTimeout(context.background(), 200 * time.duration.MilliSecond);
         defer timeout_ctx.deinit();
 
         if (timeout_ctx.deadline() == null) return error.ExpectedDeadline;
@@ -311,10 +311,10 @@ fn raceContextTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
 
         try racer.spawn(.{}, struct {
             fn run(state: R.State, l: type) void {
-                l.Thread.sleep(5 * l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
                 _ = state.success(21);
             }
-        }.run, .{lib});
+        }.run, .{std});
 
         switch (racer.race()) {
             .winner => |value| try testing.expectEqual(@as(u32, 21), value),
@@ -342,11 +342,11 @@ fn raceContextTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
         try racer.spawn(.{}, struct {
             fn run(state: R.State, l: type) void {
                 _ = state;
-                l.Thread.sleep(50 * l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(50 * time.duration.MilliSecond));
             }
-        }.run, .{lib});
+        }.run, .{std});
 
-        var timeout_ctx = try context.withTimeout(context.background(), 5 * lib.time.ns_per_ms);
+        var timeout_ctx = try context.withTimeout(context.background(), 5 * time.duration.MilliSecond);
         defer timeout_ctx.deinit();
 
         if (timeout_ctx.deadline() == null) return error.ExpectedDeadline;
@@ -369,28 +369,28 @@ fn raceContextTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
         try racer.spawn(.{}, struct {
             fn run(state: R.State, l: type) void {
                 _ = state;
-                l.Thread.sleep(20 * l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(20 * time.duration.MilliSecond));
             }
-        }.run, .{lib});
+        }.run, .{std});
 
         var cancel_ctx = try context.withCancel(context.background());
         defer cancel_ctx.deinit();
 
-        var cancel_thread = try lib.Thread.spawn(.{}, struct {
+        var cancel_thread = try std.Thread.spawn(.{}, struct {
             fn run(cc: *context_mod.Context, l: type) void {
-                l.Thread.sleep(5 * l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
                 cc.cancelWithCause(error.BrokenPipe);
             }
-        }.run, .{ &cancel_ctx, lib });
+        }.run, .{ &cancel_ctx, std });
         defer cancel_thread.join();
 
         try testing.expectError(error.BrokenPipe, racer.raceContext(cancel_ctx));
     }
 }
 
-fn exhaustedTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const R = root.Racer(lib, u32);
+fn exhaustedTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
+    const R = root.Racer(std, time, u32);
 
     var racer = try R.init(allocator);
     defer racer.deinit();
@@ -418,11 +418,11 @@ fn exhaustedTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     racer.wait();
 }
 
-fn cancelTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const Context = context_mod.make(lib);
-    const R = root.Racer(lib, u32);
-    const BoolAtomic = lib.atomic.Value(bool);
+fn cancelTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
+    const Context = context_mod.make(std, time);
+    const R = root.Racer(std, time, u32);
+    const BoolAtomic = std.atomic.Value(bool);
 
     const Flags = struct {
         saw_done: BoolAtomic = BoolAtomic.init(false),
@@ -438,21 +438,21 @@ fn cancelTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
         try racer.spawn(.{}, struct {
             fn run(ctx: R.State, l: type, f: *Flags) void {
                 while (!ctx.done()) {
-                    l.Thread.sleep(l.time.ns_per_ms);
+                    l.Thread.sleep(@intCast(time.duration.MilliSecond));
                 }
 
                 f.saw_done.store(true, .release);
                 f.success_rejected.store(!ctx.success(99), .release);
                 f.finished.store(true, .release);
             }
-        }.run, .{ lib, &flags });
+        }.run, .{ std, &flags });
 
-        var cancel_thread = try lib.Thread.spawn(.{}, struct {
+        var cancel_thread = try std.Thread.spawn(.{}, struct {
             fn run(r: *R, l: type) void {
-                l.Thread.sleep(5 * l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
                 r.cancel();
             }
-        }.run, .{ &racer, lib });
+        }.run, .{ &racer, std });
         defer cancel_thread.join();
 
         switch (racer.race()) {
@@ -462,7 +462,7 @@ fn cancelTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
 
         try testing.expect(racer.done());
         try testing.expectEqual(@as(?u32, null), racer.value());
-        try waitForTrue(lib, &flags.saw_done, 200);
+        try waitForTrue(std, time, &flags.saw_done, 200 * time.duration.MilliSecond);
         try testing.expect(flags.success_rejected.load(.acquire));
         try testing.expect(flags.finished.load(.acquire));
 
@@ -481,21 +481,21 @@ fn cancelTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
         try racer.spawn(.{}, struct {
             fn run(ctx: R.State, l: type, f: *Flags) void {
                 while (!ctx.done()) {
-                    l.Thread.sleep(l.time.ns_per_ms);
+                    l.Thread.sleep(@intCast(time.duration.MilliSecond));
                 }
 
                 f.saw_done.store(true, .release);
                 f.success_rejected.store(!ctx.success(123), .release);
                 f.finished.store(true, .release);
             }
-        }.run, .{ lib, &flags });
+        }.run, .{ std, &flags });
 
-        var cancel_thread = try lib.Thread.spawn(.{}, struct {
+        var cancel_thread = try std.Thread.spawn(.{}, struct {
             fn run(r: *R, l: type) void {
-                l.Thread.sleep(5 * l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
                 r.cancel();
             }
-        }.run, .{ &racer, lib });
+        }.run, .{ &racer, std });
         defer cancel_thread.join();
 
         switch (try racer.raceContext(context.background())) {
@@ -505,7 +505,7 @@ fn cancelTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
 
         try testing.expect(racer.done());
         try testing.expectEqual(@as(?u32, null), racer.value());
-        try waitForTrue(lib, &flags.saw_done, 200);
+        try waitForTrue(std, time, &flags.saw_done, 200 * time.duration.MilliSecond);
         try testing.expect(flags.success_rejected.load(.acquire));
         try testing.expect(flags.finished.load(.acquire));
 
@@ -521,19 +521,19 @@ fn cancelTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
         try racer.spawn(.{}, struct {
             fn run(ctx: R.State, l: type, fin: *BoolAtomic) void {
                 while (!ctx.done()) {
-                    l.Thread.sleep(l.time.ns_per_ms);
+                    l.Thread.sleep(@intCast(time.duration.MilliSecond));
                 }
-                l.Thread.sleep(5 * l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
                 fin.store(true, .release);
             }
-        }.run, .{ lib, &finished });
+        }.run, .{ std, &finished });
 
-        var cancel_thread = try lib.Thread.spawn(.{}, struct {
+        var cancel_thread = try std.Thread.spawn(.{}, struct {
             fn run(r: *R, l: type) void {
-                l.Thread.sleep(5 * l.time.ns_per_ms);
+                l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
                 r.cancel();
             }
-        }.run, .{ &racer, lib });
+        }.run, .{ &racer, std });
 
         racer.wait();
         cancel_thread.join();
@@ -544,8 +544,8 @@ fn cancelTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     }
 }
 
-fn DoneAndWaitFlags(comptime lib: type) type {
-    const BoolAtomic = lib.atomic.Value(bool);
+fn DoneAndWaitFlags(comptime std: type) type {
+    const BoolAtomic = std.atomic.Value(bool);
     return struct {
         saw_done: BoolAtomic = BoolAtomic.init(false),
         allow_exit: BoolAtomic = BoolAtomic.init(false),
@@ -554,9 +554,9 @@ fn DoneAndWaitFlags(comptime lib: type) type {
     };
 }
 
-fn doneAndWaitWorker(ctx: anytype, l: type, f: anytype) void {
+fn doneAndWaitWorker(ctx: anytype, l: type, tm: type, f: anytype) void {
     while (!ctx.done()) {
-        l.Thread.sleep(l.time.ns_per_ms);
+        l.Thread.sleep(@intCast(tm.duration.MilliSecond));
     }
 
     // `saw_done` acts as the publication fence for the test thread, so publish
@@ -565,16 +565,16 @@ fn doneAndWaitWorker(ctx: anytype, l: type, f: anytype) void {
     f.saw_done.store(true, .release);
 
     while (!f.allow_exit.load(.acquire)) {
-        l.Thread.sleep(l.time.ns_per_ms);
+        l.Thread.sleep(@intCast(tm.duration.MilliSecond));
     }
 
     f.finished.store(true, .release);
 }
 
-fn doneAndWaitTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const R = root.Racer(lib, u32);
-    const Flags = DoneAndWaitFlags(lib);
+fn doneAndWaitTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
+    const R = root.Racer(std, time, u32);
+    const Flags = DoneAndWaitFlags(std);
 
     var racer = try R.init(allocator);
     defer racer.deinit();
@@ -582,14 +582,14 @@ fn doneAndWaitTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     var flags = Flags{};
     errdefer flags.allow_exit.store(true, .release);
 
-    try racer.spawn(.{}, doneAndWaitWorker, .{ lib, &flags });
+    try racer.spawn(.{}, doneAndWaitWorker, .{ std, time, &flags });
 
     try racer.spawn(.{}, struct {
         fn run(ctx: R.State, l: type) void {
-            l.Thread.sleep(5 * l.time.ns_per_ms);
+            l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
             _ = ctx.success(7);
         }
-    }.run, .{lib});
+    }.run, .{std});
 
     switch (racer.race()) {
         .winner => |value| try testing.expectEqual(@as(u32, 7), value),
@@ -599,7 +599,7 @@ fn doneAndWaitTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     try testing.expect(racer.done());
     try testing.expectEqual(@as(?u32, 7), racer.value());
 
-    try waitForTrue(lib, &flags.saw_done, 200);
+    try waitForTrue(std, time, &flags.saw_done, 200 * time.duration.MilliSecond);
     try testing.expect(!flags.finished.load(.acquire));
     try testing.expect(flags.winner_rejected.load(.acquire));
 
@@ -610,10 +610,10 @@ fn doneAndWaitTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     try testing.expect(flags.finished.load(.acquire));
 }
 
-fn doneSignalPublishesRejectionBeforeReadyFlagTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const R = root.Racer(lib, u32);
-    const Flags = DoneAndWaitFlags(lib);
+fn doneSignalPublishesRejectionBeforeReadyFlagTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
+    const R = root.Racer(std, time, u32);
+    const Flags = DoneAndWaitFlags(std);
 
     var racer = try R.init(allocator);
     defer racer.deinit();
@@ -621,20 +621,20 @@ fn doneSignalPublishesRejectionBeforeReadyFlagTests(comptime lib: type, allocato
     var flags = Flags{};
     errdefer flags.allow_exit.store(true, .release);
 
-    try racer.spawn(.{}, doneAndWaitWorker, .{ lib, &flags });
+    try racer.spawn(.{}, doneAndWaitWorker, .{ std, time, &flags });
     try racer.spawn(.{}, struct {
         fn run(ctx: R.State, l: type) void {
-            l.Thread.sleep(5 * l.time.ns_per_ms);
+            l.Thread.sleep(@intCast(5 * time.duration.MilliSecond));
             _ = ctx.success(7);
         }
-    }.run, .{lib});
+    }.run, .{std});
 
     switch (racer.race()) {
         .winner => |value| try testing.expectEqual(@as(u32, 7), value),
         .exhausted => return error.ExpectedWinner,
     }
 
-    try waitForTrue(lib, &flags.saw_done, 200);
+    try waitForTrue(std, time, &flags.saw_done, 200 * time.duration.MilliSecond);
     try testing.expect(flags.winner_rejected.load(.acquire));
     try testing.expect(!flags.finished.load(.acquire));
 
@@ -643,18 +643,18 @@ fn doneSignalPublishesRejectionBeforeReadyFlagTests(comptime lib: type, allocato
     try testing.expect(flags.finished.load(.acquire));
 }
 
-fn spawnAllocatorTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const tst = lib.testing;
-    const CapturingThread = CapturingThreadType(lib);
-    const PassthroughAllocator = PassthroughAllocatorType(lib);
+fn spawnAllocatorTests(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const tst = std.testing;
+    const CapturingThread = CapturingThreadType(std);
+    const PassthroughAllocator = PassthroughAllocatorType(std);
     const CapturingThreadLib = struct {
-        pub const mem = lib.mem;
-        pub const atomic = lib.atomic;
-        pub const testing = lib.testing;
-        pub const debug = lib.debug;
+        pub const mem = std.mem;
+        pub const atomic = std.atomic;
+        pub const testing = std.testing;
+        pub const debug = std.debug;
         pub const Thread = CapturingThread;
     };
-    const R = root.Racer(CapturingThreadLib, u32);
+    const R = root.Racer(CapturingThreadLib, time, u32);
 
     var racer = try R.init(allocator);
     defer racer.deinit();
@@ -667,7 +667,7 @@ fn spawnAllocatorTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     }.run, .{});
 
     const seen_default = CapturingThread.last_allocator orelse return error.ExpectedDefaultAllocator;
-    try tst.expect(lib.meta.eql(seen_default, allocator));
+    try tst.expect(std.meta.eql(seen_default, allocator));
 
     var explicit_allocator_state = PassthroughAllocator.init(allocator);
     const explicit_allocator = explicit_allocator_state.allocator();
@@ -680,46 +680,46 @@ fn spawnAllocatorTests(comptime lib: type, allocator: lib.mem.Allocator) !void {
     }.run, .{});
 
     const seen_explicit = CapturingThread.last_allocator orelse return error.ExpectedExplicitAllocator;
-    try tst.expect(lib.meta.eql(seen_explicit, explicit_allocator));
+    try tst.expect(std.meta.eql(seen_explicit, explicit_allocator));
 }
 
-fn initOomTests(comptime lib: type) !void {
-    const testing = lib.testing;
-    const R = root.Racer(lib, u32);
-    const FailingAllocator = FailingAllocatorType(lib);
+fn initOomTests(comptime std: type, comptime time: type) !void {
+    const testing = std.testing;
+    const R = root.Racer(std, time, u32);
+    const FailingAllocator = FailingAllocatorType(std);
 
     var failing_allocator = FailingAllocator{};
 
     try testing.expectError(error.OutOfMemory, R.init(failing_allocator.allocator()));
 }
 
-fn waitForTrue(comptime lib: type, flag: *lib.atomic.Value(bool), timeout_ms: u64) !void {
-    var elapsed_ms: u64 = 0;
-    while (elapsed_ms < timeout_ms) : (elapsed_ms += 1) {
+fn waitForTrue(comptime std: type, comptime time: type, flag: *std.atomic.Value(bool), timeout: time.duration.Duration) !void {
+    var elapsed: time.duration.Duration = 0;
+    while (elapsed < timeout) : (elapsed += time.duration.MilliSecond) {
         if (flag.load(.acquire)) return;
-        lib.Thread.sleep(lib.time.ns_per_ms);
+        std.Thread.sleep(@intCast(time.duration.MilliSecond));
     }
     return error.TimeoutWaitingForFlag;
 }
 
-fn waitForCount(comptime lib: type, count: *lib.atomic.Value(u32), expected: u32, timeout_ms: u64) !void {
-    var elapsed_ms: u64 = 0;
-    while (elapsed_ms < timeout_ms) : (elapsed_ms += 1) {
+fn waitForCount(comptime std: type, comptime time: type, count: *std.atomic.Value(u32), expected: u32, timeout: time.duration.Duration) !void {
+    var elapsed: time.duration.Duration = 0;
+    while (elapsed < timeout) : (elapsed += time.duration.MilliSecond) {
         if (count.load(.acquire) >= expected) return;
-        lib.Thread.sleep(lib.time.ns_per_ms);
+        std.Thread.sleep(@intCast(time.duration.MilliSecond));
     }
     return error.TimeoutWaitingForCount;
 }
 
-fn allocatorAlignment(comptime lib: type) type {
-    const alloc_ptr_type = @TypeOf(lib.testing.allocator.vtable.alloc);
+fn allocatorAlignment(comptime std: type) type {
+    const alloc_ptr_type = @TypeOf(std.testing.allocator.vtable.alloc);
     const alloc_fn_type = @typeInfo(alloc_ptr_type).pointer.child;
     return @typeInfo(alloc_fn_type).@"fn".params[2].type.?;
 }
 
-fn PassthroughAllocatorType(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
-    const Alignment = allocatorAlignment(lib);
+fn PassthroughAllocatorType(comptime std: type) type {
+    const Allocator = std.mem.Allocator;
+    const Alignment = allocatorAlignment(std);
 
     return struct {
         backing: Allocator,
@@ -766,9 +766,9 @@ fn PassthroughAllocatorType(comptime lib: type) type {
     };
 }
 
-fn FailingAllocatorType(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
-    const Alignment = allocatorAlignment(lib);
+fn FailingAllocatorType(comptime std: type) type {
+    const Allocator = std.mem.Allocator;
+    const Alignment = allocatorAlignment(std);
 
     return struct {
         const Self = @This();
@@ -803,16 +803,16 @@ fn FailingAllocatorType(comptime lib: type) type {
     };
 }
 
-fn CapturingThreadType(comptime lib: type) type {
+fn CapturingThreadType(comptime std: type) type {
     return struct {
-        pub const Mutex = lib.Thread.Mutex;
-        pub const Condition = lib.Thread.Condition;
+        pub const Mutex = std.Thread.Mutex;
+        pub const Condition = std.Thread.Condition;
         pub const SpawnError = error{};
         pub const SpawnConfig = struct {
-            allocator: ?lib.mem.Allocator = null,
+            allocator: ?std.mem.Allocator = null,
         };
 
-        pub var last_allocator: ?lib.mem.Allocator = null;
+        pub var last_allocator: ?std.mem.Allocator = null;
 
         const Self = @This();
 

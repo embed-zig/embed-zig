@@ -18,10 +18,10 @@ fn typeId(comptime T: type) *const anyopaque {
     return @ptrCast(&TypeIdHolder(T).id);
 }
 
-pub const default_poll_interval_ns: u64 = 10 * glib.std.time.ns_per_ms;
+pub const default_poll_interval: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond;
 
 pub const Config = struct {
-    poll_interval_ns: u64 = default_poll_interval_ns,
+    poll_interval: glib.time.duration.Duration = default_poll_interval,
     spawn_config: glib.std.Thread.SpawnConfig = .{},
 };
 
@@ -105,7 +105,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 started: bool = false,
                 stopped: bool = false,
                 deinited: bool = false,
-                last_poll_interval_ns: u64 = 0,
+                last_poll_interval: glib.time.duration.Duration = 0,
 
                 pub fn bindOutput(self: *@This(), _: Emitter) void {
                     self.bound = true;
@@ -113,7 +113,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
                 pub fn start(self: *@This(), config: Config) !void {
                     self.started = true;
-                    self.last_poll_interval_ns = config.poll_interval_ns;
+                    self.last_poll_interval = config.poll_interval;
                 }
 
                 pub fn stop(self: *@This()) void {
@@ -145,7 +145,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(impl.started);
             try grt.std.testing.expect(impl.stopped);
             try grt.std.testing.expect(impl.deinited);
-            try grt.std.testing.expectEqual(default_poll_interval_ns, impl.last_poll_interval_ns);
+            try grt.std.testing.expectEqual(default_poll_interval, impl.last_poll_interval);
         }
     };
 

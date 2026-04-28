@@ -129,7 +129,7 @@ pub fn initSpi(bus: Spi, delay: Delay, config: SpiConfig) Fm175xx {
 
 pub fn open(self: *Fm175xx) Error!void {
     self.enable();
-    self.delay.sleepMs(100);
+    self.delay.sleep(100 * glib.time.duration.MilliSecond);
 }
 
 pub fn close(self: *Fm175xx) void {
@@ -146,14 +146,14 @@ pub fn disable(self: *Fm175xx) void {
 
 pub fn hardReset(self: *Fm175xx) Error!void {
     self.disable();
-    self.delay.sleepMs(1);
+    self.delay.sleep(glib.time.duration.MilliSecond);
     self.enable();
-    self.delay.sleepMs(1);
+    self.delay.sleep(glib.time.duration.MilliSecond);
 }
 
 pub fn softReset(self: *Fm175xx) Error!void {
     try self.writeByte(regs.command, regs.cmd_soft_reset);
-    self.delay.sleepMs(1);
+    self.delay.sleep(glib.time.duration.MilliSecond);
     _ = try self.setBitMask(regs.control, 0x10);
 }
 
@@ -197,7 +197,7 @@ pub fn setRf(self: *Fm175xx, path: RfPath) Error!void {
         },
     }
 
-    self.delay.sleepMs(5);
+    self.delay.sleep(5 * glib.time.duration.MilliSecond);
     const observed = try self.readByte(regs.tx_ctrl);
     if (observed != expected) return error.InvalidState;
 }
@@ -224,8 +224,8 @@ pub fn ntagReadAll(self: *Fm175xx, out: []u8) Error!usize {
 pub fn transceive(self: *Fm175xx, exchange: TypeA.Exchange, rx: []u8) TypeA.Error!usize {
     if (exchange.tx.len == 0) return error.InvalidArgument;
     if (exchange.tx_bits == 0) return error.InvalidArgument;
-    if (exchange.timeout_ms == 0) return error.InvalidArgument;
-    if (exchange.timeout_ms > TypeA.max_timeout_ms) return error.InvalidArgument;
+    if (exchange.timeout <= 0) return error.InvalidArgument;
+    if (exchange.timeout > TypeA.max_timeout) return error.InvalidArgument;
     if (exchange.tx_bits > exchange.tx.len * 8) return error.InvalidArgument;
 
     try self.preCommand();
@@ -237,9 +237,9 @@ pub fn transceive(self: *Fm175xx, exchange: TypeA.Exchange, rx: []u8) TypeA.Erro
     var out_len: usize = 0;
     var pending_error: ?TypeA.Error = null;
     var completed = false;
-    var poll_budget: u32 = exchange.timeout_ms + 8;
+    var poll_budget = exchange.timeout + 8 * glib.time.duration.MilliSecond;
 
-    while (poll_budget > 0) : (poll_budget -= 1) {
+    while (poll_budget > 0) : (poll_budget -= glib.time.duration.MilliSecond) {
         const irq = try self.readByte(regs.com_irq);
         if ((irq & 0x01) != 0) {
             pending_error = error.Timeout;
@@ -276,7 +276,7 @@ pub fn transceive(self: *Fm175xx, exchange: TypeA.Exchange, rx: []u8) TypeA.Erro
             completed = true;
             break;
         }
-        self.delay.sleepMs(1);
+        self.delay.sleep(glib.time.duration.MilliSecond);
     }
 
     if (!completed and pending_error == null) pending_error = error.Timeout;
@@ -452,13 +452,13 @@ fn clearBitMask(self: *Fm175xx, addr: u8, bits: u8) TypeA.Error!u8 {
     return value;
 }
 
-fn setTimer(self: *Fm175xx, timeout_ms: u32) TypeA.Error!void {
-    if (timeout_ms == 0) return error.InvalidArgument;
-    if (timeout_ms > TypeA.max_timeout_ms) return error.InvalidArgument;
+fn setTimer(self: *Fm175xx, timeout: glib.time.duration.Duration) TypeA.Error!void {
+    if (timeout <= 0) return error.InvalidArgument;
+    if (timeout > TypeA.max_timeout) return error.InvalidArgument;
 
     var prescaler: u32 = 0;
     var reload: u64 = 0;
-    const timeout_ticks = @as(u64, timeout_ms) * 13560;
+    const timeout_ticks = durationToTimerTicks(timeout);
     while (prescaler < 0x0FFF) : (prescaler += 1) {
         reload = (timeout_ticks - 1) / (@as(u64, prescaler) * 2 + 1);
         if (reload < 0xFFFF) break;
@@ -469,6 +469,13 @@ fn setTimer(self: *Fm175xx, timeout_ms: u32) TypeA.Error!void {
     try self.writeByte(regs.tprescaler, @truncate(prescaler));
     try self.writeByte(regs.treload_hi, @truncate(reload >> 8));
     try self.writeByte(regs.treload_lo, @truncate(reload));
+}
+
+fn durationToTimerTicks(timeout: glib.time.duration.Duration) u64 {
+    const ticks_per_ms: u128 = 13_560;
+    const ticks = (@as(u128, @intCast(timeout)) * ticks_per_ms + @as(u128, @intCast(glib.time.duration.MilliSecond - 1))) /
+        @as(u128, @intCast(glib.time.duration.MilliSecond));
+    return @intCast(@min(ticks, glib.std.math.maxInt(u64)));
 }
 
 fn preCommand(self: *Fm175xx) TypeA.Error!void {
@@ -494,7 +501,7 @@ fn prepareExchange(self: *Fm175xx, exchange: TypeA.Exchange) TypeA.Error!void {
     _ = try self.clearBitMask(regs.status2, 0x08);
     try self.writeByte(regs.bit_framing, @truncate(exchange.tx_bits % 8));
     if (exchange.reset_collision) try self.writeByte(regs.coll, regs.reset_collision);
-    try self.setTimer(exchange.timeout_ms);
+    try self.setTimer(exchange.timeout);
 }
 
 fn finishCommand(self: *Fm175xx, maybe_err: ?TypeA.Error, out_bits: usize) TypeA.Error!usize {
@@ -543,9 +550,9 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             const FakeDelay = struct {
-                last_sleep_ms: u32 = 0,
-                pub fn sleepMs(self: *@This(), ms: u32) void {
-                    self.last_sleep_ms = ms;
+                last_sleep_duration: glib.time.duration.Duration = 0,
+                pub fn sleep(self: *@This(), duration: glib.time.duration.Duration) void {
+                    self.last_sleep_duration = duration;
                 }
             };
 
@@ -574,7 +581,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try reader.setIsoType(.a);
 
             try grt.std.testing.expectEqual(@as(usize, 1), power.enabled);
-            try grt.std.testing.expectEqual(@as(u32, 100), delay.last_sleep_ms);
+            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 100 * glib.time.duration.MilliSecond), delay.last_sleep_duration);
             try grt.std.testing.expectEqual(@as(u8, 0x00), i2c.regs_map[regs.tx_mode]);
             try grt.std.testing.expectEqual(@as(u8, 0x00), i2c.regs_map[regs.rx_mode]);
             try grt.std.testing.expectEqual(@as(u8, 0xF8), i2c.regs_map[regs.gsn]);
@@ -611,9 +618,9 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             const FakeDelay = struct {
-                last_sleep_ms: u32 = 0,
-                pub fn sleepMs(self: *@This(), ms: u32) void {
-                    self.last_sleep_ms = ms;
+                last_sleep_duration: glib.time.duration.Duration = 0,
+                pub fn sleep(self: *@This(), duration: glib.time.duration.Duration) void {
+                    self.last_sleep_duration = duration;
                 }
             };
 
@@ -624,7 +631,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try reader.setRf(.path2);
             try grt.std.testing.expectEqual(@as(u8, 0x82), i2c.regs_map[regs.tx_ctrl]);
-            try grt.std.testing.expectEqual(@as(u32, 5), delay.last_sleep_ms);
+            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 5 * glib.time.duration.MilliSecond), delay.last_sleep_duration);
 
             try grt.std.testing.expectError(error.UnsupportedOperation, reader.setIsoType(.b));
         }
@@ -655,7 +662,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             const FakeDelay = struct {
-                pub fn sleepMs(_: *@This(), _: u32) void {}
+                pub fn sleep(_: *@This(), _: glib.time.duration.Duration) void {}
             };
 
             var spi = FakeSpi{};
@@ -716,7 +723,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             const FakeDelay = struct {
                 sleep_calls: usize = 0,
-                pub fn sleepMs(self: *@This(), _: u32) void {
+                pub fn sleep(self: *@This(), _: glib.time.duration.Duration) void {
                     self.sleep_calls += 1;
                 }
             };
@@ -729,7 +736,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const bits = try reader.transceive(.{
                 .tx = &.{0x26},
                 .tx_bits = 7,
-                .timeout_ms = 1,
+                .timeout = glib.time.duration.MilliSecond,
             }, &rx);
 
             try grt.std.testing.expectEqual(@as(usize, 11), bits);
@@ -765,7 +772,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             const FakeDelay = struct {
                 sleep_calls: usize = 0,
-                pub fn sleepMs(self: *@This(), _: u32) void {
+                pub fn sleep(self: *@This(), _: glib.time.duration.Duration) void {
                     self.sleep_calls += 1;
                 }
             };
@@ -778,7 +785,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectError(error.Timeout, reader.transceive(.{
                 .tx = &.{0x26},
                 .tx_bits = 7,
-                .timeout_ms = 2,
+                .timeout = 2 * glib.time.duration.MilliSecond,
             }, &rx));
             try grt.std.testing.expect(delay.sleep_calls >= 1);
         }
@@ -795,7 +802,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             const FakeDelay = struct {
-                pub fn sleepMs(_: *@This(), _: u32) void {}
+                pub fn sleep(_: *@This(), _: glib.time.duration.Duration) void {}
             };
 
             var i2c = FakeI2c{};
@@ -806,13 +813,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectError(error.InvalidArgument, reader.transceive(.{
                 .tx = &.{0x26},
                 .tx_bits = 7,
-                .timeout_ms = 0,
+                .timeout = 0,
             }, &rx));
 
             try grt.std.testing.expectError(error.InvalidArgument, reader.transceive(.{
                 .tx = &.{0x26},
                 .tx_bits = 7,
-                .timeout_ms = TypeA.max_timeout_ms + 1,
+                .timeout = TypeA.max_timeout + glib.time.duration.MilliSecond,
             }, &rx));
         }
     };

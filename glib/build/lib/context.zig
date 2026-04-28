@@ -14,4 +14,5 @@ pub fn create(
 
 pub fn link(mod: *std.Build.Module, deps: anytype) void {
     mod.addImport("stdz", deps.stdz);
+    mod.addImport("time", deps.time);
 }

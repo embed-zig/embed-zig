@@ -17,8 +17,9 @@ const device_name = "PairXfer";
 const service_uuid: u16 = 0x180D;
 const plain_char_uuid: u16 = 0x2A57;
 const xfer_char_uuid: u16 = 0x2A58;
-const timeout_ms: u32 = 5000;
-const reconnect_timeout_ms: u32 = 10000;
+const timeout: glib.time.duration.Duration = 5 * glib.time.duration.Second;
+const reconnect_timeout: glib.time.duration.Duration = 10 * glib.time.duration.Second;
+const poll_interval: glib.time.duration.Duration = glib.time.duration.MilliSecond;
 
 pub fn makeCentral(comptime grt: type, comptime ClientType: type, host: anytype) glib.testing.TestRunner {
     const HostPtr = @TypeOf(host);
@@ -130,7 +131,7 @@ fn runCentralRole(comptime grt: type, comptime ClientType: type, host: anytype, 
         return err;
     };
     conn.disconnect();
-    try waitForDisconnectCount(grt, &state, 1, timeout_ms);
+    try waitForDisconnectCount(grt, &state, 1, timeout);
 
     const found_again = try discoverPeer(grt, central, &state);
     var conn_again = try client.connect(found_again.addr, found_again.addr_type, .{});
@@ -139,7 +140,7 @@ fn runCentralRole(comptime grt: type, comptime ClientType: type, host: anytype, 
         return err;
     };
     conn_again.disconnect();
-    try waitForDisconnectCount(grt, &state, 2, timeout_ms);
+    try waitForDisconnectCount(grt, &state, 2, timeout);
 
     try grt.std.testing.expectEqual(@as(u32, 2), state.disconnected_count);
 }
@@ -276,8 +277,8 @@ fn runPeripheralRole(comptime grt: type, comptime ServerType: type, host: anytyp
     defer server.stopAdvertising();
 
     var restarted_after_disconnects: u32 = 0;
-    var waited_ms: u32 = 0;
-    while (waited_ms <= reconnect_timeout_ms) : (waited_ms += 1) {
+    var waited: glib.time.duration.Duration = 0;
+    while (waited <= reconnect_timeout) : (waited += poll_interval) {
         var disconnected_count: u32 = 0;
         state.mutex.lock();
         disconnected_count = state.disconnected_count;
@@ -289,9 +290,9 @@ fn runPeripheralRole(comptime grt: type, comptime ServerType: type, host: anytyp
             server.stopAdvertising();
             try startAdvertising(&server);
         }
-        grt.std.Thread.sleep(1 * 1_000_000);
+        grt.std.Thread.sleep(@intCast(poll_interval));
     }
-    if (waited_ms > reconnect_timeout_ms) return error.Timeout;
+    if (waited > reconnect_timeout) return error.Timeout;
 
     var expected_read: [32]u8 = undefined;
     const expected_read_len = fillPlainReadPayload(&expected_read);
@@ -364,11 +365,11 @@ fn discoverPeer(comptime grt: type, c: Central, state: anytype) !FoundDevice {
     resetFound(state);
     try c.startScanning(.{
         .active = true,
-        .timeout_ms = timeout_ms,
+        .timeout = timeout,
         .service_uuids = &.{service_uuid},
     });
     defer c.stopScanning();
-    return waitForFoundDevice(grt, state, timeout_ms);
+    return waitForFoundDevice(grt, state, timeout);
 }
 
 fn resetFound(state: anytype) void {
@@ -377,28 +378,28 @@ fn resetFound(state: anytype) void {
     state.found = false;
 }
 
-fn waitForFoundDevice(comptime grt: type, state: anytype, wait_ms: u32) !FoundDevice {
-    var waited_ms: u32 = 0;
-    while (waited_ms <= wait_ms) : (waited_ms += 1) {
+fn waitForFoundDevice(comptime grt: type, state: anytype, wait: glib.time.duration.Duration) !FoundDevice {
+    var waited: glib.time.duration.Duration = 0;
+    while (waited <= wait) : (waited += poll_interval) {
         state.mutex.lock();
         const found = state.found;
         const addr = state.addr;
         const addr_type = state.addr_type;
         state.mutex.unlock();
         if (found) return .{ .addr = addr, .addr_type = addr_type };
-        grt.std.Thread.sleep(1 * 1_000_000);
+        grt.std.Thread.sleep(@intCast(poll_interval));
     }
     return error.Timeout;
 }
 
-fn waitForDisconnectCount(comptime grt: type, state: anytype, want: u32, wait_ms: u32) !void {
-    var waited_ms: u32 = 0;
-    while (waited_ms <= wait_ms) : (waited_ms += 1) {
+fn waitForDisconnectCount(comptime grt: type, state: anytype, want: u32, wait: glib.time.duration.Duration) !void {
+    var waited: glib.time.duration.Duration = 0;
+    while (waited <= wait) : (waited += poll_interval) {
         state.mutex.lock();
         const disconnected_count = state.disconnected_count;
         state.mutex.unlock();
         if (disconnected_count >= want) return;
-        grt.std.Thread.sleep(1 * 1_000_000);
+        grt.std.Thread.sleep(@intCast(poll_interval));
     }
     return error.Timeout;
 }

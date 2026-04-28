@@ -35,7 +35,7 @@ pub fn emitFn(ctx: *const anyopaque, source_id: u32, adapter_event: modem_api.Mo
 
     out.emit(.{
         .origin = .source,
-        .timestamp_ns = 0,
+        .timestamp = 0,
         .body = value,
     }) catch @panic("zux.component.modem.EventHook failed to forward event");
 }

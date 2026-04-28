@@ -90,7 +90,7 @@ directly.
 Current phase-1 contracts:
 
 - `drivers.io.I2c`: non-owning type-erased register/control bus
-- `drivers.io.Delay`: non-owning type-erased millisecond sleep hook
+- `drivers.io.Delay`: non-owning type-erased duration sleep hook
 - `drivers.io.Spi`: non-owning type-erased synchronous SPI bus
 
 These wrappers are intentionally narrow. They should expose only the operations

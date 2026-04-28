@@ -6,7 +6,8 @@
 //! request serialization, response parsing, and request-scoped timeout
 //! application from `Request.context()`.
 
-const std = @import("std");
+const time_mod = @import("time");
+const host_std = @import("std");
 
 const io = @import("io");
 const dialer_mod = @import("../Dialer.zig");
@@ -30,29 +31,29 @@ const BufferedConnWriter = io.BufferedWriter(Conn);
 const TextprotoReader = textproto_reader_mod.Reader(BufferedConnReader);
 const TextprotoWriter = textproto_writer_mod.Writer(BufferedConnWriter);
 
-pub fn Transport(comptime lib: type, comptime net: type) type {
-    const Allocator = lib.mem.Allocator;
+pub fn Transport(comptime std: type, comptime net: type) type {
+    const Allocator = std.mem.Allocator;
     const Addr = netip.AddrPort;
     const IpAddr = netip.Addr;
-    const Dialer = dialer_mod.Dialer(lib, net);
-    const Resolver = resolver_mod.Resolver(lib, net);
-    const TcpConn = tcp_conn_mod.TcpConn(lib, net);
-    const Tls = tls_mod.make(lib, net);
-    const Thread = lib.Thread;
+    const Dialer = dialer_mod.Dialer(std, net);
+    const Resolver = resolver_mod.Resolver(std, net);
+    const TcpConn = tcp_conn_mod.TcpConn(std, net);
+    const Tls = tls_mod.make(std, net);
+    const Thread = std.Thread;
     const default_user_agent = "stdz-zig-http-client/1.0";
     const default_max_header_bytes = 32 * 1024;
-    const unlimited_body_bytes = std.math.maxInt(usize);
+    const unlimited_body_bytes = host_std.math.maxInt(usize);
     const default_body_io_buf_len = 1024;
     const max_informational_responses = 8;
     const default_http2_alpn = [_][]const u8{ "h2", "http/1.1" };
-    const context_timeout_grace_ns = 5 * lib.time.ns_per_ms;
+    const context_timeout_grace = 5 * time_mod.duration.MilliSecond;
     return struct {
         allocator: Allocator,
         options: Options,
         resolver: Resolver,
         idle_mu: Thread.Mutex = .{},
-        idle_conns: std.ArrayList(IdleConn),
-        host_states: std.ArrayList(HostState),
+        idle_conns: host_std.ArrayList(IdleConn),
+        host_states: host_std.ArrayList(HostState),
         idle_generation: usize = 0,
 
         const Self = @This();
@@ -127,20 +128,20 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
             body_io_buf_len: usize = default_body_io_buf_len,
             max_header_bytes: usize = default_max_header_bytes,
             max_body_bytes: usize = unlimited_body_bytes,
-            tls_handshake_timeout_ms: ?u32 = 10 * 1000,
-            response_header_timeout_ms: ?u32 = null,
-            expect_continue_timeout_ms: u32 = 1000,
+            tls_handshake_timeout: ?time_mod.duration.Duration = 10 * time_mod.duration.Second,
+            response_header_timeout: ?time_mod.duration.Duration = null,
+            expect_continue_timeout: time_mod.duration.Duration = time_mod.duration.Second,
             disable_keep_alives: bool = false,
             max_conns_per_host: usize = 0,
             max_idle_conns: usize = 100,
             max_idle_conns_per_host: usize = 0,
-            idle_conn_timeout_ms: ?u32 = 90 * 1000,
+            idle_conn_timeout: ?time_mod.duration.Duration = 90 * time_mod.duration.Second,
         };
 
         const IdleConn = struct {
             key: []u8,
             conn: Conn,
-            idle_since_ms: i64,
+            idle_since: time_mod.instant.Time,
         };
 
         const IdleConnTake = struct {
@@ -290,8 +291,8 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
                 const line_buf = try self.allocator.alloc(u8, self.max_header_bytes);
                 defer self.allocator.free(line_buf);
                 const line = self.streamReadLine(line_buf) catch |err| return self.mapReadError(err);
-                const semi = std.mem.indexOfScalar(u8, line, ';') orelse line.len;
-                return std.fmt.parseInt(usize, std.mem.trim(u8, line[0..semi], " "), 16) catch error.InvalidResponse;
+                const semi = host_std.mem.indexOfScalar(u8, line, ';') orelse line.len;
+                return host_std.fmt.parseInt(usize, host_std.mem.trim(u8, line[0..semi], " "), 16) catch error.InvalidResponse;
             }
 
             fn discardTrailers(self: *BodyState) anyerror!void {
@@ -463,7 +464,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
             abort_requested: bool = false,
             result: ?anyerror = null,
             continue_state: ContinueState = .send,
-            expect_continue_timeout_ms: u32 = 0,
+            expect_continue_timeout: time_mod.duration.Duration = 0,
             write_context_active: bool = false,
 
             const ContinueState = enum {
@@ -482,7 +483,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
                 send_chunked: bool,
                 content_length: usize,
                 wait_for_continue: bool,
-                expect_continue_timeout_ms: u32,
+                expect_continue_timeout: time_mod.duration.Duration,
                 write_context_active: bool,
             ) RoundTripper.RoundTripError!*RequestBodyState {
                 const state = try allocator.create(RequestBodyState);
@@ -501,8 +502,8 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
                     .io_buf = io_buf,
                     .send_chunked = send_chunked,
                     .content_length = content_length,
-                    .continue_state = if (wait_for_continue and expect_continue_timeout_ms != 0) .wait else .send,
-                    .expect_continue_timeout_ms = expect_continue_timeout_ms,
+                    .continue_state = if (wait_for_continue and expect_continue_timeout > 0) .wait else .send,
+                    .expect_continue_timeout = expect_continue_timeout,
                     .write_context_active = write_context_active,
                 };
                 state.thread = Thread.spawn(transport.options.spawn_config, run, .{state}) catch {
@@ -614,9 +615,11 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
 
                 if (self.continue_state != .wait) return self.continue_state != .skip and !self.abort_requested;
 
-                const wait_quantum_ns = 5 * lib.time.ns_per_ms;
-                const continue_deadline_ns = lib.time.nanoTimestamp() +
-                    @as(i128, self.expect_continue_timeout_ms) * lib.time.ns_per_ms;
+                const wait_quantum = 5 * time_mod.duration.MilliSecond;
+                const continue_deadline = time_mod.instant.add(
+                    net.time.instant.now(),
+                    self.expect_continue_timeout,
+                );
 
                 while (self.continue_state == .wait and !self.abort_requested) {
                     if (self.req.context()) |ctx| {
@@ -627,26 +630,26 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
                         }
                     }
 
-                    const now_ns = lib.time.nanoTimestamp();
-                    if (now_ns >= continue_deadline_ns) {
+                    const remaining_continue = time_mod.instant.sub(continue_deadline, net.time.instant.now());
+                    if (remaining_continue <= 0) {
                         self.continue_state = .send;
                         break;
                     }
 
-                    var wait_ns: i128 = @min(continue_deadline_ns - now_ns, wait_quantum_ns);
+                    var timed_wait = @min(remaining_continue, wait_quantum);
                     if (self.req.context()) |ctx| {
-                        if (ctx.deadline()) |ctx_deadline_ns| {
-                            const ctx_remaining_ns = ctx_deadline_ns - now_ns;
-                            if (ctx_remaining_ns <= 0) {
+                        if (ctx.deadline()) |deadline| {
+                            const ctx_remaining = @max(time_mod.instant.sub(deadline, net.time.instant.now()), 0);
+                            if (ctx_remaining <= 0) {
                                 self.continue_state = .skip;
                                 self.result = error.DeadlineExceeded;
                                 return false;
                             }
-                            wait_ns = @min(wait_ns, ctx_remaining_ns);
+                            timed_wait = @min(timed_wait, ctx_remaining);
                         }
                     }
 
-                    self.continue_cond.timedWait(&self.mu, @intCast(@max(wait_ns, 1))) catch |err| switch (err) {
+                    self.continue_cond.timedWait(&self.mu, @intCast(@max(timed_wait, 1))) catch |err| switch (err) {
                         error.Timeout => {},
                     };
                 }
@@ -709,8 +712,8 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
                 .allocator = allocator,
                 .options = owned_options,
                 .resolver = try Resolver.init(allocator, owned_options.resolver),
-                .idle_conns = try std.ArrayList(IdleConn).initCapacity(allocator, 0),
-                .host_states = try std.ArrayList(HostState).initCapacity(allocator, 0),
+                .idle_conns = try host_std.ArrayList(IdleConn).initCapacity(allocator, 0),
+                .host_states = try host_std.ArrayList(HostState).initCapacity(allocator, 0),
             };
         }
 
@@ -748,7 +751,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
                 if (ctx.err()) |err| return err;
             }
             try self.validateRequest(req);
-            if (std.ascii.eqlIgnoreCase(req.effectiveMethod(), "CONNECT")) return error.UnsupportedMethod;
+            if (host_std.ascii.eqlIgnoreCase(req.effectiveMethod(), "CONNECT")) return error.UnsupportedMethod;
             var attempt_req = req.*;
             var retried = false;
 
@@ -812,7 +815,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
                     send_chunked,
                     content_length,
                     wait_for_continue,
-                    self.options.expect_continue_timeout_ms,
+                    self.options.expect_continue_timeout,
                     write_ctx_active,
                 );
                 write_ctx_active = false;
@@ -939,8 +942,8 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
 
         fn dialRoute(self: *Self, req: *const Request, route: RouteInfo, addr: Addr) RoundTripper.RoundTripError!Conn {
             if (route.proxy != null) return self.dialHttpsViaProxy(req, route, addr);
-            if (std.mem.eql(u8, req.url.scheme, "http")) return self.dialTcp(req, addr);
-            if (std.mem.eql(u8, req.url.scheme, "https")) return self.dialHttps(req, addr);
+            if (host_std.mem.eql(u8, req.url.scheme, "http")) return self.dialTcp(req, addr);
+            if (host_std.mem.eql(u8, req.url.scheme, "https")) return self.dialHttps(req, addr);
             return error.UnsupportedScheme;
         }
 
@@ -976,18 +979,19 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
             };
             errdefer tls_conn.deinit();
 
-            const handshake_timeout_ms = try self.tlsHandshakeTimeout(req);
-            tls_conn.setReadTimeout(handshake_timeout_ms);
-            tls_conn.setWriteTimeout(handshake_timeout_ms);
+            const handshake_timeout = try self.tlsHandshakeTimeout(req);
+            const handshake_deadline = if (handshake_timeout) |timeout| time_mod.instant.add(net.time.instant.now(), timeout) else null;
+            tls_conn.setReadDeadline(handshake_deadline);
+            tls_conn.setWriteDeadline(handshake_deadline);
 
-            const handshake_started_ms = lib.time.milliTimestamp();
+            const handshake_started = net.time.instant.now();
             const typed = tls_conn.as(Tls.Conn) catch return error.Unexpected;
             const handshake_read_ctx_active = try self.setConnReadContext(tls_conn, req.context());
             defer self.clearConnReadContext(tls_conn, handshake_read_ctx_active);
             const handshake_write_ctx_active = try self.setConnWriteContext(tls_conn, req.context());
             defer self.clearConnWriteContext(tls_conn, handshake_write_ctx_active);
             typed.handshake() catch |err| return switch (err) {
-                error.RecordIoFailed => self.mapTlsHandshakeIoError(req, handshake_timeout_ms, handshake_started_ms),
+                error.RecordIoFailed => self.mapTlsHandshakeIoError(req, handshake_timeout, handshake_started),
                 else => err,
             };
 
@@ -1020,18 +1024,19 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
             };
             errdefer tls_conn.deinit();
 
-            const handshake_timeout_ms = try self.tlsHandshakeTimeout(req);
-            tls_conn.setReadTimeout(handshake_timeout_ms);
-            tls_conn.setWriteTimeout(handshake_timeout_ms);
+            const handshake_timeout = try self.tlsHandshakeTimeout(req);
+            const handshake_deadline = if (handshake_timeout) |timeout| time_mod.instant.add(net.time.instant.now(), timeout) else null;
+            tls_conn.setReadDeadline(handshake_deadline);
+            tls_conn.setWriteDeadline(handshake_deadline);
 
-            const handshake_started_ms = lib.time.milliTimestamp();
+            const handshake_started = net.time.instant.now();
             const typed = tls_conn.as(Tls.Conn) catch return error.Unexpected;
             const handshake_read_ctx_active = try self.setConnReadContext(tls_conn, req.context());
             defer self.clearConnReadContext(tls_conn, handshake_read_ctx_active);
             const handshake_write_ctx_active = try self.setConnWriteContext(tls_conn, req.context());
             defer self.clearConnWriteContext(tls_conn, handshake_write_ctx_active);
             typed.handshake() catch |err| return switch (err) {
-                error.RecordIoFailed => self.mapTlsHandshakeIoError(req, handshake_timeout_ms, handshake_started_ms),
+                error.RecordIoFailed => self.mapTlsHandshakeIoError(req, handshake_timeout, handshake_started),
                 else => err,
             };
 
@@ -1039,9 +1044,9 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
         }
 
         fn applyTimeouts(self: *Self, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
-            const remaining = try self.contextDeadlineTimeout(req);
-            conn.setReadTimeout(remaining);
-            conn.setWriteTimeout(remaining);
+            const deadline = if (try self.contextDeadlineTimeout(req)) |timeout| time_mod.instant.add(net.time.instant.now(), timeout) else null;
+            conn.setReadDeadline(deadline);
+            conn.setWriteDeadline(deadline);
         }
 
         fn setConnReadContext(self: *Self, conn: Conn, ctx: ?Context) RoundTripper.RoundTripError!bool {
@@ -1097,39 +1102,33 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
         }
 
         fn applyResponseHeaderReadTimeout(self: *Self, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
-            conn.setReadTimeout(try self.responseHeaderTimeout(req));
+            conn.setReadDeadline(if (try self.responseHeaderTimeout(req)) |timeout| time_mod.instant.add(net.time.instant.now(), timeout) else null);
         }
 
         fn restoreResponseBodyReadTimeout(self: *Self, conn: Conn, req: *const Request) RoundTripper.RoundTripError!void {
-            conn.setReadTimeout(try self.contextDeadlineTimeout(req));
+            conn.setReadDeadline(if (try self.contextDeadlineTimeout(req)) |timeout| time_mod.instant.add(net.time.instant.now(), timeout) else null);
         }
 
-        fn contextDeadlineTimeout(self: *Self, req: *const Request) RoundTripper.RoundTripError!?u32 {
+        fn contextDeadlineTimeout(self: *Self, req: *const Request) RoundTripper.RoundTripError!?time_mod.duration.Duration {
             _ = self;
             const ctx = req.context() orelse return null;
             const deadline = ctx.deadline() orelse return null;
-
-            const remaining_ns = deadline - lib.time.nanoTimestamp();
-            if (remaining_ns <= 0) return error.DeadlineExceeded;
-
-            const remaining_ms = @divFloor(remaining_ns, lib.time.ns_per_ms) + @intFromBool(@mod(remaining_ns, lib.time.ns_per_ms) != 0);
-            return if (remaining_ms > std.math.maxInt(u32))
-                std.math.maxInt(u32)
-            else
-                @intCast(remaining_ms);
+            const remaining = @max(time_mod.instant.sub(deadline, net.time.instant.now()), 0);
+            if (remaining <= 0) return error.DeadlineExceeded;
+            return remaining;
         }
 
-        fn responseHeaderTimeout(self: *Self, req: *const Request) RoundTripper.RoundTripError!?u32 {
-            return minTimeoutMs(
+        fn responseHeaderTimeout(self: *Self, req: *const Request) RoundTripper.RoundTripError!?time_mod.duration.Duration {
+            return minTimeout(
                 try self.contextDeadlineTimeout(req),
-                self.options.response_header_timeout_ms,
+                self.options.response_header_timeout,
             );
         }
 
-        fn tlsHandshakeTimeout(self: *Self, req: *const Request) RoundTripper.RoundTripError!?u32 {
-            return minTimeoutMs(
+        fn tlsHandshakeTimeout(self: *Self, req: *const Request) RoundTripper.RoundTripError!?time_mod.duration.Duration {
+            return minTimeout(
                 try self.contextDeadlineTimeout(req),
-                self.options.tls_handshake_timeout_ms,
+                self.options.tls_handshake_timeout,
             );
         }
 
@@ -1154,33 +1153,33 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
         }
 
         fn alternateTransportForConn(self: *Self, req: *const Request, conn: Conn) RoundTripper.RoundTripError!?AlternateTransport {
-            if (!std.mem.eql(u8, req.url.scheme, "https")) return null;
+            if (!host_std.mem.eql(u8, req.url.scheme, "https")) return null;
             const tls_conn = conn.as(Tls.Conn) catch |err| return switch (err) {
                 error.TypeMismatch => null,
             };
             const negotiated = tls_conn.negotiatedProtocol() catch return error.Unexpected;
             const protocol = negotiated orelse return null;
-            if (std.mem.eql(u8, protocol, "http/1.1")) return null;
+            if (host_std.mem.eql(u8, protocol, "http/1.1")) return null;
             return self.findAlternateProtocol(protocol) orelse error.UnsupportedProtocol;
         }
 
         fn findAlternateProtocol(self: *Self, protocol: []const u8) ?AlternateTransport {
             for (self.options.alternate_protocols) |alt| {
-                if (std.mem.eql(u8, alt.protocol, protocol)) return alt.transport;
+                if (host_std.mem.eql(u8, alt.protocol, protocol)) return alt.transport;
             }
             return null;
         }
 
-        fn mapTlsHandshakeIoError(self: *Self, req: *const Request, handshake_timeout_ms: ?u32, started_ms: i64) RoundTripper.RoundTripError {
+        fn mapTlsHandshakeIoError(self: *Self, req: *const Request, handshake_timeout: ?time_mod.duration.Duration, started: time_mod.instant.Time) RoundTripper.RoundTripError {
             _ = self;
             if (req.context()) |ctx| {
                 if (ctx.err()) |err| return err;
                 if (ctx.deadline()) |deadline| {
-                    if (lib.time.nanoTimestamp() >= deadline) return error.DeadlineExceeded;
+                    if (time_mod.instant.sub(deadline, net.time.instant.now()) <= 0) return error.DeadlineExceeded;
                 }
             }
-            if (handshake_timeout_ms) |timeout_ms| {
-                if (lib.time.milliTimestamp() - started_ms >= @as(i64, timeout_ms)) return error.TimedOut;
+            if (handshake_timeout) |timeout| {
+                if (time_mod.instant.sub(net.time.instant.now(), started) >= timeout) return error.TimedOut;
             }
             return error.Unexpected;
         }
@@ -1271,7 +1270,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
             if (send_chunked and !has_transfer_encoding) {
                 try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ Header.transfer_encoding, ": ", "chunked" });
             } else if (!has_content_length and (body != null or req.content_length > 0)) {
-                const len_buf = try std.fmt.allocPrint(allocator, "{d}", .{content_length});
+                const len_buf = try host_std.fmt.allocPrint(allocator, "{d}", .{content_length});
                 defer allocator.free(len_buf);
                 try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ Header.content_length, ": ", len_buf });
             }
@@ -1311,7 +1310,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
         fn shouldSendChunkedRequest(_: *Self, req: *const Request) bool {
             if (req.transfer_encoding.len != 0) {
                 for (req.transfer_encoding) |encoding| {
-                    if (std.ascii.eqlIgnoreCase(encoding, "chunked")) return true;
+                    if (host_std.ascii.eqlIgnoreCase(encoding, "chunked")) return true;
                 }
             }
             return req.content_length <= 0;
@@ -1375,7 +1374,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
                 total_written += n;
                 try self.checkRequestSendContext(req);
 
-                const size_line = std.fmt.bufPrint(&size_buf, "{x}\r\n", .{n}) catch return error.Unexpected;
+                const size_line = host_std.fmt.bufPrint(&size_buf, "{x}\r\n", .{n}) catch return error.Unexpected;
                 try self.writeAllBuffered(buffered, conn, req, size_line);
                 try self.writeAllBuffered(buffered, conn, req, buf[0..n]);
                 try self.writeAllBuffered(buffered, conn, req, "\r\n");
@@ -1398,21 +1397,21 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
 
             const path = if (req.url.path.len != 0) req.url.path else "/";
             if (req.url.raw_query.len == 0) return allocator.dupe(u8, path);
-            return std.fmt.allocPrint(allocator, "{s}?{s}", .{ path, req.url.raw_query });
+            return host_std.fmt.allocPrint(allocator, "{s}?{s}", .{ path, req.url.raw_query });
         }
 
         fn hostHeaderValue(_: *Self, allocator: Allocator, req: *const Request) Allocator.Error![]u8 {
             if (req.host.len != 0) return allocator.dupe(u8, req.host);
 
             const host = req.url.host;
-            const needs_brackets = std.mem.indexOfScalar(u8, host, ':') != null;
+            const needs_brackets = host_std.mem.indexOfScalar(u8, host, ':') != null;
             if (req.url.port.len == 0) {
-                if (needs_brackets) return std.fmt.allocPrint(allocator, "[{s}]", .{host});
+                if (needs_brackets) return host_std.fmt.allocPrint(allocator, "[{s}]", .{host});
                 return allocator.dupe(u8, host);
             }
 
-            if (needs_brackets) return std.fmt.allocPrint(allocator, "[{s}]:{s}", .{ host, req.url.port });
-            return std.fmt.allocPrint(allocator, "{s}:{s}", .{ host, req.url.port });
+            if (needs_brackets) return host_std.fmt.allocPrint(allocator, "[{s}]:{s}", .{ host, req.url.port });
+            return host_std.fmt.allocPrint(allocator, "{s}:{s}", .{ host, req.url.port });
         }
 
         fn validateRequestBodyLimit(self: *Self, req: *const Request) RoundTripper.RoundTripError!void {
@@ -1443,7 +1442,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
 
             for (req.header) |hdr| {
                 if (hdr.is(Header.content_length)) {
-                    const parsed = std.fmt.parseInt(i64, hdr.value, 10) catch return error.InvalidHeader;
+                    const parsed = host_std.fmt.parseInt(i64, hdr.value, 10) catch return error.InvalidHeader;
                     if (parsed < 0) return error.InvalidHeader;
                     if (header_content_length) |existing| {
                         if (existing != parsed) return error.InvalidHeader;
@@ -1644,24 +1643,24 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
         }
 
         fn parseHead(_: *Self, state: *ResponseState) RoundTripper.RoundTripError!ParsedHead {
-            const status_line_end = std.mem.indexOf(u8, state.head_storage, "\r\n") orelse return error.InvalidResponse;
+            const status_line_end = host_std.mem.indexOf(u8, state.head_storage, "\r\n") orelse return error.InvalidResponse;
             const status_line = state.head_storage[0..status_line_end];
 
-            const first_space = std.mem.indexOfScalar(u8, status_line, ' ') orelse return error.InvalidResponse;
+            const first_space = host_std.mem.indexOfScalar(u8, status_line, ' ') orelse return error.InvalidResponse;
             const proto = status_line[0..first_space];
             const rest = status_line[first_space + 1 ..];
-            const second_space = std.mem.indexOfScalar(u8, rest, ' ') orelse return error.InvalidResponse;
+            const second_space = host_std.mem.indexOfScalar(u8, rest, ' ') orelse return error.InvalidResponse;
             const code_slice = rest[0..second_space];
             const status_slice = rest;
-            const status_code = std.fmt.parseInt(u16, code_slice, 10) catch return error.InvalidResponse;
+            const status_code = host_std.fmt.parseInt(u16, code_slice, 10) catch return error.InvalidResponse;
 
             var proto_major: u8 = 1;
             var proto_minor: u8 = 1;
-            if (std.mem.startsWith(u8, proto, "HTTP/")) {
+            if (host_std.mem.startsWith(u8, proto, "HTTP/")) {
                 const version = proto["HTTP/".len..];
-                if (std.mem.indexOfScalar(u8, version, '.')) |dot| {
-                    proto_major = std.fmt.parseInt(u8, version[0..dot], 10) catch return error.InvalidResponse;
-                    proto_minor = std.fmt.parseInt(u8, version[dot + 1 ..], 10) catch return error.InvalidResponse;
+                if (host_std.mem.indexOfScalar(u8, version, '.')) |dot| {
+                    proto_major = host_std.fmt.parseInt(u8, version[0..dot], 10) catch return error.InvalidResponse;
+                    proto_minor = host_std.fmt.parseInt(u8, version[dot + 1 ..], 10) catch return error.InvalidResponse;
                 }
             }
 
@@ -1682,30 +1681,30 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
             var line_start: usize = 0;
             var header_index: usize = 0;
             while (line_start < header_block.len) {
-                const rel_end = std.mem.indexOf(u8, header_block[line_start..], "\r\n") orelse return error.InvalidResponse;
+                const rel_end = host_std.mem.indexOf(u8, header_block[line_start..], "\r\n") orelse return error.InvalidResponse;
                 if (rel_end == 0) break;
 
                 const line = header_block[line_start .. line_start + rel_end];
-                const colon = std.mem.indexOfScalar(u8, line, ':') orelse return error.InvalidResponse;
-                const name = std.mem.trim(u8, line[0..colon], " ");
-                const value = std.mem.trim(u8, line[colon + 1 ..], " ");
+                const colon = host_std.mem.indexOfScalar(u8, line, ':') orelse return error.InvalidResponse;
+                const name = host_std.mem.trim(u8, line[0..colon], " ");
+                const value = host_std.mem.trim(u8, line[colon + 1 ..], " ");
                 parsed.headers[header_index] = .{ .name = name, .value = value };
                 header_index += 1;
 
-                if (std.ascii.eqlIgnoreCase(name, Header.content_length)) {
-                    const content_length = std.fmt.parseInt(usize, value, 10) catch return error.InvalidResponse;
+                if (host_std.ascii.eqlIgnoreCase(name, Header.content_length)) {
+                    const content_length = host_std.fmt.parseInt(usize, value, 10) catch return error.InvalidResponse;
                     if (parsed.chunked) return error.InvalidResponse;
                     if (parsed.content_length) |existing| {
                         if (existing != content_length) return error.InvalidResponse;
                     } else {
                         parsed.content_length = content_length;
                     }
-                } else if (std.ascii.eqlIgnoreCase(name, Header.transfer_encoding)) {
+                } else if (host_std.ascii.eqlIgnoreCase(name, Header.transfer_encoding)) {
                     if (saw_transfer_encoding or parsed.content_length != null) return error.InvalidResponse;
                     if (!isSupportedChunkedTransferEncoding(value)) return error.InvalidResponse;
                     parsed.chunked = true;
                     saw_transfer_encoding = true;
-                } else if (std.ascii.eqlIgnoreCase(name, Header.connection)) {
+                } else if (host_std.ascii.eqlIgnoreCase(name, Header.connection)) {
                     if (containsToken(value, "close")) parsed.close = true;
                     if (containsToken(value, "keep-alive")) parsed.keep_alive = true;
                 }
@@ -1760,10 +1759,10 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
 
         fn requestRoute(self: *Self, req: *const Request) RoundTripper.RoundTripError!RouteInfo {
             const target_port = defaultPort(req.url) orelse return error.UnsupportedScheme;
-            if (std.mem.eql(u8, req.url.scheme, "https")) {
+            if (host_std.mem.eql(u8, req.url.scheme, "https")) {
                 if (self.options.https_proxy) |proxy| {
                     if (proxy.url.host.len == 0) return error.InvalidProxy;
-                    if (!std.mem.eql(u8, proxy.url.scheme, "http")) return error.UnsupportedProxyScheme;
+                    if (!host_std.mem.eql(u8, proxy.url.scheme, "http")) return error.UnsupportedProxyScheme;
                     const proxy_port = defaultPort(proxy.url) orelse return error.InvalidProxy;
                     return .{
                         .target_port = target_port,
@@ -1786,7 +1785,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
                 defer self.allocator.free(proxy_authority);
                 const target_authority = try authorityValue(self.allocator, req.url.host, route.target_port);
                 defer self.allocator.free(target_authority);
-                return std.fmt.allocPrint(self.allocator, "https+connect://{s}->{s}", .{ proxy_authority, target_authority });
+                return host_std.fmt.allocPrint(self.allocator, "https+connect://{s}->{s}", .{ proxy_authority, target_authority });
             }
             return connectionPoolKey(self.allocator, req.url.scheme, req.url.host, route.target_port);
         }
@@ -1916,7 +1915,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
             var i = self.idle_conns.items.len;
             while (i > 0) {
                 i -= 1;
-                if (!std.ascii.eqlIgnoreCase(self.idle_conns.items[i].key, pool_key)) continue;
+                if (!host_std.ascii.eqlIgnoreCase(self.idle_conns.items[i].key, pool_key)) continue;
                 const idle = self.idle_conns.orderedRemove(i);
                 return .{
                     .key = idle.key,
@@ -1943,7 +1942,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
                 self.idle_conns.append(self.allocator, .{
                     .key = pool_key,
                     .conn = conn,
-                    .idle_since_ms = lib.time.milliTimestamp(),
+                    .idle_since = net.time.instant.now(),
                 }) catch {
                     should_close = true;
                 };
@@ -1964,14 +1963,14 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
         }
 
         fn pruneExpiredIdleLocked(self: *Self) void {
-            const timeout_ms = self.options.idle_conn_timeout_ms orelse return;
-            const now = lib.time.milliTimestamp();
+            const timeout = self.options.idle_conn_timeout orelse return;
+            const now = net.time.instant.now();
 
             var i = self.idle_conns.items.len;
             while (i > 0) {
                 i -= 1;
                 const idle = self.idle_conns.items[i];
-                if (now - idle.idle_since_ms < timeout_ms) continue;
+                if (time_mod.instant.sub(now, idle.idle_since) < timeout) continue;
                 self.closeIdleConn(self.idle_conns.orderedRemove(i));
             }
         }
@@ -1985,7 +1984,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
         fn countIdleConnsForKeyLocked(self: *Self, pool_key: []const u8) usize {
             var count: usize = 0;
             for (self.idle_conns.items) |idle| {
-                if (std.ascii.eqlIgnoreCase(idle.key, pool_key)) count += 1;
+                if (host_std.ascii.eqlIgnoreCase(idle.key, pool_key)) count += 1;
             }
             return count;
         }
@@ -2013,7 +2012,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
 
         fn findHostStateIndexLocked(self: *Self, pool_key: []const u8) ?usize {
             for (self.host_states.items, 0..) |state, idx| {
-                if (std.ascii.eqlIgnoreCase(state.key, pool_key)) return idx;
+                if (host_std.ascii.eqlIgnoreCase(state.key, pool_key)) return idx;
             }
             return null;
         }
@@ -2043,19 +2042,19 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
             };
 
             if (ctx.err()) |err| return err;
-            if (ctx.deadline()) |deadline_ns| {
-                const remaining_ns = deadline_ns - lib.time.nanoTimestamp();
-                if (remaining_ns <= 0) return error.DeadlineExceeded;
+            if (ctx.deadline()) |deadline| {
+                const remaining = @max(time_mod.instant.sub(deadline, net.time.instant.now()), 0);
+                if (remaining <= 0) return error.DeadlineExceeded;
                 state.cond.timedWait(
                     &self.idle_mu,
-                    @intCast(@min(remaining_ns, @as(i128, 25 * lib.time.ns_per_ms))),
+                    @intCast(@min(remaining, 25 * time_mod.duration.MilliSecond)),
                 ) catch {};
                 if (ctx.err()) |err| return err;
-                if (deadline_ns <= lib.time.nanoTimestamp()) return error.DeadlineExceeded;
+                if (time_mod.instant.sub(deadline, net.time.instant.now()) <= 0) return error.DeadlineExceeded;
                 return;
             }
 
-            state.cond.timedWait(&self.idle_mu, 25 * lib.time.ns_per_ms) catch {};
+            state.cond.timedWait(&self.idle_mu, @intCast(25 * net.time.duration.MilliSecond)) catch {};
             if (ctx.err()) |err| return err;
         }
 
@@ -2088,7 +2087,7 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
         }
 
         fn shouldWaitForContinue(self: *Self, req: *const Request) bool {
-            if (self.options.expect_continue_timeout_ms == 0) return false;
+            if (self.options.expect_continue_timeout <= 0) return false;
             if (req.body() == null) return false;
             if (req.proto_major < 1) return false;
             if (req.proto_major == 1 and req.proto_minor == 0) return false;
@@ -2187,7 +2186,8 @@ pub fn Transport(comptime lib: type, comptime net: type) type {
 
         fn contextDeadlineExceeded(ctx: Context) bool {
             if (ctx.deadline()) |deadline| {
-                return lib.time.nanoTimestamp() + context_timeout_grace_ns >= deadline;
+                const remaining = @max(time_mod.instant.sub(deadline, net.time.instant.now()), 0);
+                return remaining <= context_timeout_grace;
             }
             return false;
         }
@@ -2198,7 +2198,7 @@ fn countHeaderLines(block: []const u8) usize {
     var count: usize = 0;
     var start: usize = 0;
     while (start < block.len) {
-        const rel_end = std.mem.indexOf(u8, block[start..], "\r\n") orelse break;
+        const rel_end = host_std.mem.indexOf(u8, block[start..], "\r\n") orelse break;
         if (rel_end == 0) break;
         count += 1;
         start += rel_end + 2;
@@ -2213,9 +2213,9 @@ fn isInformationalResponse(status_code: u16) bool {
 fn containsToken(value: []const u8, token: []const u8) bool {
     var start: usize = 0;
     while (start <= value.len) {
-        const comma = std.mem.indexOfScalarPos(u8, value, start, ',') orelse value.len;
-        const part = std.mem.trim(u8, value[start..comma], " ");
-        if (std.ascii.eqlIgnoreCase(part, token)) return true;
+        const comma = host_std.mem.indexOfScalarPos(u8, value, start, ',') orelse value.len;
+        const part = host_std.mem.trim(u8, value[start..comma], " ");
+        if (host_std.ascii.eqlIgnoreCase(part, token)) return true;
         if (comma == value.len) break;
         start = comma + 1;
     }
@@ -2226,10 +2226,10 @@ fn isSupportedChunkedTransferEncoding(value: []const u8) bool {
     var start: usize = 0;
     var saw_chunked = false;
     while (start <= value.len) {
-        const comma = std.mem.indexOfScalarPos(u8, value, start, ',') orelse value.len;
-        const part = std.mem.trim(u8, value[start..comma], " ");
+        const comma = host_std.mem.indexOfScalarPos(u8, value, start, ',') orelse value.len;
+        const part = host_std.mem.trim(u8, value[start..comma], " ");
         if (part.len == 0) return false;
-        if (!std.ascii.eqlIgnoreCase(part, "chunked")) return false;
+        if (!host_std.ascii.eqlIgnoreCase(part, "chunked")) return false;
         if (saw_chunked) return false;
         saw_chunked = true;
         if (comma == value.len) break;
@@ -2272,9 +2272,9 @@ fn isValidHeaderValue(value: []const u8) bool {
 }
 
 fn isForbiddenTrailerName(name: []const u8) bool {
-    return std.ascii.eqlIgnoreCase(name, Header.transfer_encoding) or
-        std.ascii.eqlIgnoreCase(name, Header.content_length) or
-        std.ascii.eqlIgnoreCase(name, Header.trailer);
+    return host_std.ascii.eqlIgnoreCase(name, Header.transfer_encoding) or
+        host_std.ascii.eqlIgnoreCase(name, Header.content_length) or
+        host_std.ascii.eqlIgnoreCase(name, Header.trailer);
 }
 
 fn requestHasHeader(headers: []const Header, name: []const u8) bool {
@@ -2292,10 +2292,10 @@ fn requestHasToken(headers: []const Header, name: []const u8, token: []const u8)
 }
 
 fn requestIsReplayable(req: *const Request) bool {
-    if (std.ascii.eqlIgnoreCase(req.effectiveMethod(), "GET")) return true;
-    if (std.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) return true;
-    if (std.ascii.eqlIgnoreCase(req.effectiveMethod(), "OPTIONS")) return true;
-    if (std.ascii.eqlIgnoreCase(req.effectiveMethod(), "TRACE")) return true;
+    if (host_std.ascii.eqlIgnoreCase(req.effectiveMethod(), "GET")) return true;
+    if (host_std.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) return true;
+    if (host_std.ascii.eqlIgnoreCase(req.effectiveMethod(), "OPTIONS")) return true;
+    if (host_std.ascii.eqlIgnoreCase(req.effectiveMethod(), "TRACE")) return true;
     if (requestHasHeader(req.header, "Idempotency-Key")) return true;
     if (requestHasHeader(req.header, "X-Idempotency-Key")) return true;
     return false;
@@ -2315,7 +2315,7 @@ fn rewindRequest(req: *const Request) anyerror!Request {
     return rewound;
 }
 
-fn minTimeoutMs(a: ?u32, b: ?u32) ?u32 {
+fn minTimeout(a: ?time_mod.duration.Duration, b: ?time_mod.duration.Duration) ?time_mod.duration.Duration {
     if (a == null) return b;
     if (b == null) return a;
     return @min(a.?, b.?);
@@ -2323,40 +2323,40 @@ fn minTimeoutMs(a: ?u32, b: ?u32) ?u32 {
 
 fn defaultPort(u: url_mod.Url) ?u16 {
     if (u.portAsNumber()) |port| return port;
-    if (std.mem.eql(u8, u.scheme, "http")) return 80;
-    if (std.mem.eql(u8, u.scheme, "https")) return 443;
+    if (host_std.mem.eql(u8, u.scheme, "http")) return 80;
+    if (host_std.mem.eql(u8, u.scheme, "https")) return 443;
     return null;
 }
 
-fn authorityValue(allocator: std.mem.Allocator, host: []const u8, port: u16) std.mem.Allocator.Error![]u8 {
-    const needs_brackets = std.mem.indexOfScalar(u8, host, ':') != null;
-    if (needs_brackets) return std.fmt.allocPrint(allocator, "[{s}]:{d}", .{ host, port });
-    return std.fmt.allocPrint(allocator, "{s}:{d}", .{ host, port });
+fn authorityValue(allocator: host_std.mem.Allocator, host: []const u8, port: u16) host_std.mem.Allocator.Error![]u8 {
+    const needs_brackets = host_std.mem.indexOfScalar(u8, host, ':') != null;
+    if (needs_brackets) return host_std.fmt.allocPrint(allocator, "[{s}]:{d}", .{ host, port });
+    return host_std.fmt.allocPrint(allocator, "{s}:{d}", .{ host, port });
 }
 
-fn proxyAuthorizationValue(allocator: std.mem.Allocator, proxy_url: url_mod.Url) anyerror!?[]u8 {
+fn proxyAuthorizationValue(allocator: host_std.mem.Allocator, proxy_url: url_mod.Url) anyerror!?[]u8 {
     if (proxy_url.username.len == 0 and proxy_url.password.len == 0) return null;
 
     const raw_userpass_len = proxy_url.username.len + proxy_url.password.len + 1;
     const max_encoded_len = proxy_authorization_value_limit - "Basic ".len;
-    if (std.base64.standard.Encoder.calcSize(raw_userpass_len) > max_encoded_len) return error.InvalidProxy;
+    if (host_std.base64.standard.Encoder.calcSize(raw_userpass_len) > max_encoded_len) return error.InvalidProxy;
 
-    var userpass = try std.ArrayList(u8).initCapacity(allocator, raw_userpass_len);
+    var userpass = try host_std.ArrayList(u8).initCapacity(allocator, raw_userpass_len);
     defer userpass.deinit(allocator);
 
     try appendPercentDecoded(&userpass, allocator, proxy_url.username);
     try userpass.append(allocator, ':');
     try appendPercentDecoded(&userpass, allocator, proxy_url.password);
 
-    const encoded_len = std.base64.standard.Encoder.calcSize(userpass.items.len);
+    const encoded_len = host_std.base64.standard.Encoder.calcSize(userpass.items.len);
     if ("Basic ".len + encoded_len > proxy_authorization_value_limit) return error.InvalidProxy;
     const value = try allocator.alloc(u8, "Basic ".len + encoded_len);
     @memcpy(value[0.."Basic ".len], "Basic ");
-    _ = std.base64.standard.Encoder.encode(value["Basic ".len..], userpass.items);
+    _ = host_std.base64.standard.Encoder.encode(value["Basic ".len..], userpass.items);
     return value;
 }
 
-fn appendPercentDecoded(bytes: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) anyerror!void {
+fn appendPercentDecoded(bytes: *host_std.ArrayList(u8), allocator: host_std.mem.Allocator, value: []const u8) anyerror!void {
     var i: usize = 0;
     while (i < value.len) {
         if (value[i] != '%') {
@@ -2382,24 +2382,24 @@ fn hexNibble(c: u8) ?u8 {
     };
 }
 
-fn connectionPoolKey(allocator: std.mem.Allocator, scheme: []const u8, host: []const u8, port: u16) std.mem.Allocator.Error![]u8 {
+fn connectionPoolKey(allocator: host_std.mem.Allocator, scheme: []const u8, host: []const u8, port: u16) host_std.mem.Allocator.Error![]u8 {
     const authority = try authorityValue(allocator, host, port);
     defer allocator.free(authority);
-    return std.fmt.allocPrint(allocator, "{s}://{s}", .{ scheme, authority });
+    return host_std.fmt.allocPrint(allocator, "{s}://{s}", .{ scheme, authority });
 }
 
 fn responseMustBeBodyless(req: *const Request, status_code: u16) bool {
-    if (std.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) return true;
+    if (host_std.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) return true;
     if (status_code >= 100 and status_code < 200) return true;
     return status_code == 204 or status_code == 304;
 }
 
-pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
+pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const HttpTransport = Transport(lib, net);
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const HttpTransport = Transport(std, net);
             {
                 var transport = try HttpTransport.init(allocator, .{
                     .max_header_bytes = 0,
@@ -2412,13 +2412,13 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
             {
                 const MockConn = struct {
-                    allocator: lib.mem.Allocator,
-                    writes: lib.ArrayList(u8),
+                    allocator: std.mem.Allocator,
+                    writes: std.ArrayList(u8),
 
-                    fn init(backing: lib.mem.Allocator) lib.mem.Allocator.Error!@This() {
+                    fn init(backing: std.mem.Allocator) std.mem.Allocator.Error!@This() {
                         return .{
                             .allocator = backing,
-                            .writes = try lib.ArrayList(u8).initCapacity(backing, 0),
+                            .writes = try std.ArrayList(u8).initCapacity(backing, 0),
                         };
                     }
 
@@ -2435,8 +2435,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                     pub fn deinit(self: *@This()) void {
                         self.writes.deinit(self.allocator);
                     }
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const BodySource = struct {
@@ -2482,8 +2482,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var transport = try HttpTransport.init(allocator, .{});
@@ -2501,18 +2501,18 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 const Alignment = @typeInfo(AllocFn).@"fn".params[2].type.?;
 
                 const FailOnLenAllocator = struct {
-                    backing: lib.mem.Allocator,
+                    backing: std.mem.Allocator,
                     fail_len: usize,
                     failed: bool = false,
 
-                    fn init(backing: lib.mem.Allocator, fail_len: usize) @This() {
+                    fn init(backing: std.mem.Allocator, fail_len: usize) @This() {
                         return .{
                             .backing = backing,
                             .fail_len = fail_len,
                         };
                     }
 
-                    fn wrap(self: *@This()) lib.mem.Allocator {
+                    fn wrap(self: *@This()) std.mem.Allocator {
                         return .{
                             .ptr = self,
                             .vtable = &vtable,
@@ -2543,7 +2543,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         self.backing.rawFree(memory, alignment, ret_addr);
                     }
 
-                    const vtable: lib.mem.Allocator.VTable = .{
+                    const vtable: std.mem.Allocator.VTable = .{
                         .alloc = alloc,
                         .resize = resize,
                         .remap = remap,
@@ -2578,8 +2578,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         self.deinit_count += 1;
                     }
 
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var transport = try HttpTransport.init(allocator, .{});
@@ -2632,8 +2632,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         self.deinited = true;
                     }
 
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var transport = try HttpTransport.init(allocator, .{});
@@ -2689,8 +2689,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         self.deinited = true;
                     }
 
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var transport = try HttpTransport.init(allocator, .{});
@@ -2699,7 +2699,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 var req = try Request.init(allocator, "GET", "http://example.com/");
                 defer req.deinit();
 
-                var response = lib.ArrayList(u8){};
+                var response = std.ArrayList(u8){};
                 defer response.deinit(allocator);
                 for (0..too_many_informational_responses) |_| {
                     try response.appendSlice(allocator, "HTTP/1.1 103 Early Hints\r\n\r\n");
@@ -2746,8 +2746,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         self.deinited = true;
                     }
 
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const BodySource = struct {
@@ -2801,7 +2801,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                     false,
                     payload.len,
                     false,
-                    transport.options.expect_continue_timeout_ms,
+                    transport.options.expect_continue_timeout,
                     false,
                 );
                 var request_body_state: ?*HttpTransport.RequestBodyState = writer;
@@ -2826,8 +2826,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
             {
                 const MockConn = struct {
-                    mu: lib.Thread.Mutex = .{},
-                    cond: lib.Thread.Condition = .{},
+                    mu: std.Thread.Mutex = .{},
+                    cond: std.Thread.Condition = .{},
                     write_started: bool = false,
                     allow_write_return: bool = false,
                     write_finished: bool = false,
@@ -2862,13 +2862,13 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         self.deinited = true;
                     }
 
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const BodySource = struct {
-                    mu: lib.Thread.Mutex = .{},
-                    cond: lib.Thread.Condition = .{},
+                    mu: std.Thread.Mutex = .{},
+                    cond: std.Thread.Condition = .{},
                     payload: []const u8,
                     offset: usize = 0,
                     closed: bool = false,
@@ -2915,7 +2915,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                     false,
                     1,
                     false,
-                    transport.options.expect_continue_timeout_ms,
+                    transport.options.expect_continue_timeout,
                     false,
                 );
 
@@ -2940,7 +2940,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                     }
                 };
 
-                var closer_thread = try lib.Thread.spawn(.{}, Closer.run, .{&body_state});
+                var closer_thread = try std.Thread.spawn(.{}, Closer.run, .{&body_state});
                 source.mu.lock();
                 while (!source.closed) source.cond.wait(&source.mu);
                 source.mu.unlock();
@@ -3051,7 +3051,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
             {
                 const OwnedBody = struct {
-                    alloc: lib.mem.Allocator,
+                    alloc: std.mem.Allocator,
                     payload: []const u8,
                     offset: usize = 0,
 
@@ -3070,7 +3070,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 };
 
                 const Factory = struct {
-                    alloc: lib.mem.Allocator,
+                    alloc: std.mem.Allocator,
                     payload: []const u8,
                     calls: usize = 0,
 
@@ -3105,7 +3105,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
             {
                 const OwnedBody = struct {
-                    alloc: lib.mem.Allocator,
+                    alloc: std.mem.Allocator,
                     payload: []const u8,
                     offset: usize = 0,
 
@@ -3124,7 +3124,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                 };
 
                 const Factory = struct {
-                    alloc: lib.mem.Allocator,
+                    alloc: std.mem.Allocator,
                     payload: []const u8,
 
                     pub fn getBody(self: *@This()) anyerror!ReadCloser {
@@ -3166,13 +3166,13 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
             {
                 const MockConn = struct {
-                    allocator: lib.mem.Allocator,
-                    writes: lib.ArrayList(u8),
+                    allocator: std.mem.Allocator,
+                    writes: std.ArrayList(u8),
 
-                    fn init(backing: lib.mem.Allocator) lib.mem.Allocator.Error!@This() {
+                    fn init(backing: std.mem.Allocator) std.mem.Allocator.Error!@This() {
                         return .{
                             .allocator = backing,
-                            .writes = try lib.ArrayList(u8).initCapacity(backing, 0),
+                            .writes = try std.ArrayList(u8).initCapacity(backing, 0),
                         };
                     }
 
@@ -3189,8 +3189,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                     pub fn deinit(self: *@This()) void {
                         self.writes.deinit(self.allocator);
                     }
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const BodySource = struct {
@@ -3232,12 +3232,12 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                     false,
                     5,
                     true,
-                    1000,
+                    net.time.duration.Second,
                     false,
                 );
                 defer writer.destroy();
 
-                lib.Thread.sleep(10 * lib.time.ns_per_ms);
+                std.Thread.sleep(@intCast(10 * net.time.duration.MilliSecond));
                 try testing.expectEqual(@as(usize, 0), mock_conn.writes.items.len);
 
                 writer.allowBodySend();
@@ -3247,13 +3247,13 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
             {
                 const MockConn = struct {
-                    allocator: lib.mem.Allocator,
-                    writes: lib.ArrayList(u8),
+                    allocator: std.mem.Allocator,
+                    writes: std.ArrayList(u8),
 
-                    fn init(backing: lib.mem.Allocator) lib.mem.Allocator.Error!@This() {
+                    fn init(backing: std.mem.Allocator) std.mem.Allocator.Error!@This() {
                         return .{
                             .allocator = backing,
-                            .writes = try lib.ArrayList(u8).initCapacity(backing, 0),
+                            .writes = try std.ArrayList(u8).initCapacity(backing, 0),
                         };
                     }
 
@@ -3270,8 +3270,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                     pub fn deinit(self: *@This()) void {
                         self.writes.deinit(self.allocator);
                     }
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const BodySource = struct {
@@ -3313,7 +3313,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                     false,
                     5,
                     true,
-                    10,
+                    10 * net.time.duration.MilliSecond,
                     false,
                 );
                 defer writer.destroy();
@@ -3342,8 +3342,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var transport = try HttpTransport.init(allocator, .{});
@@ -3382,8 +3382,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var transport = try HttpTransport.init(allocator, .{});
@@ -3423,15 +3423,15 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var transport = try HttpTransport.init(allocator, .{ .max_header_bytes = 80 });
                 defer transport.deinit();
 
                 const trailer_fill = [_]u8{'a'} ** 96;
-                const response = try lib.fmt.allocPrint(
+                const response = try std.fmt.allocPrint(
                     allocator,
                     "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\na\r\nX-Long: {s}\r\n\r\n",
                     .{&trailer_fill},
@@ -3474,15 +3474,15 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var transport = try HttpTransport.init(allocator, .{ .max_header_bytes = 80 });
                 defer transport.deinit();
 
                 const trailer_fill = [_]u8{'b'} ** 70;
-                const response = try lib.fmt.allocPrint(
+                const response = try std.fmt.allocPrint(
                     allocator,
                     "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\na\r\n0\r\nX-Test: {s}\r\n\r\n",
                     .{&trailer_fill},
@@ -3524,15 +3524,15 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var transport = try HttpTransport.init(allocator, .{ .max_header_bytes = 512 });
                 defer transport.deinit();
 
                 const extension = [_]u8{'x'} ** 180;
-                const response = try lib.fmt.allocPrint(
+                const response = try std.fmt.allocPrint(
                     allocator,
                     "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1;{s}\r\na\r\n0\r\n\r\n",
                     .{&extension},
@@ -3573,15 +3573,15 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var transport = try HttpTransport.init(allocator, .{ .max_header_bytes = 1024 });
                 defer transport.deinit();
 
                 const trailer_fill = [_]u8{'t'} ** 700;
-                const response = try lib.fmt.allocPrint(
+                const response = try std.fmt.allocPrint(
                     allocator,
                     "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n1\r\na\r\n0\r\nX-Large: {s}\r\n\r\n",
                     .{&trailer_fill},

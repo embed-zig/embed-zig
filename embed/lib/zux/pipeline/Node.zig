@@ -130,7 +130,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const Forward = struct {
                 out: ?Emitter = null,
                 called: bool = false,
-                delta_ns: i128,
+                delta: glib.time.duration.Duration,
 
                 pub fn bindOutput(self: *@This(), out: Emitter) void {
                     self.out = out;
@@ -139,7 +139,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 pub fn process(self: *@This(), message: Message) !usize {
                     self.called = true;
                     var next = message;
-                    next.timestamp_ns += self.delta_ns;
+                    next.timestamp = glib.time.instant.add(next.timestamp, self.delta);
                     try self.out.?.emit(next);
                     return 1;
                 }
@@ -147,16 +147,16 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             const Collector = struct {
                 called: bool = false,
-                last_timestamp_ns: i128 = 0,
+                last_timestamp: glib.time.instant.Time = 0,
 
                 pub fn emit(self: *@This(), message: Message) !void {
                     self.called = true;
-                    self.last_timestamp_ns = message.timestamp_ns;
+                    self.last_timestamp = message.timestamp;
                 }
             };
 
-            var first_impl = Forward{ .delta_ns = 2 };
-            var second_impl = Forward{ .delta_ns = 3 };
+            var first_impl = Forward{ .delta = 2 };
+            var second_impl = Forward{ .delta = 3 };
             var collector = Collector{};
 
             var first = Node.init(Forward, &first_impl);
@@ -167,7 +167,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             const emitted = try first.process(.{
                 .origin = .source,
-                .timestamp_ns = 5,
+                .timestamp = 5,
                 .body = .{
                     .raw_single_button = .{
                         .source_id = 1,
@@ -179,7 +179,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(first_impl.called);
             try grt.std.testing.expect(second_impl.called);
             try grt.std.testing.expect(collector.called);
-            try grt.std.testing.expectEqual(@as(i128, 10), collector.last_timestamp_ns);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), collector.last_timestamp);
             try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
     };

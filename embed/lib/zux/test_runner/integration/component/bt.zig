@@ -80,7 +80,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             try scanner.startScanning(.{
                 .active = true,
                 .filter_duplicates = false,
-                .timeout_ms = 1000,
+                .timeout = glib.time.duration.Second,
             });
             defer scanner.stopScanning();
 
@@ -90,8 +90,9 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             });
 
             var attempts: usize = 0;
+            const poll_interval = 10 * grt.time.duration.MilliSecond;
             while (attempts < 50 and sink.found_count == 0) : (attempts += 1) {
-                grt.std.Thread.sleep(10 * grt.std.time.ns_per_ms);
+                grt.std.Thread.sleep(@intCast(poll_interval));
             }
 
             advertiser.stopAdvertising();

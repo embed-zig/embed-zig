@@ -3,7 +3,7 @@ const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -12,10 +12,10 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
 
                     var ln = try Net.listen(a, .{ .address = test_utils.addr4(.{ 127, 0, 0, 1 }, 0) });
@@ -29,16 +29,16 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var ac = try ln.accept();
                     defer ac.deinit();
 
-                    ac.setReadTimeout(1);
+                    ac.setReadDeadline(net.time.instant.add(net.time.instant.now(), 1 * net.time.duration.MilliSecond));
 
                     var buf: [64]u8 = undefined;
                     const result = ac.read(&buf);
-                    try lib.testing.expectError(error.TimedOut, result);
+                    try std.testing.expectError(error.TimedOut, result);
 
-                    ac.setReadTimeout(null);
+                    ac.setReadDeadline(null);
                     try io.writeAll(@TypeOf(cc), &cc, "after timeout");
                     try io.readFull(@TypeOf(ac), &ac, buf[0..13]);
-                    try lib.testing.expectEqualStrings("after timeout", buf[0..13]);
+                    try std.testing.expectEqualStrings("after timeout", buf[0..13]);
                 }
             };
             Body.call(allocator) catch |err| {

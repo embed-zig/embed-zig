@@ -2,7 +2,7 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -11,18 +11,18 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
-                    const Thread = lib.Thread;
-                    const ReadyCounter = test_utils.ReadyCounter(lib);
-                    const AtomicBool = lib.atomic.Value(bool);
-                    const AtomicUsize = lib.atomic.Value(usize);
+                    const Thread = std.Thread;
+                    const ReadyCounter = test_utils.ReadyCounter(std);
+                    const AtomicBool = std.atomic.Value(bool);
+                    const AtomicUsize = std.atomic.Value(usize);
                     const chunk_len = 64 * 1024;
                     const target_bytes = 16 * 1024 * 1024;
-                    const initial_timeout_ms = 200;
+                    const initial_timeout = 200 * net.time.duration.MilliSecond;
 
                     const WriteCtx = struct {
                         ready: *ReadyCounter,
@@ -62,7 +62,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var server = try ln.accept();
                     defer server.deinit();
 
-                    client.setWriteTimeout(initial_timeout_ms);
+                    client.setWriteDeadline(net.time.instant.add(net.time.instant.now(), initial_timeout));
 
                     var ready = ReadyCounter.init(1);
                     var write_ctx = WriteCtx{
@@ -76,7 +76,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var stalled = false;
                     var prev = write_ctx.bytes_written.load(.seq_cst);
                     for (0..20) |_| {
-                        Thread.sleep(10 * lib.time.ns_per_ms);
+                        Thread.sleep(@intCast(10 * net.time.duration.MilliSecond));
                         const current = write_ctx.bytes_written.load(.seq_cst);
                         if (!write_ctx.done.load(.seq_cst) and current == prev) {
                             stalled = true;
@@ -84,14 +84,14 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         }
                         prev = current;
                     }
-                    try lib.testing.expect(stalled);
+                    try std.testing.expect(stalled);
 
-                    client.setWriteTimeout(null);
+                    client.setWriteDeadline(null);
 
                     // Wait past the original deadline before draining to ensure the
                     // blocked write re-evaluates the cleared timeout rather than the
                     // stale deadline it started with.
-                    Thread.sleep((initial_timeout_ms + 50) * lib.time.ns_per_ms);
+                    Thread.sleep(@intCast(initial_timeout + 50 * net.time.duration.MilliSecond));
 
                     var recv_buf: [chunk_len]u8 = undefined;
                     var total_read: usize = 0;
@@ -103,9 +103,9 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     write_thread.join();
 
                     if (write_ctx.err) |err| return err;
-                    try lib.testing.expect(write_ctx.done.load(.seq_cst));
-                    try lib.testing.expectEqual(@as(usize, target_bytes), total_read);
-                    try lib.testing.expectEqual(@as(usize, target_bytes), write_ctx.bytes_written.load(.seq_cst));
+                    try std.testing.expect(write_ctx.done.load(.seq_cst));
+                    try std.testing.expectEqual(@as(usize, target_bytes), total_read);
+                    try std.testing.expectEqual(@as(usize, target_bytes), write_ctx.bytes_written.load(.seq_cst));
                 }
             };
             Body.call(allocator) catch |err| {

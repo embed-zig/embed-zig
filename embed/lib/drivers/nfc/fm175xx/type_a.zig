@@ -42,7 +42,7 @@ fn request(type_a: TypeA, out_atqa: *[2]u8) TypeA.Error!void {
     const bits = try type_a.transceive(.{
         .tx = &.{0x26},
         .tx_bits = 7,
-        .timeout_ms = 1,
+        .timeout = glib.time.duration.MilliSecond,
     }, &rx);
 
     if (bits != 16) return error.Protocol;
@@ -56,7 +56,7 @@ fn anticollision(type_a: TypeA, cascade_code: u8, out_uid: []u8) TypeA.Error!voi
     const bits = try type_a.transceive(.{
         .tx = &.{ cascade_code, 0x20 },
         .tx_bits = 16,
-        .timeout_ms = 1,
+        .timeout = glib.time.duration.MilliSecond,
         .reset_collision = true,
     }, &rx);
 
@@ -75,7 +75,7 @@ fn select(type_a: TypeA, cascade_code: u8, in_uid: []const u8, out_sak: *u8) Typ
     const bits = try type_a.transceive(.{
         .tx = &tx,
         .tx_bits = tx.len * 8,
-        .timeout_ms = 1,
+        .timeout = glib.time.duration.MilliSecond,
         .tx_crc = true,
         .rx_crc = true,
     }, &rx);

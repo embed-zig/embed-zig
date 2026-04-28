@@ -4,25 +4,25 @@ const TMod = @import("../T.zig");
 const TestingAllocatorMod = @import("../TestingAllocator.zig");
 const TestRunnerMod = @import("../TestRunner.zig");
 
-pub fn make(comptime lib: type) testing_api {
+pub fn make(comptime std: type, comptime time: type) testing_api {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *TMod, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *TMod, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             t.parallel();
-            t.run("T", TMod.TestRunner(lib));
-            t.run("TestingAllocator", TestingAllocatorMod.TestRunner(lib));
-            t.run("TestRunner", TestRunnerMod.TestRunner(lib));
+            t.run("T", TMod.TestRunner(std, time));
+            t.run("TestingAllocator", TestingAllocatorMod.TestRunner(std));
+            t.run("TestRunner", TestRunnerMod.TestRunner(std, time));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

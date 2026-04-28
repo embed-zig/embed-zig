@@ -271,7 +271,7 @@ pub const Sta = struct {
         ssid: ?[]const u8 = null,
         channel: u8 = 0,
         show_hidden: bool = false,
-        timeout_ms: u32 = 0,
+        timeout: glib.time.duration.Duration = 0,
     };
 
     pub const ConnectConfig = struct {
@@ -279,7 +279,7 @@ pub const Sta = struct {
         password: []const u8 = "",
         bssid: ?Self.MacAddr = null,
         channel: u8 = 0,
-        timeout_ms: u32 = 0,
+        timeout: glib.time.duration.Duration = 0,
     };
 
     pub const ScanResult = struct {

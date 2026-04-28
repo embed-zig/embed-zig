@@ -16,11 +16,11 @@ test "glib/context/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .context);
+    var t = glib.testing.T.new(std, gstd.runtime.time, .context);
     defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
+    t.timeout(20 * glib.time.duration.Second);
 
-    t.run("glib/context/unit/std", glib.context.test_runner.unit.make(std));
+    t.run("glib/context/unit/std", glib.context.test_runner.unit.make(std, gstd.runtime.time));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -29,10 +29,10 @@ test "glib/context/unit/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .context);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .context);
     defer t.deinit();
-    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
+    t.timeout(20 * glib.time.duration.Second);
 
-    t.run("glib/context/unit/gstd", glib.context.test_runner.unit.make(gstd.runtime.std));
+    t.run("glib/context/unit/gstd", glib.context.test_runner.unit.make(gstd.runtime.std, gstd.runtime.time));
     if (!t.wait()) return error.TestFailed;
 }

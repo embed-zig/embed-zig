@@ -25,7 +25,7 @@ fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
     var server = harness.right();
     try grt.std.testing.expectError(error.Timeout, recv_mod.recv(grt, allocator, &server, .{
         .att_mtu = 23,
-        .timeout_ms = 5,
+        .timeout = 5 * glib.time.duration.MilliSecond,
         .max_timeout_retries = 2,
     }));
 }

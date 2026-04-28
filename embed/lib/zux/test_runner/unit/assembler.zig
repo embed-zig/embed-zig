@@ -188,7 +188,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     try grt.std.testing.expectEqual(@as(usize, 0), app.store.stores.counter.get().ticks);
                     _ = try app.impl.runtime.root.process(.{
                         .origin = .manual,
-                        .timestamp_ns = 0,
+                        .timestamp = 0,
                         .body = .{
                             .tick = .{
                                 .seq = 1,
@@ -255,12 +255,12 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     defer app.deinit();
 
                     try app.start(.{ .ticker = .manual });
-                    grt.std.Thread.sleep(3 * grt.std.time.ns_per_ms);
+                    grt.std.Thread.sleep(@intCast(3 * grt.time.duration.MilliSecond));
                     try grt.std.testing.expectEqual(@as(usize, 0), app.store.stores.counter.get().ticks);
 
                     try app.dispatch(.{
                         .origin = .timer,
-                        .timestamp_ns = 0,
+                        .timestamp = 0,
                         .body = .{
                             .tick = .{
                                 .seq = 1,
@@ -271,7 +271,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
                     try app.dispatch(.{
                         .origin = .manual,
-                        .timestamp_ns = 0,
+                        .timestamp = 0,
                         .body = .{
                             .raw_single_button = .{
                                 .source_id = 7,
@@ -289,7 +289,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
                     try app.dispatch(.{
                         .origin = .timer,
-                        .timestamp_ns = 1,
+                        .timestamp = 1,
                         .body = .{
                             .tick = .{
                                 .seq = 2,
@@ -302,7 +302,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     try app.stop();
                     try grt.std.testing.expectError(error.NotStarted, app.dispatch(.{
                         .origin = .timer,
-                        .timestamp_ns = 0,
+                        .timestamp = 0,
                         .body = .{
                             .tick = .{
                                 .seq = 2,
@@ -696,7 +696,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             .max_adc_buttons = 2,
                             .max_led_strips = 1,
                             .pipeline = .{
-                                .tick_interval_ns = 7 * grt.std.time.ns_per_ms,
+                                .tick_interval = 7 * grt.time.duration.MilliSecond,
                                 .spawn_config = .{
                                     .stack_size = 64 * 1024,
                                 },
@@ -746,7 +746,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     try grt.std.testing.expectEqual(@as(usize, 4), Built.pixel_count);
                     try grt.std.testing.expectEqual(@as(usize, 4), Built.LedStrip(.strip).pixel_count);
                     try grt.std.testing.expectEqual(@as(usize, 4), Built.LedStrip(.strip).FrameType.pixel_count);
-                    try grt.std.testing.expectEqual(@as(u64, 7 * grt.std.time.ns_per_ms), Built.ImplType.pipeline_config.tick_interval_ns);
+                    try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 7 * grt.time.duration.MilliSecond), Built.ImplType.pipeline_config.tick_interval);
                     if (@hasField(@TypeOf(Built.ImplType.pipeline_config.spawn_config), "stack_size")) {
                         try grt.std.testing.expectEqual(
                             @as(usize, 64 * 1024),
@@ -857,33 +857,33 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         },
                         else => return error.UnexpectedMessage,
                     }
-                    try app.set_led_strip_flash(.strip, Built.FrameType{}, 111, 5_000_000, 12_000_000);
+                    try app.set_led_strip_flash(.strip, Built.FrameType{}, 111, 5 * glib.time.duration.MilliSecond, 12 * glib.time.duration.MilliSecond);
                     switch (app.impl.last_event.?) {
                         .ledstrip_flash => |event_value| {
                             try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
                             try grt.std.testing.expectEqual(@as(u8, 111), event_value.brightness);
-                            try grt.std.testing.expectEqual(@as(u64, 5_000_000), event_value.duration_ns);
-                            try grt.std.testing.expectEqual(@as(u64, 12_000_000), event_value.interval_ns);
+                            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 5 * glib.time.duration.MilliSecond), event_value.duration);
+                            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 12 * glib.time.duration.MilliSecond), event_value.interval);
                         },
                         else => return error.UnexpectedMessage,
                     }
-                    try app.set_led_strip_pingpong(.strip, Built.FrameType{}, Built.FrameType{}, 99, 9_000_000, 21_000_000);
+                    try app.set_led_strip_pingpong(.strip, Built.FrameType{}, Built.FrameType{}, 99, 9 * glib.time.duration.MilliSecond, 21 * glib.time.duration.MilliSecond);
                     switch (app.impl.last_event.?) {
                         .ledstrip_pingpong => |event_value| {
                             try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
                             try grt.std.testing.expectEqual(@as(u8, 99), event_value.brightness);
-                            try grt.std.testing.expectEqual(@as(u64, 9_000_000), event_value.duration_ns);
-                            try grt.std.testing.expectEqual(@as(u64, 21_000_000), event_value.interval_ns);
+                            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 9 * glib.time.duration.MilliSecond), event_value.duration);
+                            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 21 * glib.time.duration.MilliSecond), event_value.interval);
                         },
                         else => return error.UnexpectedMessage,
                     }
-                    try app.set_led_strip_rotate(.strip, Built.FrameType{}, 77, 3_000_000, 7_000_000);
+                    try app.set_led_strip_rotate(.strip, Built.FrameType{}, 77, 3 * glib.time.duration.MilliSecond, 7 * glib.time.duration.MilliSecond);
                     switch (app.impl.last_event.?) {
                         .ledstrip_rotate => |event_value| {
                             try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
                             try grt.std.testing.expectEqual(@as(u8, 77), event_value.brightness);
-                            try grt.std.testing.expectEqual(@as(u64, 3_000_000), event_value.duration_ns);
-                            try grt.std.testing.expectEqual(@as(u64, 7_000_000), event_value.interval_ns);
+                            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 3 * glib.time.duration.MilliSecond), event_value.duration);
+                            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 7 * glib.time.duration.MilliSecond), event_value.interval);
                         },
                         else => return error.UnexpectedMessage,
                     }

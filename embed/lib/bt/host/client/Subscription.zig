@@ -51,8 +51,8 @@ pub fn Subscription(comptime grt: type, comptime ClientType: type) type {
             releaseState(self.state);
         }
 
-        pub fn next(self: *Self, timeout_ms: ?u32) error{TimedOut}!?Message {
-            return nextState(self.state, timeout_ms);
+        pub fn next(self: *Self, timeout: ?glib.time.duration.Duration) error{TimedOut}!?Message {
+            return nextState(self.state, timeout);
         }
 
         pub fn matches(state: *const State, conn_handle: u16, attr_handle: u16) bool {
@@ -110,7 +110,7 @@ pub fn Subscription(comptime grt: type, comptime ClientType: type) type {
             state.allocator.destroy(state);
         }
 
-        fn nextState(state: *State, timeout_ms: ?u32) error{TimedOut}!?Message {
+        fn nextState(state: *State, timeout: ?glib.time.duration.Duration) error{TimedOut}!?Message {
             state.mutex.lock();
             state.waiters += 1;
             defer {
@@ -122,8 +122,9 @@ pub fn Subscription(comptime grt: type, comptime ClientType: type) type {
             }
 
             while (state.queue.items.len == 0 and !state.closed) {
-                if (timeout_ms) |ms| {
-                    state.cond.timedWait(&state.mutex, @as(u64, ms) * 1_000_000) catch |err| switch (err) {
+                if (timeout) |duration| {
+                    if (duration <= 0) return error.TimedOut;
+                    state.cond.timedWait(&state.mutex, @intCast(duration)) catch |err| switch (err) {
                         error.Timeout => return error.TimedOut,
                     };
                 } else {

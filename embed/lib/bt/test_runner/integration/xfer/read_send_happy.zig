@@ -36,7 +36,7 @@ fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
         fn run(self: *@This()) void {
             self.result = read_mod.read(grt, self.allocator, &self.transport, .{
                 .att_mtu = 23,
-                .timeout_ms = 20,
+                .timeout = 20 * glib.time.duration.MilliSecond,
                 .max_timeout_retries = 3,
             }) catch |err| {
                 self.err = err;
@@ -69,7 +69,7 @@ fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
         fn run(self: *@This()) void {
             send_mod.send(grt, self.allocator, &self.transport, null, dataFn, .{
                 .att_mtu = 23,
-                .timeout_ms = 20,
+                .timeout = 20 * glib.time.duration.MilliSecond,
                 .send_redundancy = 1,
                 .max_timeout_retries = 3,
             }) catch |err| {

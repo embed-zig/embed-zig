@@ -295,7 +295,7 @@ pub fn open(self: *Self) !void {
 
     try self.writeRegister(.reset, 0xB0);
 
-    self.delay.sleepMs(10);
+    self.delay.sleep(10 * glib.time.duration.MilliSecond);
 
     try self.writeRegister(.ctrl1, 0x40);
     try self.writeRegister(.ctrl7, 0x03);
@@ -438,11 +438,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             const FakeDelay = struct {
                 calls: usize = 0,
-                last_ms: u32 = 0,
+                last_duration: glib.time.duration.Duration = 0,
 
-                pub fn sleepMs(self: *@This(), ms: u32) void {
+                pub fn sleep(self: *@This(), duration: glib.time.duration.Duration) void {
                     self.calls += 1;
-                    self.last_ms = ms;
+                    self.last_duration = duration;
                 }
             };
 
@@ -457,7 +457,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(imu.is_open);
             try grt.std.testing.expectEqual(@as(usize, 5), fake_i2c.write_count);
             try grt.std.testing.expectEqual(@as(I2c.Address, 0x6A), fake_i2c.last_addr);
-            try grt.std.testing.expectEqual(@as(u32, 10), fake_delay.last_ms);
+            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 10 * glib.time.duration.MilliSecond), fake_delay.last_duration);
             try grt.std.testing.expectEqual(@as(usize, 1), fake_delay.calls);
             try grt.std.testing.expectEqual([2]u8{ @intFromEnum(Register.reset), 0xB0 }, fake_i2c.writes[0]);
             try grt.std.testing.expectEqual([2]u8{ @intFromEnum(Register.ctrl1), 0x40 }, fake_i2c.writes[1]);

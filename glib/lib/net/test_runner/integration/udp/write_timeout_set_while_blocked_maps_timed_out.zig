@@ -6,9 +6,7 @@ const UdpConnMod = @import("../../../UdpConn.zig");
 const netip = @import("../../../netip.zig");
 const runtime_mod = @import("../../../runtime.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    _ = net;
-
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -17,13 +15,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
 
             const Body = struct {
                 const ReadyCounter = struct {
-                    mu: lib.Thread.Mutex = .{},
-                    cond: lib.Thread.Condition = .{},
+                    mu: std.Thread.Mutex = .{},
+                    cond: std.Thread.Condition = .{},
                     ready: usize = 0,
                     target: usize,
 
@@ -48,7 +46,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                 };
 
                 const State = struct {
-                    mu: lib.Thread.Mutex = .{},
+                    mu: std.Thread.Mutex = .{},
                     closed: bool = false,
                     read_interrupt: bool = false,
                     write_interrupt: bool = false,
@@ -167,8 +165,8 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             _ = opt;
                         }
 
-                        pub fn poll(sock: *@This(), want: runtime_mod.PollEvents, timeout_ms: ?u32) runtime_mod.PollError!runtime_mod.PollEvents {
-                            const started = lib.time.milliTimestamp();
+                        pub fn poll(sock: *@This(), want: runtime_mod.PollEvents, timeout: ?net.time.duration.Duration) runtime_mod.PollError!runtime_mod.PollEvents {
+                            const started = net.time.instant.now();
                             while (true) {
                                 if (sock.state.isClosed()) return error.Closed;
                                 if (want.write and sock.state.isWriteReady()) {
@@ -177,20 +175,22 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 if (want.write_interrupt and sock.state.takeWriteInterrupt()) {
                                     return .{ .write_interrupt = true };
                                 }
-                                if (timeout_ms) |ms| {
-                                    if (lib.time.milliTimestamp() - started >= ms) return error.TimedOut;
+                                if (timeout) |duration| {
+                                    const elapsed = @import("time").instant.sub(net.time.instant.now(), started);
+                                    if (elapsed >= duration) return error.TimedOut;
                                 }
-                                lib.Thread.sleep(lib.time.ns_per_ms);
+                                std.Thread.sleep(@intCast(net.time.duration.MilliSecond));
                             }
                         }
                     };
                 };
 
                 const FakeNet = struct {
+                    pub const time = net.time;
                     pub const Runtime = FakeRuntime;
                 };
 
-                const FakeUdpConn = UdpConnMod.UdpConn(lib, FakeNet);
+                const FakeUdpConn = UdpConnMod.UdpConn(std, FakeNet);
 
                 fn waitUntilWriteWaiting(impl: *FakeUdpConn, comptime thread_lib: type) void {
                     while (true) {
@@ -198,7 +198,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         const waiting = impl.write_waiting;
                         impl.write_mu.unlock();
                         if (waiting) return;
-                        thread_lib.Thread.sleep(thread_lib.time.ns_per_ms);
+                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
                     }
                 }
 
@@ -234,17 +234,17 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     }
 
                     fn closeConnLater(conn: Conn, comptime thread_lib: type) void {
-                        thread_lib.Thread.sleep(200 * thread_lib.time.ns_per_ms);
+                        thread_lib.Thread.sleep(@intCast(200 * net.time.duration.MilliSecond));
                         conn.close();
                     }
 
                     fn closePacketLater(conn: PacketConn, comptime thread_lib: type) void {
-                        thread_lib.Thread.sleep(200 * thread_lib.time.ns_per_ms);
+                        thread_lib.Thread.sleep(@intCast(200 * net.time.duration.MilliSecond));
                         conn.close();
                     }
                 };
 
-                fn runConnCase(a: lib.mem.Allocator) !void {
+                fn runConnCase(a: std.mem.Allocator) !void {
                     var state = State{};
                     var conn = try FakeUdpConn.initFromSocket(a, .{ .state = &state });
                     defer conn.deinit();
@@ -255,22 +255,22 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         .ready = &ready,
                         .conn = conn,
                     };
-                    var write_thread = try lib.Thread.spawn(.{}, Worker.writeConn, .{&write_ctx});
-                    var close_thread = try lib.Thread.spawn(.{}, Worker.closeConnLater, .{ conn, lib });
+                    var write_thread = try std.Thread.spawn(.{}, Worker.writeConn, .{&write_ctx});
+                    var close_thread = try std.Thread.spawn(.{}, Worker.closeConnLater, .{ conn, std });
 
                     ready.waitUntilReady();
-                    waitUntilWriteWaiting(conn_impl, lib);
-                    conn.setWriteTimeout(30);
+                    waitUntilWriteWaiting(conn_impl, std);
+                    conn.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 30 * net.time.duration.MilliSecond));
 
                     write_thread.join();
                     close_thread.join();
 
-                    try lib.testing.expect(write_ctx.err != null);
-                    try lib.testing.expect(write_ctx.err.? == error.TimedOut);
-                    try lib.testing.expectEqual(@as(?usize, null), write_ctx.bytes_written);
+                    try std.testing.expect(write_ctx.err != null);
+                    try std.testing.expect(write_ctx.err.? == error.TimedOut);
+                    try std.testing.expectEqual(@as(?usize, null), write_ctx.bytes_written);
                 }
 
-                fn runPacketCase(a: lib.mem.Allocator) !void {
+                fn runPacketCase(a: std.mem.Allocator) !void {
                     var state = State{};
                     var conn = try FakeUdpConn.initPacketFromSocket(a, .{ .state = &state });
                     defer conn.deinit();
@@ -281,80 +281,80 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         .ready = &ready,
                         .conn = conn,
                     };
-                    var write_thread = try lib.Thread.spawn(.{}, Worker.writePacket, .{&write_ctx});
-                    var close_thread = try lib.Thread.spawn(.{}, Worker.closePacketLater, .{ conn, lib });
+                    var write_thread = try std.Thread.spawn(.{}, Worker.writePacket, .{&write_ctx});
+                    var close_thread = try std.Thread.spawn(.{}, Worker.closePacketLater, .{ conn, std });
 
                     ready.waitUntilReady();
-                    waitUntilWriteWaiting(conn_impl, lib);
-                    conn.setWriteTimeout(30);
+                    waitUntilWriteWaiting(conn_impl, std);
+                    conn.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 30 * net.time.duration.MilliSecond));
 
                     write_thread.join();
                     close_thread.join();
 
-                    try lib.testing.expect(write_ctx.err != null);
-                    try lib.testing.expect(write_ctx.err.? == error.TimedOut);
-                    try lib.testing.expectEqual(@as(?usize, null), write_ctx.bytes_written);
+                    try std.testing.expect(write_ctx.err != null);
+                    try std.testing.expect(write_ctx.err.? == error.TimedOut);
+                    try std.testing.expectEqual(@as(?usize, null), write_ctx.bytes_written);
                 }
 
-                fn runConnClearCase(a: lib.mem.Allocator) !void {
+                fn runConnClearCase(a: std.mem.Allocator) !void {
                     var state = State{};
                     var conn = try FakeUdpConn.initFromSocket(a, .{ .state = &state });
                     defer conn.deinit();
                     const conn_impl = try conn.as(FakeUdpConn);
 
-                    conn.setWriteTimeout(30);
+                    conn.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 30 * net.time.duration.MilliSecond));
 
                     var ready = ReadyCounter.init(1);
                     var write_ctx = ConnWriteCtx{
                         .ready = &ready,
                         .conn = conn,
                     };
-                    var write_thread = try lib.Thread.spawn(.{}, Worker.writeConn, .{&write_ctx});
-                    var close_thread = try lib.Thread.spawn(.{}, Worker.closeConnLater, .{ conn, lib });
+                    var write_thread = try std.Thread.spawn(.{}, Worker.writeConn, .{&write_ctx});
+                    var close_thread = try std.Thread.spawn(.{}, Worker.closeConnLater, .{ conn, std });
 
                     ready.waitUntilReady();
-                    waitUntilWriteWaiting(conn_impl, lib);
-                    conn.setWriteTimeout(null);
-                    lib.Thread.sleep(50 * lib.time.ns_per_ms);
+                    waitUntilWriteWaiting(conn_impl, std);
+                    conn.setWriteDeadline(null);
+                    std.Thread.sleep(@intCast(50 * net.time.duration.MilliSecond));
                     state.setWriteReady(true);
 
                     write_thread.join();
                     close_thread.join();
 
                     if (write_ctx.err) |err| return err;
-                    try lib.testing.expectEqual(@as(?usize, "blocked".len), write_ctx.bytes_written);
+                    try std.testing.expectEqual(@as(?usize, "blocked".len), write_ctx.bytes_written);
                 }
 
-                fn runPacketClearCase(a: lib.mem.Allocator) !void {
+                fn runPacketClearCase(a: std.mem.Allocator) !void {
                     var state = State{};
                     var conn = try FakeUdpConn.initPacketFromSocket(a, .{ .state = &state });
                     defer conn.deinit();
                     const conn_impl = try conn.as(FakeUdpConn);
 
-                    conn.setWriteTimeout(30);
+                    conn.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 30 * net.time.duration.MilliSecond));
 
                     var ready = ReadyCounter.init(1);
                     var write_ctx = PacketWriteCtx{
                         .ready = &ready,
                         .conn = conn,
                     };
-                    var write_thread = try lib.Thread.spawn(.{}, Worker.writePacket, .{&write_ctx});
-                    var close_thread = try lib.Thread.spawn(.{}, Worker.closePacketLater, .{ conn, lib });
+                    var write_thread = try std.Thread.spawn(.{}, Worker.writePacket, .{&write_ctx});
+                    var close_thread = try std.Thread.spawn(.{}, Worker.closePacketLater, .{ conn, std });
 
                     ready.waitUntilReady();
-                    waitUntilWriteWaiting(conn_impl, lib);
-                    conn.setWriteTimeout(null);
-                    lib.Thread.sleep(50 * lib.time.ns_per_ms);
+                    waitUntilWriteWaiting(conn_impl, std);
+                    conn.setWriteDeadline(null);
+                    std.Thread.sleep(@intCast(50 * net.time.duration.MilliSecond));
                     state.setWriteReady(true);
 
                     write_thread.join();
                     close_thread.join();
 
                     if (write_ctx.err) |err| return err;
-                    try lib.testing.expectEqual(@as(?usize, "blocked".len), write_ctx.bytes_written);
+                    try std.testing.expectEqual(@as(?usize, "blocked".len), write_ctx.bytes_written);
                 }
 
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     try runConnCase(a);
                     try runPacketCase(a);
                     try runConnClearCase(a);

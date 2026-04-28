@@ -11,7 +11,7 @@
               "source_id": 17,
               "motion": {
                 "free_fall": {
-                  "duration_ms": 180,
+                  "duration": 180000000,
                   "min_magnitude": 0.03
                 }
               }

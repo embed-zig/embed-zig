@@ -16,7 +16,7 @@ test "glib/mime/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .mime);
+    var t = glib.testing.T.new(std, gstd.runtime.time, .mime);
     defer t.deinit();
 
     t.run("glib/mime/unit/std", glib.mime.test_runner.unit.make(std));
@@ -28,7 +28,7 @@ test "glib/mime/unit/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .mime);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .mime);
     defer t.deinit();
 
     t.run("glib/mime/unit/gstd", glib.mime.test_runner.unit.make(gstd.runtime.std));

@@ -16,10 +16,10 @@ test "glib/sync/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .sync);
+    var t = glib.testing.T.new(std, gstd.runtime.time, .sync);
     defer t.deinit();
 
-    t.run("glib/sync/unit/std", glib.sync.test_runner.unit.make(std));
+    t.run("glib/sync/unit/std", glib.sync.test_runner.unit.make(std, gstd.runtime.time));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -28,10 +28,10 @@ test "glib/sync/unit/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .sync);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .sync);
     defer t.deinit();
 
-    t.run("glib/sync/unit/gstd", glib.sync.test_runner.unit.make(gstd.runtime.std));
+    t.run("glib/sync/unit/gstd", glib.sync.test_runner.unit.make(gstd.runtime.std, gstd.runtime.time));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -40,11 +40,11 @@ test "glib/sync/integration/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .sync);
+    var t = glib.testing.T.new(std, gstd.runtime.time, .sync);
     defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
+    t.timeout(20 * glib.time.duration.Second);
 
-    t.run("glib/sync/integration/std", glib.sync.test_runner.integration.make(std, gstd.runtime.sync.Channel));
+    t.run("glib/sync/integration/std", glib.sync.test_runner.integration.make(std, gstd.runtime.time, gstd.runtime.sync.ChannelFactory));
     if (!t.wait()) return error.TestFailed;
 }
 
@@ -53,10 +53,10 @@ test "glib/sync/integration/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .sync);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .sync);
     defer t.deinit();
-    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
+    t.timeout(20 * glib.time.duration.Second);
 
-    t.run("glib/sync/integration/gstd", glib.sync.test_runner.integration.make(gstd.runtime.std, gstd.runtime.sync.Channel));
+    t.run("glib/sync/integration/gstd", glib.sync.test_runner.integration.make(gstd.runtime.std, gstd.runtime.time, gstd.runtime.sync.ChannelFactory));
     if (!t.wait()) return error.TestFailed;
 }

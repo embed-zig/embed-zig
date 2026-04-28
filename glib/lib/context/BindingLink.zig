@@ -10,8 +10,8 @@ pub const VTable = struct {
     deactivateFn: *const fn (ptr: *anyopaque) void,
 };
 
-pub fn fdLink(comptime lib: type, fd: *lib.posix.socket_t) BindingLink {
-    const posix = lib.posix;
+pub fn fdLink(comptime std: type, fd: *std.posix.socket_t) BindingLink {
+    const posix = std.posix;
 
     const gen = struct {
         fn fireFn(ptr: *anyopaque, cause: anyerror) void {

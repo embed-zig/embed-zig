@@ -11,12 +11,12 @@ pub const VTable = struct {
     gain: *const fn (ptr: *anyopaque) f32,
     label: *const fn (ptr: *anyopaque) []const u8,
     readBytes: *const fn (ptr: *anyopaque) usize,
-    setFadeOutDuration: *const fn (ptr: *anyopaque, ms: u32) void,
+    setFadeOutDuration: *const fn (ptr: *anyopaque, duration: glib.time.duration.Duration) void,
     closeWrite: *const fn (ptr: *anyopaque) void,
-    closeWriteWithSilence: *const fn (ptr: *anyopaque, silence_ms: u32) void,
+    closeWriteWithSilence: *const fn (ptr: *anyopaque, duration: glib.time.duration.Duration) void,
     close: *const fn (ptr: *anyopaque) void,
     closeWithError: *const fn (ptr: *anyopaque) void,
-    setGainLinearTo: *const fn (ptr: *anyopaque, to: f32, duration_ms: u32) void,
+    setGainLinearTo: *const fn (ptr: *anyopaque, to: f32, duration: glib.time.duration.Duration) void,
     deinit: *const fn (ptr: *anyopaque) void,
 };
 
@@ -36,16 +36,16 @@ pub fn readBytes(self: root) usize {
     return self.vtable.readBytes(self.ptr);
 }
 
-pub fn setFadeOutDuration(self: root, ms: u32) void {
-    self.vtable.setFadeOutDuration(self.ptr, ms);
+pub fn setFadeOutDuration(self: root, duration: glib.time.duration.Duration) void {
+    self.vtable.setFadeOutDuration(self.ptr, duration);
 }
 
 pub fn closeWrite(self: root) void {
     self.vtable.closeWrite(self.ptr);
 }
 
-pub fn closeWriteWithSilence(self: root, silence_ms: u32) void {
-    self.vtable.closeWriteWithSilence(self.ptr, silence_ms);
+pub fn closeWriteWithSilence(self: root, duration: glib.time.duration.Duration) void {
+    self.vtable.closeWriteWithSilence(self.ptr, duration);
 }
 
 pub fn close(self: root) void {
@@ -56,8 +56,8 @@ pub fn closeWithError(self: root) void {
     self.vtable.closeWithError(self.ptr);
 }
 
-pub fn setGainLinearTo(self: root, to: f32, duration_ms: u32) void {
-    self.vtable.setGainLinearTo(self.ptr, to, duration_ms);
+pub fn setGainLinearTo(self: root, to: f32, duration: glib.time.duration.Duration) void {
+    self.vtable.setGainLinearTo(self.ptr, to, duration);
 }
 
 /// `deinit()` must not race with active use of this handle or any copied value
@@ -111,17 +111,17 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             return self.impl.readBytes();
         }
 
-        pub fn setFadeOutDuration(self: *@This(), ms: u32) void {
-            if (@hasDecl(Impl, "setFadeOutDuration")) self.impl.setFadeOutDuration(ms);
+        pub fn setFadeOutDuration(self: *@This(), duration: glib.time.duration.Duration) void {
+            if (@hasDecl(Impl, "setFadeOutDuration")) self.impl.setFadeOutDuration(duration);
         }
 
         pub fn closeWrite(self: *@This()) void {
             self.impl.closeWrite();
         }
 
-        pub fn closeWriteWithSilence(self: *@This(), silence_ms: u32) void {
+        pub fn closeWriteWithSilence(self: *@This(), duration: glib.time.duration.Duration) void {
             if (@hasDecl(Impl, "closeWriteWithSilence")) {
-                self.impl.closeWriteWithSilence(silence_ms);
+                self.impl.closeWriteWithSilence(duration);
             } else {
                 self.impl.closeWrite();
             }
@@ -139,9 +139,9 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             self.impl.closeWithError();
         }
 
-        pub fn setGainLinearTo(self: *@This(), to: f32, duration_ms: u32) void {
+        pub fn setGainLinearTo(self: *@This(), to: f32, duration: glib.time.duration.Duration) void {
             if (@hasDecl(Impl, "setGainLinearTo")) {
-                self.impl.setGainLinearTo(to, duration_ms);
+                self.impl.setGainLinearTo(to, duration);
             } else {
                 self.impl.setGain(to);
             }
@@ -173,9 +173,9 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             return self.readBytes();
         }
 
-        fn setFadeOutDurationFn(ptr: *anyopaque, ms: u32) void {
+        fn setFadeOutDurationFn(ptr: *anyopaque, duration: glib.time.duration.Duration) void {
             const self: *Ctx = @ptrCast(@alignCast(ptr));
-            self.setFadeOutDuration(ms);
+            self.setFadeOutDuration(duration);
         }
 
         fn closeWriteFn(ptr: *anyopaque) void {
@@ -183,9 +183,9 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             self.closeWrite();
         }
 
-        fn closeWriteWithSilenceFn(ptr: *anyopaque, silence_ms: u32) void {
+        fn closeWriteWithSilenceFn(ptr: *anyopaque, duration: glib.time.duration.Duration) void {
             const self: *Ctx = @ptrCast(@alignCast(ptr));
-            self.closeWriteWithSilence(silence_ms);
+            self.closeWriteWithSilence(duration);
         }
 
         fn closeFn(ptr: *anyopaque) void {
@@ -198,9 +198,9 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             self.closeWithError();
         }
 
-        fn setGainLinearToFn(ptr: *anyopaque, to: f32, duration_ms: u32) void {
+        fn setGainLinearToFn(ptr: *anyopaque, to: f32, duration: glib.time.duration.Duration) void {
             const self: *Ctx = @ptrCast(@alignCast(ptr));
-            self.setGainLinearTo(to, duration_ms);
+            self.setGainLinearTo(to, duration);
         }
 
         fn deinitFn(ptr: *anyopaque) void {

@@ -1,3 +1,5 @@
+const time_mod = @import("time");
+
 pub const NTP_PORT: u16 = 123;
 pub const NTP_UNIX_OFFSET: i64 = 2208988800;
 
@@ -22,7 +24,7 @@ pub const NtpTimestamp = struct {
 pub const Response = struct {
     receive_timestamp: NtpTimestamp,
     transmit_timestamp: NtpTimestamp,
-    receive_time_ms: i64,
-    transmit_time_ms: i64,
+    receive_time: time_mod.Time,
+    transmit_time: time_mod.Time,
     stratum: u8,
 };

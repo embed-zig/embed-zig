@@ -1,9 +1,10 @@
 const stdz = @import("stdz");
 const testing_mod = @import("testing");
 const context_root = @import("context");
+const time_mod = @import("time");
 const BindingLink = context_root.Context.BindingLink;
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type, comptime time: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -14,44 +15,44 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("cancel_fires_bound_fd_and_propagates", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try cancelFiresBoundFdAndPropagatesCase(lib, case_allocator);
+            t.run("cancel_fires_bound_fd_and_propagates", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try cancelFiresBoundFdAndPropagatesCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("canceled_context_fires_immediately", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try canceledContextFiresImmediatelyCase(lib, case_allocator);
+            t.run("canceled_context_fires_immediately", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try canceledContextFiresImmediatelyCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("binding_deinit_stops_future_wakeups", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try bindingDeinitStopsFutureWakeupsCase(lib, case_allocator);
+            t.run("binding_deinit_stops_future_wakeups", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try bindingDeinitStopsFutureWakeupsCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("bind_link_null_deactivates_binding", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try bindLinkNullDeactivatesBindingCase(lib, case_allocator);
+            t.run("bind_link_null_deactivates_binding", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try bindLinkNullDeactivatesBindingCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("second_bind_returns_already_bound", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try secondBindReturnsAlreadyBoundCase(lib, case_allocator);
+            t.run("second_bind_returns_already_bound", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try secondBindReturnsAlreadyBoundCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("deinit_detaches_binding_before_parent_cancel", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try deinitDetachesBindingBeforeParentCancelCase(lib, case_allocator);
+            t.run("deinit_detaches_binding_before_parent_cancel", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try deinitDetachesBindingBeforeParentCancelCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("context_deinit_deactivates_binding", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try contextDeinitDeactivatesBindingCase(lib, case_allocator);
+            t.run("context_deinit_deactivates_binding", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try contextDeinitDeactivatesBindingCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("bound_fd_wakes_before_child_binding_runs", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try boundFdWakesBeforeChildBindingRunsCase(lib, case_allocator);
+            t.run("bound_fd_wakes_before_child_binding_runs", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try boundFdWakesBeforeChildBindingRunsCase(std, time, case_allocator);
                 }
             }.run));
             return t.wait();
@@ -69,76 +70,76 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
     return testing_mod.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-fn cancelFiresBoundFdAndPropagatesCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn cancelFiresBoundFdAndPropagatesCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    var wake = try initWakeSockets(lib);
-    defer lib.posix.close(wake.send_fd);
-    defer lib.posix.close(wake.recv_fd);
+    var wake = try initWakeSockets(std);
+    defer std.posix.close(wake.send_fd);
+    defer std.posix.close(wake.recv_fd);
 
-    const bg = ctx_ns.background();
-    var parent = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var parent = try ctx_api.withCancel(bg);
     defer parent.deinit();
-    var child = try ctx_ns.withCancel(parent);
+    var child = try ctx_api.withCancel(parent);
     defer child.deinit();
-    try parent.bindFd(lib, &wake.send_fd);
+    try parent.bindFd(std, &wake.send_fd);
 
-    try expectFdNotReadable(lib, wake.recv_fd);
+    try expectFdNotReadable(std, wake.recv_fd);
     parent.cancelWithCause(error.BrokenPipe);
 
-    try expectFdReadable(lib, wake.recv_fd);
+    try expectFdReadable(std, wake.recv_fd);
     const child_err = child.err() orelse return error.BindFdCancelShouldPropagateToChild;
     if (child_err != error.BrokenPipe) return error.BindFdCancelChildWrongCause;
 }
 
-fn canceledContextFiresImmediatelyCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn canceledContextFiresImmediatelyCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    var wake = try initWakeSockets(lib);
-    defer lib.posix.close(wake.send_fd);
-    defer lib.posix.close(wake.recv_fd);
+    var wake = try initWakeSockets(std);
+    defer std.posix.close(wake.send_fd);
+    defer std.posix.close(wake.recv_fd);
 
-    const bg = ctx_ns.background();
-    var ctx = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var ctx = try ctx_api.withCancel(bg);
     defer ctx.deinit();
     ctx.cancelWithCause(error.ConnectionReset);
 
-    try ctx.bindFd(lib, &wake.send_fd);
+    try ctx.bindFd(std, &wake.send_fd);
 
-    try expectFdReadable(lib, wake.recv_fd);
+    try expectFdReadable(std, wake.recv_fd);
 }
 
-fn bindingDeinitStopsFutureWakeupsCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn bindingDeinitStopsFutureWakeupsCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    var wake = try initWakeSockets(lib);
-    defer lib.posix.close(wake.send_fd);
-    defer lib.posix.close(wake.recv_fd);
+    var wake = try initWakeSockets(std);
+    defer std.posix.close(wake.send_fd);
+    defer std.posix.close(wake.recv_fd);
 
-    const bg = ctx_ns.background();
-    var ctx = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var ctx = try ctx_api.withCancel(bg);
     defer ctx.deinit();
 
-    try ctx.bindFd(lib, &wake.send_fd);
+    try ctx.bindFd(std, &wake.send_fd);
     try ctx.bindLink(null);
 
     ctx.cancelWithCause(error.BrokenPipe);
-    try expectFdNotReadable(lib, wake.recv_fd);
+    try expectFdNotReadable(std, wake.recv_fd);
 }
 
-fn bindLinkNullDeactivatesBindingCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn bindLinkNullDeactivatesBindingCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    const bg = ctx_ns.background();
-    var ctx = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var ctx = try ctx_api.withCancel(bg);
     defer ctx.deinit();
 
     var state = BindingState{};
@@ -149,61 +150,61 @@ fn bindLinkNullDeactivatesBindingCase(comptime lib: type, allocator: lib.mem.All
     if (state.deactivate_hits != 1) return error.BindLinkNullShouldDeactivateBinding;
 }
 
-fn secondBindReturnsAlreadyBoundCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn secondBindReturnsAlreadyBoundCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    var wake_a = try initWakeSockets(lib);
-    defer lib.posix.close(wake_a.send_fd);
-    defer lib.posix.close(wake_a.recv_fd);
+    var wake_a = try initWakeSockets(std);
+    defer std.posix.close(wake_a.send_fd);
+    defer std.posix.close(wake_a.recv_fd);
 
-    var wake_b = try initWakeSockets(lib);
-    defer lib.posix.close(wake_b.send_fd);
-    defer lib.posix.close(wake_b.recv_fd);
+    var wake_b = try initWakeSockets(std);
+    defer std.posix.close(wake_b.send_fd);
+    defer std.posix.close(wake_b.recv_fd);
 
-    const bg = ctx_ns.background();
-    var ctx = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var ctx = try ctx_api.withCancel(bg);
     defer ctx.deinit();
 
-    try ctx.bindFd(lib, &wake_a.send_fd);
+    try ctx.bindFd(std, &wake_a.send_fd);
 
-    _ = ctx.bindFd(lib, &wake_b.send_fd) catch |err| {
+    _ = ctx.bindFd(std, &wake_b.send_fd) catch |err| {
         if (err == error.AlreadyBound) return;
         return err;
     };
     return error.ExpectedAlreadyBound;
 }
 
-fn deinitDetachesBindingBeforeParentCancelCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn deinitDetachesBindingBeforeParentCancelCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    var wake = try initWakeSockets(lib);
-    defer lib.posix.close(wake.send_fd);
-    defer lib.posix.close(wake.recv_fd);
+    var wake = try initWakeSockets(std);
+    defer std.posix.close(wake.send_fd);
+    defer std.posix.close(wake.recv_fd);
 
-    const bg = ctx_ns.background();
-    var parent = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var parent = try ctx_api.withCancel(bg);
     defer parent.deinit();
-    var ctx = try ctx_ns.withCancel(parent);
-    try ctx.bindFd(lib, &wake.send_fd);
+    var ctx = try ctx_api.withCancel(parent);
+    try ctx.bindFd(std, &wake.send_fd);
 
     ctx.deinit();
     parent.cancelWithCause(error.BrokenPipe);
-    try expectFdNotReadable(lib, wake.recv_fd);
+    try expectFdNotReadable(std, wake.recv_fd);
 }
 
-fn contextDeinitDeactivatesBindingCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn contextDeinitDeactivatesBindingCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    const bg = ctx_ns.background();
-    var parent = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var parent = try ctx_api.withCancel(bg);
     defer parent.deinit();
-    var ctx = try ctx_ns.withCancel(parent);
+    var ctx = try ctx_api.withCancel(parent);
 
     var state = BindingState{};
     try ctx.bindLink(makeBindingLink(&state));
@@ -215,26 +216,26 @@ fn contextDeinitDeactivatesBindingCase(comptime lib: type, allocator: lib.mem.Al
     if (state.deactivate_hits != 1) return error.ContextDeinitShouldDeactivateBinding;
 }
 
-fn boundFdWakesBeforeChildBindingRunsCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn boundFdWakesBeforeChildBindingRunsCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    var wake = try initWakeSockets(lib);
-    defer lib.posix.close(wake.send_fd);
-    defer lib.posix.close(wake.recv_fd);
+    var wake = try initWakeSockets(std);
+    defer std.posix.close(wake.send_fd);
+    defer std.posix.close(wake.recv_fd);
 
     const State = struct {
-        recv_fd: lib.posix.socket_t,
+        recv_fd: std.posix.socket_t,
         readable_during_fire: bool = false,
     };
 
-    const bg = ctx_ns.background();
-    var parent = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var parent = try ctx_api.withCancel(bg);
     defer parent.deinit();
-    var child = try ctx_ns.withCancel(parent);
+    var child = try ctx_api.withCancel(parent);
     defer child.deinit();
-    try parent.bindFd(lib, &wake.send_fd);
+    try parent.bindFd(std, &wake.send_fd);
     var state = State{
         .recv_fd = wake.recv_fd,
     };
@@ -245,7 +246,7 @@ fn boundFdWakesBeforeChildBindingRunsCase(comptime lib: type, allocator: lib.mem
                     const same_cause = cause == error.BrokenPipe;
                     _ = same_cause;
                     const typed_state: *State = @ptrCast(@alignCast(ptr));
-                    typed_state.readable_during_fire = pollReadable(lib, typed_state.recv_fd, 20) catch false;
+                    typed_state.readable_during_fire = pollReadable(std, typed_state.recv_fd, 20 * time_mod.duration.MilliSecond) catch false;
                 }
 
                 fn deactivateFn(ptr: *anyopaque) void {
@@ -304,11 +305,11 @@ fn makeBindingLink(state: *BindingState) BindingLink {
     };
 }
 
-fn initWakeSockets(comptime lib: type) !struct {
-    recv_fd: lib.posix.socket_t,
-    send_fd: lib.posix.socket_t,
+fn initWakeSockets(comptime std: type) !struct {
+    recv_fd: std.posix.socket_t,
+    send_fd: std.posix.socket_t,
 } {
-    const posix = lib.posix;
+    const posix = std.posix;
     const loopback_addr = [4]u8{ 127, 0, 0, 1 };
     const loopback_addr_u32 = @as(*align(1) const u32, @ptrCast(&loopback_addr)).*;
 
@@ -316,7 +317,7 @@ fn initWakeSockets(comptime lib: type) !struct {
     errdefer posix.close(recv_fd);
 
     var recv_storage: posix.sockaddr.storage = undefined;
-    zeroStorage(lib, &recv_storage);
+    zeroStorage(std, &recv_storage);
     const recv_addr: *posix.sockaddr.in = @ptrCast(@alignCast(&recv_storage));
     recv_addr.* = .{
         .port = 0,
@@ -332,7 +333,7 @@ fn initWakeSockets(comptime lib: type) !struct {
     errdefer posix.close(send_fd);
 
     var send_storage: posix.sockaddr.storage = undefined;
-    zeroStorage(lib, &send_storage);
+    zeroStorage(std, &send_storage);
     const send_addr: *posix.sockaddr.in = @ptrCast(@alignCast(&send_storage));
     send_addr.* = .{
         .port = bound_addr.port,
@@ -346,29 +347,35 @@ fn initWakeSockets(comptime lib: type) !struct {
     };
 }
 
-fn zeroStorage(comptime lib: type, storage: *lib.posix.sockaddr.storage) void {
-    const bytes: *[@sizeOf(lib.posix.sockaddr.storage)]u8 = @ptrCast(storage);
+fn zeroStorage(comptime std: type, storage: *std.posix.sockaddr.storage) void {
+    const bytes: *[@sizeOf(std.posix.sockaddr.storage)]u8 = @ptrCast(storage);
     @memset(bytes, 0);
 }
 
-fn expectFdReadable(comptime lib: type, fd: lib.posix.socket_t) !void {
-    const ready = try pollReadable(lib, fd, 20);
+fn expectFdReadable(comptime std: type, fd: std.posix.socket_t) !void {
+    const ready = try pollReadable(std, fd, 20 * time_mod.duration.MilliSecond);
     if (!ready) return error.ExpectedReadableFd;
 }
 
-fn expectFdNotReadable(comptime lib: type, fd: lib.posix.socket_t) !void {
-    const ready = try pollReadable(lib, fd, 0);
+fn expectFdNotReadable(comptime std: type, fd: std.posix.socket_t) !void {
+    const ready = try pollReadable(std, fd, 0);
     if (ready) return error.ExpectedUnreadableFd;
 }
 
-fn pollReadable(comptime lib: type, fd: lib.posix.socket_t, timeout_ms: i32) !bool {
-    var poll_fds = [_]lib.posix.pollfd{.{
+fn pollReadable(comptime std: type, fd: std.posix.socket_t, timeout: time_mod.duration.Duration) !bool {
+    var poll_fds = [_]std.posix.pollfd{.{
         .fd = fd,
-        .events = lib.posix.POLL.IN,
+        .events = std.posix.POLL.IN,
         .revents = 0,
     }};
-    const ready = try lib.posix.poll(poll_fds[0..], timeout_ms);
+    const ready = try std.posix.poll(poll_fds[0..], posixPollTimeout(std, timeout));
     if (ready == 0) return false;
     if (poll_fds[0].revents == 0) return false;
     return true;
+}
+
+fn posixPollTimeout(comptime std: type, timeout: time_mod.duration.Duration) i32 {
+    if (timeout <= 0) return 0;
+    const ceil_ms = @divFloor(timeout - 1, time_mod.duration.MilliSecond) + 1;
+    return @intCast(@min(ceil_ms, std.math.maxInt(i32)));
 }

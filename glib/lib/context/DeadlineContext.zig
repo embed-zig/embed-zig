@@ -1,13 +1,16 @@
 //! DeadlineContext — context that auto-cancels when a deadline is reached.
 
+const stdz = @import("stdz");
+const time_mod = @import("time");
+const Allocator = stdz.mem.Allocator;
+
 const Context = @import("Context.zig");
 const internal = @import("internal.zig");
-const Allocator = @import("stdz").mem.Allocator;
 
-pub fn make(comptime lib: type) type {
-    const Mutex = lib.Thread.Mutex;
-    const Condition = lib.Thread.Condition;
-    const RwLock = lib.Thread.RwLock;
+pub fn make(comptime std: type, comptime time: type) type {
+    const Mutex = std.Thread.Mutex;
+    const Condition = std.Thread.Condition;
+    const RwLock = std.Thread.RwLock;
 
     return struct {
         allocator: Allocator,
@@ -16,17 +19,17 @@ pub fn make(comptime lib: type) type {
         mu: Mutex = .{},
         cond: Condition = .{},
         cause: ?anyerror = null,
-        deadline_ns: i128,
+        deadline: time_mod.instant.Time,
         timer_mu: Mutex = .{},
         timer_cond: Condition = .{},
         timer_generation: usize = 0,
         timer_canceled: bool = false,
-        timer_thread: ?lib.Thread = null,
+        timer_thread: ?std.Thread = null,
         timer_started: bool = false,
 
         const Self = @This();
 
-        pub fn init(allocator: Allocator, parent: Context, deadline_ns: i128) Allocator.Error!Context {
+        pub fn init(allocator: Allocator, parent: Context, deadline: time_mod.instant.Time) Allocator.Error!Context {
             const self = try allocator.create(Self);
             const ctx = Context.init(self, &vtable, allocator);
             self.* = .{
@@ -36,7 +39,7 @@ pub fn make(comptime lib: type) type {
                     .parent = parent,
                 },
                 .tree_rw = internal.treeLock(parent, RwLock),
-                .deadline_ns = deadline_ns,
+                .deadline = deadline,
             };
 
             internal.attachChild(parent, ctx);
@@ -46,7 +49,7 @@ pub fn make(comptime lib: type) type {
                 return ctx;
             }
 
-            if (self.effectiveDeadline() <= lib.time.nanoTimestamp()) {
+            if (time_mod.instant.sub(self.effectiveDeadline(), time.instant.now()) <= 0) {
                 self.markCanceled(Context.DeadlineExceeded);
             } else {
                 self.ensureTimer();
@@ -55,17 +58,17 @@ pub fn make(comptime lib: type) type {
             return ctx;
         }
 
-        fn effectiveDeadlineNoLock(self: *const Self) i128 {
+        fn effectiveDeadlineNoLock(self: *const Self) time_mod.instant.Time {
             const parent = self.tree.parent;
             if (parent) |p| {
                 if (internal.deadlineNoLock(p)) |parent_dl| {
-                    return @min(parent_dl, self.deadline_ns);
+                    return @min(parent_dl, self.deadline);
                 }
             }
-            return self.deadline_ns;
+            return self.deadline;
         }
 
-        fn effectiveDeadline(self: *const Self) i128 {
+        fn effectiveDeadline(self: *const Self) time_mod.instant.Time {
             const self_mut: *Self = @constCast(self);
             self_mut.tree_rw.lockShared();
             defer self_mut.tree_rw.unlockShared();
@@ -76,7 +79,7 @@ pub fn make(comptime lib: type) type {
             if (self.timer_started) return;
             if (self.cause != null) return;
             self.timer_started = true;
-            self.timer_thread = lib.Thread.spawn(.{}, timerFn, .{self}) catch |err| {
+            self.timer_thread = std.Thread.spawn(.{}, timerFn, .{self}) catch |err| {
                 self.markCanceled(err);
                 return;
             };
@@ -90,7 +93,7 @@ pub fn make(comptime lib: type) type {
                 self.timer_mu.unlock();
                 if (timer_canceled) return;
 
-                const remaining_ns = self.effectiveDeadline() - lib.time.nanoTimestamp();
+                const timed_wait = internal.remainingTimedWait(self.effectiveDeadline(), time.instant.now());
 
                 self.timer_mu.lock();
                 if (self.timer_canceled) {
@@ -101,13 +104,12 @@ pub fn make(comptime lib: type) type {
                     self.timer_mu.unlock();
                     continue;
                 }
-                if (remaining_ns <= 0) {
+                if (timed_wait == null) {
                     self.timer_mu.unlock();
                     break;
                 }
 
-                const wait_ns: u64 = @intCast(@min(remaining_ns, internal.max_wait_ns_i128));
-                self.timer_cond.timedWait(&self.timer_mu, wait_ns) catch {};
+                self.timer_cond.timedWait(&self.timer_mu, timed_wait.?) catch {};
                 const timer_stopped = self.timer_canceled;
                 self.timer_mu.unlock();
                 if (timer_stopped) return;
@@ -160,17 +162,17 @@ pub fn make(comptime lib: type) type {
             return true;
         }
 
-        pub fn wait(self: *Self, timeout_ns: ?i64) ?anyerror {
+        pub fn wait(self: *Self, timeout: ?time_mod.duration.Duration) ?anyerror {
             self.mu.lock();
             defer self.mu.unlock();
 
-            if (timeout_ns) |ns| {
-                const deadline_ns = lib.time.nanoTimestamp() + @as(i128, ns);
+            if (timeout) |duration| {
+                if (duration <= 0) return null;
+                const deadline = internal.timeoutDeadline(time, duration);
                 while (self.cause == null) {
-                    const remaining_ns = deadline_ns - lib.time.nanoTimestamp();
-                    if (remaining_ns <= 0) return null;
+                    const timed_wait = internal.remainingTimedWait(deadline, time.instant.now()) orelse return null;
 
-                    self.cond.timedWait(&self.mu, @intCast(@min(remaining_ns, internal.max_wait_ns_i128))) catch {};
+                    self.cond.timedWait(&self.mu, timed_wait) catch {};
                 }
                 return self.cause;
             }
@@ -192,12 +194,12 @@ pub fn make(comptime lib: type) type {
             return errNoLockImpl(ptr);
         }
 
-        fn deadlineNoLockImpl(ptr: *anyopaque) ?i128 {
+        fn deadlineNoLockImpl(ptr: *anyopaque) ?time_mod.instant.Time {
             const self: *Self = @ptrCast(@alignCast(ptr));
             return self.effectiveDeadlineNoLock();
         }
 
-        fn deadlineImpl(ptr: *anyopaque) ?i128 {
+        fn deadlineImpl(ptr: *anyopaque) ?time_mod.instant.Time {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
@@ -217,9 +219,9 @@ pub fn make(comptime lib: type) type {
             return valueNoLockImpl(ptr, key);
         }
 
-        fn waitImpl(ptr: *anyopaque, timeout_ns: ?i64) ?anyerror {
+        fn waitImpl(ptr: *anyopaque, timeout: ?time_mod.duration.Duration) ?anyerror {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            return self.wait(timeout_ns);
+            return self.wait(timeout);
         }
 
         fn cancelImpl(ptr: *anyopaque) void {

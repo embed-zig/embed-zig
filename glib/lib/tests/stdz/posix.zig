@@ -1,8 +1,8 @@
-const std = @import("std");
+const host_std = @import("std");
 const stdz = @import("stdz");
 const testing_mod = @import("testing");
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -13,53 +13,53 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("type_surface", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("type_surface", testing_mod.TestRunner.fromFn(std, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try typeSurfaceTest(lib);
+                    try typeSurfaceTest(std);
                 }
             }.run));
-            t.run("file", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("file", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try fileTest(lib);
+                    try fileTest(std);
                 }
             }.run));
-            t.run("seek", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("seek", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try seekTests(lib);
+                    try seekTests(std);
                 }
             }.run));
-            t.run("fcntl", testing_mod.TestRunner.fromFn(lib, 16 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("fcntl", testing_mod.TestRunner.fromFn(std, 16 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try fcntlTest(lib);
+                    try fcntlTest(std);
                 }
             }.run));
-            t.run("getsockopt", testing_mod.TestRunner.fromFn(lib, 16 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("getsockopt", testing_mod.TestRunner.fromFn(std, 16 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try getsockoptTest(lib);
+                    try getsockoptTest(std);
                 }
             }.run));
-            t.run("tcp", testing_mod.TestRunner.fromFn(lib, 64 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("tcp", testing_mod.TestRunner.fromFn(std, 64 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try tcpTest(lib);
+                    try tcpTest(std);
                 }
             }.run));
-            t.run("udp", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("udp", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try udpTest(lib);
+                    try udpTest(std);
                 }
             }.run));
             return t.wait();
@@ -67,25 +67,25 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
 }
 
-fn typeSurfaceTest(comptime lib: type) !void {
-    const posix = lib.posix;
+fn typeSurfaceTest(comptime std: type) !void {
+    const posix = std.posix;
 
     _ = posix.timeval;
     _ = posix.timespec;
     if (@sizeOf(posix.timespec) == 0) return error.TimespecTypeMissing;
 }
 
-fn fileTest(comptime lib: type) !void {
-    const posix = lib.posix;
+fn fileTest(comptime std: type) !void {
+    const posix = std.posix;
 
     const dir_path = "/tmp/stdz_test_runner";
     const file_path = dir_path ++ "/test.txt";
@@ -112,8 +112,8 @@ fn fileTest(comptime lib: type) !void {
     try posix.unlink(file_path);
 }
 
-fn seekTests(comptime lib: type) !void {
-    const posix = lib.posix;
+fn seekTests(comptime std: type) !void {
+    const posix = std.posix;
 
     const path = "/tmp/stdz_test_runner/seek_test.txt";
     const dir_path = "/tmp/stdz_test_runner";
@@ -156,8 +156,8 @@ fn seekTests(comptime lib: type) !void {
     try posix.unlink(path);
 }
 
-fn fcntlTest(comptime lib: type) !void {
-    const posix = lib.posix;
+fn fcntlTest(comptime std: type) !void {
+    const posix = std.posix;
 
     const sock = try posix.socket(posix.AF.INET, posix.SOCK.STREAM, 0);
     defer posix.close(sock);
@@ -175,19 +175,19 @@ fn fcntlTest(comptime lib: type) !void {
         return error.FcntlRestoreFailed;
 }
 
-fn getsockoptTest(comptime lib: type) !void {
-    const posix = lib.posix;
+fn getsockoptTest(comptime std: type) !void {
+    const posix = std.posix;
 
     const sock = try posix.socket(posix.AF.INET, posix.SOCK.STREAM, 0);
     defer posix.close(sock);
 
     var err_code: i32 = -1;
-    try posix.getsockopt(sock, posix.SOL.SOCKET, posix.SO.ERROR, std.mem.asBytes(&err_code));
+    try posix.getsockopt(sock, posix.SOL.SOCKET, posix.SO.ERROR, host_std.mem.asBytes(&err_code));
     if (err_code != 0) return error.GetSockOptErrorNotZero;
 }
 
-fn tcpTest(comptime lib: type) !void {
-    const posix = lib.posix;
+fn tcpTest(comptime std: type) !void {
+    const posix = std.posix;
 
     const server = try posix.socket(posix.AF.INET, posix.SOCK.STREAM, 0);
     defer posix.close(server);
@@ -195,13 +195,13 @@ fn tcpTest(comptime lib: type) !void {
     const enable: [4]u8 = @bitCast(@as(i32, 1));
     try posix.setsockopt(server, posix.SOL.SOCKET, posix.SO.REUSEADDR, &enable);
 
-    var addr = loopbackSockAddr4(lib, 0);
+    var addr = loopbackSockAddr4(std, 0);
     try posix.bind(server, @ptrCast(&addr), @sizeOf(@TypeOf(addr)));
 
     var bound_addr: posix.sockaddr.in = undefined;
     var bound_len: posix.socklen_t = @sizeOf(posix.sockaddr.in);
     try posix.getsockname(server, @ptrCast(&bound_addr), &bound_len);
-    const port = lib.mem.bigToNative(u16, bound_addr.port);
+    const port = std.mem.bigToNative(u16, bound_addr.port);
 
     try posix.listen(server, 1);
 
@@ -211,7 +211,7 @@ fn tcpTest(comptime lib: type) !void {
         .revents = 0,
     }};
 
-    const client_thread = try lib.Thread.spawn(.{}, struct {
+    const client_thread = try std.Thread.spawn(.{}, struct {
         fn connect(comptime p: type, comptime thread_lib: type, port_num: u16) void {
             const client = p.socket(p.AF.INET, p.SOCK.STREAM, 0) catch return;
             defer p.close(client);
@@ -221,7 +221,7 @@ fn tcpTest(comptime lib: type) !void {
             var sink: [64]u8 = undefined;
             _ = p.recv(client, &sink, 0) catch return;
         }
-    }.connect, .{ posix, lib, port });
+    }.connect, .{ posix, std, port });
 
     _ = try posix.poll(&poll_fds, 5000);
 
@@ -240,24 +240,24 @@ fn tcpTest(comptime lib: type) !void {
     client_thread.join();
 }
 
-fn udpTest(comptime lib: type) !void {
-    const posix = lib.posix;
+fn udpTest(comptime std: type) !void {
+    const posix = std.posix;
 
     const server = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
     defer posix.close(server);
 
-    var addr = loopbackSockAddr4(lib, 0);
+    var addr = loopbackSockAddr4(std, 0);
     try posix.bind(server, @ptrCast(&addr), @sizeOf(@TypeOf(addr)));
 
     var bound_addr: posix.sockaddr.in = undefined;
     var bound_len: posix.socklen_t = @sizeOf(posix.sockaddr.in);
     try posix.getsockname(server, @ptrCast(&bound_addr), &bound_len);
-    const port = lib.mem.bigToNative(u16, bound_addr.port);
+    const port = std.mem.bigToNative(u16, bound_addr.port);
 
     const client = try posix.socket(posix.AF.INET, posix.SOCK.DGRAM, 0);
     defer posix.close(client);
 
-    var dest = loopbackSockAddr4(lib, port);
+    var dest = loopbackSockAddr4(std, port);
     _ = try posix.sendto(client, "udp-ping", 0, @ptrCast(&dest), @sizeOf(@TypeOf(dest)));
 
     var buf: [64]u8 = undefined;
@@ -266,10 +266,10 @@ fn udpTest(comptime lib: type) !void {
     _ = try posix.recvfrom(server, &buf, 0, @ptrCast(&src_addr), &src_len);
 }
 
-fn loopbackSockAddr4(comptime lib: type, port: u16) lib.posix.sockaddr.in {
+fn loopbackSockAddr4(comptime std: type, port: u16) std.posix.sockaddr.in {
     const ip = [_]u8{ 127, 0, 0, 1 };
     return .{
-        .port = lib.mem.nativeToBig(u16, port),
+        .port = std.mem.nativeToBig(u16, port),
         .addr = @as(*align(1) const u32, @ptrCast(&ip)).*,
     };
 }

@@ -3,7 +3,7 @@ const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -12,10 +12,10 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
 
                     var ln = try Net.listen(a, .{ .address = test_utils.addr4(.{ 127, 0, 0, 1 }, 0) });
@@ -34,7 +34,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
 
                     var buf: [5]u8 = undefined;
                     try io.readFull(@TypeOf(ac), &ac, &buf);
-                    try lib.testing.expectEqualStrings("hello", &buf);
+                    try std.testing.expectEqualStrings("hello", &buf);
                 }
             };
             Body.call(allocator) catch |err| {

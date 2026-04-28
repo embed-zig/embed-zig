@@ -194,14 +194,14 @@ stdz.log.info("status={} body={s}", .{ resp.status_code, buf[0..n] });
 Common `Transport.Options` knobs:
 
 - `tls_client_config`
-- `tls_handshake_timeout_ms`
-- `response_header_timeout_ms`
-- `expect_continue_timeout_ms`
+- `tls_handshake_timeout`
+- `response_header_timeout`
+- `expect_continue_timeout`
 - `disable_keep_alives`
 - `max_conns_per_host`
 - `max_idle_conns`
 - `max_idle_conns_per_host`
-- `idle_conn_timeout_ms`
+- `idle_conn_timeout`
 - `https_proxy`
 - `force_attempt_http2`
 - `alternate_protocols`

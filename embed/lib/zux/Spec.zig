@@ -582,9 +582,9 @@ pub fn make(comptime spec_doc: anytype) type {
                     return .closed;
                 }
 
-                pub fn setDataReadTimeout(_: *@This(), _: ?u32) void {}
+                pub fn setDataReadDeadline(_: *@This(), _: ?glib.time.instant.Time) void {}
 
-                pub fn setDataWriteTimeout(_: *@This(), _: ?u32) void {}
+                pub fn setDataWriteDeadline(_: *@This(), _: ?glib.time.instant.Time) void {}
 
                 pub fn setEventCallback(_: *@This(), _: *const anyopaque, _: drivers.Modem.CallbackFn) void {}
 
@@ -649,14 +649,14 @@ pub fn make(comptime spec_doc: anytype) type {
                     return impl.dataState();
                 }
 
-                fn setDataReadTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+                fn setDataReadDeadlineFn(ptr: *anyopaque, deadline: ?glib.time.instant.Time) void {
                     const impl: *Impl = @ptrCast(@alignCast(ptr));
-                    impl.setDataReadTimeout(ms);
+                    impl.setDataReadDeadline(deadline);
                 }
 
-                fn setDataWriteTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+                fn setDataWriteDeadlineFn(ptr: *anyopaque, deadline: ?glib.time.instant.Time) void {
                     const impl: *Impl = @ptrCast(@alignCast(ptr));
-                    impl.setDataWriteTimeout(ms);
+                    impl.setDataWriteDeadline(deadline);
                 }
 
                 fn setEventCallbackFn(ptr: *anyopaque, ctx: *const anyopaque, emit_fn: drivers.Modem.CallbackFn) void {
@@ -681,8 +681,8 @@ pub fn make(comptime spec_doc: anytype) type {
                     .dataRead = dataReadFn,
                     .dataWrite = dataWriteFn,
                     .dataState = dataStateFn,
-                    .setDataReadTimeout = setDataReadTimeoutFn,
-                    .setDataWriteTimeout = setDataWriteTimeoutFn,
+                    .setDataReadDeadline = setDataReadDeadlineFn,
+                    .setDataWriteDeadline = setDataWriteDeadlineFn,
                     .setEventCallback = setEventCallbackFn,
                     .clearEventCallback = clearEventCallbackFn,
                 };
@@ -908,7 +908,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqualStrings("walks a tick", SpecType.user_stories[0].description);
             try grt.std.testing.expectEqual(@as(usize, 1), SpecType.user_stories[0].steps.len);
             if (SpecType.user_stories[0].steps[0].tick) |tick| {
-                try grt.std.testing.expectEqual(@as(i128, 42), tick.interval);
+                try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 42), tick.interval);
                 try grt.std.testing.expectEqual(@as(usize, 1), tick.n);
             } else {
                 return error.ExpectedTickStep;

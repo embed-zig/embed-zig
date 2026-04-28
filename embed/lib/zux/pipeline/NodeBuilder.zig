@@ -586,7 +586,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const Forward = struct {
                 out: ?Emitter = null,
                 called: usize = 0,
-                delta_ns: i128,
+                delta: glib.time.duration.Duration,
 
                 pub fn bindOutput(self: *@This(), out: Emitter) void {
                     self.out = out;
@@ -595,7 +595,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 pub fn process(self: *@This(), message: Message) !usize {
                     self.called += 1;
                     var next = message;
-                    next.timestamp_ns += self.delta_ns;
+                    next.timestamp = glib.time.instant.add(next.timestamp, self.delta);
                     if (self.out) |out| {
                         try out.emit(next);
                     }
@@ -605,19 +605,19 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             const Collector = struct {
                 count: usize = 0,
-                last_timestamp_ns: i128 = 0,
+                last_timestamp: glib.time.instant.Time = 0,
 
                 pub fn emit(self: *@This(), message: Message) !void {
                     self.count += 1;
-                    self.last_timestamp_ns = message.timestamp_ns;
+                    self.last_timestamp = message.timestamp;
                 }
             };
 
-            var a_impl = Forward{ .delta_ns = 1 };
-            var b_impl = Forward{ .delta_ns = 2 };
-            var c_impl = Forward{ .delta_ns = 4 };
-            var d_impl = Forward{ .delta_ns = 8 };
-            var e_impl = Forward{ .delta_ns = 16 };
+            var a_impl = Forward{ .delta = 1 };
+            var b_impl = Forward{ .delta = 2 };
+            var c_impl = Forward{ .delta = 4 };
+            var d_impl = Forward{ .delta = 8 };
+            var e_impl = Forward{ .delta = 16 };
             var collector = Collector{};
 
             var config: Built.Config = .{
@@ -633,7 +633,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             const emitted_button = try root.process(.{
                 .origin = .source,
-                .timestamp_ns = 10,
+                .timestamp = 10,
                 .body = .{
                     .button_gesture = .{
                         .source_id = 1,
@@ -647,11 +647,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 1), c_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 0), d_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 1), e_impl.called);
-            try grt.std.testing.expectEqual(@as(i128, 33), collector.last_timestamp_ns);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 33), collector.last_timestamp);
 
             const emitted_raw = try root.process(.{
                 .origin = .source,
-                .timestamp_ns = 15,
+                .timestamp = 15,
                 .body = .{
                     .raw_single_button = .{
                         .source_id = 1,
@@ -665,11 +665,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 1), c_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 1), d_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 2), e_impl.called);
-            try grt.std.testing.expectEqual(@as(i128, 40), collector.last_timestamp_ns);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 40), collector.last_timestamp);
 
             const emitted_tick = try root.process(.{
                 .origin = .timer,
-                .timestamp_ns = 20,
+                .timestamp = 20,
                 .body = .{
                     .tick = .{},
                 },
@@ -680,7 +680,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 2), c_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 2), d_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 4), e_impl.called);
-            try grt.std.testing.expectEqual(@as(i128, 43), collector.last_timestamp_ns);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 43), collector.last_timestamp);
             try grt.std.testing.expectEqual(@as(usize, 4), collector.count);
         }
 

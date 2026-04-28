@@ -1,20 +1,20 @@
-const std = @import("std");
+const host_std = @import("std");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             const Body = struct {
                 fn waitConnect(sock: *net.Runtime.Tcp) !void {
-                    _ = try sock.poll(.{ .write = true, .failed = true, .hup = true, .write_interrupt = true }, 1000);
+                    _ = try sock.poll(.{ .write = true, .failed = true, .hup = true, .write_interrupt = true }, @intCast(1000 * net.time.duration.MilliSecond));
                     try sock.finishConnect();
                 }
 
@@ -29,7 +29,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     while (true) {
                         return listener.accept(null) catch |err| switch (err) {
                             error.WouldBlock => {
-                                _ = try listener.poll(.{ .read = true, .read_interrupt = true }, 1000);
+                                _ = try listener.poll(.{ .read = true, .read_interrupt = true }, @intCast(1000 * net.time.duration.MilliSecond));
                                 continue;
                             },
                             else => return err,
@@ -38,7 +38,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                 }
 
                 fn sendLater(sock: *net.Runtime.Tcp) void {
-                    std.Thread.sleep(20 * std.time.ns_per_ms);
+                    host_std.Thread.sleep(@intCast(20 * net.time.duration.MilliSecond));
                     _ = sock.send("x") catch {};
                 }
 
@@ -71,19 +71,19 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         server.deinit();
                     }
 
-                    var sender = try std.Thread.spawn(.{}, sendLater, .{&client});
+                    var sender = try host_std.Thread.spawn(.{}, sendLater, .{&client});
                     defer sender.join();
 
-                    const started_ms = std.time.milliTimestamp();
-                    const ready = try server.poll(.{ .read = true }, 1000);
-                    const elapsed_ms = std.time.milliTimestamp() - started_ms;
-                    try std.testing.expect(ready.read);
-                    try std.testing.expect(elapsed_ms >= 10);
+                    const started = net.time.instant.now();
+                    const ready = try server.poll(.{ .read = true }, @intCast(1000 * net.time.duration.MilliSecond));
+                    const elapsed_ms = @divFloor(@import("time").instant.sub(net.time.instant.now(), started), net.time.duration.MilliSecond);
+                    try host_std.testing.expect(ready.read);
+                    try host_std.testing.expect(elapsed_ms >= 10);
 
                     var buf: [1]u8 = undefined;
                     const n = try server.recv(&buf);
-                    try std.testing.expectEqual(@as(usize, 1), n);
-                    try std.testing.expectEqual(@as(u8, 'x'), buf[0]);
+                    try host_std.testing.expectEqual(@as(usize, 1), n);
+                    try host_std.testing.expectEqual(@as(u8, 'x'), buf[0]);
                 }
             };
 
@@ -94,7 +94,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

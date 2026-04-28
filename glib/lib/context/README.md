@@ -6,16 +6,18 @@
 - deadlines and timeouts
 - request-scoped values
 
-The public entrypoint is `make(lib)`, where `lib` supplies the platform-facing
-pieces (`lib.Thread`, `lib.time`, and `lib.mem`). `bindFd(...)` additionally
-uses `lib.posix` when a caller wants cancellation to signal a borrowed wake fd.
+The public entrypoint is `make(std, time)`, where `std` supplies the
+platform-facing synchronization and memory pieces (`std.Thread`, `std.mem`),
+and `time` supplies the runtime monotonic clock (`time.instant.now()`).
+`bindFd(...)` additionally uses `std.posix` when a caller wants cancellation to
+signal a borrowed wake fd.
 
 ## Quick start
 
 ```zig
 const context_mod = @import("context");
 
-const ContextApi = context_mod.make(lib);
+const ContextApi = context_mod.make(std, time);
 var context = try ContextApi.init(allocator);
 defer context.deinit();
 
@@ -57,7 +59,7 @@ children list. Deadline and value lookup walk upward through the parent chain.
 ## API shape
 
 ```zig
-const ContextApi = context_mod.make(lib);
+const ContextApi = context_mod.make(std, time);
 var context = try ContextApi.init(allocator);
 defer context.deinit();
 ```
@@ -72,8 +74,11 @@ Derived contexts inherit the parent's allocator:
 
 ```zig
 var cc = try context.withCancel(bg);
-var dc = try context.withDeadline(bg, lib.time.milliTimestamp() + 1000);
-var tc = try context.withTimeout(bg, 1000);
+var dc = try context.withDeadline(
+    bg,
+    @import("time").instant.add(context.now(), @import("time").duration.Second),
+);
+var tc = try context.withTimeout(bg, @import("time").duration.Second);
 var wake_fd = some_posix_socket;
 try cc.bindFd(lib, &wake_fd);
 var vc = try context.withValue(u64, cc, &request_id_key, 42);
@@ -87,8 +92,8 @@ caller-owned fd slot by pointer and stores one binding value on that context.
 `Context` exposes the common interface used by callers:
 
 - `err()` returns `?anyerror`
-- `deadline()` returns `?i128`
-- `wait(timeout_ns)` blocks until cancel/deadline or timeout
+- `deadline()` returns `?time.instant.Time`
+- `wait(timeout)` blocks until cancel/deadline or the relative `time.duration.Duration` timeout
 - `cancel()` marks the node canceled with `error.Canceled`
 - `cancelWithCause(err)` marks the node canceled with a custom cause
 - `checkState()` maps the current cancellation cause to `error.Canceled` or
@@ -208,7 +213,7 @@ tree:
 
 ```zig
 const testing = @import("testing").make(lib);
-const context_runner = @import("tests/context.zig").make(lib);
+const context_runner = @import("tests/context.zig").make(std, time);
 
 var t = testing.init();
 defer t.deinit();

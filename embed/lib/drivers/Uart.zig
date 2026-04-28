@@ -1,7 +1,7 @@
 //! Uart — non-owning type-erased byte-oriented UART.
 //!
 //! This wrapper exposes the synchronous UART surface currently needed by
-//! `lib/drivers`: byte-stream reads/writes, per-direction timeouts, and baud
+//! `lib/drivers`: byte-stream reads/writes, per-direction deadlines, and baud
 //! reconfiguration.
 
 const glib = @import("glib");
@@ -51,8 +51,8 @@ pub const BaudError = error{
 pub const VTable = struct {
     read: *const fn (ptr: *anyopaque, buf: []u8) ReadError!usize,
     write: *const fn (ptr: *anyopaque, buf: []const u8) WriteError!usize,
-    setReadTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
-    setWriteTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
+    setReadDeadline: *const fn (ptr: *anyopaque, deadline: ?glib.time.instant.Time) void,
+    setWriteDeadline: *const fn (ptr: *anyopaque, deadline: ?glib.time.instant.Time) void,
     setBaud: *const fn (ptr: *anyopaque, baud: Baud) BaudError!void,
 };
 
@@ -64,12 +64,12 @@ pub fn write(self: Uart, buf: []const u8) WriteError!usize {
     return self.vtable.write(self.ptr, buf);
 }
 
-pub fn setReadTimeout(self: Uart, ms: ?u32) void {
-    self.vtable.setReadTimeout(self.ptr, ms);
+pub fn setReadDeadline(self: Uart, deadline: ?glib.time.instant.Time) void {
+    self.vtable.setReadDeadline(self.ptr, deadline);
 }
 
-pub fn setWriteTimeout(self: Uart, ms: ?u32) void {
-    self.vtable.setWriteTimeout(self.ptr, ms);
+pub fn setWriteDeadline(self: Uart, deadline: ?glib.time.instant.Time) void {
+    self.vtable.setWriteDeadline(self.ptr, deadline);
 }
 
 pub fn setBaud(self: Uart, baud: Baud) BaudError!void {
@@ -95,14 +95,14 @@ pub fn init(pointer: anytype) Uart {
             return self.write(buf);
         }
 
-        fn setReadTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+        fn setReadDeadlineFn(ptr: *anyopaque, deadline: ?glib.time.instant.Time) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            self.setReadTimeout(ms);
+            self.setReadDeadline(deadline);
         }
 
-        fn setWriteTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+        fn setWriteDeadlineFn(ptr: *anyopaque, deadline: ?glib.time.instant.Time) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            self.setWriteTimeout(ms);
+            self.setWriteDeadline(deadline);
         }
 
         fn setBaudFn(ptr: *anyopaque, baud: Baud) BaudError!void {
@@ -113,8 +113,8 @@ pub fn init(pointer: anytype) Uart {
         const vtable = VTable{
             .read = readFn,
             .write = writeFn,
-            .setReadTimeout = setReadTimeoutFn,
-            .setWriteTimeout = setWriteTimeoutFn,
+            .setReadDeadline = setReadDeadlineFn,
+            .setWriteDeadline = setWriteDeadlineFn,
             .setBaud = setBaudFn,
         };
     };
@@ -127,13 +127,13 @@ pub fn init(pointer: anytype) Uart {
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn dispatchesReadWriteTimeoutsAndBaud() !void {
+        fn dispatchesReadWriteDeadlinesAndBaud() !void {
             const Fake = struct {
                 read_fill: [4]u8 = .{ 0x41, 0x54, 0x0d, 0x0a },
                 last_write: [8]u8 = [_]u8{0} ** 8,
                 last_write_len: usize = 0,
-                read_timeout_ms: ?u32 = null,
-                write_timeout_ms: ?u32 = null,
+                read_deadline: ?glib.time.instant.Time = null,
+                write_deadline: ?glib.time.instant.Time = null,
                 baud: Baud = .bps_115200,
 
                 fn read(self: *@This(), buf: []u8) ReadError!usize {
@@ -148,12 +148,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return buf.len;
                 }
 
-                fn setReadTimeout(self: *@This(), ms: ?u32) void {
-                    self.read_timeout_ms = ms;
+                fn setReadDeadline(self: *@This(), deadline: ?glib.time.instant.Time) void {
+                    self.read_deadline = deadline;
                 }
 
-                fn setWriteTimeout(self: *@This(), ms: ?u32) void {
-                    self.write_timeout_ms = ms;
+                fn setWriteDeadline(self: *@This(), deadline: ?glib.time.instant.Time) void {
+                    self.write_deadline = deadline;
                 }
 
                 fn setBaud(self: *@This(), baud: Baud) BaudError!void {
@@ -172,10 +172,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 4), fake.last_write_len);
             try grt.std.testing.expectEqualSlices(u8, "AT\r\n", fake.last_write[0..4]);
 
-            uart.setReadTimeout(100);
-            uart.setWriteTimeout(200);
-            try grt.std.testing.expectEqual(@as(?u32, 100), fake.read_timeout_ms);
-            try grt.std.testing.expectEqual(@as(?u32, 200), fake.write_timeout_ms);
+            const read_deadline: glib.time.instant.Time = 100;
+            const write_deadline: glib.time.instant.Time = 200;
+            uart.setReadDeadline(read_deadline);
+            uart.setWriteDeadline(write_deadline);
+            try grt.std.testing.expectEqual(@as(?glib.time.instant.Time, read_deadline), fake.read_deadline);
+            try grt.std.testing.expectEqual(@as(?glib.time.instant.Time, write_deadline), fake.write_deadline);
 
             try uart.setBaud(.bps_921600);
             try grt.std.testing.expectEqual(Baud.bps_921600, fake.baud);
@@ -197,9 +199,9 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return buf.len;
                 }
 
-                fn setReadTimeout(_: *@This(), _: ?u32) void {}
+                fn setReadDeadline(_: *@This(), _: ?glib.time.instant.Time) void {}
 
-                fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                fn setWriteDeadline(_: *@This(), _: ?glib.time.instant.Time) void {}
 
                 fn setBaud(self: *@This(), _: Baud) BaudError!void {
                     if (self.fail_baud) return error.Unsupported;
@@ -232,7 +234,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             _ = self;
             _ = allocator;
 
-            TestCase.dispatchesReadWriteTimeoutsAndBaud() catch |err| {
+            TestCase.dispatchesReadWriteDeadlinesAndBaud() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

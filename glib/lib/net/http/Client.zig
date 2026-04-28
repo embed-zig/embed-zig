@@ -20,9 +20,9 @@ const RedirectAction = enum {
     preserve_method,
 };
 
-pub fn Client(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
-    const Thread = lib.Thread;
+pub fn Client(comptime std: type) type {
+    const Allocator = std.mem.Allocator;
+    const Thread = std.Thread;
 
     return struct {
         allocator: Allocator,
@@ -132,7 +132,7 @@ pub fn Client(comptime lib: type) type {
                 var resp = try self.doRoundTrip(current_req, current_cleanup);
                 current_cleanup = null;
 
-                const action = redirectAction(lib, resp.status_code, current_req);
+                const action = redirectAction(std, resp.status_code, current_req);
                 const location = responseHeaderValue(resp.header, Header.location) orelse return resp;
                 switch (action) {
                     .none => return resp,
@@ -177,7 +177,7 @@ pub fn Client(comptime lib: type) type {
             self.shared.mutex.lock();
             defer self.shared.mutex.unlock();
 
-            lib.debug.assert(self.shared.active_calls > 0);
+            std.debug.assert(self.shared.active_calls > 0);
             self.shared.active_calls -= 1;
             if (self.shared.active_calls == 0 and self.shared.active_requests == 0) {
                 self.shared.cond.broadcast();
@@ -188,7 +188,7 @@ pub fn Client(comptime lib: type) type {
             self.shared.mutex.lock();
             defer self.shared.mutex.unlock();
 
-            lib.debug.assert(self.shared.active_requests > 0);
+            std.debug.assert(self.shared.active_requests > 0);
             self.shared.active_requests -= 1;
             if (self.shared.active_requests == 0) self.shared.cond.broadcast();
         }
@@ -228,7 +228,7 @@ pub fn Client(comptime lib: type) type {
             state.shared.mutex.lock();
             defer state.shared.mutex.unlock();
 
-            lib.debug.assert(state.shared.active_requests > 0);
+            std.debug.assert(state.shared.active_requests > 0);
             state.shared.active_requests -= 1;
             if (state.shared.active_requests == 0) state.shared.cond.broadcast();
         }
@@ -259,21 +259,21 @@ pub fn Client(comptime lib: type) type {
             location: []const u8,
             action: RedirectAction,
         ) anyerror!*OwnedRequestState {
-            const raw_url = try resolveRedirectUrl(lib, self.allocator, req.url, location);
+            const raw_url = try resolveRedirectUrl(std, self.allocator, req.url, location);
             errdefer self.allocator.free(raw_url);
 
             const parsed = try url_mod.parse(raw_url);
             const state = try self.allocator.create(OwnedRequestState);
             errdefer self.allocator.destroy(state);
 
-            var next = Request.initParsed(req.allocator, redirectMethod(lib, req, action), parsed);
+            var next = Request.initParsed(req.allocator, redirectMethod(std, req, action), parsed);
             next.proto = req.proto;
             next.proto_major = req.proto_major;
             next.proto_minor = req.proto_minor;
             next.close = req.close;
             next.ctx = req.ctx;
 
-            const filtered_headers = try filterRedirectHeaders(lib, req.allocator, req.header);
+            const filtered_headers = try filterRedirectHeaders(std, req.allocator, req.header);
             next.header = filtered_headers;
             next.owned_header_storage = if (filtered_headers.len == 0) null else filtered_headers;
             errdefer next.deinit();
@@ -325,11 +325,11 @@ pub fn Client(comptime lib: type) type {
     };
 }
 
-fn redirectAction(comptime lib: type, req_status: u16, req: *const Request) RedirectAction {
+fn redirectAction(comptime std: type, req_status: u16, req: *const Request) RedirectAction {
     return switch (req_status) {
         status.moved_permanently,
         status.found,
-        => if (lib.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) .preserve_method else .rewrite_to_get,
+        => if (std.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) .preserve_method else .rewrite_to_get,
         status.see_other => .rewrite_to_get,
         status.temporary_redirect,
         status.permanent_redirect,
@@ -346,9 +346,9 @@ fn canFollowRedirect(req: *const Request, action: RedirectAction) bool {
     };
 }
 
-fn redirectMethod(comptime lib: type, req: *const Request, action: RedirectAction) []const u8 {
+fn redirectMethod(comptime std: type, req: *const Request, action: RedirectAction) []const u8 {
     return switch (action) {
-        .rewrite_to_get => if (lib.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) "HEAD" else "GET",
+        .rewrite_to_get => if (std.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) "HEAD" else "GET",
         .preserve_method => req.effectiveMethod(),
         .none => req.effectiveMethod(),
     };
@@ -362,10 +362,10 @@ fn responseHeaderValue(headers: []const Header, name: []const u8) ?[]const u8 {
 }
 
 fn filterRedirectHeaders(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
+    comptime std: type,
+    allocator: std.mem.Allocator,
     headers: []const Header,
-) lib.mem.Allocator.Error![]Header {
+) std.mem.Allocator.Error![]Header {
     var kept: usize = 0;
     for (headers) |hdr| {
         if (shouldKeepRedirectHeader(hdr)) kept += 1;
@@ -391,23 +391,23 @@ fn shouldKeepRedirectHeader(hdr: Header) bool {
 }
 
 fn resolveRedirectUrl(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
+    comptime std: type,
+    allocator: std.mem.Allocator,
     base: url_mod.Url,
     location: []const u8,
 ) ![]u8 {
-    const parts = splitReference(lib, location);
+    const parts = splitReference(std, location);
 
-    if (hasUrlScheme(lib, location)) return allocator.dupe(u8, location);
+    if (hasUrlScheme(std, location)) return allocator.dupe(u8, location);
 
-    var out = lib.ArrayList(u8){};
+    var out = std.ArrayList(u8){};
     defer out.deinit(allocator);
 
     try out.appendSlice(allocator, base.scheme);
     try out.appendSlice(allocator, "://");
-    try appendAuthority(lib, &out, allocator, base);
+    try appendAuthority(std, &out, allocator, base);
 
-    if (lib.mem.startsWith(u8, location, "//")) {
+    if (std.mem.startsWith(u8, location, "//")) {
         out.clearRetainingCapacity();
         try out.appendSlice(allocator, base.scheme);
         try out.appendSlice(allocator, ":");
@@ -415,14 +415,14 @@ fn resolveRedirectUrl(
         return out.toOwnedSlice(allocator);
     }
     if (location.len == 0) {
-        try appendPathQueryFragment(lib, &out, allocator, base.path, base.raw_query, base.fragment);
+        try appendPathQueryFragment(std, &out, allocator, base.path, base.raw_query, base.fragment);
         return out.toOwnedSlice(allocator);
     }
     if (location[0] == '/') {
-        const normalized = try normalizePath(lib, allocator, parts.path);
+        const normalized = try normalizePath(std, allocator, parts.path);
         defer allocator.free(normalized);
         try out.appendSlice(allocator, normalized);
-        try appendQueryFragment(lib, &out, allocator, parts.query, parts.fragment);
+        try appendQueryFragment(std, &out, allocator, parts.query, parts.fragment);
         return out.toOwnedSlice(allocator);
     }
     if (location[0] == '?') {
@@ -432,31 +432,31 @@ fn resolveRedirectUrl(
         return out.toOwnedSlice(allocator);
     }
     if (location[0] == '#') {
-        try appendPathQueryFragment(lib, &out, allocator, base.path, base.raw_query, "");
+        try appendPathQueryFragment(std, &out, allocator, base.path, base.raw_query, "");
         try out.appendSlice(allocator, location);
         return out.toOwnedSlice(allocator);
     }
 
-    const base_dir = baseDirectory(lib, base.path);
-    var combined = lib.ArrayList(u8){};
+    const base_dir = baseDirectory(std, base.path);
+    var combined = std.ArrayList(u8){};
     defer combined.deinit(allocator);
     try combined.appendSlice(allocator, base_dir);
     try combined.appendSlice(allocator, parts.path);
-    const normalized = try normalizePath(lib, allocator, combined.items);
+    const normalized = try normalizePath(std, allocator, combined.items);
     defer allocator.free(normalized);
     try out.appendSlice(allocator, normalized);
-    try appendQueryFragment(lib, &out, allocator, parts.query, parts.fragment);
+    try appendQueryFragment(std, &out, allocator, parts.query, parts.fragment);
     return out.toOwnedSlice(allocator);
 }
 
-fn hasUrlScheme(comptime lib: type, location: []const u8) bool {
-    return lib.mem.indexOf(u8, location, "://") != null;
+fn hasUrlScheme(comptime std: type, location: []const u8) bool {
+    return std.mem.indexOf(u8, location, "://") != null;
 }
 
 fn appendAuthority(
-    comptime lib: type,
-    out: *lib.ArrayList(u8),
-    allocator: lib.mem.Allocator,
+    comptime std: type,
+    out: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
     base: url_mod.Url,
 ) !void {
     if (base.username.len != 0) {
@@ -468,7 +468,7 @@ fn appendAuthority(
         try out.append(allocator, '@');
     }
 
-    if (lib.mem.indexOfScalar(u8, base.host, ':') != null) {
+    if (std.mem.indexOfScalar(u8, base.host, ':') != null) {
         try out.append(allocator, '[');
         try out.appendSlice(allocator, base.host);
         try out.append(allocator, ']');
@@ -482,9 +482,9 @@ fn appendAuthority(
 }
 
 fn appendPathQueryFragment(
-    comptime lib: type,
-    out: *lib.ArrayList(u8),
-    allocator: lib.mem.Allocator,
+    comptime std: type,
+    out: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
     path: []const u8,
     raw_query: []const u8,
     fragment: []const u8,
@@ -505,9 +505,9 @@ fn appendPathQueryFragment(
 }
 
 fn appendQueryFragment(
-    comptime lib: type,
-    out: *lib.ArrayList(u8),
-    allocator: lib.mem.Allocator,
+    comptime std: type,
+    out: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
     raw_query: []const u8,
     fragment: []const u8,
 ) !void {
@@ -521,29 +521,29 @@ fn appendQueryFragment(
     }
 }
 
-fn baseDirectory(comptime lib: type, path: []const u8) []const u8 {
+fn baseDirectory(comptime std: type, path: []const u8) []const u8 {
     if (path.len == 0) return "/";
-    const slash = lib.mem.lastIndexOfScalar(u8, path, '/') orelse return "/";
+    const slash = std.mem.lastIndexOfScalar(u8, path, '/') orelse return "/";
     return if (slash == 0) "/" else path[0 .. slash + 1];
 }
 
 fn normalizePath(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
+    comptime std: type,
+    allocator: std.mem.Allocator,
     path: []const u8,
-) lib.mem.Allocator.Error![]u8 {
+) std.mem.Allocator.Error![]u8 {
     const absolute = path.len != 0 and path[0] == '/';
     const preserve_trailing_slash = path.len != 0 and path[path.len - 1] == '/';
 
-    var segments = lib.ArrayList([]const u8){};
+    var segments = std.ArrayList([]const u8){};
     defer segments.deinit(allocator);
 
     var i: usize = 0;
     while (i <= path.len) {
-        const next_slash = lib.mem.indexOfScalarPos(u8, path, i, '/') orelse path.len;
+        const next_slash = std.mem.indexOfScalarPos(u8, path, i, '/') orelse path.len;
         const segment = path[i..next_slash];
-        if (segment.len != 0 and !lib.mem.eql(u8, segment, ".")) {
-            if (lib.mem.eql(u8, segment, "..")) {
+        if (segment.len != 0 and !std.mem.eql(u8, segment, ".")) {
+            if (std.mem.eql(u8, segment, "..")) {
                 if (segments.items.len != 0) _ = segments.pop();
             } else {
                 try segments.append(allocator, segment);
@@ -553,7 +553,7 @@ fn normalizePath(
         i = next_slash + 1;
     }
 
-    var out = lib.ArrayList(u8){};
+    var out = std.ArrayList(u8){};
     defer out.deinit(allocator);
 
     if (absolute) try out.append(allocator, '/');
@@ -574,29 +574,29 @@ const ReferenceParts = struct {
     fragment: []const u8,
 };
 
-fn splitReference(comptime lib: type, input: []const u8) ReferenceParts {
+fn splitReference(comptime std: type, input: []const u8) ReferenceParts {
     var parts: ReferenceParts = .{
         .path = input,
         .query = "",
         .fragment = "",
     };
 
-    if (lib.mem.indexOfScalar(u8, parts.path, '#')) |hash| {
+    if (std.mem.indexOfScalar(u8, parts.path, '#')) |hash| {
         parts.fragment = parts.path[hash + 1 ..];
         parts.path = parts.path[0..hash];
     }
-    if (lib.mem.indexOfScalar(u8, parts.path, '?')) |query| {
+    if (std.mem.indexOfScalar(u8, parts.path, '?')) |query| {
         parts.query = parts.path[query + 1 ..];
         parts.path = parts.path[0..query];
     }
     return parts;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const HttpClient = Client(lib);
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const HttpClient = Client(std);
 
             {
                 const MockRoundTripper = struct {
@@ -641,7 +641,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             {
                 const MockBody = struct {
-                    allocator: lib.mem.Allocator,
+                    allocator: std.mem.Allocator,
                     closed: *bool,
                     pub fn read(_: *@This(), _: []u8) anyerror!usize {
                         return 0;
@@ -656,13 +656,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     raw_url: []u8,
                 };
                 const MockRoundTripper = struct {
-                    allocator: lib.mem.Allocator,
-                    seen: lib.ArrayList(SeenRequest),
+                    allocator: std.mem.Allocator,
+                    seen: std.ArrayList(SeenRequest),
                     first_closed: bool = false,
                     calls: usize = 0,
                     /// Stable storage: anonymous `&.{Header...}` in return can dangle after roundTrip returns.
                     redirect_headers: [1]Header = .{Header.init(Header.location, "/next")},
-                    fn init(a: lib.mem.Allocator) @This() {
+                    fn init(a: std.mem.Allocator) @This() {
                         return .{ .allocator = a, .seen = .{} };
                     }
                     fn deinit(self: *@This()) void {
@@ -778,11 +778,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     raw_url: []u8,
                 };
                 const MockRoundTripper = struct {
-                    allocator: lib.mem.Allocator,
-                    seen: lib.ArrayList(SeenRequest),
+                    allocator: std.mem.Allocator,
+                    seen: std.ArrayList(SeenRequest),
                     calls: usize = 0,
                     redirect_headers: [1]Header = .{Header.init(Header.location, "/head-next")},
-                    fn init(a: lib.mem.Allocator) @This() {
+                    fn init(a: std.mem.Allocator) @This() {
                         return .{ .allocator = a, .seen = .{} };
                     }
                     fn deinit(self: *@This()) void {
@@ -829,9 +829,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     raw_url: []u8,
                 };
                 const MockRoundTripper = struct {
-                    allocator: lib.mem.Allocator,
-                    seen: lib.ArrayList(SeenRequest),
-                    fn init(a: lib.mem.Allocator) @This() {
+                    allocator: std.mem.Allocator,
+                    seen: std.ArrayList(SeenRequest),
+                    fn init(a: std.mem.Allocator) @This() {
                         return .{ .allocator = a, .seen = .{} };
                     }
                     fn deinit(self: *@This()) void {
@@ -876,16 +876,16 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             {
                 const base = try url_mod.parse("https://example.com/dir/sub/index.html?old=1#frag");
-                const relative = try resolveRedirectUrl(lib, allocator, base, "../next?q=1#new");
+                const relative = try resolveRedirectUrl(std, allocator, base, "../next?q=1#new");
                 defer allocator.free(relative);
                 try testing.expectEqualStrings("https://example.com/dir/next?q=1#new", relative);
-                const query_only = try resolveRedirectUrl(lib, allocator, base, "?updated=1");
+                const query_only = try resolveRedirectUrl(std, allocator, base, "?updated=1");
                 defer allocator.free(query_only);
                 try testing.expectEqualStrings("https://example.com/dir/sub/index.html?updated=1", query_only);
-                const fragment_only = try resolveRedirectUrl(lib, allocator, base, "#section");
+                const fragment_only = try resolveRedirectUrl(std, allocator, base, "#section");
                 defer allocator.free(fragment_only);
                 try testing.expectEqualStrings("https://example.com/dir/sub/index.html?old=1#section", fragment_only);
-                const authority_relative = try resolveRedirectUrl(lib, allocator, base, "//cdn.example.com/assets");
+                const authority_relative = try resolveRedirectUrl(std, allocator, base, "//cdn.example.com/assets");
                 defer allocator.free(authority_relative);
                 try testing.expectEqualStrings("https://cdn.example.com/assets", authority_relative);
             }
@@ -917,8 +917,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     }
                 };
                 const Flags = struct {
-                    started: lib.atomic.Value(bool) = lib.atomic.Value(bool).init(false),
-                    finished: lib.atomic.Value(bool) = lib.atomic.Value(bool).init(false),
+                    started: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+                    finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 };
                 const gen = struct {
                     fn run(client: *HttpClient, flags: *Flags) void {
@@ -936,12 +936,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 var resp = try client.do(&req);
                 try testing.expectEqual(@as(usize, 1), client.shared.active_requests);
                 var flags = Flags{};
-                const thread = try lib.Thread.spawn(.{}, gen.run, .{ &client, &flags });
+                const thread = try std.Thread.spawn(.{}, gen.run, .{ &client, &flags });
                 while (!flags.started.load(.seq_cst)) {
-                    lib.Thread.yield() catch {};
+                    std.Thread.yield() catch {};
                 }
                 for (0..16) |_| {
-                    lib.Thread.yield() catch {};
+                    std.Thread.yield() catch {};
                 }
                 try testing.expect(!flags.finished.load(.seq_cst));
                 resp.deinit();
@@ -957,7 +957,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     pub fn close(_: *@This()) void {}
                 };
                 const FreshBody = struct {
-                    alloc: lib.mem.Allocator,
+                    alloc: std.mem.Allocator,
                     pub fn read(_: *@This(), _: []u8) anyerror!usize {
                         return 0;
                     }
@@ -966,9 +966,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     }
                 };
                 const BlockingFactory = struct {
-                    alloc: lib.mem.Allocator,
-                    mutex: lib.Thread.Mutex = .{},
-                    cond: lib.Thread.Condition = .{},
+                    alloc: std.mem.Allocator,
+                    mutex: std.Thread.Mutex = .{},
+                    cond: std.Thread.Condition = .{},
                     started: bool = false,
                     allow_return: bool = false,
                     pub fn getBody(self: *@This()) anyerror!ReadCloser {
@@ -1008,8 +1008,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     }
                 };
                 const DoState = struct {
-                    mutex: lib.Thread.Mutex = .{},
-                    cond: lib.Thread.Condition = .{},
+                    mutex: std.Thread.Mutex = .{},
+                    cond: std.Thread.Condition = .{},
                     finished: bool = false,
                     resp: ?Response = null,
                     err: ?anyerror = null,
@@ -1029,8 +1029,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     }
                 };
                 const DeinitState = struct {
-                    started: lib.atomic.Value(bool) = lib.atomic.Value(bool).init(false),
-                    finished: lib.atomic.Value(bool) = lib.atomic.Value(bool).init(false),
+                    started: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+                    finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 };
                 const DeinitTask = struct {
                     fn run(client: *HttpClient, state: *DeinitState) void {
@@ -1051,15 +1051,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 req = req.withGetBody(Request.GetBody.init(&factory));
                 req.content_length = 1;
                 var do_state = DoState{};
-                const do_thread = try lib.Thread.spawn(.{}, DoTask.run, .{ &client, &req, &do_state });
+                const do_thread = try std.Thread.spawn(.{}, DoTask.run, .{ &client, &req, &do_state });
                 factory.waitUntilStarted();
                 var deinit_state = DeinitState{};
-                const deinit_thread = try lib.Thread.spawn(.{}, DeinitTask.run, .{ &client, &deinit_state });
+                const deinit_thread = try std.Thread.spawn(.{}, DeinitTask.run, .{ &client, &deinit_state });
                 while (!deinit_state.started.load(.seq_cst)) {
-                    lib.Thread.yield() catch {};
+                    std.Thread.yield() catch {};
                 }
                 for (0..16) |_| {
-                    lib.Thread.yield() catch {};
+                    std.Thread.yield() catch {};
                 }
                 try testing.expect(!deinit_state.finished.load(.seq_cst));
                 factory.allow();

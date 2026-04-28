@@ -21,6 +21,7 @@ pub fn make(comptime grt: type) type {
     return struct {
         const Self = @This();
         const Role = Gap.Role;
+        const supervision_timeout_unit: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond;
         const AttResponseState = struct {
             data: [att.MAX_PDU_LEN]u8 = undefined,
             len: usize = 0,
@@ -33,10 +34,10 @@ pub fn make(comptime grt: type) type {
             spawn_config: grt.std.Thread.SpawnConfig = .{
                 .stack_size = 4096,
             },
-            transport_read_deadline_ms: u32 = 100,
-            transport_write_deadline_ms: u32 = 200,
-            command_timeout_ms: u32 = 1000,
-            att_response_timeout_ms: u32 = 5000,
+            transport_read_timeout: glib.time.duration.Duration = 100 * glib.time.duration.MilliSecond,
+            transport_write_timeout: glib.time.duration.Duration = 200 * glib.time.duration.MilliSecond,
+            command_timeout: glib.time.duration.Duration = glib.time.duration.Second,
+            att_response_timeout: glib.time.duration.Duration = 5 * glib.time.duration.Second,
         };
 
         transport: Transport,
@@ -166,7 +167,7 @@ pub fn make(comptime grt: type) type {
             self.async_error = null;
             self.cond.broadcast();
             self.mutex.unlock();
-            self.transport.setReadDeadline(grt.std.time.milliTimestamp() * 1_000_000);
+            self.transport.setReadDeadline(grt.time.instant.now());
 
             if (self.recv_thread) |t| {
                 t.join();
@@ -203,7 +204,7 @@ pub fn make(comptime grt: type) type {
             while (!self.cmd_complete) {
                 if (self.async_error) |err| return err;
                 if (!self.running) return error.Disconnected;
-                self.cond.timedWait(&self.mutex, @as(u64, self.config.command_timeout_ms) * grt.std.time.ns_per_ms) catch |err| switch (err) {
+                self.cond.timedWait(&self.mutex, try durationToTimedWaitNs(self.config.command_timeout)) catch |err| switch (err) {
                     error.Timeout => return error.Timeout,
                 };
             }
@@ -250,7 +251,7 @@ pub fn make(comptime grt: type) type {
                 if (self.async_error) |err| return err;
                 if (!self.running) return error.Disconnected;
                 if (self.gap.getRoleForHandle(conn_handle) == null) return error.Disconnected;
-                self.cond.timedWait(&self.mutex, @as(u64, self.config.att_response_timeout_ms) * grt.std.time.ns_per_ms) catch |err| switch (err) {
+                self.cond.timedWait(&self.mutex, try durationToTimedWaitNs(self.config.att_response_timeout)) catch |err| switch (err) {
                     error.Timeout => return error.Timeout,
                 };
             }
@@ -465,18 +466,18 @@ pub fn make(comptime grt: type) type {
         }
 
         fn transportRead(self: *Self, buf: []u8) Transport.ReadError!usize {
-            self.transport.setReadDeadline(self.ioDeadlineNs(self.config.transport_read_deadline_ms));
+            self.transport.setReadDeadline(self.ioDeadline(self.config.transport_read_timeout));
             return self.transport.read(buf);
         }
 
         fn transportWrite(self: *Self, buf: []const u8) Transport.WriteError!usize {
-            self.transport.setWriteDeadline(self.ioDeadlineNs(self.config.transport_write_deadline_ms));
+            self.transport.setWriteDeadline(self.ioDeadline(self.config.transport_write_timeout));
             return self.transport.write(buf);
         }
 
-        fn ioDeadlineNs(self: *const Self, timeout_ms: u32) i64 {
+        fn ioDeadline(self: *const Self, timeout: glib.time.duration.Duration) glib.time.instant.Time {
             _ = self;
-            return grt.std.time.milliTimestamp() * 1_000_000 + @as(i64, timeout_ms) * 1_000_000;
+            return glib.time.instant.add(grt.time.instant.now(), timeout);
         }
 
         pub fn startScanning(self: *Self, config: Api.ScanConfig) Api.Error!void {
@@ -549,7 +550,7 @@ pub fn make(comptime grt: type) type {
                 .interval_min = config.interval_min,
                 .interval_max = config.interval_max,
                 .latency = config.latency,
-                .timeout = config.timeout,
+                .supervision_timeout_units = durationToSupervisionTimeoutUnits(config.supervision_timeout),
             });
             self.mutex.unlock();
             try self.flushGapCommands();
@@ -687,11 +688,16 @@ pub fn make(comptime grt: type) type {
             while (self.cmd_credits == 0) {
                 if (self.async_error) |err| return err;
                 if (!self.running) return error.Disconnected;
-                self.cond.timedWait(&self.mutex, @as(u64, self.config.command_timeout_ms) * grt.std.time.ns_per_ms) catch |err| switch (err) {
+                self.cond.timedWait(&self.mutex, try durationToTimedWaitNs(self.config.command_timeout)) catch |err| switch (err) {
                     error.Timeout => return error.Timeout,
                 };
             }
             self.cmd_credits -= 1;
+        }
+
+        fn durationToTimedWaitNs(timeout: glib.time.duration.Duration) Api.Error!u64 {
+            if (timeout <= 0) return error.Timeout;
+            return @intCast(timeout);
         }
 
         fn attStateForRole(self: *Self, role: Role) *AttResponseState {
@@ -716,7 +722,7 @@ pub fn make(comptime grt: type) type {
                 },
                 .interval = resolved.conn_interval,
                 .latency = resolved.conn_latency,
-                .timeout = resolved.conn_timeout,
+                .supervision_timeout = supervisionTimeoutDuration(resolved.supervision_timeout_units),
             };
         }
 
@@ -731,8 +737,18 @@ pub fn make(comptime grt: type) type {
                 },
                 .interval = link.conn_interval,
                 .latency = link.conn_latency,
-                .timeout = link.supervision_timeout,
+                .supervision_timeout = supervisionTimeoutDuration(link.supervision_timeout),
             };
+        }
+
+        fn durationToSupervisionTimeoutUnits(timeout: glib.time.duration.Duration) u16 {
+            if (timeout <= 0) return 0;
+            const units = @divFloor(timeout - 1, supervision_timeout_unit) + 1;
+            return @intCast(@min(units, glib.std.math.maxInt(u16)));
+        }
+
+        fn supervisionTimeoutDuration(units: u16) glib.time.duration.Duration {
+            return @as(glib.time.duration.Duration, @intCast(units)) * supervision_timeout_unit;
         }
 
         fn mapError(err: anyerror) Api.Error {
@@ -807,6 +823,78 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 const mismatched = att.encodeErrorResponse(&err_buf, att.FIND_INFORMATION_REQUEST, 0x0001, .request_not_supported);
                 try grt.std.testing.expect(!Impl.attResponseMatches(att.WRITE_REQUEST, mismatched));
                 try grt.std.testing.expect(Impl.attResponseMatches(att.FIND_INFORMATION_REQUEST, mismatched));
+            }
+
+            {
+                const Impl = make(grt);
+                try grt.std.testing.expectError(error.Timeout, Impl.durationToTimedWaitNs(0));
+                try grt.std.testing.expectError(error.Timeout, Impl.durationToTimedWaitNs(-glib.time.duration.NanoSecond));
+                try grt.std.testing.expectEqual(@as(u64, @intCast(3 * glib.time.duration.MilliSecond)), try Impl.durationToTimedWaitNs(3 * glib.time.duration.MilliSecond));
+            }
+
+            {
+                const Impl = make(grt);
+                const FakeTransport = struct {
+                    read_deadline: ?glib.time.instant.Time = null,
+                    write_deadline: ?glib.time.instant.Time = null,
+                    read_calls: usize = 0,
+                    write_calls: usize = 0,
+
+                    pub fn read(self: *@This(), buf: []u8) Transport.ReadError!usize {
+                        _ = buf;
+                        self.read_calls += 1;
+                        return 0;
+                    }
+
+                    pub fn write(self: *@This(), buf: []const u8) Transport.WriteError!usize {
+                        self.write_calls += 1;
+                        return buf.len;
+                    }
+
+                    pub fn reset(_: *@This()) void {}
+
+                    pub fn deinit(_: *@This()) void {}
+
+                    pub fn setReadDeadline(self: *@This(), deadline: ?glib.time.instant.Time) void {
+                        self.read_deadline = deadline;
+                    }
+
+                    pub fn setWriteDeadline(self: *@This(), deadline: ?glib.time.instant.Time) void {
+                        self.write_deadline = deadline;
+                    }
+                };
+
+                var fake = FakeTransport{};
+                var hci = Impl.init(Transport.init(&fake), .{
+                    .transport_read_timeout = 13 * glib.time.duration.MilliSecond,
+                    .transport_write_timeout = 17 * glib.time.duration.MilliSecond,
+                });
+
+                const read_timeout = hci.config.transport_read_timeout;
+                const before_read = grt.time.instant.now();
+                var read_buf: [1]u8 = undefined;
+                try grt.std.testing.expectEqual(@as(usize, 0), try hci.transportRead(&read_buf));
+                const after_read = grt.time.instant.now();
+                const read_deadline = fake.read_deadline orelse return error.MissingReadDeadline;
+                try grt.std.testing.expect(read_deadline >= glib.time.instant.add(before_read, read_timeout));
+                try grt.std.testing.expect(read_deadline <= glib.time.instant.add(after_read, read_timeout));
+                try grt.std.testing.expectEqual(@as(usize, 1), fake.read_calls);
+
+                const write_timeout = hci.config.transport_write_timeout;
+                const before_write = grt.time.instant.now();
+                try grt.std.testing.expectEqual(@as(usize, 3), try hci.transportWrite("abc"));
+                const after_write = grt.time.instant.now();
+                const write_deadline = fake.write_deadline orelse return error.MissingWriteDeadline;
+                try grt.std.testing.expect(write_deadline >= glib.time.instant.add(before_write, write_timeout));
+                try grt.std.testing.expect(write_deadline <= glib.time.instant.add(after_write, write_timeout));
+                try grt.std.testing.expectEqual(@as(usize, 1), fake.write_calls);
+
+                const before_stop = grt.time.instant.now();
+                hci.stop();
+                const after_stop = grt.time.instant.now();
+                const stop_deadline = fake.read_deadline orelse return error.MissingStopReadDeadline;
+                try grt.std.testing.expect(stop_deadline >= before_stop);
+                try grt.std.testing.expect(stop_deadline <= after_stop);
             }
         }
     };

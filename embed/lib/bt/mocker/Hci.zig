@@ -30,9 +30,9 @@ pub fn Hci(comptime grt: type) type {
         const PROP_WRITE: u8 = 0x08;
         const PROP_NOTIFY: u8 = 0x10;
         const PROP_INDICATE: u8 = 0x20;
-        const NS_PER_MS: u64 = 1_000_000;
-        const DEFAULT_RECV_TIMEOUT_MS: u32 = 10;
-        const DEFAULT_PEER_TIMEOUT_MS: u32 = 500;
+        const poll_interval: glib.time.duration.Duration = glib.time.duration.MilliSecond;
+        const default_recv_timeout_duration: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond;
+        const default_peer_timeout: glib.time.duration.Duration = 500 * glib.time.duration.MilliSecond;
         const CCCD_DISCOVERY_MAX_ATTEMPTS: u32 = 3;
 
         pub const CharacteristicConfig = struct {
@@ -70,8 +70,8 @@ pub fn Hci(comptime grt: type) type {
             mtu: u16 = 247,
             services: []const ServiceConfig = &default_services,
             auto_advertise_on_scan: bool = true,
-            recv_timeout_ms: ?u32 = DEFAULT_RECV_TIMEOUT_MS,
-            peer_timeout_ms: u32 = DEFAULT_PEER_TIMEOUT_MS,
+            recv_timeout: ?glib.time.duration.Duration = default_recv_timeout_duration,
+            peer_timeout: glib.time.duration.Duration = default_peer_timeout,
         };
 
         pub const PeerError = error{
@@ -149,9 +149,9 @@ pub fn Hci(comptime grt: type) type {
         chars: glib.std.ArrayListUnmanaged(CharState) = .{},
         acl_reassembler: l2cap.Reassembler = .{},
         config: Config,
-        default_recv_timeout_ms: ?u32,
-        read_deadline_ns: ?i64 = null,
-        write_deadline_ns: ?i64 = null,
+        default_recv_timeout: ?glib.time.duration.Duration,
+        read_deadline: ?glib.time.instant.Time = null,
+        write_deadline: ?glib.time.instant.Time = null,
         peer_att_response: [att.MAX_PDU_LEN]u8 = undefined,
         peer_att_response_len: usize = 0,
         peer_att_response_ready: bool = false,
@@ -173,7 +173,7 @@ pub fn Hci(comptime grt: type) type {
             var self = Self{
                 .allocator = allocator,
                 .config = config,
-                .default_recv_timeout_ms = config.recv_timeout_ms,
+                .default_recv_timeout = config.recv_timeout,
             };
             try self.buildDatabase();
             return self;
@@ -609,7 +609,7 @@ pub fn Hci(comptime grt: type) type {
         }
 
         pub fn read(self: *Self, out: []u8) Transport.ReadError!usize {
-            const deadline_ns = self.effectiveReadDeadlineNs();
+            const deadline = self.effectiveReadDeadline();
             while (true) {
                 self.mutex.lock();
                 if (self.queue.items.len > 0) {
@@ -622,19 +622,19 @@ pub fn Hci(comptime grt: type) type {
                 }
                 self.mutex.unlock();
 
-                if (deadline_ns) |deadline| {
-                    if (nowNs() >= deadline) return error.Timeout;
+                if (deadline) |read_deadline| {
+                    if (grt.time.instant.now() >= read_deadline) return error.Timeout;
                 }
-                grt.std.Thread.sleep(NS_PER_MS);
+                grt.std.Thread.sleep(@intCast(poll_interval));
             }
         }
 
-        pub fn setReadDeadline(self: *Self, deadline_ns: ?i64) void {
-            self.read_deadline_ns = deadline_ns;
+        pub fn setReadDeadline(self: *Self, deadline: ?glib.time.instant.Time) void {
+            self.read_deadline = deadline;
         }
 
-        pub fn setWriteDeadline(self: *Self, deadline_ns: ?i64) void {
-            self.write_deadline_ns = deadline_ns;
+        pub fn setWriteDeadline(self: *Self, deadline: ?glib.time.instant.Time) void {
+            self.write_deadline = deadline;
         }
 
         pub fn getPeerAddr(self: *const Self) [6]u8 {
@@ -709,11 +709,11 @@ pub fn Hci(comptime grt: type) type {
             return self.host_server_pushes.orderedRemove(0);
         }
 
-        pub fn waitServerPush(self: *Self, timeout_ms: u32) ?ServerPush {
-            var waited_ms: u32 = 0;
-            while (waited_ms <= timeout_ms) : (waited_ms += 1) {
+        pub fn waitServerPush(self: *Self, timeout: glib.time.duration.Duration) ?ServerPush {
+            var waited: glib.time.duration.Duration = 0;
+            while (waited <= timeout) : (waited += poll_interval) {
                 if (self.popServerPush()) |push| return push;
-                grt.std.Thread.sleep(NS_PER_MS);
+                grt.std.Thread.sleep(@intCast(poll_interval));
             }
             return null;
         }
@@ -811,14 +811,10 @@ pub fn Hci(comptime grt: type) type {
             return self.writeHost(handle, value);
         }
 
-        fn effectiveReadDeadlineNs(self: *const Self) ?i64 {
-            if (self.read_deadline_ns) |deadline| return deadline;
-            const timeout_ms = self.default_recv_timeout_ms orelse DEFAULT_RECV_TIMEOUT_MS;
-            return nowNs() + @as(i64, @intCast(timeout_ms)) * @as(i64, @intCast(NS_PER_MS));
-        }
-
-        fn nowNs() i64 {
-            return grt.std.time.milliTimestamp() * @as(i64, @intCast(NS_PER_MS));
+        fn effectiveReadDeadline(self: *const Self) ?glib.time.instant.Time {
+            if (self.read_deadline) |deadline| return deadline;
+            const timeout = self.default_recv_timeout orelse default_recv_timeout_duration;
+            return glib.time.instant.add(grt.time.instant.now(), timeout);
         }
 
         pub fn writeHost(self: *Self, handle: u16, value: []const u8) PeerError!void {
@@ -859,7 +855,7 @@ pub fn Hci(comptime grt: type) type {
                 const find_resp = self.sendAttToHostExpectResponse(find_req) catch |err| switch (err) {
                     error.Timeout => {
                         if (attempt + 1 < CCCD_DISCOVERY_MAX_ATTEMPTS) {
-                            grt.std.Thread.sleep(NS_PER_MS);
+                            grt.std.Thread.sleep(@intCast(poll_interval));
                             continue;
                         }
                         return error.Timeout;
@@ -886,7 +882,7 @@ pub fn Hci(comptime grt: type) type {
                 .peer_addr_type = self.remoteAddrType(role),
                 .interval = 0x0018,
                 .latency = 0,
-                .timeout = 0x00C8,
+                .supervision_timeout = 2 * glib.time.duration.Second,
             };
         }
 
@@ -1574,15 +1570,15 @@ pub fn Hci(comptime grt: type) type {
 
             self.enqueueAtt(self.connHandleForRole(.peripheral), pdu) catch return error.Unexpected;
 
-            var waited_ms: u32 = 0;
+            var waited: glib.time.duration.Duration = 0;
             while (true) {
                 self.mutex.lock();
                 const ready = self.peer_att_response_ready;
                 self.mutex.unlock();
                 if (ready) break;
-                if (waited_ms >= self.config.peer_timeout_ms) return error.Timeout;
-                grt.std.Thread.sleep(NS_PER_MS);
-                waited_ms += 1;
+                if (waited >= self.config.peer_timeout) return error.Timeout;
+                grt.std.Thread.sleep(@intCast(poll_interval));
+                waited += poll_interval;
             }
 
             self.mutex.lock();
@@ -1878,12 +1874,27 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             {
                 var mock = try Mock.init(grt.std.testing.allocator, .{
-                    .recv_timeout_ms = null,
+                    .recv_timeout = null,
                 });
                 defer mock.deinit();
 
                 var buf: [8]u8 = undefined;
                 try grt.std.testing.expectError(error.Timeout, mock.read(&buf));
+            }
+
+            {
+                var mock = try Mock.init(grt.std.testing.allocator, .{
+                    .recv_timeout = null,
+                });
+                defer mock.deinit();
+
+                mock.setReadDeadline(grt.time.instant.now());
+                var buf: [8]u8 = undefined;
+                try grt.std.testing.expectError(error.Timeout, mock.read(&buf));
+
+                const write_deadline = glib.time.instant.add(grt.time.instant.now(), glib.time.duration.MilliSecond);
+                mock.setWriteDeadline(write_deadline);
+                try grt.std.testing.expectEqual(@as(?glib.time.instant.Time, write_deadline), mock.write_deadline);
             }
         }
     };

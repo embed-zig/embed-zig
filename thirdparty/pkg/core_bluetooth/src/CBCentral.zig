@@ -201,7 +201,7 @@ pub fn connect(self: *CBCentral, addr: Central.BdAddr, _: Central.AddrType, _: C
                 .peer_addr_type = .public,
                 .interval = 0,
                 .latency = 0,
-                .timeout = 0,
+                .supervision_timeout = 0,
             };
         }
     }

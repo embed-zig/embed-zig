@@ -391,21 +391,21 @@ pub fn BufferedWriter(comptime Writer: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
     const TestCase = struct {
-        fn bufferedReaderInitAllocSupportsPeekAndTake(allocator: lib.mem.Allocator) !void {
+        fn bufferedReaderInitAllocSupportsPeekAndTake(allocator: std.mem.Allocator) !void {
             var src = Io.Reader.fixed("hello\r\nworld");
             var br = try BufferedReader(@TypeOf(src)).initAlloc(&src, allocator, 1);
             defer br.deinit();
             const reader = br.ioReader();
 
             const peeked = try reader.peek(5);
-            try lib.testing.expectEqualStrings("hello", peeked);
-            try lib.testing.expect(reader.buffer.len >= 5);
-            try lib.testing.expectEqualStrings("h", try reader.take(1));
+            try std.testing.expectEqualStrings("hello", peeked);
+            try std.testing.expect(reader.buffer.len >= 5);
+            try std.testing.expectEqualStrings("h", try reader.take(1));
 
             const rest = try reader.takeDelimiterInclusive('\n');
-            try lib.testing.expectEqualStrings("ello\r\n", rest);
+            try std.testing.expectEqualStrings("ello\r\n", rest);
         }
 
         fn bufferedReaderInitSupportsTextProtocolStyleReads() !void {
@@ -415,10 +415,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const reader = br.ioReader();
 
             const line1 = try reader.takeDelimiterInclusive('\n');
-            try lib.testing.expectEqualStrings("PING a\r\n", line1);
+            try std.testing.expectEqualStrings("PING a\r\n", line1);
 
             const line2 = try reader.takeDelimiterInclusive('\n');
-            try lib.testing.expectEqualStrings("PONG b\r\n", line2);
+            try std.testing.expectEqualStrings("PONG b\r\n", line2);
         }
 
         fn bufferedReaderSmallBufferSupportsRebaseAcrossLines() !void {
@@ -428,10 +428,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const reader = br.ioReader();
 
             const line1 = try reader.takeDelimiterInclusive('\n');
-            try lib.testing.expectEqualStrings("ab\r\n", line1);
+            try std.testing.expectEqualStrings("ab\r\n", line1);
 
             const line2 = try reader.takeDelimiterInclusive('\n');
-            try lib.testing.expectEqualStrings("cd\r\n", line2);
+            try std.testing.expectEqualStrings("cd\r\n", line2);
         }
 
         fn bufferedReaderInitReportsStreamTooLongForOverlongLine() !void {
@@ -439,21 +439,21 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var backing: [4]u8 = undefined;
             var br = BufferedReader(@TypeOf(src)).init(&src, &backing);
 
-            try lib.testing.expectError(error.StreamTooLong, br.ioReader().takeDelimiterInclusive('\n'));
+            try std.testing.expectError(error.StreamTooLong, br.ioReader().takeDelimiterInclusive('\n'));
         }
 
-        fn bufferedReaderInitAllocGrowsForExplicitPeekAndTake(allocator: lib.mem.Allocator) !void {
+        fn bufferedReaderInitAllocGrowsForExplicitPeekAndTake(allocator: std.mem.Allocator) !void {
             var src = Io.Reader.fixed("abcdX\n");
             var br = try BufferedReader(@TypeOf(src)).initAlloc(&src, allocator, 4);
             defer br.deinit();
 
             const line = try br.ioReader().peek(6);
-            try lib.testing.expectEqualStrings("abcdX\n", line);
-            try lib.testing.expectEqualStrings("abcdX\n", try br.ioReader().take(6));
-            try lib.testing.expect(br.ioReader().buffer.len >= 6);
+            try std.testing.expectEqualStrings("abcdX\n", line);
+            try std.testing.expectEqualStrings("abcdX\n", try br.ioReader().take(6));
+            try std.testing.expect(br.ioReader().buffer.len >= 6);
         }
 
-        fn bufferedReaderInitAllocPeekGrowsAcrossShortThenLongLine(allocator: lib.mem.Allocator) !void {
+        fn bufferedReaderInitAllocPeekGrowsAcrossShortThenLongLine(allocator: std.mem.Allocator) !void {
             const long_body = [_]u8{'A'} ** 600;
             const input = "AT\r\n" ++ long_body ++ "\r\n";
 
@@ -463,18 +463,18 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const reader = br.ioReader();
 
             const first = try reader.takeDelimiterInclusive('\n');
-            try lib.testing.expectEqualStrings("AT\r\n", first);
+            try std.testing.expectEqualStrings("AT\r\n", first);
 
             const second = try reader.peek(long_body.len + 2);
-            try lib.testing.expectEqual(@as(usize, long_body.len + 2), second.len);
-            try lib.testing.expect(second[0] == 'A');
-            try lib.testing.expect(second[long_body.len - 1] == 'A');
-            try lib.testing.expectEqualStrings("\r\n", second[long_body.len..]);
-            try lib.testing.expectEqualStrings(second, try reader.take(long_body.len + 2));
-            try lib.testing.expect(reader.buffer.len >= long_body.len + 2);
+            try std.testing.expectEqual(@as(usize, long_body.len + 2), second.len);
+            try std.testing.expect(second[0] == 'A');
+            try std.testing.expect(second[long_body.len - 1] == 'A');
+            try std.testing.expectEqualStrings("\r\n", second[long_body.len..]);
+            try std.testing.expectEqualStrings(second, try reader.take(long_body.len + 2));
+            try std.testing.expect(reader.buffer.len >= long_body.len + 2);
         }
 
-        fn bufferedReaderInitAllocTakeDelimiterInclusiveGrowsAcrossShortThenLongLine(allocator: lib.mem.Allocator) !void {
+        fn bufferedReaderInitAllocTakeDelimiterInclusiveGrowsAcrossShortThenLongLine(allocator: std.mem.Allocator) !void {
             const long_body = [_]u8{'A'} ** 600;
             const input = "AT\r\n" ++ long_body ++ "\r\n";
 
@@ -483,21 +483,21 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             defer br.deinit();
             const reader = br.ioReader();
 
-            try lib.testing.expectEqualStrings("AT\r\n", try reader.takeDelimiterInclusive('\n'));
+            try std.testing.expectEqualStrings("AT\r\n", try reader.takeDelimiterInclusive('\n'));
             const second = try reader.takeDelimiterInclusive('\n');
-            try lib.testing.expectEqual(@as(usize, long_body.len + 2), second.len);
-            try lib.testing.expect(second[0] == 'A');
-            try lib.testing.expect(second[long_body.len - 1] == 'A');
-            try lib.testing.expectEqualStrings("\r\n", second[long_body.len..]);
+            try std.testing.expectEqual(@as(usize, long_body.len + 2), second.len);
+            try std.testing.expect(second[0] == 'A');
+            try std.testing.expect(second[long_body.len - 1] == 'A');
+            try std.testing.expectEqualStrings("\r\n", second[long_body.len..]);
         }
 
-        fn bufferedReaderInitAllocZeroBufsizeStillReads(allocator: lib.mem.Allocator) !void {
+        fn bufferedReaderInitAllocZeroBufsizeStillReads(allocator: std.mem.Allocator) !void {
             var src = Io.Reader.fixed("ok");
             var br = try BufferedReader(@TypeOf(src)).initAlloc(&src, allocator, 0);
             defer br.deinit();
 
-            try lib.testing.expect(br.ioReader().buffer.len >= 1);
-            try lib.testing.expectEqualStrings("o", try br.ioReader().take(1));
+            try std.testing.expect(br.ioReader().buffer.len >= 1);
+            try std.testing.expectEqualStrings("o", try br.ioReader().take(1));
         }
 
         fn bufferedReaderErrPreservesAndClearsUnderlyingFailure() !void {
@@ -525,12 +525,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var br = BufferedReader(Reader).init(&src, &backing);
             const reader = br.ioReader();
 
-            try lib.testing.expectError(error.ReadFailed, reader.peek(1));
-            try lib.testing.expect(br.err() != null);
-            try lib.testing.expect(br.err().? == error.ConnectionReset);
+            try std.testing.expectError(error.ReadFailed, reader.peek(1));
+            try std.testing.expect(br.err() != null);
+            try std.testing.expect(br.err().? == error.ConnectionReset);
 
-            try lib.testing.expectEqualStrings("o", try reader.take(1));
-            try lib.testing.expect(br.err() == null);
+            try std.testing.expectEqualStrings("o", try reader.take(1));
+            try std.testing.expect(br.err() == null);
         }
 
         fn bufferedReaderReportsBufferTooSmallViaErrWhenWindowCannotGrow() !void {
@@ -539,13 +539,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var br = BufferedReader(@TypeOf(src)).init(&src, &backing);
             const reader = br.ioReader();
 
-            try lib.testing.expectEqualStrings("a", try reader.peek(1));
+            try std.testing.expectEqualStrings("a", try reader.peek(1));
 
             var empty: [0]u8 = .{};
             var bufs = [_][]u8{&empty};
-            try lib.testing.expectError(error.ReadFailed, @TypeOf(br).readVec(reader, &bufs));
-            try lib.testing.expect(br.err() != null);
-            try lib.testing.expect(br.err().? == error.BufferTooSmall);
+            try std.testing.expectError(error.ReadFailed, @TypeOf(br).readVec(reader, &bufs));
+            try std.testing.expect(br.err() != null);
+            try std.testing.expect(br.err().? == error.BufferTooSmall);
         }
 
         fn bufferedWriterBuffersUntilFlush() !void {
@@ -567,13 +567,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const writer = bw.ioWriter();
 
             try writer.writeAll("hello");
-            try lib.testing.expectEqual(@as(usize, 0), sink.pos);
-            try lib.testing.expectEqualStrings("hello", writer.buffered());
+            try std.testing.expectEqual(@as(usize, 0), sink.pos);
+            try std.testing.expectEqualStrings("hello", writer.buffered());
 
             try bw.flush();
-            try lib.testing.expectEqual(@as(usize, 5), sink.pos);
-            try lib.testing.expectEqualStrings("hello", storage[0..5]);
-            try lib.testing.expectEqual(@as(usize, 0), writer.buffered().len);
+            try std.testing.expectEqual(@as(usize, 5), sink.pos);
+            try std.testing.expectEqualStrings("hello", storage[0..5]);
+            try std.testing.expectEqual(@as(usize, 0), writer.buffered().len);
         }
 
         fn bufferedWriterLargeWriteDrainsDirectly() !void {
@@ -594,8 +594,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var bw = BufferedWriter(Writer).init(&sink, &backing);
 
             try bw.ioWriter().writeAll("abcdef");
-            try lib.testing.expectEqualStrings("abcdef", storage[0..6]);
-            try lib.testing.expectEqual(@as(usize, 0), bw.ioWriter().buffered().len);
+            try std.testing.expectEqualStrings("abcdef", storage[0..6]);
+            try std.testing.expectEqual(@as(usize, 0), bw.ioWriter().buffered().len);
         }
 
         fn bufferedWriterFlushPropagatesUnderlyingFlush() !void {
@@ -622,11 +622,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             try bw.ioWriter().writeAll("ok");
             try bw.flush();
-            try lib.testing.expectEqual(@as(usize, 1), sink.flush_count);
-            try lib.testing.expectEqualStrings("ok", storage[0..2]);
+            try std.testing.expectEqual(@as(usize, 1), sink.flush_count);
+            try std.testing.expectEqualStrings("ok", storage[0..2]);
         }
 
-        fn bufferedWriterInitAllocZeroBufsizeStillWrites(allocator: lib.mem.Allocator) !void {
+        fn bufferedWriterInitAllocZeroBufsizeStillWrites(allocator: std.mem.Allocator) !void {
             const Writer = struct {
                 out: []u8,
                 pos: usize = 0,
@@ -643,10 +643,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var bw = try BufferedWriter(Writer).initAlloc(&sink, allocator, 0);
             defer bw.deinit();
 
-            try lib.testing.expect(bw.ioWriter().buffer.len >= 1);
+            try std.testing.expect(bw.ioWriter().buffer.len >= 1);
             try bw.ioWriter().writeAll("a");
             try bw.flush();
-            try lib.testing.expectEqualStrings("a", storage[0..1]);
+            try std.testing.expectEqualStrings("a", storage[0..1]);
         }
 
         fn bufferedWriterErrPreservesRemainingBufferedBytes() !void {
@@ -679,24 +679,24 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var bw = BufferedWriter(Writer).init(&sink, &backing);
 
             try bw.ioWriter().writeAll("ok");
-            try lib.testing.expectError(error.WriteFailed, bw.flush());
-            try lib.testing.expect(bw.err() != null);
-            try lib.testing.expect(bw.err().? == error.ConnectionReset);
-            try lib.testing.expectEqualStrings("k", bw.ioWriter().buffered());
+            try std.testing.expectError(error.WriteFailed, bw.flush());
+            try std.testing.expect(bw.err() != null);
+            try std.testing.expect(bw.err().? == error.ConnectionReset);
+            try std.testing.expectEqualStrings("k", bw.ioWriter().buffered());
 
             try bw.flush();
-            try lib.testing.expect(bw.err() == null);
-            try lib.testing.expectEqualStrings("ok", storage[0..2]);
+            try std.testing.expect(bw.err() == null);
+            try std.testing.expectEqualStrings("ok", storage[0..2]);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
 
             TestCase.bufferedReaderInitAllocSupportsPeekAndTake(allocator) catch |err| {
@@ -762,7 +762,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

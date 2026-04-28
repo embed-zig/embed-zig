@@ -2,7 +2,7 @@
 //!
 //! The concrete transport is supplied by the caller and must provide one
 //! bidirectional session surface plus address identity:
-//! - `read(timeout_ms, out)` to wait for one inbound request/control packet
+//! - `read(timeout, out)` to wait for one inbound request/control packet
 //! - `write(data)` to emit control packets such as the write start marker
 //! - `writeNoResp(data)` to emit one outbound data chunk without response
 //! - `deinit()` to release session resources
@@ -16,7 +16,7 @@ const write_xfer = @import("write.zig");
 
 pub const Config = struct {
     att_mtu: u16 = att.DEFAULT_MTU,
-    timeout_ms: u32 = 5_000,
+    timeout: glib.time.duration.Duration = 5 * glib.time.duration.Second,
     send_redundancy: u8 = 3,
     max_timeout_retries: u8 = 5,
 };
@@ -47,7 +47,7 @@ pub fn send(
         _ = @as(*const fn (*Transport) u16, &Transport.connHandle);
         _ = @as(*const fn (*Transport) u16, &Transport.serviceUuid);
         _ = @as(*const fn (*Transport) u16, &Transport.charUuid);
-        _ = @as(*const fn (*Transport, u32, []u8) anyerror!usize, &Transport.read);
+        _ = @as(*const fn (*Transport, glib.time.duration.Duration, []u8) anyerror!usize, &Transport.read);
         _ = @as(*const fn (*Transport, []const u8) anyerror!usize, &Transport.write);
         _ = @as(*const fn (*Transport, []const u8) anyerror!usize, &Transport.writeNoResp);
         _ = @as(*const fn (*Transport) void, &Transport.deinit);
@@ -56,9 +56,9 @@ pub fn send(
     const ReplyTx = struct {
         inner: TransportPtr,
 
-        pub fn read(self: *@This(), timeout_ms: u32, out: []u8) anyerror!usize {
+        pub fn read(self: *@This(), timeout: glib.time.duration.Duration, out: []u8) anyerror!usize {
             while (true) {
-                const len = try self.inner.read(timeout_ms, out);
+                const len = try self.inner.read(timeout, out);
                 if (Chunk.isReadStartMagic(out[0..len])) continue;
                 return len;
             }
@@ -82,7 +82,7 @@ pub fn send(
     errdefer if (!handed_off) transport.deinit();
 
     var req_buf: [Chunk.max_mtu]u8 = undefined;
-    const req_len = try transport.read(config.timeout_ms, &req_buf);
+    const req_len = try transport.read(config.timeout, &req_buf);
     const req = req_buf[0..req_len];
     if (!Chunk.isReadStartMagic(req) or req.len != Chunk.read_start_magic.len) return error.InvalidReadStart;
     const payload = try dataFn(
@@ -98,7 +98,7 @@ pub fn send(
     handed_off = true;
     return write_xfer.write(grt, allocator, &reply_tx, payload, .{
         .att_mtu = config.att_mtu,
-        .timeout_ms = config.timeout_ms,
+        .timeout = config.timeout,
         .send_redundancy = config.send_redundancy,
         .max_timeout_retries = config.max_timeout_retries,
     });
@@ -125,7 +125,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return 0x2A58;
                 }
 
-                pub fn read(_: *@This(), _: u32, out: []u8) anyerror!usize {
+                pub fn read(_: *@This(), _: glib.time.duration.Duration, out: []u8) anyerror!usize {
                     @memcpy(out[0..invalid_read_start.len], &invalid_read_start);
                     return invalid_read_start.len;
                 }
@@ -173,7 +173,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return 0x2A58;
                 }
 
-                pub fn read(_: *@This(), _: u32, out: []u8) anyerror!usize {
+                pub fn read(_: *@This(), _: glib.time.duration.Duration, out: []u8) anyerror!usize {
                     @memcpy(out[0..oversized_read_start.len], &oversized_read_start);
                     return oversized_read_start.len;
                 }
@@ -222,7 +222,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return 0x2A58;
                 }
 
-                pub fn read(_: *@This(), _: u32, out: []u8) anyerror!usize {
+                pub fn read(_: *@This(), _: glib.time.duration.Duration, out: []u8) anyerror!usize {
                     @memcpy(out[0..Chunk.read_start_magic.len], &Chunk.read_start_magic);
                     return Chunk.read_start_magic.len;
                 }

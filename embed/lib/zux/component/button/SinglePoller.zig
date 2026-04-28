@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const drivers = @import("drivers");
 
 const Context = @import("../../event/Context.zig");
@@ -20,7 +21,7 @@ pub fn make(comptime grt: type) type {
 
         button: drivers.button.Single,
         source_id: u32,
-        poll_interval_ns: u64 = Poller.default_poll_interval_ns,
+        poll_interval: glib.time.duration.Duration = Poller.default_poll_interval,
         spawn_config: grt.std.Thread.SpawnConfig = .{},
         ctx: Context.Type = null,
         out: ?Emitter = null,
@@ -51,7 +52,7 @@ pub fn make(comptime grt: type) type {
                 self.state_mu.unlock();
                 return error.InvalidState;
             }
-            self.poll_interval_ns = config.poll_interval_ns;
+            self.poll_interval = config.poll_interval;
             self.spawn_config = adaptSpawnConfig(config.spawn_config);
             self.running = true;
             self.async_failed = false;
@@ -112,7 +113,7 @@ pub fn make(comptime grt: type) type {
                             return;
                         },
                         .source_id = self.source_id,
-                        .poll_interval_ns = self.poll_interval_ns,
+                        .poll_interval = self.poll_interval,
                         .ctx = self.ctx,
                     };
                 };
@@ -121,8 +122,8 @@ pub fn make(comptime grt: type) type {
                     self.failAsync();
                 };
 
-                if (snapshot.poll_interval_ns > 0) {
-                    grt.std.Thread.sleep(snapshot.poll_interval_ns);
+                if (snapshot.poll_interval > 0) {
+                    grt.std.Thread.sleep(@intCast(snapshot.poll_interval));
                 }
             }
         }
@@ -140,7 +141,7 @@ pub fn make(comptime grt: type) type {
 
             try out.emit(.{
                 .origin = .source,
-                .timestamp_ns = grt.std.time.nanoTimestamp(),
+                .timestamp = grt.time.instant.now(),
                 .body = .{
                     .raw_single_button = .{
                         .source_id = source_id,

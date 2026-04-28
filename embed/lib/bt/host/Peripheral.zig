@@ -381,7 +381,7 @@ pub fn make(comptime grt: type) type {
                 },
                 .interval = link.interval,
                 .latency = link.latency,
-                .timeout = link.timeout,
+                .supervision_timeout = link.supervision_timeout,
             };
         }
 

@@ -1,7 +1,7 @@
 const stdz = @import("stdz");
 const testing_mod = @import("testing");
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -12,32 +12,32 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("load_store_fetch", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("load_store_fetch", testing_mod.TestRunner.fromFn(std, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try loadStoreFetchCase(lib);
+                    try loadStoreFetchCase(std);
                 }
             }.run));
-            t.run("cmpxchg", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("cmpxchg", testing_mod.TestRunner.fromFn(std, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try cmpxchgCase(lib);
+                    try cmpxchgCase(std);
                 }
             }.run));
-            t.run("swap", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("swap", testing_mod.TestRunner.fromFn(std, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try swapCase(lib);
+                    try swapCase(std);
                 }
             }.run));
-            t.run("make_uses_custom_atomic", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("make_uses_custom_atomic", testing_mod.TestRunner.fromFn(std, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try makeUsesCustomAtomicCase(lib);
+                    try makeUsesCustomAtomicCase(std);
                 }
             }.run));
             return t.wait();
@@ -45,17 +45,17 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
 }
 
-fn loadStoreFetchCase(comptime lib: type) !void {
-    var v = lib.atomic.Value(u32).init(0);
+fn loadStoreFetchCase(comptime std: type) !void {
+    var v = std.atomic.Value(u32).init(0);
     v.store(10, .seq_cst);
     const loaded = v.load(.seq_cst);
     if (loaded != 10) return error.AtomicStoreFailed;
@@ -71,8 +71,8 @@ fn loadStoreFetchCase(comptime lib: type) !void {
     if (after2 != 12) return error.AtomicFetchSubFailed;
 }
 
-fn cmpxchgCase(comptime lib: type) !void {
-    var v = lib.atomic.Value(u32).init(12);
+fn cmpxchgCase(comptime std: type) !void {
+    var v = std.atomic.Value(u32).init(12);
     const swapped = v.cmpxchgStrong(12, 99, .seq_cst, .seq_cst);
     if (swapped != null) return error.CmpxchgShouldSucceed;
     if (v.load(.seq_cst) != 99) return error.CmpxchgValueWrong;
@@ -82,14 +82,14 @@ fn cmpxchgCase(comptime lib: type) !void {
     if (failed.? != 99) return error.CmpxchgReturnWrong;
 }
 
-fn swapCase(comptime lib: type) !void {
-    var v = lib.atomic.Value(u32).init(99);
+fn swapCase(comptime std: type) !void {
+    var v = std.atomic.Value(u32).init(99);
     const old = v.swap(77, .seq_cst);
     if (old != 99) return error.SwapOldWrong;
     if (v.load(.seq_cst) != 77) return error.SwapNewWrong;
 }
 
-fn makeUsesCustomAtomicCase(comptime lib: type) !void {
+fn makeUsesCustomAtomicCase(comptime std: type) !void {
     const AtomicOrder = stdz.builtin.AtomicOrder;
 
     const CustomAtomic = struct {
@@ -97,10 +97,10 @@ fn makeUsesCustomAtomicCase(comptime lib: type) !void {
             return struct {
                 pub const marker = true;
 
-                inner: lib.atomic.Value(T),
+                inner: std.atomic.Value(T),
 
                 pub fn init(value: T) @This() {
-                    return .{ .inner = lib.atomic.Value(T).init(value) };
+                    return .{ .inner = std.atomic.Value(T).init(value) };
                 }
 
                 pub fn load(self: *@This(), comptime order: AtomicOrder) T {
@@ -137,20 +137,20 @@ fn makeUsesCustomAtomicCase(comptime lib: type) !void {
     };
 
     const CustomLib = stdz.make(struct {
-        pub const Thread = lib.Thread;
-        pub const heap = lib.heap;
-        pub const log = lib.log;
-        pub const testing = lib.testing;
-        pub const posix = lib.posix;
-        pub const time = lib.time;
-        pub const crypto = lib.crypto;
+        pub const Thread = std.Thread;
+        pub const heap = std.heap;
+        pub const log = std.log;
+        pub const testing = std.testing;
+        pub const posix = std.posix;
+        pub const time = std.time;
+        pub const crypto = std.crypto;
         pub const atomic = CustomAtomic;
     });
 
-    try lib.testing.expect(@hasDecl(CustomLib.atomic.Value(u32), "marker"));
+    try std.testing.expect(@hasDecl(CustomLib.atomic.Value(u32), "marker"));
 
     var value = CustomLib.atomic.Value(u32).init(41);
-    try lib.testing.expectEqual(@as(u32, 41), value.load(.seq_cst));
+    try std.testing.expectEqual(@as(u32, 41), value.load(.seq_cst));
     value.store(42, .seq_cst);
-    try lib.testing.expectEqual(@as(u32, 42), value.load(.seq_cst));
+    try std.testing.expectEqual(@as(u32, 42), value.load(.seq_cst));
 }

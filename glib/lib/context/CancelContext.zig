@@ -1,13 +1,16 @@
 //! CancelContext — cancelable context node with recursive propagation.
 
+const stdz = @import("stdz");
+const time_mod = @import("time");
+const Allocator = stdz.mem.Allocator;
+
 const Context = @import("Context.zig");
 const internal = @import("internal.zig");
-const Allocator = @import("stdz").mem.Allocator;
 
-pub fn make(comptime lib: type) type {
-    const Mutex = lib.Thread.Mutex;
-    const Condition = lib.Thread.Condition;
-    const RwLock = lib.Thread.RwLock;
+pub fn make(comptime std: type, comptime time: type) type {
+    const Mutex = std.Thread.Mutex;
+    const Condition = std.Thread.Condition;
+    const RwLock = std.Thread.RwLock;
 
     return struct {
         allocator: Allocator,
@@ -67,17 +70,17 @@ pub fn make(comptime lib: type) type {
             return true;
         }
 
-        pub fn wait(self: *Self, timeout_ns: ?i64) ?anyerror {
+        pub fn wait(self: *Self, timeout: ?time_mod.duration.Duration) ?anyerror {
             self.mu.lock();
             defer self.mu.unlock();
 
-            if (timeout_ns) |ns| {
-                const deadline_ns = lib.time.nanoTimestamp() + @as(i128, ns);
+            if (timeout) |duration| {
+                if (duration <= 0) return null;
+                const deadline = internal.timeoutDeadline(time, duration);
                 while (self.cause == null) {
-                    const remaining_ns = deadline_ns - lib.time.nanoTimestamp();
-                    if (remaining_ns <= 0) return null;
+                    const timed_wait = internal.remainingTimedWait(deadline, time.instant.now()) orelse return null;
 
-                    self.cond.timedWait(&self.mu, @intCast(@min(remaining_ns, internal.max_wait_ns_i128))) catch {};
+                    self.cond.timedWait(&self.mu, timed_wait) catch {};
                 }
                 return self.cause;
             }
@@ -99,13 +102,13 @@ pub fn make(comptime lib: type) type {
             return errNoLockImpl(ptr);
         }
 
-        fn deadlineNoLockImpl(ptr: *anyopaque) ?i128 {
+        fn deadlineNoLockImpl(ptr: *anyopaque) ?time_mod.instant.Time {
             const self: *Self = @ptrCast(@alignCast(ptr));
             const parent = self.tree.parent orelse return null;
             return internal.deadlineNoLock(parent);
         }
 
-        fn deadlineImpl(ptr: *anyopaque) ?i128 {
+        fn deadlineImpl(ptr: *anyopaque) ?time_mod.instant.Time {
             const self: *Self = @ptrCast(@alignCast(ptr));
             self.tree_rw.lockShared();
             defer self.tree_rw.unlockShared();
@@ -125,9 +128,9 @@ pub fn make(comptime lib: type) type {
             return valueNoLockImpl(ptr, key);
         }
 
-        fn waitImpl(ptr: *anyopaque, timeout_ns: ?i64) ?anyerror {
+        fn waitImpl(ptr: *anyopaque, timeout: ?time_mod.duration.Duration) ?anyerror {
             const self: *Self = @ptrCast(@alignCast(ptr));
-            return self.wait(timeout_ns);
+            return self.wait(timeout);
         }
 
         fn cancelImpl(ptr: *anyopaque) void {

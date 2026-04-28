@@ -96,14 +96,14 @@ fn processAccel(
             .y = accel.y,
             .z = accel.z,
         },
-        .timestamp_ms = timestampMs(message.timestamp_ns),
+        .timestamp = message.timestamp,
     };
 
     if (gop.value_ptr.update(sample)) |action| {
-        emitted += try self.emitMotion(message.timestamp_ns, accel.source_id, action, accel.ctx);
+        emitted += try self.emitMotion(message.timestamp, accel.source_id, action, accel.ctx);
     }
     while (gop.value_ptr.nextAction()) |action| {
-        emitted += try self.emitMotion(message.timestamp_ns, accel.source_id, action, accel.ctx);
+        emitted += try self.emitMotion(message.timestamp, accel.source_id, action, accel.ctx);
     }
 
     return emitted;
@@ -127,14 +127,14 @@ fn processGyro(
             .y = gyro.y,
             .z = gyro.z,
         },
-        .timestamp_ms = timestampMs(message.timestamp_ns),
+        .timestamp = message.timestamp,
     };
 
     if (gop.value_ptr.updateGyro(sample)) |action| {
-        emitted += try self.emitMotion(message.timestamp_ns, gyro.source_id, action, gyro.ctx);
+        emitted += try self.emitMotion(message.timestamp, gyro.source_id, action, gyro.ctx);
     }
     while (gop.value_ptr.nextAction()) |action| {
-        emitted += try self.emitMotion(message.timestamp_ns, gyro.source_id, action, gyro.ctx);
+        emitted += try self.emitMotion(message.timestamp, gyro.source_id, action, gyro.ctx);
     }
 
     return emitted;
@@ -142,7 +142,7 @@ fn processGyro(
 
 fn emitMotion(
     self: *Reducer,
-    timestamp_ns: i128,
+    timestamp: glib.time.instant.Time,
     source_id: u32,
     action: motion.Action,
     ctx: Context.Type,
@@ -150,7 +150,7 @@ fn emitMotion(
     if (self.out) |out| {
         try out.emit(.{
             .origin = .node,
-            .timestamp_ns = timestamp_ns,
+            .timestamp = timestamp,
             .body = .{
                 .imu_motion = .{
                     .source_id = source_id,
@@ -172,16 +172,6 @@ fn forward(self: *Reducer, message: Message) !usize {
     return 0;
 }
 
-fn timestampMs(timestamp_ns: i128) u64 {
-    if (timestamp_ns <= 0) return 0;
-
-    const ns_per_ms: i128 = glib.std.time.ns_per_ms;
-    const timestamp_ms = @divTrunc(timestamp_ns, ns_per_ms);
-    const max_u64_ms: i128 = @intCast(glib.std.math.maxInt(u64));
-    if (timestamp_ms >= max_u64_ms) return glib.std.math.maxInt(u64);
-    return @intCast(timestamp_ms);
-}
-
 fn motionKind(action: motion.Action) State.Motion {
     return switch (action) {
         .shake => .shake,
@@ -193,6 +183,10 @@ fn motionKind(action: motion.Action) State.Motion {
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
+        fn timestampMs(comptime value: comptime_int) glib.time.instant.Time {
+            return @intCast(value * glib.time.duration.MilliSecond);
+        }
+
         fn forwardsRawAccelAndEmitsShake() !void {
             const Collector = struct {
                 raw_count: usize = 0,
@@ -215,8 +209,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var detector_impl = Reducer.init(grt.std.testing.allocator, .{
                 .shake_threshold_g = 1.0,
-                .shake_min_duration_ms = 50,
-                .shake_max_duration_ms = 500,
+                .shake_min_duration = 50 * glib.time.duration.MilliSecond,
+                .shake_max_duration = 500 * glib.time.duration.MilliSecond,
                 .tilt_threshold_deg = 9999,
             });
             defer detector_impl.deinit();
@@ -224,16 +218,16 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
-            inline for ([_]struct { ts: i128, x: f32, y: f32, z: f32 }{
-                .{ .ts = 0, .x = 0, .y = 0, .z = 1.0 },
-                .{ .ts = 10 * grt.std.time.ns_per_ms, .x = 2.0, .y = 0, .z = 1.0 },
-                .{ .ts = 20 * grt.std.time.ns_per_ms, .x = -2.0, .y = 0, .z = 1.0 },
-                .{ .ts = 30 * grt.std.time.ns_per_ms, .x = 2.0, .y = 0, .z = 1.0 },
-                .{ .ts = 80 * grt.std.time.ns_per_ms, .x = 0, .y = 0, .z = 1.0 },
+            inline for ([_]struct { timestamp: glib.time.instant.Time, x: f32, y: f32, z: f32 }{
+                .{ .timestamp = 0, .x = 0, .y = 0, .z = 1.0 },
+                .{ .timestamp = timestampMs(10), .x = 2.0, .y = 0, .z = 1.0 },
+                .{ .timestamp = timestampMs(20), .x = -2.0, .y = 0, .z = 1.0 },
+                .{ .timestamp = timestampMs(30), .x = 2.0, .y = 0, .z = 1.0 },
+                .{ .timestamp = timestampMs(80), .x = 0, .y = 0, .z = 1.0 },
             }) |sample| {
                 _ = try detector.process(.{
                     .origin = .source,
-                    .timestamp_ns = sample.ts,
+                    .timestamp = sample.timestamp,
                     .body = .{
                         .raw_imu_accel = .{
                             .source_id = 7,
@@ -250,7 +244,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             _ = try detector.process(.{
                 .origin = .source,
-                .timestamp_ns = 140 * grt.std.time.ns_per_ms,
+                .timestamp = timestampMs(140),
                 .body = .{
                     .raw_imu_accel = .{
                         .source_id = 7,
@@ -290,7 +284,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expectEqual(@as(usize, 1), try detector.process(.{
                 .origin = .timer,
-                .timestamp_ns = 99,
+                .timestamp = timestampMs(99),
                 .body = .{ .tick = .{} },
             }));
             try grt.std.testing.expect(collector.saw_tick);
@@ -315,8 +309,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var detector_impl = Reducer.init(grt.std.testing.allocator, .{
                 .shake_threshold_g = 1.0,
-                .shake_min_duration_ms = 50,
-                .shake_max_duration_ms = 500,
+                .shake_min_duration = 50 * glib.time.duration.MilliSecond,
+                .shake_max_duration = 500 * glib.time.duration.MilliSecond,
                 .tilt_threshold_deg = 9999,
             });
             defer detector_impl.deinit();
@@ -324,19 +318,19 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
-            inline for ([_]struct { source_id: u32, ts_ms: i128, x: f32 }{
-                .{ .source_id = 1, .ts_ms = 0, .x = 0 },
-                .{ .source_id = 2, .ts_ms = 0, .x = 0 },
-                .{ .source_id = 1, .ts_ms = 10, .x = 2.0 },
-                .{ .source_id = 1, .ts_ms = 20, .x = -2.0 },
-                .{ .source_id = 1, .ts_ms = 30, .x = 2.0 },
-                .{ .source_id = 1, .ts_ms = 80, .x = 0 },
-                .{ .source_id = 2, .ts_ms = 80, .x = 0 },
-                .{ .source_id = 1, .ts_ms = 140, .x = 0 },
+            inline for ([_]struct { source_id: u32, timestamp: glib.time.instant.Time, x: f32 }{
+                .{ .source_id = 1, .timestamp = timestampMs(0), .x = 0 },
+                .{ .source_id = 2, .timestamp = timestampMs(0), .x = 0 },
+                .{ .source_id = 1, .timestamp = timestampMs(10), .x = 2.0 },
+                .{ .source_id = 1, .timestamp = timestampMs(20), .x = -2.0 },
+                .{ .source_id = 1, .timestamp = timestampMs(30), .x = 2.0 },
+                .{ .source_id = 1, .timestamp = timestampMs(80), .x = 0 },
+                .{ .source_id = 2, .timestamp = timestampMs(80), .x = 0 },
+                .{ .source_id = 1, .timestamp = timestampMs(140), .x = 0 },
             }) |sample| {
                 _ = try detector.process(.{
                     .origin = .source,
-                    .timestamp_ns = sample.ts_ms * grt.std.time.ns_per_ms,
+                    .timestamp = sample.timestamp,
                     .body = .{
                         .raw_imu_accel = .{
                             .source_id = sample.source_id,
@@ -368,8 +362,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var detector_impl = Reducer.init(grt.std.testing.allocator, .{
                 .shake_threshold_g = 1.0,
-                .shake_min_duration_ms = 50,
-                .shake_max_duration_ms = 500,
+                .shake_min_duration = 50 * glib.time.duration.MilliSecond,
+                .shake_max_duration = 500 * glib.time.duration.MilliSecond,
                 .tilt_threshold_deg = 9999,
             });
             defer detector_impl.deinit();
@@ -377,20 +371,20 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
-            inline for ([_]struct { ts_ms: i128, x: f32 }{
-                .{ .ts_ms = 0, .x = 0.0 },
-                .{ .ts_ms = 10, .x = 0.30 },
-                .{ .ts_ms = 20, .x = 0.00 },
-                .{ .ts_ms = 30, .x = 0.30 },
-                .{ .ts_ms = 40, .x = 0.00 },
-                .{ .ts_ms = 50, .x = 0.30 },
-                .{ .ts_ms = 60, .x = 0.00 },
-                .{ .ts_ms = 120, .x = 0.00 },
-                .{ .ts_ms = 180, .x = 0.00 },
+            inline for ([_]struct { timestamp: glib.time.instant.Time, x: f32 }{
+                .{ .timestamp = timestampMs(0), .x = 0.0 },
+                .{ .timestamp = timestampMs(10), .x = 0.30 },
+                .{ .timestamp = timestampMs(20), .x = 0.00 },
+                .{ .timestamp = timestampMs(30), .x = 0.30 },
+                .{ .timestamp = timestampMs(40), .x = 0.00 },
+                .{ .timestamp = timestampMs(50), .x = 0.30 },
+                .{ .timestamp = timestampMs(60), .x = 0.00 },
+                .{ .timestamp = timestampMs(120), .x = 0.00 },
+                .{ .timestamp = timestampMs(180), .x = 0.00 },
             }) |sample| {
                 _ = try detector.process(.{
                     .origin = .source,
-                    .timestamp_ns = sample.ts_ms * grt.std.time.ns_per_ms,
+                    .timestamp = sample.timestamp,
                     .body = .{
                         .raw_imu_accel = .{
                             .source_id = 9,
@@ -429,8 +423,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 .shake_threshold_g = 9999,
                 .tilt_threshold_deg = 9999,
                 .flip_gyro_threshold_dps = 90.0,
-                .flip_recent_turn_ms = 400,
-                .flip_debounce_ms = 0,
+                .flip_recent_turn = 400 * glib.time.duration.MilliSecond,
+                .flip_debounce = 0 * glib.time.duration.MilliSecond,
             });
             defer detector_impl.deinit();
             var collector = Collector{};
@@ -439,7 +433,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             _ = try detector.process(.{
                 .origin = .source,
-                .timestamp_ns = 0,
+                .timestamp = timestampMs(0),
                 .body = .{
                     .raw_imu_accel = .{
                         .source_id = 5,
@@ -451,7 +445,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             });
             _ = try detector.process(.{
                 .origin = .source,
-                .timestamp_ns = 220 * grt.std.time.ns_per_ms,
+                .timestamp = timestampMs(220),
                 .body = .{
                     .raw_imu_gyro = .{
                         .source_id = 5,
@@ -463,7 +457,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             });
             _ = try detector.process(.{
                 .origin = .source,
-                .timestamp_ns = 260 * grt.std.time.ns_per_ms,
+                .timestamp = timestampMs(260),
                 .body = .{
                     .raw_imu_accel = .{
                         .source_id = 5,
@@ -508,7 +502,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
                 _ = try Reducer.reduce(&store, .{
                     .origin = .source,
-                    .timestamp_ns = 0,
+                    .timestamp = timestampMs(0),
                     .body = .{
                         .raw_imu_accel = .{
                             .source_id = 17,

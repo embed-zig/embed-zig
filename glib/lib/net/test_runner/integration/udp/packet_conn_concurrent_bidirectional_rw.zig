@@ -2,7 +2,7 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("../tcp/test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 320 * 1024 },
 
@@ -11,11 +11,11 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                const Thread = lib.Thread;
-                const StartGate = test_utils.StartGate(lib);
+                const Thread = std.Thread;
+                const StartGate = test_utils.StartGate(std);
                 const packet_count = 128;
                 const packet_len = 1024;
                 const header_len = 4;
@@ -37,7 +37,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     err: ?anyerror = null,
                 };
 
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Worker = struct {
                         fn read(ctx: *ReadCtx) void {
                             var buf: [packet_len]u8 = undefined;
@@ -67,7 +67,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                     ctx.err = error.ShortWrite;
                                     return;
                                 }
-                                if (seq % 8 == 7) Thread.sleep(lib.time.ns_per_ms);
+                                if (seq % 8 == 7) Thread.sleep(@intCast(net.time.duration.MilliSecond));
                             }
                         }
                     };
@@ -83,10 +83,10 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     });
                     defer b_pc.deinit();
 
-                    a_pc.setReadTimeout(10_000);
-                    a_pc.setWriteTimeout(10_000);
-                    b_pc.setReadTimeout(10_000);
-                    b_pc.setWriteTimeout(10_000);
+                    a_pc.setReadDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
+                    a_pc.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
+                    b_pc.setReadDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
+                    b_pc.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
 
                     const a_impl = try a_pc.as(net.UdpConn);
                     const b_impl = try b_pc.as(net.UdpConn);
@@ -139,8 +139,8 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     if (b_reader.err) |err| return err;
                     if (b_writer.err) |err| return err;
 
-                    for (a_seen) |seen| try lib.testing.expect(seen);
-                    for (b_seen) |seen| try lib.testing.expect(seen);
+                    for (a_seen) |seen| try std.testing.expect(seen);
+                    for (b_seen) |seen| try std.testing.expect(seen);
                 }
 
                 fn verifyPacket(ctx: *ReadCtx, result: net.PacketConn.ReadFromResult, buf: *const [packet_len]u8) !void {
@@ -179,8 +179,8 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                 }
 
                 fn expectAddrEq(actual: net.netip.AddrPort, expected: net.netip.AddrPort) !void {
-                    try lib.testing.expectEqual(expected.port(), actual.port());
-                    try lib.testing.expect(net.netip.Addr.compare(expected.addr(), actual.addr()) == .eq);
+                    try std.testing.expectEqual(expected.port(), actual.port());
+                    try std.testing.expect(net.netip.Addr.compare(expected.addr(), actual.addr()) == .eq);
                 }
             };
             Body.call(allocator) catch |err| {

@@ -2,7 +2,7 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("../tcp/test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -11,10 +11,10 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const loopback = try test_utils.addr6("::1", 0);
 
                     var pc = try net.listenPacket(.{
@@ -30,7 +30,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
 
                     var buf: [64]u8 = undefined;
                     const r = try pc.readFrom(&buf);
-                    try lib.testing.expectEqualStrings("udp v6 listenPacket", buf[0..r.bytes_read]);
+                    try std.testing.expectEqualStrings("udp v6 listenPacket", buf[0..r.bytes_read]);
                 }
             };
             Body.call(allocator) catch |err| {

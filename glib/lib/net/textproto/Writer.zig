@@ -147,11 +147,11 @@ fn validateBufferedType(comptime Buffered: type) void {
     }
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
+pub fn TestRunner(comptime std: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
 
     const TestCase = struct {
-        fn writerInitShapes(allocator: lib.mem.Allocator) !void {
+        fn writerInitShapes(allocator: std.mem.Allocator) !void {
             const Sink = struct {
                 out: []u8,
                 pos: usize = 0,
@@ -172,9 +172,9 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 var buffered = BufferedWriter.init(&sink, &backing);
 
                 var writer = TpWriter.init(&buffered, .{});
-                try lib.testing.expectEqual(@as(usize, backing.len), writer.ioWriter().buffer.len);
-                try lib.testing.expect(writer.underlyingErr() == null);
-                try lib.testing.expect(writer.bufferedWriter().ioWriter() == writer.ioWriter());
+                try std.testing.expectEqual(@as(usize, backing.len), writer.ioWriter().buffer.len);
+                try std.testing.expect(writer.underlyingErr() == null);
+                try std.testing.expect(writer.bufferedWriter().ioWriter() == writer.ioWriter());
             }
 
             {
@@ -187,8 +187,8 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
 
                 var writer = TpWriter.fromBuffered(&buffered);
                 defer writer.deinit();
-                try lib.testing.expect(writer.ioWriter().buffer.len >= 1);
-                try lib.testing.expect(writer.underlyingErr() == null);
+                try std.testing.expect(writer.ioWriter().buffer.len >= 1);
+                try std.testing.expect(writer.underlyingErr() == null);
             }
         }
 
@@ -213,11 +213,11 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             var writer = TpWriter.fromBuffered(&buffered);
 
             try writer.writeLine("PING a");
-            try lib.testing.expectEqual(@as(usize, 0), sink.pos);
-            try lib.testing.expectEqualStrings("PING a\r\n", writer.ioWriter().buffered());
+            try std.testing.expectEqual(@as(usize, 0), sink.pos);
+            try std.testing.expectEqualStrings("PING a\r\n", writer.ioWriter().buffered());
 
             try writer.flush();
-            try lib.testing.expectEqualStrings("PING a\r\n", storage[0..8]);
+            try std.testing.expectEqualStrings("PING a\r\n", storage[0..8]);
         }
 
         fn writeLineRejectsEmbeddedNewline() !void {
@@ -234,8 +234,8 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             var buffered = BufferedWriter.init(&sink, &backing);
             var writer = TpWriter.fromBuffered(&buffered);
 
-            try lib.testing.expectError(error.InvalidLine, writer.writeLine("bad\nline"));
-            try lib.testing.expectError(error.InvalidLine, writer.writeLine("bad\rline"));
+            try std.testing.expectError(error.InvalidLine, writer.writeLine("bad\nline"));
+            try std.testing.expectError(error.InvalidLine, writer.writeLine("bad\rline"));
         }
 
         fn writeLinePartsAppendsCrlf() !void {
@@ -261,7 +261,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             try writer.writeLineParts(&.{ "PING", " ", "a" });
             try writer.flush();
 
-            try lib.testing.expectEqualStrings("PING a\r\n", storage[0..8]);
+            try std.testing.expectEqualStrings("PING a\r\n", storage[0..8]);
         }
 
         fn writeLinePartsRejectsEmbeddedNewline() !void {
@@ -278,8 +278,8 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             var buffered = BufferedWriter.init(&sink, &backing);
             var writer = TpWriter.fromBuffered(&buffered);
 
-            try lib.testing.expectError(error.InvalidLine, writer.writeLineParts(&.{ "bad", "\nline" }));
-            try lib.testing.expectError(error.InvalidLine, writer.writeLineParts(&.{ "bad\r", "line" }));
+            try std.testing.expectError(error.InvalidLine, writer.writeLineParts(&.{ "bad", "\nline" }));
+            try std.testing.expectError(error.InvalidLine, writer.writeLineParts(&.{ "bad\r", "line" }));
         }
 
         fn writeLineExposesUnderlyingError() !void {
@@ -302,9 +302,9 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             var buffered = BufferedWriter.init(&sink, &backing);
             var writer = TpWriter.fromBuffered(&buffered);
 
-            try lib.testing.expectError(error.WriteFailed, writer.writeLine("ab"));
-            try lib.testing.expect(writer.underlyingErr() != null);
-            try lib.testing.expect(writer.underlyingErr().? == error.ConnectionReset);
+            try std.testing.expectError(error.WriteFailed, writer.writeLine("ab"));
+            try std.testing.expect(writer.underlyingErr() != null);
+            try std.testing.expect(writer.underlyingErr().? == error.ConnectionReset);
         }
 
         fn dotWriterStuffsNormalizesAndTerminates() !void {
@@ -328,11 +328,11 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             var writer = TpWriter.fromBuffered(&buffered);
             var dot = writer.dotWriter();
 
-            try lib.testing.expectEqual(@as(usize, 12), try dot.write("alpha\n.beta\n"));
+            try std.testing.expectEqual(@as(usize, 12), try dot.write("alpha\n.beta\n"));
             try dot.close();
             try writer.flush();
 
-            try lib.testing.expectEqualStrings("alpha\r\n..beta\r\n.\r\n", storage[0..18]);
+            try std.testing.expectEqualStrings("alpha\r\n..beta\r\n.\r\n", storage[0..18]);
         }
 
         fn dotWriterTracksCrLfAcrossWrites() !void {
@@ -356,12 +356,12 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             var writer = TpWriter.fromBuffered(&buffered);
             var dot = writer.dotWriter();
 
-            try lib.testing.expectEqual(@as(usize, 6), try dot.write("alpha\r"));
-            try lib.testing.expectEqual(@as(usize, 6), try dot.write("\n.beta"));
+            try std.testing.expectEqual(@as(usize, 6), try dot.write("alpha\r"));
+            try std.testing.expectEqual(@as(usize, 6), try dot.write("\n.beta"));
             try dot.close();
             try writer.flush();
 
-            try lib.testing.expectEqualStrings("alpha\r\n..beta\r\n.\r\n", storage[0..18]);
+            try std.testing.expectEqualStrings("alpha\r\n..beta\r\n.\r\n", storage[0..18]);
         }
 
         fn dotWriterRejectsWriteAfterClose() !void {
@@ -380,17 +380,17 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             var dot = writer.dotWriter();
 
             try dot.close();
-            try lib.testing.expectError(error.Closed, dot.write("x"));
+            try std.testing.expectError(error.Closed, dot.write("x"));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
 
             TestCase.writerInitShapes(allocator) catch |err| {
@@ -415,7 +415,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

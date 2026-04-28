@@ -44,7 +44,7 @@ const multiple_accept = @import("tcp/multiple_accept.zig");
 const conn_concurrent_bidirectional_rw = @import("tcp/conn_concurrent_bidirectional_rw.zig");
 const listener_concurrent_accept = @import("tcp/listener_concurrent_accept.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -56,50 +56,50 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
 
             t.parallel();
-            t.run("ipv4_dial_listen", ipv4_dial_listen.make(lib, net));
-            t.run("ipv6_dial_listen", ipv6_dial_listen.make(lib, net));
-            t.run("dialer_dial_and_dial_context", dialer_dial_and_dial_context.make(lib, net));
-            t.run("listener_accept_reports_oom", listener_accept_reports_oom.make(lib, net));
-            t.run("dial_ctx_canceled_before_start", dial_ctx_canceled_before_start.make(lib, net));
-            t.run("dial_ctx_deadline_exceeded_before_start", dial_ctx_deadline_exceeded_before_start.make(lib, net));
-            t.run("dial_ctx_canceled_during_connect", dial_ctx_canceled_during_connect.make(lib, net));
-            t.run("dial_ctx_deadline_exceeded_during_connect", dial_ctx_deadline_exceeded_during_connect.make(lib, net));
-            t.run("dial_refused_keeps_specific_error", dial_refused_keeps_specific_error.make(lib, net));
-            t.run("conn_close_is_idempotent", conn_close_is_idempotent.make(lib, net));
-            t.run("conn_ops_after_close_return_closed", conn_ops_after_close_return_closed.make(lib, net));
-            t.run("read_canceled_ctx_maps_timed_out", read_canceled_ctx_maps_timed_out.make(lib, net));
-            t.run("write_canceled_ctx_maps_timed_out", write_canceled_ctx_maps_timed_out.make(lib, net));
-            t.run("close_releases_context_bindings", close_releases_context_bindings.make(lib, net));
-            t.run("conn_close_unblocks_blocked_read", conn_close_unblocks_blocked_read.make(lib, net));
-            t.run("listener_close_unblocks_blocked_accept", listener_close_unblocks_blocked_accept.make(lib, net));
-            t.run("read_context_clear_while_blocked_allows_read_to_continue", read_context_clear_while_blocked_allows_read_to_continue.make(lib, net));
-            t.run("read_deadline_ctx_maps_timed_out", read_deadline_ctx_maps_timed_out.make(lib, net));
-            t.run("write_deadline_ctx_maps_timed_out", write_deadline_ctx_maps_timed_out.make(lib, net));
-            t.run("read_timeout_set_while_blocked_maps_timed_out", read_timeout_set_while_blocked_maps_timed_out.make(lib, net));
-            t.run("read_timeout_set_while_read_and_write_blocked_maps_timed_out", read_timeout_set_while_read_and_write_blocked_maps_timed_out.make(lib, net));
-            t.run("read_timeout_clear_while_blocked_allows_read_to_continue", read_timeout_clear_while_blocked_allows_read_to_continue.make(lib, net));
-            t.run("write_context_set_while_blocked_maps_timed_out", write_context_set_while_blocked_maps_timed_out.make(lib, net));
-            t.run("write_timeout_set_while_blocked_maps_timed_out", write_timeout_set_while_blocked_maps_timed_out.make(lib, net));
-            t.run("write_timeout_clear_while_blocked_allows_write_to_continue", write_timeout_clear_while_blocked_allows_write_to_continue.make(lib, net));
-            t.run("write_waits_until_peer_drains", write_waits_until_peer_drains.make(lib, net));
-            t.run("read_timeout", read_timeout.make(lib, net));
-            t.run("read_full", read_full.make(lib, net));
-            t.run("read_eos_after_peer_shutdown_write", read_eos_after_peer_shutdown_write.make(lib, net));
-            t.run("write_timeout", write_timeout.make(lib, net));
-            t.run("conn_as_downcast", conn_as_downcast.make(lib, net));
-            t.run("multiple_accept", multiple_accept.make(lib, net));
-            t.run("conn_concurrent_bidirectional_rw", conn_concurrent_bidirectional_rw.make(lib, net));
-            t.run("listener_concurrent_accept", listener_concurrent_accept.make(lib, net));
+            t.run("ipv4_dial_listen", ipv4_dial_listen.make(std, net));
+            t.run("ipv6_dial_listen", ipv6_dial_listen.make(std, net));
+            t.run("dialer_dial_and_dial_context", dialer_dial_and_dial_context.make(std, net));
+            t.run("listener_accept_reports_oom", listener_accept_reports_oom.make(std, net));
+            t.run("dial_ctx_canceled_before_start", dial_ctx_canceled_before_start.make(std, net));
+            t.run("dial_ctx_deadline_exceeded_before_start", dial_ctx_deadline_exceeded_before_start.make(std, net));
+            t.run("dial_ctx_canceled_during_connect", dial_ctx_canceled_during_connect.make(std, net));
+            t.run("dial_ctx_deadline_exceeded_during_connect", dial_ctx_deadline_exceeded_during_connect.make(std, net));
+            t.run("dial_refused_keeps_specific_error", dial_refused_keeps_specific_error.make(std, net));
+            t.run("conn_close_is_idempotent", conn_close_is_idempotent.make(std, net));
+            t.run("conn_ops_after_close_return_closed", conn_ops_after_close_return_closed.make(std, net));
+            t.run("read_canceled_ctx_maps_timed_out", read_canceled_ctx_maps_timed_out.make(std, net));
+            t.run("write_canceled_ctx_maps_timed_out", write_canceled_ctx_maps_timed_out.make(std, net));
+            t.run("close_releases_context_bindings", close_releases_context_bindings.make(std, net));
+            t.run("conn_close_unblocks_blocked_read", conn_close_unblocks_blocked_read.make(std, net));
+            t.run("listener_close_unblocks_blocked_accept", listener_close_unblocks_blocked_accept.make(std, net));
+            t.run("read_context_clear_while_blocked_allows_read_to_continue", read_context_clear_while_blocked_allows_read_to_continue.make(std, net));
+            t.run("read_deadline_ctx_maps_timed_out", read_deadline_ctx_maps_timed_out.make(std, net));
+            t.run("write_deadline_ctx_maps_timed_out", write_deadline_ctx_maps_timed_out.make(std, net));
+            t.run("read_timeout_set_while_blocked_maps_timed_out", read_timeout_set_while_blocked_maps_timed_out.make(std, net));
+            t.run("read_timeout_set_while_read_and_write_blocked_maps_timed_out", read_timeout_set_while_read_and_write_blocked_maps_timed_out.make(std, net));
+            t.run("read_timeout_clear_while_blocked_allows_read_to_continue", read_timeout_clear_while_blocked_allows_read_to_continue.make(std, net));
+            t.run("write_context_set_while_blocked_maps_timed_out", write_context_set_while_blocked_maps_timed_out.make(std, net));
+            t.run("write_timeout_set_while_blocked_maps_timed_out", write_timeout_set_while_blocked_maps_timed_out.make(std, net));
+            t.run("write_timeout_clear_while_blocked_allows_write_to_continue", write_timeout_clear_while_blocked_allows_write_to_continue.make(std, net));
+            t.run("write_waits_until_peer_drains", write_waits_until_peer_drains.make(std, net));
+            t.run("read_timeout", read_timeout.make(std, net));
+            t.run("read_full", read_full.make(std, net));
+            t.run("read_eos_after_peer_shutdown_write", read_eos_after_peer_shutdown_write.make(std, net));
+            t.run("write_timeout", write_timeout.make(std, net));
+            t.run("conn_as_downcast", conn_as_downcast.make(std, net));
+            t.run("multiple_accept", multiple_accept.make(std, net));
+            t.run("conn_concurrent_bidirectional_rw", conn_concurrent_bidirectional_rw.make(std, net));
+            t.run("listener_concurrent_accept", listener_concurrent_accept.make(std, net));
             return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_api.TestRunner.make(Runner).new(runner);
 }

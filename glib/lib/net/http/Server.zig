@@ -1,5 +1,6 @@
 //! Server — HTTP/1.1 server built on `net.Listener` / `net.Conn`.
 
+const time_mod = @import("time");
 const io = @import("io");
 const context_mod = @import("context");
 const Conn = @import("../Conn.zig");
@@ -17,15 +18,15 @@ const url_mod = @import("../url.zig");
 const BufferedConnReader = io.BufferedReader(Conn);
 const TextprotoReader = textproto_reader_mod.Reader(BufferedConnReader);
 
-pub fn Server(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
-    const Thread = lib.Thread;
+pub fn Server(comptime std: type, comptime net: type) type {
+    const Allocator = std.mem.Allocator;
+    const Thread = std.Thread;
     const Context = context_mod.Context;
-    const ContextNs = context_mod.make(lib);
-    const Handler = handler_mod.Handler(lib);
-    const HandlerFunc = handler_mod.HandlerFunc(lib);
-    const ServeMux = serve_mux_mod.ServeMux(lib);
-    const Writer = ResponseWriter(lib);
+    const ContextNs = context_mod.make(std, net.time);
+    const Handler = handler_mod.Handler(std);
+    const HandlerFunc = handler_mod.HandlerFunc(std);
+    const ServeMux = serve_mux_mod.ServeMux(std);
+    const Writer = ResponseWriter(std);
     return struct {
         allocator: Allocator,
         options: Options,
@@ -39,10 +40,10 @@ pub fn Server(comptime lib: type) type {
         pub const Options = struct {
             handler: ?Handler = null,
             spawn_config: Thread.SpawnConfig = .{},
-            read_header_timeout_ms: ?u32 = null,
-            read_timeout_ms: ?u32 = null,
-            write_timeout_ms: ?u32 = null,
-            idle_timeout_ms: ?u32 = null,
+            read_header_timeout: ?time_mod.duration.Duration = null,
+            read_timeout: ?time_mod.duration.Duration = null,
+            write_timeout: ?time_mod.duration.Duration = null,
+            idle_timeout: ?time_mod.duration.Duration = null,
             max_header_bytes: usize = 32 * 1024,
         };
 
@@ -66,7 +67,7 @@ pub fn Server(comptime lib: type) type {
             hard_close: bool = false,
             next_conn_id: usize = 1,
             active_workers: usize = 0,
-            conns: lib.ArrayList(ConnEntry) = .{},
+            conns: std.ArrayList(ConnEntry) = .{},
         };
 
         const RequestBodyMode = union(enum) {
@@ -117,9 +118,9 @@ pub fn Server(comptime lib: type) type {
                 if (chunked.remaining_in_chunk == 0) {
                     var line_buf: [128]u8 = undefined;
                     const raw_line = try self.readBufferedLine(&line_buf);
-                    const semi = lib.mem.indexOfScalar(u8, raw_line, ';') orelse raw_line.len;
-                    const size_text = lib.mem.trim(u8, raw_line[0..semi], " ");
-                    const chunk_size = try lib.fmt.parseInt(usize, size_text, 16);
+                    const semi = std.mem.indexOfScalar(u8, raw_line, ';') orelse raw_line.len;
+                    const size_text = std.mem.trim(u8, raw_line[0..semi], " ");
+                    const chunk_size = try std.fmt.parseInt(usize, size_text, 16);
                     if (chunk_size == 0) {
                         while (true) {
                             const trailer = try self.readBufferedLine(&line_buf);
@@ -328,7 +329,7 @@ pub fn Server(comptime lib: type) type {
                 }
 
                 self.shared.mutex.lock();
-                self.shared.cond.timedWait(&self.shared.mutex, 5 * lib.time.ns_per_ms) catch {};
+                self.shared.cond.timedWait(&self.shared.mutex, @intCast(5 * net.time.duration.MilliSecond)) catch {};
                 self.shared.mutex.unlock();
             }
         }
@@ -390,7 +391,7 @@ pub fn Server(comptime lib: type) type {
                 }
             }
             if (index) |i| _ = self.shared.conns.swapRemove(i);
-            lib.debug.assert(self.shared.active_workers > 0);
+            std.debug.assert(self.shared.active_workers > 0);
             self.shared.active_workers -= 1;
             if (self.shared.active_workers == 0) self.shared.cond.broadcast();
         }
@@ -465,7 +466,7 @@ pub fn Server(comptime lib: type) type {
                     error.BufferTooSmall,
                     error.InvalidCharacter,
                     => {
-                        writeBareResponse(lib, owned_conn, status.bad_request, true);
+                        writeBareResponse(std, owned_conn, status.bad_request, true);
                         return;
                     },
                     else => return,
@@ -474,8 +475,8 @@ pub fn Server(comptime lib: type) type {
                 self.setConnIdle(conn_id, false);
                 first_request = false;
 
-                if (self.options.write_timeout_ms) |ms| owned_conn.setWriteTimeout(ms);
-                defer owned_conn.setWriteTimeout(null);
+                if (self.options.write_timeout) |timeout| owned_conn.setWriteDeadline(time_mod.instant.add(net.time.instant.now(), timeout));
+                defer owned_conn.setWriteDeadline(null);
 
                 var rw = Writer.init(self.allocator, owned_conn, &parsed.req, self.shouldAttemptKeepAlive(&parsed.req));
                 defer rw.deinit();
@@ -489,25 +490,25 @@ pub fn Server(comptime lib: type) type {
 
         fn readNextRequest(self: *Self, conn: Conn, buffered: *BufferedConnReader, first_request: bool) anyerror!ParsedRequestState {
             if (first_request) {
-                if (self.options.read_header_timeout_ms) |ms| conn.setReadTimeout(ms);
-            } else if (self.options.idle_timeout_ms) |ms| {
-                conn.setReadTimeout(ms);
-            } else if (self.options.read_header_timeout_ms) |ms| {
-                conn.setReadTimeout(ms);
+                if (self.options.read_header_timeout) |timeout| conn.setReadDeadline(time_mod.instant.add(net.time.instant.now(), timeout));
+            } else if (self.options.idle_timeout) |timeout| {
+                conn.setReadDeadline(time_mod.instant.add(net.time.instant.now(), timeout));
+            } else if (self.options.read_header_timeout) |timeout| {
+                conn.setReadDeadline(time_mod.instant.add(net.time.instant.now(), timeout));
             } else {
-                conn.setReadTimeout(null);
+                conn.setReadDeadline(null);
             }
 
             const raw = try readRequestHead(self.allocator, buffered, self.options.max_header_bytes);
             errdefer self.allocator.free(raw);
 
-            var req = try parseRequest(lib, self.allocator, raw);
+            var req = try parseRequest(std, self.allocator, raw);
             errdefer req.deinit();
 
             const request_ctx = try self.contexts.withCancel(self.contexts.background());
             req.ctx = request_ctx;
 
-            if (self.options.read_timeout_ms) |ms| conn.setReadTimeout(ms);
+            if (self.options.read_timeout) |timeout| conn.setReadDeadline(time_mod.instant.add(net.time.instant.now(), timeout));
 
             var parsed: ParsedRequestState = .{
                 .allocator = self.allocator,
@@ -519,7 +520,7 @@ pub fn Server(comptime lib: type) type {
             if (requestHasBody(&parsed.req)) {
                 const body_state = try self.allocator.create(RequestBodyState);
                 errdefer self.allocator.destroy(body_state);
-                body_state.* = try initRequestBody(lib, buffered, &parsed.req);
+                body_state.* = try initRequestBody(std, net, buffered, &parsed.req);
                 parsed.body_state = body_state;
                 parsed.req.body_reader = ReadCloser.init(body_state);
             }
@@ -537,9 +538,9 @@ fn requestHasBody(req: *const Request) bool {
     return req.content_length > 0 or req.transfer_encoding.len != 0;
 }
 
-fn initRequestBody(comptime lib: type, buffered: *io.BufferedReader(Conn), req: *const Request) !Server(lib).RequestBodyState {
+fn initRequestBody(comptime std: type, comptime net: type, buffered: *io.BufferedReader(Conn), req: *const Request) !Server(std, net).RequestBodyState {
     if (headerValue(req.header, Header.transfer_encoding)) |value| {
-        if (!lib.ascii.eqlIgnoreCase(value, "chunked")) return error.BadRequest;
+        if (!std.ascii.eqlIgnoreCase(value, "chunked")) return error.BadRequest;
         return .{
             .buffered = buffered,
             .mode = .{ .chunked = .{} },
@@ -561,21 +562,21 @@ fn readRequestHead(allocator: anytype, buffered: *BufferedConnReader, max_header
     return allocator.dupe(u8, raw);
 }
 
-fn parseRequest(comptime lib: type, allocator: anytype, head: []u8) !Request {
-    const line_end = lib.mem.indexOf(u8, head, "\r\n") orelse return error.BadRequest;
+fn parseRequest(comptime std: type, allocator: anytype, head: []u8) !Request {
+    const line_end = std.mem.indexOf(u8, head, "\r\n") orelse return error.BadRequest;
     const request_line = head[0..line_end];
-    var parts_it = lib.mem.tokenizeAny(u8, request_line, " ");
+    var parts_it = std.mem.tokenizeAny(u8, request_line, " ");
     const method = parts_it.next() orelse return error.BadRequest;
     const target = parts_it.next() orelse return error.BadRequest;
     const proto = parts_it.next() orelse return error.BadRequest;
     if (parts_it.next() != null) return error.BadRequest;
 
-    const proto_parts = parseProto(lib, proto) orelse return error.BadRequest;
-    const headers = try parseHeaders(lib, allocator, head[line_end + 2 ..]);
+    const proto_parts = parseProto(std, proto) orelse return error.BadRequest;
+    const headers = try parseHeaders(std, allocator, head[line_end + 2 ..]);
     errdefer allocator.free(headers);
 
     const host = headerValue(headers, Header.host) orelse "";
-    const parsed_url = try parseRequestTarget(lib, target, host);
+    const parsed_url = try parseRequestTarget(std, target, host);
 
     var req: Request = .{
         .allocator = allocator,
@@ -588,17 +589,17 @@ fn parseRequest(comptime lib: type, allocator: anytype, head: []u8) !Request {
         .owned_header_storage = headers,
         .request_uri = target,
         .host = host,
-        .close = shouldCloseConnection(lib, headers, proto_parts.major, proto_parts.minor),
+        .close = shouldCloseConnection(std, headers, proto_parts.major, proto_parts.minor),
     };
 
     if (headerValue(headers, Header.content_length)) |value| {
-        const content_length = try lib.fmt.parseInt(i64, value, 10);
+        const content_length = try std.fmt.parseInt(i64, value, 10);
         if (content_length < 0) return error.BadRequest;
-        if (@as(u64, @intCast(content_length)) > lib.math.maxInt(usize)) return error.BadRequest;
+        if (@as(u64, @intCast(content_length)) > std.math.maxInt(usize)) return error.BadRequest;
         req.content_length = content_length;
     }
     if (headerValue(headers, Header.transfer_encoding)) |value| {
-        if (!lib.ascii.eqlIgnoreCase(value, "chunked")) return error.BadRequest;
+        if (!std.ascii.eqlIgnoreCase(value, "chunked")) return error.BadRequest;
         if (req.content_length != 0) return error.BadRequest;
         req.transfer_encoding = chunked_transfer_encoding[0..];
     }
@@ -607,18 +608,18 @@ fn parseRequest(comptime lib: type, allocator: anytype, head: []u8) !Request {
 
 const chunked_transfer_encoding = [_][]const u8{"chunked"};
 
-fn parseHeaders(comptime lib: type, allocator: anytype, lines: []u8) ![]Header {
-    var headers = lib.ArrayList(Header){};
+fn parseHeaders(comptime std: type, allocator: anytype, lines: []u8) ![]Header {
+    var headers = std.ArrayList(Header){};
     defer headers.deinit(allocator);
 
     var start: usize = 0;
     while (start <= lines.len) {
-        const rel_end = lib.mem.indexOf(u8, lines[start..], "\r\n") orelse lines.len - start;
+        const rel_end = std.mem.indexOf(u8, lines[start..], "\r\n") orelse lines.len - start;
         const line = lines[start .. start + rel_end];
         if (line.len == 0) break;
-        const colon = lib.mem.indexOfScalar(u8, line, ':') orelse return error.BadRequest;
-        const name = lib.mem.trim(u8, line[0..colon], " ");
-        const value = lib.mem.trim(u8, line[colon + 1 ..], " ");
+        const colon = std.mem.indexOfScalar(u8, line, ':') orelse return error.BadRequest;
+        const name = std.mem.trim(u8, line[0..colon], " ");
+        const value = std.mem.trim(u8, line[colon + 1 ..], " ");
         try headers.append(allocator, Header.init(name, value));
         if (start + rel_end == lines.len) break;
         start += rel_end + 2;
@@ -626,18 +627,18 @@ fn parseHeaders(comptime lib: type, allocator: anytype, lines: []u8) ![]Header {
     return headers.toOwnedSlice(allocator);
 }
 
-fn parseRequestTarget(comptime lib: type, target: []const u8, host: []const u8) !url_mod.Url {
-    if (lib.mem.indexOf(u8, target, "://") != null) return try url_mod.parse(target);
+fn parseRequestTarget(comptime std: type, target: []const u8, host: []const u8) !url_mod.Url {
+    if (std.mem.indexOf(u8, target, "://") != null) return try url_mod.parse(target);
 
     var rest = target;
     var fragment: []const u8 = "";
     var query: []const u8 = "";
 
-    if (lib.mem.indexOfScalar(u8, rest, '#')) |hash| {
+    if (std.mem.indexOfScalar(u8, rest, '#')) |hash| {
         fragment = rest[hash + 1 ..];
         rest = rest[0..hash];
     }
-    if (lib.mem.indexOfScalar(u8, rest, '?')) |q| {
+    if (std.mem.indexOfScalar(u8, rest, '?')) |q| {
         query = rest[q + 1 ..];
         rest = rest[0..q];
     }
@@ -655,18 +656,18 @@ fn parseRequestTarget(comptime lib: type, target: []const u8, host: []const u8) 
     };
 }
 
-fn parseProto(comptime lib: type, proto: []const u8) ?struct { major: u8, minor: u8 } {
-    if (!lib.mem.startsWith(u8, proto, "HTTP/")) return null;
+fn parseProto(comptime std: type, proto: []const u8) ?struct { major: u8, minor: u8 } {
+    if (!std.mem.startsWith(u8, proto, "HTTP/")) return null;
     const version = proto[5..];
-    const dot = lib.mem.indexOfScalar(u8, version, '.') orelse return null;
-    const major = lib.fmt.parseInt(u8, version[0..dot], 10) catch return null;
-    const minor = lib.fmt.parseInt(u8, version[dot + 1 ..], 10) catch return null;
+    const dot = std.mem.indexOfScalar(u8, version, '.') orelse return null;
+    const major = std.fmt.parseInt(u8, version[0..dot], 10) catch return null;
+    const minor = std.fmt.parseInt(u8, version[dot + 1 ..], 10) catch return null;
     return .{ .major = major, .minor = minor };
 }
 
-fn shouldCloseConnection(comptime lib: type, headers: []const Header, major: u8, minor: u8) bool {
+fn shouldCloseConnection(comptime std: type, headers: []const Header, major: u8, minor: u8) bool {
     const value = headerValue(headers, Header.connection) orelse return !(major == 1 and minor == 1);
-    return lib.ascii.eqlIgnoreCase(value, "close");
+    return std.ascii.eqlIgnoreCase(value, "close");
 }
 
 fn headerValue(headers: []const Header, name: []const u8) ?[]const u8 {
@@ -676,11 +677,11 @@ fn headerValue(headers: []const Header, name: []const u8) ?[]const u8 {
     return null;
 }
 
-fn writeBareResponse(comptime lib: type, conn: Conn, status_code: u16, close_conn: bool) void {
+fn writeBareResponse(comptime std: type, conn: Conn, status_code: u16, close_conn: bool) void {
     var local = conn;
     var head_buf: [128]u8 = undefined;
     const reason = status.text(status_code) orelse "Unknown";
-    const head = lib.fmt.bufPrint(
+    const head = std.fmt.bufPrint(
         &head_buf,
         "HTTP/1.1 {d} {s}\r\nContent-Length: 0\r\nConnection: {s}\r\n\r\n",
         .{ status_code, reason, if (close_conn) "close" else "keep-alive" },
@@ -688,13 +689,13 @@ fn writeBareResponse(comptime lib: type, conn: Conn, status_code: u16, close_con
     io.writeAll(@TypeOf(local), &local, head) catch {};
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const S = Server(lib);
-            const Handler = handler_mod.Handler(lib);
-            const Writer = ResponseWriter(lib);
+pub fn TestRunner(comptime std: type, comptime net: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const S = Server(std, net);
+            const Handler = handler_mod.Handler(std);
+            const Writer = ResponseWriter(std);
 
             const Demo = struct {
                 pub fn serveHTTP(_: *@This(), _: *Writer, _: *Request) void {}

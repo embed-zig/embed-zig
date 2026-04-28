@@ -141,7 +141,7 @@ pub const GnssFix = struct {
     hdop: ?f32 = null,
     satellites_in_view: u8 = 0,
     satellites_used: u8 = 0,
-    timestamp_ms: ?u64 = null,
+    timestamp: ?glib.time.wall.Time = null,
 };
 
 pub const State = struct {
@@ -261,8 +261,8 @@ pub const VTable = struct {
     dataRead: *const fn (ptr: *anyopaque, buf: []u8) DataReadError!usize,
     dataWrite: *const fn (ptr: *anyopaque, buf: []const u8) DataWriteError!usize,
     dataState: *const fn (ptr: *anyopaque) DataState,
-    setDataReadTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
-    setDataWriteTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
+    setDataReadDeadline: *const fn (ptr: *anyopaque, deadline: ?glib.time.instant.Time) void,
+    setDataWriteDeadline: *const fn (ptr: *anyopaque, deadline: ?glib.time.instant.Time) void,
     setEventCallback: *const fn (ptr: *anyopaque, ctx: *const anyopaque, emit_fn: CallbackFn) void,
     clearEventCallback: *const fn (ptr: *anyopaque) void,
 };
@@ -311,12 +311,12 @@ pub fn dataState(self: root) DataState {
     return self.vtable.dataState(self.ptr);
 }
 
-pub fn setDataReadTimeout(self: root, ms: ?u32) void {
-    self.vtable.setDataReadTimeout(self.ptr, ms);
+pub fn setDataReadDeadline(self: root, deadline: ?glib.time.instant.Time) void {
+    self.vtable.setDataReadDeadline(self.ptr, deadline);
 }
 
-pub fn setDataWriteTimeout(self: root, ms: ?u32) void {
-    self.vtable.setDataWriteTimeout(self.ptr, ms);
+pub fn setDataWriteDeadline(self: root, deadline: ?glib.time.instant.Time) void {
+    self.vtable.setDataWriteDeadline(self.ptr, deadline);
 }
 
 pub fn setEventCallback(self: root, ctx: *const anyopaque, emit_fn: CallbackFn) void {
@@ -407,12 +407,12 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             return .closed;
         }
 
-        pub fn setDataReadTimeout(self: *@This(), ms: ?u32) void {
-            if (@hasDecl(Impl, "setDataReadTimeout")) self.impl.setDataReadTimeout(ms);
+        pub fn setDataReadDeadline(self: *@This(), deadline: ?glib.time.instant.Time) void {
+            if (@hasDecl(Impl, "setDataReadDeadline")) self.impl.setDataReadDeadline(deadline);
         }
 
-        pub fn setDataWriteTimeout(self: *@This(), ms: ?u32) void {
-            if (@hasDecl(Impl, "setDataWriteTimeout")) self.impl.setDataWriteTimeout(ms);
+        pub fn setDataWriteDeadline(self: *@This(), deadline: ?glib.time.instant.Time) void {
+            if (@hasDecl(Impl, "setDataWriteDeadline")) self.impl.setDataWriteDeadline(deadline);
         }
 
         pub fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: CallbackFn) void {
@@ -479,14 +479,14 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             return self.dataState();
         }
 
-        fn setDataReadTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+        fn setDataReadDeadlineFn(ptr: *anyopaque, deadline: ?glib.time.instant.Time) void {
             const self: *Ctx = @ptrCast(@alignCast(ptr));
-            self.setDataReadTimeout(ms);
+            self.setDataReadDeadline(deadline);
         }
 
-        fn setDataWriteTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+        fn setDataWriteDeadlineFn(ptr: *anyopaque, deadline: ?glib.time.instant.Time) void {
             const self: *Ctx = @ptrCast(@alignCast(ptr));
-            self.setDataWriteTimeout(ms);
+            self.setDataWriteDeadline(deadline);
         }
 
         fn setEventCallbackFn(ptr: *anyopaque, ctx: *const anyopaque, emit_fn: CallbackFn) void {
@@ -511,8 +511,8 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             .dataRead = dataReadFn,
             .dataWrite = dataWriteFn,
             .dataState = dataStateFn,
-            .setDataReadTimeout = setDataReadTimeoutFn,
-            .setDataWriteTimeout = setDataWriteTimeoutFn,
+            .setDataReadDeadline = setDataReadDeadlineFn,
+            .setDataWriteDeadline = setDataWriteDeadlineFn,
             .setEventCallback = setEventCallbackFn,
             .clearEventCallback = clearEventCallbackFn,
         };
@@ -611,8 +611,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 _ = root.dataRead;
                 _ = root.dataWrite;
                 _ = root.dataState;
-                _ = root.setDataReadTimeout;
-                _ = root.setDataWriteTimeout;
+                _ = root.setDataReadDeadline;
+                _ = root.setDataWriteDeadline;
                 _ = root.setEventCallback;
                 _ = root.clearEventCallback;
                 _ = root.Rat;
@@ -788,20 +788,26 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn forwardsPublicDataSurface(allocator: glib.std.mem.Allocator) !void {
+            const Observed = struct {
+                data_read_deadline: ?glib.time.instant.Time = null,
+                data_write_deadline: ?glib.time.instant.Time = null,
+            };
+
             const Impl = struct {
                 pub const Config = struct {
                     allocator: glib.std.mem.Allocator,
+                    observed: *Observed,
                 };
 
                 data_state_value: DataState = .closed,
-                data_read_timeout_ms: ?u32 = null,
-                data_write_timeout_ms: ?u32 = null,
+                observed: *Observed,
 
                 const Self = @This();
 
                 pub fn init(config: Config) !Self {
-                    _ = config;
-                    return .{};
+                    return .{
+                        .observed = config.observed,
+                    };
                 }
 
                 pub fn deinit(self: *Self) void {
@@ -854,12 +860,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return self.data_state_value;
                 }
 
-                pub fn setDataReadTimeout(self: *Self, ms: ?u32) void {
-                    self.data_read_timeout_ms = ms;
+                pub fn setDataReadDeadline(self: *Self, deadline: ?glib.time.instant.Time) void {
+                    self.observed.data_read_deadline = deadline;
                 }
 
-                pub fn setDataWriteTimeout(self: *Self, ms: ?u32) void {
-                    self.data_write_timeout_ms = ms;
+                pub fn setDataWriteDeadline(self: *Self, deadline: ?glib.time.instant.Time) void {
+                    self.observed.data_write_deadline = deadline;
                 }
 
                 pub fn setEventCallback(self: *Self, ctx: *const anyopaque, emit_fn: CallbackFn) void {
@@ -874,13 +880,18 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             const Built = make(grt, Impl);
-            var modem = try Built.init(.{ .allocator = allocator });
+            var observed = Observed{};
+            var modem = try Built.init(.{ .allocator = allocator, .observed = &observed });
             defer modem.deinit();
 
             try modem.dataOpen();
             try grt.std.testing.expectEqual(DataState.open, modem.dataState());
-            modem.setDataReadTimeout(100);
-            modem.setDataWriteTimeout(200);
+            const data_read_deadline: glib.time.instant.Time = 100;
+            const data_write_deadline: glib.time.instant.Time = 200;
+            modem.setDataReadDeadline(data_read_deadline);
+            modem.setDataWriteDeadline(data_write_deadline);
+            try grt.std.testing.expectEqual(@as(?glib.time.instant.Time, data_read_deadline), observed.data_read_deadline);
+            try grt.std.testing.expectEqual(@as(?glib.time.instant.Time, data_write_deadline), observed.data_write_deadline);
             var buf: [4]u8 = undefined;
             try grt.std.testing.expectEqual(@as(usize, 1), try modem.dataRead(&buf));
             try grt.std.testing.expectEqual(@as(usize, 3), try modem.dataWrite("abc"));

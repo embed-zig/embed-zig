@@ -1,28 +1,33 @@
-//! Channel impl backed by lib thread primitives only.
+//! Channel impl backed by std thread primitives only.
 
 const glib = @import("glib");
 
+const time = struct {
+    const duration = glib.time.duration;
+    const instant = glib.time.instant.make(@import("../time/instant.zig").impl);
+};
+
 pub const ChannelFactory: glib.sync.channel.FactoryType = struct {
-    fn factory(comptime lib: type) glib.sync.channel.ChannelType {
+    fn factory(comptime std: type) glib.sync.channel.ChannelType {
         return struct {
             fn factory(comptime T: type) type {
-                return Channel(lib, T);
+                return Channel(std, T);
             }
         }.factory;
     }
 }.factory;
 
-fn Channel(comptime lib: type, comptime T: type) type {
+fn Channel(comptime std: type, comptime T: type) type {
     return struct {
         inner: *Inner,
 
         const Self = @This();
 
         const Inner = struct {
-            allocator: lib.mem.Allocator,
-            mutex: lib.Thread.Mutex,
-            can_send: lib.Thread.Condition,
-            can_recv: lib.Thread.Condition,
+            allocator: std.mem.Allocator,
+            mutex: std.Thread.Mutex,
+            can_send: std.Thread.Condition,
+            can_recv: std.Thread.Condition,
             ring: []T,
             head: usize,
             tail: usize,
@@ -31,10 +36,10 @@ fn Channel(comptime lib: type, comptime T: type) type {
             closed: bool,
             slot: T,
             slot_full: bool,
-            send_mutex: lib.Thread.Mutex,
+            send_mutex: std.Thread.Mutex,
         };
 
-        pub fn init(allocator: lib.mem.Allocator, capacity: usize) !Self {
+        pub fn init(allocator: std.mem.Allocator, capacity: usize) !Self {
             const ring: []T = if (capacity > 0)
                 try allocator.alloc(T, capacity)
             else
@@ -83,10 +88,10 @@ fn Channel(comptime lib: type, comptime T: type) type {
             return self.sendBuffered(value, null);
         }
 
-        pub fn sendTimeout(self: *Self, value: T, timeout_ms: u32) !glib.sync.channel.SendResult() {
+        pub fn sendTimeout(self: *Self, value: T, timeout: time.duration.Duration) !glib.sync.channel.SendResult() {
             if (self.inner.capacity == 0)
-                return self.sendUnbuffered(value, timeout_ms);
-            return self.sendBuffered(value, timeout_ms);
+                return self.sendUnbuffered(value, timeout);
+            return self.sendBuffered(value, timeout);
         }
 
         pub fn recv(self: *Self) !glib.sync.channel.RecvResult(T) {
@@ -95,19 +100,19 @@ fn Channel(comptime lib: type, comptime T: type) type {
             return self.recvBuffered(null);
         }
 
-        pub fn recvTimeout(self: *Self, timeout_ms: u32) !glib.sync.channel.RecvResult(T) {
+        pub fn recvTimeout(self: *Self, timeout: time.duration.Duration) !glib.sync.channel.RecvResult(T) {
             if (self.inner.capacity == 0)
-                return self.recvUnbuffered(timeout_ms);
-            return self.recvBuffered(timeout_ms);
+                return self.recvUnbuffered(timeout);
+            return self.recvBuffered(timeout);
         }
 
-        fn sendBuffered(self: *Self, value: T, timeout_ms: ?u32) !glib.sync.channel.SendResult() {
+        fn sendBuffered(self: *Self, value: T, timeout: ?time.duration.Duration) !glib.sync.channel.SendResult() {
             self.inner.mutex.lock();
             defer self.inner.mutex.unlock();
 
-            const deadline_ns = deadlineNs(timeout_ms);
+            const deadline = makeDeadline(timeout);
             while (self.inner.len == self.inner.capacity and !self.inner.closed) {
-                try waitForSend(self, deadline_ns);
+                try waitForSend(self, deadline);
             }
 
             if (self.inner.closed) {
@@ -121,13 +126,13 @@ fn Channel(comptime lib: type, comptime T: type) type {
             return .{ .ok = true };
         }
 
-        fn recvBuffered(self: *Self, timeout_ms: ?u32) !glib.sync.channel.RecvResult(T) {
+        fn recvBuffered(self: *Self, timeout: ?time.duration.Duration) !glib.sync.channel.RecvResult(T) {
             self.inner.mutex.lock();
             defer self.inner.mutex.unlock();
 
-            const deadline_ns = deadlineNs(timeout_ms);
+            const deadline = makeDeadline(timeout);
             while (self.inner.len == 0 and !self.inner.closed) {
-                try waitForRecv(self, deadline_ns);
+                try waitForRecv(self, deadline);
             }
 
             if (self.inner.len == 0) {
@@ -141,15 +146,15 @@ fn Channel(comptime lib: type, comptime T: type) type {
             return .{ .value = value, .ok = true };
         }
 
-        fn sendUnbuffered(self: *Self, value: T, timeout_ms: ?u32) !glib.sync.channel.SendResult() {
+        fn sendUnbuffered(self: *Self, value: T, timeout: ?time.duration.Duration) !glib.sync.channel.SendResult() {
             self.inner.send_mutex.lock();
             defer self.inner.send_mutex.unlock();
             self.inner.mutex.lock();
             defer self.inner.mutex.unlock();
 
-            const deadline_ns = deadlineNs(timeout_ms);
+            const deadline = makeDeadline(timeout);
             while (self.inner.slot_full and !self.inner.closed) {
-                try waitForSend(self, deadline_ns);
+                try waitForSend(self, deadline);
             }
 
             if (self.inner.closed) {
@@ -161,7 +166,7 @@ fn Channel(comptime lib: type, comptime T: type) type {
             self.inner.can_recv.signal();
 
             while (self.inner.slot_full and !self.inner.closed) {
-                waitForSend(self, deadline_ns) catch |err| switch (err) {
+                waitForSend(self, deadline) catch |err| switch (err) {
                     error.Timeout => {
                         if (self.inner.slot_full) {
                             self.inner.slot_full = false;
@@ -175,13 +180,13 @@ fn Channel(comptime lib: type, comptime T: type) type {
             return .{ .ok = true };
         }
 
-        fn recvUnbuffered(self: *Self, timeout_ms: ?u32) !glib.sync.channel.RecvResult(T) {
+        fn recvUnbuffered(self: *Self, timeout: ?time.duration.Duration) !glib.sync.channel.RecvResult(T) {
             self.inner.mutex.lock();
             defer self.inner.mutex.unlock();
 
-            const deadline_ns = deadlineNs(timeout_ms);
+            const deadline = makeDeadline(timeout);
             while (!self.inner.slot_full and !self.inner.closed) {
-                try waitForRecv(self, deadline_ns);
+                try waitForRecv(self, deadline);
             }
 
             if (!self.inner.slot_full) {
@@ -194,31 +199,31 @@ fn Channel(comptime lib: type, comptime T: type) type {
             return .{ .value = value, .ok = true };
         }
 
-        fn deadlineNs(timeout_ms: ?u32) ?i128 {
-            const ms = timeout_ms orelse return null;
-            return lib.time.nanoTimestamp() + @as(i128, ms) * @as(i128, lib.time.ns_per_ms);
+        fn makeDeadline(timeout: ?time.duration.Duration) ?time.instant.Time {
+            const duration = timeout orelse return null;
+            return time.instant.add(time.instant.now(), duration);
         }
 
-        fn waitForSend(self: *Self, deadline_ns: ?i128) error{Timeout}!void {
-            const deadline = deadline_ns orelse {
+        fn waitForSend(self: *Self, deadline: ?time.instant.Time) error{Timeout}!void {
+            const value = deadline orelse {
                 self.inner.can_send.wait(&self.inner.mutex);
                 return;
             };
-            const remaining_ns = deadline - lib.time.nanoTimestamp();
-            if (remaining_ns <= 0) return error.Timeout;
-            self.inner.can_send.timedWait(&self.inner.mutex, @intCast(remaining_ns)) catch |err| switch (err) {
+            const remaining = time.instant.sub(value, time.instant.now());
+            if (remaining <= 0) return error.Timeout;
+            self.inner.can_send.timedWait(&self.inner.mutex, @intCast(remaining)) catch |err| switch (err) {
                 error.Timeout => return error.Timeout,
             };
         }
 
-        fn waitForRecv(self: *Self, deadline_ns: ?i128) error{Timeout}!void {
-            const deadline = deadline_ns orelse {
+        fn waitForRecv(self: *Self, deadline: ?time.instant.Time) error{Timeout}!void {
+            const value = deadline orelse {
                 self.inner.can_recv.wait(&self.inner.mutex);
                 return;
             };
-            const remaining_ns = deadline - lib.time.nanoTimestamp();
-            if (remaining_ns <= 0) return error.Timeout;
-            self.inner.can_recv.timedWait(&self.inner.mutex, @intCast(remaining_ns)) catch |err| switch (err) {
+            const remaining = time.instant.sub(value, time.instant.now());
+            if (remaining <= 0) return error.Timeout;
+            self.inner.can_recv.timedWait(&self.inner.mutex, @intCast(remaining)) catch |err| switch (err) {
                 error.Timeout => return error.Timeout,
             };
         }

@@ -92,11 +92,11 @@ fn TestCase(comptime grt: type, comptime BuiltApp: type) type {
 
         fn driveSequence(app: *BuiltApp) !void {
             // Start face-up and quiet.
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 1.0 }, 80);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = 1.0 }, 80 * glib.time.duration.MilliSecond);
             try ensureCallbackCount(0, .callback_before_turn);
 
             // Flip into a face-down orientation.
-            try pushGyro(app, .{ .x = 0.0, .y = 130.0, .z = 0.0 }, 20);
+            try pushGyro(app, .{ .x = 0.0, .y = 130.0, .z = 0.0 }, 20 * glib.time.duration.MilliSecond);
             try app.imu_accel(.sensor, .{ .x = 0.0, .y = 0.0, .z = -1.0 });
             try waitForCallbackCount(1);
 
@@ -105,10 +105,10 @@ fn TestCase(comptime grt: type, comptime BuiltApp: type) type {
             try waitForCallbackCount(2);
 
             // Then the user shakes the already flipped device.
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = -2.80 }, 10);
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = -0.20 }, 10);
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = -2.60 }, 50);
-            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = -1.00 }, 40);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = -2.80 }, 10 * glib.time.duration.MilliSecond);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = -0.20 }, 10 * glib.time.duration.MilliSecond);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = -2.60 }, 50 * glib.time.duration.MilliSecond);
+            try pushAccel(app, .{ .x = 0.0, .y = 0.0, .z = -1.00 }, 40 * glib.time.duration.MilliSecond);
             try app.imu_accel(.sensor, .{ .x = 0.0, .y = 0.0, .z = -1.00 });
             try waitForCallbackCount(3);
 
@@ -117,14 +117,14 @@ fn TestCase(comptime grt: type, comptime BuiltApp: type) type {
             try waitForCallbackCount(4);
         }
 
-        fn pushAccel(app: *BuiltApp, accel: BuiltApp.Imu.Vec3, sleep_ms: u64) !void {
+        fn pushAccel(app: *BuiltApp, accel: BuiltApp.Imu.Vec3, sleep_duration: glib.time.duration.Duration) !void {
             try app.imu_accel(.sensor, accel);
-            grt.std.Thread.sleep(sleep_ms * grt.std.time.ns_per_ms);
+            grt.std.Thread.sleep(@intCast(sleep_duration));
         }
 
-        fn pushGyro(app: *BuiltApp, gyro: BuiltApp.Imu.Vec3, sleep_ms: u64) !void {
+        fn pushGyro(app: *BuiltApp, gyro: BuiltApp.Imu.Vec3, sleep_duration: glib.time.duration.Duration) !void {
             try app.imu_gyro(.sensor, gyro);
-            grt.std.Thread.sleep(sleep_ms * grt.std.time.ns_per_ms);
+            grt.std.Thread.sleep(@intCast(sleep_duration));
         }
 
         fn ensureCallbackCount(expected: usize, failure: Failure) !void {
@@ -176,11 +176,12 @@ fn TestCase(comptime grt: type, comptime BuiltApp: type) type {
         }
 
         fn waitForCallbackCount(expected: usize) !void {
+            const poll_interval = 10 * glib.time.duration.MilliSecond;
             var attempts: usize = 0;
             while (attempts < 300) : (attempts += 1) {
                 if (currentFailure() != null) return error.CallbackFailed;
                 if (currentCallbackCalls() >= expected) return;
-                grt.std.Thread.sleep(10 * grt.std.time.ns_per_ms);
+                grt.std.Thread.sleep(@intCast(poll_interval));
             }
             fail(.missing_callback_count);
             return error.TimedOut;

@@ -3,29 +3,29 @@
 const testing_api = @import("testing");
 const test_utils = @import("http_transport/test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Utils = test_utils.make2(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(std, net);
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, run_allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, run_allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Http = Utils.Http;
-                    const Mutex = lib.Thread.Mutex;
-                    const Condition = lib.Thread.Condition;
-                    const test_spawn_config: lib.Thread.SpawnConfig = .{};
+                    const Mutex = std.Thread.Mutex;
+                    const Condition = std.Thread.Condition;
+                    const test_spawn_config: std.Thread.SpawnConfig = .{};
                     const testing = struct {
-                        pub var allocator: lib.mem.Allocator = undefined;
-                        pub const expect = lib.testing.expect;
-                        pub const expectEqual = lib.testing.expectEqual;
-                        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-                        pub const expectError = lib.testing.expectError;
+                        pub var allocator: std.mem.Allocator = undefined;
+                        pub const expect = std.testing.expect;
+                        pub const expectEqual = std.testing.expectEqual;
+                        pub const expectEqualStrings = std.testing.expectEqualStrings;
+                        pub const expectError = std.testing.expectError;
                     };
                     testing.allocator = a;
 
@@ -34,7 +34,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         .status_code = Http.status.ok,
                         .body = "ok",
                     }, struct {
-                        fn run(_: lib.mem.Allocator, port: u16) !void {
+                        fn run(_: std.mem.Allocator, port: u16) !void {
                             var transport = try Http.Transport.init(testing.allocator, .{});
                             defer transport.deinit();
                             var client = try Http.Client.init(testing.allocator, .{
@@ -42,7 +42,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             });
                             defer client.deinit();
 
-                            const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-ok", .{port});
+                            const url = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-ok", .{port});
                             defer testing.allocator.free(url);
 
                             var resp = try client.get(url);
@@ -61,7 +61,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         .status_code = Http.status.ok,
                         .body = "",
                     }, struct {
-                        fn run(_: lib.mem.Allocator, port: u16) !void {
+                        fn run(_: std.mem.Allocator, port: u16) !void {
                             var transport = try Http.Transport.init(testing.allocator, .{});
                             defer transport.deinit();
                             var client = try Http.Client.init(testing.allocator, .{
@@ -69,7 +69,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             });
                             defer client.deinit();
 
-                            const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-head", .{port});
+                            const url = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-head", .{port});
                             defer testing.allocator.free(url);
 
                             var resp = try client.head(url);
@@ -86,7 +86,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         .location = "/client-target",
                         .final_body = "redirected",
                     }, struct {
-                        fn run(_: lib.mem.Allocator, port: u16) !void {
+                        fn run(_: std.mem.Allocator, port: u16) !void {
                             var transport = try Http.Transport.init(testing.allocator, .{});
                             defer transport.deinit();
                             var client = try Http.Client.init(testing.allocator, .{
@@ -94,7 +94,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             });
                             defer client.deinit();
 
-                            const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-start", .{port});
+                            const url = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-start", .{port});
                             defer testing.allocator.free(url);
 
                             var resp = try client.get(url);
@@ -116,7 +116,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         .first_body = "one",
                         .second_body = "two",
                     }, struct {
-                        fn run(_: lib.mem.Allocator, port: u16) !void {
+                        fn run(_: std.mem.Allocator, port: u16) !void {
                             var transport = try Http.Transport.init(testing.allocator, .{});
                             defer transport.deinit();
                             var client = try Http.Client.init(testing.allocator, .{
@@ -124,7 +124,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             });
                             defer client.deinit();
 
-                            const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-idle", .{port});
+                            const url = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-idle", .{port});
                             defer testing.allocator.free(url);
 
                             var resp1 = try client.get(url);
@@ -150,7 +150,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         .status_code = Http.status.ok,
                         .body = "wait",
                     }, struct {
-                        fn run(_: lib.mem.Allocator, port: u16) !void {
+                        fn run(_: std.mem.Allocator, port: u16) !void {
                             const State = struct {
                                 mutex: Mutex = .{},
                                 cond: Condition = .{},
@@ -179,19 +179,19 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             var client = try Http.Client.init(testing.allocator, .{
                                 .round_tripper = transport.roundTripper(),
                             });
-                            const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-deinit", .{port});
+                            const url = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/client-deinit", .{port});
                             defer testing.allocator.free(url);
 
                             var resp = try client.get(url);
 
                             var state = State{};
-                            const thread = try lib.Thread.spawn(test_spawn_config, DeinitTask.run, .{ &client, &state });
+                            const thread = try std.Thread.spawn(test_spawn_config, DeinitTask.run, .{ &client, &state });
 
                             state.mutex.lock();
                             while (!state.started) state.cond.wait(&state.mutex);
                             state.mutex.unlock();
 
-                            lib.Thread.sleep(20 * lib.time.ns_per_ms);
+                            std.Thread.sleep(@intCast(20 * net.time.duration.MilliSecond));
 
                             state.mutex.lock();
                             const finished_early = state.finished;
@@ -215,7 +215,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

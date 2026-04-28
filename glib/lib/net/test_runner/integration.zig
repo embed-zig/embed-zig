@@ -9,33 +9,35 @@ const http_transport = @import("integration/http_transport.zig");
 const https_transport = @import("integration/https_transport.zig");
 const cmux = @import("integration/cmux.zig");
 const resolver_local = @import("integration/resolver_local.zig");
+const ntp_public = @import("integration/public/ntp.zig");
 const runtime_runner = @import("integration/runtime.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("tcp", tcp.make(lib, net));
-            t.run("udp", udp.make(lib, net));
-            t.run("tls", tls.make(lib, net));
-            t.run("resolver_local", resolver_local.make(lib, net));
-            t.run("cmux_http_tcp", cmux.make(lib, net));
-            t.run("http_client", http_client.make(lib, net));
-            t.run("http_server", http_server.make(lib, net));
-            t.run("http_transport", http_transport.make2(lib, net));
-            t.run("https_transport", https_transport.make(lib, net));
-            t.run("runtime", runtime_runner.make(lib, net));
+            t.run("tcp", tcp.make(std, net));
+            t.run("udp", udp.make(std, net));
+            t.run("tls", tls.make(std, net));
+            t.run("resolver_local", resolver_local.make(std, net));
+            t.run("cmux_http_tcp", cmux.make(std, net));
+            t.run("http_client", http_client.make(std, net));
+            t.run("http_server", http_server.make(std, net));
+            t.run("http_transport", http_transport.make2(std, net));
+            t.run("https_transport", https_transport.make(std, net));
+            t.run("ntp_public", ntp_public.make(std, net));
+            t.run("runtime", runtime_runner.make(std, net));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

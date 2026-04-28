@@ -1,26 +1,27 @@
 const testing_api = @import("testing");
+const Channel = @import("../Channel.zig");
 
 pub const channel = @import("integration/channel.zig");
 pub const racer = @import("integration/racer.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime time: type, comptime ChannelFactory: Channel.FactoryType) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             t.parallel();
-            t.run("channel", channel.make(lib, Channel));
-            t.run("racer", racer.make(lib));
+            t.run("channel", channel.make(std, time, ChannelFactory));
+            t.run("racer", racer.make(std, time));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

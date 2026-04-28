@@ -143,10 +143,10 @@ const vtable: mem.Allocator.VTable = .{
     .free = free,
 };
 
-pub fn TestRunner(comptime lib: type) TestRunnerApi {
+pub fn TestRunner(comptime std: type) TestRunnerApi {
     if (builtin.target.os.tag == .freestanding) {
         const Runner = struct {
-            pub fn init(self: *@This(), allocator_arg: lib.mem.Allocator) !void {
+            pub fn init(self: *@This(), allocator_arg: std.mem.Allocator) !void {
                 _ = self;
                 _ = allocator_arg;
             }
@@ -172,8 +172,6 @@ pub fn TestRunner(comptime lib: type) TestRunnerApi {
 
     const TestCase = struct {
         fn testEnforcesLimitAndTracksPeak() !void {
-            const std = @import("std");
-
             var allocator_state = Self.init(std.testing.allocator, 24);
             const alloc_inst = allocator_state.allocator();
 
@@ -193,8 +191,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerApi {
         }
 
         fn testTracksPeakConcurrentLiveBytes() !void {
-            const std = @import("std");
-
+            const host_std = @import("std");
             const Sync = struct {
                 mutex: std.Thread.Mutex = .{},
                 cond: std.Thread.Condition = .{},
@@ -217,7 +214,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerApi {
                 }
             };
 
-            var allocator_state = Self.init(std.heap.page_allocator, null);
+            var allocator_state = Self.init(host_std.heap.page_allocator, null);
             const alloc_inst = allocator_state.allocator();
             var sync: Sync = .{};
 
@@ -240,8 +237,6 @@ pub fn TestRunner(comptime lib: type) TestRunnerApi {
         }
 
         fn testResizeAndRemapRespectLimit() !void {
-            const std = @import("std");
-
             const FixedBufferAllocator = struct {
                 storage: [64]u8 = undefined,
                 allocated_len: usize = 0,
@@ -329,12 +324,12 @@ pub fn TestRunner(comptime lib: type) TestRunnerApi {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), gpa: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), gpa: std.mem.Allocator) !void {
             _ = self;
             _ = gpa;
         }
 
-        pub fn run(self: *@This(), t: *T, gpa: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *T, gpa: std.mem.Allocator) bool {
             _ = self;
             _ = gpa;
 
@@ -353,7 +348,7 @@ pub fn TestRunner(comptime lib: type) TestRunnerApi {
             return true;
         }
 
-        pub fn deinit(self: *@This(), gpa: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), gpa: std.mem.Allocator) void {
             _ = self;
             _ = gpa;
         }

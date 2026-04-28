@@ -24,7 +24,7 @@ pub const Thresholds = types.Thresholds;
 pub const ShakeState = struct {
     prev_mag: ?f32 = null,
     active: bool = false,
-    start_time_ms: u64 = 0,
+    start_time: glib.time.instant.Time = 0,
     peak_delta: f32 = 0,
     sample_count: u32 = 0,
 };
@@ -33,21 +33,21 @@ pub const TiltState = struct {
     initialized: bool = false,
     last_roll: f32 = 0,
     last_pitch: f32 = 0,
-    last_event_time_ms: u64 = 0,
+    last_event_time: glib.time.instant.Time = 0,
 };
 
 pub const FreeFallState = struct {
     active: bool = false,
     emitted: bool = false,
-    start_time_ms: u64 = 0,
+    start_time: glib.time.instant.Time = 0,
     min_magnitude: f32 = 0,
 };
 
 pub const FlipState = struct {
     face: ?Face = null,
     saw_turn: bool = false,
-    last_turn_time_ms: u64 = 0,
-    last_event_time_ms: u64 = 0,
+    last_turn_time: glib.time.instant.Time = 0,
+    last_event_time: glib.time.instant.Time = 0,
 };
 
 thresholds: Thresholds,
@@ -138,7 +138,7 @@ fn detectShake(self: *Detector, sample: Sample) void {
     if (delta > self.thresholds.shake_threshold_g * 0.5) {
         if (!self.shake_state.active) {
             self.shake_state.active = true;
-            self.shake_state.start_time_ms = sample.timestamp_ms;
+            self.shake_state.start_time = sample.timestamp;
             self.shake_state.peak_delta = delta;
             self.shake_state.sample_count = 1;
         } else {
@@ -149,18 +149,18 @@ fn detectShake(self: *Detector, sample: Sample) void {
 
     if (!self.shake_state.active) return;
 
-    const duration_ms = sample.timestamp_ms -| self.shake_state.start_time_ms;
-    if (duration_ms > self.thresholds.shake_max_duration_ms or
+    const duration = glib.time.instant.sub(sample.timestamp, self.shake_state.start_time);
+    if (duration > self.thresholds.shake_max_duration or
         (delta < self.thresholds.shake_threshold_g * 0.2 and
-            duration_ms > self.thresholds.shake_min_duration_ms))
+            duration > self.thresholds.shake_min_duration))
     {
-        if (duration_ms >= self.thresholds.shake_min_duration_ms and
+        if (duration >= self.thresholds.shake_min_duration and
             self.shake_state.peak_delta >= self.thresholds.shake_threshold_g)
         {
             self.queueAction(.{
                 .shake = .{
                     .magnitude = self.shake_state.peak_delta,
-                    .duration_ms = saturatingU32(duration_ms),
+                    .duration = duration,
                 },
             });
         }
@@ -187,7 +187,7 @@ fn detectTilt(self: *Detector, sample: Sample) void {
 
     if ((roll_delta >= self.thresholds.tilt_threshold_deg or
         pitch_delta >= self.thresholds.tilt_threshold_deg) and
-        sample.timestamp_ms -| self.tilt_state.last_event_time_ms >= self.thresholds.tilt_debounce_ms)
+        glib.time.instant.sub(sample.timestamp, self.tilt_state.last_event_time) >= self.thresholds.tilt_debounce)
     {
         self.queueAction(.{
             .tilt = .{
@@ -197,7 +197,7 @@ fn detectTilt(self: *Detector, sample: Sample) void {
         });
         self.tilt_state.last_roll = roll;
         self.tilt_state.last_pitch = pitch;
-        self.tilt_state.last_event_time_ms = sample.timestamp_ms;
+        self.tilt_state.last_event_time = sample.timestamp;
     }
 }
 
@@ -208,19 +208,19 @@ fn detectFreeFall(self: *Detector, sample: Sample) void {
         if (!self.free_fall_state.active) {
             self.free_fall_state.active = true;
             self.free_fall_state.emitted = false;
-            self.free_fall_state.start_time_ms = sample.timestamp_ms;
+            self.free_fall_state.start_time = sample.timestamp;
             self.free_fall_state.min_magnitude = mag;
             return;
         }
 
         self.free_fall_state.min_magnitude = minf(self.free_fall_state.min_magnitude, mag);
-        const duration_ms = sample.timestamp_ms -| self.free_fall_state.start_time_ms;
+        const duration = glib.time.instant.sub(sample.timestamp, self.free_fall_state.start_time);
         if (!self.free_fall_state.emitted and
-            duration_ms >= self.thresholds.free_fall_min_duration_ms)
+            duration >= self.thresholds.free_fall_min_duration)
         {
             self.queueAction(.{
                 .free_fall = .{
-                    .duration_ms = saturatingU32(duration_ms),
+                    .duration = duration,
                     .min_magnitude = self.free_fall_state.min_magnitude,
                 },
             });
@@ -231,7 +231,7 @@ fn detectFreeFall(self: *Detector, sample: Sample) void {
 
     self.free_fall_state.active = false;
     self.free_fall_state.emitted = false;
-    self.free_fall_state.start_time_ms = 0;
+    self.free_fall_state.start_time = 0;
     self.free_fall_state.min_magnitude = 0;
 }
 
@@ -241,9 +241,9 @@ fn detectFlip(self: *Detector, sample: Sample) void {
     if (self.flip_state.face) |prev_face| {
         if (prev_face != face and
             self.flip_state.saw_turn and
-            sample.timestamp_ms -| self.flip_state.last_turn_time_ms <= self.thresholds.flip_recent_turn_ms and
-            (self.flip_state.last_event_time_ms == 0 or
-                sample.timestamp_ms -| self.flip_state.last_event_time_ms >= self.thresholds.flip_debounce_ms))
+            glib.time.instant.sub(sample.timestamp, self.flip_state.last_turn_time) <= self.thresholds.flip_recent_turn and
+            (self.flip_state.last_event_time == 0 or
+                glib.time.instant.sub(sample.timestamp, self.flip_state.last_event_time) >= self.thresholds.flip_debounce))
         {
             self.queueAction(.{
                 .flip = .{
@@ -251,7 +251,7 @@ fn detectFlip(self: *Detector, sample: Sample) void {
                     .to = face,
                 },
             });
-            self.flip_state.last_event_time_ms = sample.timestamp_ms;
+            self.flip_state.last_event_time = sample.timestamp;
         }
     }
 
@@ -262,7 +262,7 @@ fn detectFlipGyro(self: *Detector, sample: GyroSample) void {
     if (sample.gyro.magnitude() < self.thresholds.flip_gyro_threshold_dps) return;
 
     self.flip_state.saw_turn = true;
-    self.flip_state.last_turn_time_ms = sample.timestamp_ms;
+    self.flip_state.last_turn_time = sample.timestamp;
 }
 
 fn syncTiltBaseline(self: *Detector, sample: Sample) void {
@@ -272,7 +272,7 @@ fn syncTiltBaseline(self: *Detector, sample: Sample) void {
     self.tilt_state.initialized = true;
     self.tilt_state.last_roll = roll;
     self.tilt_state.last_pitch = pitch;
-    self.tilt_state.last_event_time_ms = sample.timestamp_ms;
+    self.tilt_state.last_event_time = sample.timestamp;
 }
 
 fn absf(x: f32) f32 {
@@ -285,12 +285,6 @@ fn maxf(a: f32, b: f32) f32 {
 
 fn minf(a: f32, b: f32) f32 {
     return if (a < b) a else b;
-}
-
-fn saturatingU32(value: u64) u32 {
-    const max_u32: u64 = 4294967295;
-    if (value >= max_u32) return max_u32;
-    return @intCast(value);
 }
 
 fn atanApproxUnit(x: f32) f32 {
@@ -324,53 +318,57 @@ fn dominantFace(accel: AccelData) ?Face {
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
+        fn timestampMs(comptime value: comptime_int) glib.time.instant.Time {
+            return @intCast(value * glib.time.duration.MilliSecond);
+        }
+
         fn testFirstSampleOnlySeedsBaseline() !void {
             var detector = Detector.initDefault();
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 0,
+                .timestamp = timestampMs(0),
             }) == null);
             try grt.std.testing.expect(!detector.hasPendingActions());
         }
         fn testShakeEmitsAfterActivityReturnsQuiet() !void {
             var detector = Detector.init(.{
                 .shake_threshold_g = 1.0,
-                .shake_min_duration_ms = 50,
-                .shake_max_duration_ms = 500,
+                .shake_min_duration = 50 * glib.time.duration.MilliSecond,
+                .shake_max_duration = 500 * glib.time.duration.MilliSecond,
                 .tilt_threshold_deg = 9999,
             });
 
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 0,
+                .timestamp = timestampMs(0),
             }) == null);
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 2.0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 10,
+                .timestamp = timestampMs(10),
             }) == null);
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = -2.0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 20,
+                .timestamp = timestampMs(20),
             }) == null);
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 2.0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 30,
+                .timestamp = timestampMs(30),
             }) == null);
 
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 80,
+                .timestamp = timestampMs(80),
             }) == null);
 
             const action = detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 140,
+                .timestamp = timestampMs(140),
             }).?;
 
             switch (action) {
                 .shake => |shake| {
                     try grt.std.testing.expect(shake.magnitude >= 1.0);
-                    try grt.std.testing.expect(shake.duration_ms >= 50);
+                    try grt.std.testing.expect(shake.duration >= 50 * glib.time.duration.MilliSecond);
                 },
                 else => try grt.std.testing.expect(false),
             }
@@ -379,17 +377,17 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = Detector.init(.{
                 .shake_threshold_g = 9999,
                 .tilt_threshold_deg = 5.0,
-                .tilt_debounce_ms = 0,
+                .tilt_debounce = 0 * glib.time.duration.MilliSecond,
             });
 
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 0,
+                .timestamp = timestampMs(0),
             }) == null);
 
             const action = detector.update(.{
                 .accel = .{ .x = 0.5, .y = 0, .z = 0.866 },
-                .timestamp_ms = 100,
+                .timestamp = timestampMs(100),
             }).?;
 
             switch (action) {
@@ -403,54 +401,54 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = Detector.init(.{
                 .shake_threshold_g = 9999,
                 .tilt_threshold_deg = 5.0,
-                .tilt_debounce_ms = 200,
+                .tilt_debounce = 200 * glib.time.duration.MilliSecond,
             });
 
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 0,
+                .timestamp = timestampMs(0),
             }) == null);
 
             _ = detector.update(.{
                 .accel = .{ .x = 0.5, .y = 0, .z = 0.866 },
-                .timestamp_ms = 100,
+                .timestamp = timestampMs(100),
             });
             try grt.std.testing.expect(!detector.hasPendingActions());
 
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0.7, .y = 0, .z = 0.714 },
-                .timestamp_ms = 150,
+                .timestamp = timestampMs(150),
             }) == null);
             try grt.std.testing.expect(!detector.hasPendingActions());
         }
         fn testSpeakerLikeSmallVibrationStaysQuiet() !void {
             var detector = Detector.init(.{
                 .shake_threshold_g = 1.0,
-                .shake_min_duration_ms = 50,
-                .shake_max_duration_ms = 500,
+                .shake_min_duration = 50 * glib.time.duration.MilliSecond,
+                .shake_max_duration = 500 * glib.time.duration.MilliSecond,
                 .tilt_threshold_deg = 9999,
             });
 
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 0,
+                .timestamp = timestampMs(0),
             }) == null);
 
-            inline for ([_]struct { ts: u64, x: f32 }{
-                .{ .ts = 10, .x = 0.30 },
-                .{ .ts = 20, .x = 0.00 },
-                .{ .ts = 30, .x = 0.30 },
-                .{ .ts = 40, .x = 0.00 },
-                .{ .ts = 50, .x = 0.30 },
-                .{ .ts = 60, .x = 0.00 },
-                .{ .ts = 70, .x = 0.30 },
-                .{ .ts = 80, .x = 0.00 },
-                .{ .ts = 120, .x = 0.00 },
-                .{ .ts = 180, .x = 0.00 },
+            inline for ([_]struct { timestamp: glib.time.instant.Time, x: f32 }{
+                .{ .timestamp = timestampMs(10), .x = 0.30 },
+                .{ .timestamp = timestampMs(20), .x = 0.00 },
+                .{ .timestamp = timestampMs(30), .x = 0.30 },
+                .{ .timestamp = timestampMs(40), .x = 0.00 },
+                .{ .timestamp = timestampMs(50), .x = 0.30 },
+                .{ .timestamp = timestampMs(60), .x = 0.00 },
+                .{ .timestamp = timestampMs(70), .x = 0.30 },
+                .{ .timestamp = timestampMs(80), .x = 0.00 },
+                .{ .timestamp = timestampMs(120), .x = 0.00 },
+                .{ .timestamp = timestampMs(180), .x = 0.00 },
             }) |sample| {
                 try grt.std.testing.expect(detector.update(.{
                     .accel = .{ .x = sample.x, .y = 0, .z = 1.0 },
-                    .timestamp_ms = sample.ts,
+                    .timestamp = sample.timestamp,
                 }) == null);
                 try grt.std.testing.expect(!detector.hasPendingActions());
             }
@@ -458,17 +456,17 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         fn testSlowReorientationDoesNotLookLikeShake() !void {
             var detector = Detector.init(.{
                 .shake_threshold_g = 1.0,
-                .shake_min_duration_ms = 50,
-                .shake_max_duration_ms = 500,
+                .shake_min_duration = 50 * glib.time.duration.MilliSecond,
+                .shake_max_duration = 500 * glib.time.duration.MilliSecond,
                 .tilt_threshold_deg = 9999,
             });
 
             inline for ([_]Sample{
-                .{ .accel = .{ .x = 0.0000, .y = 0, .z = 1.0000 }, .timestamp_ms = 0 },
-                .{ .accel = .{ .x = 0.1736, .y = 0, .z = 0.9848 }, .timestamp_ms = 100 },
-                .{ .accel = .{ .x = 0.3420, .y = 0, .z = 0.9397 }, .timestamp_ms = 200 },
-                .{ .accel = .{ .x = 0.5000, .y = 0, .z = 0.8660 }, .timestamp_ms = 300 },
-                .{ .accel = .{ .x = 0.6428, .y = 0, .z = 0.7660 }, .timestamp_ms = 400 },
+                .{ .accel = .{ .x = 0.0000, .y = 0, .z = 1.0000 }, .timestamp = timestampMs(0) },
+                .{ .accel = .{ .x = 0.1736, .y = 0, .z = 0.9848 }, .timestamp = timestampMs(100) },
+                .{ .accel = .{ .x = 0.3420, .y = 0, .z = 0.9397 }, .timestamp = timestampMs(200) },
+                .{ .accel = .{ .x = 0.5000, .y = 0, .z = 0.8660 }, .timestamp = timestampMs(300) },
+                .{ .accel = .{ .x = 0.6428, .y = 0, .z = 0.7660 }, .timestamp = timestampMs(400) },
             }) |sample| {
                 try grt.std.testing.expect(detector.update(sample) == null);
                 try grt.std.testing.expect(!detector.hasPendingActions());
@@ -477,33 +475,33 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         fn testHumanShakeStillWinsAfterSmallVibrationNoise() !void {
             var detector = Detector.init(.{
                 .shake_threshold_g = 1.0,
-                .shake_min_duration_ms = 50,
-                .shake_max_duration_ms = 500,
+                .shake_min_duration = 50 * glib.time.duration.MilliSecond,
+                .shake_max_duration = 500 * glib.time.duration.MilliSecond,
                 .tilt_threshold_deg = 9999,
             });
 
             inline for ([_]Sample{
-                .{ .accel = .{ .x = 0.0, .y = 0, .z = 1.0 }, .timestamp_ms = 0 },
-                .{ .accel = .{ .x = 0.3, .y = 0, .z = 1.0 }, .timestamp_ms = 10 },
-                .{ .accel = .{ .x = 0.0, .y = 0, .z = 1.0 }, .timestamp_ms = 20 },
-                .{ .accel = .{ .x = 0.3, .y = 0, .z = 1.0 }, .timestamp_ms = 30 },
-                .{ .accel = .{ .x = 0.0, .y = 0, .z = 1.0 }, .timestamp_ms = 40 },
-                .{ .accel = .{ .x = 2.0, .y = 0, .z = 1.0 }, .timestamp_ms = 60 },
-                .{ .accel = .{ .x = 2.0, .y = 0, .z = 1.0 }, .timestamp_ms = 90 },
-                .{ .accel = .{ .x = 0.0, .y = 0, .z = 1.0 }, .timestamp_ms = 140 },
+                .{ .accel = .{ .x = 0.0, .y = 0, .z = 1.0 }, .timestamp = timestampMs(0) },
+                .{ .accel = .{ .x = 0.3, .y = 0, .z = 1.0 }, .timestamp = timestampMs(10) },
+                .{ .accel = .{ .x = 0.0, .y = 0, .z = 1.0 }, .timestamp = timestampMs(20) },
+                .{ .accel = .{ .x = 0.3, .y = 0, .z = 1.0 }, .timestamp = timestampMs(30) },
+                .{ .accel = .{ .x = 0.0, .y = 0, .z = 1.0 }, .timestamp = timestampMs(40) },
+                .{ .accel = .{ .x = 2.0, .y = 0, .z = 1.0 }, .timestamp = timestampMs(60) },
+                .{ .accel = .{ .x = 2.0, .y = 0, .z = 1.0 }, .timestamp = timestampMs(90) },
+                .{ .accel = .{ .x = 0.0, .y = 0, .z = 1.0 }, .timestamp = timestampMs(140) },
             }) |sample| {
                 try grt.std.testing.expect(detector.update(sample) == null);
             }
 
             const action = detector.update(.{
                 .accel = .{ .x = 0.0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 220,
+                .timestamp = timestampMs(220),
             }).?;
 
             switch (action) {
                 .shake => |shake| {
                     try grt.std.testing.expect(shake.magnitude >= 1.0);
-                    try grt.std.testing.expect(shake.duration_ms >= 80);
+                    try grt.std.testing.expect(shake.duration >= 80 * glib.time.duration.MilliSecond);
                 },
                 else => try grt.std.testing.expect(false),
             }
@@ -513,23 +511,23 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = Detector.init(.{
                 .shake_threshold_g = 9999,
                 .tilt_threshold_deg = 5.0,
-                .tilt_debounce_ms = 200,
+                .tilt_debounce = 200 * glib.time.duration.MilliSecond,
             });
 
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 0,
+                .timestamp = timestampMs(0),
             }) == null);
 
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0.5, .y = 0, .z = 0.866 },
-                .timestamp_ms = 100,
+                .timestamp = timestampMs(100),
             }) == null);
             try grt.std.testing.expect(!detector.hasPendingActions());
 
             const action = detector.update(.{
                 .accel = .{ .x = 0.7, .y = 0, .z = 0.714 },
-                .timestamp_ms = 250,
+                .timestamp = timestampMs(250),
             }).?;
 
             switch (action) {
@@ -544,31 +542,31 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 .shake_threshold_g = 9999,
                 .tilt_threshold_deg = 9999,
                 .flip_gyro_threshold_dps = 90.0,
-                .flip_recent_turn_ms = 400,
-                .flip_debounce_ms = 0,
+                .flip_recent_turn = 400 * glib.time.duration.MilliSecond,
+                .flip_debounce = 0 * glib.time.duration.MilliSecond,
             });
 
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 0,
+                .timestamp = timestampMs(0),
             }) == null);
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = -1.0 },
-                .timestamp_ms = 100,
+                .timestamp = timestampMs(100),
             }) == null);
 
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 200,
+                .timestamp = timestampMs(200),
             }) == null);
             try grt.std.testing.expect(detector.updateGyro(.{
                 .gyro = .{ .x = 0, .y = 0, .z = 140.0 },
-                .timestamp_ms = 220,
+                .timestamp = timestampMs(220),
             }) == null);
 
             const action = detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = -1.0 },
-                .timestamp_ms = 260,
+                .timestamp = timestampMs(260),
             }).?;
 
             switch (action) {
@@ -584,30 +582,30 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 .shake_threshold_g = 9999,
                 .tilt_threshold_deg = 9999,
                 .free_fall_threshold_g = 0.25,
-                .free_fall_min_duration_ms = 120,
+                .free_fall_min_duration = 120 * glib.time.duration.MilliSecond,
             });
 
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0, .y = 0, .z = 1.0 },
-                .timestamp_ms = 0,
+                .timestamp = timestampMs(0),
             }) == null);
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0.05, .y = 0.02, .z = 0.08 },
-                .timestamp_ms = 40,
+                .timestamp = timestampMs(40),
             }) == null);
             try grt.std.testing.expect(detector.update(.{
                 .accel = .{ .x = 0.02, .y = 0.01, .z = 0.06 },
-                .timestamp_ms = 100,
+                .timestamp = timestampMs(100),
             }) == null);
 
             const action = detector.update(.{
                 .accel = .{ .x = 0.01, .y = 0.00, .z = 0.04 },
-                .timestamp_ms = 170,
+                .timestamp = timestampMs(170),
             }).?;
 
             switch (action) {
                 .free_fall => |free_fall| {
-                    try grt.std.testing.expect(free_fall.duration_ms >= 120);
+                    try grt.std.testing.expect(free_fall.duration >= 120 * glib.time.duration.MilliSecond);
                     try grt.std.testing.expect(free_fall.min_magnitude <= 0.1);
                 },
                 else => try grt.std.testing.expect(false),
@@ -616,11 +614,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         fn testQueueOverflowDropsOldestAction() !void {
             var detector = Detector.initDefault();
 
-            detector.queueAction(.{ .shake = .{ .magnitude = 1.0, .duration_ms = 1 } });
-            detector.queueAction(.{ .shake = .{ .magnitude = 2.0, .duration_ms = 2 } });
-            detector.queueAction(.{ .shake = .{ .magnitude = 3.0, .duration_ms = 3 } });
-            detector.queueAction(.{ .shake = .{ .magnitude = 4.0, .duration_ms = 4 } });
-            detector.queueAction(.{ .shake = .{ .magnitude = 5.0, .duration_ms = 5 } });
+            detector.queueAction(.{ .shake = .{ .magnitude = 1.0, .duration = 1 * glib.time.duration.MilliSecond } });
+            detector.queueAction(.{ .shake = .{ .magnitude = 2.0, .duration = 2 * glib.time.duration.MilliSecond } });
+            detector.queueAction(.{ .shake = .{ .magnitude = 3.0, .duration = 3 * glib.time.duration.MilliSecond } });
+            detector.queueAction(.{ .shake = .{ .magnitude = 4.0, .duration = 4 * glib.time.duration.MilliSecond } });
+            detector.queueAction(.{ .shake = .{ .magnitude = 5.0, .duration = 5 * glib.time.duration.MilliSecond } });
 
             try grt.std.testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
 
@@ -629,35 +627,35 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const third = detector.nextAction().?;
             const fourth = detector.nextAction().?;
 
-            try expectShakeDuration(first, 2);
-            try expectShakeDuration(second, 3);
-            try expectShakeDuration(third, 4);
-            try expectShakeDuration(fourth, 5);
+            try expectShakeDuration(first, 2 * glib.time.duration.MilliSecond);
+            try expectShakeDuration(second, 3 * glib.time.duration.MilliSecond);
+            try expectShakeDuration(third, 4 * glib.time.duration.MilliSecond);
+            try expectShakeDuration(fourth, 5 * glib.time.duration.MilliSecond);
             try grt.std.testing.expect(detector.nextAction() == null);
         }
         fn testQueueOverflowAfterWrapPreservesFifoOrder() !void {
             var detector = Detector.initDefault();
 
-            detector.queueAction(.{ .shake = .{ .magnitude = 1.0, .duration_ms = 1 } });
-            detector.queueAction(.{ .shake = .{ .magnitude = 2.0, .duration_ms = 2 } });
-            detector.queueAction(.{ .shake = .{ .magnitude = 3.0, .duration_ms = 3 } });
-            detector.queueAction(.{ .shake = .{ .magnitude = 4.0, .duration_ms = 4 } });
+            detector.queueAction(.{ .shake = .{ .magnitude = 1.0, .duration = 1 * glib.time.duration.MilliSecond } });
+            detector.queueAction(.{ .shake = .{ .magnitude = 2.0, .duration = 2 * glib.time.duration.MilliSecond } });
+            detector.queueAction(.{ .shake = .{ .magnitude = 3.0, .duration = 3 * glib.time.duration.MilliSecond } });
+            detector.queueAction(.{ .shake = .{ .magnitude = 4.0, .duration = 4 * glib.time.duration.MilliSecond } });
 
-            try expectShakeDuration(detector.nextAction().?, 1);
+            try expectShakeDuration(detector.nextAction().?, 1 * glib.time.duration.MilliSecond);
 
-            detector.queueAction(.{ .shake = .{ .magnitude = 5.0, .duration_ms = 5 } });
-            detector.queueAction(.{ .shake = .{ .magnitude = 6.0, .duration_ms = 6 } });
+            detector.queueAction(.{ .shake = .{ .magnitude = 5.0, .duration = 5 * glib.time.duration.MilliSecond } });
+            detector.queueAction(.{ .shake = .{ .magnitude = 6.0, .duration = 6 * glib.time.duration.MilliSecond } });
 
             try grt.std.testing.expectEqual(@as(usize, action_queue_capacity), detector.count);
-            try expectShakeDuration(detector.nextAction().?, 3);
-            try expectShakeDuration(detector.nextAction().?, 4);
-            try expectShakeDuration(detector.nextAction().?, 5);
-            try expectShakeDuration(detector.nextAction().?, 6);
+            try expectShakeDuration(detector.nextAction().?, 3 * glib.time.duration.MilliSecond);
+            try expectShakeDuration(detector.nextAction().?, 4 * glib.time.duration.MilliSecond);
+            try expectShakeDuration(detector.nextAction().?, 5 * glib.time.duration.MilliSecond);
+            try expectShakeDuration(detector.nextAction().?, 6 * glib.time.duration.MilliSecond);
             try grt.std.testing.expect(detector.nextAction() == null);
         }
-        fn expectShakeDuration(action: Action, expected_duration_ms: u32) !void {
+        fn expectShakeDuration(action: Action, expected_duration: glib.time.duration.Duration) !void {
             switch (action) {
-                .shake => |shake| try grt.std.testing.expectEqual(expected_duration_ms, shake.duration_ms),
+                .shake => |shake| try grt.std.testing.expectEqual(expected_duration, shake.duration),
                 else => try grt.std.testing.expect(false),
             }
         }

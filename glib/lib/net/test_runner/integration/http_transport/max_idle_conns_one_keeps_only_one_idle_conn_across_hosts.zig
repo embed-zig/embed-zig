@@ -3,8 +3,8 @@ const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Utils = test_utils.make2(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(std, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
@@ -14,18 +14,18 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: lib.mem.Allocator) bool {
+        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: std.mem.Allocator) bool {
             _ = runner;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = Utils.Net;
                     const Http = Utils.Http;
                     const testing = struct {
-                        pub var allocator: lib.mem.Allocator = undefined;
-                        pub const expect = lib.testing.expect;
-                        pub const expectEqual = lib.testing.expectEqual;
-                        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-                        pub const expectError = lib.testing.expectError;
+                        pub var allocator: std.mem.Allocator = undefined;
+                        pub const expect = std.testing.expect;
+                        pub const expectEqual = std.testing.expectEqual;
+                        pub const expectEqualStrings = std.testing.expectEqualStrings;
+                        pub const expectError = std.testing.expectError;
                     };
                     testing.allocator = a;
 
@@ -34,7 +34,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         second_request_line: []const u8,
                         first_body: []const u8,
                         second_body: []const u8,
-                        reuse_wait_timeout_ms: u32 = 100,
+                        reuse_wait_timeout: net.time.duration.Duration = 100 * net.time.duration.MilliSecond,
                     };
 
                     const Helpers = struct {
@@ -46,7 +46,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             try testing.expect(Utils.hasRequestLine(req_head, expected_request_line));
 
                             var head_buf: [256]u8 = undefined;
-                            const head = try lib.fmt.bufPrint(
+                            const head = try std.fmt.bufPrint(
                                 &head_buf,
                                 "HTTP/1.1 200 OK\r\nContent-Length: {d}\r\nConnection: {s}\r\n\r\n",
                                 .{ body.len, if (close_conn) "close" else "keep-alive" },
@@ -64,12 +64,12 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
 
                                 _ = try serveKeepAliveRequest(conn, spec.first_request_line, spec.first_body, false);
 
-                                conn.setReadTimeout(spec.reuse_wait_timeout_ms);
+                                conn.setReadDeadline(net.time.instant.add(net.time.instant.now(), spec.reuse_wait_timeout));
                                 const reused = serveKeepAliveRequest(conn, spec.second_request_line, spec.second_body, true) catch |err| switch (err) {
                                     error.TimedOut, error.EndOfStream => false,
                                     else => return err,
                                 };
-                                conn.setReadTimeout(null);
+                                conn.setReadDeadline(null);
                                 if (reused) return;
                             }
 
@@ -115,7 +115,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var server_result1: ?anyerror = null;
                     var server_result2: ?anyerror = null;
 
-                    var server_thread1 = try lib.Thread.spawn(.{}, struct {
+                    var server_thread1 = try std.Thread.spawn(.{}, struct {
                         fn run(tcp_listener: *Net.TcpListener, spec: TwoRequestSpec, accepts: *usize, result: *?anyerror) void {
                             Helpers.serveTwoKeepAliveRequests(tcp_listener, spec, accepts) catch |err| {
                                 result.* = err;
@@ -130,7 +130,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         }
                     }
 
-                    var server_thread2 = try lib.Thread.spawn(.{}, struct {
+                    var server_thread2 = try std.Thread.spawn(.{}, struct {
                         fn run(tcp_listener: *Net.TcpListener, spec: TwoRequestSpec, accepts: *usize, result: *?anyerror) void {
                             Helpers.serveTwoKeepAliveRequests(tcp_listener, spec, accepts) catch |err| {
                                 result.* = err;
@@ -150,13 +150,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     });
                     defer transport.deinit();
 
-                    const url1 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/global-idle-1", .{port1});
+                    const url1 = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/global-idle-1", .{port1});
                     defer testing.allocator.free(url1);
-                    const url2 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/global-idle-2", .{port2});
+                    const url2 = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/global-idle-2", .{port2});
                     defer testing.allocator.free(url2);
-                    const url3 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/global-idle-3", .{port1});
+                    const url3 = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/global-idle-3", .{port1});
                     defer testing.allocator.free(url3);
-                    const url4 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/global-idle-4", .{port2});
+                    const url4 = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/global-idle-4", .{port2});
                     defer testing.allocator.free(url4);
 
                     var req1 = try Http.Request.init(testing.allocator, "GET", url1);
@@ -197,7 +197,6 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     if (server_result1) |err| return err;
                     if (server_result2) |err| return err;
                     try testing.expectEqual(@as(usize, 3), accept_count1 + accept_count2);
-                            
                 }
             };
             Body.call(run_allocator) catch |err| {

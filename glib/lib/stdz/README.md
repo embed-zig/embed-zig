@@ -21,7 +21,7 @@ In other words:
 
 - `stdz` aims to look like `std`
 - the backing implementation is not hard-coded to `std`
-- platform code can provide its own `Thread`, `posix`, `log`, `time`, `crypto`,
+- platform code can provide its own `Thread`, `posix`, `log`, `crypto`,
   and other low-level pieces
 
 ## Current status

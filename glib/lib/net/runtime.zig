@@ -6,7 +6,7 @@
 //! - non-blocking socket operations
 //! - per-socket directional interrupt events for runtime/backend/close wakeups,
 //!   consumed once by `poll(...)`
-//! - per-socket `poll(...)`
+//! - per-socket `poll(...)` with finite timeouts expressed as durations
 //! - explicit `close()` / `deinit()` lifecycle hooks
 //!
 //! It intentionally does not own:
@@ -15,6 +15,7 @@
 //! - public `net.Conn` / `net.PacketConn` / `net.Listener`
 
 const runtime = @This();
+const time_mod = @import("time");
 const netip = @import("netip.zig");
 
 pub const Domain = enum(u8) {
@@ -129,7 +130,7 @@ pub fn make(comptime Impl: type) type {
             _ = @as(*const fn (*Tcp) runtime.SocketError!netip.AddrPort, &Tcp.localAddr);
             _ = @as(*const fn (*Tcp) runtime.SocketError!netip.AddrPort, &Tcp.remoteAddr);
             _ = @as(*const fn (*Tcp, runtime.TcpOption) runtime.SetSockOptError!void, &Tcp.setOpt);
-            _ = @as(*const fn (*Tcp, runtime.PollEvents, ?u32) runtime.PollError!runtime.PollEvents, &Tcp.poll);
+            _ = @as(*const fn (*Tcp, runtime.PollEvents, ?time_mod.duration.Duration) runtime.PollError!runtime.PollEvents, &Tcp.poll);
 
             _ = @as(*const fn (*Udp) void, &Udp.close);
             _ = @as(*const fn (*Udp) void, &Udp.deinit);
@@ -144,7 +145,7 @@ pub fn make(comptime Impl: type) type {
             _ = @as(*const fn (*Udp) runtime.SocketError!netip.AddrPort, &Udp.localAddr);
             _ = @as(*const fn (*Udp) runtime.SocketError!netip.AddrPort, &Udp.remoteAddr);
             _ = @as(*const fn (*Udp, runtime.UdpOption) runtime.SetSockOptError!void, &Udp.setOpt);
-            _ = @as(*const fn (*Udp, runtime.PollEvents, ?u32) runtime.PollError!runtime.PollEvents, &Udp.poll);
+            _ = @as(*const fn (*Udp, runtime.PollEvents, ?time_mod.duration.Duration) runtime.PollError!runtime.PollEvents, &Udp.poll);
         }
 
         pub fn tcp(domain: runtime.Domain) runtime.CreateError!Tcp {

@@ -9,7 +9,7 @@ pub const Step = struct {
 };
 
 pub const Tick = struct {
-    interval: i128,
+    interval: glib.time.duration.Duration,
     n: usize,
 };
 
@@ -67,10 +67,10 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
 
         fn runSteps(runner: *@This(), allocator: glib.std.mem.Allocator) !void {
             var tick_seq: u64 = 0;
-            var timestamp_ns: i128 = 0;
+            var timestamp: glib.time.instant.Time = 0;
 
             for (runner.story.steps) |step| {
-                try runner.runOneStep(allocator, step, &tick_seq, &timestamp_ns);
+                try runner.runOneStep(allocator, step, &tick_seq, &timestamp);
             }
         }
 
@@ -79,16 +79,16 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
             allocator: glib.std.mem.Allocator,
             step: Step,
             tick_seq: *u64,
-            timestamp_ns: *i128,
+            timestamp: *glib.time.instant.Time,
         ) !void {
             if (step.tick) |tick| {
                 for (0..tick.n) |_| {
                     tick_seq.* +%= 1;
-                    timestamp_ns.* +%= tick.interval;
+                    timestamp.* = glib.time.instant.add(timestamp.*, tick.interval);
 
                     runner.app.dispatch(.{
                         .origin = .timer,
-                        .timestamp_ns = timestamp_ns.*,
+                        .timestamp = timestamp.*,
                         .body = .{
                             .tick = .{
                                 .seq = tick_seq.*,
@@ -109,7 +109,7 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                 var event = try decodeJsonValue(ZuxApp.Event, allocator, event_value.value);
                 defer freeDecodedValue(ZuxApp.Event, allocator, &event);
 
-                try runner.dispatchInput(event, timestamp_ns.*);
+                try runner.dispatchInput(event, timestamp.*);
             }
 
             runner.app.store.tick();
@@ -144,7 +144,7 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
         fn dispatchInput(
             runner: *@This(),
             event: ZuxApp.Event,
-            timestamp_ns: i128,
+            timestamp: glib.time.instant.Time,
         ) !void {
             switch (event) {
                 .ledstrip_set_pixels => |value| {
@@ -167,8 +167,8 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                         try ledStripLabelForSourceId(value.source_id),
                         ledStripFrame(value.pixels),
                         value.brightness,
-                        value.duration_ns,
-                        value.interval_ns,
+                        value.duration,
+                        value.interval,
                     );
                 },
                 .ledstrip_pingpong => |value| {
@@ -177,8 +177,8 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                         ledStripFrame(value.from_pixels),
                         ledStripFrame(value.to_pixels),
                         value.brightness,
-                        value.duration_ns,
-                        value.interval_ns,
+                        value.duration,
+                        value.interval,
                     );
                 },
                 .ledstrip_rotate => |value| {
@@ -186,14 +186,14 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                         try ledStripLabelForSourceId(value.source_id),
                         ledStripFrame(value.pixels),
                         value.brightness,
-                        value.duration_ns,
-                        value.interval_ns,
+                        value.duration,
+                        value.interval,
                     );
                 },
                 else => {
                     runner.app.dispatch(.{
                         .origin = .manual,
-                        .timestamp_ns = timestamp_ns,
+                        .timestamp = timestamp,
                         .body = event,
                     }) catch |err| return err;
                 },
@@ -923,7 +923,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 3), parsed.steps.len);
 
             if (parsed.steps[0].tick) |tick| {
-                try grt.std.testing.expectEqual(@as(i128, 42), tick.interval);
+                try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 42), tick.interval);
                 try grt.std.testing.expectEqual(@as(usize, 2), tick.n);
             } else {
                 return error.ExpectedTickStep;

@@ -1,12 +1,13 @@
+const time_mod = @import("time");
 const NetConn = @import("../Conn.zig");
 const NetListener = @import("../Listener.zig");
 const control = @import("control.zig");
 const frame = @import("frame.zig");
 
-pub fn make(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
-    const Thread = lib.Thread;
-    const cmux_log = lib.log.scoped(.net_cmux);
+pub fn make(comptime std: type, comptime time: type) type {
+    const Allocator = std.mem.Allocator;
+    const Thread = std.Thread;
+    const cmux_log = std.log.scoped(.net_cmux);
 
     return struct {
         allocator: Allocator,
@@ -23,7 +24,7 @@ pub fn make(comptime lib: type) type {
         receive_storage: []u8,
         send_storage: []u8,
         channels: [64]?*ChannelState = [_]?*ChannelState{null} ** 64,
-        accept_queue: lib.ArrayList(*ChannelState) = .{},
+        accept_queue: std.ArrayList(*ChannelState) = .{},
 
         const Self = @This();
 
@@ -65,13 +66,13 @@ pub fn make(comptime lib: type) type {
             dlci: u8,
             mutex: Thread.Mutex = .{},
             cond: Thread.Condition = .{},
-            rx: lib.ArrayList(u8) = .{},
+            rx: std.ArrayList(u8) = .{},
             refs: usize = 1,
             registered: bool = true,
             phase: ChannelPhase = .opening,
             queued_for_accept: bool = false,
-            read_timeout_ms: ?u32 = null,
-            write_timeout_ms: ?u32 = null,
+            read_deadline: ?time_mod.instant.Time = null,
+            write_deadline: ?time_mod.instant.Time = null,
         };
 
         pub fn init(allocator: Allocator, bearer: NetConn, options: Options) InitError!*Self {
@@ -230,7 +231,7 @@ pub fn make(comptime lib: type) type {
         pub fn releaseChannel(self: *Self, channel: *ChannelState) void {
             _ = self;
             channel.mutex.lock();
-            lib.debug.assert(channel.refs > 0);
+            std.debug.assert(channel.refs > 0);
             channel.refs -= 1;
             const refs = channel.refs;
             channel.mutex.unlock();
@@ -248,8 +249,13 @@ pub fn make(comptime lib: type) type {
             defer channel.mutex.unlock();
 
             while (availableRx(channel) == 0 and channel.phase == .open) {
-                if (channel.read_timeout_ms) |timeout_ms| {
-                    channel.cond.timedWait(&channel.mutex, timeout_ms * lib.time.ns_per_ms) catch return error.TimedOut;
+                if (channel.read_deadline) |deadline| {
+                    const remaining = @max(time_mod.instant.sub(deadline, time.instant.now()), 0);
+                    if (remaining == 0) return error.TimedOut;
+                    channel.cond.timedWait(
+                        &channel.mutex,
+                        @intCast(remaining),
+                    ) catch return error.TimedOut;
                 } else {
                     channel.cond.wait(&channel.mutex);
                 }
@@ -263,7 +269,7 @@ pub fn make(comptime lib: type) type {
             if (n == rx.len) {
                 channel.rx.clearRetainingCapacity();
             } else {
-                lib.mem.copyForwards(u8, channel.rx.items[0 .. rx.len - n], channel.rx.items[n..rx.len]);
+                std.mem.copyForwards(u8, channel.rx.items[0 .. rx.len - n], channel.rx.items[n..rx.len]);
                 channel.rx.items.len = rx.len - n;
             }
             return n;
@@ -274,7 +280,7 @@ pub fn make(comptime lib: type) type {
 
             channel.mutex.lock();
             const writable = channel.phase == .open;
-            const write_timeout_ms = channel.write_timeout_ms;
+            const write_deadline = channel.write_deadline;
             channel.mutex.unlock();
 
             if (!writable) return error.BrokenPipe;
@@ -282,7 +288,7 @@ pub fn make(comptime lib: type) type {
             var written: usize = 0;
             while (written < buf.len) {
                 const chunk_len = @min(buf.len - written, self.options.write_buffer_size);
-                self.sendFrame(write_timeout_ms, .{
+                self.sendFrame(write_deadline, .{
                     .dlci = channel.dlci,
                     .cr = control.commandCr(self.options.role),
                     .frame_type = .uih,
@@ -318,17 +324,18 @@ pub fn make(comptime lib: type) type {
             self.sendControl(channel.dlci, .disc) catch {};
         }
 
-        pub fn setChannelReadTimeout(self: *Self, channel: *ChannelState, ms: ?u32) void {
+        pub fn setChannelReadDeadline(self: *Self, channel: *ChannelState, deadline: ?time_mod.instant.Time) void {
             _ = self;
             channel.mutex.lock();
-            channel.read_timeout_ms = ms;
+            channel.read_deadline = deadline;
+            channel.cond.broadcast();
             channel.mutex.unlock();
         }
 
-        pub fn setChannelWriteTimeout(self: *Self, channel: *ChannelState, ms: ?u32) void {
+        pub fn setChannelWriteDeadline(self: *Self, channel: *ChannelState, deadline: ?time_mod.instant.Time) void {
             _ = self;
             channel.mutex.lock();
-            channel.write_timeout_ms = ms;
+            channel.write_deadline = deadline;
             channel.mutex.unlock();
         }
 
@@ -400,13 +407,13 @@ pub fn make(comptime lib: type) type {
             });
         }
 
-        fn sendFrame(self: *Self, timeout_ms: ?u32, cmux_frame: frame.Frame) NetConn.WriteError!void {
+        fn sendFrame(self: *Self, deadline: ?time_mod.instant.Time, cmux_frame: frame.Frame) NetConn.WriteError!void {
             self.send_mutex.lock();
             defer self.send_mutex.unlock();
 
             const encoded = frame.encode(self.send_storage, cmux_frame) catch return error.Unexpected;
-            self.bearer.setWriteTimeout(timeout_ms);
-            defer self.bearer.setWriteTimeout(null);
+            self.bearer.setWriteDeadline(deadline);
+            defer self.bearer.setWriteDeadline(null);
             try writeAll(self.bearer, encoded);
         }
 
@@ -457,7 +464,7 @@ pub fn make(comptime lib: type) type {
             const total_len = 1 + (header_len - 1) + info_len + 1 + 1;
             if (total_len > storage.len) return error.FrameTooLarge;
 
-            for (storage[header_len .. total_len]) |*byte| {
+            for (storage[header_len..total_len]) |*byte| {
                 byte.* = try readByte(self.bearer);
             }
             return try frame.decode(storage[0..total_len]);
@@ -740,4 +747,3 @@ fn writeAll(conn: NetConn, buf: []const u8) NetConn.WriteError!void {
         offset += n;
     }
 }
-

@@ -11,5 +11,4 @@ pub const posix = if (builtin.target.os.tag == .windows)
     void
 else
     @import("stdz/posix.zig");
-pub const time = @import("stdz/time.zig");
 pub const crypto = @import("stdz/crypto.zig");

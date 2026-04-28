@@ -52,5 +52,5 @@ Keep it out of `lib/io` when it is:
 
 `lib/io` exports unit coverage through `io.test_runner.unit`.
 
-Implementation files that need unit tests export `TestRunner(comptime lib: type)`,
+Implementation files that need unit tests export `TestRunner(comptime std: type)`,
 and `lib/io/test_runner/unit.zig` composes those runners for `tests/glib_io.zig`.

@@ -2,7 +2,7 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -11,39 +11,39 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn waitUntilReadWaiting(conn: *net.TcpConn, ctx: anytype, comptime thread_lib: type) !void {
-                    const deadline = thread_lib.time.nanoTimestamp() + 2 * thread_lib.time.ns_per_s;
+                fn waitUntilReadWaiting(conn: *net.TcpConn, ctx: anytype, comptime thread_lib: type, comptime time: type) !void {
+                    const deadline = time.instant.add(time.instant.now(), 2 * time.duration.Second);
                     while (true) {
                         conn.read_mu.lock();
                         const waiting = conn.read_waiting;
                         conn.read_mu.unlock();
                         if (waiting) return;
                         if (ctx.err != null) return error.ReadWorkerExitedBeforeWait;
-                        if (thread_lib.time.nanoTimestamp() >= deadline) return error.ExpectedReadWaiting;
-                        thread_lib.Thread.sleep(thread_lib.time.ns_per_ms);
+                        if (time.instant.now() >= deadline) return error.ExpectedReadWaiting;
+                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
                     }
                 }
 
-                fn waitUntilWriteWaiting(conn: *net.TcpConn, ctx: anytype, comptime thread_lib: type) !void {
-                    const deadline = thread_lib.time.nanoTimestamp() + 2 * thread_lib.time.ns_per_s;
+                fn waitUntilWriteWaiting(conn: *net.TcpConn, ctx: anytype, comptime thread_lib: type, comptime time: type) !void {
+                    const deadline = time.instant.add(time.instant.now(), 2 * time.duration.Second);
                     while (true) {
                         conn.write_mu.lock();
                         const waiting = conn.write_waiting;
                         conn.write_mu.unlock();
                         if (waiting) return;
                         if (ctx.err != null) return error.WriteWorkerExitedBeforeWait;
-                        if (thread_lib.time.nanoTimestamp() >= deadline) return error.ExpectedWriteWaiting;
-                        thread_lib.Thread.sleep(thread_lib.time.ns_per_ms);
+                        if (time.instant.now() >= deadline) return error.ExpectedWriteWaiting;
+                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
                     }
                 }
 
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
-                    const Thread = lib.Thread;
-                    const ReadyCounter = test_utils.ReadyCounter(lib);
+                    const Thread = std.Thread;
+                    const ReadyCounter = test_utils.ReadyCounter(std);
 
                     const ReadCtx = struct {
                         ready: *ReadyCounter,
@@ -109,18 +109,18 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
 
                     read_ready.waitUntilReady();
                     write_ready.waitUntilReady();
-                    try waitUntilReadWaiting(client, &read_ctx, lib);
-                    try waitUntilWriteWaiting(client, &write_ctx, lib);
+                    try waitUntilReadWaiting(client, &read_ctx, std, net.time);
+                    try waitUntilWriteWaiting(client, &write_ctx, std, net.time);
 
-                    client_conn.setReadTimeout(30);
+                    client_conn.setReadDeadline(net.time.instant.add(net.time.instant.now(), 30 * net.time.duration.MilliSecond));
 
                     read_thread.join();
-                    try lib.testing.expect(read_ctx.err != null);
-                    try lib.testing.expect(read_ctx.err.? == error.TimedOut);
+                    try std.testing.expect(read_ctx.err != null);
+                    try std.testing.expect(read_ctx.err.? == error.TimedOut);
 
                     client.close();
                     write_thread.join();
-                    try lib.testing.expect(write_ctx.err != null);
+                    try std.testing.expect(write_ctx.err != null);
                 }
             };
             Body.call(allocator) catch |err| {

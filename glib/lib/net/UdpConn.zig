@@ -3,15 +3,16 @@
 //! Returns Conn / PacketConn directly. The internal state is heap-allocated
 //! and freed on deinit().
 
+const time_mod = @import("time");
 const Conn = @import("Conn.zig");
 const PacketConn = @import("PacketConn.zig");
 const netip = @import("netip.zig");
 const runtime_mod = @import("runtime.zig");
 
-pub fn UdpConn(comptime lib: type, comptime net: type) type {
-    const Allocator = lib.mem.Allocator;
+pub fn UdpConn(comptime std: type, comptime net: type) type {
+    const Allocator = std.mem.Allocator;
     const AddrPort = netip.AddrPort;
-    const Mutex = lib.Thread.Mutex;
+    const Mutex = std.Thread.Mutex;
     const Runtime = net.Runtime;
     const UdpSocket = Runtime.Udp;
 
@@ -23,15 +24,15 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
         write_mu: Mutex = .{},
         read_waiting: bool = false,
         write_waiting: bool = false,
-        read_timeout_ms: ?u32 = null,
-        write_timeout_ms: ?u32 = null,
+        read_deadline: ?time_mod.instant.Time = null,
+        write_deadline: ?time_mod.instant.Time = null,
         read_state_gen: u64 = 0,
         write_state_gen: u64 = 0,
 
         const Self = @This();
         const WaitState = struct {
             config_gen: ?u64 = null,
-            deadline_ms: ?i64 = null,
+            deadline: ?time_mod.instant.Time = null,
         };
 
         pub const BatchItem = struct {
@@ -162,20 +163,20 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
 
         // Returns the number of datagrams transferred. A short return means the batch
         // made partial progress and the caller should only trust slots 0..count.
-        pub fn recvBatch(self: *Self, batch: []BatchItem, timeout_ms: ?u32) BatchReadError!usize {
+        pub fn recvBatch(self: *Self, batch: []BatchItem, timeout: ?time_mod.duration.Duration) BatchReadError!usize {
             if (self.isClosed()) return error.Closed;
             if (batch.len == 0) return 0;
             for (batch) |item| {
                 if (item.buf.len == 0) return error.InvalidBatchItem;
             }
 
-            const saved_timeout = self.currentReadTimeout();
-            defer self.setReadTimeout(saved_timeout);
+            const saved_deadline = self.currentReadDeadline();
+            defer self.setReadDeadline(saved_deadline);
 
-            const deadline_ms = batchDeadline(timeout_ms orelse saved_timeout);
+            const deadline = if (timeout) |duration| time_mod.instant.add(net.time.instant.now(), duration) else saved_deadline;
             var received: usize = 0;
             while (received < batch.len) : (received += 1) {
-                self.setReadTimeout(remainingTimeoutMs(deadline_ms));
+                self.setReadDeadline(deadline);
 
                 const result = self.readFrom(batch[received].buf) catch |err| {
                     if (received != 0) return received;
@@ -190,12 +191,16 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
         }
 
         pub fn sendBatch(self: *Self, batch: []const BatchItem) BatchWriteError!usize {
-            return self.sendBatchWithTimeout(batch, self.currentWriteTimeout());
+            return self.sendBatchWithDeadline(batch, self.currentWriteDeadline());
         }
 
         // Returns the number of datagrams transferred. A short return means the batch
         // made partial progress and the caller should only retry the remaining suffix.
-        pub fn sendBatchWithTimeout(self: *Self, batch: []const BatchItem, timeout_ms: ?u32) BatchWriteError!usize {
+        pub fn sendBatchWithTimeout(self: *Self, batch: []const BatchItem, timeout: ?time_mod.duration.Duration) BatchWriteError!usize {
+            return self.sendBatchWithDeadline(batch, if (timeout) |duration| time_mod.instant.add(net.time.instant.now(), duration) else null);
+        }
+
+        fn sendBatchWithDeadline(self: *Self, batch: []const BatchItem, deadline: ?time_mod.instant.Time) BatchWriteError!usize {
             if (self.isClosed()) return error.Closed;
             if (batch.len == 0) return 0;
             for (batch) |item| {
@@ -203,13 +208,12 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
                 if (!item.addr.isValid()) return error.InvalidBatchItem;
             }
 
-            const saved_timeout = self.currentWriteTimeout();
-            defer self.setWriteTimeout(saved_timeout);
+            const saved_deadline = self.currentWriteDeadline();
+            defer self.setWriteDeadline(saved_deadline);
 
-            const deadline_ms = batchDeadline(timeout_ms orelse saved_timeout);
             var sent: usize = 0;
             while (sent < batch.len) : (sent += 1) {
-                self.setWriteTimeout(remainingTimeoutMs(deadline_ms));
+                self.setWriteDeadline(deadline);
 
                 const written = self.writeTo(
                     batch[sent].buf[0..batch[sent].len],
@@ -247,12 +251,12 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
             a.destroy(self);
         }
 
-        pub fn setReadTimeout(self: *Self, ms: ?u32) void {
+        pub fn setReadDeadline(self: *Self, deadline: ?time_mod.instant.Time) void {
             if (self.isClosed()) return;
             var should_signal = false;
             self.read_mu.lock();
             if (!self.isClosed()) {
-                self.read_timeout_ms = ms;
+                self.read_deadline = deadline;
                 self.read_state_gen +%= 1;
                 should_signal = self.read_waiting;
             }
@@ -260,12 +264,12 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
             if (should_signal) self.socket.signal(.read_interrupt);
         }
 
-        pub fn setWriteTimeout(self: *Self, ms: ?u32) void {
+        pub fn setWriteDeadline(self: *Self, deadline: ?time_mod.instant.Time) void {
             if (self.isClosed()) return;
             var should_signal = false;
             self.write_mu.lock();
             if (!self.isClosed()) {
-                self.write_timeout_ms = ms;
+                self.write_deadline = deadline;
                 self.write_state_gen +%= 1;
                 should_signal = self.write_waiting;
             }
@@ -285,33 +289,16 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
             return addr.port();
         }
 
-        fn timeoutToDeadline(ms: ?u32) ?i64 {
-            const timeout_ms = ms orelse return null;
-            return lib.time.milliTimestamp() + timeout_ms;
-        }
-
-        fn batchDeadline(timeout_ms: ?u32) ?i64 {
-            const ms = timeout_ms orelse return null;
-            return lib.time.milliTimestamp() + @as(i64, ms);
-        }
-
-        fn remainingTimeoutMs(deadline_ms: ?i64) ?u32 {
-            const deadline = deadline_ms orelse return null;
-            const now = lib.time.milliTimestamp();
-            if (deadline <= now) return 0;
-            return @intCast(deadline - now);
-        }
-
-        fn currentReadTimeout(self: *Self) ?u32 {
+        fn currentReadDeadline(self: *Self) ?time_mod.instant.Time {
             self.read_mu.lock();
             defer self.read_mu.unlock();
-            return self.read_timeout_ms;
+            return self.read_deadline;
         }
 
-        fn currentWriteTimeout(self: *Self) ?u32 {
+        fn currentWriteDeadline(self: *Self) ?time_mod.instant.Time {
             self.write_mu.lock();
             defer self.write_mu.unlock();
-            return self.write_timeout_ms;
+            return self.write_deadline;
         }
 
         pub fn initFromSocket(allocator: Allocator, socket: UdpSocket) Allocator.Error!Conn {
@@ -336,7 +323,7 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
             while (true) {
                 if (self.isClosed()) return error.EndOfStream;
                 const poll_result = blk: {
-                    const timeout_ms = self.beginReadWait(wait_state) catch |err| switch (err) {
+                    const timeout = self.beginReadWait(wait_state) catch |err| switch (err) {
                         error.Closed => return error.EndOfStream,
                         error.TimedOut => return error.TimedOut,
                     };
@@ -346,7 +333,7 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
                         .failed = true,
                         .hup = true,
                         .read_interrupt = true,
-                    }, timeout_ms);
+                    }, timeout);
                 };
                 _ = poll_result catch |err| switch (err) {
                     error.Closed => return error.EndOfStream,
@@ -364,7 +351,7 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
             while (true) {
                 if (self.isClosed()) return error.BrokenPipe;
                 const poll_result = blk: {
-                    const timeout_ms = self.beginWriteWait(wait_state) catch |err| switch (err) {
+                    const timeout = self.beginWriteWait(wait_state) catch |err| switch (err) {
                         error.Closed => return error.BrokenPipe,
                         error.TimedOut => return error.TimedOut,
                     };
@@ -374,7 +361,7 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
                         .failed = true,
                         .hup = true,
                         .write_interrupt = true,
-                    }, timeout_ms);
+                    }, timeout);
                 };
                 _ = poll_result catch |err| switch (err) {
                     error.Closed => return error.BrokenPipe,
@@ -392,7 +379,7 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
             while (true) {
                 if (self.isClosed()) return error.Closed;
                 const poll_result = blk: {
-                    const timeout_ms = self.beginReadWait(wait_state) catch |err| switch (err) {
+                    const timeout = self.beginReadWait(wait_state) catch |err| switch (err) {
                         error.Closed => return error.Closed,
                         error.TimedOut => return error.TimedOut,
                     };
@@ -402,7 +389,7 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
                         .failed = true,
                         .hup = true,
                         .read_interrupt = true,
-                    }, timeout_ms);
+                    }, timeout);
                 };
                 _ = poll_result catch |err| switch (err) {
                     error.Closed => return error.Closed,
@@ -420,7 +407,7 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
             while (true) {
                 if (self.isClosed()) return error.Closed;
                 const poll_result = blk: {
-                    const timeout_ms = self.beginWriteWait(wait_state) catch |err| switch (err) {
+                    const timeout = self.beginWriteWait(wait_state) catch |err| switch (err) {
                         error.Closed => return error.Closed,
                         error.TimedOut => return error.TimedOut,
                     };
@@ -430,7 +417,7 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
                         .failed = true,
                         .hup = true,
                         .write_interrupt = true,
-                    }, timeout_ms);
+                    }, timeout);
                 };
                 _ = poll_result catch |err| switch (err) {
                     error.Closed => return error.Closed,
@@ -444,16 +431,14 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
             }
         }
 
-        fn remainingPollTimeout(deadline_ms: ?i64) ?u32 {
-            const deadline = deadline_ms orelse return null;
-            const now = lib.time.milliTimestamp();
-            if (deadline <= now) return 0;
-            return @intCast(deadline - now);
+        fn remainingPollTimeout(deadline: ?time_mod.instant.Time) ?time_mod.duration.Duration {
+            const value = deadline orelse return null;
+            return @max(time_mod.instant.sub(value, net.time.instant.now()), 0);
         }
 
-        fn waitExpired(deadline_ms: ?i64) bool {
-            const deadline = deadline_ms orelse return false;
-            return deadline <= lib.time.milliTimestamp();
+        fn waitExpired(deadline: ?time_mod.instant.Time) bool {
+            const value = deadline orelse return false;
+            return time_mod.instant.sub(value, net.time.instant.now()) <= 0;
         }
 
         fn ensureReadActive(self: *Self, wait_state: *WaitState) error{ Closed, TimedOut }!void {
@@ -462,7 +447,7 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
 
             if (self.isClosed()) return error.Closed;
             self.syncReadWaitStateLocked(wait_state);
-            if (waitExpired(wait_state.deadline_ms)) return error.TimedOut;
+            if (waitExpired(wait_state.deadline)) return error.TimedOut;
         }
 
         fn ensureWriteActive(self: *Self, wait_state: *WaitState) error{ Closed, TimedOut }!void {
@@ -471,29 +456,29 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
 
             if (self.isClosed()) return error.Closed;
             self.syncWriteWaitStateLocked(wait_state);
-            if (waitExpired(wait_state.deadline_ms)) return error.TimedOut;
+            if (waitExpired(wait_state.deadline)) return error.TimedOut;
         }
 
-        fn beginReadWait(self: *Self, wait_state: *WaitState) error{ Closed, TimedOut }!?u32 {
+        fn beginReadWait(self: *Self, wait_state: *WaitState) error{ Closed, TimedOut }!?time_mod.duration.Duration {
             self.read_mu.lock();
             defer self.read_mu.unlock();
 
             if (self.isClosed()) return error.Closed;
             self.syncReadWaitStateLocked(wait_state);
-            if (waitExpired(wait_state.deadline_ms)) return error.TimedOut;
+            if (waitExpired(wait_state.deadline)) return error.TimedOut;
             self.read_waiting = true;
-            return remainingPollTimeout(wait_state.deadline_ms);
+            return remainingPollTimeout(wait_state.deadline);
         }
 
-        fn beginWriteWait(self: *Self, wait_state: *WaitState) error{ Closed, TimedOut }!?u32 {
+        fn beginWriteWait(self: *Self, wait_state: *WaitState) error{ Closed, TimedOut }!?time_mod.duration.Duration {
             self.write_mu.lock();
             defer self.write_mu.unlock();
 
             if (self.isClosed()) return error.Closed;
             self.syncWriteWaitStateLocked(wait_state);
-            if (waitExpired(wait_state.deadline_ms)) return error.TimedOut;
+            if (waitExpired(wait_state.deadline)) return error.TimedOut;
             self.write_waiting = true;
-            return remainingPollTimeout(wait_state.deadline_ms);
+            return remainingPollTimeout(wait_state.deadline);
         }
 
         fn endReadWait(self: *Self) void {
@@ -513,7 +498,7 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
             defer self.read_mu.unlock();
 
             self.syncReadWaitStateLocked(wait_state);
-            return waitExpired(wait_state.deadline_ms);
+            return waitExpired(wait_state.deadline);
         }
 
         fn writeWaitExpired(self: *Self, wait_state: *WaitState) bool {
@@ -521,20 +506,20 @@ pub fn UdpConn(comptime lib: type, comptime net: type) type {
             defer self.write_mu.unlock();
 
             self.syncWriteWaitStateLocked(wait_state);
-            return waitExpired(wait_state.deadline_ms);
+            return waitExpired(wait_state.deadline);
         }
 
         fn syncReadWaitStateLocked(self: *Self, wait_state: *WaitState) void {
             if (wait_state.config_gen != self.read_state_gen) {
                 wait_state.config_gen = self.read_state_gen;
-                wait_state.deadline_ms = timeoutToDeadline(self.read_timeout_ms);
+                wait_state.deadline = self.read_deadline;
             }
         }
 
         fn syncWriteWaitStateLocked(self: *Self, wait_state: *WaitState) void {
             if (wait_state.config_gen != self.write_state_gen) {
                 wait_state.config_gen = self.write_state_gen;
-                wait_state.deadline_ms = timeoutToDeadline(self.write_timeout_ms);
+                wait_state.deadline = self.write_deadline;
             }
         }
 

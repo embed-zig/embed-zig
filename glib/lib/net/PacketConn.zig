@@ -1,7 +1,7 @@
 //! PacketConn — type-erased datagram interface (like Go's net.PacketConn).
 //!
 //! VTable-based runtime dispatch, same pattern as Conn and Listener.
-//! Concrete implementations must also provide close/deinit and timeout setter
+//! Concrete implementations must also provide close/deinit and deadline setter
 //! methods. For connectionless protocols (UDP), each readFrom/writeTo operates
 //! on a single datagram with an associated remote address.
 //!
@@ -17,6 +17,8 @@
 //! same time, but concurrent operations in the same direction are not part of
 //! the shared PacketConn contract.
 
+const time_mod = @import("time");
+
 const PacketConn = @This();
 const AddrPort = @import("netip/AddrPort.zig");
 
@@ -29,8 +31,8 @@ pub const VTable = struct {
     writeTo: *const fn (ptr: *anyopaque, buf: []const u8, addr: AddrPort) WriteToError!usize,
     close: *const fn (ptr: *anyopaque) void,
     deinit: *const fn (ptr: *anyopaque) void,
-    setReadTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
-    setWriteTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
+    setReadDeadline: *const fn (ptr: *anyopaque, deadline: ?time_mod.instant.Time) void,
+    setWriteDeadline: *const fn (ptr: *anyopaque, deadline: ?time_mod.instant.Time) void,
 };
 
 pub const ReadFromResult = struct {
@@ -89,12 +91,12 @@ pub fn deinit(self: PacketConn) void {
     self.vtable.deinit(self.ptr);
 }
 
-pub fn setReadTimeout(self: PacketConn, ms: ?u32) void {
-    self.vtable.setReadTimeout(self.ptr, ms);
+pub fn setReadDeadline(self: PacketConn, deadline: ?time_mod.instant.Time) void {
+    self.vtable.setReadDeadline(self.ptr, deadline);
 }
 
-pub fn setWriteTimeout(self: PacketConn, ms: ?u32) void {
-    self.vtable.setWriteTimeout(self.ptr, ms);
+pub fn setWriteDeadline(self: PacketConn, deadline: ?time_mod.instant.Time) void {
+    self.vtable.setWriteDeadline(self.ptr, deadline);
 }
 
 /// Wrap a pointer to any concrete type that matches the `PacketConn` vtable contract.
@@ -104,8 +106,8 @@ pub fn setWriteTimeout(self: PacketConn, ms: ?u32) void {
 ///   fn writeTo(*Self, []const u8, AddrPort) WriteToError!usize
 ///   fn close(*Self) void
 ///   fn deinit(*Self) void
-///   fn setReadTimeout(*Self, ?u32) void
-///   fn setWriteTimeout(*Self, ?u32) void
+///   fn setReadDeadline(*Self, ?time_mod.instant.Time) void
+///   fn setWriteDeadline(*Self, ?time_mod.instant.Time) void
 pub fn init(pointer: anytype) PacketConn {
     const Ptr = @TypeOf(pointer);
     const info = @typeInfo(Ptr);
@@ -133,21 +135,21 @@ pub fn init(pointer: anytype) PacketConn {
             .writeTo = writeToFn,
             .close = closeFn,
             .deinit = deinitFn,
-            .setReadTimeout = setReadTimeoutFn,
-            .setWriteTimeout = setWriteTimeoutFn,
+            .setReadDeadline = setReadDeadlineFn,
+            .setWriteDeadline = setWriteDeadlineFn,
         };
 
         fn deinitFn(ptr: *anyopaque) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             self.deinit();
         }
-        fn setReadTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+        fn setReadDeadlineFn(ptr: *anyopaque, deadline: ?time_mod.instant.Time) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            self.setReadTimeout(ms);
+            self.setReadDeadline(deadline);
         }
-        fn setWriteTimeoutFn(ptr: *anyopaque, ms: ?u32) void {
+        fn setWriteDeadlineFn(ptr: *anyopaque, deadline: ?time_mod.instant.Time) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            self.setWriteTimeout(ms);
+            self.setWriteDeadline(deadline);
         }
     };
 

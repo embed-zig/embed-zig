@@ -3,7 +3,7 @@ const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 320 * 1024 },
 
@@ -12,13 +12,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
-                    const Thread = lib.Thread;
-                    const StartGate = test_utils.StartGate(lib);
+                    const Thread = std.Thread;
+                    const StartGate = test_utils.StartGate(std);
 
                     const ReadCtx = struct {
                         gate: *StartGate,
@@ -61,10 +61,10 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var ac = try ln.accept();
                     defer ac.deinit();
 
-                    cc.setReadTimeout(10_000);
-                    cc.setWriteTimeout(10_000);
-                    ac.setReadTimeout(10_000);
-                    ac.setWriteTimeout(10_000);
+                    cc.setReadDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
+                    cc.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
+                    ac.setReadDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
+                    ac.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
 
                     const client_len = 128 * 1024 + 257;
                     const server_len = 96 * 1024 + 113;
@@ -103,8 +103,8 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     if (server_reader.result) |err| return err;
                     if (server_writer.result) |err| return err;
 
-                    try lib.testing.expectEqualSlices(u8, server_payload, client_received);
-                    try lib.testing.expectEqualSlices(u8, client_payload, server_received);
+                    try std.testing.expectEqualSlices(u8, server_payload, client_received);
+                    try std.testing.expectEqualSlices(u8, client_payload, server_received);
                 }
             };
             Body.call(allocator) catch |err| {

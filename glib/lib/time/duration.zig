@@ -21,31 +21,31 @@ pub fn magnitude(duration: Duration) u64 {
     return @intCast(duration);
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
+pub fn TestRunner(comptime std: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), _: *testing_api.T, _: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), _: *testing_api.T, _: std.mem.Allocator) bool {
             _ = self;
 
-            lib.testing.expectEqual(@as(Duration, 1), NanoSecond) catch return false;
-            lib.testing.expectEqual(@as(Duration, 1_000), MicroSecond) catch return false;
-            lib.testing.expectEqual(@as(Duration, 1_000_000), MilliSecond) catch return false;
-            lib.testing.expectEqual(@as(Duration, 1_000_000_000), Second) catch return false;
-            lib.testing.expectEqual(@as(Duration, 60_000_000_000), Minute) catch return false;
-            lib.testing.expectEqual(@as(Duration, 3_600_000_000_000), Hour) catch return false;
-            lib.testing.expectEqual(@as(u64, 42), magnitude(42)) catch return false;
-            lib.testing.expectEqual(@as(u64, 42), magnitude(-42)) catch return false;
-            lib.testing.expectEqual(@as(u64, 9_223_372_036_854_775_808), magnitude(Minimum)) catch return false;
+            std.testing.expectEqual(@as(Duration, 1), NanoSecond) catch return false;
+            std.testing.expectEqual(@as(Duration, 1_000), MicroSecond) catch return false;
+            std.testing.expectEqual(@as(Duration, 1_000_000), MilliSecond) catch return false;
+            std.testing.expectEqual(@as(Duration, 1_000_000_000), Second) catch return false;
+            std.testing.expectEqual(@as(Duration, 60_000_000_000), Minute) catch return false;
+            std.testing.expectEqual(@as(Duration, 3_600_000_000_000), Hour) catch return false;
+            std.testing.expectEqual(@as(u64, 42), magnitude(42)) catch return false;
+            std.testing.expectEqual(@as(u64, 42), magnitude(-42)) catch return false;
+            std.testing.expectEqual(@as(u64, 9_223_372_036_854_775_808), magnitude(Minimum)) catch return false;
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -8,7 +8,7 @@ pub const Context = ?*anyopaque;
 
 pub const Gesture = union(enum) {
     click: u16,
-    long_press_ns: u64,
+    long_press: glib.time.duration.Duration,
 };
 
 pub const Action = struct {
@@ -17,44 +17,43 @@ pub const Action = struct {
 };
 
 pub const Sample = struct {
-    timestamp_ns: i128,
+    timestamp: glib.time.instant.Time,
     pressed: bool,
     ctx: Context = null,
 };
 
 pub const Config = struct {
-    long_press_ns: u64 = default_long_press_ns,
-    multi_click_window_ns: u64 = default_multi_click_window_ns,
+    long_press: glib.time.duration.Duration = default_long_press,
+    multi_click_window: glib.time.duration.Duration = default_multi_click_window,
 };
 
 const PendingPress = struct {
-    pressed_at_ns: i128,
-    last_long_press_ns: u64 = 0,
+    pressed_at: glib.time.instant.Time,
+    last_long_press: glib.time.duration.Duration = 0,
     ctx: Context,
 };
 
 const PendingClicks = struct {
-    last_click_at_ns: i128,
+    last_click_at: glib.time.instant.Time,
     count: u16,
     ctx: Context,
 };
 
-pub const ns_per_ms: u64 = 1_000_000;
-pub const default_long_press_ns: u64 = 500 * ns_per_ms;
-pub const default_multi_click_window_ns: u64 = 300 * ns_per_ms;
+pub const default_long_press: glib.time.duration.Duration = 500 * glib.time.duration.MilliSecond;
+pub const default_multi_click_window: glib.time.duration.Duration = 300 * glib.time.duration.MilliSecond;
 
 pending_press: ?PendingPress = null,
 pending_clicks: ?PendingClicks = null,
 actions: [action_queue_capacity]?Action = [_]?Action{null} ** action_queue_capacity,
 read_idx: usize = 0,
 count: usize = 0,
-long_press_ns: u64 = default_long_press_ns,
-multi_click_window_ns: u64 = default_multi_click_window_ns,
+long_press: glib.time.duration.Duration = default_long_press,
+multi_click_window: glib.time.duration.Duration = default_multi_click_window,
 
 pub fn init(config: Config) ClickDetector {
     return .{
-        .long_press_ns = config.long_press_ns,
-        .multi_click_window_ns = config.multi_click_window_ns,
+        .long_press = config.long_press,
+        .multi_click_window = config.multi_click_window,
     };
 }
 
@@ -71,12 +70,12 @@ pub fn reset(self: *ClickDetector) void {
 }
 
 pub fn update(self: *ClickDetector, sample: Sample) ?Action {
-    self.flushDue(sample.timestamp_ns);
+    self.flushDue(sample.timestamp);
 
     if (sample.pressed) {
         if (self.pending_press == null) {
             self.pending_press = .{
-                .pressed_at_ns = sample.timestamp_ns,
+                .pressed_at = sample.timestamp,
                 .ctx = sample.ctx,
             };
         }
@@ -86,12 +85,12 @@ pub fn update(self: *ClickDetector, sample: Sample) ?Action {
     const pending_press = self.pending_press orelse return self.nextAction();
     self.pending_press = null;
 
-    const held_ns = elapsedNs(pending_press.pressed_at_ns, sample.timestamp_ns);
-    if (held_ns >= self.long_press_ns) {
+    const held = elapsed(pending_press.pressed_at, sample.timestamp);
+    if (held >= self.long_press) {
         self.pending_clicks = null;
-        if (held_ns > pending_press.last_long_press_ns) {
+        if (held > pending_press.last_long_press) {
             self.queueAction(.{
-                .gesture = .{ .long_press_ns = held_ns },
+                .gesture = .{ .long_press = held },
                 .ctx = pending_press.ctx,
             });
         }
@@ -99,27 +98,27 @@ pub fn update(self: *ClickDetector, sample: Sample) ?Action {
     }
 
     if (self.pending_clicks) |*pending_clicks| {
-        if (elapsedNs(pending_clicks.last_click_at_ns, sample.timestamp_ns) < self.multi_click_window_ns) {
+        if (elapsed(pending_clicks.last_click_at, sample.timestamp) < self.multi_click_window) {
             const next_count = @addWithOverflow(pending_clicks.count, 1);
             if (next_count[1] == 0) {
                 pending_clicks.count = next_count[0];
             }
-            pending_clicks.last_click_at_ns = sample.timestamp_ns;
+            pending_clicks.last_click_at = sample.timestamp;
             pending_clicks.ctx = sample.ctx;
             return self.nextAction();
         }
     }
 
     self.pending_clicks = .{
-        .last_click_at_ns = sample.timestamp_ns,
+        .last_click_at = sample.timestamp,
         .count = 1,
         .ctx = sample.ctx,
     };
     return self.nextAction();
 }
 
-pub fn flush(self: *ClickDetector, timestamp_ns: i128) ?Action {
-    self.flushDue(timestamp_ns);
+pub fn flush(self: *ClickDetector, timestamp: glib.time.instant.Time) ?Action {
+    self.flushDue(timestamp);
     return self.nextAction();
 }
 
@@ -138,22 +137,22 @@ pub fn hasPendingActions(self: *const ClickDetector) bool {
     return self.count != 0;
 }
 
-fn flushDue(self: *ClickDetector, timestamp_ns: i128) void {
+fn flushDue(self: *ClickDetector, timestamp: glib.time.instant.Time) void {
     if (self.pending_press) |*pending_press| {
-        const held_ns = elapsedNs(pending_press.pressed_at_ns, timestamp_ns);
-        if (held_ns >= self.long_press_ns and held_ns > pending_press.last_long_press_ns) {
+        const held = elapsed(pending_press.pressed_at, timestamp);
+        if (held >= self.long_press and held > pending_press.last_long_press) {
             self.pending_clicks = null;
-            pending_press.last_long_press_ns = held_ns;
+            pending_press.last_long_press = held;
             self.queueAction(.{
-                .gesture = .{ .long_press_ns = held_ns },
+                .gesture = .{ .long_press = held },
                 .ctx = pending_press.ctx,
             });
         }
     }
 
     if (self.pending_clicks) |pending_clicks| {
-        const quiet_ns = elapsedNs(pending_clicks.last_click_at_ns, timestamp_ns);
-        if (quiet_ns >= self.multi_click_window_ns) {
+        const quiet = elapsed(pending_clicks.last_click_at, timestamp);
+        if (quiet >= self.multi_click_window) {
             self.pending_clicks = null;
             self.queueAction(.{
                 .gesture = .{ .click = pending_clicks.count },
@@ -173,13 +172,9 @@ fn queueAction(self: *ClickDetector, action: Action) void {
     self.count += 1;
 }
 
-fn elapsedNs(start_ns: i128, end_ns: i128) u64 {
-    if (end_ns <= start_ns) return 0;
-
-    const delta_ns = end_ns - start_ns;
-    const max_u64_ns: i128 = 18_446_744_073_709_551_615;
-    if (delta_ns >= max_u64_ns) return 18_446_744_073_709_551_615;
-    return @intCast(delta_ns);
+fn elapsed(start: glib.time.instant.Time, end: glib.time.instant.Time) glib.time.duration.Duration {
+    const duration = glib.time.instant.sub(end, start);
+    return if (duration <= 0) 0 else duration;
 }
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
@@ -190,17 +185,17 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = ClickDetector.initDefault();
 
             try grt.std.testing.expect(detector.update(.{
-                .timestamp_ns = 10,
+                .timestamp = 10,
                 .pressed = true,
                 .ctx = @ptrCast(&press_ctx_value),
             }) == null);
             try grt.std.testing.expect(detector.update(.{
-                .timestamp_ns = 20,
+                .timestamp = 20,
                 .pressed = false,
                 .ctx = @ptrCast(&release_ctx_value),
             }) == null);
 
-            const action = detector.flush(20 + @as(i128, default_multi_click_window_ns)).?;
+            const action = detector.flush(glib.time.instant.add(20, default_multi_click_window)).?;
             switch (action.gesture) {
                 .click => |count| try grt.std.testing.expectEqual(@as(u16, 1), count),
                 else => try grt.std.testing.expect(false),
@@ -212,19 +207,19 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var last_ctx_value: u8 = 3;
             var detector = ClickDetector.initDefault();
 
-            inline for ([_]i128{ 10, 30, 50, 70 }) |start_ns| {
+            inline for ([_]glib.time.instant.Time{ 10, 30, 50, 70 }) |start| {
                 try grt.std.testing.expect(detector.update(.{
-                    .timestamp_ns = start_ns,
+                    .timestamp = start,
                     .pressed = true,
                 }) == null);
                 try grt.std.testing.expect(detector.update(.{
-                    .timestamp_ns = start_ns + 10,
+                    .timestamp = glib.time.instant.add(start, 10),
                     .pressed = false,
                     .ctx = @ptrCast(&last_ctx_value),
                 }) == null);
             }
 
-            const action = detector.flush(80 + @as(i128, default_multi_click_window_ns)).?;
+            const action = detector.flush(glib.time.instant.add(80, default_multi_click_window)).?;
             switch (action.gesture) {
                 .click => |count| try grt.std.testing.expectEqual(@as(u16, 4), count),
                 else => try grt.std.testing.expect(false),
@@ -237,54 +232,54 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = ClickDetector.initDefault();
 
             try grt.std.testing.expect(detector.update(.{
-                .timestamp_ns = 10,
+                .timestamp = 10,
                 .pressed = true,
                 .ctx = @ptrCast(&press_ctx_value),
             }) == null);
 
-            const action = detector.flush(10 + @as(i128, default_long_press_ns) + 25).?;
-            try expectLongPressDuration(action, default_long_press_ns + 25);
+            const action = detector.flush(glib.time.instant.add(10, default_long_press + 25)).?;
+            try expectLongPressDuration(action, default_long_press + 25);
             try grt.std.testing.expect(action.ctx == @as(Context, @ptrCast(&press_ctx_value)));
         }
 
         fn testReleaseAfterFlushedLongPressEmitsUpdatedDuration() !void {
             var detector = ClickDetector.initDefault();
             _ = detector.update(.{
-                .timestamp_ns = 10,
+                .timestamp = 10,
                 .pressed = true,
             });
-            const first_action = detector.flush(10 + @as(i128, default_long_press_ns) + 1).?;
-            try expectLongPressDuration(first_action, default_long_press_ns + 1);
+            const first_action = detector.flush(glib.time.instant.add(10, default_long_press + 1)).?;
+            try expectLongPressDuration(first_action, default_long_press + 1);
 
             const release_action = detector.update(.{
-                .timestamp_ns = 10 + @as(i128, default_long_press_ns) + 10,
+                .timestamp = glib.time.instant.add(10, default_long_press + 10),
                 .pressed = false,
             }).?;
-            try expectLongPressDuration(release_action, default_long_press_ns + 10);
+            try expectLongPressDuration(release_action, default_long_press + 10);
             try grt.std.testing.expect(!detector.hasPendingActions());
         }
 
         fn testHeldSamplesAfterLongPressEmitCumulativeDuration() !void {
             var detector = ClickDetector.initDefault();
             try grt.std.testing.expect(detector.update(.{
-                .timestamp_ns = 10,
+                .timestamp = 10,
                 .pressed = true,
             }) == null);
 
-            const first_action = detector.flush(10 + @as(i128, default_long_press_ns) + 1).?;
-            try expectLongPressDuration(first_action, default_long_press_ns + 1);
+            const first_action = detector.flush(glib.time.instant.add(10, default_long_press + 1)).?;
+            try expectLongPressDuration(first_action, default_long_press + 1);
 
             const second_action = detector.update(.{
-                .timestamp_ns = 10 + @as(i128, default_long_press_ns) + 50,
+                .timestamp = glib.time.instant.add(10, default_long_press + 50),
                 .pressed = true,
             }).?;
-            try expectLongPressDuration(second_action, default_long_press_ns + 50);
+            try expectLongPressDuration(second_action, default_long_press + 50);
 
-            const third_action = detector.flush(10 + @as(i128, default_long_press_ns) * 2 + 50).?;
-            try expectLongPressDuration(third_action, default_long_press_ns * 2 + 50);
+            const third_action = detector.flush(glib.time.instant.add(10, default_long_press * 2 + 50)).?;
+            try expectLongPressDuration(third_action, default_long_press * 2 + 50);
 
             try grt.std.testing.expect(detector.update(.{
-                .timestamp_ns = 10 + @as(i128, default_long_press_ns) * 2 + 50,
+                .timestamp = glib.time.instant.add(10, default_long_press * 2 + 50),
                 .pressed = false,
             }) == null);
             try grt.std.testing.expect(!detector.hasPendingActions());
@@ -293,16 +288,16 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         fn testReleaseAtSameTimestampDoesNotDuplicateLongPress() !void {
             var detector = ClickDetector.initDefault();
             try grt.std.testing.expect(detector.update(.{
-                .timestamp_ns = 10,
+                .timestamp = 10,
                 .pressed = true,
             }) == null);
 
-            const held_ns = 10 + @as(i128, default_long_press_ns) + 20;
-            const first_action = detector.flush(held_ns).?;
-            try expectLongPressDuration(first_action, default_long_press_ns + 20);
+            const release_at = glib.time.instant.add(10, default_long_press + 20);
+            const first_action = detector.flush(release_at).?;
+            try expectLongPressDuration(first_action, default_long_press + 20);
 
             try grt.std.testing.expect(detector.update(.{
-                .timestamp_ns = held_ns,
+                .timestamp = release_at,
                 .pressed = false,
             }) == null);
         }
@@ -352,9 +347,9 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             }
         }
 
-        fn expectLongPressDuration(action: Action, expected_held_ns: u64) !void {
+        fn expectLongPressDuration(action: Action, expected_held: glib.time.duration.Duration) !void {
             switch (action.gesture) {
-                .long_press_ns => |held_ns| try grt.std.testing.expectEqual(expected_held_ns, held_ns),
+                .long_press => |held| try grt.std.testing.expectEqual(expected_held, held),
                 else => try grt.std.testing.expect(false),
             }
         }

@@ -40,7 +40,7 @@ const conn_as_downcast = @import("udp/conn_as_downcast.zig");
 const conn_ops_after_close = @import("udp/conn_ops_after_close.zig");
 const packet_conn_ops_after_close = @import("udp/packet_conn_ops_after_close.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -52,43 +52,43 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
 
             t.parallel();
-            t.run("ipv4_listen_packet", ipv4_listen_packet.make(lib, net));
-            t.run("ipv6_listen_packet", ipv6_listen_packet.make(lib, net));
-            t.run("bound_port_rejects_ipv6_sockets", bound_port_rejects_ipv6_sockets.make(lib, net));
-            t.run("bound_port6_rejects_ipv4_sockets", bound_port6_rejects_ipv4_sockets.make(lib, net));
-            t.run("read_timeout", read_timeout.make(lib, net));
-            t.run("read_timeout_set_while_blocked_maps_timed_out", read_timeout_set_while_blocked_maps_timed_out.make(lib, net));
-            t.run("read_timeout_clear_while_blocked_allows_read_to_continue", read_timeout_clear_while_blocked_allows_read_to_continue.make(lib, net));
-            t.run("write_timeout_set_while_blocked_maps_timed_out", write_timeout_set_while_blocked_maps_timed_out.make(lib, net));
-            t.run("dial_context", dial_context.make(lib, net));
-            t.run("conn_read_timeout_set_while_blocked_maps_timed_out", conn_read_timeout_set_while_blocked_maps_timed_out.make(lib, net));
-            t.run("conn_read_timeout_clear_while_blocked_allows_read_to_continue", conn_read_timeout_clear_while_blocked_allows_read_to_continue.make(lib, net));
-            t.run("conn_zero_length_read_does_not_consume_datagram", conn_zero_length_read_does_not_consume_datagram.make(lib, net));
-            t.run("conn_zero_length_datagram_is_not_eof", conn_zero_length_datagram_is_not_eof.make(lib, net));
-            t.run("conn_close_unblocks_blocked_read", conn_close_unblocks_blocked_read.make(lib, net));
-            t.run("packet_conn_zero_length_read_does_not_consume_datagram", packet_conn_zero_length_read_does_not_consume_datagram.make(lib, net));
-            t.run("packet_conn_preserves_datagram_boundaries", packet_conn_preserves_datagram_boundaries.make(lib, net));
-            t.run("packet_conn_concurrent_bidirectional_rw", packet_conn_concurrent_bidirectional_rw.make(lib, net));
-            t.run("packet_conn_close_unblocks_blocked_read", packet_conn_close_unblocks_blocked_read.make(lib, net));
-            t.run("dial_context_canceled_before_start", dial_context_canceled_before_start.make(lib, net));
-            t.run("dial_context_deadline_exceeded_before_start", dial_context_deadline_exceeded_before_start.make(lib, net));
-            t.run("dial_context_canceled_during_connect", dial_context_canceled_during_connect.make(lib, net));
-            t.run("dial_context_deadline_exceeded_during_connect", dial_context_deadline_exceeded_during_connect.make(lib, net));
-            t.run("packet_conn_as_downcast", packet_conn_as_downcast.make(lib, net));
-            t.run("packet_conn_batch_as_udp_conn", packet_conn_batch_as_udp_conn.make(lib, net));
-            t.run("conn_as_downcast", conn_as_downcast.make(lib, net));
-            t.run("conn_ops_after_close", conn_ops_after_close.make(lib, net));
-            t.run("packet_conn_ops_after_close", packet_conn_ops_after_close.make(lib, net));
+            t.run("ipv4_listen_packet", ipv4_listen_packet.make(std, net));
+            t.run("ipv6_listen_packet", ipv6_listen_packet.make(std, net));
+            t.run("bound_port_rejects_ipv6_sockets", bound_port_rejects_ipv6_sockets.make(std, net));
+            t.run("bound_port6_rejects_ipv4_sockets", bound_port6_rejects_ipv4_sockets.make(std, net));
+            t.run("read_timeout", read_timeout.make(std, net));
+            t.run("read_timeout_set_while_blocked_maps_timed_out", read_timeout_set_while_blocked_maps_timed_out.make(std, net));
+            t.run("read_timeout_clear_while_blocked_allows_read_to_continue", read_timeout_clear_while_blocked_allows_read_to_continue.make(std, net));
+            t.run("write_timeout_set_while_blocked_maps_timed_out", write_timeout_set_while_blocked_maps_timed_out.make(std, net));
+            t.run("dial_context", dial_context.make(std, net));
+            t.run("conn_read_timeout_set_while_blocked_maps_timed_out", conn_read_timeout_set_while_blocked_maps_timed_out.make(std, net));
+            t.run("conn_read_timeout_clear_while_blocked_allows_read_to_continue", conn_read_timeout_clear_while_blocked_allows_read_to_continue.make(std, net));
+            t.run("conn_zero_length_read_does_not_consume_datagram", conn_zero_length_read_does_not_consume_datagram.make(std, net));
+            t.run("conn_zero_length_datagram_is_not_eof", conn_zero_length_datagram_is_not_eof.make(std, net));
+            t.run("conn_close_unblocks_blocked_read", conn_close_unblocks_blocked_read.make(std, net));
+            t.run("packet_conn_zero_length_read_does_not_consume_datagram", packet_conn_zero_length_read_does_not_consume_datagram.make(std, net));
+            t.run("packet_conn_preserves_datagram_boundaries", packet_conn_preserves_datagram_boundaries.make(std, net));
+            t.run("packet_conn_concurrent_bidirectional_rw", packet_conn_concurrent_bidirectional_rw.make(std, net));
+            t.run("packet_conn_close_unblocks_blocked_read", packet_conn_close_unblocks_blocked_read.make(std, net));
+            t.run("dial_context_canceled_before_start", dial_context_canceled_before_start.make(std, net));
+            t.run("dial_context_deadline_exceeded_before_start", dial_context_deadline_exceeded_before_start.make(std, net));
+            t.run("dial_context_canceled_during_connect", dial_context_canceled_during_connect.make(std, net));
+            t.run("dial_context_deadline_exceeded_during_connect", dial_context_deadline_exceeded_during_connect.make(std, net));
+            t.run("packet_conn_as_downcast", packet_conn_as_downcast.make(std, net));
+            t.run("packet_conn_batch_as_udp_conn", packet_conn_batch_as_udp_conn.make(std, net));
+            t.run("conn_as_downcast", conn_as_downcast.make(std, net));
+            t.run("conn_ops_after_close", conn_ops_after_close.make(std, net));
+            t.run("packet_conn_ops_after_close", packet_conn_ops_after_close.make(std, net));
             return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_api.TestRunner.make(Runner).new(runner);
 }

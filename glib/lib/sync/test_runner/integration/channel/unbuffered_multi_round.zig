@@ -1,9 +1,10 @@
 const stdz = @import("stdz");
 const testing_api = @import("testing");
+const Channel = @import("../../../Channel.zig");
 const suite_mod = @import("suite.zig");
 
-pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.TestRunner {
-    const Suite = suite_mod.Suite(lib, Channel);
+pub fn make(comptime std: type, comptime time: type, comptime ChannelFactory: Channel.FactoryType) testing_api.TestRunner {
+    const Suite = suite_mod.Suite(std, time, ChannelFactory);
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 98304 },
 
@@ -12,7 +13,7 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             Suite.testUnbufferedMultiRound(allocator) catch |err| {
                 t.logFatal(@errorName(err));
@@ -23,11 +24,11 @@ pub fn make(comptime lib: type, comptime Channel: fn (type) type) testing_api.Te
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_api.TestRunner.make(Runner).new(runner);
 }

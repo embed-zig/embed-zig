@@ -21,7 +21,8 @@ const notify_request = "PAIR:NOTIFY";
 const notify_value = "n1";
 const indicate_request = "PAIR:INDICATE";
 const indicate_value = "i1";
-const pair_timeout_ms: u32 = 5000;
+const pair_timeout: glib.time.duration.Duration = 5 * glib.time.duration.Second;
+const poll_interval: glib.time.duration.Duration = glib.time.duration.MilliSecond;
 
 pub fn makeCentral(comptime grt: type, host: anytype) glib.testing.TestRunner {
     const HostPtr = @TypeOf(host);
@@ -158,15 +159,15 @@ fn runCentralRole(comptime grt: type, c: Central) !void {
     try grt.std.testing.expectEqual(Central.State.idle, c.getState());
     try c.startScanning(.{
         .active = true,
-        .timeout_ms = pair_timeout_ms,
+        .timeout = pair_timeout,
         .service_uuids = &.{service_uuid},
     });
 
-    const found = try waitForFoundDevice(grt, &state, pair_timeout_ms);
+    const found = try waitForFoundDevice(grt, &state, pair_timeout);
     c.stopScanning();
 
     _ = try c.connect(found.addr, found.addr_type, .{});
-    const conn_handle = try waitForConnHandle(grt, &state, pair_timeout_ms);
+    const conn_handle = try waitForConnHandle(grt, &state, pair_timeout);
 
     var services: [8]Central.DiscoveredService = undefined;
     const svc_count = try c.discoverServices(conn_handle, &services);
@@ -187,17 +188,17 @@ fn runCentralRole(comptime grt: type, c: Central) !void {
 
     try c.subscribe(conn_handle, ch.cccd_handle);
     try c.gattWrite(conn_handle, ch.value_handle, notify_request);
-    try waitForNotification(grt, &state, 1, pair_timeout_ms);
+    try waitForNotification(grt, &state, 1, pair_timeout);
     try expectLastNotification(grt, &state, ch.value_handle, notify_value);
 
     try c.gattWrite(conn_handle, ch.cccd_handle, &[_]u8{ 0x03, 0x00 });
     try c.gattWrite(conn_handle, ch.value_handle, indicate_request);
-    try waitForNotification(grt, &state, 2, pair_timeout_ms);
+    try waitForNotification(grt, &state, 2, pair_timeout);
     try expectLastNotification(grt, &state, ch.value_handle, indicate_value);
 
     try c.gattWrite(conn_handle, ch.cccd_handle, &[_]u8{ 0x00, 0x00 });
     c.disconnect(conn_handle);
-    try waitForDisconnected(grt, &state, pair_timeout_ms);
+    try waitForDisconnected(grt, &state, pair_timeout);
 }
 
 fn runPeripheralRole(comptime grt: type, p: Peripheral) !void {
@@ -284,10 +285,10 @@ fn runPeripheralRole(comptime grt: type, p: Peripheral) !void {
         .service_uuids = &.{service_uuid},
     });
 
-    try waitForPeripheralConnected(grt, &state, pair_timeout_ms);
+    try waitForPeripheralConnected(grt, &state, pair_timeout);
 
-    var waited_ms: u32 = 0;
-    while (waited_ms <= pair_timeout_ms) : (waited_ms += 1) {
+    var waited: glib.time.duration.Duration = 0;
+    while (waited <= pair_timeout) : (waited += poll_interval) {
         var conn_handle: u16 = 0;
         var do_notify = false;
         var do_indicate = false;
@@ -326,7 +327,7 @@ fn runPeripheralRole(comptime grt: type, p: Peripheral) !void {
         }
         if (disconnected) break;
 
-        grt.std.Thread.sleep(1 * 1_000_000);
+        grt.std.Thread.sleep(@intCast(poll_interval));
     }
 
     try grt.std.testing.expectEqual(Peripheral.State.idle, p.getState());
@@ -337,43 +338,40 @@ const FoundDevice = struct {
     addr_type: Central.AddrType,
 };
 
-fn waitForFoundDevice(comptime grt: type, state: anytype, timeout_ms: u32) !FoundDevice {
-    const NS_PER_MS: u64 = 1_000_000;
-    var waited_ms: u32 = 0;
-    while (waited_ms <= timeout_ms) : (waited_ms += 1) {
+fn waitForFoundDevice(comptime grt: type, state: anytype, timeout: glib.time.duration.Duration) !FoundDevice {
+    var waited: glib.time.duration.Duration = 0;
+    while (waited <= timeout) : (waited += poll_interval) {
         state.mutex.lock();
         const found = state.found;
         const addr = state.addr;
         const addr_type = state.addr_type;
         state.mutex.unlock();
         if (found) return .{ .addr = addr, .addr_type = addr_type };
-        grt.std.Thread.sleep(NS_PER_MS);
+        grt.std.Thread.sleep(@intCast(poll_interval));
     }
     return error.Timeout;
 }
 
-fn waitForConnHandle(comptime grt: type, state: anytype, timeout_ms: u32) !u16 {
-    const NS_PER_MS: u64 = 1_000_000;
-    var waited_ms: u32 = 0;
-    while (waited_ms <= timeout_ms) : (waited_ms += 1) {
+fn waitForConnHandle(comptime grt: type, state: anytype, timeout: glib.time.duration.Duration) !u16 {
+    var waited: glib.time.duration.Duration = 0;
+    while (waited <= timeout) : (waited += poll_interval) {
         state.mutex.lock();
         const conn_handle = state.conn_handle;
         state.mutex.unlock();
         if (conn_handle != 0) return conn_handle;
-        grt.std.Thread.sleep(NS_PER_MS);
+        grt.std.Thread.sleep(@intCast(poll_interval));
     }
     return error.Timeout;
 }
 
-fn waitForNotification(comptime grt: type, state: anytype, want_count: u32, timeout_ms: u32) !void {
-    const NS_PER_MS: u64 = 1_000_000;
-    var waited_ms: u32 = 0;
-    while (waited_ms <= timeout_ms) : (waited_ms += 1) {
+fn waitForNotification(comptime grt: type, state: anytype, want_count: u32, timeout: glib.time.duration.Duration) !void {
+    var waited: glib.time.duration.Duration = 0;
+    while (waited <= timeout) : (waited += poll_interval) {
         state.mutex.lock();
         const count = state.notification_count;
         state.mutex.unlock();
         if (count >= want_count) return;
-        grt.std.Thread.sleep(NS_PER_MS);
+        grt.std.Thread.sleep(@intCast(poll_interval));
     }
     return error.Timeout;
 }
@@ -385,28 +383,26 @@ fn expectLastNotification(comptime grt: type, state: anytype, attr_handle: u16, 
     try grt.std.testing.expect(grt.std.mem.eql(u8, state.last_notification[0..state.last_notification_len], want));
 }
 
-fn waitForDisconnected(comptime grt: type, state: anytype, timeout_ms: u32) !void {
-    const NS_PER_MS: u64 = 1_000_000;
-    var waited_ms: u32 = 0;
-    while (waited_ms <= timeout_ms) : (waited_ms += 1) {
+fn waitForDisconnected(comptime grt: type, state: anytype, timeout: glib.time.duration.Duration) !void {
+    var waited: glib.time.duration.Duration = 0;
+    while (waited <= timeout) : (waited += poll_interval) {
         state.mutex.lock();
         const disconnected = state.disconnected;
         state.mutex.unlock();
         if (disconnected) return;
-        grt.std.Thread.sleep(NS_PER_MS);
+        grt.std.Thread.sleep(@intCast(poll_interval));
     }
     return error.Timeout;
 }
 
-fn waitForPeripheralConnected(comptime grt: type, state: anytype, timeout_ms: u32) !void {
-    const NS_PER_MS: u64 = 1_000_000;
-    var waited_ms: u32 = 0;
-    while (waited_ms <= timeout_ms) : (waited_ms += 1) {
+fn waitForPeripheralConnected(comptime grt: type, state: anytype, timeout: glib.time.duration.Duration) !void {
+    var waited: glib.time.duration.Duration = 0;
+    while (waited <= timeout) : (waited += poll_interval) {
         state.mutex.lock();
         const connected = state.connected;
         state.mutex.unlock();
         if (connected) return;
-        grt.std.Thread.sleep(NS_PER_MS);
+        grt.std.Thread.sleep(@intCast(poll_interval));
     }
     return error.Timeout;
 }
@@ -420,9 +416,9 @@ fn isDisconnectRace(state: anytype, conn_handle: u16) bool {
 fn waitForDisconnectRace(comptime grt: type, p: Peripheral, state: anytype, conn_handle: u16) bool {
     if (p.getState() != .connected or isDisconnectRace(state, conn_handle)) return true;
 
-    var waited_ms: u32 = 0;
-    while (waited_ms < 50) : (waited_ms += 1) {
-        grt.std.Thread.sleep(1 * 1_000_000);
+    var waited: glib.time.duration.Duration = 0;
+    while (waited < 50 * glib.time.duration.MilliSecond) : (waited += poll_interval) {
+        grt.std.Thread.sleep(@intCast(poll_interval));
         if (p.getState() != .connected or isDisconnectRace(state, conn_handle)) return true;
     }
     return false;

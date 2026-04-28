@@ -8,6 +8,7 @@
 
 const builtin = @import("builtin");
 const stdz = @import("stdz");
+const time_mod = @import("time");
 const Self = @This();
 const T = @import("T.zig");
 
@@ -87,9 +88,9 @@ pub fn make(comptime RunnerType: type) type {
 }
 
 pub fn fromFn(
-    comptime lib: type,
+    comptime std: type,
     comptime stack_size: usize,
-    comptime run_fn: *const fn (t: *T, allocator: lib.mem.Allocator) anyerror!void,
+    comptime run_fn: *const fn (t: *T, allocator: std.mem.Allocator) anyerror!void,
 ) Self {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = stack_size },
@@ -127,10 +128,10 @@ fn defaultCtx() *anyopaque {
 
 fn noopDeinit(_: Self, _: stdz.mem.Allocator) void {}
 
-pub fn TestRunner(comptime lib: type) Self {
+pub fn TestRunner(comptime std: type, comptime time: type) Self {
     if (builtin.target.os.tag == .freestanding) {
         const Runner = struct {
-            pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+            pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
                 _ = self;
                 _ = allocator;
             }
@@ -156,7 +157,7 @@ pub fn TestRunner(comptime lib: type) Self {
 
     const TestCase = struct {
         fn testForwardsRunAndDeinit() !void {
-            const std = @import("std");
+            const host_std = @import("std");
 
             const RunnerState = struct {
                 run_hits: usize = 0,
@@ -181,9 +182,9 @@ pub fn TestRunner(comptime lib: type) Self {
             };
 
             var state = RunnerState{};
-            var handle = T.new(std, .test_run);
+            var handle = T.new(std, time, .test_run);
             defer {
-                std.testing.expect(handle.wait()) catch @panic("handle wait failed");
+                host_std.testing.expect(handle.wait()) catch @panic("handle wait failed");
                 handle.deinit();
             }
             var runner = Self.init(.{
@@ -196,18 +197,18 @@ pub fn TestRunner(comptime lib: type) Self {
                 .memory_limit = 99,
             });
 
-            try std.testing.expectEqual(@as(usize, 1234), runner.spawn_config.stack_size);
-            try std.testing.expectEqual(@as(?usize, 99), runner.memory_limit);
-            try std.testing.expect(runner.run(&handle, std.testing.allocator));
-            try std.testing.expectEqual(@as(usize, 1), state.run_hits);
-            try std.testing.expectEqual(@intFromPtr(std.testing.allocator.ptr), state.expected_allocator_ptr);
+            try host_std.testing.expectEqual(@as(usize, 1234), runner.spawn_config.stack_size);
+            try host_std.testing.expectEqual(@as(?usize, 99), runner.memory_limit);
+            try host_std.testing.expect(runner.run(&handle, host_std.testing.allocator));
+            try host_std.testing.expectEqual(@as(usize, 1), state.run_hits);
+            try host_std.testing.expectEqual(@intFromPtr(host_std.testing.allocator.ptr), state.expected_allocator_ptr);
 
-            runner.deinit(std.testing.allocator);
-            try std.testing.expectEqual(@as(usize, 1), state.deinit_hits);
+            runner.deinit(host_std.testing.allocator);
+            try host_std.testing.expectEqual(@as(usize, 1), state.deinit_hits);
         }
 
         fn testNewOwnsState() !void {
-            const std = @import("std");
+            const host_std = @import("std");
 
             const OwnedArgs = struct {
                 seed: usize,
@@ -231,9 +232,9 @@ pub fn TestRunner(comptime lib: type) Self {
                 }
             };
 
-            var t = T.new(std, .test_run);
+            var t = T.new(std, time, .test_run);
             defer {
-                std.testing.expect(t.wait()) catch @panic("t wait failed");
+                host_std.testing.expect(t.wait()) catch @panic("t wait failed");
                 t.deinit();
             }
             var ctx = OwnedArgs{
@@ -243,16 +244,16 @@ pub fn TestRunner(comptime lib: type) Self {
             const RunnerType = Self.make(OwnedArgs);
             var runner = RunnerType.new(&ctx);
 
-            try std.testing.expectEqual(@as(usize, 4096), runner.spawn_config.stack_size);
-            try std.testing.expectEqual(@as(?usize, 21), runner.memory_limit);
-            try std.testing.expect(runner.run(&t, std.testing.allocator));
-            try std.testing.expectEqual(@as(usize, 0), ctx.deinit_hits);
-            runner.deinit(std.testing.allocator);
-            try std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
+            try host_std.testing.expectEqual(@as(usize, 4096), runner.spawn_config.stack_size);
+            try host_std.testing.expectEqual(@as(?usize, 21), runner.memory_limit);
+            try host_std.testing.expect(runner.run(&t, host_std.testing.allocator));
+            try host_std.testing.expectEqual(@as(usize, 0), ctx.deinit_hits);
+            runner.deinit(host_std.testing.allocator);
+            try host_std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
         }
 
         fn testNewDeinitWithoutRunIsOk() !void {
-            const std = @import("std");
+            const host_std = @import("std");
 
             const OwnedArgs = struct {
                 deinit_hits: usize = 0,
@@ -279,39 +280,39 @@ pub fn TestRunner(comptime lib: type) Self {
             const RunnerType = Self.make(OwnedArgs);
             var runner = RunnerType.new(&ctx);
 
-            runner.deinit(std.testing.allocator);
-            try std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
+            runner.deinit(host_std.testing.allocator);
+            try host_std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
         }
 
         fn testInitFailureMarksTestFailed() !void {
-            const std = @import("std");
+            const host_std = @import("std");
 
             const Support = struct {
-                var entries: std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: std.Thread.Mutex = .{};
+                var entries: host_std.ArrayListUnmanaged([]u8) = .{};
+                var mutex: host_std.Thread.Mutex = .{};
 
                 fn reset() void {
                     mutex.lock();
                     defer mutex.unlock();
                     for (entries.items) |entry| {
-                        std.testing.allocator.free(entry);
+                        host_std.testing.allocator.free(entry);
                     }
-                    entries.deinit(std.testing.allocator);
+                    entries.deinit(host_std.testing.allocator);
                     entries = .{};
                 }
 
                 fn append(comptime format: []const u8, args: anytype) void {
-                    const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
+                    const message = host_std.fmt.allocPrint(host_std.testing.allocator, format, args) catch @panic("OOM");
                     mutex.lock();
                     defer mutex.unlock();
-                    entries.append(std.testing.allocator, message) catch @panic("OOM");
+                    entries.append(host_std.testing.allocator, message) catch @panic("OOM");
                 }
 
-                fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
+                fn joinedLog(allocator: host_std.mem.Allocator) ![]u8 {
                     mutex.lock();
                     defer mutex.unlock();
 
-                    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
+                    var bytes = try host_std.ArrayList(u8).initCapacity(allocator, 0);
                     errdefer bytes.deinit(allocator);
 
                     for (entries.items, 0..) |entry, idx| {
@@ -325,43 +326,9 @@ pub fn TestRunner(comptime lib: type) Self {
             };
 
             const CapturingLog = struct {
-                pub fn scoped(comptime scope: @Type(.enum_literal)) type {
-                    _ = scope;
-                    return struct {
-                        pub fn info(comptime format: []const u8, args: anytype) void {
-                            Support.append(format, args);
-                        }
-
-                        pub fn err(comptime format: []const u8, args: anytype) void {
-                            Support.append(format, args);
-                        }
-                    };
+                fn err(comptime format: []const u8, args: anytype) void {
+                    Support.append(format, args);
                 }
-            };
-
-            const TestLib = struct {
-                pub const mem = stdz.mem;
-                pub const fmt = stdz.fmt;
-                pub const Thread = std.Thread;
-                pub const log = CapturingLog;
-                pub fn ArrayList(comptime Elem: type) type {
-                    return std.ArrayList(Elem);
-                }
-                pub const testing = struct {
-                    pub const allocator = std.testing.allocator;
-                };
-                pub const time = struct {
-                    pub const ns_per_ms = std.time.ns_per_ms;
-                    pub const Instant = std.time.Instant;
-
-                    pub fn nanoTimestamp() i128 {
-                        return std.time.nanoTimestamp();
-                    }
-
-                    pub fn milliTimestamp() i64 {
-                        return std.time.milliTimestamp();
-                    }
-                };
             };
 
             const OwnedArgs = struct {
@@ -387,36 +354,79 @@ pub fn TestRunner(comptime lib: type) Self {
                 }
             };
 
+            const TestState = struct {
+                failed: bool = false,
+            };
+            const TestVTable = struct {
+                fn noopCreated(_: *T) void {}
+                fn noopDestroyed(_: *T) void {}
+                fn noopTDeinit(_: *T) void {}
+                fn noopDestroyDebug(_: *T, _: []const u8) void {}
+                fn noopInfo(_: *anyopaque, _: []const u8) void {}
+                fn recordError(ptr: *anyopaque, message: []const u8) void {
+                    const state: *TestState = @ptrCast(@alignCast(ptr));
+                    state.failed = true;
+                    CapturingLog.err("{s}", .{message});
+                }
+                fn noopFatal(_: *T, _: []const u8) void {}
+                fn noopTimeout(_: *T, _: time_mod.duration.Duration) void {}
+                fn noopRun(_: *T, _: []const u8, _: Self) void {}
+                fn wait(t: *T) bool {
+                    const state: *TestState = @ptrCast(@alignCast(t.ptr));
+                    return !state.failed;
+                }
+
+                const vtable: T.VTable = .{
+                    .onCreatedFn = noopCreated,
+                    .onDestroyedFn = noopDestroyed,
+                    .deinitFn = noopTDeinit,
+                    .enableDestroyDebugFn = noopDestroyDebug,
+                    .logInfoFn = noopInfo,
+                    .logErrorFn = recordError,
+                    .logFatalFn = noopFatal,
+                    .timeoutFn = noopTimeout,
+                    .runFn = noopRun,
+                    .waitFn = wait,
+                };
+            };
+
             Support.reset();
             defer Support.reset();
 
-            var t = T.new(TestLib, .test_run);
-            defer t.deinit();
+            var test_state = TestState{};
+            var t: T = .{
+                .ptr = @ptrCast(&test_state),
+                .vtable = &TestVTable.vtable,
+                .allocator = host_std.testing.allocator,
+                .ctx = undefined,
+                .test_name = "init_failure",
+                .relative_started = 0,
+            };
 
             var ctx = OwnedArgs{};
             const RunnerType = Self.make(OwnedArgs);
             var runner = RunnerType.new(&ctx);
 
-            try std.testing.expect(!runner.run(&t, std.testing.allocator));
-            try std.testing.expectEqual(@as(usize, 0), ctx.run_hits);
-            try std.testing.expect(!t.wait());
+            try host_std.testing.expect(!runner.run(&t, host_std.testing.allocator));
+            try host_std.testing.expectEqual(@as(usize, 0), ctx.run_hits);
+            try host_std.testing.expect(!t.wait());
 
-            runner.deinit(std.testing.allocator);
-            try std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
+            runner.deinit(host_std.testing.allocator);
+            try host_std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
 
-            const log = try Support.joinedLog(std.testing.allocator);
-            defer std.testing.allocator.free(log);
-            try std.testing.expect(std.mem.indexOf(u8, log, "runner init failed: error.InitFailed") != null);
+            const log = try Support.joinedLog(host_std.testing.allocator);
+            defer host_std.testing.allocator.free(log);
+            try host_std.testing.expect(host_std.mem.indexOf(u8, log, "runner init failed: error.InitFailed") != null);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *T, allocator: std.mem.Allocator) bool {
             _ = self;
 
             TestCase.testForwardsRunAndDeinit() catch |err| {
@@ -436,16 +446,16 @@ pub fn TestRunner(comptime lib: type) Self {
                 return false;
             };
             const FromFnCases = struct {
-                fn run(_: *T, case_allocator: lib.mem.Allocator) !void {
+                fn run(_: *T, case_allocator: std.mem.Allocator) !void {
                     _ = case_allocator;
                 }
             };
-            var from_fn_runner = Self.fromFn(lib, 256 * 1024, FromFnCases.run);
+            var from_fn_runner = Self.fromFn(std, 256 * 1024, FromFnCases.run);
             if (!from_fn_runner.run(t, allocator)) return false;
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

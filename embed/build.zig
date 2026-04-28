@@ -17,20 +17,19 @@ pub fn build(b: *std.Build) void {
     inline for (@typeInfo(Libraries).@"struct".decls) |decl| {
         linkLibrary(@field(Libraries, decl.name), b, target, optimize);
     }
-
 }
 
 fn linkLibrary(
-    comptime lib: type,
+    comptime library: type,
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
-    const params_len = @typeInfo(@TypeOf(lib.link)).@"fn".params.len;
+    const params_len = @typeInfo(@TypeOf(library.link)).@"fn".params.len;
     if (params_len == 1) {
-        lib.link(b);
+        library.link(b);
     } else if (params_len == 3) {
-        lib.link(b, target, optimize);
+        library.link(b, target, optimize);
     } else {
         @compileError("library link function must accept (b) or (b, target, optimize)");
     }

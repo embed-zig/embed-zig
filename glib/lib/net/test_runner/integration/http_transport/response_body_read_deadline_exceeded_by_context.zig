@@ -4,8 +4,8 @@ const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Utils = test_utils.make2(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(std, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
@@ -15,22 +15,23 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: lib.mem.Allocator) bool {
+        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: std.mem.Allocator) bool {
             _ = runner;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Http = Utils.Http;
                     const testing = struct {
-                        pub var allocator: lib.mem.Allocator = undefined;
-                        pub const expect = lib.testing.expect;
-                        pub const expectEqual = lib.testing.expectEqual;
-                        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-                        pub const expectError = lib.testing.expectError;
+                        pub var allocator: std.mem.Allocator = undefined;
+                        pub const expect = std.testing.expect;
+                        pub const expectEqual = std.testing.expectEqual;
+                        pub const expectEqualStrings = std.testing.expectEqualStrings;
+                        pub const expectError = std.testing.expectError;
                     };
                     testing.allocator = a;
 
                     const EmptyState = struct {};
-                    try Utils.withServerState(testing.allocator, 
+                    try Utils.withServerState(
+                        testing.allocator,
                         EmptyState{},
                         struct {
                             fn run(conn: net.Conn, _: *EmptyState) !void {
@@ -47,13 +48,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 // Keep the server-side body write comfortably behind the
                                 // client-side deadline so this remains a body-read
                                 // deadline test even on slower runners.
-                                lib.Thread.sleep(300 * lib.time.ns_per_ms);
+                                std.Thread.sleep(@intCast(300 * net.time.duration.MilliSecond));
                                 io.writeAll(@TypeOf(c), &c, "late") catch {};
                             }
                         }.run,
                         struct {
-                            fn run(_: lib.mem.Allocator, port: u16, _: *EmptyState) !void {
-                                const Context = context_mod.make(lib);
+                            fn run(_: std.mem.Allocator, port: u16, _: *EmptyState) !void {
+                                const Context = context_mod.make(std, net.time);
                                 var ctx_api = try Context.init(testing.allocator);
                                 defer ctx_api.deinit();
                                 var ctx = try ctx_api.withCancel(ctx_api.background());
@@ -62,7 +63,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 var transport = try Http.Transport.init(testing.allocator, .{});
                                 defer transport.deinit();
 
-                                const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/body-deadline", .{port});
+                                const url = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/body-deadline", .{port});
                                 defer testing.allocator.free(url);
 
                                 var req = try Http.Request.init(testing.allocator, "GET", url);
@@ -71,19 +72,18 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 var resp = try transport.roundTrip(&req);
                                 defer resp.deinit();
 
-                                const deadline_thread = try lib.Thread.spawn(.{}, struct {
+                                const deadline_thread = try std.Thread.spawn(.{}, struct {
                                     fn run(deadline_ctx: context_mod.Context, comptime thread_lib: type) void {
-                                        thread_lib.Thread.sleep(30 * thread_lib.time.ns_per_ms);
+                                        thread_lib.Thread.sleep(@intCast(30 * net.time.duration.MilliSecond));
                                         deadline_ctx.cancelWithCause(error.DeadlineExceeded);
                                     }
-                                }.run, .{ ctx, lib });
+                                }.run, .{ ctx, std });
                                 defer deadline_thread.join();
 
                                 try testing.expectError(error.DeadlineExceeded, Utils.readBody(testing.allocator, resp));
                             }
                         }.run,
                     );
-                            
                 }
             };
             Body.call(run_allocator) catch |err| {

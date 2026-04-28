@@ -39,7 +39,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
         var spec = SpecType.init();
         break :blk spec.testRunner(grt, .{
             .pipeline = .{
-                .tick_interval_ns = grt.std.time.ns_per_ms,
+                .tick_interval = grt.time.duration.MilliSecond,
             },
         });
     };

@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const bt = @import("bt");
 const bt_event = @import("event.zig");
 
@@ -9,7 +10,7 @@ pub const Central = struct {
     peer_addr_type: ?bt.Central.AddrType = null,
     interval: u16 = 0,
     latency: u16 = 0,
-    timeout: u16 = 0,
+    supervision_timeout: glib.time.duration.Duration = 0,
     last_rssi: ?i8 = null,
     name_end: u8 = 0,
     name_buf: [bt_event.max_name_len]u8 = [_]u8{0} ** bt_event.max_name_len,
@@ -42,7 +43,7 @@ pub const Periph = struct {
     last_peer_addr_type: ?bt.Peripheral.AddrType = null,
     last_interval: u16 = 0,
     last_latency: u16 = 0,
-    last_timeout: u16 = 0,
+    last_supervision_timeout: glib.time.duration.Duration = 0,
     last_mtu_conn_handle: ?u16 = null,
     last_mtu: ?u16 = null,
 

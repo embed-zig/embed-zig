@@ -150,9 +150,9 @@ pub fn PrefixReader(comptime Reader: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
     const TestCase = struct {
-        fn readAllReadsUntilEof(allocator: lib.mem.Allocator) !void {
+        fn readAllReadsUntilEof(allocator: std.mem.Allocator) !void {
             const Reader = struct {
                 payload: []const u8 = "hello",
                 offset: usize = 0,
@@ -170,10 +170,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const bytes = try readAll(Reader, &reader, allocator);
             defer allocator.free(bytes);
 
-            try lib.testing.expectEqualStrings("hello", bytes);
+            try std.testing.expectEqualStrings("hello", bytes);
         }
 
-        fn readAllAcceptsEndOfStreamAsEof(allocator: lib.mem.Allocator) !void {
+        fn readAllAcceptsEndOfStreamAsEof(allocator: std.mem.Allocator) !void {
             const Reader = struct {
                 payload: []const u8 = "hello",
                 offset: usize = 0,
@@ -193,10 +193,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const bytes = try readAll(Reader, &reader, allocator);
             defer allocator.free(bytes);
 
-            try lib.testing.expectEqualStrings("hello", bytes);
+            try std.testing.expectEqualStrings("hello", bytes);
         }
 
-        fn readAllReturnsEmptySliceWhenReaderImmediatelyEnds(allocator: lib.mem.Allocator) !void {
+        fn readAllReturnsEmptySliceWhenReaderImmediatelyEnds(allocator: std.mem.Allocator) !void {
             const Reader = struct {
                 fn read(_: *@This(), _: []u8) anyerror!usize {
                     return error.EndOfStream;
@@ -207,10 +207,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const bytes = try readAll(Reader, &reader, allocator);
             defer allocator.free(bytes);
 
-            try lib.testing.expectEqual(@as(usize, 0), bytes.len);
+            try std.testing.expectEqual(@as(usize, 0), bytes.len);
         }
 
-        fn readAllReturnsEmptySliceOnZeroLengthRead(allocator: lib.mem.Allocator) !void {
+        fn readAllReturnsEmptySliceOnZeroLengthRead(allocator: std.mem.Allocator) !void {
             const Reader = struct {
                 fn read(_: *@This(), _: []u8) anyerror!usize {
                     return 0;
@@ -221,10 +221,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const bytes = try readAll(Reader, &reader, allocator);
             defer allocator.free(bytes);
 
-            try lib.testing.expectEqual(@as(usize, 0), bytes.len);
+            try std.testing.expectEqual(@as(usize, 0), bytes.len);
         }
 
-        fn readAllPropagatesNonEofError(allocator: lib.mem.Allocator) !void {
+        fn readAllPropagatesNonEofError(allocator: std.mem.Allocator) !void {
             const Reader = struct {
                 called: bool = false,
 
@@ -238,7 +238,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             };
 
             var reader = Reader{};
-            try lib.testing.expectError(error.ConnectionReset, readAll(Reader, &reader, allocator));
+            try std.testing.expectError(error.ConnectionReset, readAll(Reader, &reader, allocator));
         }
 
         fn readFullFillsDestinationBuffer() !void {
@@ -259,10 +259,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var buf: [5]u8 = undefined;
             try readFull(Reader, &reader, &buf);
 
-            try lib.testing.expectEqualStrings("hello", &buf);
+            try std.testing.expectEqualStrings("hello", &buf);
         }
 
-        fn copyTransfersWholeStream(allocator: lib.mem.Allocator) !void {
+        fn copyTransfersWholeStream(allocator: std.mem.Allocator) !void {
             const Reader = struct {
                 payload: []const u8 = "hello world",
                 offset: usize = 0,
@@ -293,11 +293,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const copied = try copy(Writer, Reader, &writer, &reader, allocator);
             const copied_len: usize = @intCast(copied);
 
-            try lib.testing.expectEqual(@as(u64, 11), copied);
-            try lib.testing.expectEqualStrings("hello world", storage[0..copied_len]);
+            try std.testing.expectEqual(@as(u64, 11), copied);
+            try std.testing.expectEqualStrings("hello world", storage[0..copied_len]);
         }
 
-        fn copyTreatsEndOfStreamAsSuccessfulEof(allocator: lib.mem.Allocator) !void {
+        fn copyTreatsEndOfStreamAsSuccessfulEof(allocator: std.mem.Allocator) !void {
             const Reader = struct {
                 payload: []const u8 = "hello",
                 offset: usize = 0,
@@ -329,11 +329,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const copied = try copy(Writer, Reader, &writer, &reader, allocator);
             const copied_len: usize = @intCast(copied);
 
-            try lib.testing.expectEqual(@as(u64, 5), copied);
-            try lib.testing.expectEqualStrings("hello", storage[0..copied_len]);
+            try std.testing.expectEqual(@as(u64, 5), copied);
+            try std.testing.expectEqualStrings("hello", storage[0..copied_len]);
         }
 
-        fn copyTreatsZeroLengthReadAsSuccessfulEof(allocator: lib.mem.Allocator) !void {
+        fn copyTreatsZeroLengthReadAsSuccessfulEof(allocator: std.mem.Allocator) !void {
             const Reader = struct {
                 payload: []const u8 = "hello",
                 offset: usize = 0,
@@ -365,8 +365,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             const copied = try copy(Writer, Reader, &writer, &reader, allocator);
             const copied_len: usize = @intCast(copied);
 
-            try lib.testing.expectEqual(@as(u64, 5), copied);
-            try lib.testing.expectEqualStrings("hello", storage[0..copied_len]);
+            try std.testing.expectEqual(@as(u64, 5), copied);
+            try std.testing.expectEqualStrings("hello", storage[0..copied_len]);
         }
 
         fn copyBufPropagatesReadError() !void {
@@ -398,8 +398,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var writer = Writer{ .out = &storage };
             var scratch: [2]u8 = "ok".*;
 
-            try lib.testing.expectError(error.ConnectionReset, copyBuf(Writer, Reader, &writer, &reader, &scratch));
-            try lib.testing.expectEqualStrings("ok", storage[0..2]);
+            try std.testing.expectError(error.ConnectionReset, copyBuf(Writer, Reader, &writer, &reader, &scratch));
+            try std.testing.expectEqualStrings("ok", storage[0..2]);
         }
 
         fn copyBufPropagatesWriteError() !void {
@@ -423,7 +423,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var writer = Writer{};
             var scratch: [2]u8 = undefined;
 
-            try lib.testing.expectError(error.BrokenPipe, copyBuf(Writer, Reader, &writer, &reader, &scratch));
+            try std.testing.expectError(error.BrokenPipe, copyBuf(Writer, Reader, &writer, &reader, &scratch));
         }
 
         fn writeAllWritesFullPayload() !void {
@@ -442,7 +442,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var storage: [5]u8 = undefined;
             var writer = Writer{ .out = &storage };
             try writeAll(Writer, &writer, "hello");
-            try lib.testing.expectEqualStrings("hello", &storage);
+            try std.testing.expectEqualStrings("hello", &storage);
         }
 
         fn readFullReturnsEndOfStreamOnShortRead() !void {
@@ -462,7 +462,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var reader = Reader{};
             var buf: [5]u8 = undefined;
 
-            try lib.testing.expectError(error.EndOfStream, readFull(Reader, &reader, &buf));
+            try std.testing.expectError(error.EndOfStream, readFull(Reader, &reader, &buf));
         }
 
         fn readFullPropagatesEndOfStreamError() !void {
@@ -484,7 +484,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var reader = Reader{};
             var buf: [5]u8 = undefined;
 
-            try lib.testing.expectError(error.EndOfStream, readFull(Reader, &reader, &buf));
+            try std.testing.expectError(error.EndOfStream, readFull(Reader, &reader, &buf));
         }
 
         fn readFullWithEmptyBufferIsNoop() !void {
@@ -500,7 +500,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var reader = Reader{};
             var buf: [0]u8 = .{};
             try readFull(Reader, &reader, &buf);
-            try lib.testing.expect(!reader.called);
+            try std.testing.expect(!reader.called);
         }
 
         fn prefixReaderConsumesPrefixBeforeReader() !void {
@@ -521,10 +521,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var buf: [16]u8 = undefined;
             const n = try reader.read(&buf);
 
-            try lib.testing.expectEqualStrings("hello ", buf[0..n]);
+            try std.testing.expectEqualStrings("hello ", buf[0..n]);
 
             const m = try reader.read(buf[n..]);
-            try lib.testing.expectEqualStrings("hello world", buf[0 .. n + m]);
+            try std.testing.expectEqualStrings("hello world", buf[0 .. n + m]);
         }
 
         fn prefixReaderReadByteCrossesPrefixAndReaderBoundary() !void {
@@ -542,11 +542,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             };
 
             var reader = PrefixReader(Reader).init(Reader{}, "ab");
-            try lib.testing.expectEqual('a', try reader.readByte());
-            try lib.testing.expectEqual('b', try reader.readByte());
-            try lib.testing.expectEqual('c', try reader.readByte());
-            try lib.testing.expectEqual('d', try reader.readByte());
-            try lib.testing.expectError(error.EndOfStream, reader.readByte());
+            try std.testing.expectEqual('a', try reader.readByte());
+            try std.testing.expectEqual('b', try reader.readByte());
+            try std.testing.expectEqual('c', try reader.readByte());
+            try std.testing.expectEqual('d', try reader.readByte());
+            try std.testing.expectError(error.EndOfStream, reader.readByte());
         }
 
         fn prefixReaderReadLineReadsCrlfTerminatedLines() !void {
@@ -567,10 +567,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             var line_buf: [16]u8 = undefined;
 
             const line = try reader.readLine(&line_buf);
-            try lib.testing.expectEqualStrings("line", line);
+            try std.testing.expectEqualStrings("line", line);
 
             const tail = try reader.readLine(&line_buf);
-            try lib.testing.expectEqualStrings("tail", tail);
+            try std.testing.expectEqualStrings("tail", tail);
         }
 
         fn prefixReaderReadLineReturnsEndOfStreamWithoutTrailingCrlf() !void {
@@ -589,7 +589,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             var reader = PrefixReader(Reader).init(Reader{}, "");
             var line_buf: [16]u8 = undefined;
-            try lib.testing.expectError(error.EndOfStream, reader.readLine(&line_buf));
+            try std.testing.expectError(error.EndOfStream, reader.readLine(&line_buf));
         }
 
         fn prefixReaderReadLineReturnsBufferTooSmallForLongLine() !void {
@@ -608,7 +608,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             var reader = PrefixReader(Reader).init(Reader{}, "");
             var line_buf: [4]u8 = undefined;
-            try lib.testing.expectError(error.BufferTooSmall, reader.readLine(&line_buf));
+            try std.testing.expectError(error.BufferTooSmall, reader.readLine(&line_buf));
         }
 
         fn prefixReaderExpectCrlfAcceptsAndRejectsLineEndings() !void {
@@ -627,7 +627,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             var reader = PrefixReader(Reader).init(Reader{}, "");
             try reader.expectCrlf();
-            try lib.testing.expectError(error.InvalidResponse, reader.expectCrlf());
+            try std.testing.expectError(error.InvalidResponse, reader.expectCrlf());
         }
 
         fn prefixReaderExpectCrlfCrossesPrefixAndReaderBoundary() !void {
@@ -656,7 +656,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             };
 
             var writer = Writer{};
-            try lib.testing.expectError(error.Unexpected, writeAll(Writer, &writer, "hello"));
+            try std.testing.expectError(error.Unexpected, writeAll(Writer, &writer, "hello"));
         }
 
         fn writeAllPropagatesWriteError() !void {
@@ -673,7 +673,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             };
 
             var writer = Writer{};
-            try lib.testing.expectError(error.BrokenPipe, writeAll(Writer, &writer, "hello"));
+            try std.testing.expectError(error.BrokenPipe, writeAll(Writer, &writer, "hello"));
         }
 
         fn writeAllWithEmptyPayloadIsNoop() !void {
@@ -688,17 +688,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             var writer = Writer{};
             try writeAll(Writer, &writer, "");
-            try lib.testing.expect(!writer.called);
+            try std.testing.expect(!writer.called);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
 
             TestCase.readAllReadsUntilEof(allocator) catch |err| {
@@ -804,7 +804,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

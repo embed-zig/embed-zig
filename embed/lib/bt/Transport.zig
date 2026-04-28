@@ -12,6 +12,8 @@
 //!   const HciType = @import("bt/host/Hci.zig").Hci(stdz);
 //!   var hci = HciType.init(transport, .{});
 
+const glib = @import("glib");
+
 const root = @This();
 
 ptr: *anyopaque,
@@ -22,8 +24,8 @@ pub const VTable = struct {
     read: *const fn (ptr: *anyopaque, buf: []u8) ReadError!usize,
     reset: *const fn (ptr: *anyopaque) void,
     deinit: *const fn (ptr: *anyopaque) void,
-    setReadDeadline: *const fn (ptr: *anyopaque, deadline_ns: ?i64) void,
-    setWriteDeadline: *const fn (ptr: *anyopaque, deadline_ns: ?i64) void,
+    setReadDeadline: *const fn (ptr: *anyopaque, deadline: ?glib.time.instant.Time) void,
+    setWriteDeadline: *const fn (ptr: *anyopaque, deadline: ?glib.time.instant.Time) void,
 };
 
 pub const WriteError = error{
@@ -53,12 +55,12 @@ pub fn reset(self: root) void {
     self.vtable.reset(self.ptr);
 }
 
-pub fn setReadDeadline(self: root, deadline_ns: ?i64) void {
-    self.vtable.setReadDeadline(self.ptr, deadline_ns);
+pub fn setReadDeadline(self: root, deadline: ?glib.time.instant.Time) void {
+    self.vtable.setReadDeadline(self.ptr, deadline);
 }
 
-pub fn setWriteDeadline(self: root, deadline_ns: ?i64) void {
-    self.vtable.setWriteDeadline(self.ptr, deadline_ns);
+pub fn setWriteDeadline(self: root, deadline: ?glib.time.instant.Time) void {
+    self.vtable.setWriteDeadline(self.ptr, deadline);
 }
 
 pub fn deinit(self: root) void {
@@ -90,13 +92,13 @@ pub fn init(pointer: anytype) root {
             const self: *Impl = @ptrCast(@alignCast(ptr));
             self.deinit();
         }
-        fn setReadDeadlineFn(ptr: *anyopaque, deadline_ns: ?i64) void {
+        fn setReadDeadlineFn(ptr: *anyopaque, deadline: ?glib.time.instant.Time) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            self.setReadDeadline(deadline_ns);
+            self.setReadDeadline(deadline);
         }
-        fn setWriteDeadlineFn(ptr: *anyopaque, deadline_ns: ?i64) void {
+        fn setWriteDeadlineFn(ptr: *anyopaque, deadline: ?glib.time.instant.Time) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            self.setWriteDeadline(deadline_ns);
+            self.setWriteDeadline(deadline);
         }
 
         const vtable = VTable{

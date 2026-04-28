@@ -3,8 +3,8 @@ const context_mod = @import("context");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Utils = test_utils.make2(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(std, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
@@ -14,22 +14,22 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: lib.mem.Allocator) bool {
+        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: std.mem.Allocator) bool {
             _ = runner;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Http = Utils.Http;
                     const testing = struct {
-                        pub var allocator: lib.mem.Allocator = undefined;
-                        pub const expect = lib.testing.expect;
-                        pub const expectEqual = lib.testing.expectEqual;
-                        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-                        pub const expectError = lib.testing.expectError;
+                        pub var allocator: std.mem.Allocator = undefined;
+                        pub const expect = std.testing.expect;
+                        pub const expectEqual = std.testing.expectEqual;
+                        pub const expectEqualStrings = std.testing.expectEqualStrings;
+                        pub const expectError = std.testing.expectError;
                     };
                     testing.allocator = a;
 
-                    const Mutex = lib.Thread.Mutex;
-                    const Condition = lib.Thread.Condition;
+                    const Mutex = std.Thread.Mutex;
+                    const Condition = std.Thread.Condition;
                     const WaitState = struct {
                         mutex: Mutex = .{},
                         cond: Condition = .{},
@@ -42,11 +42,11 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             self.mutex.unlock();
                         }
 
-                        fn wait(self: *@This(), timeout_ms: u32) !void {
+                        fn wait(self: *@This(), timeout: net.time.duration.Duration) !void {
                             self.mutex.lock();
                             defer self.mutex.unlock();
                             if (self.client_done) return;
-                            self.cond.timedWait(&self.mutex, @as(u64, timeout_ms) * lib.time.ns_per_ms) catch return error.TestUnexpectedResult;
+                            self.cond.timedWait(&self.mutex, @intCast(timeout)) catch return error.TestUnexpectedResult;
                             if (!self.client_done) return error.TestUnexpectedResult;
                         }
                     };
@@ -58,35 +58,34 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 var req_buf: [4096]u8 = undefined;
                                 const req_head = try Utils.readRequestHead(conn, &req_buf);
                                 try testing.expect(Utils.hasRequestLine(req_head, "GET /slow HTTP/1.1"));
-                                try state.wait(2000);
+                                try state.wait(2000 * net.time.duration.MilliSecond);
                             }
                         }.run,
                         struct {
-                            fn run(_: lib.mem.Allocator, port: u16, state: *WaitState) !void {
-                            var transport = try Http.Transport.init(testing.allocator, .{});
-                            var transport_active = true;
-                            defer if (transport_active) transport.deinit();
-                            defer state.signal();
+                            fn run(_: std.mem.Allocator, port: u16, state: *WaitState) !void {
+                                var transport = try Http.Transport.init(testing.allocator, .{});
+                                var transport_active = true;
+                                defer if (transport_active) transport.deinit();
+                                defer state.signal();
 
-                            const Context = context_mod.make(lib);
-                            var ctx_api = try Context.init(testing.allocator);
-                            defer ctx_api.deinit();
-                            var timeout_ctx = try ctx_api.withTimeout(ctx_api.background(), 30 * lib.time.ns_per_ms);
-                            defer timeout_ctx.deinit();
+                                const Context = context_mod.make(std, net.time);
+                                var ctx_api = try Context.init(testing.allocator);
+                                defer ctx_api.deinit();
+                                var timeout_ctx = try ctx_api.withTimeout(ctx_api.background(), 30 * net.time.duration.MilliSecond);
+                                defer timeout_ctx.deinit();
 
-                            const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/slow", .{port});
-                            defer testing.allocator.free(url);
+                                const url = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/slow", .{port});
+                                defer testing.allocator.free(url);
 
-                            var req = try Http.Request.init(testing.allocator, "GET", url);
-                            req = req.withContext(timeout_ctx);
+                                var req = try Http.Request.init(testing.allocator, "GET", url);
+                                req = req.withContext(timeout_ctx);
 
-                            try testing.expectError(error.DeadlineExceeded, transport.roundTrip(&req));
-                            transport.deinit();
-                            transport_active = false;
-                        }
+                                try testing.expectError(error.DeadlineExceeded, transport.roundTrip(&req));
+                                transport.deinit();
+                                transport_active = false;
+                            }
                         }.run,
                     );
-                            
                 }
             };
             Body.call(run_allocator) catch |err| {

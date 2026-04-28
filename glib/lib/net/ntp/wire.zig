@@ -1,23 +1,24 @@
-const std = @import("std");
+const host_std = @import("std");
+const time_mod = @import("time");
 const types = @import("types.zig");
 const testing_api = @import("testing");
 
-pub fn generateNonce(comptime lib: type) i64 {
+pub fn generateNonce(comptime std: type) i64 {
     var buf: [8]u8 = undefined;
-    lib.crypto.random.bytes(&buf);
-    const raw = std.mem.readInt(i64, &buf, .little);
+    std.crypto.random.bytes(&buf);
+    const raw = host_std.mem.readInt(i64, &buf, .little);
     return if (raw == 0) 1 else raw;
 }
 
-pub fn buildRequest(buf: *[48]u8, origin_time_ms: i64) void {
+pub fn buildRequest(buf: *[48]u8, origin_time: time_mod.Time) void {
     @memset(buf, 0);
     buf[0] = 0b00_100_011;
     buf[1] = 0;
     buf[2] = 6;
     buf[3] = 0xEC;
 
-    if (origin_time_ms != 0) {
-        const ts = unixMsToNtp(origin_time_ms);
+    if (!origin_time.isZero()) {
+        const ts = timeToNtp(origin_time);
         writeTimestamp(buf[40..48], ts);
     }
 }
@@ -46,52 +47,50 @@ pub fn parseResponse(buf: *const [48]u8, expected_origin: types.NtpTimestamp) ty
     return .{
         .receive_timestamp = receive_timestamp,
         .transmit_timestamp = transmit_timestamp,
-        .receive_time_ms = ntpToUnixMs(receive_timestamp),
-        .transmit_time_ms = ntpToUnixMs(transmit_timestamp),
+        .receive_time = ntpToTime(receive_timestamp),
+        .transmit_time = ntpToTime(transmit_timestamp),
         .stratum = stratum,
     };
 }
 
 pub fn readTimestamp(buf: *const [8]u8) types.NtpTimestamp {
     return .{
-        .seconds = @as(i64, std.mem.readInt(u32, buf[0..4], .big)),
-        .fraction = std.mem.readInt(u32, buf[4..8], .big),
+        .seconds = @as(i64, host_std.mem.readInt(u32, buf[0..4], .big)),
+        .fraction = host_std.mem.readInt(u32, buf[4..8], .big),
     };
 }
 
 pub fn writeTimestamp(buf: *[8]u8, ts: types.NtpTimestamp) void {
-    std.mem.writeInt(u32, buf[0..4], @truncate(@as(u64, @bitCast(ts.seconds))), .big);
-    std.mem.writeInt(u32, buf[4..8], ts.fraction, .big);
+    host_std.mem.writeInt(u32, buf[0..4], @truncate(@as(u64, @bitCast(ts.seconds))), .big);
+    host_std.mem.writeInt(u32, buf[4..8], ts.fraction, .big);
 }
 
-pub fn ntpToUnixMs(ntp: types.NtpTimestamp) i64 {
+pub fn ntpToTime(ntp: types.NtpTimestamp) time_mod.Time {
     const unix_secs: i64 = ntp.seconds - types.NTP_UNIX_OFFSET;
-    const ms: i64 = (@as(i64, ntp.fraction) * 1000) >> 32;
-    return unix_secs * 1000 + ms;
+    const nsec: i64 = @intCast((@as(u128, ntp.fraction) * @as(u128, @intCast(time_mod.duration.Second))) >> 32);
+    return time_mod.unix(unix_secs, nsec);
 }
 
-pub fn unixMsToNtp(unix_ms: i64) types.NtpTimestamp {
-    const unix_secs = @divFloor(unix_ms, 1000);
-    const ms = @mod(unix_ms, 1000);
+pub fn timeToNtp(time: time_mod.Time) types.NtpTimestamp {
     return .{
-        .seconds = unix_secs + types.NTP_UNIX_OFFSET,
-        .fraction = @intCast((@as(u64, @intCast(ms)) << 32) / 1000),
+        .seconds = time.sec + types.NTP_UNIX_OFFSET,
+        .fraction = @intCast((@as(u128, time.nsec) << 32) / @as(u128, @intCast(time_mod.duration.Second))),
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
+            const testing = std.testing;
 
-            const test_ms: i64 = 1_706_000_000_000;
-            const ntp = unixMsToNtp(test_ms);
-            const back = ntpToUnixMs(ntp);
-            try testing.expect(@abs(back - test_ms) <= 1);
+            const test_time = time_mod.fromUnixMilli(1_706_000_000_000);
+            const ntp = timeToNtp(test_time);
+            const back = ntpToTime(ntp);
+            try testing.expect(@abs(back.sub(test_time)) <= time_mod.duration.MicroSecond);
 
             {
                 var buf: [48]u8 = undefined;
-                buildRequest(&buf, 0);
+                buildRequest(&buf, .{});
 
                 try testing.expectEqual(@as(u8, 0x23), buf[0]);
                 try testing.expectEqual(@as(u8, 6), buf[2]);
@@ -100,7 +99,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             {
                 var buf: [48]u8 = undefined;
-                buildRequest(&buf, 1_706_012_096_000);
+                buildRequest(&buf, time_mod.fromUnixMilli(1_706_012_096_000));
 
                 var saw_nonzero = false;
                 for (buf[40..48]) |b| {
@@ -110,10 +109,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const origin_ms: i64 = 1_706_012_096_000;
-                const origin = unixMsToNtp(origin_ms);
-                const recv = unixMsToNtp(origin_ms + 12);
-                const xmit = unixMsToNtp(origin_ms + 20);
+                const origin_time = time_mod.fromUnixMilli(1_706_012_096_000);
+                const origin = timeToNtp(origin_time);
+                const recv = timeToNtp(origin_time.add(12 * time_mod.duration.MilliSecond));
+                const xmit = timeToNtp(origin_time.add(20 * time_mod.duration.MilliSecond));
 
                 var buf: [48]u8 = [_]u8{0} ** 48;
                 buf[0] = 0b00_100_100;
@@ -132,10 +131,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const origin_ms: i64 = 1_706_012_096_000;
-                const origin = unixMsToNtp(origin_ms);
-                const recv = unixMsToNtp(origin_ms + 15);
-                const xmit = unixMsToNtp(origin_ms + 30);
+                const origin_time = time_mod.fromUnixMilli(1_706_012_096_000);
+                const origin = timeToNtp(origin_time);
+                const recv_time = origin_time.add(15 * time_mod.duration.MilliSecond);
+                const xmit_time = origin_time.add(30 * time_mod.duration.MilliSecond);
+                const recv = timeToNtp(recv_time);
+                const xmit = timeToNtp(xmit_time);
 
                 var buf: [48]u8 = [_]u8{0} ** 48;
                 buf[0] = 0b00_100_100;
@@ -146,15 +147,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 const resp = try parseResponse(&buf, origin);
                 try testing.expectEqual(@as(u8, 3), resp.stratum);
-                try testing.expect(@abs(resp.receive_time_ms - (origin_ms + 15)) <= 1);
-                try testing.expect(@abs(resp.transmit_time_ms - (origin_ms + 30)) <= 1);
+                try testing.expect(@abs(resp.receive_time.sub(recv_time)) <= time_mod.duration.MicroSecond);
+                try testing.expect(@abs(resp.transmit_time.sub(xmit_time)) <= time_mod.duration.MicroSecond);
             }
 
             {
-                const origin_ms: i64 = 1_706_012_096_000;
-                const origin = unixMsToNtp(origin_ms);
-                const recv = unixMsToNtp(origin_ms + 15);
-                const xmit = unixMsToNtp(origin_ms + 30);
+                const origin_time = time_mod.fromUnixMilli(1_706_012_096_000);
+                const origin = timeToNtp(origin_time);
+                const recv = timeToNtp(origin_time.add(15 * time_mod.duration.MilliSecond));
+                const xmit = timeToNtp(origin_time.add(30 * time_mod.duration.MilliSecond));
 
                 var buf: [48]u8 = [_]u8{0} ** 48;
                 buf[0] = 0b00_011_100;

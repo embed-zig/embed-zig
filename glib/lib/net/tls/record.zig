@@ -1,9 +1,10 @@
+const time_mod = @import("time");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) type {
-    const common = @import("common.zig").make(lib);
-    const crypto = lib.crypto;
-    const mem = lib.mem;
+pub fn make(comptime std: type) type {
+    const common = @import("common.zig").make(std);
+    const crypto = std.crypto;
+    const mem = std.mem;
 
     return struct {
         pub const RecordError = error{
@@ -582,13 +583,13 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             _ = allocator;
-            const testing = lib.testing;
-            const common = @import("common.zig").make(lib);
-            const record = make(lib);
+            const testing = std.testing;
+            const common = @import("common.zig").make(std);
+            const record = make(std);
 
             {
                 const key16 = [_]u8{0x01} ** 16;
@@ -640,8 +641,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var mock = MockConn{};
@@ -689,8 +690,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const key = [_]u8{0x11} ** 16;
@@ -741,8 +742,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const key = [_]u8{0x11} ** 16;
@@ -813,8 +814,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const key = [_]u8{0x33} ** 32;
@@ -871,8 +872,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var mock = MockConn{};
@@ -897,8 +898,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                             pub fn close(_: *@This()) void {}
                             pub fn deinit(_: *@This()) void {}
-                            pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                            pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                            pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                            pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                         };
 
                         var mock = MockConn{};
@@ -953,8 +954,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                             pub fn close(_: *@This()) void {}
                             pub fn deinit(_: *@This()) void {}
-                            pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                            pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                            pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                            pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                         };
 
                         var mock = MockConn{};

@@ -338,7 +338,7 @@ const TestCaseHost = struct {
                     .peer_addr_type = .random,
                     .interval = 24,
                     .latency = 1,
-                    .timeout = 200,
+                    .supervision_timeout = 2 * glib.time.duration.Second,
                 },
             },
         });
@@ -368,7 +368,7 @@ const TestCaseHost = struct {
                     .peer_addr_type = .public,
                     .interval = 30,
                     .latency = 0,
-                    .timeout = 300,
+                    .supervision_timeout = 3 * glib.time.duration.Second,
                 },
             },
         });

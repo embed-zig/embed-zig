@@ -1,7 +1,7 @@
 # lib/net — Go-style networking for embed-zig
 
 High-level networking package built on top of `stdz`. Takes a comptime
-`lib` (the result of `stdz.make(platform)`) and provides Go-style
+`std` (the result of `stdz.make(platform)`) and provides Go-style
 networking primitives.
 
 ## Table of Contents
@@ -27,9 +27,9 @@ networking primitives.
 
 ## Design principles
 
-1. **Comptime `lib` injection.** Every module takes `comptime lib: type`
-   (the sealed stdz namespace) and builds types from `lib.posix`,
-   `lib.Thread`, `lib.time`, etc. No global state, no runtime dispatch.
+1. **Comptime `std` injection.** Every module takes `comptime std: type`
+   (the sealed stdz namespace) and builds types from `std.posix`,
+   `lib.Thread`, `std.posix`, etc. No global state, no runtime dispatch.
 
 2. **Contract-based composition.** `Conn` is the universal byte stream
    contract (like Go's `net.Conn`). TLS wraps a Conn and produces a Conn.
@@ -50,21 +50,22 @@ networking primitives.
 
 ```zig
 const stdz = @import("stdz").make(platform);
+const time = @import("time").make(time_impl);
 const runtime_posix = @import("runtime_posix");
-const net = @import("net").make2(stdz, runtime_posix.make(stdz));
+const net = @import("net").make(stdz, time, runtime_posix.make(stdz));
 ```
 
-`lib/net` depends on the sealed `stdz` namespace for:
-- `lib.posix` — socket, bind, listen, accept, connect, send, recv, sendto, recvfrom, poll, fcntl, getsockopt, close
-- `lib.Thread` — synchronization and worker threads used by TLS, resolver, and runners
-- `lib.time` — deadlines and timeout accounting
+`lib/net` depends on the sealed `stdz` namespace (`std`) for:
+- `std.posix` — socket, bind, listen, accept, connect, send, recv, sendto, recvfrom, poll, fcntl, getsockopt, close
+- `std.Thread` — synchronization and worker threads used by TLS, resolver, and runners
+- `time` — monotonic runtime clock for context deadline accounting
 - `net.netip` — `Addr` / `AddrPort` construction and parsing for public addresses
 
 ## Package structure
 
 ```zig
 lib/
-  net.zig              Root; make2(lib, impl) entry point, Conn, Listener, PacketConn, Dial, Listen
+  net.zig              Root; make(lib, time, impl) entry point, Conn, Listener, PacketConn, Dial, Listen
   net/
     Conn.zig           Type-erased byte stream interface (Go's net.Conn)
     Listener.zig       Type-erased stream listener interface (Go's net.Listener)
@@ -74,7 +75,7 @@ lib/
     TcpConn.zig        Conn over a runtime TCP socket (Go's net.TCPConn)
     UdpConn.zig        PacketConn + Conn over a runtime UDP socket (Go's net.UDPConn)
     TcpListener.zig    Listener for TCP (Go's net.TCPListener)
-    runtime.zig        Runtime socket contract used by Net2
+    runtime.zig        Runtime socket contract used by the root net namespace
     runtime_posix.zig  POSIX-backed host runtime implementation
     Wake.zig           Internal wake helper for runtime-backed polling
     cmux/
@@ -136,8 +137,8 @@ lib/
 └──────────────────────────────────────────────────────┘
 ```
 
-Internally, `Net2` binds the public transport types to a concrete runtime
-implementation through `make2(lib, impl)`. The default host path uses
+Internally, the returned net namespace binds the public transport types to a
+concrete runtime implementation through `make(lib, time, impl)`. The default host path uses
 `runtime_posix`, while public callers still work with `Dialer`, `TcpConn`,
 `TcpListener`, `UdpConn`, `Conn`, `Listener`, and `PacketConn`.
 
@@ -153,12 +154,12 @@ under `lib/net/test_runner/integration/`, all wired from `tests/glib_net.zig`.
 ## Test layout
 
 - `lib/net.zig` exports only `net.test_runner.unit` and `net.test_runner.integration`.
-- `tests/glib_net.zig` wires the std-backed `net/unit/std_posix` and `net/integration/std_posix` suites through `glib.net.make(std, net_backend.posix_impl)`.
+- `tests/glib_net.zig` wires the std-backed `net/unit/std_posix` and `net/integration/std_posix` suites through `glib.net.make(std, time, net_backend.posix_impl)`.
 - `tests/glib_net.zig` wires the `net/unit/std`, `net/integration/std`, `net/unit/gstd`, and `net/integration/gstd` suites so the full higher-level stack exercises both plain `std` and the std-backed `gstd.runtime`.
 - `lib/net/test_runner/unit.zig` aggregates source-file `TestRunner`s and topic namespaces such as `netip`, `http`, `textproto`, `cmux`, `resolver`, `tls`, and `core`.
-- `lib/net/test_runner/integration.zig` fans out into deterministic local runners such as `tcp`, `udp`, `resolver_local`, `cmux`, `http_server`, `http_transport`, and `https_transport`.
-- `lib/net/test_runner/integration/runtime.zig` is the focused `net.make2(...).Runtime` integration slice shared by `net/integration/runtime_posix/*` and `net/integration2/*`.
-- Host-only or optional public-network helpers live under `lib/net/test_runner/integration/compat/` and `integration/public/` and are not wired from `integration.zig`; examples include `integration/compat/tls_std_compat.zig`, `integration/public/tls_dial.zig`, and `integration/public/resolver_dns.zig`.
+- `lib/net/test_runner/integration.zig` fans out into runners such as `tcp`, `udp`, `resolver_local`, `cmux`, `http_server`, `http_transport`, `https_transport`, and the public Aliyun NTP smoke suite.
+- `lib/net/test_runner/integration/runtime.zig` is the focused `net.make(...).Runtime` integration slice shared by runtime-backed integration suites.
+- Host-only compatibility helpers and remaining public-network smoke helpers live under `lib/net/test_runner/integration/compat/` and `integration/public/`; examples include `integration/compat/tls_std_compat.zig`, `integration/public/tls_dial.zig`, and `integration/public/resolver_dns.zig`.
 
 ## net (root)
 
@@ -169,16 +170,18 @@ mirroring Go's `net` package.
 
 Type-erased bidirectional byte stream (Go's `net.Conn`). VTable-based,
 same pattern as `std.mem.Allocator`. Any concrete type with
-read/write/close/deinit plus timeout setters can be wrapped into a Conn.
+read/write/close/deinit plus deadline setters can be wrapped into a Conn.
 
 ```zig
+const time = @import("time");
+
 pub const VTable = struct {
     read:  *const fn (*anyopaque, []u8) ReadError!usize,
     write: *const fn (*anyopaque, []const u8) WriteError!usize,
     close: *const fn (*anyopaque) void,
     deinit: *const fn (*anyopaque) void,
-    setReadTimeout: *const fn (*anyopaque, ms: ?u32) void,
-    setWriteTimeout: *const fn (*anyopaque, ms: ?u32) void,
+    setReadDeadline: *const fn (*anyopaque, deadline: ?time.instant.Time) void,
+    setWriteDeadline: *const fn (*anyopaque, deadline: ?time.instant.Time) void,
 };
 
 pub const ReadError = error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected };
@@ -230,6 +233,8 @@ associated remote address.
 
 ```zig
 // PacketConn.zig
+const time = @import("time");
+
 const PacketConn = @This();
 
 ptr: *anyopaque,
@@ -241,8 +246,8 @@ pub const VTable = struct {
     writeTo: *const fn (ptr: *anyopaque, buf: []const u8, addr: net.netip.AddrPort) WriteToError!usize,
     close: *const fn (ptr: *anyopaque) void,
     deinit: *const fn (ptr: *anyopaque) void,
-    setReadTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
-    setWriteTimeout: *const fn (ptr: *anyopaque, ms: ?u32) void,
+    setReadDeadline: *const fn (ptr: *anyopaque, deadline: ?time.instant.Time) void,
+    setWriteDeadline: *const fn (ptr: *anyopaque, deadline: ?time.instant.Time) void,
 };
 
 pub const ReadFromResult = struct {
@@ -269,7 +274,7 @@ Concrete implementation: **UdpConn**.
 
 ```zig
 // UdpConn.zig
-pub fn UdpConn(comptime lib: type, comptime net: type) type { ... }
+pub fn UdpConn(comptime std: type, comptime net: type) type { ... }
 ```
 
 ### Dial / Listen
@@ -307,7 +312,7 @@ const data = buf[0..result.bytes_read];
 _ = try pc.writeTo("reply", result.addr);
 ```
 
-Also exposed as `net.listenPacket` in the `make2(...)` namespace:
+Also exposed as `net.listenPacket` in the `make(...)` namespace:
 
 ```zig
 pub fn listenPacket(opts: ListenPacketOptions) !PacketConn {
@@ -347,7 +352,7 @@ no CGO, fully portable across stdz platforms.
 | Concurrency             | Single-threaded poll loop             | One detached task per server via `sync.Racer` |
 | Result storage          | Heap `ArrayList(LookupAddr)`          | Caller-provided `[]Address` buffer          |
 | Timeout / retry         | From resolv.conf (`timeout`, `attempts`) | Explicit in `Options`                    |
-| Platform                | Linux-specific, musl port             | Platform-agnostic via `lib.posix`           |
+| Platform                | Linux-specific, musl port             | Platform-agnostic via `std.posix`           |
 | Protocol                | UDP only (no TCP fallback)            | Per-server `Protocol`: udp, tcp, tls, doh |
 
 Resolver-specific note:
@@ -360,7 +365,7 @@ Resolver-specific note:
 ### Resolver struct
 
 ```zig
-pub fn Resolver(comptime lib: type) type {
+pub fn Resolver(comptime std: type) type {
     return struct {
         allocator: Allocator,
         options: Options,
@@ -398,7 +403,7 @@ pub fn Resolver(comptime lib: type) type {
                 Server.init(dns.ali.v4_2, .udp),
                 Server.init(dns.cloudflare.v4_2, .udp),
             },
-            timeout_ms: u32 = 1000,
+            timeout: time.duration.Duration = time.duration.Second,
             attempts: u32 = 2,
             mode: QueryMode = .ipv4_only,
             spawn_config: Thread.SpawnConfig = .{},
@@ -463,8 +468,9 @@ Key properties:
 
 ```zig
 const stdz = @import("stdz").make(platform);
+const time = @import("time").make(time_impl);
 const runtime_posix = @import("runtime_posix");
-const net = @import("net").make2(stdz, runtime_posix.make(stdz));
+const net = @import("net").make(stdz, time, runtime_posix.make(stdz));
 const Addr = net.netip.Addr;
 const AddrPort = net.netip.AddrPort;
 
@@ -482,7 +488,7 @@ var r2 = try R.init(allocator, .{
         R.Server.init(R.dns.ali.v4_1, .udp),
         R.Server.init(R.dns.ali.v4_2, .tcp),
     },
-    .timeout_ms = 3000,
+    .timeout = 3 * net.time.duration.Second,
     .mode = .ipv4_only,
 });
 defer r2.deinit();
@@ -493,7 +499,7 @@ var r3 = try R.init(allocator, .{
         R.Server.init(R.dns.ali.v4_1, .tls),
         R.Server.init(R.dns.google.v4_1, .tls),
     },
-    .timeout_ms = 5000,
+    .timeout = 5 * net.time.duration.Second,
 });
 defer r3.deinit();
 
@@ -520,23 +526,24 @@ Highlights:
 - Pure timestamp conversion and packet encode/decode helpers at module root
 - `Client(lib)` with single-server query and multi-server race support
 - Per-server race workers built on `sync.Racer`
-- Public-network Aliyun test coverage in `lib/net/test_runner/integration/public/ntp.zig`
+- Public-network Aliyun test coverage wired through the default integration runner via `lib/net/test_runner/integration/public/ntp.zig`
 
 ```zig
 const stdz = @import("stdz").make(platform);
+const time = @import("time").make(time_impl);
 const runtime_posix = @import("runtime_posix");
-const net = @import("net").make2(stdz, runtime_posix.make(stdz));
+const net = @import("net").make(stdz, time, runtime_posix.make(stdz));
 
 var client = try net.ntp.Client.init(stdz.testing.allocator, .{
     .servers = &.{net.ntp.Servers.aliyun},
-    .timeout_ms = 5000,
+    .timeout = 5 * net.time.duration.Second,
 });
 defer client.deinit();
 
-const resp = try client.query(stdz.time.milliTimestamp());
-const current_time_ms = try client.getTime(stdz.time.milliTimestamp());
+const resp = try client.query(time.now());
+const current_time = try client.getTime(time.now());
 _ = resp;
-_ = current_time_ms;
+_ = current_time;
 ```
 
 ## net/tls
@@ -670,8 +677,9 @@ Planned, but not landed in the current tree yet.
 
 ```zig
 const stdz = @import("stdz").make(platform);
+const time = @import("time").make(time_impl);
 const runtime_posix = @import("runtime_posix");
-const net = @import("net").make2(stdz, runtime_posix.make(stdz));
+const net = @import("net").make(stdz, time, runtime_posix.make(stdz));
 const Addr = net.netip.AddrPort;
 
 var ln = try net.listen(stdz.testing.allocator, .{
@@ -699,8 +707,9 @@ while (true) {
 
 ```zig
 const stdz = @import("stdz").make(platform);
+const time = @import("time").make(time_impl);
 const runtime_posix = @import("runtime_posix");
-const net = @import("net").make2(stdz, runtime_posix.make(stdz));
+const net = @import("net").make(stdz, time, runtime_posix.make(stdz));
 
 var transport = try net.http.Transport.init(stdz.testing.allocator, .{});
 defer transport.deinit();

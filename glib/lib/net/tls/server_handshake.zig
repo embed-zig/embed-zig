@@ -1,12 +1,13 @@
+const time_mod = @import("time");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) type {
-    const common = @import("common.zig").make(lib);
-    const extensions = @import("extensions.zig").make(lib);
-    const kdf = @import("kdf.zig").make(lib);
-    const record = @import("record.zig").make(lib);
-    const crypto = lib.crypto;
-    const mem = lib.mem;
+pub fn make(comptime std: type) type {
+    const common = @import("common.zig").make(std);
+    const extensions = @import("extensions.zig").make(std);
+    const kdf = @import("kdf.zig").make(std);
+    const record = @import("record.zig").make(std);
+    const crypto = std.crypto;
+    const mem = std.mem;
 
     return struct {
         pub const HandshakeError = error{
@@ -433,7 +434,7 @@ pub fn make(comptime lib: type) type {
                     pos += 1;
 
                     if (self.version == .tls_1_3) {
-                        var ext_builder = @import("extensions.zig").make(lib).ExtensionBuilder.init(out[pos + 2 ..]);
+                        var ext_builder = @import("extensions.zig").make(std).ExtensionBuilder.init(out[pos + 2 ..]);
                         ext_builder.addSelectedVersion(.tls_1_3) catch return error.BufferTooSmall;
                         ext_builder.addKeyShareServer(.{
                             .group = .x25519,
@@ -1057,14 +1058,14 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const client = @import("client_handshake.zig").make(lib);
+pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const client = @import("client_handshake.zig").make(std, time);
             const fixtures = @import("test_fixtures.zig");
-            const tls_server = make(lib);
-            const tls_common = @import("common.zig").make(lib);
+            const tls_server = make(std);
+            const tls_common = @import("common.zig").make(std);
 
             const MockConn = struct {
                 pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -1077,8 +1078,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 pub fn close(_: *@This()) void {}
                 pub fn deinit(_: *@This()) void {}
-                pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
             };
 
             const Helpers = struct {
@@ -1091,22 +1092,22 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     const session_id_len = msg[pos];
                     pos += 1 + session_id_len;
 
-                    const cipher_suites_len = lib.mem.readInt(u16, msg[pos..][0..2], .big);
+                    const cipher_suites_len = std.mem.readInt(u16, msg[pos..][0..2], .big);
                     pos += 2 + cipher_suites_len;
 
                     const compression_methods_len = msg[pos];
                     pos += 1 + compression_methods_len;
 
                     const ext_len_pos = pos;
-                    const ext_len = lib.mem.readInt(u16, msg[pos..][0..2], .big);
+                    const ext_len = std.mem.readInt(u16, msg[pos..][0..2], .big);
                     pos += 2;
                     const ext_start = pos;
                     const ext_end = ext_start + ext_len;
 
                     var scan = ext_start;
                     while (scan + 4 <= ext_end) {
-                        const got: tls_common.ExtensionType = @enumFromInt(lib.mem.readInt(u16, msg[scan..][0..2], .big));
-                        const got_len = lib.mem.readInt(u16, msg[scan + 2 ..][0..2], .big);
+                        const got: tls_common.ExtensionType = @enumFromInt(std.mem.readInt(u16, msg[scan..][0..2], .big));
+                        const got_len = std.mem.readInt(u16, msg[scan + 2 ..][0..2], .big);
                         const total = 4 + got_len;
                         if (scan + total > ext_end) return error.TestUnexpectedResult;
                         if (got == ext_type) {
@@ -1114,8 +1115,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                             @memcpy(out[0..ext_end], msg[0..ext_end]);
                             @memcpy(out[ext_end..][0..total], msg[scan..][0..total]);
                             @memcpy(out[ext_end + total ..][0 .. msg.len - ext_end], msg[ext_end..]);
-                            lib.mem.writeInt(u16, out[ext_len_pos..][0..2], @intCast(ext_len + total), .big);
-                            lib.mem.writeInt(u24, out[1..4], @intCast((msg.len - tls_common.HandshakeHeader.SIZE) + total), .big);
+                            std.mem.writeInt(u16, out[ext_len_pos..][0..2], @intCast(ext_len + total), .big);
+                            std.mem.writeInt(u24, out[1..4], @intCast((msg.len - tls_common.HandshakeHeader.SIZE) + total), .big);
                             return out[0 .. msg.len + total];
                         }
                         scan += total;
@@ -1132,21 +1133,21 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     var pos: usize = tls_common.HandshakeHeader.SIZE + 2 + 32;
                     const session_id_len = msg[pos];
                     pos += 1 + session_id_len;
-                    const cipher_suites_len = lib.mem.readInt(u16, msg[pos..][0..2], .big);
+                    const cipher_suites_len = std.mem.readInt(u16, msg[pos..][0..2], .big);
                     pos += 2 + cipher_suites_len;
                     const compression_methods_len = msg[pos];
                     pos += 1 + compression_methods_len;
 
                     const ext_len_pos = pos;
-                    const ext_len = lib.mem.readInt(u16, msg[pos..][0..2], .big);
+                    const ext_len = std.mem.readInt(u16, msg[pos..][0..2], .big);
                     pos += 2;
                     const ext_start = pos;
                     const ext_end = ext_start + ext_len;
 
                     var scan = ext_start;
                     while (scan + 4 <= ext_end) {
-                        const got: tls_common.ExtensionType = @enumFromInt(lib.mem.readInt(u16, msg[scan..][0..2], .big));
-                        const got_len = lib.mem.readInt(u16, msg[scan + 2 ..][0..2], .big);
+                        const got: tls_common.ExtensionType = @enumFromInt(std.mem.readInt(u16, msg[scan..][0..2], .big));
+                        const got_len = std.mem.readInt(u16, msg[scan + 2 ..][0..2], .big);
                         const total = 4 + got_len;
                         if (scan + total > ext_end) return error.TestUnexpectedResult;
                         if (got == ext_type) {
@@ -1154,8 +1155,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                             @memcpy(out[0..scan], msg[0..scan]);
                             @memcpy(out[scan..][0 .. ext_end - (scan + total)], msg[scan + total .. ext_end]);
                             @memcpy(out[scan + (ext_end - (scan + total)) ..][0 .. msg.len - ext_end], msg[ext_end..]);
-                            lib.mem.writeInt(u16, out[ext_len_pos..][0..2], @intCast(ext_len - total), .big);
-                            lib.mem.writeInt(u24, out[1..4], @intCast((msg.len - tls_common.HandshakeHeader.SIZE) - total), .big);
+                            std.mem.writeInt(u16, out[ext_len_pos..][0..2], @intCast(ext_len - total), .big);
+                            std.mem.writeInt(u24, out[1..4], @intCast((msg.len - tls_common.HandshakeHeader.SIZE) - total), .big);
                             return out[0 .. msg.len - total];
                         }
                         scan += total;

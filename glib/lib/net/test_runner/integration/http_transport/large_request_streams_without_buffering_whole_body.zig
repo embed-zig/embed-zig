@@ -2,8 +2,8 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Utils = test_utils.make2(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(std, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
@@ -13,20 +13,19 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: lib.mem.Allocator) bool {
+        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: std.mem.Allocator) bool {
             _ = runner;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Http = Utils.Http;
                     const testing = struct {
-                        pub var allocator: lib.mem.Allocator = undefined;
-                        pub const expect = lib.testing.expect;
-                        pub const expectEqual = lib.testing.expectEqual;
-                        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-                        pub const expectError = lib.testing.expectError;
+                        pub var allocator: std.mem.Allocator = undefined;
+                        pub const expect = std.testing.expect;
+                        pub const expectEqual = std.testing.expectEqual;
+                        pub const expectEqualStrings = std.testing.expectEqualStrings;
+                        pub const expectError = std.testing.expectError;
                     };
                     testing.allocator = a;
-
 
                     const payload = [_]u8{'q'} ** 8192;
 
@@ -51,11 +50,11 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         .status_code = Http.status.ok,
                         .body = "uploaded",
                     }, struct {
-                        fn run(_: lib.mem.Allocator, port: u16) !void {
+                        fn run(_: std.mem.Allocator, port: u16) !void {
                             var transport = try Http.Transport.init(testing.allocator, .{ .max_body_bytes = payload.len });
                             defer transport.deinit();
 
-                            const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/large-request", .{port});
+                            const url = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/large-request", .{port});
                             defer testing.allocator.free(url);
 
                             var source = BodySource{ .payload = &payload };
@@ -71,7 +70,6 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             try testing.expectEqualStrings("uploaded", body);
                         }
                     }.run);
-                            
                 }
             };
             Body.call(run_allocator) catch |err| {

@@ -88,19 +88,19 @@ fn runCentral(comptime grt: type, c: Central) !void {
     try grt.std.testing.expectEqual(Central.State.idle, c.getState());
     _ = c.getAddr();
 
-    try c.startScanning(.{ .active = true, .timeout_ms = 1000 });
+    try c.startScanning(.{ .active = true, .timeout = 1000 * glib.time.duration.MilliSecond });
     try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
     try grt.std.testing.expectEqual(Central.State.idle, c.getState());
 
-    try c.startScanning(.{ .active = false, .timeout_ms = 1000 });
+    try c.startScanning(.{ .active = false, .timeout = 1000 * glib.time.duration.MilliSecond });
     try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
     try grt.std.testing.expectEqual(Central.State.idle, c.getState());
 
     try c.startScanning(.{
         .active = true,
-        .timeout_ms = 1000,
+        .timeout = 1000 * glib.time.duration.MilliSecond,
         .service_uuids = &.{0x180D},
     });
     try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
@@ -108,7 +108,7 @@ fn runCentral(comptime grt: type, c: Central) !void {
 
     try c.startScanning(.{
         .active = true,
-        .timeout_ms = 1000,
+        .timeout = 1000 * glib.time.duration.MilliSecond,
         .service_uuids = &.{ 0x180D, 0x180F, 0xFFE0 },
     });
     try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
@@ -116,7 +116,7 @@ fn runCentral(comptime grt: type, c: Central) !void {
 
     try c.startScanning(.{
         .active = true,
-        .timeout_ms = 1000,
+        .timeout = 1000 * glib.time.duration.MilliSecond,
         .filter_duplicates = false,
     });
     try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
@@ -124,9 +124,9 @@ fn runCentral(comptime grt: type, c: Central) !void {
 
     try c.startScanning(.{
         .active = true,
-        .timeout_ms = 1000,
-        .interval_ms = 100,
-        .window_ms = 50,
+        .timeout = 1000 * glib.time.duration.MilliSecond,
+        .interval = 100 * glib.time.duration.MilliSecond,
+        .window = 50 * glib.time.duration.MilliSecond,
     });
     try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
@@ -151,11 +151,11 @@ fn runCentral(comptime grt: type, c: Central) !void {
         }
     }.cb);
 
-    try c.startScanning(.{ .active = true, .timeout_ms = 500 });
+    try c.startScanning(.{ .active = true, .timeout = 500 * glib.time.duration.MilliSecond });
     try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
     try grt.std.testing.expectEqual(Central.State.idle, c.getState());
-    try c.startScanning(.{ .active = true, .timeout_ms = 500 });
+    try c.startScanning(.{ .active = true, .timeout = 500 * glib.time.duration.MilliSecond });
     try grt.std.testing.expectEqual(Central.State.scanning, c.getState());
     c.stopScanning();
     try grt.std.testing.expectEqual(Central.State.idle, c.getState());

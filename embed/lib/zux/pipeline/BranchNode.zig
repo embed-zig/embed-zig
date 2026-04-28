@@ -243,7 +243,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             const emitted = try branch.process(.{
                 .origin = .timer,
-                .timestamp_ns = 1,
+                .timestamp = 1,
                 .body = .{
                     .tick = .{},
                 },

@@ -47,7 +47,7 @@
               "button_id": 1,
               "gesture_kind": "click",
               "click_count": 1,
-              "long_press_ns": 0
+              "long_press": 0
             }
           }
         ]
@@ -95,7 +95,7 @@
               "button_id": 2,
               "gesture_kind": "click",
               "click_count": 1,
-              "long_press_ns": 0
+              "long_press": 0
             }
           }
         ]
@@ -177,7 +177,7 @@
               "button_id": 2,
               "gesture_kind": "click",
               "click_count": 2,
-              "long_press_ns": 0
+              "long_press": 0
             }
           }
         ]

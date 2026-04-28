@@ -1,3 +1,5 @@
+const glib = @import("glib");
+
 pub const Single = struct {
     source_id: u32 = 0,
     pressed: bool = false,
@@ -17,5 +19,5 @@ pub const Detected = struct {
         long_press,
     } = null,
     click_count: u16 = 0,
-    long_press_ns: u64 = 0,
+    long_press: glib.time.duration.Duration = 0,
 };

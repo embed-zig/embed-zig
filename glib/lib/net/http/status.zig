@@ -165,10 +165,10 @@ pub fn isServerError(code: u16) bool {
     return code >= 500 and code < 600;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
+            const testing = std.testing;
 
             try testing.expectEqualStrings("OK", text(ok).?);
             try testing.expectEqualStrings("No Content", text(no_content).?);

@@ -1,6 +1,18 @@
+const time_mod = @import("time");
+
 const Context = @import("Context.zig");
 
-pub const max_wait_ns_i128 = @as(i128, @intCast((@as(u128, 1) << 64) - 1));
+pub const max_timed_wait = time_mod.duration.Maximum;
+
+pub fn timeoutDeadline(comptime time: type, timeout: time_mod.duration.Duration) time_mod.instant.Time {
+    return time_mod.instant.add(time.instant.now(), timeout);
+}
+
+pub fn remainingTimedWait(deadline: time_mod.instant.Time, current: time_mod.instant.Time) ?u64 {
+    const remaining = time_mod.instant.sub(deadline, current);
+    if (remaining <= 0) return null;
+    return @intCast(@min(remaining, max_timed_wait));
+}
 
 pub fn tree(ctx: Context) *Context.TreeLink {
     return ctx.vtable.treeFn(ctx.ptr);
@@ -20,7 +32,7 @@ pub fn errNoLock(ctx: Context) ?anyerror {
 }
 
 // Caller already holds the shared root tree lock.
-pub fn deadlineNoLock(ctx: Context) ?i128 {
+pub fn deadlineNoLock(ctx: Context) ?time_mod.instant.Time {
     return ctx.vtable.deadlineNoLockFn(ctx.ptr);
 }
 

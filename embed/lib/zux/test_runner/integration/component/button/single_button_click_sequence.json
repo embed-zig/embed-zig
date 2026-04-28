@@ -45,7 +45,7 @@
               "button_id": null,
               "gesture_kind": "click",
               "click_count": 1,
-              "long_press_ns": 0
+              "long_press": 0
             }
           }
         ]
@@ -123,7 +123,7 @@
               "button_id": null,
               "gesture_kind": "click",
               "click_count": 2,
-              "long_press_ns": 0
+              "long_press": 0
             }
           }
         ]
@@ -169,7 +169,7 @@
               "button_id": null,
               "gesture_kind": "click",
               "click_count": 1,
-              "long_press_ns": 0
+              "long_press": 0
             }
           }
         ]
@@ -247,7 +247,7 @@
               "button_id": null,
               "gesture_kind": "click",
               "click_count": 2,
-              "long_press_ns": 0
+              "long_press": 0
             }
           }
         ]
@@ -357,7 +357,7 @@
               "button_id": null,
               "gesture_kind": "click",
               "click_count": 3,
-              "long_press_ns": 0
+              "long_press": 0
             }
           }
         ]
@@ -499,7 +499,7 @@
               "button_id": null,
               "gesture_kind": "click",
               "click_count": 4,
-              "long_press_ns": 0
+              "long_press": 0
             }
           }
         ]
@@ -673,7 +673,7 @@
               "button_id": null,
               "gesture_kind": "click",
               "click_count": 5,
-              "long_press_ns": 0
+              "long_press": 0
             }
           }
         ]

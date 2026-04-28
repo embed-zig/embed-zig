@@ -164,7 +164,7 @@ fn crc8_rohc(initial: u8, buf: []const u8) u8 {
 
 const max_info_len = 0x7FFF;
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
+pub fn TestRunner(comptime std: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
 
     const TestCase = struct {
@@ -176,14 +176,14 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 .frame_type = .uih,
                 .info = "abc",
             });
-            try lib.testing.expectEqual(@as(u8, control.flag), encoded[0]);
-            try lib.testing.expectEqual(@as(u8, control.flag), encoded[encoded.len - 1]);
+            try std.testing.expectEqual(@as(u8, control.flag), encoded[0]);
+            try std.testing.expectEqual(@as(u8, control.flag), encoded[encoded.len - 1]);
 
             const decoded = try decode(encoded);
-            try lib.testing.expectEqual(@as(u8, 5), decoded.dlci);
-            try lib.testing.expect(decoded.cr);
-            try lib.testing.expectEqual(control.FrameType.uih, decoded.frame_type);
-            try lib.testing.expectEqualStrings("abc", decoded.info);
+            try std.testing.expectEqual(@as(u8, 5), decoded.dlci);
+            try std.testing.expect(decoded.cr);
+            try std.testing.expectEqual(control.FrameType.uih, decoded.frame_type);
+            try std.testing.expectEqualStrings("abc", decoded.info);
         }
 
         fn encodesTwoOctetLength() !void {
@@ -197,16 +197,16 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 .frame_type = .uih,
                 .info = &payload,
             });
-            try lib.testing.expectEqual(@as(u8, 0), encoded[3] & 0x01);
+            try std.testing.expectEqual(@as(u8, 0), encoded[3] & 0x01);
 
             const decoded = try decode(encoded);
-            try lib.testing.expectEqual(@as(usize, payload.len), decoded.info.len);
-            try lib.testing.expectEqual(@as(u8, 'x'), decoded.info[0]);
+            try std.testing.expectEqual(@as(usize, payload.len), decoded.info.len);
+            try std.testing.expectEqual(@as(u8, 'x'), decoded.info[0]);
         }
 
         fn rejectsInvalidDlci() !void {
             var storage: [16]u8 = undefined;
-            try lib.testing.expectError(error.InvalidDlci, encode(&storage, .{
+            try std.testing.expectError(error.InvalidDlci, encode(&storage, .{
                 .dlci = 64,
                 .cr = true,
                 .frame_type = .uih,
@@ -221,44 +221,44 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
                 .frame_type = .sabm,
             });
             storage[encoded.len - 2] ^= 0x01;
-            try lib.testing.expectError(error.InvalidFcs, decode(encoded));
+            try std.testing.expectError(error.InvalidFcs, decode(encoded));
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
-            t.run("encodesAndDecodesUih", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            t.run("encodesAndDecodesUih", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
                     try TestCase.encodesAndDecodesUih();
                 }
             }.run));
-            t.run("encodesTwoOctetLength", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            t.run("encodesTwoOctetLength", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
                     try TestCase.encodesTwoOctetLength();
                 }
             }.run));
-            t.run("rejectsInvalidDlci", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            t.run("rejectsInvalidDlci", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
                     try TestCase.rejectsInvalidDlci();
                 }
             }.run));
-            t.run("rejectsBadFcs", testing_api.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
+            t.run("rejectsBadFcs", testing_api.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
                     try TestCase.rejectsBadFcs();
                 }
             }.run));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -269,4 +269,3 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     };
     return testing_api.TestRunner.make(Runner).new(&Holder.runner);
 }
-

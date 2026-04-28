@@ -45,9 +45,9 @@ is planned as a future addition under the same package.
    only. The backing implementation — HCI host stack, CoreBluetooth,
    Android BLE — is invisible to the application.
 
-2. **Comptime `lib` injection.** Modules that need platform primitives
-   take `comptime lib: type` (the sealed stdz namespace) for
-   `lib.Thread`, `lib.time`, `lib.mem`, etc. No global state.
+2. **Comptime `std` injection.** Modules that need platform primitives
+   take `comptime std: type` (the sealed stdz namespace) for
+   `std.Thread`, `std.mem`, etc. and the runtime `time` namespace. No global state.
 
 3. **VTable transport for HCI.** The built-in HCI host stack uses a
    `Transport` VTable for the physical bus. Platform provides the
@@ -71,12 +71,13 @@ is planned as a future addition under the same package.
 
 ```zig
 const stdz = @import("stdz").make(platform);
+const glib = @import("glib");
 const bt = @import("bt");
 ```
 
 `lib/bt` depends on the sealed `stdz` namespace for:
 - `lib.Thread` — Mutex, background host task
-- `lib.time` — timeouts, connection supervision
+- `grt.time` — monotonic deadlines, timeouts, connection supervision
 - `lib.mem` — Allocator
 - `lib.atomic` — lock-free HCI flow control counters
 
@@ -203,7 +204,7 @@ lib/bt/
 │              │                                    │          │
 ├──────────────┴────────────────────────────────────┘──────────┤
 │                    lib (stdz.make)                           │
-│              Thread / time / mem / atomic                     │
+│              Thread / mem / atomic + monotonic time              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -703,7 +704,7 @@ fn runScanner(central: bt.Central) !void {
         }
     }.onEvent);
 
-    try central.startScanning(.{ .active = true, .timeout_ms = 5000 });
+    try central.startScanning(.{ .active = true, .timeout = 5 * glib.time.duration.Second });
 }
 ```
 

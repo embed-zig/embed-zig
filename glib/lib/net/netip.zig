@@ -1,26 +1,26 @@
 pub const Addr = @import("netip/Addr.zig");
 pub const AddrPort = @import("netip/AddrPort.zig");
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
+pub fn TestRunner(comptime std: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             t.parallel();
-            t.run("Addr", Addr.TestRunner(lib));
-            t.run("AddrPort", AddrPort.TestRunner(lib));
+            t.run("Addr", Addr.TestRunner(std));
+            t.run("AddrPort", AddrPort.TestRunner(std));
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

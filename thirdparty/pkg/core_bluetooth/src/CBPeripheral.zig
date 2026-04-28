@@ -554,7 +554,7 @@ fn pmDidSubscribe(delegate: objc.Id, _: objc.SEL, _: objc.Id, _: objc.Id, _: obj
         .peer_addr_type = .random,
         .interval = 0,
         .latency = 0,
-        .timeout = 0,
+        .supervision_timeout = 0,
     } });
 }
 

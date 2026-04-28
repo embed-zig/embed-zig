@@ -3,8 +3,8 @@ const context_mod = @import("context");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Utils = test_utils.make2(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(std, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
@@ -14,23 +14,23 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: lib.mem.Allocator) bool {
+        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: std.mem.Allocator) bool {
             _ = runner;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Http = Utils.Http;
                     const testing = struct {
-                        pub var allocator: lib.mem.Allocator = undefined;
-                        pub const expect = lib.testing.expect;
-                        pub const expectEqual = lib.testing.expectEqual;
-                        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-                        pub const expectError = lib.testing.expectError;
+                        pub var allocator: std.mem.Allocator = undefined;
+                        pub const expect = std.testing.expect;
+                        pub const expectEqual = std.testing.expectEqual;
+                        pub const expectEqualStrings = std.testing.expectEqualStrings;
+                        pub const expectError = std.testing.expectError;
                     };
                     testing.allocator = a;
-                    const test_spawn_config: lib.Thread.SpawnConfig = .{};
+                    const test_spawn_config: std.Thread.SpawnConfig = .{};
 
-                    const Mutex = lib.Thread.Mutex;
-                    const Condition = lib.Thread.Condition;
+                    const Mutex = std.Thread.Mutex;
+                    const Condition = std.Thread.Condition;
 
                     const WaitState = struct {
                         mutex: Mutex = .{},
@@ -44,11 +44,11 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             self.mutex.unlock();
                         }
 
-                        fn wait(self: *@This(), timeout_ms: u32) !void {
+                        fn wait(self: *@This(), timeout: net.time.duration.Duration) !void {
                             self.mutex.lock();
                             defer self.mutex.unlock();
                             if (self.client_done) return;
-                            self.cond.timedWait(&self.mutex, @as(u64, timeout_ms) * lib.time.ns_per_ms) catch return error.TestUnexpectedResult;
+                            self.cond.timedWait(&self.mutex, @intCast(timeout)) catch return error.TestUnexpectedResult;
                             if (!self.client_done) return error.TestUnexpectedResult;
                         }
                     };
@@ -90,15 +90,16 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             };
                         }
 
-                        fn waitTimeout(self: *@This(), timeout_ms: u32) bool {
+                        fn waitTimeout(self: *@This(), timeout: net.time.duration.Duration) bool {
                             self.mutex.lock();
                             defer self.mutex.unlock();
                             if (self.finished) return true;
-                            self.cond.timedWait(&self.mutex, @as(u64, timeout_ms) * lib.time.ns_per_ms) catch {};
+                            self.cond.timedWait(&self.mutex, @intCast(timeout)) catch {};
                             return self.finished;
                         }
                     };
-                    try Utils.withServerState(testing.allocator, 
+                    try Utils.withServerState(
+                        testing.allocator,
                         WaitState{},
                         struct {
                             fn run(conn: net.Conn, state: *WaitState) !void {
@@ -107,14 +108,14 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 try testing.expect(Utils.hasRequestLine(req_head, "POST /upload-chunked-deadline HTTP/1.1"));
                                 try testing.expectEqualStrings("chunked", Utils.headerValue(req_head, Http.Header.transfer_encoding) orelse "");
                                 try testing.expectEqualStrings("100-continue", Utils.headerValue(req_head, Http.Header.expect) orelse "");
-                                const head_end = lib.mem.indexOf(u8, req_head, "\r\n\r\n") orelse return error.TestUnexpectedResult;
+                                const head_end = std.mem.indexOf(u8, req_head, "\r\n\r\n") orelse return error.TestUnexpectedResult;
                                 try testing.expectEqual(@as(usize, 0), req_head[head_end + 4 ..].len);
-                                try state.wait(2000);
+                                try state.wait(2000 * net.time.duration.MilliSecond);
                             }
                         }.run,
                         struct {
-                            fn run(_: lib.mem.Allocator, port: u16, state: *WaitState) !void {
-                                const Context = context_mod.make(lib);
+                            fn run(_: std.mem.Allocator, port: u16, state: *WaitState) !void {
+                                const Context = context_mod.make(std, net.time);
                                 var ctx_api = try Context.init(testing.allocator);
                                 defer ctx_api.deinit();
                                 var ctx = try ctx_api.withCancel(ctx_api.background());
@@ -125,7 +126,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 defer if (transport_active) transport.deinit();
                                 defer state.signal();
 
-                                const url = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/upload-chunked-deadline", .{port});
+                                const url = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/upload-chunked-deadline", .{port});
                                 defer testing.allocator.free(url);
 
                                 var source = ChunkedBodySource{ .chunks = &.{"deadline-me"} };
@@ -138,16 +139,16 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                     .transport = &transport,
                                     .req = &req,
                                 };
-                                var thread = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
+                                var thread = try std.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task});
                                 var joined = false;
                                 defer if (!joined) thread.join();
 
-                                const deadline_thread = try lib.Thread.spawn(.{}, struct {
+                                const deadline_thread = try std.Thread.spawn(.{}, struct {
                                     fn run(deadline_ctx: context_mod.Context, comptime thread_lib: type) void {
-                                        thread_lib.Thread.sleep(30 * thread_lib.time.ns_per_ms);
+                                        thread_lib.Thread.sleep(@intCast(30 * net.time.duration.MilliSecond));
                                         deadline_ctx.cancelWithCause(error.DeadlineExceeded);
                                     }
-                                }.run, .{ ctx, lib });
+                                }.run, .{ ctx, std });
                                 defer deadline_thread.join();
 
                                 thread.join();
@@ -158,7 +159,6 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             }
                         }.run,
                     );
-                            
                 }
             };
             Body.call(run_allocator) catch |err| {

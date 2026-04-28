@@ -3,7 +3,7 @@ const context_mod = @import("context");
 const testing_api = @import("testing");
 const test_utils = @import("../tcp/test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -12,11 +12,11 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
-                    const Context = context_mod.make(lib);
+                fn call(a: std.mem.Allocator) !void {
+                    const Context = context_mod.make(std, net.time);
 
                     var ctx_api = try Context.init(a);
                     defer ctx_api.deinit();
@@ -40,11 +40,11 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
 
                     var buf: [64]u8 = undefined;
                     const recv = try pc.readFrom(&buf);
-                    try lib.testing.expectEqualStrings(msg, buf[0..recv.bytes_read]);
+                    try std.testing.expectEqualStrings(msg, buf[0..recv.bytes_read]);
 
                     _ = try pc.writeTo("ack", recv.addr);
                     const ack_len = try c.read(buf[0..]);
-                    try lib.testing.expectEqualStrings("ack", buf[0..ack_len]);
+                    try std.testing.expectEqualStrings("ack", buf[0..ack_len]);
                 }
             };
             Body.call(allocator) catch |err| {

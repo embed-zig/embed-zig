@@ -4,7 +4,7 @@ const tls_fixtures = @import("../../../../net/tls/test_fixtures.zig");
 const tcp_test_utils = @import("../tcp/test_utils.zig");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
@@ -13,14 +13,14 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
-                    const Thread = lib.Thread;
+                    const Thread = std.Thread;
                     const test_spawn_config: Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 };
-                    const StartGate = tcp_test_utils.StartGate(lib);
+                    const StartGate = tcp_test_utils.StartGate(std);
 
                     const ReadCtx = struct {
                         gate: *StartGate,
@@ -44,7 +44,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 ctx.result.* = err;
                                 return;
                             };
-                            if (!lib.mem.eql(u8, ctx.expected, ctx.output)) {
+                            if (!std.mem.eql(u8, ctx.expected, ctx.output)) {
                                 ctx.result.* = error.TestUnexpectedResult;
                             }
                         }
@@ -67,7 +67,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
 
                     var server_result: ?anyerror = null;
                     const server_thread = try Thread.spawn(test_spawn_config, struct {
-                        fn run(listener: *Net.TcpListener, result: *?anyerror, alloc: lib.mem.Allocator) void {
+                        fn run(listener: *Net.TcpListener, result: *?anyerror, alloc: std.mem.Allocator) void {
                             var conn = listener.accept() catch |err| {
                                 result.* = err;
                                 return;
@@ -91,8 +91,8 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 return;
                             };
 
-                            tls_conn.setReadTimeout(10_000);
-                            tls_conn.setWriteTimeout(10_000);
+                            tls_conn.setReadDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
+                            tls_conn.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
 
                             const inbound_len = Net.tls.MAX_PLAINTEXT_LEN * 3 + 257;
                             const outbound_len = Net.tls.MAX_PLAINTEXT_LEN * 2 + 113;
@@ -174,8 +174,8 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     const typed = try tls_client.as(Net.tls.Conn);
                     try typed.handshake();
 
-                    tls_client.setReadTimeout(10_000);
-                    tls_client.setWriteTimeout(10_000);
+                    tls_client.setReadDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
+                    tls_client.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
 
                     const outbound_len = Net.tls.MAX_PLAINTEXT_LEN * 3 + 257;
                     const inbound_len = Net.tls.MAX_PLAINTEXT_LEN * 2 + 113;

@@ -26,28 +26,28 @@ test "thirdparty/speexdsp/unit/root_surface_exposes_phase1_wrappers" {
 }
 
 test "thirdparty/speexdsp/unit/std" {
-    var t = glib.testing.T.new(gstd.runtime.std, .speexdsp_unit_std);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .speexdsp_unit_std);
     defer t.deinit();
     t.run("unit", speexdsp.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "thirdparty/speexdsp/unit/embed_std" {
-    var t = glib.testing.T.new(gstd.runtime.std, .speexdsp_unit_embed);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .speexdsp_unit_embed);
     defer t.deinit();
     t.run("unit", speexdsp.test_runner.unit.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "thirdparty/speexdsp/integration/std" {
-    var t = glib.testing.T.new(gstd.runtime.std, .speexdsp_integration_std);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .speexdsp_integration_std);
     defer t.deinit();
     t.run("integration", speexdsp.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "thirdparty/speexdsp/integration/embed_std" {
-    var t = glib.testing.T.new(gstd.runtime.std, .speexdsp_integration_embed);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .speexdsp_integration_embed);
     defer t.deinit();
     t.run("integration", speexdsp.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;

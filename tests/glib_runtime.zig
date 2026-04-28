@@ -15,7 +15,7 @@ test "gstd/runtime/unit/time/gstd" {
     const std = @import("std");
 
     const now = gstd.runtime.time.instant.now();
-    try std.testing.expect(gstd.runtime.time.instant.since(now, now) == 0);
+    try std.testing.expect(gstd.runtime.time.instant.sub(now, now) == 0);
 }
 
 test "gstd/runtime/unit/thread/gstd small explicit stack" {

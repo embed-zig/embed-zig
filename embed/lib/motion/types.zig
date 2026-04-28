@@ -23,17 +23,17 @@ pub const GyroData = struct {
 
 pub const Sample = struct {
     accel: AccelData,
-    timestamp_ms: u64,
+    timestamp: glib.time.instant.Time,
 };
 
 pub const GyroSample = struct {
     gyro: GyroData,
-    timestamp_ms: u64,
+    timestamp: glib.time.instant.Time,
 };
 
 pub const ShakeData = struct {
     magnitude: f32,
-    duration_ms: u32,
+    duration: glib.time.duration.Duration,
 };
 
 pub const TiltData = struct {
@@ -52,7 +52,7 @@ pub const FlipData = struct {
 };
 
 pub const FreeFallData = struct {
-    duration_ms: u32,
+    duration: glib.time.duration.Duration,
     min_magnitude: f32,
 };
 
@@ -65,18 +65,18 @@ pub const Action = union(enum) {
 
 pub const Thresholds = struct {
     shake_threshold_g: f32 = 1.5,
-    shake_min_duration_ms: u32 = 100,
-    shake_max_duration_ms: u32 = 1000,
+    shake_min_duration: glib.time.duration.Duration = 100 * glib.time.duration.MilliSecond,
+    shake_max_duration: glib.time.duration.Duration = glib.time.duration.Second,
 
     tilt_threshold_deg: f32 = 10.0,
-    tilt_debounce_ms: u32 = 200,
+    tilt_debounce: glib.time.duration.Duration = 200 * glib.time.duration.MilliSecond,
 
     free_fall_threshold_g: f32 = 0.25,
-    free_fall_min_duration_ms: u32 = 120,
+    free_fall_min_duration: glib.time.duration.Duration = 120 * glib.time.duration.MilliSecond,
 
     flip_gyro_threshold_dps: f32 = 120.0,
-    flip_recent_turn_ms: u32 = 400,
-    flip_debounce_ms: u32 = 300,
+    flip_recent_turn: glib.time.duration.Duration = 400 * glib.time.duration.MilliSecond,
+    flip_debounce: glib.time.duration.Duration = 300 * glib.time.duration.MilliSecond,
 
     pub const default = Thresholds{};
 
@@ -84,20 +84,20 @@ pub const Thresholds = struct {
         .shake_threshold_g = 1.0,
         .tilt_threshold_deg = 5.0,
         .free_fall_threshold_g = 0.35,
-        .free_fall_min_duration_ms = 80,
+        .free_fall_min_duration = 80 * glib.time.duration.MilliSecond,
         .flip_gyro_threshold_dps = 90.0,
-        .flip_recent_turn_ms = 500,
-        .flip_debounce_ms = 200,
+        .flip_recent_turn = 500 * glib.time.duration.MilliSecond,
+        .flip_debounce = 200 * glib.time.duration.MilliSecond,
     };
 
     pub const insensitive = Thresholds{
         .shake_threshold_g = 2.5,
         .tilt_threshold_deg = 20.0,
         .free_fall_threshold_g = 0.15,
-        .free_fall_min_duration_ms = 180,
+        .free_fall_min_duration = 180 * glib.time.duration.MilliSecond,
         .flip_gyro_threshold_dps = 180.0,
-        .flip_recent_turn_ms = 250,
-        .flip_debounce_ms = 450,
+        .flip_recent_turn = 250 * glib.time.duration.MilliSecond,
+        .flip_debounce = 450 * glib.time.duration.MilliSecond,
     };
 };
 

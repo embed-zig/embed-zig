@@ -15,7 +15,7 @@ pub fn make(comptime grt: type) type {
         label_buf: []u8,
         gain_bits: u32 = @bitCast(@as(f32, 1.0)),
         read_bytes_val: usize = 0,
-        fade_out_ms_val: u32 = 0,
+        fade_out_duration_val: glib.time.duration.Duration = 0,
         refs: usize = 0,
         owner_ptr: ?*anyopaque = null,
         on_last_handle_dropped: ?*const fn (ptr: *anyopaque, state: *@This()) void = null,
@@ -93,8 +93,8 @@ pub fn make(comptime grt: type) type {
             return @atomicLoad(usize, &self.read_bytes_val, .acquire);
         }
 
-        pub fn setFadeOutDuration(self: *@This(), ms: u32) void {
-            @atomicStore(u32, &self.fade_out_ms_val, ms, .release);
+        pub fn setFadeOutDuration(self: *@This(), duration: glib.time.duration.Duration) void {
+            @atomicStore(glib.time.duration.Duration, &self.fade_out_duration_val, duration, .release);
         }
 
         pub fn closeWrite(self: *@This()) void {
@@ -102,7 +102,7 @@ pub fn make(comptime grt: type) type {
         }
 
         pub fn close(self: *@This()) void {
-            if (@atomicLoad(u32, &self.fade_out_ms_val, .acquire) > 0) {
+            if (@atomicLoad(glib.time.duration.Duration, &self.fade_out_duration_val, .acquire) > 0) {
                 self.setGain(0);
             }
             self.closeWrite();
@@ -112,16 +112,12 @@ pub fn make(comptime grt: type) type {
             self.buffer.closeWithError();
         }
 
-        pub fn closeWriteWithSilence(self: *@This(), silence_ms: u32) !void {
-            const rate = @as(u64, self.output.rate);
-            const channels = @as(u64, self.output.channelCount());
-            const ms = @as(u64, silence_ms);
+        pub fn closeWriteWithSilence(self: *@This(), duration: glib.time.duration.Duration) !void {
+            const rate = @as(u128, self.output.rate);
+            const channels = @as(u128, self.output.channelCount());
+            const positive_duration: glib.time.duration.Duration = if (duration <= 0) 0 else duration;
 
-            if (rate != 0 and channels > grt.std.math.maxInt(u64) / rate) return error.Overflow;
-            const rate_channels = rate * channels;
-            if (rate_channels != 0 and ms > grt.std.math.maxInt(u64) / rate_channels) return error.Overflow;
-
-            const total_samples = (rate_channels * ms) / 1000;
+            const total_samples = (rate * channels * @as(u128, @intCast(positive_duration))) / @as(u128, @intCast(glib.time.duration.Second));
             if (total_samples > grt.std.math.maxInt(usize)) return error.Overflow;
 
             var remaining: usize = @intCast(total_samples);
@@ -135,7 +131,7 @@ pub fn make(comptime grt: type) type {
             self.closeWrite();
         }
 
-        pub fn setGainLinearTo(self: *@This(), to: f32, _: u32) void {
+        pub fn setGainLinearTo(self: *@This(), to: f32, _: glib.time.duration.Duration) void {
             self.setGain(to);
         }
 
@@ -244,7 +240,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             defer state.destroy();
 
             try state.write(.{ .rate = 1000, .channels = .mono }, &.{9});
-            try state.closeWriteWithSilence(2);
+            try state.closeWriteWithSilence(2 * glib.time.duration.MilliSecond);
 
             var out: [4]i16 = @splat(0);
             const n = state.mixInto(&out);

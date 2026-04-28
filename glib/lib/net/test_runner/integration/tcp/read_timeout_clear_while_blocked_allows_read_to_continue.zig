@@ -3,7 +3,7 @@ const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -12,7 +12,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
                 fn waitUntilReadWaiting(conn: *net.TcpConn, comptime thread_lib: type) void {
@@ -21,14 +21,14 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         const waiting = conn.read_waiting;
                         conn.read_mu.unlock();
                         if (waiting) return;
-                        thread_lib.Thread.sleep(thread_lib.time.ns_per_ms);
+                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
                     }
                 }
 
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
-                    const Thread = lib.Thread;
-                    const ReadyCounter = test_utils.ReadyCounter(lib);
+                    const Thread = std.Thread;
+                    const ReadyCounter = test_utils.ReadyCounter(std);
 
                     const ReadCtx = struct {
                         ready: *ReadyCounter,
@@ -53,7 +53,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         }
 
                         fn write(ctx: *WriteCtx, comptime thread_lib: type) void {
-                            thread_lib.Thread.sleep(60 * thread_lib.time.ns_per_ms);
+                            thread_lib.Thread.sleep(@intCast(60 * net.time.duration.MilliSecond));
                             io.writeAll(@TypeOf(ctx.conn), &ctx.conn, "ok") catch |err| {
                                 ctx.err = err;
                             };
@@ -72,7 +72,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     defer ac.deinit();
 
                     const accepted = try ac.as(Net.TcpConn);
-                    accepted.setReadTimeout(30);
+                    accepted.setReadDeadline(net.time.instant.add(net.time.instant.now(), 30 * net.time.duration.MilliSecond));
 
                     var read_ready = ReadyCounter.init(1);
                     var read_ctx = ReadCtx{
@@ -82,20 +82,20 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var read_thread = try Thread.spawn(.{}, Worker.read, .{&read_ctx});
 
                     read_ready.waitUntilReady();
-                    waitUntilReadWaiting(accepted, lib);
+                    waitUntilReadWaiting(accepted, std);
 
-                    accepted.setReadTimeout(null);
+                    accepted.setReadDeadline(null);
 
                     var write_ctx = WriteCtx{ .conn = cc };
-                    var writer_thread = try Thread.spawn(.{}, Worker.write, .{ &write_ctx, lib });
+                    var writer_thread = try Thread.spawn(.{}, Worker.write, .{ &write_ctx, std });
 
                     read_thread.join();
                     writer_thread.join();
 
                     if (read_ctx.err) |err| return err;
                     if (write_ctx.err) |err| return err;
-                    try lib.testing.expectEqual(@as(?usize, 2), read_ctx.bytes_read);
-                    try lib.testing.expectEqualStrings("ok", read_ctx.buf[0..2]);
+                    try std.testing.expectEqual(@as(?usize, 2), read_ctx.bytes_read);
+                    try std.testing.expectEqualStrings("ok", read_ctx.buf[0..2]);
                 }
             };
             Body.call(allocator) catch |err| {

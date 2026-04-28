@@ -22,8 +22,8 @@ pub fn make(comptime grt: type) type {
             drop_seq_once: ?u16 = null,
             dropped: bool = false,
 
-            pub fn read(self: *@This(), timeout_ms: u32, out: []u8) !usize {
-                const recv_res = try self.inbound.recvTimeout(timeout_ms);
+            pub fn read(self: *@This(), timeout: glib.time.duration.Duration, out: []u8) !usize {
+                const recv_res = try self.inbound.recvTimeout(timeout);
                 if (!recv_res.ok) return error.Closed;
 
                 const payload = recv_res.value;

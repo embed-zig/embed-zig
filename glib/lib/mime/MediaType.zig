@@ -196,11 +196,11 @@ fn isValidQuotedPairChar(c: u8) bool {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 64 * 1024, struct {
-        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const std = @import("std");
-            const testing = lib.testing;
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 64 * 1024, struct {
+        fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
+            const host_std = @import("std");
+            const testing = std.testing;
 
             {
                 const params = [_]Parameter{
@@ -285,7 +285,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const mt = MediaType.init("text/plain", &params);
 
                 var buf: [128]u8 = undefined;
-                var stream = std.io.fixedBufferStream(&buf);
+                var stream = host_std.io.fixedBufferStream(&buf);
                 try mt.format(stream.writer());
                 try testing.expectEqualStrings(
                     "text/plain; charset=utf-8; filename=\"hello world.txt\"",
@@ -300,7 +300,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const mt = MediaType.init("text/plain", &params);
 
                 var buf: [128]u8 = undefined;
-                var stream = std.io.fixedBufferStream(&buf);
+                var stream = host_std.io.fixedBufferStream(&buf);
                 try mt.format(stream.writer());
                 try testing.expectEqualStrings(
                     "text/plain; title=\"hello\\\"world\\\\path\"",
@@ -315,7 +315,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const mt = MediaType.init("text/plain", &params);
 
                 var buf: [128]u8 = undefined;
-                var stream = std.io.fixedBufferStream(&buf);
+                var stream = host_std.io.fixedBufferStream(&buf);
                 try testing.expectError(error.InvalidQuotedPair, mt.format(stream.writer()));
             }
 
@@ -326,7 +326,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const mt = MediaType.init("text/plain", &params);
 
                 var buf: [128]u8 = undefined;
-                var stream = std.io.fixedBufferStream(&buf);
+                var stream = host_std.io.fixedBufferStream(&buf);
                 try testing.expectError(error.InvalidQuotedPair, mt.format(stream.writer()));
                 try testing.expectEqual(@as(usize, 0), stream.getWritten().len);
             }
@@ -340,12 +340,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const bad_name = MediaType.init("text/plain", &bad_name_params);
 
                 var type_buf: [128]u8 = undefined;
-                var type_stream = std.io.fixedBufferStream(&type_buf);
+                var type_stream = host_std.io.fixedBufferStream(&type_buf);
                 try testing.expectError(error.InvalidMediaType, bad_type.format(type_stream.writer()));
                 try testing.expectEqual(@as(usize, 0), type_stream.getWritten().len);
 
                 var name_buf: [128]u8 = undefined;
-                var name_stream = std.io.fixedBufferStream(&name_buf);
+                var name_stream = host_std.io.fixedBufferStream(&name_buf);
                 try testing.expectError(error.InvalidParameter, bad_name.format(name_stream.writer()));
                 try testing.expectEqual(@as(usize, 0), name_stream.getWritten().len);
             }
@@ -355,7 +355,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 const parsed = try MediaType.parse("text/plain; title=\"hello\\\"world\\\\path\"", &parsed_params);
 
                 var buf: [128]u8 = undefined;
-                var stream = std.io.fixedBufferStream(&buf);
+                var stream = host_std.io.fixedBufferStream(&buf);
                 try parsed.format(stream.writer());
                 try testing.expectEqualStrings(
                     "text/plain; title=\"hello\\\"world\\\\path\"",

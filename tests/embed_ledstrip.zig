@@ -23,7 +23,7 @@ test "embed/ledstrip/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .ledstrip);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .ledstrip);
     defer t.deinit();
 
     t.run("embed/ledstrip/unit/std", ledstrip.test_runner.unit.make(gstd.runtime));
@@ -35,7 +35,7 @@ test "embed/ledstrip/unit/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .ledstrip);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .ledstrip);
     defer t.deinit();
 
     t.run("embed/ledstrip/unit/gstd", ledstrip.test_runner.unit.make(gstd.runtime));

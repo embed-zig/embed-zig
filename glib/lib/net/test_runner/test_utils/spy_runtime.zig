@@ -1,7 +1,7 @@
 const runtime = @import("../../runtime.zig");
 
-pub fn make(comptime lib: type, comptime Base: type) type {
-    const AtomicUsize = lib.atomic.Value(usize);
+pub fn make(comptime std: type, comptime Base: type) type {
+    const AtomicUsize = std.atomic.Value(usize);
 
     return struct {
         pub var tcp_create_count: AtomicUsize = AtomicUsize.init(0);

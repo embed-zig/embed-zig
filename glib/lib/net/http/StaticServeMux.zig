@@ -1,5 +1,6 @@
 //! StaticServeMux — comptime-built HTTP request multiplexer.
 
+const time_mod = @import("time");
 const Request = @import("Request.zig");
 const ResponseWriter = @import("ResponseWriter.zig").ResponseWriter;
 const handler_mod = @import("Handler.zig");
@@ -7,13 +8,13 @@ const mux_common = @import("mux_common.zig");
 const Conn = @import("../Conn.zig");
 const testing_api = @import("testing");
 
-pub fn StaticServeMux(comptime lib: type, comptime spec: anytype) type {
+pub fn StaticServeMux(comptime std: type, comptime spec: anytype) type {
     if (validationError(spec)) |err| @compileError(err);
 
-    const Handler = handler_mod.Handler(lib);
+    const Handler = handler_mod.Handler(std);
     const routes = comptime normalizeSpec(spec);
     const trie = comptime buildTrie(routes);
-    const Writer = ResponseWriter(lib);
+    const Writer = ResponseWriter(std);
 
     return struct {
         handlers: [routes.len]Handler,
@@ -32,27 +33,27 @@ pub fn StaticServeMux(comptime lib: type, comptime spec: anytype) type {
 
         pub fn serveHTTP(self: *Self, rw: *Writer, req: *Request) void {
             const path = mux_common.requestPath(req);
-            const cleaned = mux_common.cleanPath(lib, rw.allocator, path) catch path;
+            const cleaned = mux_common.cleanPath(std, rw.allocator, path) catch path;
             const owns_cleaned = cleaned.ptr != path.ptr;
             defer if (owns_cleaned) rw.allocator.free(cleaned);
 
-            if (!lib.mem.eql(u8, cleaned, path)) {
-                mux_common.redirectTo(lib, rw, cleaned);
+            if (!std.mem.eql(u8, cleaned, path)) {
+                mux_common.redirectTo(std, rw, cleaned);
                 return;
             }
 
             if (needsTrailingSlashRedirect(cleaned)) {
                 const target = mux_common.appendSlash(rw.allocator, cleaned) catch {
-                    mux_common.notFound(lib, rw);
+                    mux_common.notFound(std, rw);
                     return;
                 };
                 defer rw.allocator.free(target);
-                mux_common.redirectTo(lib, rw, target);
+                mux_common.redirectTo(std, rw, target);
                 return;
             }
 
             const route_index = bestRoute(cleaned) orelse {
-                mux_common.notFound(lib, rw);
+                mux_common.notFound(std, rw);
                 return;
             };
             self.handlers[route_index].serveHTTP(rw, req);
@@ -130,7 +131,7 @@ pub fn StaticServeMux(comptime lib: type, comptime spec: anytype) type {
             var edge_index = trie.nodes[node_index].first_child_edge;
             while (edge_index) |idx| : (edge_index = trie.edges[idx].next_sibling_edge) {
                 const edge = trie.edges[idx];
-                if (lib.mem.eql(u8, edge.segment, segment)) return edge.child_node_index;
+                if (std.mem.eql(u8, edge.segment, segment)) return edge.child_node_index;
             }
             return null;
         }
@@ -339,13 +340,13 @@ fn comptimeIntToString(comptime value: usize) []const u8 {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const Writer = ResponseWriter(lib);
-            const DynamicMux = @import("ServeMux.zig").ServeMux(lib);
-            const StaticMux = StaticServeMux(lib, .{
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const Writer = ResponseWriter(std);
+            const DynamicMux = @import("ServeMux.zig").ServeMux(std);
+            const StaticMux = StaticServeMux(std, .{
                 "/redirect/",
                 "/exact",
             });
@@ -361,7 +362,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }) == null);
 
             {
-                const Mux = StaticServeMux(lib, .{
+                const Mux = StaticServeMux(std, .{
                     "/",
                     "/api/",
                     "/api/users",
@@ -414,10 +415,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const ExactOnlyMux = StaticServeMux(lib, .{
+                const ExactOnlyMux = StaticServeMux(std, .{
                     "/api",
                 });
-                const ExactAndSubtreeMux = StaticServeMux(lib, .{
+                const ExactAndSubtreeMux = StaticServeMux(std, .{
                     "/api",
                     "/api/",
                 });
@@ -464,13 +465,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
             {
                 const MockConn = struct {
-                    allocator: lib.mem.Allocator,
-                    writes: lib.ArrayList(u8),
+                    allocator: std.mem.Allocator,
+                    writes: std.ArrayList(u8),
 
-                    fn init(local_allocator: lib.mem.Allocator) lib.mem.Allocator.Error!@This() {
+                    fn init(local_allocator: std.mem.Allocator) std.mem.Allocator.Error!@This() {
                         return .{
                             .allocator = local_allocator,
-                            .writes = try lib.ArrayList(u8).initCapacity(local_allocator, 0),
+                            .writes = try std.ArrayList(u8).initCapacity(local_allocator, 0),
                         };
                     }
 
@@ -487,8 +488,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     pub fn deinit(self: *@This()) void {
                         self.writes.deinit(self.allocator);
                     }
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const SinkHandler = struct {
@@ -502,14 +503,14 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     status_line: []u8,
                     location: ?[]const u8,
 
-                    fn deinit(self: *@This(), local_allocator: lib.mem.Allocator) void {
+                    fn deinit(self: *@This(), local_allocator: std.mem.Allocator) void {
                         local_allocator.free(self.status_line);
                         if (self.location) |loc| local_allocator.free(loc);
                     }
                 };
 
                 const captureResponse = struct {
-                    fn run(mux: anytype, local_allocator: lib.mem.Allocator, url: []const u8) !Captured {
+                    fn run(mux: anytype, local_allocator: std.mem.Allocator, url: []const u8) !Captured {
                         var raw = try MockConn.init(local_allocator);
                         defer raw.deinit();
                         var req = try Request.init(local_allocator, "GET", url);
@@ -521,8 +522,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         try writer.finish();
 
                         const head = raw.writes.items;
-                        const first_end = lib.mem.indexOf(u8, head, "\r\n") orelse return error.TestUnexpectedResult;
-                        const header_end = lib.mem.indexOf(u8, head, "\r\n\r\n") orelse return error.TestUnexpectedResult;
+                        const first_end = std.mem.indexOf(u8, head, "\r\n") orelse return error.TestUnexpectedResult;
+                        const header_end = std.mem.indexOf(u8, head, "\r\n\r\n") orelse return error.TestUnexpectedResult;
                         const status_line = head[0..first_end];
                         const location = headerValue(head[0..header_end], "Location");
                         return .{
@@ -534,11 +535,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     fn headerValue(head: []const u8, name: []const u8) ?[]const u8 {
                         var start: usize = 0;
                         while (start < head.len) {
-                            const line_end = lib.mem.indexOfScalarPos(u8, head, start, '\n') orelse head.len;
-                            const line = lib.mem.trimRight(u8, head[start..line_end], "\r");
+                            const line_end = std.mem.indexOfScalarPos(u8, head, start, '\n') orelse head.len;
+                            const line = std.mem.trimRight(u8, head[start..line_end], "\r");
                             if (line.len == 0) return null;
-                            if (lib.mem.startsWith(u8, line, name) and line.len > name.len + 1 and line[name.len] == ':') {
-                                return lib.mem.trimLeft(u8, line[name.len + 1 ..], " ");
+                            if (std.mem.startsWith(u8, line, name) and line.len > name.len + 1 and line[name.len] == ':') {
+                                return std.mem.trimLeft(u8, line[name.len + 1 ..], " ");
                             }
                             start = @min(line_end + 1, head.len);
                         }
@@ -550,8 +551,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 defer dynamic.deinit();
                 var sink_a = SinkHandler{};
                 var sink_b = SinkHandler{};
-                try dynamic.handle("/redirect/", handler_mod.Handler(lib).init(&sink_a));
-                try dynamic.handle("/exact", handler_mod.Handler(lib).init(&sink_b));
+                try dynamic.handle("/redirect/", handler_mod.Handler(std).init(&sink_a));
+                try dynamic.handle("/exact", handler_mod.Handler(std).init(&sink_b));
 
                 var static_sink_a = SinkHandler{};
                 var static_sink_b = SinkHandler{};

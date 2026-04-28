@@ -1,9 +1,11 @@
 const stdz = @import("stdz");
 const testing_mod = @import("testing");
 const context_root = @import("context");
+const time_mod = @import("time");
+
 const Context = context_root.Context;
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type, comptime time: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -14,29 +16,29 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("cancel_wakes_waiter", testing_mod.TestRunner.fromFn(lib, 48 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try multiThreadCancelWakesWaiterCase(lib, case_allocator);
+            t.run("cancel_wakes_waiter", testing_mod.TestRunner.fromFn(std, 48 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try multiThreadCancelWakesWaiterCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("custom_cause_wakes_waiter", testing_mod.TestRunner.fromFn(lib, 48 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try multiThreadCustomCauseWakesWaiterCase(lib, case_allocator);
+            t.run("custom_cause_wakes_waiter", testing_mod.TestRunner.fromFn(std, 48 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try multiThreadCustomCauseWakesWaiterCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("parent_cancel_wakes_child_waiter", testing_mod.TestRunner.fromFn(lib, 48 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try multiThreadParentCancelWakesChildWaiterCase(lib, case_allocator);
+            t.run("parent_cancel_wakes_child_waiter", testing_mod.TestRunner.fromFn(std, 48 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try multiThreadParentCancelWakesChildWaiterCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("concurrent_create_and_deinit", testing_mod.TestRunner.fromFn(lib, 64 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try multiThreadConcurrentCreateAndDeinitCase(lib, case_allocator);
+            t.run("concurrent_create_and_deinit", testing_mod.TestRunner.fromFn(std, 64 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try multiThreadConcurrentCreateAndDeinitCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("deadline_reparent_keeps_child_deadline", testing_mod.TestRunner.fromFn(lib, 64 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try multiThreadDeadlineReparentKeepsChildDeadlineCase(lib, case_allocator);
+            t.run("deadline_reparent_keeps_child_deadline", testing_mod.TestRunner.fromFn(std, 64 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try multiThreadDeadlineReparentKeepsChildDeadlineCase(std, time, case_allocator);
                 }
             }.run));
             return t.wait();
@@ -54,24 +56,24 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
     return testing_mod.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-fn multiThreadCancelWakesWaiterCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn multiThreadCancelWakesWaiterCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    const bg = ctx_ns.background();
-    var cc = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var cc = try ctx_api.withCancel(bg);
     defer cc.deinit();
 
-    const t = try lib.Thread.spawn(.{}, struct {
+    const t = try std.Thread.spawn(.{}, struct {
         fn work(c: *Context) void {
             const cause = c.wait(null);
-            lib.debug.assert(cause != null);
-            lib.debug.assert(cause.? == error.Canceled);
+            std.debug.assert(cause != null);
+            std.debug.assert(cause.? == error.Canceled);
         }
     }.work, .{&cc});
 
-    lib.Thread.sleep(5_000_000);
+    std.Thread.sleep(@intCast(5 * time_mod.duration.MilliSecond));
     cc.cancel();
     t.join();
 
@@ -79,24 +81,24 @@ fn multiThreadCancelWakesWaiterCase(comptime lib: type, allocator: lib.mem.Alloc
     if (e != error.Canceled) return error.MultiThreadCancelWrong;
 }
 
-fn multiThreadCustomCauseWakesWaiterCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn multiThreadCustomCauseWakesWaiterCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    const bg = ctx_ns.background();
-    var cc = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var cc = try ctx_api.withCancel(bg);
     defer cc.deinit();
 
-    const t = try lib.Thread.spawn(.{}, struct {
+    const t = try std.Thread.spawn(.{}, struct {
         fn work(c: *Context) void {
             const cause = c.wait(null);
-            lib.debug.assert(cause != null);
-            lib.debug.assert(cause.? == error.BrokenPipe);
+            std.debug.assert(cause != null);
+            std.debug.assert(cause.? == error.BrokenPipe);
         }
     }.work, .{&cc});
 
-    lib.Thread.sleep(5_000_000);
+    std.Thread.sleep(@intCast(5 * time_mod.duration.MilliSecond));
     cc.cancelWithCause(error.BrokenPipe);
     t.join();
 
@@ -104,26 +106,26 @@ fn multiThreadCustomCauseWakesWaiterCase(comptime lib: type, allocator: lib.mem.
     if (e != error.BrokenPipe) return error.MultiThreadCauseWrong;
 }
 
-fn multiThreadParentCancelWakesChildWaiterCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn multiThreadParentCancelWakesChildWaiterCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    const bg = ctx_ns.background();
-    var parent = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var parent = try ctx_api.withCancel(bg);
     defer parent.deinit();
-    var child = try ctx_ns.withCancel(parent);
+    var child = try ctx_api.withCancel(parent);
     defer child.deinit();
 
-    const t = try lib.Thread.spawn(.{}, struct {
+    const t = try std.Thread.spawn(.{}, struct {
         fn work(c: *Context) void {
             const cause = c.wait(null);
-            lib.debug.assert(cause != null);
-            lib.debug.assert(cause.? == error.Canceled);
+            std.debug.assert(cause != null);
+            std.debug.assert(cause.? == error.Canceled);
         }
     }.work, .{&child});
 
-    lib.Thread.sleep(5_000_000);
+    std.Thread.sleep(@intCast(5 * time_mod.duration.MilliSecond));
     parent.cancel();
     t.join();
 
@@ -131,15 +133,15 @@ fn multiThreadParentCancelWakesChildWaiterCase(comptime lib: type, allocator: li
     if (e != error.Canceled) return error.MultiThreadParentWakeWrong;
 }
 
-fn multiThreadConcurrentCreateAndDeinitCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn multiThreadConcurrentCreateAndDeinitCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    const Api = @TypeOf(ctx_ns);
-    var threads: [6]lib.Thread = undefined;
+    const Api = @TypeOf(ctx_api);
+    var threads: [6]std.Thread = undefined;
     for (&threads) |*t| {
-        t.* = try lib.Thread.spawn(.{}, struct {
+        t.* = try std.Thread.spawn(.{}, struct {
             fn work(api: *const Api) void {
                 var i: usize = 0;
                 while (i < 200) : (i += 1) {
@@ -147,22 +149,22 @@ fn multiThreadConcurrentCreateAndDeinitCase(comptime lib: type, allocator: lib.m
                     ctx.deinit();
                 }
             }
-        }.work, .{&ctx_ns});
+        }.work, .{&ctx_api});
     }
     for (threads) |t| t.join();
 }
 
-fn multiThreadDeadlineReparentKeepsChildDeadlineCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn multiThreadDeadlineReparentKeepsChildDeadlineCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    const bg = ctx_ns.background();
-    var parent = try ctx_ns.withDeadline(bg, lib.time.nanoTimestamp() + 1000 * lib.time.ns_per_ms);
-    var child = try ctx_ns.withDeadline(parent, lib.time.nanoTimestamp() + 2000 * lib.time.ns_per_ms);
+    const bg = ctx_api.background();
+    var parent = try ctx_api.withDeadline(bg, time_mod.instant.add(ctx_api.now(), 1000 * time_mod.duration.MilliSecond));
+    var child = try ctx_api.withDeadline(parent, time_mod.instant.add(ctx_api.now(), 2000 * time_mod.duration.MilliSecond));
     defer child.deinit();
 
-    const t = try lib.Thread.spawn(.{}, struct {
+    const t = try std.Thread.spawn(.{}, struct {
         fn work(c: *Context) void {
             var i: usize = 0;
             while (i < 10_000) : (i += 1) {
@@ -171,7 +173,7 @@ fn multiThreadDeadlineReparentKeepsChildDeadlineCase(comptime lib: type, allocat
         }
     }.work, .{&child});
 
-    lib.Thread.sleep(1_000_000);
+    std.Thread.sleep(@intCast(1 * time_mod.duration.MilliSecond));
     parent.deinit();
     t.join();
 

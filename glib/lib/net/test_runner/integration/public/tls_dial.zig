@@ -11,7 +11,7 @@
 const stdz = @import("stdz");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type, comptime net: type, comptime host: []const u8) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type, comptime host: []const u8) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
@@ -22,7 +22,7 @@ pub fn make(comptime lib: type, comptime net: type, comptime host: []const u8) t
 
         pub fn run(self: *@This(), t: *testing_api.T, allocator: stdz.mem.Allocator) bool {
             _ = self;
-            runImpl(lib, net, t, allocator, host) catch |err| {
+            runImpl(std, net, t, allocator, host) catch |err| {
                 t.logErrorf("tls_dial runner failed: {}", .{err});
                 return false;
             };
@@ -31,31 +31,31 @@ pub fn make(comptime lib: type, comptime net: type, comptime host: []const u8) t
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_api.TestRunner.make(Runner).new(runner);
 }
 
 fn runImpl(
-    comptime lib: type,
+    comptime std: type,
     comptime Net: type,
     t: *testing_api.T,
-    alloc: lib.mem.Allocator,
+    alloc: std.mem.Allocator,
     comptime host: []const u8,
 ) !void {
     _ = t;
     const Addr = Net.netip.Addr;
     const AddrPort = Net.netip.AddrPort;
     const testing = struct {
-        pub var allocator: lib.mem.Allocator = undefined;
-        pub const expect = lib.testing.expect;
-        pub const expectEqual = lib.testing.expectEqual;
-        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-        pub const expectError = lib.testing.expectError;
+        pub var allocator: std.mem.Allocator = undefined;
+        pub const expect = std.testing.expect;
+        pub const expectEqual = std.testing.expectEqual;
+        pub const expectEqualStrings = std.testing.expectEqualStrings;
+        pub const expectError = std.testing.expectError;
     };
     testing.allocator = alloc;
     const PinnedVersionSuite = struct {
@@ -63,7 +63,7 @@ fn runImpl(
         suite: ?Net.tls.CipherSuite = null,
     };
 
-    var bundle: lib.crypto.Certificate.Bundle = .{};
+    var bundle: std.crypto.Certificate.Bundle = .{};
     defer bundle.deinit(testing.allocator);
     try bundle.rescan(testing.allocator);
 
@@ -83,20 +83,20 @@ fn runImpl(
         .{ .version = .tls_1_3, .suite = .TLS_AES_256_GCM_SHA384 },
         .{ .version = .tls_1_3, .suite = .TLS_CHACHA20_POLY1305_SHA256 },
     }) |case| {
-        try runPinnedVersionSuiteCase(lib, alloc, Net, server_addr, host, &bundle, case);
+        try runPinnedVersionSuiteCase(std, alloc, Net, server_addr, host, &bundle, case);
     }
 }
 
 fn runPinnedVersionSuiteCase(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
+    comptime std: type,
+    allocator: std.mem.Allocator,
     comptime NetType: type,
     server_addr: anytype,
     comptime host: []const u8,
-    bundle: *const lib.crypto.Certificate.Bundle,
+    bundle: *const std.crypto.Certificate.Bundle,
     comptime case: anytype,
 ) !void {
-    const testing = lib.testing;
+    const testing = std.testing;
     const tls12_cipher_suites = if (case.suite) |suite|
         if (!suite.isTls13())
             &[_]NetType.tls.CipherSuite{suite}

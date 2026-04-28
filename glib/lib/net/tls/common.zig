@@ -1,8 +1,8 @@
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) type {
-    const crypto = lib.crypto;
-    const mem = lib.mem;
+pub fn make(comptime std: type) type {
+    const crypto = std.crypto;
+    const mem = std.mem;
 
     return struct {
         pub const Tls13Hash = enum {
@@ -412,12 +412,12 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             _ = allocator;
-            const testing = lib.testing;
-            const common = make(lib);
+            const testing = std.testing;
+            const common = make(std);
 
             {
                 const header = common.RecordHeader{

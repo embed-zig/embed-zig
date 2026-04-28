@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const bt = @import("bt");
 const Context = @import("../../event/Context.zig");
 
@@ -50,7 +51,7 @@ pub const CentralConnected = struct {
     peer_addr_type: bt.Central.AddrType,
     interval: u16,
     latency: u16,
-    timeout: u16,
+    supervision_timeout: glib.time.duration.Duration,
     ctx: Context.Type = null,
 };
 
@@ -86,7 +87,7 @@ pub const PeriphConnected = struct {
     peer_addr_type: bt.Peripheral.AddrType,
     interval: u16,
     latency: u16,
-    timeout: u16,
+    supervision_timeout: glib.time.duration.Duration,
     ctx: Context.Type = null,
 };
 
@@ -133,7 +134,7 @@ pub fn make(comptime EventType: type, source_id: u32, host_event: Event) !EventT
                     .peer_addr_type = info.peer_addr_type,
                     .interval = info.interval,
                     .latency = info.latency,
-                    .timeout = info.timeout,
+                    .supervision_timeout = info.supervision_timeout,
                     .ctx = null,
                 },
             },
@@ -176,7 +177,7 @@ pub fn make(comptime EventType: type, source_id: u32, host_event: Event) !EventT
                     .peer_addr_type = info.peer_addr_type,
                     .interval = info.interval,
                     .latency = info.latency,
-                    .timeout = info.timeout,
+                    .supervision_timeout = info.supervision_timeout,
                     .ctx = null,
                 },
             },

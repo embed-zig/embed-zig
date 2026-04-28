@@ -7,29 +7,29 @@ const Racer = @import("../Racer.zig");
 const Timer = @import("../Timer.zig");
 const WakeFd = @import("../WakeFd.zig");
 
-pub fn make(comptime lib: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime time: type) testing_api.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
             t.parallel();
-            t.run("Channel", Channel.TestRunner(lib));
-            t.run("Pool", Pool.TestRunner(lib));
-            t.run("Racer", Racer.TestRunner(lib));
-            t.run("Timer", Timer.TestRunner(lib));
+            t.run("Channel", Channel.TestRunner(std));
+            t.run("Pool", Pool.TestRunner(std));
+            t.run("Racer", Racer.TestRunner(std, time));
+            t.run("Timer", Timer.TestRunner(std, time));
             if (builtin.target.os.tag != .windows) {
-                t.run("WakeFd", WakeFd.TestRunner(lib));
+                t.run("WakeFd", WakeFd.TestRunner(std, time));
             }
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

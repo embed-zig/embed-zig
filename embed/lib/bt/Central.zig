@@ -28,14 +28,14 @@ pub const State = enum {
 
 pub const ScanConfig = struct {
     active: bool = true,
-    /// Scan interval in milliseconds. Backends that speak raw HCI must convert
-    /// this to controller-specific scan units.
-    interval_ms: u16 = 10,
-    /// Scan window in milliseconds. Backends that speak raw HCI must convert
-    /// this to controller-specific scan units.
-    window_ms: u16 = 10,
+    /// Scan interval. Backends that speak raw HCI must convert this to
+    /// controller-specific scan units.
+    interval: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond,
+    /// Scan window. Backends that speak raw HCI must convert this to
+    /// controller-specific scan units.
+    window: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond,
     filter_duplicates: bool = true,
-    timeout_ms: u32 = 0,
+    timeout: glib.time.duration.Duration = 0,
     service_uuids: []const u16 = &.{},
 };
 
@@ -43,7 +43,7 @@ pub const ConnParams = struct {
     interval_min: u16 = 0x0006,
     interval_max: u16 = 0x0006,
     latency: u16 = 0,
-    timeout: u16 = 0x00C8,
+    supervision_timeout: glib.time.duration.Duration = 2 * glib.time.duration.Second,
 };
 
 pub const AdvReport = struct {
@@ -70,7 +70,7 @@ pub const ConnectionInfo = struct {
     peer_addr_type: AddrType,
     interval: u16,
     latency: u16,
-    timeout: u16,
+    supervision_timeout: glib.time.duration.Duration,
 };
 
 pub const DiscoveredService = struct {

@@ -29,7 +29,7 @@ const conn_concurrent_bidirectional_rw = @import("tls/conn_concurrent_bidirectio
 const dialer_rejects_udp = @import("tls/dialer_rejects_udp.zig");
 const invalid_listener_config_rejected = @import("tls/invalid_listener_config_rejected.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -41,28 +41,28 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
 
             t.parallel();
-            t.run("local_loopback_versions", local_loopback_versions.make(lib, net));
-            t.run("tls13_configured_suites", tls13_configured_suites.make(lib, net));
-            t.run("server_conn_handles_client_key_update", server_conn_handles_client_key_update.make(lib, net));
-            t.run("client_conn_handles_server_key_update", client_conn_handles_server_key_update.make(lib, net));
-            t.run("close_sends_close_notify_to_peer", close_sends_close_notify_to_peer.make(lib, net));
-            t.run("listener_accepts_tls_client", listener_accepts_tls_client.make(lib, net));
-            t.run("dialer_connects_to_tls_listener", dialer_connects_to_tls_listener.make(lib, net));
-            t.run("dial_context_connects_to_tls_listener", dial_context_connects_to_tls_listener.make(lib, net));
-            t.run("conn_concurrent_bidirectional_rw", conn_concurrent_bidirectional_rw.make(lib, net));
-            t.run("dial_context_canceled_before_start", dial_context_canceled_before_start.make(lib, net));
-            t.run("dialer_rejects_udp", dialer_rejects_udp.make(lib, net));
-            t.run("invalid_listener_config_rejected", invalid_listener_config_rejected.make(lib, net));
+            t.run("local_loopback_versions", local_loopback_versions.make(std, net));
+            t.run("tls13_configured_suites", tls13_configured_suites.make(std, net));
+            t.run("server_conn_handles_client_key_update", server_conn_handles_client_key_update.make(std, net));
+            t.run("client_conn_handles_server_key_update", client_conn_handles_server_key_update.make(std, net));
+            t.run("close_sends_close_notify_to_peer", close_sends_close_notify_to_peer.make(std, net));
+            t.run("listener_accepts_tls_client", listener_accepts_tls_client.make(std, net));
+            t.run("dialer_connects_to_tls_listener", dialer_connects_to_tls_listener.make(std, net));
+            t.run("dial_context_connects_to_tls_listener", dial_context_connects_to_tls_listener.make(std, net));
+            t.run("dial_context_canceled_before_start", dial_context_canceled_before_start.make(std, net));
+            t.run("conn_concurrent_bidirectional_rw", conn_concurrent_bidirectional_rw.make(std, net));
+            t.run("dialer_rejects_udp", dialer_rejects_udp.make(std, net));
+            t.run("invalid_listener_config_rejected", invalid_listener_config_rejected.make(std, net));
             return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_api.TestRunner.make(Runner).new(runner);
 }

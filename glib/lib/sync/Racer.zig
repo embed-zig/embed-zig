@@ -1,10 +1,11 @@
 const context_mod = @import("context");
 const testing_api = @import("testing");
+const time_mod = @import("time");
 
-pub fn Racer(comptime lib: type, comptime T: type) type {
-    const Allocator = lib.mem.Allocator;
-    const Thread = lib.Thread;
-    const Atomic = lib.atomic.Value;
+pub fn Racer(comptime std: type, comptime time: type, comptime T: type) type {
+    const Allocator = std.mem.Allocator;
+    const Thread = std.Thread;
+    const Atomic = std.atomic.Value;
 
     return struct {
         allocator: Allocator,
@@ -172,22 +173,22 @@ pub fn Racer(comptime lib: type, comptime T: type) type {
             while (!self.shared.has_value and self.shared.running != 0) {
                 if (ctx.err()) |err| return err;
 
-                const wait_ns: u64 = blk: {
-                    const poll_ns: i128 = 10 * lib.time.ns_per_ms;
-                    if (ctx.deadline()) |deadline_ns| {
-                        const remaining_ns = deadline_ns - lib.time.nanoTimestamp();
-                        if (remaining_ns <= 0) break :blk 0;
-                        break :blk @intCast(@min(remaining_ns, poll_ns));
+                const timed_wait: time_mod.duration.Duration = blk: {
+                    const poll_interval: time_mod.duration.Duration = 10 * time_mod.duration.MilliSecond;
+                    if (ctx.deadline()) |deadline| {
+                        const remaining = time_mod.instant.sub(deadline, time.instant.now());
+                        if (remaining <= 0) break :blk 0;
+                        break :blk @min(remaining, poll_interval);
                     }
-                    break :blk @intCast(poll_ns);
+                    break :blk poll_interval;
                 };
 
-                if (wait_ns == 0) {
+                if (timed_wait == 0) {
                     if (ctx.err()) |err| return err;
                     return error.DeadlineExceeded;
                 }
 
-                self.shared.cond.timedWait(&self.shared.mutex, wait_ns) catch {};
+                self.shared.cond.timedWait(&self.shared.mutex, @intCast(timed_wait)) catch {};
             }
 
             if (self.shared.has_value) return .{ .winner = self.shared.value };
@@ -216,44 +217,19 @@ pub fn Racer(comptime lib: type, comptime T: type) type {
             shared.mutex.lock();
             defer shared.mutex.unlock();
 
-            lib.debug.assert(shared.running > 0);
+            std.debug.assert(shared.running > 0);
             shared.running -= 1;
             if (shared.running == 0) shared.cond.broadcast();
         }
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
+pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunner {
     const TestCase = struct {
         fn run() !void {
-            const TestLib = struct {
-                pub const mem = lib.mem;
-                pub const atomic = lib.atomic;
-                pub const debug = lib.debug;
-                pub const time = lib.time;
-                pub const Thread = struct {
-                    pub const Mutex = lib.Thread.Mutex;
-                    pub const Condition = lib.Thread.Condition;
-                    pub const SpawnConfig = struct {
-                        allocator: ?lib.mem.Allocator = null,
-                    };
-                    pub const SpawnError = error{};
+            const R = Racer(std, time, u32);
 
-                    pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) SpawnError!@This() {
-                        _ = config;
-                        @call(.auto, f, args);
-                        return .{};
-                    }
-
-                    pub fn detach(self: @This()) void {
-                        _ = self;
-                    }
-                };
-            };
-
-            const R = Racer(TestLib, u32);
-
-            var racer = try R.init(lib.testing.allocator);
+            var racer = try R.init(std.testing.allocator);
             defer racer.deinit();
 
             switch (racer.race()) {
@@ -261,11 +237,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 .exhausted => {},
             }
 
-            try lib.testing.expect(!racer.done());
-            try lib.testing.expectEqual(@as(?u32, null), racer.value());
+            try std.testing.expect(!racer.done());
+            try std.testing.expectEqual(@as(?u32, null), racer.value());
 
             racer.cancel();
-            try lib.testing.expect(racer.done());
+            try std.testing.expect(racer.done());
 
             switch (racer.race()) {
                 .winner => return error.UnexpectedWinner,
@@ -277,12 +253,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
         }
     };
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -293,7 +269,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

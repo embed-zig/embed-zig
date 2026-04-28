@@ -14,7 +14,7 @@ pub const Event = event.Event;
 pub const Kind = @typeInfo(Event).@"union".tag_type.?;
 
 origin: Origin = .source,
-timestamp_ns: i128 = 0,
+timestamp: glib.time.instant.Time = 0,
 body: Event,
 
 pub fn kind(self: Message) Kind {
@@ -28,7 +28,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         fn tagTracksBodyVariant() !void {
             const message: Message = .{
                 .origin = .source,
-                .timestamp_ns = 42,
+                .timestamp = 42,
                 .body = .{
                     .button_gesture = .{
                         .source_id = 1,
@@ -39,13 +39,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expectEqual(Kind.button_gesture, message.kind());
             try grt.std.testing.expectEqual(Origin.source, message.origin);
-            try grt.std.testing.expectEqual(@as(i128, 42), message.timestamp_ns);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 42), message.timestamp);
         }
 
         fn tickVariantUsesTickKind() !void {
             const message: Message = .{
                 .origin = .timer,
-                .timestamp_ns = 99,
+                .timestamp = 99,
                 .body = .{
                     .tick = .{},
                 },
@@ -53,7 +53,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expectEqual(Kind.tick, message.kind());
             try grt.std.testing.expectEqual(Origin.timer, message.origin);
-            try grt.std.testing.expectEqual(@as(i128, 99), message.timestamp_ns);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 99), message.timestamp);
         }
     };
 

@@ -3,8 +3,8 @@ const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Utils = test_utils.make(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make(std, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 3 * 1024 * 1024 },
@@ -14,21 +14,21 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: lib.mem.Allocator) bool {
+        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: std.mem.Allocator) bool {
             _ = runner;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = Utils.Net;
                     const Http = Utils.Http;
-                    const Thread = lib.Thread;
-                    const test_spawn_config: lib.Thread.SpawnConfig = Utils.test_spawn_config;
+                    const Thread = std.Thread;
+                    const test_spawn_config: std.Thread.SpawnConfig = Utils.test_spawn_config;
                     const testing = struct {
-                        pub var allocator: lib.mem.Allocator = undefined;
-                        pub const expect = lib.testing.expect;
-                        pub const expectEqual = lib.testing.expectEqual;
-                        pub const expectEqualSlices = lib.testing.expectEqualSlices;
-                        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-                        pub const expectError = lib.testing.expectError;
+                        pub var allocator: std.mem.Allocator = undefined;
+                        pub const expect = std.testing.expect;
+                        pub const expectEqual = std.testing.expectEqual;
+                        pub const expectEqualSlices = std.testing.expectEqualSlices;
+                        pub const expectEqualStrings = std.testing.expectEqualStrings;
+                        pub const expectError = std.testing.expectError;
                     };
                     testing.allocator = a;
 
@@ -93,15 +93,15 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             fn run(listener: *Net.TcpListener, state: *ProxyProbeState) void {
                                 var conn = listener.accept() catch return;
                                 defer conn.deinit();
-                                conn.setReadTimeout(200);
+                                conn.setReadDeadline(net.time.instant.add(net.time.instant.now(), 200 * net.time.duration.MilliSecond));
                                 var buf: [64]u8 = undefined;
                                 const n = conn.read(&buf) catch return;
                                 if (n == 0) return;
-                                if (lib.mem.startsWith(u8, buf[0..n], "PING")) {
+                                if (std.mem.startsWith(u8, buf[0..n], "PING")) {
                                     state.saw_probe = true;
                                     return;
                                 }
-                                if (lib.mem.indexOf(u8, buf[0..n], "CONNECT ") != null) {
+                                if (std.mem.indexOf(u8, buf[0..n], "CONNECT ") != null) {
                                     state.saw_connect = true;
                                 }
                             }
@@ -117,7 +117,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var transport = try Http.Transport.init(testing.allocator, Utils.tlsTransportOptions());
                     defer transport.deinit();
 
-                    const raw_url = try lib.fmt.allocPrint(testing.allocator, "https://127.0.0.1:{d}/direct", .{target_port});
+                    const raw_url = try std.fmt.allocPrint(testing.allocator, "https://127.0.0.1:{d}/direct", .{target_port});
                     defer testing.allocator.free(raw_url);
 
                     var req = try Http.Request.init(testing.allocator, "GET", raw_url);

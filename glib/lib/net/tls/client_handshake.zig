@@ -1,12 +1,13 @@
-pub fn make(comptime lib: type) type {
-    const common = @import("common.zig").make(lib);
-    const extensions = @import("extensions.zig").make(lib);
-    const kdf = @import("kdf.zig").make(lib);
-    const record = @import("record.zig").make(lib);
-    const crypto = lib.crypto;
-    const mem = lib.mem;
-    const time = lib.time;
-    const Allocator = lib.mem.Allocator;
+const time_mod = @import("time");
+
+pub fn make(comptime std: type, comptime time: type) type {
+    const common = @import("common.zig").make(std);
+    const extensions = @import("extensions.zig").make(std);
+    const kdf = @import("kdf.zig").make(std);
+    const record = @import("record.zig").make(std);
+    const crypto = std.crypto;
+    const mem = std.mem;
+    const Allocator = std.mem.Allocator;
 
     return struct {
         pub const HandshakeError = error{
@@ -1189,7 +1190,7 @@ pub fn make(comptime lib: type) type {
                 }
 
                 fn certificateNowSeconds() i64 {
-                    return @divFloor(time.milliTimestamp(), 1000);
+                    return time.now().unix();
                 }
 
                 fn mapCertificateError(err: anyerror) HandshakeError {
@@ -1323,14 +1324,14 @@ pub fn make(comptime lib: type) type {
 }
 const testing_api = @import("testing");
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 8 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const K = @import("kdf.zig").make(lib);
+pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 8 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const K = @import("kdf.zig").make(std);
 
             {
-                const client = make(lib);
+                const client = make(std, time);
 
                 var a = try client.KeyExchange.generate(.x25519);
                 var b = try client.KeyExchange.generate(.x25519);
@@ -1341,8 +1342,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_common = @import("common.zig").make(lib);
+                const client = make(std, time);
+                const tls_common = @import("common.zig").make(std);
 
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -1355,8 +1356,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var conn = MockConn{};
@@ -1373,9 +1374,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_common = @import("common.zig").make(lib);
-                const tls_ext = @import("extensions.zig").make(lib);
+                const client = make(std, time);
+                const tls_common = @import("common.zig").make(std);
+                const tls_ext = @import("extensions.zig").make(std);
 
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -1388,8 +1389,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var conn = MockConn{};
@@ -1411,13 +1412,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pos += 32; // client_random
                 pos += 1 + body[pos]; // session_id
 
-                const cipher_suites_len = lib.mem.readInt(u16, body[pos..][0..2], .big);
+                const cipher_suites_len = std.mem.readInt(u16, body[pos..][0..2], .big);
                 pos += 2 + cipher_suites_len;
 
                 const compression_methods_len = body[pos];
                 pos += 1 + compression_methods_len;
 
-                const extensions_len = lib.mem.readInt(u16, body[pos..][0..2], .big);
+                const extensions_len = std.mem.readInt(u16, body[pos..][0..2], .big);
                 pos += 2;
 
                 const exts = try tls_ext.parseExtensions(body[pos..][0..extensions_len], testing.allocator);
@@ -1428,9 +1429,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_common = @import("common.zig").make(lib);
-                const tls_ext = @import("extensions.zig").make(lib);
+                const client = make(std, time);
+                const tls_common = @import("common.zig").make(std);
+                const tls_ext = @import("extensions.zig").make(std);
 
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -1443,8 +1444,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var conn = MockConn{};
@@ -1466,13 +1467,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pos += 32;
                 pos += 1 + body[pos];
 
-                const cipher_suites_len = lib.mem.readInt(u16, body[pos..][0..2], .big);
+                const cipher_suites_len = std.mem.readInt(u16, body[pos..][0..2], .big);
                 pos += 2 + cipher_suites_len;
 
                 const compression_methods_len = body[pos];
                 pos += 1 + compression_methods_len;
 
-                const extensions_len = lib.mem.readInt(u16, body[pos..][0..2], .big);
+                const extensions_len = std.mem.readInt(u16, body[pos..][0..2], .big);
                 pos += 2;
 
                 const exts = try tls_ext.parseExtensions(body[pos..][0..extensions_len], testing.allocator);
@@ -1483,8 +1484,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_common = @import("common.zig").make(lib);
+                const client = make(std, time);
+                const tls_common = @import("common.zig").make(std);
 
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -1497,8 +1498,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var conn = MockConn{};
@@ -1521,19 +1522,19 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pos += 32;
                 pos += 1 + body[pos];
 
-                const cipher_suites_len = lib.mem.readInt(u16, body[pos..][0..2], .big);
+                const cipher_suites_len = std.mem.readInt(u16, body[pos..][0..2], .big);
                 pos += 2;
                 try testing.expectEqual(@as(u16, 2), cipher_suites_len);
-                const cipher_suite: tls_common.CipherSuite = @enumFromInt(lib.mem.readInt(u16, body[pos..][0..2], .big));
+                const cipher_suite: tls_common.CipherSuite = @enumFromInt(std.mem.readInt(u16, body[pos..][0..2], .big));
                 try testing.expectEqual(tls_common.CipherSuite.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256, cipher_suite);
             }
 
             {
-                const client = make(lib);
-                const tls_common = @import("common.zig").make(lib);
-                const tls_record = @import("record.zig").make(lib);
+                const client = make(std, time);
+                const tls_common = @import("common.zig").make(std);
+                const tls_record = @import("record.zig").make(std);
                 const fixtures = @import("test_fixtures.zig");
-                const Ecdsa = lib.crypto.sign.ecdsa.EcdsaP256Sha256;
+                const Ecdsa = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 
                 const MockConn = struct {
                     write_buf: [4096]u8 = undefined,
@@ -1551,8 +1552,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const ReadConn = struct {
@@ -1573,8 +1574,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var conn = MockConn{};
@@ -1592,17 +1593,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 var server_hello: [256]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
                 pos += 2;
                 @memset(server_hello[pos..][0..32], 0xAA);
                 pos += 32;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256), .big);
                 pos += 2;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], 0, .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], 0, .big);
                 pos += 2;
                 const server_hello_header: tls_common.HandshakeHeader = .{
                     .msg_type = .server_hello,
@@ -1615,9 +1616,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 var certificate_msg: [4 + 3 + 3 + fixtures.self_signed_cert_der.len]u8 = undefined;
                 var cert_pos: usize = 4;
-                lib.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], 3 + fixtures.self_signed_cert_der.len, .big);
+                std.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], 3 + fixtures.self_signed_cert_der.len, .big);
                 cert_pos += 3;
-                lib.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], fixtures.self_signed_cert_der.len, .big);
+                std.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], fixtures.self_signed_cert_der.len, .big);
                 cert_pos += 3;
                 @memcpy(certificate_msg[cert_pos..][0..fixtures.self_signed_cert_der.len], fixtures.self_signed_cert_der[0..]);
                 cert_pos += fixtures.self_signed_cert_der.len;
@@ -1640,7 +1641,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 var ske_pos: usize = 4;
                 ske_msg[ske_pos] = 0x03;
                 ske_pos += 1;
-                lib.mem.writeInt(u16, ske_msg[ske_pos..][0..2], @intFromEnum(tls_common.NamedGroup.secp256r1), .big);
+                std.mem.writeInt(u16, ske_msg[ske_pos..][0..2], @intFromEnum(tls_common.NamedGroup.secp256r1), .big);
                 ske_pos += 2;
                 ske_msg[ske_pos] = @intCast(server_pub.len);
                 ske_pos += 1;
@@ -1661,9 +1662,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 var sig_der_buf: [Ecdsa.Signature.der_encoded_length_max]u8 = undefined;
                 const sig_der = ske_sig.toDer(&sig_der_buf);
 
-                lib.mem.writeInt(u16, ske_msg[ske_pos..][0..2], @intFromEnum(tls_common.SignatureScheme.ecdsa_secp256r1_sha256), .big);
+                std.mem.writeInt(u16, ske_msg[ske_pos..][0..2], @intFromEnum(tls_common.SignatureScheme.ecdsa_secp256r1_sha256), .big);
                 ske_pos += 2;
-                lib.mem.writeInt(u16, ske_msg[ske_pos..][0..2], @intCast(sig_der.len), .big);
+                std.mem.writeInt(u16, ske_msg[ske_pos..][0..2], @intCast(sig_der.len), .big);
                 ske_pos += 2;
                 @memcpy(ske_msg[ske_pos..][0..sig_der.len], sig_der);
                 ske_pos += sig_der.len;
@@ -1757,8 +1758,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_common = @import("common.zig").make(lib);
+                const client = make(std, time);
+                const tls_common = @import("common.zig").make(std);
 
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -1771,8 +1772,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var conn = MockConn{};
@@ -1797,12 +1798,12 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 try testing.expectError(error.InvalidHandshake, hs.processHandshake(&msg));
             }
 
-            if (comptime lib == @import("std")) {
-                const std = @import("std");
+            if (comptime std == @import("std")) {
+                const host_std = @import("std");
                 {
-                    const client = make(lib);
-                    const tls_common = @import("common.zig").make(lib);
-                    const tls_ext = @import("extensions.zig").make(lib);
+                    const client = make(std, time);
+                    const tls_common = @import("common.zig").make(std);
+                    const tls_ext = @import("extensions.zig").make(std);
 
                     const MockConn = struct {
                         write_buf: [4096]u8 = undefined,
@@ -1820,8 +1821,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                         pub fn close(_: *@This()) void {}
                         pub fn deinit(_: *@This()) void {}
-                        pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                        pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                        pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                        pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                     };
 
                     const ParsedClientHello = struct {
@@ -1852,7 +1853,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                             const session_id = body[pos..][0..session_id_len];
                             pos += session_id_len;
 
-                            const cipher_suites_len = std.mem.readInt(u16, body[pos..][0..2], .big);
+                            const cipher_suites_len = host_std.mem.readInt(u16, body[pos..][0..2], .big);
                             pos += 2;
                             const cipher_suites = body[pos..][0..cipher_suites_len];
                             pos += cipher_suites_len;
@@ -1862,7 +1863,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                             const compression_methods = body[pos..][0..compression_methods_len];
                             pos += compression_methods_len;
 
-                            const extensions_len = std.mem.readInt(u16, body[pos..][0..2], .big);
+                            const extensions_len = host_std.mem.readInt(u16, body[pos..][0..2], .big);
                             pos += 2;
                             const extensions_data = body[pos..][0..extensions_len];
 
@@ -1880,7 +1881,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                             var j: usize = 0;
                             var i: usize = 0;
                             while (i + 1 < haystack.len and j + 1 < needle.len) : (i += 2) {
-                                if (std.mem.eql(u8, needle[j .. j + 2], haystack[i .. i + 2])) {
+                                if (host_std.mem.eql(u8, needle[j .. j + 2], haystack[i .. i + 2])) {
                                     j += 2;
                                 }
                             }
@@ -1890,7 +1891,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         fn expectContainsCipherSuite(encoded: []const u8, suite: tls_common.CipherSuite) !void {
                             var i: usize = 0;
                             while (i + 1 < encoded.len) : (i += 2) {
-                                const got: tls_common.CipherSuite = @enumFromInt(std.mem.readInt(u16, encoded[i..][0..2], .big));
+                                const got: tls_common.CipherSuite = @enumFromInt(host_std.mem.readInt(u16, encoded[i..][0..2], .big));
                                 if (got == suite) return;
                             }
                             return error.TestUnexpectedResult;
@@ -1899,7 +1900,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                         fn expectNotContainsCipherSuite(encoded: []const u8, suite: tls_common.CipherSuite) !void {
                             var i: usize = 0;
                             while (i + 1 < encoded.len) : (i += 2) {
-                                const got: tls_common.CipherSuite = @enumFromInt(std.mem.readInt(u16, encoded[i..][0..2], .big));
+                                const got: tls_common.CipherSuite = @enumFromInt(host_std.mem.readInt(u16, encoded[i..][0..2], .big));
                                 if (got == suite) return error.TestUnexpectedResult;
                             }
                         }
@@ -1912,16 +1913,16 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                     _ = try hs.sendClientHello(&handshake_buf, &record_buf);
                     const ours = try Helpers.parseClientHello(conn.write_buf[0..conn.write_len]);
 
-                    var input_backing: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
-                    var input = std.Io.Reader.fixed(input_backing[0..]);
+                    var input_backing: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+                    var input = host_std.Io.Reader.fixed(input_backing[0..]);
                     input.seek = 0;
                     input.end = 0;
 
                     var output_backing: [4096]u8 = undefined;
-                    var output = std.Io.Writer.fixed(output_backing[0..]);
-                    var std_read_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
-                    var std_write_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
-                    _ = std.crypto.tls.Client.init(&input, &output, .{
+                    var output = host_std.Io.Writer.fixed(output_backing[0..]);
+                    var std_read_buf: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+                    var std_write_buf: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+                    _ = host_std.crypto.tls.Client.init(&input, &output, .{
                         .host = .{ .explicit = "example.com" },
                         .ca = .no_verification,
                         .read_buffer = &std_read_buf,
@@ -1968,9 +1969,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_ext = @import("extensions.zig").make(lib);
-                const tls_common = @import("common.zig").make(lib);
+                const client = make(std, time);
+                const tls_ext = @import("extensions.zig").make(std);
+                const tls_common = @import("common.zig").make(std);
 
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -1983,8 +1984,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var conn = MockConn{};
@@ -1994,8 +1995,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 var client_hello: [1024]u8 = undefined;
                 _ = try hs.encodeClientHello(&client_hello);
 
-                const server_secret = [_]u8{0x42} ** lib.crypto.dh.X25519.secret_length;
-                const server_public = try lib.crypto.dh.X25519.recoverPublicKey(server_secret);
+                const server_secret = [_]u8{0x42} ** std.crypto.dh.X25519.secret_length;
+                const server_public = try std.crypto.dh.X25519.recoverPublicKey(server_secret);
 
                 var ext_buf: [128]u8 = undefined;
                 var ext_builder = tls_ext.ExtensionBuilder.init(&ext_buf);
@@ -2008,17 +2009,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 var server_hello: [256]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
                 pos += 2;
                 @memset(server_hello[pos..][0..32], 0xAA);
                 pos += 32;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_AES_128_GCM_SHA256), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_AES_128_GCM_SHA256), .big);
                 pos += 2;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intCast(ext_data.len), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intCast(ext_data.len), .big);
                 pos += 2;
                 @memcpy(server_hello[pos..][0..ext_data.len], ext_data);
                 pos += ext_data.len;
@@ -2034,13 +2035,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 try testing.expectEqual(tls_common.ProtocolVersion.tls_1_3, hs.version);
                 try testing.expectEqual(tls_common.CipherSuite.TLS_AES_128_GCM_SHA256, hs.cipher_suite);
                 try testing.expect(hs.records.read_cipher != .none);
-                try testing.expect(!lib.mem.allEqual(u8, &hs.server_handshake_traffic_secret, 0));
+                try testing.expect(!std.mem.allEqual(u8, &hs.server_handshake_traffic_secret, 0));
             }
 
             {
-                const client = make(lib);
-                const tls_ext = @import("extensions.zig").make(lib);
-                const tls_common = @import("common.zig").make(lib);
+                const client = make(std, time);
+                const tls_ext = @import("extensions.zig").make(std);
+                const tls_common = @import("common.zig").make(std);
 
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -2053,8 +2054,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var conn = MockConn{};
@@ -2068,17 +2069,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 var server_hello: [256]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
                 pos += 2;
                 @memset(server_hello[pos..][0..32], 0xAA);
                 pos += 32;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_AES_128_GCM_SHA256), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_AES_128_GCM_SHA256), .big);
                 pos += 2;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intCast(ext_data.len), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intCast(ext_data.len), .big);
                 pos += 2;
                 @memcpy(server_hello[pos..][0..ext_data.len], ext_data);
                 pos += ext_data.len;
@@ -2093,9 +2094,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_ext = @import("extensions.zig").make(lib);
-                const tls_common = @import("common.zig").make(lib);
+                const client = make(std, time);
+                const tls_ext = @import("extensions.zig").make(std);
+                const tls_common = @import("common.zig").make(std);
 
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -2108,16 +2109,16 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).init(&conn, "example.com", testing.allocator, false);
                 hs.state = .wait_server_hello;
 
-                const server_secret = [_]u8{0x24} ** lib.crypto.dh.X25519.secret_length;
-                const server_public = try lib.crypto.dh.X25519.recoverPublicKey(server_secret);
+                const server_secret = [_]u8{0x24} ** std.crypto.dh.X25519.secret_length;
+                const server_public = try std.crypto.dh.X25519.recoverPublicKey(server_secret);
 
                 var ext_buf: [128]u8 = undefined;
                 var ext_builder = tls_ext.ExtensionBuilder.init(&ext_buf);
@@ -2130,17 +2131,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 var server_hello: [256]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
                 pos += 2;
                 @memset(server_hello[pos..][0..32], 0xBB);
                 pos += 32;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_AES_128_GCM_SHA256), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_AES_128_GCM_SHA256), .big);
                 pos += 2;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intCast(ext_data.len), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intCast(ext_data.len), .big);
                 pos += 2;
                 @memcpy(server_hello[pos..][0..ext_data.len], ext_data);
                 pos += ext_data.len;
@@ -2155,8 +2156,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_common = @import("common.zig").make(lib);
+                const client = make(std, time);
+                const tls_common = @import("common.zig").make(std);
 
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -2169,8 +2170,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var conn = MockConn{};
@@ -2179,17 +2180,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 var server_hello: [128]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
                 pos += 2;
                 @memset(server_hello[pos..][0..32], 0xCD);
                 pos += 32;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256), .big);
                 pos += 2;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], 0, .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], 0, .big);
                 pos += 2;
 
                 const header: tls_common.HandshakeHeader = .{
@@ -2205,8 +2206,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_common = @import("common.zig").make(lib);
+                const client = make(std, time);
+                const tls_common = @import("common.zig").make(std);
 
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -2219,8 +2220,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var conn = MockConn{};
@@ -2229,17 +2230,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 var server_hello: [128]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
                 pos += 2;
                 @memset(server_hello[pos..][0..32], 0xEF);
                 pos += 32;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256), .big);
                 pos += 2;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], 0, .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], 0, .big);
                 pos += 2;
 
                 const header: tls_common.HandshakeHeader = .{
@@ -2255,8 +2256,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_common = @import("common.zig").make(lib);
+                const client = make(std, time);
+                const tls_common = @import("common.zig").make(std);
 
                 const MockConn = struct {
                     pub fn read(_: *@This(), _: []u8) error{ EndOfStream, ShortRead, ConnectionReset, ConnectionRefused, BrokenPipe, TimedOut, Unexpected }!usize {
@@ -2269,8 +2270,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 var conn = MockConn{};
@@ -2279,7 +2280,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 var server_hello: [128]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
                 pos += 2;
                 @memset(server_hello[pos..][0..32], 0xAB);
                 @memcpy(server_hello[pos + 24 ..][0..7], "DOWNGRD");
@@ -2287,11 +2288,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 pos += 32;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256), .big);
                 pos += 2;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], 0, .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], 0, .big);
                 pos += 2;
 
                 const header: tls_common.HandshakeHeader = .{
@@ -2304,10 +2305,10 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_ext = @import("extensions.zig").make(lib);
-                const tls_common = @import("common.zig").make(lib);
-                const Ecdsa = lib.crypto.sign.ecdsa.EcdsaP256Sha256;
+                const client = make(std, time);
+                const tls_ext = @import("extensions.zig").make(std);
+                const tls_common = @import("common.zig").make(std);
+                const Ecdsa = std.crypto.sign.ecdsa.EcdsaP256Sha256;
 
                 const MockConn = struct {
                     write_buf: [4096]u8 = undefined,
@@ -2325,8 +2326,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
                 const cert_der = [_]u8{
@@ -2380,8 +2381,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 var client_hello: [1024]u8 = undefined;
                 _ = try hs.encodeClientHello(&client_hello);
 
-                const server_secret = [_]u8{0x42} ** lib.crypto.dh.X25519.secret_length;
-                const server_public = try lib.crypto.dh.X25519.recoverPublicKey(server_secret);
+                const server_secret = [_]u8{0x42} ** std.crypto.dh.X25519.secret_length;
+                const server_public = try std.crypto.dh.X25519.recoverPublicKey(server_secret);
 
                 var ext_buf: [128]u8 = undefined;
                 var ext_builder = tls_ext.ExtensionBuilder.init(&ext_buf);
@@ -2394,17 +2395,17 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 var server_hello: [256]u8 = undefined;
                 var pos: usize = tls_common.HandshakeHeader.SIZE;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.ProtocolVersion.tls_1_2), .big);
                 pos += 2;
                 @memset(server_hello[pos..][0..32], 0xAA);
                 pos += 32;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_AES_128_GCM_SHA256), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intFromEnum(tls_common.CipherSuite.TLS_AES_128_GCM_SHA256), .big);
                 pos += 2;
                 server_hello[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u16, server_hello[pos..][0..2], @intCast(ext_data.len), .big);
+                std.mem.writeInt(u16, server_hello[pos..][0..2], @intCast(ext_data.len), .big);
                 pos += 2;
                 @memcpy(server_hello[pos..][0..ext_data.len], ext_data);
                 pos += ext_data.len;
@@ -2430,13 +2431,13 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 var cert_pos: usize = 4;
                 certificate_msg[cert_pos] = 0;
                 cert_pos += 1;
-                lib.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], 3 + cert_der.len + 2, .big);
+                std.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], 3 + cert_der.len + 2, .big);
                 cert_pos += 3;
-                lib.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], cert_der.len, .big);
+                std.mem.writeInt(u24, certificate_msg[cert_pos..][0..3], cert_der.len, .big);
                 cert_pos += 3;
                 @memcpy(certificate_msg[cert_pos..][0..cert_der.len], cert_der[0..]);
                 cert_pos += cert_der.len;
-                lib.mem.writeInt(u16, certificate_msg[cert_pos..][0..2], 0, .big);
+                std.mem.writeInt(u16, certificate_msg[cert_pos..][0..2], 0, .big);
                 cert_pos += 2;
                 const certificate_header: tls_common.HandshakeHeader = .{
                     .msg_type = .certificate,
@@ -2462,9 +2463,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 var cert_verify_msg: [4 + 2 + 2 + Ecdsa.Signature.der_encoded_length_max]u8 = undefined;
                 var cv_pos: usize = 4;
-                lib.mem.writeInt(u16, cert_verify_msg[cv_pos..][0..2], @intFromEnum(tls_common.SignatureScheme.ecdsa_secp256r1_sha256), .big);
+                std.mem.writeInt(u16, cert_verify_msg[cv_pos..][0..2], @intFromEnum(tls_common.SignatureScheme.ecdsa_secp256r1_sha256), .big);
                 cv_pos += 2;
-                lib.mem.writeInt(u16, cert_verify_msg[cv_pos..][0..2], @intCast(sig_der.len), .big);
+                std.mem.writeInt(u16, cert_verify_msg[cv_pos..][0..2], @intCast(sig_der.len), .big);
                 cv_pos += 2;
                 @memcpy(cert_verify_msg[cv_pos..][0..sig_der.len], sig_der);
                 cv_pos += sig_der.len;
@@ -2506,8 +2507,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_common = @import("common.zig").make(lib);
+                const client = make(std, time);
+                const tls_common = @import("common.zig").make(std);
                 const fixtures = @import("test_fixtures.zig");
 
                 const MockConn = struct {
@@ -2521,15 +2522,15 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
-                var bundle: lib.crypto.Certificate.Bundle = .{};
+                var bundle: std.crypto.Certificate.Bundle = .{};
                 defer bundle.deinit(testing.allocator);
                 const decoded_start: u32 = @intCast(bundle.bytes.items.len);
                 try bundle.bytes.appendSlice(testing.allocator, fixtures.chain_root_der[0..]);
-                try bundle.parseCert(testing.allocator, decoded_start, @intCast(@divTrunc(lib.time.milliTimestamp(), 1000)));
+                try bundle.parseCert(testing.allocator, decoded_start, @intCast(time.now().unix()));
 
                 var conn = MockConn{};
                 var hs = try client.ClientHandshake(*MockConn).initWithOptions(&conn, .{
@@ -2544,19 +2545,19 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 var pos: usize = 4;
                 certificate_msg[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u24, certificate_msg[pos..][0..3], certs_len, .big);
+                std.mem.writeInt(u24, certificate_msg[pos..][0..3], certs_len, .big);
                 pos += 3;
-                lib.mem.writeInt(u24, certificate_msg[pos..][0..3], fixtures.chain_leaf_der.len, .big);
+                std.mem.writeInt(u24, certificate_msg[pos..][0..3], fixtures.chain_leaf_der.len, .big);
                 pos += 3;
                 @memcpy(certificate_msg[pos..][0..fixtures.chain_leaf_der.len], fixtures.chain_leaf_der[0..]);
                 pos += fixtures.chain_leaf_der.len;
-                lib.mem.writeInt(u16, certificate_msg[pos..][0..2], 0, .big);
+                std.mem.writeInt(u16, certificate_msg[pos..][0..2], 0, .big);
                 pos += 2;
-                lib.mem.writeInt(u24, certificate_msg[pos..][0..3], fixtures.chain_root_der.len, .big);
+                std.mem.writeInt(u24, certificate_msg[pos..][0..3], fixtures.chain_root_der.len, .big);
                 pos += 3;
                 @memcpy(certificate_msg[pos..][0..fixtures.chain_root_der.len], fixtures.chain_root_der[0..]);
                 pos += fixtures.chain_root_der.len;
-                lib.mem.writeInt(u16, certificate_msg[pos..][0..2], 0, .big);
+                std.mem.writeInt(u16, certificate_msg[pos..][0..2], 0, .big);
                 pos += 2;
 
                 const certificate_header: tls_common.HandshakeHeader = .{
@@ -2571,8 +2572,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             }
 
             {
-                const client = make(lib);
-                const tls_common = @import("common.zig").make(lib);
+                const client = make(std, time);
+                const tls_common = @import("common.zig").make(std);
                 const fixtures = @import("test_fixtures.zig");
 
                 const MockConn = struct {
@@ -2586,11 +2587,11 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                     pub fn close(_: *@This()) void {}
                     pub fn deinit(_: *@This()) void {}
-                    pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                    pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                    pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                    pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
                 };
 
-                var bundle: lib.crypto.Certificate.Bundle = .{};
+                var bundle: std.crypto.Certificate.Bundle = .{};
                 defer bundle.deinit(testing.allocator);
 
                 var conn = MockConn{};
@@ -2606,19 +2607,19 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 var pos: usize = 4;
                 certificate_msg[pos] = 0;
                 pos += 1;
-                lib.mem.writeInt(u24, certificate_msg[pos..][0..3], certs_len, .big);
+                std.mem.writeInt(u24, certificate_msg[pos..][0..3], certs_len, .big);
                 pos += 3;
-                lib.mem.writeInt(u24, certificate_msg[pos..][0..3], fixtures.chain_leaf_der.len, .big);
+                std.mem.writeInt(u24, certificate_msg[pos..][0..3], fixtures.chain_leaf_der.len, .big);
                 pos += 3;
                 @memcpy(certificate_msg[pos..][0..fixtures.chain_leaf_der.len], fixtures.chain_leaf_der[0..]);
                 pos += fixtures.chain_leaf_der.len;
-                lib.mem.writeInt(u16, certificate_msg[pos..][0..2], 0, .big);
+                std.mem.writeInt(u16, certificate_msg[pos..][0..2], 0, .big);
                 pos += 2;
-                lib.mem.writeInt(u24, certificate_msg[pos..][0..3], fixtures.chain_root_der.len, .big);
+                std.mem.writeInt(u24, certificate_msg[pos..][0..3], fixtures.chain_root_der.len, .big);
                 pos += 3;
                 @memcpy(certificate_msg[pos..][0..fixtures.chain_root_der.len], fixtures.chain_root_der[0..]);
                 pos += fixtures.chain_root_der.len;
-                lib.mem.writeInt(u16, certificate_msg[pos..][0..2], 0, .big);
+                std.mem.writeInt(u16, certificate_msg[pos..][0..2], 0, .big);
                 pos += 2;
 
                 const certificate_header: tls_common.HandshakeHeader = .{

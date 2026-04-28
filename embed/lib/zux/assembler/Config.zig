@@ -8,7 +8,7 @@ const root = @This();
 store: Store.BuilderOptions = .{},
 node: NodeBuilder.BuilderOptions = .{},
 pipeline: struct {
-    tick_interval_ns: u64 = 10 * glib.std.time.ns_per_ms,
+    tick_interval: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond,
     spawn_config: glib.std.Thread.SpawnConfig = .{},
 } = .{},
 poller: Poller.Config = .{},

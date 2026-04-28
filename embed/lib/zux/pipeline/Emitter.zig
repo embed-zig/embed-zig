@@ -44,11 +44,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         fn initAndEmit() !void {
             const Impl = struct {
                 called: bool = false,
-                last_timestamp_ns: i128 = 0,
+                last_timestamp: glib.time.instant.Time = 0,
 
                 pub fn emit(self: *@This(), message: Message) !void {
                     self.called = true;
-                    self.last_timestamp_ns = message.timestamp_ns;
+                    self.last_timestamp = message.timestamp;
                 }
             };
 
@@ -56,7 +56,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const emitter = Emitter.init(&impl);
             try emitter.emit(.{
                 .origin = .source,
-                .timestamp_ns = 9,
+                .timestamp = 9,
                 .body = .{
                     .raw_single_button = .{
                         .source_id = 1,
@@ -66,7 +66,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             });
 
             try grt.std.testing.expect(impl.called);
-            try grt.std.testing.expectEqual(@as(i128, 9), impl.last_timestamp_ns);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 9), impl.last_timestamp);
         }
     };
 

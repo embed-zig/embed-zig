@@ -2,7 +2,7 @@
 //!
 //! The concrete transport is supplied by the caller and must provide one
 //! bidirectional session surface:
-//! - `read(timeout_ms, out)` to wait for one inbound control/data packet
+//! - `read(timeout, out)` to wait for one inbound control/data packet
 //! - `write(data)` to emit outbound control packets such as loss-lists and ACKs
 //! - `deinit()` to release session resources
 
@@ -13,7 +13,7 @@ const Chunk = @import("Chunk.zig");
 
 pub const Config = struct {
     att_mtu: u16 = att.DEFAULT_MTU,
-    timeout_ms: u32 = 1_000,
+    timeout: glib.time.duration.Duration = glib.time.duration.Second,
     max_timeout_retries: u8 = 5,
 };
 
@@ -31,7 +31,7 @@ pub fn recv(
     };
 
     comptime {
-        _ = @as(*const fn (*Transport, u32, []u8) anyerror!usize, &Transport.read);
+        _ = @as(*const fn (*Transport, glib.time.duration.Duration, []u8) anyerror!usize, &Transport.read);
         _ = @as(*const fn (*Transport, []const u8) anyerror!usize, &Transport.write);
         _ = @as(*const fn (*Transport) void, &Transport.deinit);
     }
@@ -53,7 +53,7 @@ pub fn recv(
     var timeout_count: u8 = 0;
 
     while (true) {
-        const payload_len = transport.read(config.timeout_ms, &chunk_buf) catch |err| switch (err) {
+        const payload_len = transport.read(config.timeout, &chunk_buf) catch |err| switch (err) {
             error.Timeout => {
                 timeout_count += 1;
                 if (timeout_count >= config.max_timeout_retries) return error.Timeout;
@@ -169,7 +169,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return self;
                 }
 
-                pub fn read(self: *@This(), _: u32, out: []u8) anyerror!usize {
+                pub fn read(self: *@This(), _: glib.time.duration.Duration, out: []u8) anyerror!usize {
                     const payload = switch (self.read_index) {
                         0 => self.start[0..],
                         1 => self.chunk1[0..],
@@ -235,7 +235,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return self;
                 }
 
-                pub fn read(self: *@This(), _: u32, out: []u8) anyerror!usize {
+                pub fn read(self: *@This(), _: glib.time.duration.Duration, out: []u8) anyerror!usize {
                     const step = self.steps[self.step_index];
                     self.step_index += 1;
                     return switch (step) {

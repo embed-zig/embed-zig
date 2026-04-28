@@ -34,7 +34,7 @@ In short:
    classification semantics.
 2. Stay allocator-free for normal construction, parsing, comparison, and
    formatting into caller-provided buffers.
-3. Keep the package independent from `comptime lib`.
+3. Keep the package independent from `comptime std injection`.
    Like `net/url`, this should be a pure utility package.
 4. Interoperate cleanly with existing `stdz.net.Address`,
    `stdz.net.Ip4Address`, and `stdz.net.Ip6Address` at the boundary.

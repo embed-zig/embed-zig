@@ -18,14 +18,14 @@ pub fn classifyPattern(pattern: []const u8) ?RouteKind {
     return .exact;
 }
 
-pub fn redirectTo(comptime lib: type, rw: anytype, location: []const u8) void {
-    _ = lib;
+pub fn redirectTo(comptime std: type, rw: anytype, location: []const u8) void {
+    _ = std;
     rw.setHeader("Location", location) catch return;
     rw.writeHeader(status.moved_permanently) catch return;
 }
 
-pub fn notFound(comptime lib: type, rw: anytype) void {
-    _ = lib;
+pub fn notFound(comptime std: type, rw: anytype) void {
+    _ = std;
     rw.writeHeader(status.not_found) catch {};
 }
 
@@ -36,19 +36,19 @@ pub fn appendSlash(allocator: anytype, path: []const u8) ![]u8 {
     return out;
 }
 
-pub fn cleanPath(comptime lib: type, allocator: anytype, path: []const u8) ![]u8 {
+pub fn cleanPath(comptime std: type, allocator: anytype, path: []const u8) ![]u8 {
     const absolute = path.len == 0 or path[0] == '/';
     const preserve_trailing_slash = path.len > 1 and path[path.len - 1] == '/';
 
-    var segments = lib.ArrayList([]const u8){};
+    var segments = std.ArrayList([]const u8){};
     defer segments.deinit(allocator);
 
     var i: usize = 0;
     while (i <= path.len) {
-        const next_slash = lib.mem.indexOfScalarPos(u8, path, i, '/') orelse path.len;
+        const next_slash = std.mem.indexOfScalarPos(u8, path, i, '/') orelse path.len;
         const segment = path[i..next_slash];
-        if (segment.len != 0 and !lib.mem.eql(u8, segment, ".")) {
-            if (lib.mem.eql(u8, segment, "..")) {
+        if (segment.len != 0 and !std.mem.eql(u8, segment, ".")) {
+            if (std.mem.eql(u8, segment, "..")) {
                 if (segments.items.len != 0) _ = segments.pop();
             } else {
                 try segments.append(allocator, segment);
@@ -58,7 +58,7 @@ pub fn cleanPath(comptime lib: type, allocator: anytype, path: []const u8) ![]u8
         i = next_slash + 1;
     }
 
-    var out = lib.ArrayList(u8){};
+    var out = std.ArrayList(u8){};
     defer out.deinit(allocator);
 
     if (absolute) try out.append(allocator, '/');

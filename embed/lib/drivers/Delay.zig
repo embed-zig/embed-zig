@@ -1,7 +1,7 @@
-//! Delay — non-owning type-erased millisecond sleep hook.
+//! Delay — non-owning type-erased duration sleep hook.
 //!
 //! This wrapper is intentionally small for the first `lib/drivers` phase.
-//! It forwards `sleepMs` to an externally owned implementation.
+//! It forwards `sleep` to an externally owned implementation.
 
 const glib = @import("glib");
 
@@ -11,11 +11,11 @@ ptr: *anyopaque,
 vtable: *const VTable,
 
 pub const VTable = struct {
-    sleepMs: *const fn (ptr: *anyopaque, ms: u32) void,
+    sleep: *const fn (ptr: *anyopaque, duration: glib.time.duration.Duration) void,
 };
 
-pub fn sleepMs(self: Delay, ms: u32) void {
-    self.vtable.sleepMs(self.ptr, ms);
+pub fn sleep(self: Delay, duration: glib.time.duration.Duration) void {
+    self.vtable.sleep(self.ptr, duration);
 }
 
 pub fn init(pointer: anytype) Delay {
@@ -27,13 +27,13 @@ pub fn init(pointer: anytype) Delay {
     const Impl = info.pointer.child;
 
     const gen = struct {
-        fn sleepMsFn(ptr: *anyopaque, ms: u32) void {
+        fn sleepFn(ptr: *anyopaque, duration: glib.time.duration.Duration) void {
             const self: *Impl = @ptrCast(@alignCast(ptr));
-            self.sleepMs(ms);
+            self.sleep(duration);
         }
 
         const vtable = VTable{
-            .sleepMs = sleepMsFn,
+            .sleep = sleepFn,
         };
     };
 
@@ -45,25 +45,25 @@ pub fn init(pointer: anytype) Delay {
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
-        fn dispatchesSleepMs() !void {
+        fn dispatchesSleep() !void {
             const Fake = struct {
                 calls: usize = 0,
-                last_ms: u32 = 0,
+                last_duration: glib.time.duration.Duration = 0,
 
-                fn sleepMs(self: *@This(), ms: u32) void {
+                fn sleep(self: *@This(), duration: glib.time.duration.Duration) void {
                     self.calls += 1;
-                    self.last_ms = ms;
+                    self.last_duration = duration;
                 }
             };
 
             var fake = Fake{};
             const delay = Delay.init(&fake);
 
-            delay.sleepMs(10);
-            delay.sleepMs(25);
+            delay.sleep(10 * glib.time.duration.MilliSecond);
+            delay.sleep(25 * glib.time.duration.MilliSecond);
 
             try grt.std.testing.expectEqual(@as(usize, 2), fake.calls);
-            try grt.std.testing.expectEqual(@as(u32, 25), fake.last_ms);
+            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 25 * glib.time.duration.MilliSecond), fake.last_duration);
         }
     };
 
@@ -77,7 +77,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             _ = self;
             _ = allocator;
 
-            TestCase.dispatchesSleepMs() catch |err| {
+            TestCase.dispatchesSleep() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

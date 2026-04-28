@@ -19,15 +19,15 @@ pub const RawResponse = struct {
 };
 
 pub fn writeRawRequest(
-    comptime lib: type,
-    alloc: lib.mem.Allocator,
+    comptime std: type,
+    alloc: std.mem.Allocator,
     conn: *Conn,
     request: Request,
 ) !void {
-    var bytes = lib.ArrayList(u8){};
+    var bytes = std.ArrayList(u8){};
     defer bytes.deinit(alloc);
 
-    const start_line = try lib.fmt.allocPrint(
+    const start_line = try std.fmt.allocPrint(
         alloc,
         "{s} {s} HTTP/1.1\r\n",
         .{ request.method, request.target },
@@ -39,11 +39,11 @@ pub fn writeRawRequest(
     var has_connection = false;
     var has_content_length = false;
     for (request.headers) |header| {
-        if (lib.ascii.eqlIgnoreCase(header.name, "host")) has_host = true;
-        if (lib.ascii.eqlIgnoreCase(header.name, "connection")) has_connection = true;
-        if (lib.ascii.eqlIgnoreCase(header.name, "content-length")) has_content_length = true;
+        if (std.ascii.eqlIgnoreCase(header.name, "host")) has_host = true;
+        if (std.ascii.eqlIgnoreCase(header.name, "connection")) has_connection = true;
+        if (std.ascii.eqlIgnoreCase(header.name, "content-length")) has_content_length = true;
 
-        const line = try lib.fmt.allocPrint(
+        const line = try std.fmt.allocPrint(
             alloc,
             "{s}: {s}\r\n",
             .{ header.name, header.value },
@@ -55,7 +55,7 @@ pub fn writeRawRequest(
     if (!has_host) try bytes.appendSlice(alloc, "Host: example.com\r\n");
     if (!has_connection) try bytes.appendSlice(alloc, "Connection: close\r\n");
     if (request.body.len != 0 and !has_content_length) {
-        const content_length = try lib.fmt.allocPrint(
+        const content_length = try std.fmt.allocPrint(
             alloc,
             "Content-Length: {d}\r\n",
             .{request.body.len},
@@ -70,14 +70,13 @@ pub fn writeRawRequest(
 }
 
 pub fn readRawResponse(
-    comptime lib: type,
+    comptime std: type,
     comptime net: type,
-    alloc: lib.mem.Allocator,
+    alloc: std.mem.Allocator,
     conn: net.Conn,
 ) !RawResponse {
-    const http_ns = net.http;
     var c = conn;
-    var bytes = try lib.ArrayList(u8).initCapacity(alloc, 0);
+    var bytes = try std.ArrayList(u8).initCapacity(alloc, 0);
     defer bytes.deinit(alloc);
     var buf: [256]u8 = undefined;
 
@@ -86,71 +85,71 @@ pub fn readRawResponse(
         const n = try c.read(&buf);
         if (n == 0) return error.EndOfStream;
         try bytes.appendSlice(alloc, buf[0..n]);
-        if (lib.mem.indexOf(u8, bytes.items, "\r\n\r\n")) |end| head_end = end;
+        if (std.mem.indexOf(u8, bytes.items, "\r\n\r\n")) |end| head_end = end;
     }
 
     const split = head_end.? + 4;
     const head = try alloc.dupe(u8, bytes.items[0..split]);
     errdefer alloc.free(head);
     const prefix = bytes.items[split..];
-    const status_code = try responseStatusCode(lib, head);
+    const status_code = try responseStatusCode(std, head);
 
-    if (!responseBodyAllowed(http_ns, status_code)) {
+    if (!responseBodyAllowed(net.http, status_code)) {
         return .{
             .head = head,
             .body = try alloc.dupe(u8, prefix),
         };
     }
 
-    if (headerValue(lib, http_ns, head, http_ns.Header.content_length)) |value| {
-        const content_length = try lib.fmt.parseInt(usize, value, 10);
-        const body = try readFixedBody(lib, alloc, c, prefix, content_length);
+    if (headerValue(std, net.http, head, net.http.Header.content_length)) |value| {
+        const content_length = try std.fmt.parseInt(usize, value, 10);
+        const body = try readFixedBody(std, alloc, c, prefix, content_length);
         return .{ .head = head, .body = body };
     }
-    if (headerValue(lib, http_ns, head, http_ns.Header.transfer_encoding)) |value| {
-        if (lib.ascii.eqlIgnoreCase(value, "chunked")) {
-            const body = try readChunkedBody(lib, alloc, c, prefix);
+    if (headerValue(std, net.http, head, net.http.Header.transfer_encoding)) |value| {
+        if (std.ascii.eqlIgnoreCase(value, "chunked")) {
+            const body = try readChunkedBody(std, alloc, c, prefix);
             return .{ .head = head, .body = body };
         }
     }
-    const body = try readToEof(lib, alloc, c, prefix);
+    const body = try readToEof(std, alloc, c, prefix);
     return .{
         .head = head,
         .body = body,
     };
 }
 
-pub fn responseStatusCode(comptime lib: type, head: []const u8) !u16 {
-    const line = firstLine(lib, head);
-    var parts = lib.mem.tokenizeAny(u8, line, " ");
+pub fn responseStatusCode(comptime std: type, head: []const u8) !u16 {
+    const line = firstLine(std, head);
+    var parts = std.mem.tokenizeAny(u8, line, " ");
     _ = parts.next() orelse return error.BadResponse;
     const code = parts.next() orelse return error.BadResponse;
-    return try lib.fmt.parseInt(u16, code, 10);
+    return try std.fmt.parseInt(u16, code, 10);
 }
 
-pub fn firstLine(comptime lib: type, head: []const u8) []const u8 {
-    const end = lib.mem.indexOf(u8, head, "\r\n") orelse head.len;
+pub fn firstLine(comptime std: type, head: []const u8) []const u8 {
+    const end = std.mem.indexOf(u8, head, "\r\n") orelse head.len;
     return head[0..end];
 }
 
 pub fn headerValue(
-    comptime lib: type,
-    comptime http_ns: type,
+    comptime std: type,
+    comptime http: type,
     head: []const u8,
     name: []const u8,
 ) ?[]const u8 {
     var line_start: usize = 0;
     while (line_start < head.len) {
-        const rel_end = lib.mem.indexOf(u8, head[line_start..], "\r\n") orelse head.len - line_start;
+        const rel_end = std.mem.indexOf(u8, head[line_start..], "\r\n") orelse head.len - line_start;
         const line = head[line_start .. line_start + rel_end];
-        const colon = lib.mem.indexOfScalar(u8, line, ':') orelse {
+        const colon = std.mem.indexOfScalar(u8, line, ':') orelse {
             if (line_start + rel_end == head.len) break;
             line_start += rel_end + 2;
             continue;
         };
-        const header_name = lib.mem.trim(u8, line[0..colon], " ");
-        if (http_ns.Header.init(header_name, "").is(name)) {
-            return lib.mem.trim(u8, line[colon + 1 ..], " ");
+        const header_name = std.mem.trim(u8, line[0..colon], " ");
+        if (http.Header.init(header_name, "").is(name)) {
+            return std.mem.trim(u8, line[colon + 1 ..], " ");
         }
         if (line_start + rel_end == head.len) break;
         line_start += rel_end + 2;
@@ -158,10 +157,10 @@ pub fn headerValue(
     return null;
 }
 
-pub fn expectConnClosed(comptime lib: type, conn: Conn) !void {
-    const testing = lib.testing;
+pub fn expectConnClosed(comptime std: type, comptime net: type, conn: Conn) !void {
+    const testing = std.testing;
     var c = conn;
-    c.setReadTimeout(20);
+    c.setReadDeadline(net.time.instant.add(net.time.instant.now(), 20 * net.time.duration.MilliSecond));
 
     var buf: [1]u8 = undefined;
     const n = c.read(&buf) catch |err| switch (err) {
@@ -184,13 +183,13 @@ pub fn expectConnClosed(comptime lib: type, conn: Conn) !void {
 }
 
 fn readFixedBody(
-    comptime lib: type,
-    alloc: lib.mem.Allocator,
+    comptime std: type,
+    alloc: std.mem.Allocator,
     conn: Conn,
     prefix: []const u8,
     total_len: usize,
 ) ![]u8 {
-    var out = try lib.ArrayList(u8).initCapacity(alloc, total_len);
+    var out = try std.ArrayList(u8).initCapacity(alloc, total_len);
     errdefer out.deinit(alloc);
     try out.appendSlice(alloc, prefix[0..@min(prefix.len, total_len)]);
     var c = conn;
@@ -205,19 +204,19 @@ fn readFixedBody(
 }
 
 fn readChunkedBody(
-    comptime lib: type,
-    alloc: lib.mem.Allocator,
+    comptime std: type,
+    alloc: std.mem.Allocator,
     conn: Conn,
     prefix: []const u8,
 ) ![]u8 {
     var stream = io.PrefixReader(Conn).init(conn, prefix);
-    var body = lib.ArrayList(u8){};
+    var body = std.ArrayList(u8){};
     defer body.deinit(alloc);
     var line_buf: [128]u8 = undefined;
     while (true) {
         const line = try stream.readLine(&line_buf);
-        const semi = lib.mem.indexOfScalar(u8, line, ';') orelse line.len;
-        const size = try lib.fmt.parseInt(usize, lib.mem.trim(u8, line[0..semi], " "), 16);
+        const semi = std.mem.indexOfScalar(u8, line, ';') orelse line.len;
+        const size = try std.fmt.parseInt(usize, std.mem.trim(u8, line[0..semi], " "), 16);
         if (size == 0) {
             try stream.expectCrlf();
             break;
@@ -232,12 +231,12 @@ fn readChunkedBody(
 }
 
 fn readToEof(
-    comptime lib: type,
-    alloc: lib.mem.Allocator,
+    comptime std: type,
+    alloc: std.mem.Allocator,
     conn: Conn,
     prefix: []const u8,
 ) ![]u8 {
-    var out = lib.ArrayList(u8){};
+    var out = std.ArrayList(u8){};
     defer out.deinit(alloc);
     try out.appendSlice(alloc, prefix);
 
@@ -254,8 +253,8 @@ fn readToEof(
     return out.toOwnedSlice(alloc);
 }
 
-fn responseBodyAllowed(comptime http_ns: type, status_code: u16) bool {
+fn responseBodyAllowed(comptime http: type, status_code: u16) bool {
     if (status_code >= 100 and status_code < 200) return false;
-    if (status_code == http_ns.status.no_content or status_code == http_ns.status.not_modified) return false;
+    if (status_code == http.status.no_content or status_code == http.status.not_modified) return false;
     return true;
 }

@@ -153,7 +153,7 @@ pub const ConnectionInfo = struct {
     peer_addr_type: AddrType,
     interval: u16,
     latency: u16,
-    timeout: u16,
+    supervision_timeout: glib.time.duration.Duration,
 };
 
 pub const MtuInfo = struct {

@@ -2,7 +2,7 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
 
@@ -11,13 +11,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
                     try test_utils.runLoopbackCase(
-                        lib,
+                        std,
                         a,
                         Net,
                         .tls_1_2,
@@ -27,8 +27,8 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         null,
                         null,
                     );
-                    try test_utils.runLoopbackCase(lib, a, Net, .tls_1_2, .tls_1_3, .tls_1_3, null, null, null);
-                    try test_utils.runLoopbackCase(lib, a, Net, .tls_1_3, .tls_1_3, .tls_1_3, null, null, null);
+                    try test_utils.runLoopbackCase(std, a, Net, .tls_1_2, .tls_1_3, .tls_1_3, null, null, null);
+                    try test_utils.runLoopbackCase(std, a, Net, .tls_1_3, .tls_1_3, .tls_1_3, null, null, null);
                 }
             };
             Body.call(allocator) catch |err| {

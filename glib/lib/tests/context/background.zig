@@ -1,10 +1,11 @@
 const stdz = @import("stdz");
 const testing_mod = @import("testing");
 const context_root = @import("context");
+const time_mod = @import("time");
 const Context = context_root.Context;
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type, comptime time: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -15,24 +16,24 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("err_is_null", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try backgroundErrIsNullCase(lib, case_allocator);
+            t.run("err_is_null", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try backgroundErrIsNullCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("value_is_empty", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try backgroundValueIsEmptyCase(lib, case_allocator);
+            t.run("value_is_empty", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try backgroundValueIsEmptyCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("deadline_is_null", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try backgroundDeadlineIsNullCase(lib, case_allocator);
+            t.run("deadline_is_null", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try backgroundDeadlineIsNullCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("wait_uses_thread_sleep", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try backgroundWaitUsesThreadSleepCase(lib, case_allocator);
+            t.run("wait_uses_thread_sleep", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try backgroundWaitUsesThreadSleepCase(std, time, case_allocator);
                 }
             }.run));
             return t.wait();
@@ -50,49 +51,48 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
     return testing_mod.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-fn backgroundErrIsNullCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn backgroundErrIsNullCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    const bg = ctx_ns.background();
+    const bg = ctx_api.background();
     if (bg.err() != null) return error.BackgroundShouldNotBeDone;
 }
 
-fn backgroundValueIsEmptyCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn backgroundValueIsEmptyCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
     var key: Context.Key(u64) = .{};
-    const bg = ctx_ns.background();
+    const bg = ctx_api.background();
     if (bg.value(u64, &key) != null) return error.BackgroundShouldHaveNoValues;
 }
 
-fn backgroundDeadlineIsNullCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn backgroundDeadlineIsNullCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    const bg = ctx_ns.background();
+    const bg = ctx_api.background();
     if (bg.deadline() != null) return error.BackgroundShouldHaveNoDeadline;
 }
 
-fn backgroundWaitUsesThreadSleepCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CapturingThread = test_utils.CapturingSleepThreadType(lib);
+fn backgroundWaitUsesThreadSleepCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CapturingThread = test_utils.CapturingSleepThreadType(std);
     const FakeLib = struct {
         pub const Thread = CapturingThread;
-        pub const time = lib.time;
-        pub const mem = lib.mem;
-        pub const DoublyLinkedList = lib.DoublyLinkedList;
+        pub const mem = std.mem;
+        pub const DoublyLinkedList = std.DoublyLinkedList;
     };
-    const FakeCtxApi = context_root.make(FakeLib);
-    var fake_ctx_ns = try FakeCtxApi.init(allocator);
-    defer fake_ctx_ns.deinit();
+    const FakeCtxApi = context_root.make(FakeLib, time);
+    var fake_ctx_api = try FakeCtxApi.init(allocator);
+    defer fake_ctx_api.deinit();
 
     CapturingThread.sleep_calls = 0;
     CapturingThread.last_sleep_ns = 0;
-    if (fake_ctx_ns.background().wait(5 * lib.time.ns_per_ms) != null) return error.BackgroundWaitShouldReturnNull;
+    if (fake_ctx_api.background().wait(5 * time_mod.duration.MilliSecond) != null) return error.BackgroundWaitShouldReturnNull;
     if (CapturingThread.sleep_calls == 0) return error.BackgroundWaitShouldUseLibThreadSleep;
-    if (CapturingThread.last_sleep_ns != 5 * lib.time.ns_per_ms) return error.BackgroundWaitWrongSleepDuration;
+    if (CapturingThread.last_sleep_ns != 5 * time_mod.duration.MilliSecond) return error.BackgroundWaitWrongSleepDuration;
 }

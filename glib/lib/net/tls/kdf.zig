@@ -1,10 +1,10 @@
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) type {
-    const common = @import("common.zig").make(lib);
-    const crypto = lib.crypto;
-    const debug = lib.debug;
-    const mem = lib.mem;
+pub fn make(comptime std: type) type {
+    const common = @import("common.zig").make(std);
+    const crypto = std.crypto;
+    const debug = std.debug;
+    const mem = std.mem;
 
     return struct {
         pub const HkdfSha256 = crypto.kdf.hkdf.HkdfSha256;
@@ -369,12 +369,12 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
             _ = allocator;
-            const testing = lib.testing;
-            const K = make(lib);
+            const testing = std.testing;
+            const K = make(std);
 
             {
                 const secret: [K.HkdfSha256.prk_length]u8 = [_]u8{0x01} ** K.HkdfSha256.prk_length;
@@ -395,7 +395,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 const c_hs = K.deriveSecretSha256(secret, "c hs traffic", &transcript);
                 const s_hs = K.deriveSecretSha256(secret, "s hs traffic", &transcript);
-                try testing.expect(!lib.mem.eql(u8, &c_hs, &s_hs));
+                try testing.expect(!std.mem.eql(u8, &c_hs, &s_hs));
             }
 
             {
@@ -410,7 +410,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
             {
                 var out: [48]u8 = undefined;
                 K.tls12PrfSha256(&out, "pre-master-secret", "master secret", "seed");
-                try testing.expect(!lib.mem.allEqual(u8, &out, 0));
+                try testing.expect(!std.mem.allEqual(u8, &out, 0));
             }
 
             {
@@ -423,10 +423,9 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 var expected: [K.Sha256.digest_length]u8 = undefined;
                 K.Sha256.hash("hello", &expected, .{});
 
-                try testing.expect(!lib.mem.eql(u8, &peeked, &expected));
+                try testing.expect(!std.mem.eql(u8, &peeked, &expected));
                 try testing.expectEqualSlices(u8, &expected, &finaled);
             }
-
         }
     }.run);
 }

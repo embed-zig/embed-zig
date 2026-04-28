@@ -21,10 +21,10 @@ pub fn make(comptime n: usize, comptime max_frames: usize) type {
         frames: [max_frames]FrameType = [_]FrameType{.{}} ** max_frames,
         total_frames: usize = 0,
         current_frame: usize = 0,
-        /// Wall-clock hold between keyframes for multi-frame modes (nanoseconds).
-        interval_ns: u64 = 0,
-        /// Cross-fade duration toward each keyframe for multi-frame modes (nanoseconds).
-        duration_ns: u64 = 0,
+        /// Wall-clock hold between keyframes for multi-frame modes.
+        interval: glib.time.duration.Duration = 0,
+        /// Cross-fade duration toward each keyframe for multi-frame modes.
+        duration: glib.time.duration.Duration = 0,
         /// `Pipeline` tick sequence when the strip became stationary at `current_frame`
         /// (`glib.std.math.maxInt(u64)` while transitioning).
         rest_started_seq: u64 = glib.std.math.maxInt(u64),

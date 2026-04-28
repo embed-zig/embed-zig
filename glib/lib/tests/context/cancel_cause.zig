@@ -3,7 +3,7 @@ const testing_mod = @import("testing");
 const context_root = @import("context");
 const Context = context_root.Context;
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type, comptime time: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -14,19 +14,19 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("cancel_with_cause_sets_error", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try cancelWithCauseSetsErrorCase(lib, case_allocator);
+            t.run("cancel_with_cause_sets_error", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try cancelWithCauseSetsErrorCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("first_cause_wins", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try firstCauseWinsCase(lib, case_allocator);
+            t.run("first_cause_wins", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try firstCauseWinsCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("cause_propagates_to_child", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try causePropagatesToChildCase(lib, case_allocator);
+            t.run("cause_propagates_to_child", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try causePropagatesToChildCase(std, time, case_allocator);
                 }
             }.run));
             return t.wait();
@@ -44,26 +44,26 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
     return testing_mod.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-fn cancelWithCauseSetsErrorCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn cancelWithCauseSetsErrorCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    const bg = ctx_ns.background();
-    var cc = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var cc = try ctx_api.withCancel(bg);
     defer cc.deinit();
     cc.cancelWithCause(error.TimedOut);
     const e = cc.err() orelse return error.CauseShouldExist;
     if (e != error.TimedOut) return error.CauseWrongValue;
 }
 
-fn firstCauseWinsCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn firstCauseWinsCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    const bg = ctx_ns.background();
-    var cc = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var cc = try ctx_api.withCancel(bg);
     defer cc.deinit();
     cc.cancelWithCause(error.TimedOut);
     cc.cancelWithCause(error.BrokenPipe);
@@ -71,15 +71,15 @@ fn firstCauseWinsCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
     if (e != error.TimedOut) return error.FirstCauseWrongValue;
 }
 
-fn causePropagatesToChildCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    defer ctx_ns.deinit();
+fn causePropagatesToChildCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    defer ctx_api.deinit();
 
-    const bg = ctx_ns.background();
-    var parent = try ctx_ns.withCancel(bg);
+    const bg = ctx_api.background();
+    var parent = try ctx_api.withCancel(bg);
     defer parent.deinit();
-    var child = try ctx_ns.withCancel(parent);
+    var child = try ctx_api.withCancel(parent);
     defer child.deinit();
     parent.cancelWithCause(error.ConnectionReset);
     const pe = parent.err() orelse return error.ParentCauseMissing;

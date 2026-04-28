@@ -2,7 +2,7 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -11,13 +11,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
-                    const TcpConnType = @import("../../../TcpConn.zig").TcpConn(lib, net);
-                    const UdpConnType = @import("../../../UdpConn.zig").UdpConn(lib, net);
+                    const TcpConnType = @import("../../../TcpConn.zig").TcpConn(std, net);
+                    const UdpConnType = @import("../../../UdpConn.zig").UdpConn(std, net);
 
                     var ln = try Net.listen(a, .{ .address = test_utils.addr4(.{ 127, 0, 0, 1 }, 0) });
                     defer ln.deinit();
@@ -31,9 +31,9 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     defer ac.deinit();
 
                     const tcp_impl = try cc.as(TcpConnType);
-                    try lib.testing.expectEqual(@as(u8, 0), tcp_impl.closed);
+                    try std.testing.expectEqual(@as(u8, 0), tcp_impl.closed);
 
-                    try lib.testing.expectError(error.TypeMismatch, cc.as(UdpConnType));
+                    try std.testing.expectError(error.TypeMismatch, cc.as(UdpConnType));
                 }
             };
             Body.call(allocator) catch |err| {

@@ -4,7 +4,7 @@ const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -13,13 +13,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
-                    const Context = context_mod.make(lib);
-                    const Thread = lib.Thread;
+                    const Context = context_mod.make(std, net.time);
+                    const Thread = std.Thread;
 
                     var ctx_api = try Context.init(a);
                     defer ctx_api.deinit();
@@ -43,19 +43,19 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
 
                     const cancel_thread = try Thread.spawn(.{}, struct {
                         fn run(ctx: context_mod.Context, comptime thread_lib: type) void {
-                            thread_lib.Thread.sleep(30 * thread_lib.time.ns_per_ms);
+                            thread_lib.Thread.sleep(@intCast(30 * net.time.duration.MilliSecond));
                             ctx.cancel();
                         }
-                    }.run, .{ io_ctx, lib });
+                    }.run, .{ io_ctx, std });
                     defer cancel_thread.join();
 
                     var buf: [16]u8 = undefined;
-                    try lib.testing.expectError(error.TimedOut, ac.read(&buf));
+                    try std.testing.expectError(error.TimedOut, ac.read(&buf));
 
                     try accepted.setReadContext(null);
                     try io.writeAll(@TypeOf(cc), &cc, "ok");
                     try io.readFull(@TypeOf(ac), &ac, buf[0..2]);
-                    try lib.testing.expectEqualStrings("ok", buf[0..2]);
+                    try std.testing.expectEqualStrings("ok", buf[0..2]);
                 }
             };
             Body.call(allocator) catch |err| {

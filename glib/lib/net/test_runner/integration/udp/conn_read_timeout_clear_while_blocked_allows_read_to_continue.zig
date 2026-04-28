@@ -2,7 +2,7 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("../tcp/test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -11,7 +11,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
                 fn waitUntilReadWaiting(impl: *net.UdpConn, comptime thread_lib: type) void {
@@ -20,13 +20,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         const waiting = impl.read_waiting;
                         impl.read_mu.unlock();
                         if (waiting) return;
-                        thread_lib.Thread.sleep(thread_lib.time.ns_per_ms);
+                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
                     }
                 }
 
-                fn call(a: lib.mem.Allocator) !void {
-                    const ReadyCounter = test_utils.ReadyCounter(lib);
-                    const Thread = lib.Thread;
+                fn call(a: std.mem.Allocator) !void {
+                    const ReadyCounter = test_utils.ReadyCounter(std);
+                    const Thread = std.Thread;
 
                     const ReadCtx = struct {
                         ready: *ReadyCounter,
@@ -52,7 +52,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         }
 
                         fn write(ctx: *WriteCtx, comptime thread_lib: type) void {
-                            thread_lib.Thread.sleep(60 * thread_lib.time.ns_per_ms);
+                            thread_lib.Thread.sleep(@intCast(60 * net.time.duration.MilliSecond));
                             _ = ctx.conn.writeTo("ok", ctx.dest) catch |err| {
                                 ctx.err = err;
                             };
@@ -73,7 +73,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     const conn_impl = try conn.as(net.UdpConn);
                     const conn_addr = test_utils.addr4(.{ 127, 0, 0, 1 }, try conn_impl.boundPort());
 
-                    conn.setReadTimeout(30);
+                    conn.setReadDeadline(net.time.instant.add(net.time.instant.now(), 30 * net.time.duration.MilliSecond));
 
                     var ready = ReadyCounter.init(1);
                     var read_ctx = ReadCtx{
@@ -83,23 +83,23 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var read_thread = try Thread.spawn(.{}, Worker.read, .{&read_ctx});
 
                     ready.waitUntilReady();
-                    waitUntilReadWaiting(conn_impl, lib);
+                    waitUntilReadWaiting(conn_impl, std);
 
-                    conn.setReadTimeout(null);
+                    conn.setReadDeadline(null);
 
                     var write_ctx = WriteCtx{
                         .conn = server_pc,
                         .dest = conn_addr,
                     };
-                    var write_thread = try Thread.spawn(.{}, Worker.write, .{ &write_ctx, lib });
+                    var write_thread = try Thread.spawn(.{}, Worker.write, .{ &write_ctx, std });
 
                     read_thread.join();
                     write_thread.join();
 
                     if (read_ctx.err) |err| return err;
                     if (write_ctx.err) |err| return err;
-                    try lib.testing.expectEqual(@as(?usize, 2), read_ctx.bytes_read);
-                    try lib.testing.expectEqualStrings("ok", read_ctx.buf[0..2]);
+                    try std.testing.expectEqual(@as(?usize, 2), read_ctx.bytes_read);
+                    try std.testing.expectEqualStrings("ok", read_ctx.buf[0..2]);
                 }
             };
             Body.call(allocator) catch |err| {

@@ -15,9 +15,10 @@
 //!   7. Detached cleanup waits for lagging workers and frees lookup state
 //!   8. deinit() waits for all outstanding lookups to finish cleanup
 
-const std = @import("std");
+const host_std = @import("std");
 const context_mod = @import("context");
 const sync = @import("sync");
+const time = @import("time");
 const Conn = @import("Conn.zig");
 const dialer = @import("Dialer.zig");
 const http_mod = @import("http.zig");
@@ -25,17 +26,17 @@ const netip = @import("netip.zig");
 const runtime_mod = @import("runtime.zig");
 const tls_mod = @import("tls.zig");
 
-pub fn Resolver(comptime lib: type, comptime net: type) type {
+pub fn Resolver(comptime std: type, comptime net: type) type {
     const Addr = netip.Addr;
     const AddrPort = netip.AddrPort;
-    const ContextApi = context_mod.make(lib);
-    const Dialer = dialer.Dialer(lib, net);
-    const Http = http_mod.make(lib, net);
-    const Tls = tls_mod.make(lib, net);
-    const Atomic = lib.atomic.Value;
-    const mem = lib.mem;
+    const ContextApi = context_mod.make(std, net.time);
+    const Dialer = dialer.Dialer(std, net);
+    const Http = http_mod.make(std, net);
+    const Tls = tls_mod.make(std, net);
+    const Atomic = std.atomic.Value;
+    const mem = std.mem;
     const Allocator = mem.Allocator;
-    const Thread = lib.Thread;
+    const Thread = std.Thread;
     return struct {
         allocator: Allocator,
         options: Options,
@@ -158,7 +159,7 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
                 Server.init(dns.ali.v4_2, .udp),
                 Server.init(dns.cloudflare.v4_2, .udp),
             },
-            timeout_ms: u32 = 1000,
+            timeout: time.duration.Duration = time.duration.Second,
             attempts: u32 = 2,
             mode: QueryMode = .ipv4_only,
             spawn_config: Thread.SpawnConfig = .{},
@@ -223,9 +224,9 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
             has_result: bool = false,
         };
 
-        const WorkerRacer = sync.Racer(lib, WorkerResult);
-        const worker_io_quantum_ms: i64 = 50;
-        const worker_attempt_cancel_poll_ns: u64 = 1 * lib.time.ns_per_ms;
+        const WorkerRacer = sync.Racer(std, net.time, WorkerResult);
+        const worker_io_quantum: time.duration.Duration = 50 * time.duration.MilliSecond;
+        const worker_attempt_cancel_poll: time.duration.Duration = net.time.duration.MilliSecond;
 
         const LookupJob = struct {
             resolver: *Self,
@@ -286,13 +287,13 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
             stop_requested: Atomic(bool) = Atomic(bool).init(false),
             watcher: ?Thread = null,
 
-            fn init(allocator: Allocator, state: WorkerRacer.State, timeout_ms: u32) Allocator.Error!@This() {
+            fn init(allocator: Allocator, state: WorkerRacer.State, timeout: time.duration.Duration) Allocator.Error!@This() {
                 var context_api = try ContextApi.init(allocator);
                 errdefer context_api.deinit();
 
-                var deadline_ctx = try context_api.withDeadline(
+                var deadline_ctx = try context_api.withTimeout(
                     context_api.background(),
-                    lib.time.nanoTimestamp() + @as(i128, timeout_ms) * lib.time.ns_per_ms,
+                    timeout,
                 );
                 errdefer deadline_ctx.deinit();
 
@@ -331,7 +332,7 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
                         self.ctx.cancel();
                         return;
                     }
-                    Thread.sleep(worker_attempt_cancel_poll_ns);
+                    Thread.sleep(@intCast(worker_attempt_cancel_poll));
                 }
             }
         };
@@ -339,7 +340,7 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
         /// Public resolver calls return `anyerror` so they can transparently
         /// propagate arbitrary causes injected via `context.cancelWithCause(...)`.
         pub fn lookupHost(self: *Self, name: []const u8, buf: []Addr) anyerror!usize {
-            const Context = context_mod.make(lib);
+            const Context = context_mod.make(std, net.time);
             var context_api = try Context.init(self.allocator);
             defer context_api.deinit();
             return self.lookupHostContext(context_api.background(), name, buf);
@@ -455,13 +456,11 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
 
         fn udpResolve(ctx: WorkerRacer.State, server: Server, job: *LookupJob) ?WorkerResult {
             const attempts = @max(job.resolver.options.attempts, 1);
-            const per_attempt_ms = job.resolver.options.timeout_ms / attempts;
+            const per_attempt_timeout = @divFloor(job.resolver.options.timeout, @as(time.duration.Duration, @intCast(attempts)));
 
             const d = Dialer.init(job.resolver.allocator, .{});
             var c = d.dial(.udp, server.addr) catch return null;
             defer c.deinit();
-
-            c.setReadTimeout(per_attempt_ms);
 
             var result = WorkerResult{};
             var replied = [2]bool{ false, false };
@@ -488,6 +487,7 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
                     if (handled_count >= job.queryPkts().len) break;
 
                     var recv_buf: [512]u8 = undefined;
+                    c.setReadDeadline(time.instant.add(net.time.instant.now(), per_attempt_timeout));
                     const recv_n = c.read(&recv_buf) catch break;
                     if (recv_n < 12) continue;
 
@@ -541,19 +541,19 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
 
         fn tcpResolve(ctx: WorkerRacer.State, server: Server, job: *LookupJob) ?WorkerResult {
             const attempts = @max(job.resolver.options.attempts, 1);
-            const per_attempt_ms = job.resolver.options.timeout_ms / attempts;
+            const per_attempt_timeout = @divFloor(job.resolver.options.timeout, @as(time.duration.Duration, @intCast(attempts)));
 
             var attempt: u32 = 0;
             while (attempt < attempts) : (attempt += 1) {
                 if (ctx.done()) return null;
-                if (tcpAttempt(ctx, server, job, per_attempt_ms)) |r| return r;
+                if (tcpAttempt(ctx, server, job, per_attempt_timeout)) |r| return r;
             }
             return null;
         }
 
-        fn tcpAttempt(ctx: WorkerRacer.State, server: Server, job: *LookupJob, timeout_ms: u32) ?WorkerResult {
+        fn tcpAttempt(ctx: WorkerRacer.State, server: Server, job: *LookupJob, timeout: time.duration.Duration) ?WorkerResult {
             const d = Dialer.init(job.resolver.allocator, .{});
-            var attempt_ctx = WorkerAttemptScope.init(job.resolver.allocator, ctx, timeout_ms) catch |err| {
+            var attempt_ctx = WorkerAttemptScope.init(job.resolver.allocator, ctx, timeout) catch |err| {
                 return WorkerResult{ .has_result = true, .err = err };
             };
             defer attempt_ctx.deinit();
@@ -563,26 +563,26 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
             var c = d.dialContext(attempt_ctx.context(), .tcp, server.addr) catch return null;
             defer c.deinit();
 
-            return streamAttempt(ctx, c, job, timeout_ms);
+            return streamAttempt(ctx, c, job, timeout);
         }
 
         fn tlsResolve(ctx: WorkerRacer.State, server: Server, job: *LookupJob) ?WorkerResult {
             const attempts = @max(job.resolver.options.attempts, 1);
-            const per_attempt_ms = job.resolver.options.timeout_ms / attempts;
+            const per_attempt_timeout = @divFloor(job.resolver.options.timeout, @as(time.duration.Duration, @intCast(attempts)));
 
             var attempt: u32 = 0;
             while (attempt < attempts) : (attempt += 1) {
                 if (ctx.done()) return null;
-                if (tlsAttempt(ctx, server, job, per_attempt_ms)) |r| return r;
+                if (tlsAttempt(ctx, server, job, per_attempt_timeout)) |r| return r;
             }
             return null;
         }
 
-        fn tlsAttempt(ctx: WorkerRacer.State, server: Server, job: *LookupJob, timeout_ms: u32) ?WorkerResult {
+        fn tlsAttempt(ctx: WorkerRacer.State, server: Server, job: *LookupJob, timeout: time.duration.Duration) ?WorkerResult {
             const tls_config = server.tls_config orelse return null;
             const net_dialer = Dialer.init(job.resolver.allocator, .{});
             const tls_dialer = Tls.Dialer.init(net_dialer, tls_config);
-            var attempt_ctx = WorkerAttemptScope.init(job.resolver.allocator, ctx, timeout_ms) catch |err| {
+            var attempt_ctx = WorkerAttemptScope.init(job.resolver.allocator, ctx, timeout) catch |err| {
                 return WorkerResult{ .has_result = true, .err = err };
             };
             defer attempt_ctx.deinit();
@@ -592,29 +592,30 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
             var c = tls_dialer.dialContext(attempt_ctx.context(), .tcp, server.addr) catch return null;
             defer c.deinit();
 
-            c.setReadTimeout(timeout_ms);
-            c.setWriteTimeout(timeout_ms);
+            const handshake_deadline = time.instant.add(net.time.instant.now(), timeout);
+            c.setReadDeadline(handshake_deadline);
+            c.setWriteDeadline(handshake_deadline);
 
             const tls_conn = c.as(Tls.Conn) catch return null;
             if (ctx.done()) return null;
             tls_conn.handshake() catch return null;
 
-            return streamAttempt(ctx, c, job, timeout_ms);
+            return streamAttempt(ctx, c, job, timeout);
         }
 
         fn dohResolve(ctx: WorkerRacer.State, server: Server, job: *LookupJob) ?WorkerResult {
             const attempts = @max(job.resolver.options.attempts, 1);
-            const per_attempt_ms = job.resolver.options.timeout_ms / attempts;
+            const per_attempt_timeout = @divFloor(job.resolver.options.timeout, @as(time.duration.Duration, @intCast(attempts)));
 
             var attempt: u32 = 0;
             while (attempt < attempts) : (attempt += 1) {
                 if (ctx.done()) return null;
-                if (dohAttempt(ctx, server, job, per_attempt_ms)) |r| return r;
+                if (dohAttempt(ctx, server, job, per_attempt_timeout)) |r| return r;
             }
             return null;
         }
 
-        fn dohAttempt(ctx: WorkerRacer.State, server: Server, job: *LookupJob, timeout_ms: u32) ?WorkerResult {
+        fn dohAttempt(ctx: WorkerRacer.State, server: Server, job: *LookupJob, timeout: time.duration.Duration) ?WorkerResult {
             var result = WorkerResult{};
             var replied = [2]bool{ false, false };
             var replied_count: usize = 0;
@@ -631,7 +632,7 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
                     qpkt,
                     job.resolver.allocator,
                     job.resolver.options.spawn_config,
-                    timeout_ms,
+                    timeout,
                     &recv_buf,
                 ) catch |err| return WorkerResult{ .has_result = true, .err = err }) orelse return null;
                 if (recv_n < 12) return null;
@@ -675,11 +676,11 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
             qpkt: QueryPkt,
             allocator: Allocator,
             spawn_config: Thread.SpawnConfig,
-            timeout_ms: u32,
+            timeout: time.duration.Duration,
             out: []u8,
         ) LookupError!?usize {
             const tls_config = server.tls_config orelse return null;
-            var attempt_ctx = try WorkerAttemptScope.init(allocator, ctx, timeout_ms);
+            var attempt_ctx = try WorkerAttemptScope.init(allocator, ctx, timeout);
             defer attempt_ctx.deinit();
             try attempt_ctx.start(spawn_config);
             // DoH here is an internal one-shot DNS wire exchange, so keep it on a
@@ -691,8 +692,8 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
                 .tls_client_config = tls_config,
                 .disable_keep_alives = true,
                 .max_idle_conns = 0,
-                .tls_handshake_timeout_ms = timeout_ms,
-                .response_header_timeout_ms = timeout_ms,
+                .tls_handshake_timeout = timeout,
+                .response_header_timeout = timeout,
             }) catch return null;
             defer transport.deinit();
 
@@ -739,16 +740,16 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
             const host = try formatDohHost(server.addr, &host_buf);
             const port = server.addr.port();
             if (port == 443) {
-                return std.fmt.bufPrint(buf, "https://{s}{s}", .{ host, server.doh_path });
+                return host_std.fmt.bufPrint(buf, "https://{s}{s}", .{ host, server.doh_path });
             }
-            return std.fmt.bufPrint(buf, "https://{s}:{d}{s}", .{ host, port, server.doh_path });
+            return host_std.fmt.bufPrint(buf, "https://{s}:{d}{s}", .{ host, port, server.doh_path });
         }
 
         fn formatDohHost(addr_port: AddrPort, buf: []u8) ![]u8 {
             const addr = addr_port.addr();
             if (addr.is4()) {
                 const bytes = addr.as4().?;
-                return std.fmt.bufPrint(buf, "{d}.{d}.{d}.{d}", .{
+                return host_std.fmt.bufPrint(buf, "{d}.{d}.{d}.{d}", .{
                     bytes[0], bytes[1], bytes[2], bytes[3],
                 });
             }
@@ -768,7 +769,7 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
                 (@as(u16, bytes[14]) << 8) | bytes[15],
             };
 
-            return std.fmt.bufPrint(
+            return host_std.fmt.bufPrint(
                 buf,
                 "[{x}:{x}:{x}:{x}:{x}:{x}:{x}:{x}]",
                 .{
@@ -781,9 +782,9 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
         fn responseHasDnsMessageContentType(resp: Http.Response) bool {
             for (resp.header) |hdr| {
                 if (hdr.is(Http.Header.content_type)) {
-                    const semi = std.mem.indexOfScalar(u8, hdr.value, ';') orelse hdr.value.len;
-                    const media_type = std.mem.trim(u8, hdr.value[0..semi], " \t");
-                    return std.ascii.eqlIgnoreCase(media_type, "application/dns-message");
+                    const semi = host_std.mem.indexOfScalar(u8, hdr.value, ';') orelse hdr.value.len;
+                    const media_type = host_std.mem.trim(u8, hdr.value[0..semi], " \t");
+                    return host_std.ascii.eqlIgnoreCase(media_type, "application/dns-message");
                 }
             }
             return false;
@@ -799,16 +800,16 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
             }
         }
 
-        fn streamAttempt(ctx: WorkerRacer.State, c: Conn, job: *LookupJob, timeout_ms: u32) ?WorkerResult {
+        fn streamAttempt(ctx: WorkerRacer.State, c: Conn, job: *LookupJob, timeout: time.duration.Duration) ?WorkerResult {
             var conn = c;
-            const started_ms = lib.time.milliTimestamp();
+            const started = net.time.instant.now();
 
             for (job.queryPkts()) |qpkt| {
                 var tcp_buf: [514]u8 = undefined;
                 tcp_buf[0] = @truncate(qpkt.len >> 8);
                 tcp_buf[1] = @truncate(qpkt.len);
                 @memcpy(tcp_buf[2..][0..qpkt.len], qpkt.buf[0..qpkt.len]);
-                tryWriteAll(ctx, &conn, tcp_buf[0 .. 2 + qpkt.len], started_ms, timeout_ms) orelse return null;
+                tryWriteAll(ctx, &conn, tcp_buf[0 .. 2 + qpkt.len], started, timeout) orelse return null;
             }
 
             var result = WorkerResult{};
@@ -819,13 +820,13 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
 
             while (handled_count < job.queryPkts().len) {
                 var len_buf: [2]u8 = undefined;
-                tryReadFull(ctx, &conn, &len_buf, started_ms, timeout_ms) orelse return null;
+                tryReadFull(ctx, &conn, &len_buf, started, timeout) orelse return null;
 
                 const msg_len = readU16(&len_buf);
                 if (msg_len < 12 or msg_len > 512) return null;
 
                 var recv_buf: [512]u8 = undefined;
-                tryReadFull(ctx, &conn, recv_buf[0..msg_len], started_ms, timeout_ms) orelse return null;
+                tryReadFull(ctx, &conn, recv_buf[0..msg_len], started, timeout) orelse return null;
 
                 const resp_id = readU16(recv_buf[0..2]);
                 const idx = job.queryIndexById(resp_id) orelse continue;
@@ -866,12 +867,12 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
             return null;
         }
 
-        fn tryWriteAll(ctx: WorkerRacer.State, conn: *Conn, buf: []const u8, started_ms: i64, timeout_ms: u32) ?void {
+        fn tryWriteAll(ctx: WorkerRacer.State, conn: *Conn, buf: []const u8, started: time.instant.Time, timeout: time.duration.Duration) ?void {
             var offset: usize = 0;
             while (offset < buf.len) {
                 if (ctx.done()) return null;
-                const io_timeout_ms = nextStreamTimeoutWorker(ctx, started_ms, timeout_ms) orelse return null;
-                conn.setWriteTimeout(io_timeout_ms);
+                const io_timeout = nextStreamTimeoutWorker(ctx, started, timeout) orelse return null;
+                conn.setWriteDeadline(time.instant.add(net.time.instant.now(), io_timeout));
                 const n = conn.write(buf[offset..]) catch |err| switch (err) {
                     error.TimedOut => continue,
                     else => return null,
@@ -881,12 +882,12 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
             }
         }
 
-        fn tryReadFull(ctx: WorkerRacer.State, conn: *Conn, buf: []u8, started_ms: i64, timeout_ms: u32) ?void {
+        fn tryReadFull(ctx: WorkerRacer.State, conn: *Conn, buf: []u8, started: time.instant.Time, timeout: time.duration.Duration) ?void {
             var offset: usize = 0;
             while (offset < buf.len) {
                 if (ctx.done()) return null;
-                const io_timeout_ms = nextStreamTimeoutWorker(ctx, started_ms, timeout_ms) orelse return null;
-                conn.setReadTimeout(io_timeout_ms);
+                const io_timeout = nextStreamTimeoutWorker(ctx, started, timeout) orelse return null;
+                conn.setReadDeadline(time.instant.add(net.time.instant.now(), io_timeout));
                 const n = conn.read(buf[offset..]) catch |err| switch (err) {
                     error.TimedOut => continue,
                     else => return null,
@@ -896,13 +897,12 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
             }
         }
 
-        fn nextStreamTimeoutWorker(ctx: WorkerRacer.State, started_ms: i64, timeout_ms: u32) ?u32 {
+        fn nextStreamTimeoutWorker(ctx: WorkerRacer.State, started: time.instant.Time, timeout: time.duration.Duration) ?time.duration.Duration {
             if (ctx.done()) return null;
-            const now_ms = lib.time.milliTimestamp();
-            const elapsed_ms = now_ms - started_ms;
-            const remaining_query = @as(i64, timeout_ms) - elapsed_ms;
+            const elapsed = time.instant.sub(net.time.instant.now(), started);
+            const remaining_query = timeout - elapsed;
             if (remaining_query <= 0) return null;
-            return @intCast(@max(@as(i64, 1), @min(remaining_query, worker_io_quantum_ms)));
+            return @max(@as(time.duration.Duration, 1), @min(remaining_query, worker_io_quantum));
         }
 
         fn validateServer(server: Server) LookupError!void {
@@ -1078,15 +1078,15 @@ pub fn Resolver(comptime lib: type, comptime net: type) type {
 
         fn randomId() u16 {
             var buf: [2]u8 = undefined;
-            lib.crypto.random.bytes(&buf);
+            std.crypto.random.bytes(&buf);
             return readU16(&buf);
         }
     };
 }
 
-pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
+pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
         fn writeResolverTestU16(buf: *[512]u8, pos: *usize, value: u16) void {
             buf[pos.*] = @truncate(value >> 8);
             buf[pos.* + 1] = @truncate(value);
@@ -1129,9 +1129,9 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
             return pos;
         }
 
-        fn run(_: *testing_api.T, _: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const R = Resolver(lib, net);
+        fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const R = Resolver(std, net);
 
             {
                 var req_buf: [512]u8 = undefined;

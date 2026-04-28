@@ -3,20 +3,21 @@
 //! Returns a Conn directly. The internal state is heap-allocated and
 //! freed on deinit().
 
+const time_mod = @import("time");
 const context_mod = @import("context");
 const Conn = @import("Conn.zig");
 
-pub fn TcpConn(comptime lib: type, comptime net: type) type {
-    const Allocator = lib.mem.Allocator;
+pub fn TcpConn(comptime std: type, comptime net: type) type {
+    const Allocator = std.mem.Allocator;
     const Context = context_mod.Context;
-    const ContextApi = context_mod.make(lib);
-    const Mutex = lib.Thread.Mutex;
+    const ContextApi = context_mod.make(std, net.time);
+    const Mutex = std.Thread.Mutex;
     const Runtime = net.Runtime;
     const TcpSocket = Runtime.Tcp;
     // Context-driven waits still use short poll slices because parent context
     // cancellation is not runtime-signaled, but explicit timeout/context setter
     // changes wake blocked polls immediately via runtime interrupts.
-    const poll_quantum_ms: i64 = 50;
+    const poll_quantum: time_mod.duration.Duration = 50 * time_mod.duration.MilliSecond;
 
     return struct {
         socket: TcpSocket,
@@ -26,8 +27,8 @@ pub fn TcpConn(comptime lib: type, comptime net: type) type {
         write_mu: Mutex = .{},
         read_waiting: bool = false,
         write_waiting: bool = false,
-        read_timeout_ms: ?u32 = null,
-        write_timeout_ms: ?u32 = null,
+        read_deadline: ?time_mod.instant.Time = null,
+        write_deadline: ?time_mod.instant.Time = null,
         read_ctx: ?*SideContext = null,
         write_ctx: ?*SideContext = null,
         read_state_gen: u64 = 0,
@@ -36,7 +37,7 @@ pub fn TcpConn(comptime lib: type, comptime net: type) type {
         const Self = @This();
         const WaitState = struct {
             config_gen: ?u64 = null,
-            deadline_ms: ?i64 = null,
+            deadline: ?time_mod.instant.Time = null,
         };
 
         const SideContext = struct {
@@ -132,12 +133,12 @@ pub fn TcpConn(comptime lib: type, comptime net: type) type {
             self.allocator.destroy(self);
         }
 
-        pub fn setReadTimeout(self: *Self, ms: ?u32) void {
+        pub fn setReadDeadline(self: *Self, deadline: ?time_mod.instant.Time) void {
             if (self.isClosed()) return;
             var should_signal = false;
             self.read_mu.lock();
             if (!self.isClosed()) {
-                self.read_timeout_ms = ms;
+                self.read_deadline = deadline;
                 self.read_state_gen +%= 1;
                 should_signal = self.read_waiting;
             }
@@ -145,12 +146,12 @@ pub fn TcpConn(comptime lib: type, comptime net: type) type {
             if (should_signal) self.socket.signal(.read_interrupt);
         }
 
-        pub fn setWriteTimeout(self: *Self, ms: ?u32) void {
+        pub fn setWriteDeadline(self: *Self, deadline: ?time_mod.instant.Time) void {
             if (self.isClosed()) return;
             var should_signal = false;
             self.write_mu.lock();
             if (!self.isClosed()) {
-                self.write_timeout_ms = ms;
+                self.write_deadline = deadline;
                 self.write_state_gen +%= 1;
                 should_signal = self.write_waiting;
             }
@@ -215,14 +216,14 @@ pub fn TcpConn(comptime lib: type, comptime net: type) type {
             while (true) {
                 if (self.isClosed()) return error.EndOfStream;
                 const poll_result = blk: {
-                    const timeout_ms = try self.beginReadWait(wait_state);
+                    const timeout = try self.beginReadWait(wait_state);
                     defer self.endReadWait();
                     break :blk self.socket.poll(.{
                         .read = true,
                         .failed = true,
                         .hup = true,
                         .read_interrupt = true,
-                    }, timeout_ms);
+                    }, timeout);
                 };
                 _ = poll_result catch |err| switch (err) {
                     error.Closed => return error.EndOfStream,
@@ -240,14 +241,14 @@ pub fn TcpConn(comptime lib: type, comptime net: type) type {
             while (true) {
                 if (self.isClosed()) return error.BrokenPipe;
                 const poll_result = blk: {
-                    const timeout_ms = try self.beginWriteWait(wait_state);
+                    const timeout = try self.beginWriteWait(wait_state);
                     defer self.endWriteWait();
                     break :blk self.socket.poll(.{
                         .write = true,
                         .failed = true,
                         .hup = true,
                         .write_interrupt = true,
-                    }, timeout_ms);
+                    }, timeout);
                 };
                 _ = poll_result catch |err| switch (err) {
                     error.Closed => return error.BrokenPipe,
@@ -267,12 +268,10 @@ pub fn TcpConn(comptime lib: type, comptime net: type) type {
 
             if (self.isClosed()) return error.EndOfStream;
             self.syncReadWaitStateLocked(wait_state);
-            if (deadlineExpired(wait_state.deadline_ms)) return error.TimedOut;
+            if (waitExpired(null, wait_state.deadline)) return error.TimedOut;
             if (self.read_ctx) |side| {
                 if (side.ctx.err() != null) return error.TimedOut;
-                if (side.ctx.deadline()) |deadline_ns| {
-                    if (deadline_ns <= lib.time.nanoTimestamp()) return error.TimedOut;
-                }
+                if (waitExpired(side.ctx, null)) return error.TimedOut;
             }
         }
 
@@ -282,45 +281,39 @@ pub fn TcpConn(comptime lib: type, comptime net: type) type {
 
             if (self.isClosed()) return error.BrokenPipe;
             self.syncWriteWaitStateLocked(wait_state);
-            if (deadlineExpired(wait_state.deadline_ms)) return error.TimedOut;
+            if (waitExpired(null, wait_state.deadline)) return error.TimedOut;
             if (self.write_ctx) |side| {
                 if (side.ctx.err() != null) return error.TimedOut;
-                if (side.ctx.deadline()) |deadline_ns| {
-                    if (deadline_ns <= lib.time.nanoTimestamp()) return error.TimedOut;
-                }
+                if (waitExpired(side.ctx, null)) return error.TimedOut;
             }
         }
 
-        fn beginReadWait(self: *Self, wait_state: *WaitState) Conn.ReadError!?u32 {
+        fn beginReadWait(self: *Self, wait_state: *WaitState) Conn.ReadError!?time_mod.duration.Duration {
             self.read_mu.lock();
             defer self.read_mu.unlock();
             if (self.isClosed()) return error.EndOfStream;
             self.syncReadWaitStateLocked(wait_state);
-            if (deadlineExpired(wait_state.deadline_ms)) return error.TimedOut;
+            if (waitExpired(null, wait_state.deadline)) return error.TimedOut;
             if (self.read_ctx) |side| {
                 if (side.ctx.err() != null) return error.TimedOut;
-                if (side.ctx.deadline()) |deadline_ns| {
-                    if (deadline_ns <= lib.time.nanoTimestamp()) return error.TimedOut;
-                }
+                if (waitExpired(side.ctx, null)) return error.TimedOut;
             }
             self.read_waiting = true;
-            return pollTimeoutMs(if (self.read_ctx) |side| side.ctx else null, wait_state.deadline_ms);
+            return pollTimeout(if (self.read_ctx) |side| side.ctx else null, wait_state.deadline);
         }
 
-        fn beginWriteWait(self: *Self, wait_state: *WaitState) Conn.WriteError!?u32 {
+        fn beginWriteWait(self: *Self, wait_state: *WaitState) Conn.WriteError!?time_mod.duration.Duration {
             self.write_mu.lock();
             defer self.write_mu.unlock();
             if (self.isClosed()) return error.BrokenPipe;
             self.syncWriteWaitStateLocked(wait_state);
-            if (deadlineExpired(wait_state.deadline_ms)) return error.TimedOut;
+            if (waitExpired(null, wait_state.deadline)) return error.TimedOut;
             if (self.write_ctx) |side| {
                 if (side.ctx.err() != null) return error.TimedOut;
-                if (side.ctx.deadline()) |deadline_ns| {
-                    if (deadline_ns <= lib.time.nanoTimestamp()) return error.TimedOut;
-                }
+                if (waitExpired(side.ctx, null)) return error.TimedOut;
             }
             self.write_waiting = true;
-            return pollTimeoutMs(if (self.write_ctx) |side| side.ctx else null, wait_state.deadline_ms);
+            return pollTimeout(if (self.write_ctx) |side| side.ctx else null, wait_state.deadline);
         }
 
         fn endReadWait(self: *Self) void {
@@ -339,14 +332,14 @@ pub fn TcpConn(comptime lib: type, comptime net: type) type {
             self.read_mu.lock();
             defer self.read_mu.unlock();
             self.syncReadWaitStateLocked(wait_state);
-            return waitExpired(if (self.read_ctx) |side| side.ctx else null, wait_state.deadline_ms);
+            return waitExpired(if (self.read_ctx) |side| side.ctx else null, wait_state.deadline);
         }
 
         fn writeWaitExpired(self: *Self, wait_state: *WaitState) bool {
             self.write_mu.lock();
             defer self.write_mu.unlock();
             self.syncWriteWaitStateLocked(wait_state);
-            return waitExpired(if (self.write_ctx) |side| side.ctx else null, wait_state.deadline_ms);
+            return waitExpired(if (self.write_ctx) |side| side.ctx else null, wait_state.deadline);
         }
 
         fn clearReadContext(self: *Self) void {
@@ -375,65 +368,46 @@ pub fn TcpConn(comptime lib: type, comptime net: type) type {
             return @atomicRmw(u8, &self.closed, .Xchg, 1, .acq_rel) != 0;
         }
 
-        fn timeoutToDeadline(ms: ?u32) ?i64 {
-            const timeout_ms = ms orelse return null;
-            return lib.time.milliTimestamp() + timeout_ms;
-        }
-
-        fn pollTimeoutMs(ctx: ?context_mod.Context, deadline_ms: ?i64) ?u32 {
-            var remaining_ms: ?i64 = null;
-
-            if (deadline_ms) |deadline| {
-                remaining_ms = deadline - lib.time.milliTimestamp();
-            }
+        fn pollTimeout(ctx: ?context_mod.Context, deadline: ?time_mod.instant.Time) ?time_mod.duration.Duration {
+            var remaining: ?time_mod.duration.Duration = if (deadline) |value|
+                @max(time_mod.instant.sub(value, net.time.instant.now()), 0)
+            else
+                null;
             if (ctx) |active_ctx| {
-                if (active_ctx.deadline()) |deadline_ns| {
-                    const ctx_remaining: i64 = @intCast(@divFloor(deadline_ns - lib.time.nanoTimestamp(), lib.time.ns_per_ms));
-                    remaining_ms = if (remaining_ms) |current|
-                        @min(current, ctx_remaining)
-                    else
-                        ctx_remaining;
+                if (active_ctx.deadline()) |ctx_deadline| {
+                    const ctx_remaining = @max(time_mod.instant.sub(ctx_deadline, net.time.instant.now()), 0);
+                    remaining = if (remaining) |value| @min(value, ctx_remaining) else ctx_remaining;
                 }
 
-                const remaining = remaining_ms orelse return @intCast(poll_quantum_ms);
-                if (remaining <= 0) return 0;
-                return @intCast(@max(@as(i64, 1), @min(remaining, poll_quantum_ms)));
+                const timeout = remaining orelse return poll_quantum;
+                return @min(timeout, poll_quantum);
             }
 
-            const remaining = remaining_ms orelse return null;
-            if (remaining <= 0) return 0;
-            return @intCast(remaining);
+            return remaining;
         }
 
-        fn waitExpired(ctx: ?Context, deadline_ms: ?i64) bool {
+        fn waitExpired(ctx: ?Context, deadline: ?time_mod.instant.Time) bool {
             if (ctx) |active_ctx| {
                 if (active_ctx.err() != null) return true;
-                if (active_ctx.deadline()) |deadline_ns| {
-                    if (deadline_ns <= lib.time.nanoTimestamp()) return true;
+                if (active_ctx.deadline()) |value| {
+                    if (time_mod.instant.sub(value, net.time.instant.now()) <= 0) return true;
                 }
             }
-            if (deadline_ms) |deadline| {
-                return deadline <= lib.time.milliTimestamp();
-            }
-            return false;
-        }
-
-        fn deadlineExpired(deadline_ms: ?i64) bool {
-            const deadline = deadline_ms orelse return false;
-            return deadline <= lib.time.milliTimestamp();
+            const value = deadline orelse return false;
+            return time_mod.instant.sub(value, net.time.instant.now()) <= 0;
         }
 
         fn syncReadWaitStateLocked(self: *Self, wait_state: *WaitState) void {
             if (wait_state.config_gen != self.read_state_gen) {
                 wait_state.config_gen = self.read_state_gen;
-                wait_state.deadline_ms = timeoutToDeadline(self.read_timeout_ms);
+                wait_state.deadline = self.read_deadline;
             }
         }
 
         fn syncWriteWaitStateLocked(self: *Self, wait_state: *WaitState) void {
             if (wait_state.config_gen != self.write_state_gen) {
                 wait_state.config_gen = self.write_state_gen;
-                wait_state.deadline_ms = timeoutToDeadline(self.write_timeout_ms);
+                wait_state.deadline = self.write_deadline;
             }
         }
     };

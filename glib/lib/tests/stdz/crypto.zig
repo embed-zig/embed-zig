@@ -1,7 +1,7 @@
 const stdz = @import("stdz");
 const testing_mod = @import("testing");
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -12,88 +12,88 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("hash", testing_mod.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("hash", testing_mod.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try hashTests(lib);
+                    try hashTests(std);
                 }
             }.run));
-            t.run("hmac", testing_mod.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("hmac", testing_mod.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try hmacTests(lib);
+                    try hmacTests(std);
                 }
             }.run));
-            t.run("aead", testing_mod.TestRunner.fromFn(lib, 128 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("aead", testing_mod.TestRunner.fromFn(std, 128 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try aeadTests(lib);
+                    try aeadTests(std);
                 }
             }.run));
-            t.run("random", testing_mod.TestRunner.fromFn(lib, 128 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("random", testing_mod.TestRunner.fromFn(std, 128 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try randomTests(lib);
+                    try randomTests(std);
                 }
             }.run));
-            t.run("hkdf", testing_mod.TestRunner.fromFn(lib, 256 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("hkdf", testing_mod.TestRunner.fromFn(std, 256 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try hkdfTests(lib);
+                    try hkdfTests(std);
                 }
             }.run));
-            t.run("ed25519", testing_mod.TestRunner.fromFn(lib, 128 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("ed25519", testing_mod.TestRunner.fromFn(std, 128 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try ed25519Tests(lib);
+                    try ed25519Tests(std);
                 }
             }.run));
-            t.run("ecdsa", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("ecdsa", testing_mod.TestRunner.fromFn(std, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try ecdsaTests(lib);
+                    try ecdsaTests(std);
                 }
             }.run));
-            t.run("x25519", testing_mod.TestRunner.fromFn(lib, 128 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("x25519", testing_mod.TestRunner.fromFn(std, 128 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try x25519Tests(lib);
+                    try x25519Tests(std);
                 }
             }.run));
-            t.run("ecc", testing_mod.TestRunner.fromFn(lib, 8 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("ecc", testing_mod.TestRunner.fromFn(std, 8 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try eccTests(lib);
+                    try eccTests(std);
                 }
             }.run));
-            t.run("aes_block", testing_mod.TestRunner.fromFn(lib, 128 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("aes_block", testing_mod.TestRunner.fromFn(std, 128 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try aesBlockTests(lib);
+                    try aesBlockTests(std);
                 }
             }.run));
-            t.run("certificate", testing_mod.TestRunner.fromFn(lib, 56 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("certificate", testing_mod.TestRunner.fromFn(std, 56 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try certificateTests(lib);
+                    try certificateTests(std);
                 }
             }.run));
-            t.run("certificate_rsa", testing_mod.TestRunner.fromFn(lib, 96 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("certificate_rsa", testing_mod.TestRunner.fromFn(std, 96 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try certificateRsaTests(lib);
+                    try certificateRsaTests(std);
                 }
             }.run));
             return t.wait();
@@ -101,17 +101,17 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
 }
 
-fn hashTests(comptime lib: type) !void {
-    const crypto = lib.crypto;
+fn hashTests(comptime std: type) !void {
+    const crypto = std.crypto;
 
     inline for (.{
         .{ crypto.hash.sha2.Sha256, 32, "sha256" },
@@ -138,13 +138,13 @@ fn hashTests(comptime lib: type) !void {
 
         h.final(&out2);
 
-        if (!lib.mem.eql(u8, &out, &out2)) return error.HashStreamingMismatch;
-        if (!lib.mem.eql(u8, &peeked, &out)) return error.HashPeekMismatch;
+        if (!std.mem.eql(u8, &out, &out2)) return error.HashStreamingMismatch;
+        if (!std.mem.eql(u8, &peeked, &out)) return error.HashPeekMismatch;
     }
 }
 
-fn hmacTests(comptime lib: type) !void {
-    const crypto = lib.crypto;
+fn hmacTests(comptime std: type) !void {
+    const crypto = std.crypto;
 
     inline for (.{
         .{ crypto.auth.hmac.sha2.HmacSha256, 32, "HmacSha256" },
@@ -169,7 +169,7 @@ fn hmacTests(comptime lib: type) !void {
         var out2: [H.mac_length]u8 = undefined;
         ctx.final(&out2);
 
-        if (!lib.mem.eql(u8, &out1, &out2)) return error.HmacStreamingMismatch;
+        if (!std.mem.eql(u8, &out1, &out2)) return error.HmacStreamingMismatch;
 
         var long_key: [300]u8 = undefined;
         var long_msg: [9000]u8 = undefined;
@@ -186,12 +186,12 @@ fn hmacTests(comptime lib: type) !void {
         var long_out2: [H.mac_length]u8 = undefined;
         long_ctx.final(&long_out2);
 
-        if (!lib.mem.eql(u8, &long_out1, &long_out2)) return error.HmacLargeStreamingMismatch;
+        if (!std.mem.eql(u8, &long_out1, &long_out2)) return error.HmacLargeStreamingMismatch;
     }
 }
 
-fn aeadTests(comptime lib: type) !void {
-    const crypto = lib.crypto;
+fn aeadTests(comptime std: type) !void {
+    const crypto = std.crypto;
 
     inline for (.{
         .{ crypto.aead.aes_gcm.Aes128Gcm, "Aes128Gcm" },
@@ -215,7 +215,7 @@ fn aeadTests(comptime lib: type) !void {
         var decrypted: [plaintext.len]u8 = undefined;
         try A.decrypt(&decrypted, &ciphertext, tag, "", nonce, key);
 
-        if (!lib.mem.eql(u8, plaintext, &decrypted)) return error.AeadDecryptMismatch;
+        if (!std.mem.eql(u8, plaintext, &decrypted)) return error.AeadDecryptMismatch;
 
         tag[0] ^= 0xff;
         if (A.decrypt(&decrypted, &ciphertext, tag, "", nonce, key)) |_| {
@@ -224,17 +224,17 @@ fn aeadTests(comptime lib: type) !void {
     }
 }
 
-fn randomTests(comptime lib: type) !void {
+fn randomTests(comptime std: type) !void {
     var buf1: [32]u8 = undefined;
     var buf2: [32]u8 = undefined;
-    lib.crypto.random.bytes(&buf1);
-    lib.crypto.random.bytes(&buf2);
+    std.crypto.random.bytes(&buf1);
+    std.crypto.random.bytes(&buf2);
 
-    if (lib.mem.eql(u8, &buf1, &buf2)) return error.RandomNotRandom;
+    if (std.mem.eql(u8, &buf1, &buf2)) return error.RandomNotRandom;
 }
 
-fn hkdfTests(comptime lib: type) !void {
-    const crypto = lib.crypto;
+fn hkdfTests(comptime std: type) !void {
+    const crypto = std.crypto;
     const GenericHkdfSha256 = crypto.kdf.hkdf.Hkdf(crypto.auth.hmac.sha2.HmacSha256);
     const GenericHkdfSha384 = crypto.kdf.hkdf.Hkdf(crypto.auth.hmac.sha2.HmacSha384);
 
@@ -270,18 +270,18 @@ fn hkdfTests(comptime lib: type) !void {
         const ikm = "input-keying-material";
         const prk_a = crypto.kdf.hkdf.HkdfSha256.extract(salt, ikm);
         const prk_b = GenericHkdfSha256.extract(salt, ikm);
-        if (!lib.mem.eql(u8, &prk_a, &prk_b)) return error.HkdfGenericExtractMismatch;
+        if (!std.mem.eql(u8, &prk_a, &prk_b)) return error.HkdfGenericExtractMismatch;
 
         var okm_a: [64]u8 = undefined;
         var okm_b: [64]u8 = undefined;
         crypto.kdf.hkdf.HkdfSha256.expand(&okm_a, "info", prk_a);
         GenericHkdfSha256.expand(&okm_b, "info", prk_b);
-        if (!lib.mem.eql(u8, &okm_a, &okm_b)) return error.HkdfGenericExpandMismatch;
+        if (!std.mem.eql(u8, &okm_a, &okm_b)) return error.HkdfGenericExpandMismatch;
     }
 }
 
-fn ed25519Tests(comptime lib: type) !void {
-    const Ed = lib.crypto.sign.Ed25519;
+fn ed25519Tests(comptime std: type) !void {
+    const Ed = std.crypto.sign.Ed25519;
 
     if (Ed.noise_length != 32) return error.Ed25519NoiseLenWrong;
     if (Ed.KeyPair.seed_length != 32) return error.Ed25519SeedLenWrong;
@@ -297,11 +297,11 @@ fn ed25519Tests(comptime lib: type) !void {
 
     const sig_bytes = sig.toBytes();
     const sig2 = Ed.Signature.fromBytes(sig_bytes);
-    if (!lib.mem.eql(u8, &sig_bytes, &sig2.toBytes())) return error.Ed25519SigRoundtripFailed;
+    if (!std.mem.eql(u8, &sig_bytes, &sig2.toBytes())) return error.Ed25519SigRoundtripFailed;
 }
 
-fn ecdsaTests(comptime lib: type) !void {
-    const crypto = lib.crypto;
+fn ecdsaTests(comptime std: type) !void {
+    const crypto = std.crypto;
 
     inline for (.{
         .{ crypto.sign.ecdsa.EcdsaP256Sha256, "EcdsaP256Sha256" },
@@ -319,12 +319,12 @@ fn ecdsaTests(comptime lib: type) !void {
         const sig_bytes = [_]u8{0} ** E.Signature.encoded_length;
         const sig = E.Signature.fromBytes(sig_bytes);
         const rt = sig.toBytes();
-        if (!lib.mem.eql(u8, &sig_bytes, &rt)) return error.EcdsaSigRoundtripFailed;
+        if (!std.mem.eql(u8, &sig_bytes, &rt)) return error.EcdsaSigRoundtripFailed;
     }
 }
 
-fn x25519Tests(comptime lib: type) !void {
-    const X = lib.crypto.dh.X25519;
+fn x25519Tests(comptime std: type) !void {
+    const X = std.crypto.dh.X25519;
 
     if (X.secret_length != 32) return error.X25519SecretLenWrong;
     if (X.public_length != 32) return error.X25519PublicLenWrong;
@@ -337,22 +337,22 @@ fn x25519Tests(comptime lib: type) !void {
     const shared_a = try X.scalarmult(kp_a.secret_key, kp_b.public_key);
     const shared_b = try X.scalarmult(kp_b.secret_key, kp_a.public_key);
 
-    if (!lib.mem.eql(u8, &shared_a, &shared_b)) return error.X25519SharedMismatch;
+    if (!std.mem.eql(u8, &shared_a, &shared_b)) return error.X25519SharedMismatch;
 
     const recovered = try X.recoverPublicKey(kp_a.secret_key);
-    if (!lib.mem.eql(u8, &recovered, &kp_a.public_key)) return error.X25519RecoverMismatch;
+    if (!std.mem.eql(u8, &recovered, &kp_a.public_key)) return error.X25519RecoverMismatch;
 }
 
-fn eccTests(comptime lib: type) !void {
-    const P = lib.crypto.ecc.P256;
+fn eccTests(comptime std: type) !void {
+    const P = std.crypto.ecc.P256;
 
     _ = P.Fe;
     _ = P.scalar;
     _ = P.basePoint;
 }
 
-fn aesBlockTests(comptime lib: type) !void {
-    const aes = lib.crypto.core.aes;
+fn aesBlockTests(comptime std: type) !void {
+    const aes = std.crypto.core.aes;
 
     _ = aes.has_hardware_support;
 
@@ -379,12 +379,12 @@ fn aesBlockTests(comptime lib: type) !void {
         const dec_ctx = A.initDec(key);
         dec_ctx.decrypt(&decrypted, &encrypted);
 
-        if (!lib.mem.eql(u8, &plaintext, &decrypted)) return error.AesBlockRoundtripFailed;
+        if (!std.mem.eql(u8, &plaintext, &decrypted)) return error.AesBlockRoundtripFailed;
     }
 }
 
-fn certificateTests(comptime lib: type) !void {
-    const Cert = lib.crypto.Certificate;
+fn certificateTests(comptime std: type) !void {
+    const Cert = std.crypto.Certificate;
 
     _ = Cert.Version;
     _ = Cert.Algorithm;
@@ -412,9 +412,9 @@ fn certificateTests(comptime lib: type) !void {
     try cert.verify(cert, valid_midpoint);
 }
 
-fn certificateRsaTests(comptime lib: type) !void {
-    const Rsa = lib.crypto.Certificate.rsa;
-    const Sha2 = lib.crypto.hash.sha2;
+fn certificateRsaTests(comptime std: type) !void {
+    const Rsa = std.crypto.Certificate.rsa;
+    const Sha2 = std.crypto.hash.sha2;
 
     const components = try Rsa.PublicKey.parseDer(&rsa_test_pub_der);
     if (components.modulus.len != 128) return error.RsaModulusLenMismatch;

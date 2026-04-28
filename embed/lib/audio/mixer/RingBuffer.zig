@@ -175,8 +175,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
         fn closeWithErrorUnblocksBlockedWriter() !void {
             const Thread = grt.std.Thread;
-            const ns_per_ms = grt.std.time.ns_per_ms;
-
             var buffer = try Buffer.init(grt.std.testing.allocator, 2);
             defer buffer.deinit();
 
@@ -197,7 +195,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 }
             }.run, .{&state});
 
-            Thread.sleep(10 * ns_per_ms);
+            Thread.sleep(@intCast(10 * grt.time.duration.MilliSecond));
             buffer.closeWithError();
             worker.join();
 

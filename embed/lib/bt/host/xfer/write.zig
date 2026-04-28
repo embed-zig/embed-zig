@@ -3,7 +3,7 @@
 //! This file defines the top-level function shape for a shared xfer write loop.
 //! The concrete transport is supplied by the caller and must provide one
 //! bidirectional session surface:
-//! - `read(timeout_ms, out)` to wait for one inbound control packet
+//! - `read(timeout, out)` to wait for one inbound control packet
 //! - `write(data)` to emit control packets such as the write start marker
 //! - `writeNoResp(data)` to emit one outbound data chunk without response
 //! - `deinit()` to release session resources
@@ -15,7 +15,7 @@ const Chunk = @import("Chunk.zig");
 
 pub const Config = struct {
     att_mtu: u16 = att.DEFAULT_MTU,
-    timeout_ms: u32 = 5_000,
+    timeout: glib.time.duration.Duration = 5 * glib.time.duration.Second,
     send_redundancy: u8 = 3,
     max_timeout_retries: u8 = 5,
 };
@@ -29,7 +29,7 @@ pub fn write(comptime grt: type, allocator: glib.std.mem.Allocator, transport: a
     };
 
     comptime {
-        _ = @as(*const fn (*Transport, u32, []u8) anyerror!usize, &Transport.read);
+        _ = @as(*const fn (*Transport, glib.time.duration.Duration, []u8) anyerror!usize, &Transport.read);
         _ = @as(*const fn (*Transport, []const u8) anyerror!usize, &Transport.write);
         _ = @as(*const fn (*Transport, []const u8) anyerror!usize, &Transport.writeNoResp);
         _ = @as(*const fn (*Transport) void, &Transport.deinit);
@@ -57,7 +57,7 @@ pub fn write(comptime grt: type, allocator: glib.std.mem.Allocator, transport: a
     while (true) {
         try sendMarkedChunks(transport, data, sndmask[0..mask_len], total, dcs, config.send_redundancy);
 
-        const resp_len = transport.read(config.timeout_ms, &resp_buf) catch |err| switch (err) {
+        const resp_len = transport.read(config.timeout, &resp_buf) catch |err| switch (err) {
             error.Timeout => {
                 timeout_count += 1;
                 if (timeout_count >= config.max_timeout_retries) return error.Timeout;
@@ -129,7 +129,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 deinited: bool = false,
                 ack_sent: bool = false,
 
-                pub fn read(self: *@This(), _: u32, out: []u8) anyerror!usize {
+                pub fn read(self: *@This(), _: glib.time.duration.Duration, out: []u8) anyerror!usize {
                     if (self.ack_sent) return error.Closed;
                     self.ack_sent = true;
                     @memcpy(out[0..Chunk.ack_signal.len], &Chunk.ack_signal);
@@ -166,7 +166,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 chunk_count: usize = 0,
                 deinited: bool = false,
 
-                pub fn read(self: *@This(), _: u32, out: []u8) anyerror!usize {
+                pub fn read(self: *@This(), _: glib.time.duration.Duration, out: []u8) anyerror!usize {
                     const step = self.step_index;
                     self.step_index += 1;
                     switch (step) {
@@ -208,7 +208,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 chunk_count: usize = 0,
                 deinited: bool = false,
 
-                pub fn read(self: *@This(), _: u32, out: []u8) anyerror!usize {
+                pub fn read(self: *@This(), _: glib.time.duration.Duration, out: []u8) anyerror!usize {
                     switch (self.read_count) {
                         0 => {
                             self.read_count += 1;
@@ -247,7 +247,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 read_count: usize = 0,
                 deinited: bool = false,
 
-                pub fn read(self: *@This(), _: u32, out: []u8) anyerror!usize {
+                pub fn read(self: *@This(), _: glib.time.duration.Duration, out: []u8) anyerror!usize {
                     if (self.read_count != 0) return error.Closed;
                     self.read_count += 1;
                     const encoded = Chunk.encodeLossList(&.{999}, out);

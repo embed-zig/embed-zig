@@ -2,8 +2,8 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Utils = test_utils.make2(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(std, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
@@ -13,37 +13,36 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: lib.mem.Allocator) bool {
+        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: std.mem.Allocator) bool {
             _ = runner;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Http = Utils.Http;
                     const testing = struct {
-                        pub var allocator: lib.mem.Allocator = undefined;
-                        pub const expect = lib.testing.expect;
-                        pub const expectEqual = lib.testing.expectEqual;
-                        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-                        pub const expectError = lib.testing.expectError;
+                        pub var allocator: std.mem.Allocator = undefined;
+                        pub const expect = std.testing.expect;
+                        pub const expectEqual = std.testing.expectEqual;
+                        pub const expectEqualStrings = std.testing.expectEqualStrings;
+                        pub const expectError = std.testing.expectError;
                     };
                     testing.allocator = a;
-
 
                     const accept_count = try Utils.withTwoRequestKeepAliveServer(testing.allocator, .{
                         .first_request_line = "GET /idle-timeout-1 HTTP/1.1",
                         .second_request_line = "GET /idle-timeout-2 HTTP/1.1",
                         .first_body = "one",
                         .second_body = "two",
-                        .reuse_wait_timeout_ms = 150,
+                        .reuse_wait_timeout = 150 * net.time.duration.MilliSecond,
                     }, struct {
-                        fn run(_: lib.mem.Allocator, port: u16) !void {
+                        fn run(_: std.mem.Allocator, port: u16) !void {
                             var transport = try Http.Transport.init(testing.allocator, .{
-                                .idle_conn_timeout_ms = 10,
+                                .idle_conn_timeout = 10 * net.time.duration.MilliSecond,
                             });
                             defer transport.deinit();
 
-                            const url1 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-timeout-1", .{port});
+                            const url1 = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-timeout-1", .{port});
                             defer testing.allocator.free(url1);
-                            const url2 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-timeout-2", .{port});
+                            const url2 = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-timeout-2", .{port});
                             defer testing.allocator.free(url2);
 
                             var req1 = try Http.Request.init(testing.allocator, "GET", url1);
@@ -53,7 +52,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             try testing.expectEqualStrings("one", body1);
                             resp1.deinit();
 
-                            lib.Thread.sleep(80 * lib.time.ns_per_ms);
+                            std.Thread.sleep(@intCast(80 * net.time.duration.MilliSecond));
 
                             var req2 = try Http.Request.init(testing.allocator, "GET", url2);
                             var resp2 = try transport.roundTrip(&req2);
@@ -65,7 +64,6 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     }.run);
 
                     try testing.expectEqual(@as(usize, 2), accept_count);
-                            
                 }
             };
             Body.call(run_allocator) catch |err| {

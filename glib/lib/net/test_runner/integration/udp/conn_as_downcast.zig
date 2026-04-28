@@ -2,7 +2,7 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("../tcp/test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -11,12 +11,12 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
-                    const TcpConnType = @import("../../../TcpConn.zig").TcpConn(lib, net);
+                    const TcpConnType = @import("../../../TcpConn.zig").TcpConn(std, net);
 
                     var pc = try Net.listenPacket(.{
                         .allocator = a,
@@ -29,9 +29,9 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     defer c.deinit();
 
                     const udp_impl = try c.as(Net.UdpConn);
-                    try lib.testing.expect((try udp_impl.localAddr()).isValid());
+                    try std.testing.expect((try udp_impl.localAddr()).isValid());
 
-                    try lib.testing.expectError(error.TypeMismatch, c.as(TcpConnType));
+                    try std.testing.expectError(error.TypeMismatch, c.as(TcpConnType));
                 }
             };
             Body.call(allocator) catch |err| {

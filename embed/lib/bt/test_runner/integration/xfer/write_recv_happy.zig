@@ -35,7 +35,7 @@ fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
         fn run(self: *@This()) void {
             write_mod.write(grt, self.allocator, &self.transport, self.expected, .{
                 .att_mtu = 23,
-                .timeout_ms = 20,
+                .timeout = 20 * glib.time.duration.MilliSecond,
                 .send_redundancy = 1,
                 .max_timeout_retries = 3,
             }) catch |err| {
@@ -54,7 +54,7 @@ fn runCase(comptime grt: type, allocator: glib.std.mem.Allocator) !void {
         fn run(self: *@This()) void {
             self.result = recv_mod.recv(grt, self.allocator, &self.transport, .{
                 .att_mtu = 23,
-                .timeout_ms = 20,
+                .timeout = 20 * glib.time.duration.MilliSecond,
                 .max_timeout_retries = 3,
             }) catch |err| {
                 self.err = err;

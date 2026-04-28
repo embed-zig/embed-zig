@@ -3,8 +3,8 @@ const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
-    const Utils = test_utils.make2(lib, net);
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
+    const Utils = test_utils.make2(std, net);
 
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 },
@@ -14,24 +14,24 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: lib.mem.Allocator) bool {
+        pub fn run(runner: *@This(), t: *testing_api.T, run_allocator: std.mem.Allocator) bool {
             _ = runner;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = Utils.Net;
                     const Http = Utils.Http;
                     const testing = struct {
-                        pub var allocator: lib.mem.Allocator = undefined;
-                        pub const expect = lib.testing.expect;
-                        pub const expectEqual = lib.testing.expectEqual;
-                        pub const expectEqualStrings = lib.testing.expectEqualStrings;
-                        pub const expectError = lib.testing.expectError;
+                        pub var allocator: std.mem.Allocator = undefined;
+                        pub const expect = std.testing.expect;
+                        pub const expectEqual = std.testing.expectEqual;
+                        pub const expectEqualStrings = std.testing.expectEqualStrings;
+                        pub const expectError = std.testing.expectError;
                     };
                     testing.allocator = a;
-                    const test_spawn_config: lib.Thread.SpawnConfig = .{};
+                    const test_spawn_config: std.Thread.SpawnConfig = .{};
 
-                    const Mutex = lib.Thread.Mutex;
-                    const Condition = lib.Thread.Condition;
+                    const Mutex = std.Thread.Mutex;
+                    const Condition = std.Thread.Condition;
 
                     const RoundTripTask = struct {
                         mutex: Mutex = .{},
@@ -55,11 +55,11 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             };
                         }
 
-                        fn waitTimeout(self: *@This(), timeout_ms: u32) bool {
+                        fn waitTimeout(self: *@This(), timeout: net.time.duration.Duration) bool {
                             self.mutex.lock();
                             defer self.mutex.unlock();
                             if (self.finished) return true;
-                            self.cond.timedWait(&self.mutex, @as(u64, timeout_ms) * lib.time.ns_per_ms) catch {};
+                            self.cond.timedWait(&self.mutex, @intCast(timeout)) catch {};
                             return self.finished;
                         }
                     };
@@ -73,7 +73,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var accept_count: usize = 0;
                     var server_result: ?anyerror = null;
 
-                    var server_thread = try lib.Thread.spawn(.{}, struct {
+                    var server_thread = try std.Thread.spawn(.{}, struct {
                         fn writePathResponse(conn: net.Conn, req_head: []const u8) !void {
                             var c = conn;
                             const body = if (Utils.hasRequestLine(req_head, "GET /idle-per-host-1 HTTP/1.1"))
@@ -88,7 +88,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                 return error.TestUnexpectedResult;
 
                             var head_buf: [256]u8 = undefined;
-                            const head = try lib.fmt.bufPrint(
+                            const head = try std.fmt.bufPrint(
                                 &head_buf,
                                 "HTTP/1.1 200 OK\r\nContent-Length: {d}\r\nConnection: keep-alive\r\n\r\n",
                                 .{body.len},
@@ -103,7 +103,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
 
                             var req_buf: [4096]u8 = undefined;
                             while (true) {
-                                owned.setReadTimeout(200);
+                                owned.setReadDeadline(net.time.instant.add(net.time.instant.now(), 200 * net.time.duration.MilliSecond));
                                 const req_head = Utils.readRequestHead(owned, &req_buf) catch |err| switch (err) {
                                     error.TimedOut,
                                     error.EndOfStream,
@@ -122,7 +122,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         }
 
                         fn run(tcp_listener: *Net.TcpListener, accepts: *usize, result: *?anyerror) void {
-                            var handler_threads: [3]?lib.Thread = .{ null, null, null };
+                            var handler_threads: [3]?std.Thread = .{ null, null, null };
                             var handler_count: usize = 0;
                             defer {
                                 var i: usize = 0;
@@ -158,7 +158,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                                     result.* = err;
                                     return;
                                 };
-                                handler_threads[handler_count] = lib.Thread.spawn(.{}, struct {
+                                handler_threads[handler_count] = std.Thread.spawn(.{}, struct {
                                     fn runConn(owned_conn: net.Conn, run_result: *?anyerror) void {
                                         serveConn(owned_conn, run_result);
                                     }
@@ -179,13 +179,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     });
                     defer transport.deinit();
 
-                    const url1 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-per-host-1", .{port});
+                    const url1 = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-per-host-1", .{port});
                     defer testing.allocator.free(url1);
-                    const url2 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-per-host-2", .{port});
+                    const url2 = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-per-host-2", .{port});
                     defer testing.allocator.free(url2);
-                    const url3 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-per-host-3", .{port});
+                    const url3 = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-per-host-3", .{port});
                     defer testing.allocator.free(url3);
-                    const url4 = try lib.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-per-host-4", .{port});
+                    const url4 = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}/idle-per-host-4", .{port});
                     defer testing.allocator.free(url4);
 
                     var req1 = try Http.Request.init(testing.allocator, "GET", url1);
@@ -196,7 +196,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         .transport = &transport,
                         .req = &req2,
                     };
-                    var thread2 = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task2});
+                    var thread2 = try std.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task2});
                     thread2.join();
 
                     if (task2.err) |err| return err;
@@ -220,7 +220,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         .transport = &transport,
                         .req = &req4,
                     };
-                    var thread4 = try lib.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task4});
+                    var thread4 = try std.Thread.spawn(test_spawn_config, RoundTripTask.run, .{&task4});
                     thread4.join();
 
                     if (task4.err) |err| return err;
@@ -244,7 +244,6 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     server_joined = true;
                     if (server_result) |err| return err;
                     try testing.expectEqual(@as(usize, 3), accept_count);
-                            
                 }
             };
             Body.call(run_allocator) catch |err| {

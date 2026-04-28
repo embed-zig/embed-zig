@@ -1,15 +1,16 @@
-const std = @import("std");
+const time_mod = @import("time");
+const host_std = @import("std");
 const context_mod = @import("context");
 const sync = @import("sync");
 
-pub fn Client(comptime lib: type, comptime net: type, comptime ntp: type) type {
+pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
     const Net = net;
     const Addr = net.netip.AddrPort;
     const IpAddr = net.netip.Addr;
-    const Allocator = lib.mem.Allocator;
-    const Thread = lib.Thread;
+    const Allocator = std.mem.Allocator;
+    const Thread = std.Thread;
     const PacketConn = net.PacketConn;
-    const WorkerRacer = sync.Racer(lib, ntp.Response);
+    const WorkerRacer = sync.Racer(std, net.time, ntp.Response);
 
     return struct {
         allocator: Allocator,
@@ -41,14 +42,14 @@ pub fn Client(comptime lib: type, comptime net: type, comptime ntp: type) type {
 
         pub const Options = struct {
             servers: []const Server = &.{ Servers.aliyun, Servers.cloudflare, Servers.google },
-            timeout_ms: u32 = 5000,
+            timeout: time_mod.duration.Duration = 5 * time_mod.duration.Second,
             spawn_config: Thread.SpawnConfig = .{},
         };
 
         const RaceJob = struct {
             client: *Self,
             racer: WorkerRacer,
-            origin_time_ms: i64,
+            origin_time: time_mod.Time,
             failure_mutex: Thread.Mutex = .{},
             saw_kiss_of_death: bool = false,
             saw_origin_mismatch: bool = false,
@@ -86,6 +87,8 @@ pub fn Client(comptime lib: type, comptime net: type, comptime ntp: type) type {
             }
         };
 
+        const read_quantum: time_mod.duration.Duration = 50 * time_mod.duration.MilliSecond;
+
         pub fn init(allocator: Allocator, options: Options) Allocator.Error!Self {
             const servers = try allocator.dupe(Server, options.servers);
             var owned = options;
@@ -112,51 +115,51 @@ pub fn Client(comptime lib: type, comptime net: type, comptime ntp: type) type {
             while (self.active_races != 0) self.cond.wait(&self.mutex);
         }
 
-        pub fn query(self: *Self, origin_time_ms: i64) anyerror!ntp.Response {
-            const Context = context_mod.make(lib);
+        pub fn query(self: *Self, origin_time: time_mod.Time) anyerror!ntp.Response {
+            const Context = context_mod.make(std, net.time);
             var context_api = try Context.init(self.allocator);
             defer context_api.deinit();
-            return self.queryContext(context_api.background(), origin_time_ms);
+            return self.queryContext(context_api.background(), origin_time);
         }
 
-        pub fn queryContext(self: *Self, ctx: context_mod.Context, origin_time_ms: i64) anyerror!ntp.Response {
+        pub fn queryContext(self: *Self, ctx: context_mod.Context, origin_time: time_mod.Time) anyerror!ntp.Response {
             if (self.options.servers.len == 0) return error.NoServerConfigured;
-            if (self.options.servers.len > 1) return self.queryRaceContext(ctx, origin_time_ms);
-            return self.queryServerContext(ctx, self.options.servers[0], origin_time_ms);
+            if (self.options.servers.len > 1) return self.queryRaceContext(ctx, origin_time);
+            return self.queryServerContext(ctx, self.options.servers[0], origin_time);
         }
 
-        pub fn queryServer(self: *Self, server: Server, origin_time_ms: i64) anyerror!ntp.Response {
-            const Context = context_mod.make(lib);
+        pub fn queryServer(self: *Self, server: Server, origin_time: time_mod.Time) anyerror!ntp.Response {
+            const Context = context_mod.make(std, net.time);
             var context_api = try Context.init(self.allocator);
             defer context_api.deinit();
-            return self.queryServerContext(context_api.background(), server, origin_time_ms);
+            return self.queryServerContext(context_api.background(), server, origin_time);
         }
 
-        pub fn queryServerContext(self: *Self, ctx: context_mod.Context, server: Server, origin_time_ms: i64) anyerror!ntp.Response {
+        pub fn queryServerContext(self: *Self, ctx: context_mod.Context, server: Server, origin_time: time_mod.Time) anyerror!ntp.Response {
             try ensureContextActive(ctx);
             try self.beginRace();
             defer self.finishRace();
-            return self.queryWithContext(ctx, server, normalizedOriginTimeMs(origin_time_ms));
+            return self.queryWithContext(ctx, server, normalizedOriginTime(origin_time));
         }
 
-        pub fn getTime(self: *Self, origin_time_ms: i64) anyerror!i64 {
-            const resp = try self.query(origin_time_ms);
-            return resp.transmit_time_ms;
+        pub fn getTime(self: *Self, origin_time: time_mod.Time) anyerror!time_mod.Time {
+            const resp = try self.query(origin_time);
+            return resp.transmit_time;
         }
 
-        pub fn getTimeContext(self: *Self, ctx: context_mod.Context, origin_time_ms: i64) anyerror!i64 {
-            const resp = try self.queryContext(ctx, origin_time_ms);
-            return resp.transmit_time_ms;
+        pub fn getTimeContext(self: *Self, ctx: context_mod.Context, origin_time: time_mod.Time) anyerror!time_mod.Time {
+            const resp = try self.queryContext(ctx, origin_time);
+            return resp.transmit_time;
         }
 
-        pub fn queryRace(self: *Self, origin_time_ms: i64) anyerror!ntp.Response {
-            const Context = context_mod.make(lib);
+        pub fn queryRace(self: *Self, origin_time: time_mod.Time) anyerror!ntp.Response {
+            const Context = context_mod.make(std, net.time);
             var context_api = try Context.init(self.allocator);
             defer context_api.deinit();
-            return self.queryRaceContext(context_api.background(), origin_time_ms);
+            return self.queryRaceContext(context_api.background(), origin_time);
         }
 
-        pub fn queryRaceContext(self: *Self, ctx: context_mod.Context, origin_time_ms: i64) anyerror!ntp.Response {
+        pub fn queryRaceContext(self: *Self, ctx: context_mod.Context, origin_time: time_mod.Time) anyerror!ntp.Response {
             if (self.options.servers.len == 0) return error.NoServerConfigured;
             try ensureContextActive(ctx);
 
@@ -172,7 +175,7 @@ pub fn Client(comptime lib: type, comptime net: type, comptime ntp: type) type {
             job.* = .{
                 .client = self,
                 .racer = undefined,
-                .origin_time_ms = normalizedOriginTimeMs(origin_time_ms),
+                .origin_time = normalizedOriginTime(origin_time),
             };
             job.racer = WorkerRacer.init(self.allocator) catch return error.OutOfMemory;
             destroy_raw_job_on_error = false;
@@ -216,18 +219,18 @@ pub fn Client(comptime lib: type, comptime net: type, comptime ntp: type) type {
             return winner;
         }
 
-        pub fn getTimeRace(self: *Self, origin_time_ms: i64) anyerror!i64 {
-            const resp = try self.queryRace(origin_time_ms);
-            return resp.transmit_time_ms;
+        pub fn getTimeRace(self: *Self, origin_time: time_mod.Time) anyerror!time_mod.Time {
+            const resp = try self.queryRace(origin_time);
+            return resp.transmit_time;
         }
 
-        pub fn getTimeRaceContext(self: *Self, ctx: context_mod.Context, origin_time_ms: i64) anyerror!i64 {
-            const resp = try self.queryRaceContext(ctx, origin_time_ms);
-            return resp.transmit_time_ms;
+        pub fn getTimeRaceContext(self: *Self, ctx: context_mod.Context, origin_time: time_mod.Time) anyerror!time_mod.Time {
+            const resp = try self.queryRaceContext(ctx, origin_time);
+            return resp.transmit_time;
         }
 
         fn raceWorker(state: WorkerRacer.State, job: *RaceJob, server: Server) void {
-            const resp = job.client.queryWithWorker(state, server, job.origin_time_ms) catch |err| {
+            const resp = job.client.queryWithWorker(state, server, job.origin_time) catch |err| {
                 if (!state.done()) job.recordFailure(err);
                 return;
             };
@@ -236,34 +239,34 @@ pub fn Client(comptime lib: type, comptime net: type, comptime ntp: type) type {
             }
         }
 
-        fn queryWithContext(self: *Self, ctx: context_mod.Context, server: Server, origin_time_ms: i64) anyerror!ntp.Response {
+        fn queryWithContext(self: *Self, ctx: context_mod.Context, server: Server, origin_time: time_mod.Time) anyerror!ntp.Response {
             var pc = try self.openPacketConn(server.addr);
             defer pc.deinit();
 
             var request: [48]u8 = undefined;
-            ntp.buildRequest(&request, origin_time_ms);
-            const expected_origin = ntp.unixMsToNtp(origin_time_ms);
+            ntp.buildRequest(&request, origin_time);
+            const expected_origin = ntp.timeToNtp(origin_time);
 
-            const write_timeout_ms = initialWriteTimeoutMs(ctx, self.options.timeout_ms);
-            pc.setWriteTimeout(write_timeout_ms);
+            const write_timeout = initialWriteTimeout(ctx, self.options.timeout);
+            pc.setWriteDeadline(if (write_timeout) |timeout| time_mod.instant.add(net.time.instant.now(), timeout) else null);
             const sent = pc.writeTo(request[0..], server.addr) catch return error.SendFailed;
             if (sent != request.len) return error.SendFailed;
 
-            const started_ms = lib.time.milliTimestamp();
+            const started = net.time.instant.now();
             while (true) {
                 if (ctx.err()) |err| return err;
 
-                const read_timeout_ms = nextReadTimeoutContext(ctx, started_ms, self.options.timeout_ms) orelse return timeoutForContext(ctx);
-                pc.setReadTimeout(read_timeout_ms);
+                const read_timeout = nextReadTimeoutContext(ctx, started, self.options.timeout) orelse return timeoutForContext(ctx);
+                pc.setReadDeadline(time_mod.instant.add(net.time.instant.now(), read_timeout));
 
                 var recv_buf: [128]u8 = undefined;
                 const result = pc.readFrom(&recv_buf) catch |err| switch (err) {
                     error.TimedOut => {
                         if (ctx.err()) |cause| return cause;
-                        if (ctx.deadline()) |deadline_ns| {
-                            if (deadline_ns <= lib.time.nanoTimestamp()) return error.DeadlineExceeded;
+                        if (ctx.deadline()) |deadline| {
+                            if (time_mod.instant.sub(deadline, net.time.instant.now()) <= 0) return error.DeadlineExceeded;
                         }
-                        if (queryTimedOut(started_ms, self.options.timeout_ms)) return error.Timeout;
+                        if (queryTimedOut(started, self.options.timeout)) return error.Timeout;
                         continue;
                     },
                     else => return error.RecvFailed,
@@ -278,32 +281,32 @@ pub fn Client(comptime lib: type, comptime net: type, comptime ntp: type) type {
             }
         }
 
-        fn queryWithWorker(self: *Self, state: WorkerRacer.State, server: Server, origin_time_ms: i64) anyerror!?ntp.Response {
+        fn queryWithWorker(self: *Self, state: WorkerRacer.State, server: Server, origin_time: time_mod.Time) anyerror!?ntp.Response {
             if (state.done()) return null;
 
             var pc = try self.openPacketConn(server.addr);
             defer pc.deinit();
 
             var request: [48]u8 = undefined;
-            ntp.buildRequest(&request, origin_time_ms);
-            const expected_origin = ntp.unixMsToNtp(origin_time_ms);
+            ntp.buildRequest(&request, origin_time);
+            const expected_origin = ntp.timeToNtp(origin_time);
 
-            pc.setWriteTimeout(if (self.options.timeout_ms == 0) 1 else self.options.timeout_ms);
+            pc.setWriteDeadline(time_mod.instant.add(net.time.instant.now(), if (self.options.timeout <= 0) 1 else self.options.timeout));
             const sent = pc.writeTo(request[0..], server.addr) catch return error.SendFailed;
             if (sent != request.len) return error.SendFailed;
 
-            const started_ms = lib.time.milliTimestamp();
+            const started = net.time.instant.now();
             while (true) {
                 if (state.done()) return null;
 
-                const read_timeout_ms = nextReadTimeoutWorker(state, started_ms, self.options.timeout_ms) orelse return if (state.done()) null else error.Timeout;
-                pc.setReadTimeout(read_timeout_ms);
+                const read_timeout = nextReadTimeoutWorker(state, started, self.options.timeout) orelse return if (state.done()) null else error.Timeout;
+                pc.setReadDeadline(time_mod.instant.add(net.time.instant.now(), read_timeout));
 
                 var recv_buf: [128]u8 = undefined;
                 const result = pc.readFrom(&recv_buf) catch |err| switch (err) {
                     error.TimedOut => {
                         if (state.done()) return null;
-                        if (queryTimedOut(started_ms, self.options.timeout_ms)) return error.Timeout;
+                        if (queryTimedOut(started, self.options.timeout)) return error.Timeout;
                         continue;
                     },
                     else => return error.RecvFailed,
@@ -336,62 +339,60 @@ pub fn Client(comptime lib: type, comptime net: type, comptime ntp: type) type {
                 net.netip.Addr.compare(result.addr.addr(), expected.addr()) == .eq;
         }
 
-        fn initialWriteTimeoutMs(ctx: context_mod.Context, timeout_ms: u32) ?u32 {
-            if (timeout_ms == 0) return 1;
-            if (ctx.deadline()) |deadline_ns| {
-                const remaining = @divFloor(deadline_ns - lib.time.nanoTimestamp(), lib.time.ns_per_ms);
+        fn initialWriteTimeout(ctx: context_mod.Context, timeout: time_mod.duration.Duration) ?time_mod.duration.Duration {
+            if (timeout <= 0) return 1;
+            if (ctx.deadline()) |deadline| {
+                const remaining = @max(time_mod.instant.sub(deadline, net.time.instant.now()), 0);
                 if (remaining <= 0) return 1;
-                return @intCast(@max(@as(i64, 1), @min(@as(i64, timeout_ms), remaining)));
+                return @max(@as(time_mod.duration.Duration, 1), @min(timeout, remaining));
             }
-            return timeout_ms;
+            return timeout;
         }
 
-        fn nextReadTimeoutContext(ctx: context_mod.Context, started_ms: i64, timeout_ms: u32) ?u32 {
-            const now_ms = lib.time.milliTimestamp();
-            const elapsed_ms = now_ms - started_ms;
-            const remaining_query = @as(i64, timeout_ms) - elapsed_ms;
+        fn nextReadTimeoutContext(ctx: context_mod.Context, started: time_mod.instant.Time, timeout: time_mod.duration.Duration) ?time_mod.duration.Duration {
+            const elapsed = time_mod.instant.sub(net.time.instant.now(), started);
+            const remaining_query = timeout - elapsed;
             if (remaining_query <= 0) return null;
 
-            var remaining_ms = remaining_query;
-            if (ctx.deadline()) |deadline_ns| {
-                const remaining_ctx: i64 = @intCast(@divFloor(deadline_ns - lib.time.nanoTimestamp(), lib.time.ns_per_ms));
+            var remaining = remaining_query;
+            if (ctx.deadline()) |deadline| {
+                const remaining_ctx = @max(time_mod.instant.sub(deadline, net.time.instant.now()), 0);
                 if (remaining_ctx <= 0) return null;
-                remaining_ms = @min(remaining_ms, remaining_ctx);
+                remaining = @min(remaining, remaining_ctx);
             }
 
-            return @intCast(@max(@as(i64, 1), @min(remaining_ms, 50)));
+            return @max(@as(time_mod.duration.Duration, 1), @min(remaining, read_quantum));
         }
 
-        fn nextReadTimeoutWorker(state: WorkerRacer.State, started_ms: i64, timeout_ms: u32) ?u32 {
+        fn nextReadTimeoutWorker(state: WorkerRacer.State, started: time_mod.instant.Time, timeout: time_mod.duration.Duration) ?time_mod.duration.Duration {
             if (state.done()) return null;
-            const now_ms = lib.time.milliTimestamp();
-            const elapsed_ms = now_ms - started_ms;
-            const remaining_query = @as(i64, timeout_ms) - elapsed_ms;
+            const elapsed = time_mod.instant.sub(net.time.instant.now(), started);
+            const remaining_query = timeout - elapsed;
             if (remaining_query <= 0) return null;
-            return @intCast(@max(@as(i64, 1), @min(remaining_query, 50)));
+            return @max(@as(time_mod.duration.Duration, 1), @min(remaining_query, read_quantum));
         }
 
-        fn queryTimedOut(started_ms: i64, timeout_ms: u32) bool {
-            return lib.time.milliTimestamp() - started_ms >= timeout_ms;
+        fn queryTimedOut(started: time_mod.instant.Time, timeout: time_mod.duration.Duration) bool {
+            return time_mod.instant.sub(net.time.instant.now(), started) >= timeout;
         }
 
         fn timeoutForContext(ctx: context_mod.Context) anyerror {
             if (ctx.err()) |err| return err;
-            if (ctx.deadline()) |deadline_ns| {
-                if (deadline_ns <= lib.time.nanoTimestamp()) return error.DeadlineExceeded;
+            if (ctx.deadline()) |deadline| {
+                if (time_mod.instant.sub(deadline, net.time.instant.now()) <= 0) return error.DeadlineExceeded;
             }
             return error.Timeout;
         }
 
         fn ensureContextActive(ctx: context_mod.Context) anyerror!void {
             if (ctx.err()) |err| return err;
-            if (ctx.deadline()) |deadline_ns| {
-                if (deadline_ns <= lib.time.nanoTimestamp()) return error.DeadlineExceeded;
+            if (ctx.deadline()) |deadline| {
+                if (time_mod.instant.sub(deadline, net.time.instant.now()) <= 0) return error.DeadlineExceeded;
             }
         }
 
-        fn normalizedOriginTimeMs(origin_time_ms: i64) i64 {
-            return if (origin_time_ms != 0) origin_time_ms else 1;
+        fn normalizedOriginTime(origin_time: time_mod.Time) time_mod.Time {
+            return if (!origin_time.isZero()) origin_time else net.time.now();
         }
 
         fn beginRace(self: *Self) error{Closed}!void {
@@ -406,7 +407,7 @@ pub fn Client(comptime lib: type, comptime net: type, comptime ntp: type) type {
             self.mutex.lock();
             defer self.mutex.unlock();
 
-            std.debug.assert(self.active_races > 0);
+            host_std.debug.assert(self.active_races > 0);
             self.active_races -= 1;
             if (self.active_races == 0) self.cond.broadcast();
         }
@@ -437,23 +438,21 @@ pub fn Client(comptime lib: type, comptime net: type, comptime ntp: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type, comptime net: type, comptime ntp: type) @import("testing").TestRunner {
-    _ = net;
-
+pub fn TestRunner(comptime std: type, comptime net: type, comptime ntp: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
     const PacketConnApi = @import("../PacketConn.zig");
     const netip_mod = @import("../netip.zig");
     const wire_mod = @import("wire.zig");
     const AddrPort = netip_mod.AddrPort;
 
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
         const FakePacketConn = struct {
             response_addr: AddrPort = AddrPort.from4(.{ 127, 0, 0, 1 }, ntp.NTP_PORT),
             response_len: usize = 0,
             response_buf: [48]u8 = [_]u8{0} ** 48,
             write_to_addr: ?AddrPort = null,
-            write_timeout_ms: ?u32 = null,
-            read_timeout_ms: ?u32 = null,
+            write_deadline: ?time_mod.instant.Time = null,
+            read_deadline: ?time_mod.instant.Time = null,
             close_calls: usize = 0,
             deinit_calls: usize = 0,
 
@@ -479,12 +478,12 @@ pub fn TestRunner(comptime lib: type, comptime net: type, comptime ntp: type) @i
                 conn.deinit_calls += 1;
             }
 
-            pub fn setReadTimeout(conn: *FakePacketConn, ms: ?u32) void {
-                conn.read_timeout_ms = ms;
+            pub fn setReadDeadline(conn: *FakePacketConn, deadline: ?time_mod.instant.Time) void {
+                conn.read_deadline = deadline;
             }
 
-            pub fn setWriteTimeout(conn: *FakePacketConn, ms: ?u32) void {
-                conn.write_timeout_ms = ms;
+            pub fn setWriteDeadline(conn: *FakePacketConn, deadline: ?time_mod.instant.Time) void {
+                conn.write_deadline = deadline;
             }
         };
 
@@ -494,6 +493,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type, comptime ntp: type) @i
         };
 
         const FakeNet = struct {
+            pub const time = net.time;
             pub const PacketConn = PacketConnApi;
             pub const netip = netip_mod;
 
@@ -504,15 +504,15 @@ pub fn TestRunner(comptime lib: type, comptime net: type, comptime ntp: type) @i
             }
         };
 
-        const ClientApi = Client(lib, FakeNet, ntp);
+        const ClientApi = Client(std, FakeNet, ntp);
 
-        fn buildResponse(origin_ms: i64, receive_ms: i64, transmit_ms: i64, stratum: u8) [48]u8 {
+        fn buildResponse(origin_time: time_mod.Time, receive_time: time_mod.Time, transmit_time: time_mod.Time, stratum: u8) [48]u8 {
             var buf: [48]u8 = [_]u8{0} ** 48;
             buf[0] = 0b00_100_100;
             buf[1] = stratum;
-            wire_mod.writeTimestamp(buf[24..32], wire_mod.unixMsToNtp(origin_ms));
-            wire_mod.writeTimestamp(buf[32..40], wire_mod.unixMsToNtp(receive_ms));
-            wire_mod.writeTimestamp(buf[40..48], wire_mod.unixMsToNtp(transmit_ms));
+            wire_mod.writeTimestamp(buf[24..32], wire_mod.timeToNtp(origin_time));
+            wire_mod.writeTimestamp(buf[32..40], wire_mod.timeToNtp(receive_time));
+            wire_mod.writeTimestamp(buf[40..48], wire_mod.timeToNtp(transmit_time));
             return buf;
         }
 
@@ -521,45 +521,47 @@ pub fn TestRunner(comptime lib: type, comptime net: type, comptime ntp: type) @i
             try testing.expect(netip_mod.Addr.compare(actual.addr(), expected.addr()) == .eq);
         }
 
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const origin_ms: i64 = 1_706_012_096_000;
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const origin_time = time_mod.fromUnixMilli(1_706_012_096_000);
+            const receive_time = origin_time.add(12 * time_mod.duration.MilliSecond);
+            const transmit_time = origin_time.add(20 * time_mod.duration.MilliSecond);
             const server = ClientApi.Server.init(AddrPort.from4(.{ 203, 107, 6, 88 }, ntp.NTP_PORT));
 
             var client = try ClientApi.init(allocator, .{
                 .servers = &.{server},
-                .timeout_ms = 250,
+                .timeout = 250 * net.time.duration.MilliSecond,
             });
             defer client.deinit();
 
             var good_conn = FakePacketConn{
                 .response_addr = server.addr,
                 .response_len = 48,
-                .response_buf = buildResponse(origin_ms, origin_ms + 12, origin_ms + 20, 2),
+                .response_buf = buildResponse(origin_time, receive_time, transmit_time, 2),
             };
             FakeState.active_conn = &good_conn;
             FakeState.opened_addr = null;
 
-            const resp = try client.queryServer(server, origin_ms);
+            const resp = try client.queryServer(server, origin_time);
             try testing.expectEqual(@as(u8, 2), resp.stratum);
-            try testing.expect(@abs(resp.receive_time_ms - (origin_ms + 12)) <= 1);
-            try testing.expect(@abs(resp.transmit_time_ms - (origin_ms + 20)) <= 1);
+            try testing.expect(@abs(resp.receive_time.sub(receive_time)) <= time_mod.duration.MicroSecond);
+            try testing.expect(@abs(resp.transmit_time.sub(transmit_time)) <= time_mod.duration.MicroSecond);
             try expectAddrPortEqual(testing, good_conn.write_to_addr.?, server.addr);
             try expectAddrPortEqual(testing, FakeState.opened_addr.?, AddrPort.from4(.{ 0, 0, 0, 0 }, 0));
-            try testing.expect(good_conn.write_timeout_ms != null);
-            try testing.expect(good_conn.read_timeout_ms != null);
+            try testing.expect(good_conn.write_deadline != null);
+            try testing.expect(good_conn.read_deadline != null);
             try testing.expectEqual(@as(usize, 1), good_conn.close_calls);
             try testing.expectEqual(@as(usize, 1), good_conn.deinit_calls);
 
             var bad_conn = FakePacketConn{
                 .response_addr = AddrPort.from4(.{ 1, 1, 1, 1 }, ntp.NTP_PORT),
                 .response_len = 48,
-                .response_buf = buildResponse(origin_ms, origin_ms + 12, origin_ms + 20, 2),
+                .response_buf = buildResponse(origin_time, receive_time, transmit_time, 2),
             };
             FakeState.active_conn = &bad_conn;
             FakeState.opened_addr = null;
 
-            try testing.expectError(error.SourceMismatch, client.queryServer(server, origin_ms));
+            try testing.expectError(error.SourceMismatch, client.queryServer(server, origin_time));
             try expectAddrPortEqual(testing, bad_conn.write_to_addr.?, server.addr);
             try testing.expectEqual(@as(usize, 1), bad_conn.close_calls);
             try testing.expectEqual(@as(usize, 1), bad_conn.deinit_calls);

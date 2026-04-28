@@ -233,22 +233,22 @@ embed-zig-example/
 #### 4.5.2 file_test_runner.zig
 
 - 文件级别的测试可以直接写在对应的 zig 文件里
-- `Pet.zig` 和 `PetStore.zig` 都可以提供 `pub fn TestRunner(comptime lib: type) dep.testing.TestRunner`
+- `Pet.zig` 和 `PetStore.zig` 都可以提供 `pub fn TestRunner(comptime std: type) dep.testing.TestRunner`
 - 文件内的单元测试代码仍然放在文件底部
 - `TestRunner` 负责把这个文件里的测试统一导出为一个文件级 test runner
 - 对应 example：`embed-zig-example/lib/petstore/Pet.zig`、`embed-zig-example/lib/petstore/PetStore.zig`
 
 ```zig
-pub fn TestRunner(comptime lib: type) @import("dep").testing.TestRunner {
+pub fn TestRunner(comptime std: type) @import("dep").testing.TestRunner {
     const testing_api = @import("dep").testing;
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -256,7 +256,7 @@ pub fn TestRunner(comptime lib: type) @import("dep").testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }
@@ -292,7 +292,7 @@ pub const test_runner = struct {
 - `make` 中建议直接给一个 `comptime` block
 - 在这个 `comptime` block 中检查传入的 `Impl` 是否符合要求
 - 可以使用 `@as(...)` 的方式检查函数签名
-- 如果第一个参数是 `std` namespace，那么这个参数应该写成 `comptime lib: type`
+- 如果第一个参数是 `std` namespace，那么这个参数应该写成 `comptime std: type`
 - 对于这个 `std` namespace 参数，不需要使用 `comptime` block 去检查函数签名
 - 参考 example：`embed-zig-example/lib/petstore/Pet.zig`
 

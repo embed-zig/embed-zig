@@ -1,5 +1,6 @@
 //! ResponseWriter — server-side HTTP response construction surface.
 
+const time_mod = @import("time");
 const io = @import("io");
 const Conn = @import("../Conn.zig");
 const Header = @import("Header.zig");
@@ -8,8 +9,8 @@ const status = @import("status.zig");
 const textproto_writer_mod = @import("../textproto/Writer.zig");
 const testing_api = @import("testing");
 
-pub fn ResponseWriter(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
+pub fn ResponseWriter(comptime std: type) type {
+    const Allocator = std.mem.Allocator;
     const BufferedConnWriter = io.BufferedWriter(Conn);
     const TextprotoWriter = textproto_writer_mod.Writer(BufferedConnWriter);
     const write_buf_len = 1024;
@@ -21,7 +22,7 @@ pub fn ResponseWriter(comptime lib: type) type {
         buffered_initialized: bool = false,
         write_buf: [write_buf_len]u8 = undefined,
         request_method: []const u8 = "GET",
-        header: lib.ArrayList(Header) = .{},
+        header: std.ArrayList(Header) = .{},
         status_code: u16 = status.ok,
         committed_flag: bool = false,
         finished_flag: bool = false,
@@ -79,7 +80,7 @@ pub fn ResponseWriter(comptime lib: type) type {
             const buffered = self.bufferedWriter();
             if (self.use_chunked) {
                 var prefix_buf: [32]u8 = undefined;
-                const prefix = try lib.fmt.bufPrint(&prefix_buf, "{x}\r\n", .{buf.len});
+                const prefix = try std.fmt.bufPrint(&prefix_buf, "{x}\r\n", .{buf.len});
                 try self.writeAllBuffered(buffered, prefix);
                 try self.writeAllBuffered(buffered, buf);
                 try self.writeAllBuffered(buffered, "\r\n");
@@ -115,9 +116,9 @@ pub fn ResponseWriter(comptime lib: type) type {
             self.body_allowed = bodyAllowed(self.request_method, self.status_code);
             const explicit_connection = self.headerValue(Header.connection);
             if (explicit_connection) |value| {
-                if (lib.ascii.eqlIgnoreCase(value, "close")) {
+                if (std.ascii.eqlIgnoreCase(value, "close")) {
                     self.keep_alive = false;
-                } else if (lib.ascii.eqlIgnoreCase(value, "keep-alive")) {
+                } else if (std.ascii.eqlIgnoreCase(value, "keep-alive")) {
                     self.keep_alive = true;
                 }
             } else {
@@ -142,7 +143,7 @@ pub fn ResponseWriter(comptime lib: type) type {
 
             const reason = status.text(self.status_code) orelse "Unknown";
             var code_buf: [32]u8 = undefined;
-            const code = try lib.fmt.bufPrint(&code_buf, "{d}", .{self.status_code});
+            const code = try std.fmt.bufPrint(&code_buf, "{d}", .{self.status_code});
             var writer = TextprotoWriter.fromBuffered(self.bufferedWriter());
 
             try writer.writeLineParts(&.{ "HTTP/1.1 ", code, " ", reason });
@@ -199,11 +200,11 @@ fn bodyAllowed(method: []const u8, status_code: u16) bool {
     return true;
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const Writer = ResponseWriter(lib);
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const Writer = ResponseWriter(std);
 
             var writer = Writer.init(allocator, undefined, null, false);
             defer writer.deinit();
@@ -236,8 +237,8 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 pub fn close(_: *@This()) void {}
                 pub fn deinit(_: *@This()) void {}
-                pub fn setReadTimeout(_: *@This(), _: ?u32) void {}
-                pub fn setWriteTimeout(_: *@This(), _: ?u32) void {}
+                pub fn setReadDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
+                pub fn setWriteDeadline(_: *@This(), _: ?time_mod.instant.Time) void {}
             };
 
             var mock_conn = MockConn{};

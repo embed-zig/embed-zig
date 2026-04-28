@@ -8,7 +8,7 @@ pub fn makeBuiltApp(comptime grt: type) type {
 
     const AssemblerType = Assembler.make(grt, .{
         .pipeline = .{
-            .tick_interval_ns = grt.std.time.ns_per_ms,
+            .tick_interval = grt.time.duration.MilliSecond,
         },
     });
     var assembler = AssemblerType.init();

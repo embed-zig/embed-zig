@@ -20,7 +20,6 @@ pub const mem = @import("stdz/mem.zig");
 pub const posix = @import("stdz/posix.zig");
 pub const Random = @import("stdz/Random.zig");
 pub const Thread = @import("stdz/Thread.zig");
-pub const time = @import("stdz/time.zig");
 pub const math = @import("stdz/math.zig");
 pub const debug = @import("stdz/debug.zig");
 pub const meta = @import("stdz/meta.zig");
@@ -93,7 +92,6 @@ pub fn make(comptime Impl: type) type {
         pub const Thread = root.Thread.make(Impl.Thread, Self.heap);
         pub const log = root.log.make(Impl.log);
         pub const posix = root.posix.make(Impl.posix);
-        pub const time = root.time.make(Impl.time);
         pub const ascii = root.ascii;
         pub const mem = root.mem;
         pub const fmt = root.fmt;

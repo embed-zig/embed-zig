@@ -54,7 +54,7 @@ pub const ConnConfig = struct {
     interval_min: u16 = 0x0018,
     interval_max: u16 = 0x0028,
     latency: u16 = 0,
-    timeout: u16 = 0x00C8,
+    supervision_timeout: glib.time.duration.Duration = 2 * glib.time.duration.Second,
 };
 
 pub const Link = struct {
@@ -64,7 +64,7 @@ pub const Link = struct {
     peer_addr_type: AddrType,
     interval: u16,
     latency: u16,
-    timeout: u16,
+    supervision_timeout: glib.time.duration.Duration,
 };
 
 pub const Error = error{
@@ -389,7 +389,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .peer_addr_type = addr_type,
                         .interval = config.interval_min,
                         .latency = config.latency,
-                        .timeout = config.timeout,
+                        .supervision_timeout = config.supervision_timeout,
                     };
                 }
                 pub fn cancelConnect(self: *@This()) void {

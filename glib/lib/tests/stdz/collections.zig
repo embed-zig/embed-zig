@@ -1,7 +1,7 @@
 const stdz = @import("stdz");
 const testing_mod = @import("testing");
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -12,55 +12,55 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("array_list", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("array_list", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
-                    try collectionsArrayListCase(lib, sub_allocator);
+                    try collectionsArrayListCase(std, sub_allocator);
                 }
             }.run));
-            t.run("hash_maps", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("hash_maps", testing_mod.TestRunner.fromFn(std, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
-                    try collectionsHashMapsCase(lib, sub_allocator);
+                    try collectionsHashMapsCase(std, sub_allocator);
                 }
             }.run));
-            t.run("buf_map_set", testing_mod.TestRunner.fromFn(lib, 40 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("buf_map_set", testing_mod.TestRunner.fromFn(std, 40 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
-                    try collectionsBufMapSetCase(lib, sub_allocator);
+                    try collectionsBufMapSetCase(std, sub_allocator);
                 }
             }.run));
-            t.run("priority_dynamic_bitset", testing_mod.TestRunner.fromFn(lib, 36 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("priority_dynamic_bitset", testing_mod.TestRunner.fromFn(std, 36 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
-                    try collectionsPriorityDynamicBitsetCase(lib, sub_allocator);
+                    try collectionsPriorityDynamicBitsetCase(std, sub_allocator);
                 }
             }.run));
-            t.run("static_bitset_lists", testing_mod.TestRunner.fromFn(lib, 32 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("static_bitset_lists", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try collectionsStaticBitsetListsCase(lib);
+                    try collectionsStaticBitsetListsCase(std);
                 }
             }.run));
-            t.run("enum_array_set", testing_mod.TestRunner.fromFn(lib, 16 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("enum_array_set", testing_mod.TestRunner.fromFn(std, 16 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try collectionsEnumArraySetCase(lib);
+                    try collectionsEnumArraySetCase(std);
                 }
             }.run));
-            t.run("static_string_map", testing_mod.TestRunner.fromFn(lib, 16 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("static_string_map", testing_mod.TestRunner.fromFn(std, 16 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
                     _ = sub_allocator;
-                    try collectionsStaticStringMapCase(lib);
+                    try collectionsStaticStringMapCase(std);
                 }
             }.run));
-            t.run("multiarray_bitstack", testing_mod.TestRunner.fromFn(lib, 36 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: lib.mem.Allocator) !void {
+            t.run("multiarray_bitstack", testing_mod.TestRunner.fromFn(std, 36 * 1024, struct {
+                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
-                    try collectionsMultiarrayBitstackCase(lib, sub_allocator);
+                    try collectionsMultiarrayBitstackCase(std, sub_allocator);
                 }
             }.run));
             return t.wait();
@@ -68,17 +68,17 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
 
         pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
             _ = allocator;
-            lib.testing.allocator.destroy(self);
+            std.testing.allocator.destroy(self);
         }
     };
 
-    const runner = lib.testing.allocator.create(Runner) catch @panic("OOM");
+    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
 }
 
-fn collectionsArrayListCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    var list: lib.ArrayList(u32) = .empty;
+fn collectionsArrayListCase(comptime std: type, allocator: std.mem.Allocator) !void {
+    var list: std.ArrayList(u32) = .empty;
     defer list.deinit(allocator);
     try list.append(allocator, 10);
     try list.append(allocator, 20);
@@ -90,22 +90,22 @@ fn collectionsArrayListCase(comptime lib: type, allocator: lib.mem.Allocator) !v
     if (list.items[1] != 30) return error.ArrayListRemoveShiftWrong;
 }
 
-fn collectionsHashMapsCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
+fn collectionsHashMapsCase(comptime std: type, allocator: std.mem.Allocator) !void {
     {
-        var map = lib.AutoHashMap(u32, []const u8).init(allocator);
+        var map = std.AutoHashMap(u32, []const u8).init(allocator);
         defer map.deinit();
         try map.put(1, "one");
         try map.put(2, "two");
         try map.put(3, "three");
         if (map.count() != 3) return error.HashMapCountWrong;
         const val = map.get(2) orelse return error.HashMapGetFailed;
-        if (!lib.mem.eql(u8, val, "two")) return error.HashMapValueWrong;
+        if (!std.mem.eql(u8, val, "two")) return error.HashMapValueWrong;
         _ = map.remove(2);
         if (map.get(2) != null) return error.HashMapRemoveFailed;
     }
 
     {
-        var map = lib.StringHashMap(i32).init(allocator);
+        var map = std.StringHashMap(i32).init(allocator);
         defer map.deinit();
         try map.put("alpha", 1);
         try map.put("beta", 2);
@@ -114,7 +114,7 @@ fn collectionsHashMapsCase(comptime lib: type, allocator: lib.mem.Allocator) !vo
     }
 
     {
-        var map = lib.AutoArrayHashMap(u32, u32).init(allocator);
+        var map = std.AutoArrayHashMap(u32, u32).init(allocator);
         defer map.deinit();
         try map.put(100, 1);
         try map.put(200, 2);
@@ -125,24 +125,24 @@ fn collectionsHashMapsCase(comptime lib: type, allocator: lib.mem.Allocator) !vo
     }
 }
 
-fn collectionsBufMapSetCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
+fn collectionsBufMapSetCase(comptime std: type, allocator: std.mem.Allocator) !void {
     {
-        var map = lib.BufMap.init(allocator);
+        var map = std.BufMap.init(allocator);
         defer map.deinit();
         try map.put("host", "localhost");
         try map.put("port", "8080");
         if (map.count() != 2) return error.BufMapCountWrong;
         const host = map.get("host") orelse return error.BufMapGetFailed;
-        if (!lib.mem.eql(u8, host, "localhost")) return error.BufMapValueWrong;
+        if (!std.mem.eql(u8, host, "localhost")) return error.BufMapValueWrong;
         try map.put("host", "0.0.0.0");
         const updated = map.get("host") orelse return error.BufMapGetFailed2;
-        if (!lib.mem.eql(u8, updated, "0.0.0.0")) return error.BufMapUpdateFailed;
+        if (!std.mem.eql(u8, updated, "0.0.0.0")) return error.BufMapUpdateFailed;
         map.remove("port");
         if (map.get("port") != null) return error.BufMapRemoveFailed;
     }
 
     {
-        var set = lib.BufSet.init(allocator);
+        var set = std.BufSet.init(allocator);
         defer set.deinit();
         try set.insert("hello");
         try set.insert("world");
@@ -154,11 +154,11 @@ fn collectionsBufMapSetCase(comptime lib: type, allocator: lib.mem.Allocator) !v
     }
 }
 
-fn collectionsPriorityDynamicBitsetCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
+fn collectionsPriorityDynamicBitsetCase(comptime std: type, allocator: std.mem.Allocator) !void {
     {
-        var pq = lib.PriorityQueue(u32, void, struct {
-            fn cmp(_: void, a: u32, b: u32) lib.math.Order {
-                return lib.math.order(a, b);
+        var pq = std.PriorityQueue(u32, void, struct {
+            fn cmp(_: void, a: u32, b: u32) std.math.Order {
+                return std.math.order(a, b);
             }
         }.cmp).init(allocator, {});
         defer pq.deinit();
@@ -171,7 +171,7 @@ fn collectionsPriorityDynamicBitsetCase(comptime lib: type, allocator: lib.mem.A
     }
 
     {
-        var bs = try lib.DynamicBitSet.initEmpty(allocator, 64);
+        var bs = try std.DynamicBitSet.initEmpty(allocator, 64);
         defer bs.deinit();
         bs.set(0);
         bs.set(31);
@@ -183,9 +183,9 @@ fn collectionsPriorityDynamicBitsetCase(comptime lib: type, allocator: lib.mem.A
     }
 }
 
-fn collectionsStaticBitsetListsCase(comptime lib: type) !void {
+fn collectionsStaticBitsetListsCase(comptime std: type) !void {
     {
-        var bs = lib.StaticBitSet(128).initEmpty();
+        var bs = std.StaticBitSet(128).initEmpty();
         bs.set(0);
         bs.set(64);
         bs.set(127);
@@ -195,7 +195,7 @@ fn collectionsStaticBitsetListsCase(comptime lib: type) !void {
     }
 
     {
-        const DLL = lib.DoublyLinkedList;
+        const DLL = std.DoublyLinkedList;
         var list = DLL{};
         var n1 = DLL.Node{};
         var n2 = DLL.Node{};
@@ -210,7 +210,7 @@ fn collectionsStaticBitsetListsCase(comptime lib: type) !void {
     }
 
     {
-        const SLL = lib.SinglyLinkedList;
+        const SLL = std.SinglyLinkedList;
         var list = SLL{};
         var n1 = SLL.Node{};
         var n2 = SLL.Node{};
@@ -225,10 +225,10 @@ fn collectionsStaticBitsetListsCase(comptime lib: type) !void {
     }
 }
 
-fn collectionsEnumArraySetCase(comptime lib: type) !void {
+fn collectionsEnumArraySetCase(comptime std: type) !void {
     {
         const Color = enum { red, green, blue };
-        var arr = lib.EnumArray(Color, u32).initFill(0);
+        var arr = std.EnumArray(Color, u32).initFill(0);
         arr.set(.red, 10);
         arr.set(.blue, 30);
         if (arr.get(.red) != 10) return error.EnumArrayGetWrong;
@@ -238,7 +238,7 @@ fn collectionsEnumArraySetCase(comptime lib: type) !void {
 
     {
         const Fruit = enum { apple, banana, cherry, date };
-        var set = lib.EnumSet(Fruit).initEmpty();
+        var set = std.EnumSet(Fruit).initEmpty();
         set.insert(.apple);
         set.insert(.cherry);
         if (set.count() != 2) return error.EnumSetCountWrong;
@@ -248,8 +248,8 @@ fn collectionsEnumArraySetCase(comptime lib: type) !void {
     }
 }
 
-fn collectionsStaticStringMapCase(comptime lib: type) !void {
-    const map = lib.StaticStringMap(u32).initComptime(.{
+fn collectionsStaticStringMapCase(comptime std: type) !void {
+    const map = std.StaticStringMap(u32).initComptime(.{
         .{ "foo", 1 },
         .{ "bar", 2 },
         .{ "baz", 3 },
@@ -259,10 +259,10 @@ fn collectionsStaticStringMapCase(comptime lib: type) !void {
     if (map.get("missing") != null) return error.SSMMissingShouldBeNull;
 }
 
-fn collectionsMultiarrayBitstackCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
+fn collectionsMultiarrayBitstackCase(comptime std: type, allocator: std.mem.Allocator) !void {
     {
         const Item = struct { x: u32, y: f32 };
-        var mal = lib.MultiArrayList(Item){};
+        var mal = std.MultiArrayList(Item){};
         defer mal.deinit(allocator);
         try mal.append(allocator, .{ .x = 1, .y = 1.0 });
         try mal.append(allocator, .{ .x = 2, .y = 2.0 });
@@ -273,7 +273,7 @@ fn collectionsMultiarrayBitstackCase(comptime lib: type, allocator: lib.mem.Allo
     }
 
     {
-        var bs = lib.BitStack.init(allocator);
+        var bs = std.BitStack.init(allocator);
         defer bs.deinit();
         try bs.push(1);
         try bs.push(0);

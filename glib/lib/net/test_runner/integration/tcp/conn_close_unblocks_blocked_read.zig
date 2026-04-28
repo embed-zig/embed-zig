@@ -2,7 +2,7 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -11,7 +11,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
 
             const Body = struct {
@@ -21,13 +21,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         const waiting = conn.read_waiting;
                         conn.read_mu.unlock();
                         if (waiting) return;
-                        thread_lib.Thread.sleep(thread_lib.time.ns_per_ms);
+                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
                     }
                 }
 
-                fn call(a: lib.mem.Allocator) !void {
-                    const ReadyCounter = test_utils.ReadyCounter(lib);
-                    const Thread = lib.Thread;
+                fn call(a: std.mem.Allocator) !void {
+                    const ReadyCounter = test_utils.ReadyCounter(std);
+                    const Thread = std.Thread;
 
                     const ReadCtx = struct {
                         ready: *ReadyCounter,
@@ -69,7 +69,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var read_thread = try Thread.spawn(.{}, Worker.read, .{&read_ctx});
 
                     ready.waitUntilReady();
-                    waitUntilReadWaiting(client, lib);
+                    waitUntilReadWaiting(client, std);
                     cc.close();
                     read_thread.join();
 

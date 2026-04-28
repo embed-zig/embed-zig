@@ -35,7 +35,7 @@ pub fn emitFn(ctx: *const anyopaque, update: drivers.nfc.Update) void {
 
     out.emit(.{
         .origin = .source,
-        .timestamp_ns = 0,
+        .timestamp = 0,
         .body = value,
     }) catch @panic("zux.component.nfc.EventHook failed to forward event");
 }

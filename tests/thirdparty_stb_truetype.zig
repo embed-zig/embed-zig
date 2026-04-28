@@ -18,14 +18,14 @@ test "thirdparty/stb_truetype/unit" {
 }
 
 test "thirdparty/stb_truetype/integration/embed" {
-    var t = glib.testing.T.new(gstd.runtime.std, .stb_truetype_integration_embed);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .stb_truetype_integration_embed);
     defer t.deinit();
     t.run("stb_truetype", stb_truetype.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
 }
 
 test "thirdparty/stb_truetype/integration/std" {
-    var t = glib.testing.T.new(gstd.runtime.std, .stb_truetype_integration_std);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .stb_truetype_integration_std);
     defer t.deinit();
     t.run("stb_truetype", stb_truetype.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;

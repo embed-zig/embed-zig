@@ -12,14 +12,14 @@ const netip = @import("netip.zig");
 const tcp_conn = @import("TcpConn.zig");
 const udp_conn = @import("UdpConn.zig");
 
-pub fn Dialer(comptime lib: type, comptime net: type) type {
+pub fn Dialer(comptime std: type, comptime net: type) type {
     const Addr = @import("netip/AddrPort.zig");
-    const Allocator = lib.mem.Allocator;
+    const Allocator = std.mem.Allocator;
     const Runtime = net.Runtime;
-    const TC = tcp_conn.TcpConn(lib, net);
-    const UC = udp_conn.UdpConn(lib, net);
+    const TC = tcp_conn.TcpConn(std, net);
+    const UC = udp_conn.UdpConn(std, net);
     // Context-only waits use short poll slices so concurrent context updates stay visible.
-    const poll_quantum_ms: i64 = 50;
+    const poll_quantum: net.time.duration.Duration = 50 * net.time.duration.MilliSecond;
 
     return struct {
         allocator: Allocator,
@@ -85,7 +85,7 @@ pub fn Dialer(comptime lib: type, comptime net: type) type {
                     .failed = true,
                     .hup = true,
                     .write_interrupt = ctx != null,
-                }, pollTimeoutMs(ctx)) catch |err| switch (err) {
+                }, pollTimeout(ctx)) catch |err| switch (err) {
                     error.TimedOut => {
                         try ensureOptionalContextActive(ctx);
                         continue;
@@ -110,7 +110,7 @@ pub fn Dialer(comptime lib: type, comptime net: type) type {
                     .failed = true,
                     .hup = true,
                     .write_interrupt = ctx != null,
-                }, pollTimeoutMs(ctx)) catch |err| switch (err) {
+                }, pollTimeout(ctx)) catch |err| switch (err) {
                     error.TimedOut => {
                         try ensureOptionalContextActive(ctx);
                         continue;
@@ -124,8 +124,8 @@ pub fn Dialer(comptime lib: type, comptime net: type) type {
 
         fn ensureContextActive(ctx: Context) anyerror!void {
             if (ctx.err()) |err| return err;
-            if (ctx.deadline()) |deadline_ns| {
-                if (deadline_ns <= lib.time.nanoTimestamp()) return error.DeadlineExceeded;
+            if (ctx.deadline()) |deadline| {
+                if (net.time.instant.sub(deadline, net.time.instant.now()) <= 0) return error.DeadlineExceeded;
             }
         }
 
@@ -134,14 +134,14 @@ pub fn Dialer(comptime lib: type, comptime net: type) type {
             try ensureContextActive(active_ctx);
         }
 
-        fn pollTimeoutMs(ctx: ?Context) ?u32 {
+        fn pollTimeout(ctx: ?Context) ?net.time.duration.Duration {
             const active_ctx = ctx orelse return null;
-            if (active_ctx.deadline()) |deadline_ns| {
-                const remaining_ms = @divFloor(deadline_ns - lib.time.nanoTimestamp(), lib.time.ns_per_ms);
-                if (remaining_ms <= 0) return 0;
-                return @intCast(@max(@as(i64, 1), @min(remaining_ms, poll_quantum_ms)));
+            if (active_ctx.deadline()) |deadline| {
+                const remaining = @max(net.time.instant.sub(deadline, net.time.instant.now()), 0);
+                if (remaining <= 0) return 0;
+                return @min(remaining, poll_quantum);
             }
-            return @intCast(poll_quantum_ms);
+            return poll_quantum;
         }
 
         fn teardownTcpSocket(socket: *Runtime.Tcp) void {

@@ -7,13 +7,13 @@ const Request = @import("Request.zig");
 const response_writer_mod = @import("ResponseWriter.zig");
 const testing_api = @import("testing");
 
-pub fn HandlerFunc(comptime lib: type) type {
-    return *const fn (rw: *response_writer_mod.ResponseWriter(lib), req: *Request) void;
+pub fn HandlerFunc(comptime std: type) type {
+    return *const fn (rw: *response_writer_mod.ResponseWriter(std), req: *Request) void;
 }
 
-pub fn Handler(comptime lib: type) type {
-    const ResponseWriter = response_writer_mod.ResponseWriter(lib);
-    const Fn = HandlerFunc(lib);
+pub fn Handler(comptime std: type) type {
+    const ResponseWriter = response_writer_mod.ResponseWriter(std);
+    const Fn = HandlerFunc(std);
 
     return union(enum) {
         erased: Erased,
@@ -69,12 +69,12 @@ pub fn Handler(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const Writer = response_writer_mod.ResponseWriter(lib);
-            const H = Handler(lib);
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const Writer = response_writer_mod.ResponseWriter(std);
+            const H = Handler(std);
 
             const Counter = struct {
                 var calls: usize = 0;

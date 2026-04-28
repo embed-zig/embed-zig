@@ -2,7 +2,7 @@ const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("../tcp/test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -11,7 +11,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
                 fn waitUntilReadWaiting(impl: *net.UdpConn, comptime thread_lib: type) void {
@@ -20,13 +20,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         const waiting = impl.read_waiting;
                         impl.read_mu.unlock();
                         if (waiting) return;
-                        thread_lib.Thread.sleep(thread_lib.time.ns_per_ms);
+                        thread_lib.Thread.sleep(@intCast(net.time.duration.MilliSecond));
                     }
                 }
 
-                fn call(a: lib.mem.Allocator) !void {
-                    const ReadyCounter = test_utils.ReadyCounter(lib);
-                    const Thread = lib.Thread;
+                fn call(a: std.mem.Allocator) !void {
+                    const ReadyCounter = test_utils.ReadyCounter(std);
+                    const Thread = std.Thread;
 
                     const ReadCtx = struct {
                         ready: *ReadyCounter,
@@ -46,7 +46,7 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         }
 
                         fn closeLater(conn: net.Conn, comptime thread_lib: type) void {
-                            thread_lib.Thread.sleep(200 * thread_lib.time.ns_per_ms);
+                            thread_lib.Thread.sleep(@intCast(200 * net.time.duration.MilliSecond));
                             conn.close();
                         }
                     };
@@ -69,17 +69,17 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                         .conn = conn,
                     };
                     var read_thread = try Thread.spawn(.{}, Worker.read, .{&read_ctx});
-                    var close_thread = try Thread.spawn(.{}, Worker.closeLater, .{ conn, lib });
+                    var close_thread = try Thread.spawn(.{}, Worker.closeLater, .{ conn, std });
 
                     ready.waitUntilReady();
-                    waitUntilReadWaiting(conn_impl, lib);
-                    conn.setReadTimeout(30);
+                    waitUntilReadWaiting(conn_impl, std);
+                    conn.setReadDeadline(net.time.instant.add(net.time.instant.now(), 30 * net.time.duration.MilliSecond));
 
                     read_thread.join();
                     close_thread.join();
 
-                    try lib.testing.expect(read_ctx.err != null);
-                    try lib.testing.expect(read_ctx.err.? == error.TimedOut);
+                    try std.testing.expect(read_ctx.err != null);
+                    try std.testing.expect(read_ctx.err.? == error.TimedOut);
                 }
             };
             Body.call(allocator) catch |err| {

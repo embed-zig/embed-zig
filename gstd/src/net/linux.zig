@@ -4,6 +4,10 @@ const glib = @import("glib");
 const posix = std.posix;
 const linux = std.os.linux;
 const poll_rdhup: i16 = @intCast(linux.POLL.RDHUP);
+const time = struct {
+    const duration = glib.time.duration;
+    const instant = glib.time.instant.make(@import("../time/instant.zig").impl);
+};
 
 const EncodeSockAddrError = error{
     InvalidAddress,
@@ -109,11 +113,18 @@ fn matchesWant(got: glib.net.runtime.PollEvents, want: glib.net.runtime.PollEven
         (want.write_interrupt and got.write_interrupt);
 }
 
-fn remainingTimeoutMs(started: std.time.Instant, total_ms: u32) glib.net.runtime.PollError!u32 {
-    const now = std.time.Instant.now() catch return error.Unexpected;
-    const elapsed_ms = now.since(started) / std.time.ns_per_ms;
-    if (elapsed_ms >= total_ms) return 0;
-    return total_ms - @as(u32, @intCast(elapsed_ms));
+fn remainingTimeout(started: time.instant.Time, total: time.duration.Duration) time.duration.Duration {
+    const elapsed = time.instant.sub(time.instant.now(), started);
+    if (elapsed <= 0) return total;
+    if (elapsed >= total) return 0;
+    return total - elapsed;
+}
+
+fn remainingTimeoutPollMs(started: time.instant.Time, total: time.duration.Duration) i32 {
+    const remaining = remainingTimeout(started, total);
+    const remaining_ms = @divFloor(remaining, time.duration.MilliSecond) +
+        @intFromBool(@mod(remaining, time.duration.MilliSecond) != 0);
+    return @intCast(@min(remaining_ms, @as(time.duration.Duration, std.math.maxInt(i32))));
 }
 
 fn OpCommon(comptime Self: type) type {
@@ -180,11 +191,11 @@ fn OpCommon(comptime Self: type) type {
             return @atomicRmw(bool, &self.write_interrupt, .Xchg, false, .acq_rel);
         }
 
-        fn pollCommon(self: *Self, want: glib.net.runtime.PollEvents, timeout_ms: ?u32) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
+        fn pollCommon(self: *Self, want: glib.net.runtime.PollEvents, timeout: ?time.duration.Duration) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
             if (self.closed) return error.Closed;
 
-            const started: ?std.time.Instant = if (timeout_ms != null)
-                (std.time.Instant.now() catch return error.Unexpected)
+            const started: ?time.instant.Time = if (timeout != null)
+                time.instant.now()
             else
                 null;
 
@@ -195,8 +206,8 @@ fn OpCommon(comptime Self: type) type {
                 };
                 if (matchesWant(out, want)) return out;
 
-                const timeout: i32 = if (timeout_ms) |ms|
-                    @intCast(try remainingTimeoutMs(started.?, ms))
+                const poll_wait_ms: i32 = if (timeout) |duration|
+                    remainingTimeoutPollMs(started.?, duration)
                 else
                     -1;
 
@@ -221,7 +232,7 @@ fn OpCommon(comptime Self: type) type {
                     break :blk fd_count;
                 } else null;
 
-                const n = posix.poll(fds[0..fd_count], timeout) catch return error.Unexpected;
+                const n = posix.poll(fds[0..fd_count], poll_wait_ms) catch return error.Unexpected;
                 if (n == 0) return error.TimedOut;
 
                 const sock_revents = fds[0].revents;
@@ -244,8 +255,8 @@ fn OpCommon(comptime Self: type) type {
                 }
 
                 if (matchesWant(out, want)) return out;
-                if (timeout_ms) |ms| {
-                    if (try remainingTimeoutMs(started.?, ms) == 0) return error.TimedOut;
+                if (timeout) |duration| {
+                    if (remainingTimeout(started.?, duration) == 0) return error.TimedOut;
                 }
                 continue :poll_loop;
             }
@@ -396,8 +407,8 @@ pub const Tcp = struct {
         }
     }
 
-    pub fn poll(self: *Tcp, want: glib.net.runtime.PollEvents, timeout_ms: ?u32) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
-        return tcp_ops.pollCommon(self, want, timeout_ms);
+    pub fn poll(self: *Tcp, want: glib.net.runtime.PollEvents, timeout: ?time.duration.Duration) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
+        return tcp_ops.pollCommon(self, want, timeout);
     }
 
     fn triggerWake(self: *Tcp) void {
@@ -519,8 +530,8 @@ pub const Udp = struct {
         }
     }
 
-    pub fn poll(self: *Udp, want: glib.net.runtime.PollEvents, timeout_ms: ?u32) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
-        return udp_ops.pollCommon(self, want, timeout_ms);
+    pub fn poll(self: *Udp, want: glib.net.runtime.PollEvents, timeout: ?time.duration.Duration) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
+        return udp_ops.pollCommon(self, want, timeout);
     }
 
     fn triggerWake(self: *Udp) void {

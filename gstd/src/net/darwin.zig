@@ -6,6 +6,10 @@ const system = posix.system;
 const EV = std.c.EV;
 const NOTE = std.c.NOTE;
 const EVFILT = std.c.EVFILT;
+const time = struct {
+    const duration = glib.time.duration;
+    const instant = glib.time.instant.make(@import("../time/instant.zig").impl);
+};
 
 const EncodeSockAddrError = error{
     InvalidAddress,
@@ -231,10 +235,10 @@ fn OpCommon(comptime Self: type) type {
             }
         }
 
-        fn pollCommon(self: *Self, want: glib.net.runtime.PollEvents, timeout_ms: ?u32) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
+        fn pollCommon(self: *Self, want: glib.net.runtime.PollEvents, timeout: ?time.duration.Duration) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
             if (isClosed(self)) return error.Closed;
             if (self.kq == -1) return error.Unexpected;
-            const started_ms = if (timeout_ms != null) std.time.milliTimestamp() else 0;
+            const started = if (timeout != null) time.instant.now() else 0;
 
             while (true) {
                 if (isClosed(self)) return error.Closed;
@@ -247,11 +251,11 @@ fn OpCommon(comptime Self: type) type {
 
                 var ts: posix.timespec = undefined;
                 const timeout_ptr: ?*const posix.timespec = blk: {
-                    const t = timeout_ms orelse break :blk null;
-                    const remaining_ms = remainingTimeoutMs(started_ms, t);
+                    const t = timeout orelse break :blk null;
+                    const remaining = remainingTimeout(started, t);
                     ts = .{
-                        .sec = @as(isize, @intCast(@divFloor(remaining_ms, 1000))),
-                        .nsec = @as(isize, @intCast(@as(u64, @mod(remaining_ms, 1000)) * std.time.ns_per_ms)),
+                        .sec = @as(isize, @intCast(@divFloor(remaining, time.duration.Second))),
+                        .nsec = @as(isize, @intCast(@mod(remaining, time.duration.Second))),
                     };
                     break :blk &ts;
                 };
@@ -260,7 +264,7 @@ fn OpCommon(comptime Self: type) type {
                 const n = posix.kevent(self.kq, &.{}, &evs, timeout_ptr) catch return error.Unexpected;
 
                 if (n == 0) {
-                    if (timeout_ms != null) return error.TimedOut;
+                    if (timeout != null) return error.TimedOut;
                     continue;
                 }
 
@@ -303,8 +307,8 @@ fn OpCommon(comptime Self: type) type {
 
                 if (hasAnyWantedEvent(out, want)) return out;
 
-                if (timeout_ms) |t| {
-                    if (remainingTimeoutMs(started_ms, t) == 0) return error.TimedOut;
+                if (timeout) |duration| {
+                    if (remainingTimeout(started, duration) == 0) return error.TimedOut;
                 }
             }
         }
@@ -450,8 +454,8 @@ pub const Tcp = struct {
         }
     }
 
-    pub fn poll(self: *Tcp, want: glib.net.runtime.PollEvents, timeout_ms: ?u32) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
-        return tcp_ops.pollCommon(self, want, timeout_ms);
+    pub fn poll(self: *Tcp, want: glib.net.runtime.PollEvents, timeout: ?time.duration.Duration) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
+        return tcp_ops.pollCommon(self, want, timeout);
     }
 
     fn triggerReadWake(self: *Tcp) void {
@@ -581,8 +585,8 @@ pub const Udp = struct {
         }
     }
 
-    pub fn poll(self: *Udp, want: glib.net.runtime.PollEvents, timeout_ms: ?u32) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
-        return udp_ops.pollCommon(self, want, timeout_ms);
+    pub fn poll(self: *Udp, want: glib.net.runtime.PollEvents, timeout: ?time.duration.Duration) glib.net.runtime.PollError!glib.net.runtime.PollEvents {
+        return udp_ops.pollCommon(self, want, timeout);
     }
 
     fn triggerReadWake(self: *Udp) void {
@@ -681,11 +685,11 @@ fn socketError(err: anyerror) glib.net.runtime.SocketError {
     };
 }
 
-fn remainingTimeoutMs(started_ms: i64, total_ms: u32) u32 {
-    const elapsed = std.time.milliTimestamp() - started_ms;
-    if (elapsed <= 0) return total_ms;
-    if (elapsed >= total_ms) return 0;
-    return total_ms - @as(u32, @intCast(elapsed));
+fn remainingTimeout(started: time.instant.Time, total: time.duration.Duration) time.duration.Duration {
+    const elapsed = time.instant.sub(time.instant.now(), started);
+    if (elapsed <= 0) return total;
+    if (elapsed >= total) return 0;
+    return total - elapsed;
 }
 
 fn hasAnyWantedEvent(got: glib.net.runtime.PollEvents, want: glib.net.runtime.PollEvents) bool {

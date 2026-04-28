@@ -23,7 +23,7 @@ test "embed/bt/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .bt);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .bt);
     defer t.deinit();
 
     t.run("embed/bt/unit/std", bt.test_runner.unit.make(gstd.runtime));
@@ -35,7 +35,7 @@ test "embed/bt/unit/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .bt);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .bt);
     defer t.deinit();
 
     t.run("embed/bt/unit/gstd", bt.test_runner.unit.make(gstd.runtime));
@@ -47,9 +47,9 @@ test "embed/bt/integration/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .bt);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .bt);
     defer t.deinit();
-    t.timeout(60 * gstd.runtime.std.time.ns_per_s);
+    t.timeout(60 * glib.time.duration.Second);
 
     t.run("embed/bt/integration/std", bt.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;
@@ -60,9 +60,9 @@ test "embed/bt/integration/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .bt);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .bt);
     defer t.deinit();
-    t.timeout(60 * gstd.runtime.std.time.ns_per_s);
+    t.timeout(60 * glib.time.duration.Second);
 
     t.run("embed/bt/integration/gstd", bt.test_runner.integration.make(gstd.runtime));
     if (!t.wait()) return error.TestFailed;

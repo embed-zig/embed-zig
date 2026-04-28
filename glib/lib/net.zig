@@ -1,7 +1,7 @@
 //! net — Go-style networking for stdz-zig.
 //!
 //! Usage:
-//!   const net = @import("net").make(lib, impl);
+//!   const net = @import("net").make(std, time, impl);
 //!   const Addr = net.netip.AddrPort;
 //!
 //!   // Quick dial (default options):
@@ -37,8 +37,12 @@ const dialer_mod = @import("net/Dialer.zig");
 const udp_conn = @import("net/UdpConn.zig");
 const resolver_mod = @import("net/Resolver.zig");
 
-pub fn make(comptime lib: type, comptime impl: type) type {
-    const Allocator = lib.mem.Allocator;
+pub fn make(comptime std: type, comptime time: type, comptime impl: type) type {
+    return makeWithTime(std, time, impl);
+}
+
+fn makeWithTime(comptime std: type, comptime Time: type, comptime impl: type) type {
+    const Allocator = std.mem.Allocator;
     const Addr = netip.AddrPort;
     const IpAddr = netip.Addr;
     const RuntimeNs = runtime.make(impl);
@@ -50,17 +54,18 @@ pub fn make(comptime lib: type, comptime impl: type) type {
         pub const runtime = @import("net/runtime.zig");
         pub const netip = @import("net/netip.zig");
         pub const url = @import("net/url.zig");
+        pub const time = Time;
         pub const Runtime = RuntimeNs;
-        pub const Dialer = dialer_mod.Dialer(lib, @This());
-        pub const TcpConn = tcp_conn.TcpConn(lib, @This());
-        pub const TcpListener = tcp_listener.TcpListener(lib, @This());
-        pub const UdpConn = udp_conn.UdpConn(lib, @This());
-        pub const Resolver = resolver_mod.Resolver(lib, @This());
-        pub const http = @import("net/http.zig").make(lib, @This());
-        pub const textproto = @import("net/textproto.zig").make(lib);
-        pub const Cmux = @import("net/Cmux.zig").Cmux(lib);
-        pub const ntp = @import("net/ntp.zig").make(lib, @This());
-        pub const tls = @import("net/tls.zig").make(lib, @This());
+        pub const Dialer = dialer_mod.Dialer(std, @This());
+        pub const TcpConn = tcp_conn.TcpConn(std, @This());
+        pub const TcpListener = tcp_listener.TcpListener(std, @This());
+        pub const UdpConn = udp_conn.UdpConn(std, @This());
+        pub const Resolver = resolver_mod.Resolver(std, @This());
+        pub const http = @import("net/http.zig").make(std, @This());
+        pub const textproto = @import("net/textproto.zig").make(std);
+        pub const Cmux = @import("net/Cmux.zig").Cmux(std, Time);
+        pub const ntp = @import("net/ntp.zig").make(std, @This());
+        pub const tls = @import("net/tls.zig").make(std, @This());
         pub const ListenOptions = TcpListener.Options;
 
         pub const ListenPacketOptions = struct {
@@ -109,4 +114,3 @@ pub const test_runner = struct {
     pub const unit = @import("net/test_runner/unit.zig");
     pub const integration = @import("net/test_runner/integration.zig");
 };
-

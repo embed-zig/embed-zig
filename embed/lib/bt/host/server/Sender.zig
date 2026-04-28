@@ -186,8 +186,8 @@ pub fn make(comptime grt: type, comptime ServerType: type) type {
                     return self.session.subscription.charUuid();
                 }
 
-                pub fn read(self: *@This(), timeout_ms: u32, out: []u8) !usize {
-                    const recv_res = try self.session.inbox.recvTimeout(timeout_ms);
+                pub fn read(self: *@This(), timeout: glib.time.duration.Duration, out: []u8) !usize {
+                    const recv_res = try self.session.inbox.recvTimeout(timeout);
                     if (!recv_res.ok) return error.Closed;
 
                     const payload = recv_res.value;
@@ -412,7 +412,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         }
                         pub fn deinit(_: *@This()) void {}
                         pub fn close(_: *@This()) void {}
-                        pub fn recvTimeout(_: *@This(), _: u32) !glib.sync.channel.RecvResult(T) {
+                        pub fn recvTimeout(_: *@This(), _: glib.time.duration.Duration) !glib.sync.channel.RecvResult(T) {
                             return error.Unexpected;
                         }
                         pub fn recv(_: *@This()) !glib.sync.channel.RecvResult(T) {
@@ -421,7 +421,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         pub fn send(_: *@This(), _: T) !glib.sync.channel.SendResult() {
                             return .{ .ok = true };
                         }
-                        pub fn sendTimeout(_: *@This(), _: T, _: u32) !glib.sync.channel.SendResult() {
+                        pub fn sendTimeout(_: *@This(), _: T, _: glib.time.duration.Duration) !glib.sync.channel.SendResult() {
                             return .{ .ok = true };
                         }
                     };

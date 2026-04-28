@@ -6,9 +6,12 @@
 
 const stdz_mod = @import("stdz");
 const context_mod = @import("context");
+const context_facade = @import("lib/context/facade.zig");
 const testing_mod = @import("testing");
 const time_mod = @import("time");
 const tests_mod = @import("lib/tests.zig");
+
+pub const Time = time_mod.Time;
 
 pub const std = struct {
     pub const ascii = stdz_mod.ascii;
@@ -22,7 +25,6 @@ pub const std = struct {
     pub const posix = stdz_mod.posix;
     pub const Random = stdz_mod.Random;
     pub const Thread = stdz_mod.Thread;
-    pub const time = stdz_mod.time;
     pub const math = stdz_mod.math;
     pub const debug = stdz_mod.debug;
     pub const meta = stdz_mod.meta;
@@ -99,16 +101,19 @@ pub const testing = struct {
 };
 pub const context = struct {
     pub const Context = context_mod.Context;
-
-    pub fn make(comptime lib: type) type {
-        return context_mod.make(lib);
-    }
+    pub const make = context_facade.make;
 
     pub const test_runner = tests_mod.context;
 };
 pub const time = struct {
     pub const duration = time_mod.duration;
     pub const instant = time_mod.instant;
+    pub const wall = time_mod.wall;
+    pub const Time = time_mod.Time;
+    pub const unix = time_mod.unix;
+    pub const fromUnixMilli = time_mod.fromUnixMilli;
+    pub const fromUnixMicro = time_mod.fromUnixMicro;
+    pub const fromUnixNano = time_mod.fromUnixNano;
 
     pub fn make(comptime Impl: type) type {
         return time_mod.make(Impl);
@@ -122,7 +127,7 @@ pub const mime = @import("mime");
 pub const net = @import("net");
 pub const crypto = @import("crypto");
 pub const runtime = struct {
-    const runtime_ns = @This();
+    const Runtime = @This();
     const TypeMarker = struct {};
     pub const Options = struct {
         stdz_impl: type,
@@ -132,26 +137,26 @@ pub const runtime = struct {
     };
 
     pub fn make(comptime options: Options) type {
-        const std_ns = @import("stdz").make(options.stdz_impl);
-        const time_ns = @import("time").make(options.time_impl);
+        const runtime_std = @import("stdz").make(options.stdz_impl);
+        const runtime_time = @import("time").make(options.time_impl);
         const channel_factory = options.channel_factory;
         const net_impl = options.net_impl;
 
         return struct {
             const runtime_marker: TypeMarker = .{};
-            pub const runtime = runtime_ns;
-            pub const std = std_ns;
-            pub const time = time_ns;
-            pub const context = @import("context").make(std_ns);
+            pub const runtime = Runtime;
+            pub const std = runtime_std;
+            pub const time = runtime_time;
+            pub const context = @import("context").make(runtime_std, runtime_time);
             pub const sync = struct {
                 pub const ChannelFactory = channel_factory;
-                pub const Channel = @import("sync").Channel(std_ns, channel_factory);
+                pub const Channel = @import("sync").Channel(runtime_std, channel_factory);
 
                 pub fn Racer(comptime T: type) type {
-                    return @import("sync").Racer(std_ns, T);
+                    return @import("sync").Racer(runtime_std, runtime_time, T);
                 }
             };
-            pub const net = @import("net").make(std_ns, net_impl);
+            pub const net = @import("net").make(runtime_std, runtime_time, net_impl);
         };
     }
 

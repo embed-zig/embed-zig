@@ -48,7 +48,7 @@ pub const Link = struct {
     peer_addr_type: u8,
     conn_interval: u16,
     conn_latency: u16,
-    conn_timeout: u16,
+    supervision_timeout_units: u16,
 };
 
 const MAX_PENDING_CMDS = 8;
@@ -165,7 +165,7 @@ pub fn connect(self: *Gap, peer_addr: [6]u8, peer_addr_type: commands.PeerAddrTy
         .conn_interval_min = config.interval_min,
         .conn_interval_max = config.interval_max,
         .max_latency = config.latency,
-        .supervision_timeout = config.timeout,
+        .supervision_timeout = config.supervision_timeout_units,
         .min_ce_length = 0,
         .max_ce_length = 0,
     });
@@ -265,7 +265,7 @@ pub fn handleEvent(self: *Gap, evt: events.Event) void {
                     .peer_addr_type = lc.peer_addr_type,
                     .conn_interval = lc.conn_interval,
                     .conn_latency = lc.conn_latency,
-                    .conn_timeout = lc.supervision_timeout,
+                    .supervision_timeout_units = lc.supervision_timeout,
                 };
                 switch (link.role) {
                     .central => self.central_link = link,
@@ -289,14 +289,14 @@ pub fn handleEvent(self: *Gap, evt: events.Event) void {
                     if (uc.conn_handle == link.conn_handle) {
                         link.conn_interval = uc.conn_interval;
                         link.conn_latency = uc.conn_latency;
-                        link.conn_timeout = uc.supervision_timeout;
+                        link.supervision_timeout_units = uc.supervision_timeout;
                     }
                 }
                 if (self.peripheral_link) |*link| {
                     if (uc.conn_handle == link.conn_handle) {
                         link.conn_interval = uc.conn_interval;
                         link.conn_latency = uc.conn_latency;
-                        link.conn_timeout = uc.supervision_timeout;
+                        link.supervision_timeout_units = uc.supervision_timeout;
                     }
                 }
             }
@@ -352,7 +352,7 @@ pub const ConnConfig = struct {
     interval_min: u16 = 0x0018,
     interval_max: u16 = 0x0028,
     latency: u16 = 0,
-    timeout: u16 = 0x00C8,
+    supervision_timeout_units: u16 = 0x00C8,
 };
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
@@ -441,7 +441,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     .peer_addr_type = 0x00,
                     .conn_interval = 0x0018,
                     .conn_latency = 0,
-                    .conn_timeout = 0x00C8,
+                    .supervision_timeout_units = 0x00C8,
                 };
                 gap.handleEvent(.{ .disconnection_complete = .{
                     .status = .success,

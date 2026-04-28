@@ -117,16 +117,16 @@ pub fn make(comptime grt: type) type {
             return self.state.readBytes();
         }
 
-        pub fn setFadeOutDuration(self: *@This(), ms: u32) void {
-            self.state.setFadeOutDuration(ms);
+        pub fn setFadeOutDuration(self: *@This(), duration: glib.time.duration.Duration) void {
+            self.state.setFadeOutDuration(duration);
         }
 
         pub fn closeWrite(self: *@This()) void {
             self.state.closeWrite();
         }
 
-        pub fn closeWriteWithSilence(self: *@This(), silence_ms: u32) void {
-            self.state.closeWriteWithSilence(silence_ms) catch self.state.closeWrite();
+        pub fn closeWriteWithSilence(self: *@This(), duration: glib.time.duration.Duration) void {
+            self.state.closeWriteWithSilence(duration) catch self.state.closeWrite();
         }
 
         pub fn close(self: *@This()) void {
@@ -137,8 +137,8 @@ pub fn make(comptime grt: type) type {
             self.state.closeWithError();
         }
 
-        pub fn setGainLinearTo(self: *@This(), to: f32, duration_ms: u32) void {
-            self.state.setGainLinearTo(to, duration_ms);
+        pub fn setGainLinearTo(self: *@This(), to: f32, duration: glib.time.duration.Duration) void {
+            self.state.setGainLinearTo(to, duration);
         }
 
         pub fn deinit(self: *@This()) void {
@@ -518,6 +518,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
         fn defaultBackendOverflowingSilenceTailFallsBackToCloseWrite() !void {
             const max_u32 = grt.std.math.maxInt(u32);
+            const max_duration = glib.time.duration.Maximum;
             const mixer = try MixerType.init(.{
                 .allocator = grt.std.testing.allocator,
                 .output = .{ .rate = max_u32, .channels = .stereo },
@@ -529,7 +530,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             defer handle.ctrl.deinit();
 
             try handle.track.write(.{ .rate = max_u32, .channels = .stereo }, &.{ 1, 2 });
-            handle.ctrl.closeWriteWithSilence(max_u32);
+            handle.ctrl.closeWriteWithSilence(max_duration);
 
             var out: [8]i16 = undefined;
             const n = mixer.read(&out) orelse unreachable;

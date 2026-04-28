@@ -33,7 +33,7 @@ fn readOnce(type_a: TypeA, page: u8, out: []u8) TypeA.Error!void {
     const bits = try type_a.transceive(.{
         .tx = &.{ 0x30, page },
         .tx_bits = 16,
-        .timeout_ms = 5,
+        .timeout = 5 * glib.time.duration.MilliSecond,
         .tx_crc = true,
         .rx_crc = true,
     }, &rx);

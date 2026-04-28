@@ -16,9 +16,10 @@ test "glib/stdz/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .stdz);
+    var t = glib.testing.T.new(std, gstd.runtime.time, .stdz);
     defer t.deinit();
-    t.timeout(20 * std.time.ns_per_s);
+    t.timeout(20 * glib.time.duration.Second);
+    try std.testing.expect(!@hasDecl(glib.std, "time"));
 
     t.run("glib/stdz/unit/std", glib.std.test_runner.unit.make(std));
     if (!t.wait()) return error.TestFailed;
@@ -29,9 +30,9 @@ test "glib/stdz/unit/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .stdz);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .stdz);
     defer t.deinit();
-    t.timeout(20 * gstd.runtime.std.time.ns_per_s);
+    t.timeout(20 * glib.time.duration.Second);
 
     t.run("glib/stdz/unit/gstd", glib.std.test_runner.unit.make(gstd.runtime.std));
     if (!t.wait()) return error.TestFailed;

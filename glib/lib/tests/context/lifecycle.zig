@@ -3,7 +3,7 @@ const testing_mod = @import("testing");
 const context_root = @import("context");
 const Context = context_root.Context;
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type, comptime time: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -14,14 +14,14 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("child_detach_leaves_root_empty", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try childDetachLeavesRootEmptyCase(lib, case_allocator);
+            t.run("child_detach_leaves_root_empty", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try childDetachLeavesRootEmptyCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("parent_deinit_reparents_child", testing_mod.TestRunner.fromFn(lib, 24 * 1024, struct {
-                fn run(_: *testing_mod.T, case_allocator: lib.mem.Allocator) !void {
-                    try parentDeinitReparentsChildCase(lib, case_allocator);
+            t.run("parent_deinit_reparents_child", testing_mod.TestRunner.fromFn(std, 24 * 1024, struct {
+                fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
+                    try parentDeinitReparentsChildCase(std, time, case_allocator);
                 }
             }.run));
             return t.wait();
@@ -39,34 +39,34 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
     return testing_mod.TestRunner.make(Runner).new(&Holder.runner);
 }
 
-fn childDetachLeavesRootEmptyCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    const bg = ctx_ns.background();
-    var child = try ctx_ns.withCancel(bg);
+fn childDetachLeavesRootEmptyCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    const bg = ctx_api.background();
+    var child = try ctx_api.withCancel(bg);
 
-    try testing.expect(ctx_ns.shared.background_impl.tree.children.first != null);
+    try testing.expect(ctx_api.shared.background_impl.tree.children.first != null);
 
     child.deinit();
-    try testing.expect(ctx_ns.shared.background_impl.tree.children.first == null);
+    try testing.expect(ctx_api.shared.background_impl.tree.children.first == null);
 
-    ctx_ns.deinit();
+    ctx_api.deinit();
 }
 
-fn parentDeinitReparentsChildCase(comptime lib: type, allocator: lib.mem.Allocator) !void {
-    const testing = lib.testing;
-    const CtxApi = context_root.make(lib);
-    var ctx_ns = try CtxApi.init(allocator);
-    const bg = ctx_ns.background();
-    var parent = try ctx_ns.withCancel(bg);
-    var child = try ctx_ns.withCancel(parent);
+fn parentDeinitReparentsChildCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const testing = std.testing;
+    const CtxApi = context_root.make(std, time);
+    var ctx_api = try CtxApi.init(allocator);
+    const bg = ctx_api.background();
+    var parent = try ctx_api.withCancel(bg);
+    var child = try ctx_api.withCancel(parent);
 
     parent.deinit();
-    try testing.expect(ctx_ns.shared.background_impl.tree.children.first != null);
+    try testing.expect(ctx_api.shared.background_impl.tree.children.first != null);
 
     child.deinit();
-    try testing.expect(ctx_ns.shared.background_impl.tree.children.first == null);
+    try testing.expect(ctx_api.shared.background_impl.tree.children.first == null);
 
-    ctx_ns.deinit();
+    ctx_api.deinit();
 }

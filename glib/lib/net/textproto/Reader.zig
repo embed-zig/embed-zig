@@ -549,14 +549,14 @@ fn validateBufferedType(comptime Buffered: type) void {
     }
 }
 
-pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
+pub fn TestRunner(comptime std: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
     const TestCase = struct {
         fn expectError(comptime expected: anyerror, actual: anytype) !void {
             if (actual) |_| {
                 return error.ExpectedErrorNotReturned;
             } else |err| {
-                try lib.testing.expect(err == expected);
+                try std.testing.expect(err == expected);
             }
         }
 
@@ -573,8 +573,8 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return out[0..used];
         }
 
-        fn readerInitShapes(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
+        fn readerInitShapes(allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
             const Io = stdz.Io;
 
             {
@@ -621,7 +621,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeLineTrimsCrlf() !void {
-            const testing = lib.testing;
+            const testing = std.testing;
             const Io = stdz.Io;
 
             var src = Io.Reader.fixed("PING a\r\n");
@@ -637,7 +637,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeLineTrimsLf() !void {
-            const testing = lib.testing;
+            const testing = std.testing;
             const Io = stdz.Io;
 
             var src = Io.Reader.fixed("PING a\n");
@@ -653,7 +653,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeLineTrimAsciiSpace() !void {
-            const testing = lib.testing;
+            const testing = std.testing;
             const Io = stdz.Io;
 
             var src = Io.Reader.fixed("  PING a \t\r\n");
@@ -682,8 +682,8 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             try expectError(error.InvalidLineEnding, reader.takeLine(.{}));
         }
 
-        fn takeLineGrowsAcrossShortThenLongLine(allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
+        fn takeLineGrowsAcrossShortThenLongLine(allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
             const Io = stdz.Io;
             const long_body = [_]u8{'A'} ** 600;
             const input = "AT\r\n" ++ long_body ++ "\r\nOK\r\n";
@@ -697,7 +697,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             defer reader.deinit();
 
             const first = try reader.takeLine(.{});
-            try lib.testing.expectEqualStrings("AT", first);
+            try std.testing.expectEqualStrings("AT", first);
 
             const second = try reader.takeLine(.{});
             try testing.expectEqual(@as(usize, long_body.len), second.len);
@@ -705,11 +705,11 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             try testing.expect(second[second.len - 1] == 'A');
 
             const final = try reader.takeLine(.{});
-            try lib.testing.expectEqualStrings("OK", final);
+            try std.testing.expectEqualStrings("OK", final);
         }
 
         fn takeContinuedLineReturnsRawFoldedBlock() !void {
-            const testing = lib.testing;
+            const testing = std.testing;
             const Io = stdz.Io;
 
             var src = Io.Reader.fixed("hello\r\n world\r\n\tzig \t\r\nnext\r\n");
@@ -728,7 +728,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeHeaderBlockCollectsCrlfLines() !void {
-            const testing = lib.testing;
+            const testing = std.testing;
             const Io = stdz.Io;
 
             var src = Io.Reader.fixed("Host: example.com\r\nUser-Agent: zig\r\n\r\nNEXT\r\n");
@@ -747,7 +747,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeHeaderBlockAllowsEmptySection() !void {
-            const testing = lib.testing;
+            const testing = std.testing;
             const Io = stdz.Io;
 
             var src = Io.Reader.fixed("\r\nNEXT\r\n");
@@ -776,7 +776,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             try expectError(error.InvalidLineEnding, reader.takeHeaderBlock(.{}));
         }
 
-        fn takeHeaderBlockMaxRejectsOversizedManagedSection(allocator: lib.mem.Allocator) !void {
+        fn takeHeaderBlockMaxRejectsOversizedManagedSection(allocator: std.mem.Allocator) !void {
             const Io = stdz.Io;
 
             var src = Io.Reader.fixed("Host: example.com\r\n\r\n");
@@ -791,7 +791,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeLineGroupStopsOnTerminalLine() !void {
-            const testing = lib.testing;
+            const testing = std.testing;
             const Io = stdz.Io;
 
             const Ctx = struct {
@@ -855,7 +855,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeCodeLineParsesSingleLine() !void {
-            const testing = lib.testing;
+            const testing = std.testing;
             const Io = stdz.Io;
 
             var src = Io.Reader.fixed("220 smtp.example\r\n");
@@ -900,7 +900,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeResponseParsesSingleLine() !void {
-            const testing = lib.testing;
+            const testing = std.testing;
             const Io = stdz.Io;
 
             var src = Io.Reader.fixed("250 ok\r\n");
@@ -918,7 +918,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn takeResponseParsesMultilineBlock() !void {
-            const testing = lib.testing;
+            const testing = std.testing;
             const Io = stdz.Io;
 
             var src = Io.Reader.fixed("250-first line\r\nsecond line\r\n250 third line\r\n");
@@ -966,7 +966,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
         }
 
         fn dotReaderUnstuffsAndLeavesFollowingLine() !void {
-            const testing = lib.testing;
+            const testing = std.testing;
             const Io = stdz.Io;
 
             var src = Io.Reader.fixed("alpha\r\n..beta\r\n.\r\nNEXT\r\n");
@@ -988,12 +988,12 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
 
             TestCase.readerInitShapes(allocator) catch |err| {
@@ -1036,7 +1036,7 @@ pub fn TestRunner(comptime lib: type) @import("testing").TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

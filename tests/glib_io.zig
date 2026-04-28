@@ -16,7 +16,7 @@ test "glib/io/unit/std" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(std, .io);
+    var t = glib.testing.T.new(std, gstd.runtime.time, .io);
     defer t.deinit();
 
     t.run("glib/io/unit/std", glib.io.test_runner.unit.make(std));
@@ -28,7 +28,7 @@ test "glib/io/unit/gstd" {
 
     std.testing.log_level = .info;
 
-    var t = glib.testing.T.new(gstd.runtime.std, .io);
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .io);
     defer t.deinit();
 
     t.run("glib/io/unit/gstd", glib.io.test_runner.unit.make(gstd.runtime.std));

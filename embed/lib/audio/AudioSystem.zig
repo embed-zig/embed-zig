@@ -454,12 +454,17 @@ pub fn Builder(comptime grt: type) type {
                 fn sleepForSamples(sample_count: usize, sample_rate: u32) void {
                     if (sample_count == 0 or sample_rate == 0) return;
 
-                    const sleep_ns_128 = (@as(u128, sample_count) * @as(u128, grt.std.time.ns_per_s)) /
-                        @as(u128, sample_rate);
-                    if (sleep_ns_128 == 0) return;
+                    const duration = durationForSamples(sample_count, sample_rate);
+                    if (duration <= 0) return;
+                    grt.std.Thread.sleep(@intCast(duration));
+                }
 
-                    const sleep_ns: u64 = @intCast(@min(sleep_ns_128, @as(u128, grt.std.math.maxInt(u64))));
-                    grt.std.Thread.sleep(sleep_ns);
+                fn durationForSamples(sample_count: usize, sample_rate: u32) glib.time.duration.Duration {
+                    if (sample_count == 0 or sample_rate == 0) return 0;
+
+                    const duration_128 = (@as(u128, sample_count) * @as(u128, @intCast(grt.time.duration.Second))) /
+                        @as(u128, sample_rate);
+                    return @intCast(@min(duration_128, @as(u128, @intCast(glib.time.duration.Maximum))));
                 }
 
                 fn referenceChunkLen(input_len: usize, input_rate: u32, output_rate: u32) Error!usize {
@@ -503,37 +508,35 @@ pub fn Builder(comptime grt: type) type {
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         /// Upper bound for polling async read/write loops in these unit tests (success is usually ms-scale).
-        const test_async_wait_ns: i128 = 5 * grt.std.time.ns_per_s;
+        const test_async_wait: glib.time.duration.Duration = 5 * grt.time.duration.Second;
 
-        /// Poll `read` until samples arrive or `max_wait_ns` elapses. Avoids tying
+        /// Poll `read` until samples arrive or `max_wait` elapses. Avoids tying
         /// readiness to a fixed iteration count (brittle under slow scheduling / CI).
-        fn pollReadSamples(system: anytype, out: []i16, max_wait_ns: i128) !usize {
+        fn pollReadSamples(system: anytype, out: []i16, max_wait: glib.time.duration.Duration) !usize {
             const Thread = grt.std.Thread;
-            const time = grt.std.time;
-            const deadline: i128 = time.nanoTimestamp() + max_wait_ns;
-            while (time.nanoTimestamp() < deadline) {
+            const deadline = glib.time.instant.add(grt.time.instant.now(), max_wait);
+            while (grt.time.instant.now() < deadline) {
                 const n = system.read(out) catch |err| switch (err) {
                     error.WouldBlock => {
-                        Thread.sleep(time.ns_per_ms);
+                        Thread.sleep(@intCast(grt.time.duration.MilliSecond));
                         continue;
                     },
                     else => return err,
                 };
                 if (n > 0) return n;
-                Thread.sleep(time.ns_per_ms);
+                Thread.sleep(@intCast(grt.time.duration.MilliSecond));
             }
             return 0;
         }
 
-        fn waitSpeakerWrites(ctx: anytype, deadline_ns: i128) bool {
+        fn waitSpeakerWrites(ctx: anytype, deadline: glib.time.instant.Time) bool {
             const Thread = grt.std.Thread;
-            const time = grt.std.time;
-            while (time.nanoTimestamp() < deadline_ns) {
+            while (grt.time.instant.now() < deadline) {
                 ctx.mu.lock();
                 const w = ctx.writes;
                 ctx.mu.unlock();
                 if (w > 0) return true;
-                Thread.sleep(time.ns_per_ms);
+                Thread.sleep(@intCast(grt.time.duration.MilliSecond));
             }
             return false;
         }
@@ -655,7 +658,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
         fn readLoopBuffersProcessedAudio(alloc: glib.std.mem.Allocator) !void {
             const Thread = grt.std.Thread;
-            const time = grt.std.time;
             const TestMic = MicMod.make(grt, 1, 4);
             const TestSpeaker = SpeakerMod.make(grt, 4);
             const ProcessorBackend = struct {
@@ -791,12 +793,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             defer system.stop() catch {};
 
             var out: [8]i16 = @splat(0);
-            const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
+            const n = try pollReadSamples(&system, out[0..], test_async_wait);
             try grt.std.testing.expect(n > 0);
             try grt.std.testing.expect(out[0] != 0);
 
             // writeLoop may lag readLoop; don't assert speaker writes synchronously.
-            try grt.std.testing.expect(waitSpeakerWrites(&speaker_ctx, time.nanoTimestamp() + test_async_wait_ns));
+            try grt.std.testing.expect(waitSpeakerWrites(&speaker_ctx, glib.time.instant.add(grt.time.instant.now(), test_async_wait)));
         }
 
         fn readReturnsWouldBlockWhenRunningAndEmpty(alloc: glib.std.mem.Allocator) !void {
@@ -942,7 +944,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectError(error.WouldBlock, system.read(out[0..]));
 
             ProcessorBackend.emit.store(true, .release);
-            const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
+            const n = try pollReadSamples(&system, out[0..], test_async_wait);
             try grt.std.testing.expect(n > 0);
         }
 
@@ -1032,14 +1034,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             defer system.stop() catch {};
 
             var out: [8]i16 = @splat(0);
-            const n = try pollReadSamples(&system, out[0..], test_async_wait_ns);
+            const n = try pollReadSamples(&system, out[0..], test_async_wait);
             try grt.std.testing.expect(n > 0);
             try grt.std.testing.expect(out[0] != 0);
         }
 
         fn startAllowsSpeakerOnlyMode(alloc: glib.std.mem.Allocator) !void {
             const Thread = grt.std.Thread;
-            const time = grt.std.time;
             const TestSpeaker = SpeakerMod.make(grt, 4);
             const TestMic = MicMod.make(grt, 1, 4);
             const ProcessorBackend = struct {
@@ -1123,7 +1124,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var out: [4]i16 = @splat(0);
             try grt.std.testing.expectError(error.InvalidState, system.read(out[0..]));
 
-            const deadline = time.nanoTimestamp() + test_async_wait_ns;
+            const deadline = glib.time.instant.add(grt.time.instant.now(), test_async_wait);
             try grt.std.testing.expect(waitSpeakerWrites(&speaker_ctx, deadline));
         }
     };

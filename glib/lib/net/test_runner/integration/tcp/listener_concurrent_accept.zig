@@ -3,7 +3,7 @@ const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 320 * 1024 },
 
@@ -12,13 +12,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
+                fn call(a: std.mem.Allocator) !void {
                     const Net = net;
-                    const Thread = lib.Thread;
-                    const ReadyCounter = test_utils.ReadyCounter(lib);
+                    const Thread = std.Thread;
+                    const ReadyCounter = test_utils.ReadyCounter(std);
 
                     const client_msg_len = "client1".len;
 
@@ -39,8 +39,8 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                             };
                             defer conn.deinit();
 
-                            conn.setReadTimeout(10_000);
-                            conn.setWriteTimeout(10_000);
+                            conn.setReadDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
+                            conn.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
 
                             io.readFull(@TypeOf(conn), &conn, ctx.payload[0..client_msg_len]) catch |err| {
                                 ctx.result = err;
@@ -74,19 +74,19 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     var c2 = try Net.dial(a, .tcp, dest);
                     defer c2.deinit();
 
-                    c1.setReadTimeout(10_000);
-                    c1.setWriteTimeout(10_000);
-                    c2.setReadTimeout(10_000);
-                    c2.setWriteTimeout(10_000);
+                    c1.setReadDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
+                    c1.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
+                    c2.setReadDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
+                    c2.setWriteDeadline(net.time.instant.add(net.time.instant.now(), 10_000 * net.time.duration.MilliSecond));
 
                     try io.writeAll(@TypeOf(c1), &c1, "client1");
                     try io.writeAll(@TypeOf(c2), &c2, "client2");
 
                     var ack: [3]u8 = undefined;
                     try io.readFull(@TypeOf(c1), &c1, &ack);
-                    try lib.testing.expectEqualStrings("ack", &ack);
+                    try std.testing.expectEqualStrings("ack", &ack);
                     try io.readFull(@TypeOf(c2), &c2, &ack);
-                    try lib.testing.expectEqualStrings("ack", &ack);
+                    try std.testing.expectEqualStrings("ack", &ack);
 
                     t1.join();
                     t2.join();
@@ -97,9 +97,9 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
                     const got1 = accept1.payload[0..accept1.len];
                     const got2 = accept2.payload[0..accept2.len];
                     const ok =
-                        (lib.mem.eql(u8, got1, "client1") and lib.mem.eql(u8, got2, "client2")) or
-                        (lib.mem.eql(u8, got1, "client2") and lib.mem.eql(u8, got2, "client1"));
-                    try lib.testing.expect(ok);
+                        (std.mem.eql(u8, got1, "client1") and std.mem.eql(u8, got2, "client2")) or
+                        (std.mem.eql(u8, got1, "client2") and std.mem.eql(u8, got2, "client1"));
+                    try std.testing.expect(ok);
                 }
             };
             Body.call(allocator) catch |err| {

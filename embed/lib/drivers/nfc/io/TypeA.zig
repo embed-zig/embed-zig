@@ -11,7 +11,7 @@ const TypeA = @This();
 ptr: *anyopaque,
 vtable: *const VTable,
 
-pub const max_timeout_ms: u32 = 30_000;
+pub const max_timeout: glib.time.duration.Duration = 30 * glib.time.duration.Second;
 
 pub const Error = error{
     Timeout,
@@ -27,7 +27,7 @@ pub const Error = error{
 pub const Exchange = struct {
     tx: []const u8,
     tx_bits: usize,
-    timeout_ms: u32,
+    timeout: glib.time.duration.Duration,
     tx_crc: bool = false,
     rx_crc: bool = false,
     reset_collision: bool = false,
@@ -40,8 +40,8 @@ pub const VTable = struct {
 pub fn transceive(self: TypeA, exchange: Exchange, rx: []u8) Error!usize {
     if (exchange.tx.len == 0) return error.InvalidArgument;
     if (exchange.tx_bits == 0) return error.InvalidArgument;
-    if (exchange.timeout_ms == 0) return error.InvalidArgument;
-    if (exchange.timeout_ms > max_timeout_ms) return error.InvalidArgument;
+    if (exchange.timeout <= 0) return error.InvalidArgument;
+    if (exchange.timeout > max_timeout) return error.InvalidArgument;
     if (exchange.tx_bits > exchange.tx.len * 8) return error.InvalidArgument;
     return self.vtable.transceive(self.ptr, exchange, rx);
 }
@@ -78,7 +78,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 last_tx: [8]u8 = [_]u8{0} ** 8,
                 last_tx_len: usize = 0,
                 last_tx_bits: usize = 0,
-                last_timeout_ms: u32 = 0,
+                last_timeout: glib.time.duration.Duration = 0,
                 last_tx_crc: bool = false,
                 last_rx_crc: bool = false,
                 last_reset_collision: bool = false,
@@ -86,7 +86,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 fn transceive(self: *@This(), exchange: Exchange, rx: []u8) Error!usize {
                     self.last_tx_len = exchange.tx.len;
                     self.last_tx_bits = exchange.tx_bits;
-                    self.last_timeout_ms = exchange.timeout_ms;
+                    self.last_timeout = exchange.timeout;
                     self.last_tx_crc = exchange.tx_crc;
                     self.last_rx_crc = exchange.rx_crc;
                     self.last_reset_collision = exchange.reset_collision;
@@ -104,7 +104,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const bits = try type_a.transceive(.{
                 .tx = &.{0x26},
                 .tx_bits = 7,
-                .timeout_ms = 1,
+                .timeout = glib.time.duration.MilliSecond,
                 .tx_crc = false,
                 .rx_crc = false,
                 .reset_collision = true,
@@ -113,7 +113,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 16), bits);
             try grt.std.testing.expectEqual(@as(usize, 1), fake.last_tx_len);
             try grt.std.testing.expectEqual(@as(usize, 7), fake.last_tx_bits);
-            try grt.std.testing.expectEqual(@as(u32, 1), fake.last_timeout_ms);
+            try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, glib.time.duration.MilliSecond), fake.last_timeout);
             try grt.std.testing.expect(!fake.last_tx_crc);
             try grt.std.testing.expect(!fake.last_rx_crc);
             try grt.std.testing.expect(fake.last_reset_collision);
@@ -138,38 +138,38 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectError(error.Timeout, type_a.transceive(.{
                 .tx = &.{0x00},
                 .tx_bits = 8,
-                .timeout_ms = 1,
+                .timeout = glib.time.duration.MilliSecond,
             }, &rx));
 
             fake.fail = false;
             try grt.std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
                 .tx = &.{0x00},
                 .tx_bits = 9,
-                .timeout_ms = 1,
+                .timeout = glib.time.duration.MilliSecond,
             }, &rx));
 
             try grt.std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
                 .tx = &.{0x00},
                 .tx_bits = 8,
-                .timeout_ms = 0,
+                .timeout = 0,
             }, &rx));
 
             try grt.std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
                 .tx = &.{},
                 .tx_bits = 0,
-                .timeout_ms = 1,
+                .timeout = glib.time.duration.MilliSecond,
             }, &rx));
 
             try grt.std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
                 .tx = &.{0x00},
                 .tx_bits = 0,
-                .timeout_ms = 1,
+                .timeout = glib.time.duration.MilliSecond,
             }, &rx));
 
             try grt.std.testing.expectError(error.InvalidArgument, type_a.transceive(.{
                 .tx = &.{0x00},
                 .tx_bits = 8,
-                .timeout_ms = max_timeout_ms + 1,
+                .timeout = max_timeout + glib.time.duration.MilliSecond,
             }, &rx));
         }
     };

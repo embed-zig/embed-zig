@@ -2,7 +2,7 @@ const stdz = @import("stdz");
 const test_utils = @import("../tcp/test_utils.zig");
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
+pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
         spawn_config: stdz.Thread.SpawnConfig = .{ .stack_size = 192 * 1024 },
 
@@ -11,13 +11,13 @@ pub fn make(comptime lib: type, comptime net: type) testing_api.TestRunner {
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
 
             const Body = struct {
-                fn call(a: lib.mem.Allocator) !void {
-                    const ReadyCounter = test_utils.ReadyCounter(lib);
-                    const Thread = lib.Thread;
+                fn call(a: std.mem.Allocator) !void {
+                    const ReadyCounter = test_utils.ReadyCounter(std);
+                    const Thread = std.Thread;
 
                     const ErrorSlot = struct {
                         mutex: Thread.Mutex = .{},

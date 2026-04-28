@@ -13,7 +13,7 @@ pub const multi_thread = @import("context/multi_thread.zig");
 pub const value = @import("context/value.zig");
 pub const wait = @import("context/wait.zig");
 
-pub fn make(comptime lib: type) testing_mod.TestRunner {
+pub fn make(comptime std: type, comptime time: type) testing_mod.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
             _ = self;
@@ -24,18 +24,18 @@ pub fn make(comptime lib: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("background", background.make(lib));
+            t.run("background", background.make(std, time));
             if (builtin.target.os.tag != .windows) {
-                t.run("bind_fd", bind_fd.make(lib));
+                t.run("bind_fd", bind_fd.make(std, time));
             }
-            t.run("cancel/basic", cancel_basic.make(lib));
-            t.run("cancel/cause", cancel_cause.make(lib));
-            t.run("cancel/propagation", cancel_propagation.make(lib));
-            t.run("deadline", deadline.make(lib));
-            t.run("lifecycle", lifecycle.make(lib));
-            t.run("multi_thread", multi_thread.make(lib));
-            t.run("value", value.make(lib));
-            t.run("wait", wait.make(lib));
+            t.run("cancel/basic", cancel_basic.make(std, time));
+            t.run("cancel/cause", cancel_cause.make(std, time));
+            t.run("cancel/propagation", cancel_propagation.make(std, time));
+            t.run("deadline", deadline.make(std, time));
+            t.run("lifecycle", lifecycle.make(std, time));
+            t.run("multi_thread", multi_thread.make(std, time));
+            t.run("value", value.make(std, time));
+            t.run("wait", wait.make(std, time));
             return t.wait();
         }
 

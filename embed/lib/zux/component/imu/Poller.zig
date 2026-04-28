@@ -1,3 +1,4 @@
+const glib = @import("glib");
 const drivers = @import("drivers");
 
 const Context = @import("../../event/Context.zig");
@@ -12,18 +13,18 @@ pub fn make(comptime grt: type) type {
             Unexpected,
         };
 
-        pub const default_poll_interval_ns: u64 = 10 * grt.std.time.ns_per_ms;
+        pub const default_poll_interval: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond;
 
         pub const Config = struct {
             source_id: u32,
-            poll_interval_ns: u64 = default_poll_interval_ns,
+            poll_interval: glib.time.duration.Duration = default_poll_interval,
             spawn_config: grt.std.Thread.SpawnConfig = .{},
             ctx: Context.Type = null,
         };
 
         imu: drivers.imu,
         source_id: u32,
-        poll_interval_ns: u64 = default_poll_interval_ns,
+        poll_interval: glib.time.duration.Duration = default_poll_interval,
         spawn_config: grt.std.Thread.SpawnConfig = .{},
         ctx: Context.Type = null,
         out: ?Emitter = null,
@@ -36,7 +37,7 @@ pub fn make(comptime grt: type) type {
             return .{
                 .imu = imu,
                 .source_id = config.source_id,
-                .poll_interval_ns = config.poll_interval_ns,
+                .poll_interval = config.poll_interval,
                 .spawn_config = config.spawn_config,
                 .ctx = config.ctx,
             };
@@ -112,7 +113,7 @@ pub fn make(comptime grt: type) type {
                             return;
                         },
                         .source_id = self.source_id,
-                        .poll_interval_ns = self.poll_interval_ns,
+                        .poll_interval = self.poll_interval,
                         .ctx = self.ctx,
                     };
                 };
@@ -121,20 +122,20 @@ pub fn make(comptime grt: type) type {
                     self.failAsync();
                 };
 
-                if (snapshot.poll_interval_ns > 0) {
-                    grt.std.Thread.sleep(snapshot.poll_interval_ns);
+                if (snapshot.poll_interval > 0) {
+                    grt.std.Thread.sleep(@intCast(snapshot.poll_interval));
                 }
             }
         }
 
         fn pollOnce(self: *Self, out: Emitter, source_id: u32, ctx: Context.Type) !void {
             const sample = try self.imu.read();
-            const timestamp_ns = grt.std.time.nanoTimestamp();
+            const timestamp = grt.time.instant.now();
 
             if (sample.accel) |accel| {
                 try out.emit(.{
                     .origin = .source,
-                    .timestamp_ns = timestamp_ns,
+                    .timestamp = timestamp,
                     .body = .{
                         .raw_imu_accel = .{
                             .source_id = source_id,
@@ -150,7 +151,7 @@ pub fn make(comptime grt: type) type {
             if (sample.gyro) |gyro| {
                 try out.emit(.{
                     .origin = .source,
-                    .timestamp_ns = timestamp_ns,
+                    .timestamp = timestamp,
                     .body = .{
                         .raw_imu_gyro = .{
                             .source_id = source_id,

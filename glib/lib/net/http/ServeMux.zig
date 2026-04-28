@@ -6,15 +6,15 @@ const handler_mod = @import("Handler.zig");
 const mux_common = @import("mux_common.zig");
 const testing_api = @import("testing");
 
-pub fn ServeMux(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
-    const Handler = handler_mod.Handler(lib);
-    const HandlerFunc = handler_mod.HandlerFunc(lib);
-    const Writer = ResponseWriter(lib);
+pub fn ServeMux(comptime std: type) type {
+    const Allocator = std.mem.Allocator;
+    const Handler = handler_mod.Handler(std);
+    const HandlerFunc = handler_mod.HandlerFunc(std);
+    const Writer = ResponseWriter(std);
 
     return struct {
         allocator: Allocator,
-        routes: lib.ArrayList(Route) = .{},
+        routes: std.ArrayList(Route) = .{},
 
         const Self = @This();
 
@@ -64,27 +64,27 @@ pub fn ServeMux(comptime lib: type) type {
 
         pub fn serveHTTP(self: *Self, rw: *Writer, req: *Request) void {
             const path = mux_common.requestPath(req);
-            const cleaned = mux_common.cleanPath(lib, self.allocator, path) catch path;
+            const cleaned = mux_common.cleanPath(std, self.allocator, path) catch path;
             const owns_cleaned = cleaned.ptr != path.ptr;
             defer if (owns_cleaned) self.allocator.free(cleaned);
 
-            if (!lib.mem.eql(u8, cleaned, path)) {
-                mux_common.redirectTo(lib, rw, cleaned);
+            if (!std.mem.eql(u8, cleaned, path)) {
+                mux_common.redirectTo(std, rw, cleaned);
                 return;
             }
 
             if (self.needsTrailingSlashRedirect(cleaned)) {
                 const target = mux_common.appendSlash(self.allocator, cleaned) catch {
-                    mux_common.notFound(lib, rw);
+                    mux_common.notFound(std, rw);
                     return;
                 };
                 defer self.allocator.free(target);
-                mux_common.redirectTo(lib, rw, target);
+                mux_common.redirectTo(std, rw, target);
                 return;
             }
 
             const route = self.bestRoute(cleaned) orelse {
-                mux_common.notFound(lib, rw);
+                mux_common.notFound(std, rw);
                 return;
             };
             route.handler.serveHTTP(rw, req);
@@ -92,7 +92,7 @@ pub fn ServeMux(comptime lib: type) type {
 
         fn hasPattern(self: *const Self, pattern: []const u8) bool {
             for (self.routes.items) |route| {
-                if (lib.mem.eql(u8, route.pattern, pattern)) return true;
+                if (std.mem.eql(u8, route.pattern, pattern)) return true;
             }
             return false;
         }
@@ -115,7 +115,7 @@ pub fn ServeMux(comptime lib: type) type {
             const with_slash = mux_common.appendSlash(self.allocator, path) catch return false;
             defer self.allocator.free(with_slash);
             for (self.routes.items) |route| {
-                if (route.kind == .subtree and lib.mem.eql(u8, route.pattern, with_slash)) return true;
+                if (route.kind == .subtree and std.mem.eql(u8, route.pattern, with_slash)) return true;
             }
             return false;
         }
@@ -123,20 +123,20 @@ pub fn ServeMux(comptime lib: type) type {
         fn matches(route: Route, path: []const u8) bool {
             return switch (route.kind) {
                 .catch_all => true,
-                .exact => lib.mem.eql(u8, route.pattern, path),
-                .subtree => lib.mem.startsWith(u8, path, route.pattern),
+                .exact => std.mem.eql(u8, route.pattern, path),
+                .subtree => std.mem.startsWith(u8, path, route.pattern),
             };
         }
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const Mux = ServeMux(lib);
-            const H = handler_mod.Handler(lib);
-            const Writer = ResponseWriter(lib);
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const Mux = ServeMux(std);
+            const H = handler_mod.Handler(std);
+            const Writer = ResponseWriter(std);
 
             {
                 const Demo = struct {

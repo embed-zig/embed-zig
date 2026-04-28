@@ -1,9 +1,10 @@
+const time_mod = @import("time");
 const NetConn = @import("../Conn.zig");
 const Session = @import("Session.zig");
 
-pub fn make(comptime lib: type) type {
-    const Allocator = lib.mem.Allocator;
-    const SessionType = Session.make(lib);
+pub fn make(comptime std: type, comptime time: type) type {
+    const Allocator = std.mem.Allocator;
+    const SessionType = Session.make(std, time);
 
     return struct {
         allocator: Allocator,
@@ -48,13 +49,12 @@ pub fn make(comptime lib: type) type {
             self.allocator.destroy(self);
         }
 
-        pub fn setReadTimeout(self: *Self, ms: ?u32) void {
-            self.session.setChannelReadTimeout(self.channel, ms);
+        pub fn setReadDeadline(self: *Self, deadline: ?time_mod.instant.Time) void {
+            self.session.setChannelReadDeadline(self.channel, deadline);
         }
 
-        pub fn setWriteTimeout(self: *Self, ms: ?u32) void {
-            self.session.setChannelWriteTimeout(self.channel, ms);
+        pub fn setWriteDeadline(self: *Self, deadline: ?time_mod.instant.Time) void {
+            self.session.setChannelWriteDeadline(self.channel, deadline);
         }
     };
 }
-

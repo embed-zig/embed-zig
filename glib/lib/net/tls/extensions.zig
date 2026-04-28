@@ -1,10 +1,10 @@
 const testing_api = @import("testing");
 
-pub fn make(comptime lib: type) type {
-    const common = @import("common.zig").make(lib);
-    const Allocator = lib.mem.Allocator;
-    const ArrayList = lib.ArrayList;
-    const mem = lib.mem;
+pub fn make(comptime std: type) type {
+    const common = @import("common.zig").make(std);
+    const Allocator = std.mem.Allocator;
+    const ArrayList = std.ArrayList;
+    const mem = std.mem;
 
     return struct {
         pub const ExtensionError = error{
@@ -338,12 +338,12 @@ pub fn make(comptime lib: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
-            const common = @import("common.zig").make(lib);
-            const extensions = make(lib);
+pub fn TestRunner(comptime std: type) testing_api.TestRunner {
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
+            const common = @import("common.zig").make(std);
+            const extensions = make(std);
 
             {
                 var buf: [256]u8 = undefined;
@@ -366,7 +366,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
 
                 const data = builder.getData();
                 try testing.expect(data.len >= 9);
-                try testing.expectEqual(@as(u16, @intFromEnum(common.ExtensionType.supported_versions)), lib.mem.readInt(u16, data[0..2], .big));
+                try testing.expectEqual(@as(u16, @intFromEnum(common.ExtensionType.supported_versions)), std.mem.readInt(u16, data[0..2], .big));
                 try testing.expectEqual(@as(u8, 4), data[4]);
             }
 
@@ -424,7 +424,7 @@ pub fn TestRunner(comptime lib: type) testing_api.TestRunner {
                 defer allocator.free(exts);
 
                 const alpn = extensions.findExtension(exts, common.ExtensionType.application_layer_protocol_negotiation) orelse return error.TestUnexpectedResult;
-                try testing.expectEqualStrings("h2", (try extensions.findMatchingAlpn(alpn.data, &.{ "h2" })).?);
+                try testing.expectEqualStrings("h2", (try extensions.findMatchingAlpn(alpn.data, &.{"h2"})).?);
             }
 
             try testing.expectEqualStrings("h2", try extensions.parseSelectedAlpn(&.{ 0x00, 0x03, 0x02, 'h', '2' }));

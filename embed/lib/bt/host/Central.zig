@@ -12,9 +12,9 @@ const gatt_client = @import("gatt/client.zig");
 pub fn make(comptime grt: type) type {
     return struct {
         const Self = @This();
-        const POLL_INTERVAL_NS: u64 = 1_000_000;
-        const MIN_WAIT_TIMEOUT_MS: u32 = 1000;
-        const CONNECT_TIMEOUT_MS: u32 = 5000;
+        const poll_interval: glib.time.duration.Duration = glib.time.duration.MilliSecond;
+        const min_wait_timeout: glib.time.duration.Duration = glib.time.duration.Second;
+        const connect_timeout: glib.time.duration.Duration = 5 * glib.time.duration.Second;
         const CCCD_DISCOVERY_MAX_ATTEMPTS: u32 = 3;
 
         hci: bt.Hci,
@@ -142,8 +142,8 @@ pub fn make(comptime grt: type) type {
             self.state = .scanning;
             self.hci.startScanning(.{
                 .active = config.active,
-                .interval = @max(1, config.interval_ms * 16 / 10),
-                .window = @max(1, config.window_ms * 16 / 10),
+                .interval = durationToScanUnits(config.interval),
+                .window = durationToScanUnits(config.window),
                 .filter_duplicates = config.filter_duplicates,
             }) catch |err| return switch (err) {
                 error.Busy => blk: {
@@ -155,6 +155,13 @@ pub fn make(comptime grt: type) type {
                     break :blk error.Unexpected;
                 },
             };
+        }
+
+        fn durationToScanUnits(duration: glib.time.duration.Duration) u16 {
+            if (duration <= 0) return 1;
+            const units = (@as(u128, @intCast(duration)) * 16) /
+                @as(u128, @intCast(10 * glib.time.duration.MilliSecond));
+            return @intCast(@min(@max(units, 1), glib.std.math.maxInt(u16)));
         }
 
         pub fn stopScanning(self: *Self) void {
@@ -174,7 +181,7 @@ pub fn make(comptime grt: type) type {
                 .interval_min = params.interval_min,
                 .interval_max = params.interval_max,
                 .latency = params.latency,
-                .timeout = params.timeout,
+                .supervision_timeout = params.supervision_timeout,
             }) catch |err| return switch (err) {
                 error.Timeout => error.Timeout,
                 error.Busy, error.Rejected => error.Rejected,
@@ -182,14 +189,14 @@ pub fn make(comptime grt: type) type {
             };
             self.state = .connecting;
 
-            var waited_ms: u32 = 0;
-            while (self.hci.isConnectingCentral()) : (waited_ms += 1) {
-                if (waited_ms >= CONNECT_TIMEOUT_MS) {
+            var waited: glib.time.duration.Duration = 0;
+            while (self.hci.isConnectingCentral()) : (waited += poll_interval) {
+                if (waited >= connect_timeout) {
                     self.hci.cancelConnect();
                     self.state = .idle;
                     return error.Timeout;
                 }
-                grt.std.Thread.sleep(POLL_INTERVAL_NS);
+                grt.std.Thread.sleep(@intCast(poll_interval));
             }
             const link = self.hci.getLink(.central) orelse {
                 self.state = .idle;
@@ -207,14 +214,14 @@ pub fn make(comptime grt: type) type {
         }
 
         pub fn disconnect(self: *Self, conn_handle: u16) void {
-            const wait_timeout_ms = if (self.hci.getLinkByHandle(conn_handle)) |link|
-                @max(MIN_WAIT_TIMEOUT_MS, @as(u32, link.timeout) * 10)
+            const wait_timeout = if (self.hci.getLinkByHandle(conn_handle)) |link|
+                @max(min_wait_timeout, link.supervision_timeout)
             else
-                MIN_WAIT_TIMEOUT_MS;
+                min_wait_timeout;
             self.hci.disconnect(conn_handle, 0x13);
-            var waited_ms: u32 = 0;
-            while (self.hci.getLinkByHandle(conn_handle) != null and waited_ms < wait_timeout_ms) : (waited_ms += 1) {
-                grt.std.Thread.sleep(POLL_INTERVAL_NS);
+            var waited: glib.time.duration.Duration = 0;
+            while (self.hci.getLinkByHandle(conn_handle) != null and waited < wait_timeout) : (waited += poll_interval) {
+                grt.std.Thread.sleep(@intCast(poll_interval));
             }
             if (self.hci.getLinkByHandle(conn_handle) == null) {
                 self.state = .idle;
@@ -433,7 +440,7 @@ pub fn make(comptime grt: type) type {
                 const find_resp = self.sendAttRequest(conn_handle, find_req, resp_buf) catch |err| switch (err) {
                     error.Timeout => {
                         if (attempt + 1 < CCCD_DISCOVERY_MAX_ATTEMPTS) {
-                            grt.std.Thread.sleep(POLL_INTERVAL_NS);
+                            grt.std.Thread.sleep(@intCast(poll_interval));
                             continue;
                         }
                         return error.Timeout;
@@ -462,7 +469,7 @@ pub fn make(comptime grt: type) type {
                 },
                 .interval = link.interval,
                 .latency = link.latency,
-                .timeout = link.timeout,
+                .supervision_timeout = link.supervision_timeout,
             };
         }
 
@@ -594,6 +601,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn run() !void {
             const Impl = make(grt);
+
+            try grt.std.testing.expectEqual(@as(u16, 16), Impl.durationToScanUnits(10 * glib.time.duration.MilliSecond));
+            try grt.std.testing.expectEqual(@as(u16, 160), Impl.durationToScanUnits(100 * glib.time.duration.MilliSecond));
+            try grt.std.testing.expectEqual(@as(u16, 1), Impl.durationToScanUnits(0));
+            try grt.std.testing.expectEqual(@as(u16, 1), Impl.durationToScanUnits(-glib.time.duration.NanoSecond));
 
             const raw = [_]u8{
                 1,
@@ -741,7 +753,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .peer_addr_type = .public,
                         .interval = 0,
                         .latency = 0,
-                        .timeout = 0,
+                        .supervision_timeout = 0,
                     };
                 }
                 pub fn getLinkByHandle(_: *@This(), _: u16) ?bt.Hci.Link {

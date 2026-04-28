@@ -5,6 +5,7 @@
 //! the underlying node; those APIs must not deinit it.
 
 const stdz = @import("stdz");
+const time_mod = @import("time");
 const binding_link = @import("BindingLink.zig");
 
 const Context = @This();
@@ -32,11 +33,11 @@ pub const TreeLink = struct {
 pub const VTable = struct {
     errFn: *const fn (ptr: *anyopaque) ?anyerror,
     errNoLockFn: *const fn (ptr: *anyopaque) ?anyerror,
-    deadlineFn: *const fn (ptr: *anyopaque) ?i128,
-    deadlineNoLockFn: *const fn (ptr: *anyopaque) ?i128,
+    deadlineFn: *const fn (ptr: *anyopaque) ?time_mod.instant.Time,
+    deadlineNoLockFn: *const fn (ptr: *anyopaque) ?time_mod.instant.Time,
     valueFn: *const fn (ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque,
     valueNoLockFn: *const fn (ptr: *anyopaque, key: *const anyopaque) ?*const anyopaque,
-    waitFn: *const fn (ptr: *anyopaque, timeout_ns: ?i64) ?anyerror,
+    waitFn: *const fn (ptr: *anyopaque, timeout: ?time_mod.duration.Duration) ?anyerror,
     cancelFn: *const fn (ptr: *anyopaque) void,
     cancelWithCauseFn: *const fn (ptr: *anyopaque, cause: anyerror) void,
     propagateCancelWithCauseFn: *const fn (ptr: *anyopaque, cause: anyerror) void,
@@ -75,15 +76,15 @@ pub fn err(self: Context) ?anyerror {
     return self.vtable.errFn(self.ptr);
 }
 
-/// Returns the deadline (nanoTimestamp) if one is set, or null.
-pub fn deadline(self: Context) ?i128 {
+/// Returns the monotonic instant deadline if one is set, or null.
+pub fn deadline(self: Context) ?time_mod.instant.Time {
     return self.vtable.deadlineFn(self.ptr);
 }
 
 /// Block until canceled or timeout. Returns the cause error, or null if the
 /// timeout expired before cancellation.
-pub fn wait(self: Context, timeout_ns: ?i64) ?anyerror {
-    return self.vtable.waitFn(self.ptr, timeout_ns);
+pub fn wait(self: Context, timeout: ?time_mod.duration.Duration) ?anyerror {
+    return self.vtable.waitFn(self.ptr, timeout);
 }
 
 pub fn checkState(self: Context) StateError!void {
@@ -134,12 +135,8 @@ pub fn bindLink(self: Context, binding: ?BindingLink) error{AlreadyBound}!void {
     if (canceled_cause) |cause| binding.?.fire(cause);
 }
 
-pub fn fdLink(comptime lib: type, fd: *lib.posix.socket_t) BindingLink {
-    return BindingLink.fdLink(lib, fd);
-}
-
-pub fn bindFd(self: Context, comptime lib: type, fd: *lib.posix.socket_t) error{AlreadyBound}!void {
-    return self.bindLink(BindingLink.fdLink(lib, fd));
+pub fn bindFd(self: Context, comptime std: type, fd: *std.posix.socket_t) error{AlreadyBound}!void {
+    return self.bindLink(BindingLink.fdLink(std, fd));
 }
 
 pub fn as(self: Context, comptime T: type) error{TypeMismatch}!*T {

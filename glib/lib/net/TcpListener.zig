@@ -8,13 +8,13 @@ const Conn = @import("Conn.zig");
 const Listener = @import("Listener.zig");
 const tcp_conn = @import("TcpConn.zig");
 
-pub fn TcpListener(comptime lib: type, comptime net: type) type {
+pub fn TcpListener(comptime std: type, comptime net: type) type {
     const AddrPort = @import("netip/AddrPort.zig");
-    const Allocator = lib.mem.Allocator;
-    const Mutex = lib.Thread.Mutex;
+    const Allocator = std.mem.Allocator;
+    const Mutex = std.Thread.Mutex;
     const Runtime = net.Runtime;
     const RuntimeTcp = Runtime.Tcp;
-    const SC = tcp_conn.TcpConn(lib, net);
+    const SC = tcp_conn.TcpConn(std, net);
 
     return struct {
         socket: RuntimeTcp,
@@ -166,13 +166,13 @@ pub fn TcpListener(comptime lib: type, comptime net: type) type {
     };
 }
 
-pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").TestRunner {
+pub fn TestRunner(comptime std: type, comptime net: type) @import("testing").TestRunner {
     const testing_api = @import("testing");
-    return testing_api.TestRunner.fromFn(lib, 3 * 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const testing = lib.testing;
+    return testing_api.TestRunner.fromFn(std, 3 * 1024 * 1024, struct {
+        fn run(_: *testing_api.T, allocator: std.mem.Allocator) !void {
+            const testing = std.testing;
             const Addr = @import("netip/AddrPort.zig");
-            const TL = TcpListener(lib, net);
+            const TL = TcpListener(std, net);
 
             {
                 var ln = try TL.init(allocator, .{ .address = Addr.from4(.{ 127, 0, 0, 1 }, 0) });
@@ -192,6 +192,8 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
 
             {
                 const fake_net = struct {
+                    pub const time = net.time;
+
                     pub const Runtime = struct {
                         pub const Tcp = struct {
                             pub fn close(_: *@This()) void {}
@@ -220,7 +222,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                             pub fn setOpt(_: *@This(), _: @import("runtime.zig").TcpOption) @import("runtime.zig").SetSockOptError!void {
                                 return error.Unsupported;
                             }
-                            pub fn poll(_: *@This(), _: @import("runtime.zig").PollEvents, _: ?u32) @import("runtime.zig").PollError!@import("runtime.zig").PollEvents {
+                            pub fn poll(_: *@This(), _: @import("runtime.zig").PollEvents, _: ?@import("time").duration.Duration) @import("runtime.zig").PollError!@import("runtime.zig").PollEvents {
                                 return error.Unexpected;
                             }
                         };
@@ -253,7 +255,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                             pub fn setOpt(_: *@This(), _: @import("runtime.zig").UdpOption) @import("runtime.zig").SetSockOptError!void {
                                 return error.Unsupported;
                             }
-                            pub fn poll(_: *@This(), _: @import("runtime.zig").PollEvents, _: ?u32) @import("runtime.zig").PollError!@import("runtime.zig").PollEvents {
+                            pub fn poll(_: *@This(), _: @import("runtime.zig").PollEvents, _: ?@import("time").duration.Duration) @import("runtime.zig").PollError!@import("runtime.zig").PollEvents {
                                 return error.Unexpected;
                             }
                         };
@@ -271,7 +273,7 @@ pub fn TestRunner(comptime lib: type, comptime net: type) @import("testing").Tes
                         return if (addr.is4()) .inet else .inet6;
                     }
                 };
-                const FakeListener = TcpListener(lib, fake_net);
+                const FakeListener = TcpListener(std, fake_net);
 
                 try testing.expectError(error.Unsupported, FakeListener.init(allocator, .{
                     .address = Addr.from4(.{ 127, 0, 0, 1 }, 0),

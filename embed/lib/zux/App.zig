@@ -14,7 +14,7 @@ const SubscriberType = @import("store/Subscriber.zig");
 const root = @This();
 
 pub const Ticker = union(enum) {
-    interval_ms: u16,
+    interval: glib.time.duration.Duration,
     manual,
 };
 
@@ -24,7 +24,7 @@ pub const PollerStart = union(enum) {
 };
 
 pub const StartConfig = struct {
-    ticker: ?Ticker = .{ .interval_ms = 10 },
+    ticker: ?Ticker = .{ .interval = 10 * glib.time.duration.MilliSecond },
     poller: PollerStart = .default,
 };
 
@@ -316,9 +316,9 @@ pub fn make(comptime Impl: type) type {
         _ = @as(*const fn (*Impl, impl_periph_label, modem_api.Modem.GnssFix) anyerror!void, &Impl.modem_gnss_fix_changed);
         _ = @as(*const fn (*Impl, impl_periph_label, impl_frame_type, u8) anyerror!void, &Impl.set_led_strip_pixels);
         _ = @as(*const fn (*Impl, impl_periph_label, impl_frame_type, u8, u32) anyerror!void, &Impl.set_led_strip_animated);
-        _ = @as(*const fn (*Impl, impl_periph_label, impl_frame_type, u8, u64, u64) anyerror!void, &Impl.set_led_strip_flash);
-        _ = @as(*const fn (*Impl, impl_periph_label, impl_frame_type, impl_frame_type, u8, u64, u64) anyerror!void, &Impl.set_led_strip_pingpong);
-        _ = @as(*const fn (*Impl, impl_periph_label, impl_frame_type, u8, u64, u64) anyerror!void, &Impl.set_led_strip_rotate);
+        _ = @as(*const fn (*Impl, impl_periph_label, impl_frame_type, u8, glib.time.duration.Duration, glib.time.duration.Duration) anyerror!void, &Impl.set_led_strip_flash);
+        _ = @as(*const fn (*Impl, impl_periph_label, impl_frame_type, impl_frame_type, u8, glib.time.duration.Duration, glib.time.duration.Duration) anyerror!void, &Impl.set_led_strip_pingpong);
+        _ = @as(*const fn (*Impl, impl_periph_label, impl_frame_type, u8, glib.time.duration.Duration, glib.time.duration.Duration) anyerror!void, &Impl.set_led_strip_rotate);
         _ = @as(*const fn (*Impl, impl_periph_label, []const u8, drivers.nfc.CardType) anyerror!void, &Impl.nfc_found);
         _ = @as(*const fn (*Impl, impl_periph_label, []const u8, []const u8, drivers.nfc.CardType) anyerror!void, &Impl.nfc_read);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Sta.ScanResult) anyerror!void, &Impl.wifi_sta_scan_result);
@@ -537,10 +537,10 @@ pub fn make(comptime Impl: type) type {
             label: PeriphLabel,
             frame: FrameType,
             brightness: u8,
-            duration_ns: u64,
-            interval_ns: u64,
+            duration: glib.time.duration.Duration,
+            interval: glib.time.duration.Duration,
         ) !void {
-            try self.impl.set_led_strip_flash(label, frame, brightness, duration_ns, interval_ns);
+            try self.impl.set_led_strip_flash(label, frame, brightness, duration, interval);
         }
 
         pub fn set_led_strip_pingpong(
@@ -549,10 +549,10 @@ pub fn make(comptime Impl: type) type {
             from_frame: FrameType,
             to_frame: FrameType,
             brightness: u8,
-            duration_ns: u64,
-            interval_ns: u64,
+            duration: glib.time.duration.Duration,
+            interval: glib.time.duration.Duration,
         ) !void {
-            try self.impl.set_led_strip_pingpong(label, from_frame, to_frame, brightness, duration_ns, interval_ns);
+            try self.impl.set_led_strip_pingpong(label, from_frame, to_frame, brightness, duration, interval);
         }
 
         pub fn set_led_strip_rotate(
@@ -560,10 +560,10 @@ pub fn make(comptime Impl: type) type {
             label: PeriphLabel,
             frame: FrameType,
             brightness: u8,
-            duration_ns: u64,
-            interval_ns: u64,
+            duration: glib.time.duration.Duration,
+            interval: glib.time.duration.Duration,
         ) !void {
-            try self.impl.set_led_strip_rotate(label, frame, brightness, duration_ns, interval_ns);
+            try self.impl.set_led_strip_rotate(label, frame, brightness, duration, interval);
         }
 
         pub fn nfc_found(self: *Self, label: PeriphLabel, uid: []const u8, card_type: Nfc.CardType) !void {
