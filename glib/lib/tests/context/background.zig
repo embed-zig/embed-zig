@@ -3,6 +3,7 @@ const testing_mod = @import("testing");
 const context_root = @import("context");
 const time_mod = @import("time");
 const Context = context_root.Context;
+const context_std = @import("std.zig");
 const test_utils = @import("test_utils.zig");
 
 pub fn make(comptime std: type, comptime time: type) testing_mod.TestRunner {
@@ -80,12 +81,8 @@ fn backgroundDeadlineIsNullCase(comptime std: type, comptime time: type, allocat
 }
 
 fn backgroundWaitUsesThreadSleepCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
-    const CapturingThread = test_utils.CapturingSleepThreadType(std);
-    const FakeLib = struct {
-        pub const Thread = CapturingThread;
-        pub const mem = std.mem;
-        pub const DoublyLinkedList = std.DoublyLinkedList;
-    };
+    const CapturingThread = context_std.CapturingThread.make(std);
+    const FakeLib = context_std.make(std, .{ .Thread = CapturingThread });
     const FakeCtxApi = context_root.make(FakeLib, time);
     var fake_ctx_api = try FakeCtxApi.init(allocator);
     defer fake_ctx_api.deinit();

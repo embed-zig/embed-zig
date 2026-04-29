@@ -5,6 +5,7 @@ const time_mod = @import("time");
 
 const Context = context_root.Context;
 
+const context_std = @import("std.zig");
 const test_utils = @import("test_utils.zig");
 
 pub fn make(comptime std: type, comptime time: type) testing_mod.TestRunner {
@@ -241,12 +242,8 @@ fn deadlineSpuriousTimerWakeStillWaitsForDeadlineCase(comptime std: type, compti
 }
 
 fn deadlineSpawnFailureCancelsContextCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
-    const FailingThread = test_utils.FailingSpawnThreadType(std);
-    const FakeLib = struct {
-        pub const Thread = FailingThread;
-        pub const mem = std.mem;
-        pub const DoublyLinkedList = std.DoublyLinkedList;
-    };
+    const FailingThread = context_std.FailingThread.make(std);
+    const FakeLib = context_std.make(std, .{ .Thread = FailingThread });
     const FakeCtxApi = context_root.make(FakeLib, time);
     var fake_ctx_api = try FakeCtxApi.init(allocator);
     defer fake_ctx_api.deinit();
@@ -261,11 +258,7 @@ fn deadlineSpawnFailureCancelsContextCase(comptime std: type, comptime time: typ
 
 fn deadlineDeinitJoinsTimerThreadCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
     const CountingThread = test_utils.CountingJoinThreadType(std);
-    const FakeLib = struct {
-        pub const Thread = CountingThread;
-        pub const mem = std.mem;
-        pub const DoublyLinkedList = std.DoublyLinkedList;
-    };
+    const FakeLib = context_std.make(std, .{ .Thread = CountingThread });
     const FakeCtxApi = context_root.make(FakeLib, time);
     var fake_ctx_api = try FakeCtxApi.init(allocator);
     defer fake_ctx_api.deinit();
@@ -281,11 +274,7 @@ fn deadlineDeinitJoinsTimerThreadCase(comptime std: type, comptime time: type, a
 
 fn deadlineReparentedChildKeepsOwnDeadlineCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
     const ReparentThread = test_utils.ReparentGateThreadType(std);
-    const FakeLib = struct {
-        pub const Thread = ReparentThread;
-        pub const mem = std.mem;
-        pub const DoublyLinkedList = std.DoublyLinkedList;
-    };
+    const FakeLib = context_std.make(std, .{ .Thread = ReparentThread });
     const FakeCtxApi = context_root.make(FakeLib, time);
     var fake_ctx_api = try FakeCtxApi.init(allocator);
     defer fake_ctx_api.deinit();
@@ -325,11 +314,7 @@ fn deadlineReparentedChildKeepsOwnDeadlineCase(comptime std: type, comptime time
 
 fn deadlineParentCancelDoesNotReenterSharedLockUnderPendingWriterCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
     const TrackingThread = test_utils.SharedLockTrackingThreadType(std);
-    const FakeLib = struct {
-        pub const Thread = TrackingThread;
-        pub const mem = std.mem;
-        pub const DoublyLinkedList = std.DoublyLinkedList;
-    };
+    const FakeLib = context_std.make(std, .{ .Thread = TrackingThread });
     const FakeCtxApi = context_root.make(FakeLib, time);
     var fake_ctx_api = try FakeCtxApi.init(allocator);
     defer fake_ctx_api.deinit();

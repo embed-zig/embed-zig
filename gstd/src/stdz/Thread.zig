@@ -17,8 +17,6 @@ const contract_max_name_len = 128;
 // Zig 0.15 does not expose Linux _SC_THREAD_STACK_MIN in std.c._SC. Both glibc
 // and musl use this sysconf id, and pthreads rejects stacks below its value.
 const linux_sc_thread_stack_min: c_int = 75;
-const linux_pthread_stack_min_fallback = 128 * 1024;
-
 pub const default_stack_size = std.Thread.SpawnConfig.default_stack_size;
 
 pub const Id = std.Thread.Id;
@@ -44,11 +42,9 @@ pub fn spawn(config: glib.std.Thread.SpawnConfig, comptime f: anytype, args: any
 
 fn normalizeStackSize(stack_size: usize) usize {
     if (comptime native_os == .linux and std.Thread.use_pthreads) {
-        const pthread_stack_min = blk: {
-            const min = std.c.sysconf(linux_sc_thread_stack_min);
-            if (min > 0) break :blk @as(usize, @intCast(min));
-            break :blk linux_pthread_stack_min_fallback;
-        };
+        const min = std.c.sysconf(linux_sc_thread_stack_min);
+        if (min <= 0) return stack_size;
+        const pthread_stack_min: usize = @intCast(min);
         return @max(stack_size, pthread_stack_min);
     }
     return stack_size;

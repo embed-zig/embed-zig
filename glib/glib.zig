@@ -91,7 +91,9 @@ pub const std = struct {
     pub const test_runner = tests_mod.std;
 };
 pub const testing = struct {
+    pub const std = testing_mod.std;
     pub const T = testing_mod.T;
+    pub const IsolationThread = testing_mod.IsolationThread;
     pub const TestingAllocator = testing_mod.TestingAllocator;
     pub const CountingAllocator = testing_mod.CountingAllocator;
     pub const LimitAllocator = testing_mod.LimitAllocator;

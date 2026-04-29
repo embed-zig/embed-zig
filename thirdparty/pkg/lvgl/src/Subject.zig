@@ -88,6 +88,9 @@ pub fn previousString(self: *Self) ?[*:0]const u8 {
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Impl = struct {
         fn integer_subject_tracks_current_and_previous_values(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
+            binding.lv_init();
+            defer binding.lv_deinit();
+
             var subject = try Self.initInt(12);
             defer subject.deinit();
 
@@ -100,6 +103,9 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn pointer_subject_tracks_previous_pointer_value(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
+            binding.lv_init();
+            defer binding.lv_deinit();
+
             var first: u8 = 1;
             var second: u8 = 2;
             var subject = try Self.initPointer(&first);
@@ -115,6 +121,9 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn string_subject_copies_into_owned_buffers(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
+            binding.lv_init();
+            defer binding.lv_deinit();
+
             var current_buffer = [_:0]u8{0} ** 16;
             var previous_buffer = [_:0]u8{0} ** 16;
             var subject = try Self.initString(current_buffer[0.. :0], previous_buffer[0.. :0], "hi");
@@ -127,6 +136,9 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn string_subject_uses_caller_provided_storage(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
+            binding.lv_init();
+            defer binding.lv_deinit();
+
             var current_buffer = [_:0]u8{0} ** 16;
             var previous_buffer = [_:0]u8{0} ** 16;
             const current = current_buffer[0.. :0];

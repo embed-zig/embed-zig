@@ -3,7 +3,8 @@ const glib = @import("glib");
 
 const posix = std.posix;
 const linux = std.os.linux;
-const poll_rdhup: i16 = @intCast(linux.POLL.RDHUP);
+// Zig 0.15.2 does not expose POLLRDHUP through std.os.linux.POLL on every Linux arch.
+const poll_rdhup: i16 = 0x2000;
 const time = struct {
     const duration = glib.time.duration;
     const instant = glib.time.instant.make(@import("../time/instant.zig").impl);

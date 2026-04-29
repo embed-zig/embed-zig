@@ -5,6 +5,7 @@ const stdz_mod = @import("stdz");
 const context_mod = @import("context");
 const time_mod = @import("time");
 const Context = context_mod.Context;
+const testing_std_mod = @import("std.zig");
 const TestRunnerHandle = @import("TestRunner.zig");
 const Self = @This();
 
@@ -196,19 +197,20 @@ fn structuredLabelPadding(label: []const u8) []const u8 {
 }
 
 pub fn new(comptime std: type, comptime time: type, comptime scope: @Type(.enum_literal)) Self {
+    const TestStd = testing_std_mod.make(std, .{});
     const ContextApi = context_mod.make(std, time);
     const TestingAllocator = @import("TestingAllocator.zig");
-    const run_log = std.log.scoped(scope);
+    const run_log = TestStd.log.scoped(scope);
 
     const Impl = struct {
         name_buf: []u8,
         parent: ?*ImplSelf,
-        allocator: std.mem.Allocator,
+        allocator: TestStd.mem.Allocator,
         testing_allocator: *TestingAllocator,
         context_api: ContextApi,
         base_ctx: Context,
         timeout_ctx: ?Context = null,
-        pending_runs: std.ArrayList(*PendingRun) = .empty,
+        pending_runs: TestStd.ArrayList(*PendingRun) = .empty,
         started: time_mod.instant.Time = 0,
         body_finished: time_mod.instant.Time = 0,
         failure: time_mod.instant.Time = 0,
@@ -216,7 +218,7 @@ pub fn new(comptime std: type, comptime time: type, comptime scope: @Type(.enum_
         is_wait_done: bool = false,
         destroy_debug_tag: ?[]const u8 = null,
 
-        state_mutex: std.Thread.Mutex = .{},
+        state_mutex: TestStd.Thread.Mutex = .{},
         is_failed: bool = false,
         is_fatal: bool = false,
 
@@ -226,35 +228,29 @@ pub fn new(comptime std: type, comptime time: type, comptime scope: @Type(.enum_
             runner: TestRunnerHandle,
             testing_allocator: TestingAllocator,
             ok: bool = false,
-            worker: std.Thread,
+            worker: TestStd.Thread,
         };
 
         fn projectSpawnConfig(
             runner_config: stdz_mod.Thread.SpawnConfig,
             allocator: stdz_mod.mem.Allocator,
-        ) std.Thread.SpawnConfig {
-            var config: std.Thread.SpawnConfig = .{
+        ) TestStd.Thread.SpawnConfig {
+            var config: TestStd.Thread.SpawnConfig = .{
                 .allocator = runner_config.allocator orelse allocator,
+                .priority = runner_config.priority,
+                .name = runner_config.name,
+                .core_id = runner_config.core_id,
             };
             if (runner_config.stack_size != 0) {
                 config.stack_size = runner_config.stack_size;
-            }
-            if (@hasField(std.Thread.SpawnConfig, "priority")) {
-                config.priority = runner_config.priority;
-            }
-            if (@hasField(std.Thread.SpawnConfig, "name")) {
-                config.name = runner_config.name;
-            }
-            if (@hasField(std.Thread.SpawnConfig, "core_id")) {
-                config.core_id = runner_config.core_id;
             }
             return config;
         }
 
         fn createRoot() !Self {
-            const ta = try std.testing.allocator.create(TestingAllocator);
-            errdefer std.testing.allocator.destroy(ta);
-            ta.* = TestingAllocator.init(std.testing.allocator, null);
+            const ta = try TestStd.testing.allocator.create(TestingAllocator);
+            errdefer TestStd.testing.allocator.destroy(ta);
+            ta.* = TestingAllocator.init(TestStd.testing.allocator, null);
 
             const allocator = ta.allocator();
             const impl = try allocator.create(ImplSelf);
@@ -312,7 +308,7 @@ pub fn new(comptime std: type, comptime time: type, comptime scope: @Type(.enum_
             const impl = try allocator.create(ImplSelf);
             errdefer allocator.destroy(impl);
 
-            const name_buf = try std.fmt.allocPrint(allocator, "{s}/{s}", .{
+            const name_buf = try TestStd.fmt.allocPrint(allocator, "{s}/{s}", .{
                 parent_state.name_buf,
                 child_name,
             });
@@ -362,7 +358,7 @@ pub fn new(comptime std: type, comptime time: type, comptime scope: @Type(.enum_
             const testing_allocator_owner = if (state.parent) |parent|
                 parent.testing_allocator.allocator()
             else
-                std.testing.allocator;
+                TestStd.testing.allocator;
             state.pending_runs.deinit(state.allocator);
             if (state.timeout_ctx) |timeout_ctx| {
                 timeout_ctx.deinit();
@@ -679,8 +675,7 @@ pub fn new(comptime std: type, comptime time: type, comptime scope: @Type(.enum_
             const child_state = fromPtr(child.ptr);
             const child_allocator = child_state.testing_allocator.allocator();
             const dup_config = projectSpawnConfig(configured_runner.spawn_config, child_allocator);
-
-            pending.worker = std.Thread.spawn(dup_config, Worker.main, .{pending}) catch |err| {
+            pending.worker = TestStd.Thread.spawn(dup_config, Worker.main, .{pending}) catch |err| {
                 const child_label = child.name();
                 run_log.err("subtest Thread.spawn error: {s} (child {s})", .{
                     @errorName(err),
@@ -920,18 +915,15 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestStd = struct {
-                pub const mem = stdz.mem;
-                pub const fmt = stdz.fmt;
-                pub const Thread = TestThread;
-                pub const log = CapturingLog;
-                pub fn ArrayList(comptime T: type) type {
-                    return host_std.ArrayList(T);
-                }
-                pub const testing = struct {
+            const TestStd = testing_std_mod.make(host_std, .{
+                .Thread = TestThread,
+                .log = CapturingLog,
+                .mem = stdz.mem,
+                .fmt = stdz.fmt,
+                .testing = struct {
                     pub const allocator = host_std.testing.allocator;
-                };
-            };
+                },
+            });
 
             const TestTime = struct {
                 pub const duration = time.duration;
@@ -1463,18 +1455,15 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestStd = struct {
-                pub const mem = stdz.mem;
-                pub const fmt = stdz.fmt;
-                pub const Thread = TestThread;
-                pub const log = CapturingLog;
-                pub fn ArrayList(comptime Elem: type) type {
-                    return host_std.ArrayList(Elem);
-                }
-                pub const testing = struct {
+            const TestStd = testing_std_mod.make(host_std, .{
+                .Thread = TestThread,
+                .log = CapturingLog,
+                .mem = stdz.mem,
+                .fmt = stdz.fmt,
+                .testing = struct {
                     pub const allocator = host_std.testing.allocator;
-                };
-            };
+                },
+            });
 
             const TestTime = struct {
                 pub const duration = time.duration;
@@ -2072,18 +2061,15 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestStd = struct {
-                pub const mem = stdz.mem;
-                pub const fmt = stdz.fmt;
-                pub const Thread = TestThread;
-                pub const log = CapturingLog;
-                pub fn ArrayList(comptime Elem: type) type {
-                    return host_std.ArrayList(Elem);
-                }
-                pub const testing = struct {
+            const TestStd = testing_std_mod.make(host_std, .{
+                .Thread = TestThread,
+                .log = CapturingLog,
+                .mem = stdz.mem,
+                .fmt = stdz.fmt,
+                .testing = struct {
                     pub const allocator = host_std.testing.allocator;
-                };
-            };
+                },
+            });
 
             const TestTime = struct {
                 pub const duration = time.duration;
@@ -2392,20 +2378,15 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestStd = struct {
-                pub const mem = stdz.mem;
-                pub const fmt = stdz.fmt;
-                pub const Thread = TestThread;
-                pub const log = CapturingLog;
-
-                pub fn ArrayList(comptime Elem: type) type {
-                    return host_std.ArrayList(Elem);
-                }
-
-                pub const testing = struct {
+            const TestStd = testing_std_mod.make(host_std, .{
+                .Thread = TestThread,
+                .log = CapturingLog,
+                .mem = stdz.mem,
+                .fmt = stdz.fmt,
+                .testing = struct {
                     pub const allocator = host_std.testing.allocator;
-                };
-            };
+                },
+            });
 
             const TestTime = struct {
                 pub const duration = time.duration;
@@ -2703,20 +2684,15 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestStd = struct {
-                pub const mem = stdz.mem;
-                pub const fmt = stdz.fmt;
-                pub const Thread = TestThread;
-                pub const log = CapturingLog;
-
-                pub fn ArrayList(comptime Elem: type) type {
-                    return host_std.ArrayList(Elem);
-                }
-
-                pub const testing = struct {
+            const TestStd = testing_std_mod.make(host_std, .{
+                .Thread = TestThread,
+                .log = CapturingLog,
+                .mem = stdz.mem,
+                .fmt = stdz.fmt,
+                .testing = struct {
                     pub var allocator: stdz.mem.Allocator = undefined;
-                };
-            };
+                },
+            });
 
             const TestTime = struct {
                 pub const duration = time.duration;

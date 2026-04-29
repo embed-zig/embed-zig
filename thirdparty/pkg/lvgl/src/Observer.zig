@@ -41,6 +41,9 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         fn can_observe_subject_updates(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             const Subject = @import("Subject.zig");
 
+            binding.lv_init();
+            defer binding.lv_deinit();
+
             const CallbackCtx = struct {
                 calls: usize = 0,
                 observer: ?*binding.Observer = null,
@@ -86,6 +89,9 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
         fn remove_stops_future_subject_notifications(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
             const Subject = @import("Subject.zig");
+
+            binding.lv_init();
+            defer binding.lv_deinit();
 
             const CallbackCtx = struct {
                 calls: usize = 0,

@@ -96,6 +96,9 @@ pub fn deleteAll() void {
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const Impl = struct {
         fn descriptor_configures_core_fields(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
+            binding.lv_init();
+            defer binding.lv_deinit();
+
             var anim = try Self.init();
             defer anim.deinit();
             anim.setDuration(120);
@@ -119,6 +122,9 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn pause_state_toggles_through_lvgl_api(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
+            binding.lv_init();
+            defer binding.lv_deinit();
+
             var anim = try Self.init();
             defer anim.deinit();
 
