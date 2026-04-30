@@ -23,6 +23,10 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
+        "embed/",
+        "glib/",
+        "gstd/",
         "tests/",
+        "thirdparty/",
     },
 }
