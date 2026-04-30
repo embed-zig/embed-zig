@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>desktop mock</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <h1>desktop mock</h1>
+      <p>Single button input + ledstrip output over GET and SSE.</p>
+
+      <div class="row">
+        <div class="panel">
+          <button id="power-btn" class="button">Power</button>
+        </div>
+        <div class="panel">
+          <div id="strip" class="strip"></div>
+        </div>
+      </div>
+
+      <div class="panel panel-log">
+        <pre id="log"></pre>
+      </div>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

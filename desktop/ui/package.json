@@ -1,0 +1,18 @@
+{
+  "name": "desktop-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "sh -c \"rm -rf ./dist && mkdir -p ./dist && bun build ./src/main.ts ./src/desktop-core.ts --outdir ./dist --target browser --entry-naming='[name].[ext]' --chunk-naming='[name].[ext]' --asset-naming='[name].[ext]' && cp ./src/index.html ./dist/index.html && cp ./src/styles.css ./dist/styles.css\"",
+    "build:watch": "sh -c \"mkdir -p ./dist && cp ./src/index.html ./dist/index.html && cp ./src/styles.css ./dist/styles.css && bun build ./src/main.ts ./src/desktop-core.ts --outdir ./dist --target browser --entry-naming='[name].[ext]' --chunk-naming='[name].[ext]' --asset-naming='[name].[ext]' --watch\"",
+    "generate:api": "openapi-ts",
+    "mock:server": "bun run ./mock/server.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "^0.95.0",
+    "@types/bun": "^1.3.12",
+    "typescript": "^6.0.2"
+  }
+}

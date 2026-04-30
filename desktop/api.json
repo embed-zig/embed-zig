@@ -1,0 +1,465 @@
+{
+  "openapi": "3.2.0",
+  "info": {
+    "title": "desktop local runtime API",
+    "version": "0.1.0",
+    "summary": "Local HTTP and SSE API for the desktop runtime.",
+    "description": "Local-only API exposed by the desktop runtime binary. Input events are sent with GET requests and output/state updates are streamed over Server-Sent Events."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "description": "Local desktop runtime server.",
+      "variables": {
+        "port": {
+          "default": "8080"
+        }
+      }
+    }
+  ],
+  "tags": [
+    {
+      "name": "runtime",
+      "summary": "Runtime discovery and state"
+    },
+    {
+      "name": "emit",
+      "summary": "Input event injection"
+    },
+    {
+      "name": "events",
+      "summary": "Server-Sent Events stream"
+    }
+  ],
+  "paths": {
+    "/topology": {
+      "get": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Get runtime topology",
+        "operationId": "getTopology",
+        "responses": {
+          "200": {
+            "description": "Current runtime topology.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopologyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/state": {
+      "get": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Get current state snapshot",
+        "operationId": "getState",
+        "responses": {
+          "200": {
+            "description": "Current state snapshot for all exposed gears.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/emit/{gear-label}/{event}": {
+      "get": {
+        "tags": [
+          "emit"
+        ],
+        "summary": "Inject an input event",
+        "description": "Local-only input event endpoint. In the initial version this is intended for single-button gears using `press` and `release` events.",
+        "operationId": "emitInputEvent",
+        "parameters": [
+          {
+            "name": "gear-label",
+            "in": "path",
+            "required": true,
+            "description": "Gear label registered by the app/runtime.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "event",
+            "in": "path",
+            "required": true,
+            "description": "Event name to inject.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "press",
+                "release"
+              ]
+            }
+          },
+          {
+            "name": "ts",
+            "in": "query",
+            "required": true,
+            "description": "Client timestamp in Unix milliseconds.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "metadata",
+            "in": "query",
+            "required": false,
+            "description": "Optional runtime-defined metadata payload encoded as a base64url string. This can be used to attach extra context to an emitted input event.",
+            "schema": {
+              "$ref": "#/components/schemas/MetadataValue"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event accepted.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Responses should not be cached.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmitAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid event or missing parameters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown gear label.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "Open the SSE stream",
+        "description": "Streams runtime events from the desktop binary to the browser.",
+        "operationId": "openEventStream",
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events stream.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "SSE stream payload."
+                },
+                "itemSchema": {
+                  "$ref": "#/components/schemas/ServerEvent"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "TopologyResponse": {
+        "type": "object",
+        "required": [
+          "gears"
+        ],
+        "properties": {
+          "gears": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GearTopology"
+            }
+          }
+        }
+      },
+      "GearTopology": {
+        "type": "object",
+        "required": [
+          "label",
+          "kind"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "single_button",
+              "ledstrip"
+            ]
+          },
+          "pixel_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "StateResponse": {
+        "type": "object",
+        "required": [
+          "ts_ms",
+          "gears"
+        ],
+        "properties": {
+          "ts_ms": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "gears": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GearState"
+            }
+          }
+        }
+      },
+      "GearState": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SingleButtonState"
+          },
+          {
+            "$ref": "#/components/schemas/LedStripState"
+          }
+        ]
+      },
+      "SingleButtonState": {
+        "type": "object",
+        "required": [
+          "label",
+          "kind",
+          "pressed"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "const": "single_button"
+          },
+          "pressed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "LedStripState": {
+        "type": "object",
+        "required": [
+          "label",
+          "kind",
+          "pixels",
+          "refresh_count"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "const": "ledstrip"
+          },
+          "pixels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Color"
+            }
+          },
+          "refresh_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "Color": {
+        "type": "object",
+        "required": [
+          "r",
+          "g",
+          "b"
+        ],
+        "properties": {
+          "r": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "g": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "b": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          }
+        }
+      },
+      "EmitAck": {
+        "type": "object",
+        "required": [
+          "accepted",
+          "gear_label",
+          "event",
+          "ts"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "gear_label": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          },
+          "ts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/MetadataValue"
+          }
+        }
+      },
+      "MetadataValue": {
+        "type": "string",
+        "description": "base64url-encoded metadata blob.",
+        "pattern": "^[A-Za-z0-9_-]*$",
+        "examples": [
+          "eyJzb3VyY2UiOiJ1aSIsInByZXNzX2lkIjoxfQ"
+        ]
+      },
+      "ServerEvent": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/StateSnapshotEvent"
+          },
+          {
+            "$ref": "#/components/schemas/LedStripRefreshedEvent"
+          }
+        ]
+      },
+      "StateSnapshotEvent": {
+        "type": "object",
+        "required": [
+          "event",
+          "data"
+        ],
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "state.snapshot"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StateResponse"
+          }
+        }
+      },
+      "LedStripRefreshedEvent": {
+        "type": "object",
+        "required": [
+          "event",
+          "data"
+        ],
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "ledstrip.refreshed"
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "label",
+              "ts_ms",
+              "pixels",
+              "refresh_count"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "ts_ms": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "pixels": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Color"
+                }
+              },
+              "refresh_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

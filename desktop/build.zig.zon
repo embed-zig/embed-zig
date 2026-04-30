@@ -1,0 +1,25 @@
+.{
+    .name = .desktop,
+    .version = "0.1.0",
+    .fingerprint = 0x96105a400746e5b,
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "api.json",
+        "build",
+        "build.zig",
+        "build.zig.zon",
+        "lib",
+        "pkg",
+        "ui",
+    },
+    .dependencies = .{
+        .embed = .{
+            .url = "https://codeload.github.com/embed-zig/embed-zig/tar.gz/d2a8c1106f4a446917008a80c4e58cdf646a0349",
+            .hash = "embed_zig-0.0.0-prAy_N9HPAA6dsEibgEFpvoAfqoa-uWI7tPDvsPSxbjq",
+        },
+        .openapi_codegen = .{
+            .url = "https://codeload.github.com/embed-zig/openapi-codegen/tar.gz/refs/heads/main",
+            .hash = "openapi_codegen-0.0.0-YkOKuRESBACq3c-J-O-yO5JUTTqNxt04hJylaLIHZ4WD",
+        },
+    },
+}
