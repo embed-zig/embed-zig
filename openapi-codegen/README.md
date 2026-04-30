@@ -2,7 +2,7 @@
 
 [中文说明](README.zh-CN.md)
 
-Comptime-first OpenAPI 3.x tooling for Zig: parse specs, then `**codegen.models**`, `**codegen.client**`, and `**codegen.server**` expand into real types and operation handles during compilation. Nothing writes a separate `generated.zig` to disk—the API lives in the type system.
+Comptime-first OpenAPI 3.x tooling for Zig: parse specs, then `codegen.models`, `codegen.client`, and `codegen.server` expand into real types and operation handles during compilation. Nothing writes a separate `generated.zig` to disk—the API lives in the type system.
 
 ## Requirements
 
@@ -14,27 +14,27 @@ Comptime-first OpenAPI 3.x tooling for Zig: parse specs, then `**codegen.models*
 
 | Piece                             | Role                                                                                 |
 | --------------------------------- | ------------------------------------------------------------------------------------ |
-| `**openapi`** (`lib/openapi.zig`) | JSON parse → `Spec`; `Files` bundles one or more documents for `$ref` across layouts |
-| `**codegen.models`**              | `codegen.models.make(files)` → schema-backed model types                             |
-| `**codegen.client**`              | `codegen.client.make(lib, files)` → `ClientApi` with `operations.<operationId>`      |
-| `**codegen.server**`              | `codegen.server.make(lib, files)` → strict handler registration                      |
+| `openapi` (`lib/openapi.zig`) | JSON parse → `Spec`; `Files` bundles one or more documents for `$ref` across layouts |
+| `codegen.models`             | `codegen.models.make(files)` → schema-backed model types                             |
+| `codegen.client`             | `codegen.client.make(lib, files)` → `ClientApi` with `operations.<operationId>`      |
+| `codegen.server`             | `codegen.server.make(lib, files)` → strict handler registration                      |
 
 
-Examples in this repo use `**const gstd = @import("gstd");**` for runtime networking/time, `**const glib = @import("glib");**` for context/testing helpers, and `**const lib = @import("std");**` for the comptime std-like namespace passed into `codegen.*.make`.
+Examples in this repo use `const gstd = @import("gstd");` for runtime networking/time, `const glib = @import("glib");` for context/testing helpers, and `const lib = @import("std");` for the comptime std-like namespace passed into `codegen.*.make`.
 
 ## Clone and verify
 
 ```sh
-zig build unit    # runtime/unit coverage (including SSE flush + ownership regressions)
-zig build example # runs tests/examples/ (petstore, stream, sse)
-zig build test    # runs unit + example + tests/oapi-codegen/ fixture suites
+zig build test-all-openapi-codegen # from the monorepo root
+zig build test-unit-openapi-codegen
+zig build test-integration-openapi-codegen
 ```
 
 ## Depend on the package
 
-Your `build.zig.zon` should list `**openapi_codegen**`, `**glib**`, and `**gstd**`. Use `zig fetch --save` (or a `path` dependency) so tar URLs get a correct `**.hash**`.
+Your `build.zig.zon` should list `openapi_codegen`, `glib`, and `gstd`. Use `zig fetch --save` (or a `path` dependency) so tar URLs get a correct `.hash`.
 
-Wire modules like this repository’s `build.zig`: create an `**openapi**` module rooted at `lib/openapi.zig`, then pass through `**glib_dep.module("glib")**` and `**gstd_dep.module("gstd")**` to `**codegen**`.
+Wire modules like this repository’s `build.zig`: create an `openapi` module rooted at `lib/openapi.zig`, then pass through `glib_dep.module("glib")` and `gstd_dep.module("gstd")` to `codegen`.
 
 ```zig
 const std = @import("std");
@@ -85,7 +85,7 @@ pub fn build(b: *std.Build) void {
 
 ## Spec + `ClientApi` (petstore-style)
 
-The petstore example uses **two JSON files**: paths in `service.json`, `components` in `structure.json`. Both must appear in `**openapi.Files`**. The following is adapted from `**tests/examples/petstore/test.zig`**.
+The petstore example uses **two JSON files**: paths in `service.json`, `components` in `structure.json`. Both must appear in `openapi.Files`. The following is adapted from `tests/openapi_codegen/examples/petstore/test.zig`.
 
 ```zig
 const openapi = @import("openapi");
@@ -117,7 +117,7 @@ For a single-file OpenAPI document, use one entry in `.items` and one `@embedFil
 
 ## Calling the generated client (petstore)
 
-Full flow in `**tests/examples/petstore/test.zig**`: spin up `**ServerApi**`, listen on loopback, then build the HTTP stack and `**ClientApi**`. Below are the **client-only** pieces copied from that file.
+Full flow in `tests/openapi_codegen/examples/petstore/test.zig`: spin up `ServerApi`, listen on loopback, then build the HTTP stack and `ClientApi`. Below are the **client-only** pieces copied from that file.
 
 **1. Transport + `ClientApi.init`**
 
@@ -139,7 +139,7 @@ defer api.deinit();
 
 **2. Context for `send`**
 
-`send` takes `**context.Context**` as the first argument. The example test uses the glib testing harness: `**t.context()**`. In ordinary code, create a background context the same way as `**tests/oapi-codegen/strict-server/test.zig**`:
+`send` takes `context.Context` as the first argument. The example test uses the glib testing harness: `t.context()`. In ordinary code, create a background context the same way as `tests/openapi_codegen/oapi-codegen/strict-server/test.zig`:
 
 ```zig
 var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(alloc);
@@ -169,7 +169,7 @@ switch (resp.value) {
 
 **4. GET with path parameters (`getPetById`)**
 
-Path template `/pet/{petId}` becomes `**.path = .{ .petId = pet_id }`** (field names come from the OpenAPI parameter names).
+Path template `/pet/{petId}` becomes `.path = .{ .petId = pet_id }` (field names come from the OpenAPI parameter names).
 
 ```zig
 const resp = try api.operations.getPetById.send(t.context(), alloc, .{
@@ -186,7 +186,7 @@ switch (resp.value) {
 
 **5. DELETE with path + optional header (`deletePet`)**
 
-This operation shows `**.path`** together with `**.header`** (OpenAPI `in: header` / cookie-style bundles on `args`).
+This operation shows `.path` together with `.header` (OpenAPI `in: header` / cookie-style bundles on `args`).
 
 ```zig
 const resp = try api.operations.deletePet.send(t.context(), alloc, .{
@@ -200,10 +200,10 @@ switch (resp.value) {
 }
 ```
 
-**Body types:** JSON requests still use typed Zig values on `.body`. For **non-JSON request bodies** (`text/plain`, `application/octet-stream`, etc.), pass a `**net.http.ReadCloser`** on `.body` so the client can upload as a stream; on the server side, raw handlers receive that same `ReadCloser` and should `read` it incrementally, then `close` it when done.
+**Body types:** JSON requests still use typed Zig values on `.body`. For **non-JSON request bodies** (`text/plain`, `application/octet-stream`, etc.), pass a **`net.http.ReadCloser`** on `.body` so the client can upload as a stream; on the server side, raw handlers receive that same `ReadCloser` and should `read` it incrementally, then `close` it when done.
 
-**Response shape:** `send` returns a pointer-like handle with a `.value` union keyed by status (e.g. `.status_200`, `.status_404`, `.status_204`). Always `defer resp.deinit()` after you are done. JSON arms hold parsed models and are still released by the outer response handle. **Non-JSON stream bodies** (`text/plain`, `application/octet-stream`, etc.) are a `**net.http.ReadCloser`**: call `read` in a loop, then `close()` that reader yourself before the outer `resp.deinit()`. `text/event-stream` responses return `codegen.sse.Reader`: consume events, then call `stream.deinit()` before the outer `resp.deinit()`. Model types for JSON bodies live on `ClientApi.models`.
+**Response shape:** `send` returns a pointer-like handle with a `.value` union keyed by status (e.g. `.status_200`, `.status_404`, `.status_204`). Always `defer resp.deinit()` after you are done. JSON arms hold parsed models and are still released by the outer response handle. **Non-JSON stream bodies** (`text/plain`, `application/octet-stream`, etc.) are a **`net.http.ReadCloser`**: call `read` in a loop, then `close()` that reader yourself before the outer `resp.deinit()`. `text/event-stream` responses return `codegen.sse.Reader`: consume events, then call `stream.deinit()` before the outer `resp.deinit()`. Model types for JSON bodies live on `ClientApi.models`.
 
 ## Acknowledgements
 
-Fixtures under `**tests/oapi-codegen**` trace back to **[oapi-codegen](https://github.com/oapi-codegen/oapi-codegen)**. Thanks to that project’s authors for the reference behaviour and test corpus.
+Fixtures under `tests/openapi_codegen/oapi-codegen` trace back to **[oapi-codegen](https://github.com/oapi-codegen/oapi-codegen)**. Thanks to that project’s authors for the reference behaviour and test corpus.

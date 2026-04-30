@@ -1,5 +1,4 @@
 const std = @import("std");
-const Tests = @import("build/tests.zig");
 
 const lib_desktop = @import("build/lib/desktop.zig");
 
@@ -25,8 +24,6 @@ pub fn build(b: *std.Build) void {
     const ui_step = b.step("ui-build", "Bundle the desktop UI into zig-out/ui");
     ui_step.dependOn(&ui_bundle.install.step);
     b.getInstallStep().dependOn(&ui_bundle.install.step);
-
-    Tests.create(b, target, optimize, Libraries);
 }
 
 fn createDependencyModules(

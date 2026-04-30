@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-面向 Zig 的 **comptime OpenAPI 3.x** 方案：在编译期解析文档，通过 `**codegen.models**`、`**codegen.client**`、`**codegen.server**` 生成类型与操作入口，**不会**单独落盘 `generated.zig`——生成结果在类型系统里。
+面向 Zig 的 **comptime OpenAPI 3.x** 方案：在编译期解析文档，通过 `codegen.models`、`codegen.client`、`codegen.server` 生成类型与操作入口，**不会**单独落盘 `generated.zig`——生成结果在类型系统里。
 
 ## 环境要求
 
@@ -14,25 +14,25 @@
 
 | 模块                               | 作用                                                                                           |
 | -------------------------------- | -------------------------------------------------------------------------------------------- |
-| `**openapi**`（`lib/openapi.zig`） | JSON → `Spec`；`**Files**` 挂载多文档，支持跨文件 `**$ref**`                                             |
-| `**codegen.models**`             | `**codegen.models.make(files)**` → schema 对应 model 类型                                        |
-| `**codegen.client**`             | `**codegen.client.make(lib, files)**` → `**ClientApi**`，操作为 `**operations.<operationId>**`   |
-| `**codegen.server**`             | `**codegen.server.make(lib, files)**` → 严格 handler 注册                                        |
+| `openapi`（`lib/openapi.zig`） | JSON → `Spec`；`Files` 挂载多文档，支持跨文件 `$ref`                                             |
+| `codegen.models`             | `codegen.models.make(files)` → schema 对应 model 类型                                        |
+| `codegen.client`             | `codegen.client.make(lib, files)` → `ClientApi`，操作为 `operations.<operationId>`   |
+| `codegen.server`             | `codegen.server.make(lib, files)` → 严格 handler 注册                                        |
 
 
-示例里统一写 `**const gstd = @import("gstd");**` 获取运行时网络/时间，`**const glib = @import("glib");**` 获取 context/testing 辅助能力，`**const lib = @import("std");**` 作为传给 `codegen.*.make` 的 comptime std-like namespace。
+示例里统一写 `const gstd = @import("gstd");` 获取运行时网络/时间，`const glib = @import("glib");` 获取 context/testing 辅助能力，`const lib = @import("std");` 作为传给 `codegen.*.make` 的 comptime std-like namespace。
 
 ## 克隆后自测
 
 ```sh
-zig build unit    # runtime/unit 覆盖（含 SSE flush 与 ownership 回归）
-zig build example # 运行 tests/examples/（petstore、stream、sse）
-zig build test    # 运行 unit + example + tests/oapi-codegen/ 夹具
+zig build test-all-openapi-codegen # 在 monorepo 根目录运行
+zig build test-unit-openapi-codegen
+zig build test-integration-openapi-codegen
 ```
 
 ## 在你自己的工程里依赖
 
-在 `**build.zig.zon**` 声明 `**openapi_codegen**`、`**glib**` 与 `**gstd**`；远端包用 `**zig fetch --save**` 写入 `**.hash**`。接线时先创建 `**openapi**` 模块，再把 `**glib_dep.module("glib")**` 和 `**gstd_dep.module("gstd")**` 传给 `**codegen**`。
+在 `build.zig.zon` 声明 `openapi_codegen`、`glib` 与 `gstd`；远端包用 `zig fetch --save` 写入 `.hash`。接线时先创建 `openapi` 模块，再把 `glib_dep.module("glib")` 和 `gstd_dep.module("gstd")` 传给 `codegen`。
 
 ```zig
 const std = @import("std");
@@ -83,7 +83,7 @@ pub fn build(b: *std.Build) void {
 
 ## Spec + `ClientApi`（与 petstore 示例一致）
 
-本仓库 `**tests/examples/petstore/test.zig**` 使用 **双文件**：`**service.json**` 管 paths，`**structure.json**` 管 `**components**`；`**openapi.Files**` 里两份都要列出。下面片段与示例文件一致（节选）。
+本仓库 `tests/openapi_codegen/examples/petstore/test.zig` 使用 **双文件**：`service.json` 管 paths，`structure.json` 管 `components`；`openapi.Files` 里两份都要列出。下面片段与示例文件一致（节选）。
 
 ```zig
 const openapi = @import("openapi");
@@ -111,11 +111,11 @@ const ClientApi = codegen.client.make(lib, files());
 const net = gstd.runtime.net;
 ```
 
-若只有一份 OpenAPI JSON，`**.items**` 里放一条即可。
+若只有一份 OpenAPI JSON，`.items` 里放一条即可。
 
 ## 调用生成的 client（petstore）
 
-完整流程（含 `**ServerApi**`、监听、线程）见 `**tests/examples/petstore/test.zig**`。这里只保留与 **client** 直接相关的写法，均来自该文件。
+完整流程（含 `ServerApi`、监听、线程）见 `tests/openapi_codegen/examples/petstore/test.zig`。这里只保留与 **client** 直接相关的写法，均来自该文件。
 
 **1. `Transport` + `ClientApi.init`**
 
@@ -137,7 +137,7 @@ defer api.deinit();
 
 **2. `send` 的第一个参数：`context.Context`**
 
-示例测试里使用 harness 的 `**t.context()**`。在普通程序里可像 `**tests/oapi-codegen/strict-server/test.zig**` 那样：
+示例测试里使用 harness 的 `t.context()`。在普通程序里可像 `tests/openapi_codegen/oapi-codegen/strict-server/test.zig` 那样：
 
 ```zig
 var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(alloc);
@@ -167,7 +167,7 @@ switch (resp.value) {
 
 **4. 带 path 参数的 GET（`getPetById`）**
 
-OpenAPI 里 `/pet/{petId}` 对应参数名 `**petId**`，代码里写 `**.path = .{ .petId = pet_id }**`。
+OpenAPI 里 `/pet/{petId}` 对应参数名 `petId`，代码里写 `.path = .{ .petId = pet_id }`。
 
 ```zig
 const resp = try api.operations.getPetById.send(t.context(), alloc, .{
@@ -202,4 +202,4 @@ switch (resp.value) {
 
 ## 致谢
 
-`**tests/oapi-codegen**` 中的场景与数据源自 **[oapi-codegen](https://github.com/oapi-codegen/oapi-codegen)**。
+`tests/openapi_codegen/oapi-codegen` 中的场景与数据源自 **[oapi-codegen](https://github.com/oapi-codegen/oapi-codegen)**。

@@ -1,3 +1,14 @@
+pub const meta = .{
+    .source_file = sourceFile(),
+    .module = "openapi-codegen",
+    .filter = "openapi-codegen/integration/examples",
+    .label = .integration,
+};
+
+fn sourceFile() []const u8 {
+    return @src().file;
+}
+
 const glib = @import("glib");
 const lib = @import("std");
 
@@ -5,7 +16,7 @@ const petstore = @import("examples/petstore/test.zig");
 const sse = @import("sse/roundtrip/test.zig");
 const gstd = @import("gstd");
 
-test "examples" {
+test "openapi-codegen/integration/examples" {
     var t = glib.testing.T.new(lib, gstd.runtime.time, .examples);
     defer t.deinit();
 

@@ -1,5 +1,5 @@
 const std = @import("std");
-const helpers = @import("helpers");
+const helpers = @import("../helpers.zig");
 const codegen_helpers = @import("../codegen_helpers.zig");
 const openapi = @import("openapi");
 const glib = @import("glib");

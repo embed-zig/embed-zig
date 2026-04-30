@@ -12,6 +12,12 @@
         .gstd = .{
             .path = "gstd",
         },
+        .desktop = .{
+            .path = "desktop",
+        },
+        .openapi_codegen = .{
+            .path = "openapi-codegen",
+        },
         .thirdparty = .{
             .path = "thirdparty",
         },
@@ -23,9 +29,11 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
+        "desktop/",
         "embed/",
         "glib/",
         "gstd/",
+        "openapi-codegen/",
         "tests/",
         "thirdparty/",
     },

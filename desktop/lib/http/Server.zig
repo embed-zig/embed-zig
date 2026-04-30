@@ -230,7 +230,8 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
         }
 
         fn resolveAssetsOverridesOnlyMainJs() !void {
-            const assets_dir = ".zig-cache/tmp/desktop-http-assets-dir-test";
+            const assets_dir = try uniqueAssetsDir(std.testing.allocator, "desktop-http-assets-dir-test");
+            defer std.testing.allocator.free(assets_dir);
             host_std.fs.cwd().deleteTree(assets_dir) catch {};
             defer host_std.fs.cwd().deleteTree(assets_dir) catch {};
 
@@ -252,7 +253,8 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
         }
 
         fn resolveAssetsFallsBackWithoutMainJs() !void {
-            const assets_dir = ".zig-cache/tmp/desktop-http-assets-empty-test";
+            const assets_dir = try uniqueAssetsDir(std.testing.allocator, "desktop-http-assets-empty-test");
+            defer std.testing.allocator.free(assets_dir);
             host_std.fs.cwd().deleteTree(assets_dir) catch {};
             defer host_std.fs.cwd().deleteTree(assets_dir) catch {};
 
@@ -265,6 +267,10 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
             try std.testing.expect(!assets.owns_main_js);
             try std.testing.expectEqualStrings(ui_assets.main_js, assets.main_js);
             try std.testing.expectEqualStrings(ui_assets.desktop_core_js, assets.desktop_core_js);
+        }
+
+        fn uniqueAssetsDir(allocator: std.mem.Allocator, comptime prefix: []const u8) ![]u8 {
+            return std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}-{d}", .{ prefix, host_std.time.nanoTimestamp() });
         }
     };
 

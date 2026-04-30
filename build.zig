@@ -28,13 +28,32 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const desktop_dep = b.dependency("desktop", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const openapi_codegen_dep = b.dependency("openapi_codegen", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const thirdparty_dep = b.dependency("thirdparty", .{
         .target = target,
         .optimize = optimize,
     });
-    b.modules.put("glib", glib_dep.module("glib")) catch @panic("OOM");
-    b.modules.put("gstd", gstd_dep.module("gstd")) catch @panic("OOM");
-    b.modules.put("embed", embed_dep.module("embed")) catch @panic("OOM");
+    const glib = glib_dep.module("glib");
+    const gstd = gstd_dep.module("gstd");
+    const embed = embed_dep.module("embed");
+    const openapi = openapi_codegen_dep.module("openapi");
+    const codegen = openapi_codegen_dep.module("codegen");
+    const desktop = desktop_dep.module("desktop");
+
+    b.modules.put("glib", glib) catch @panic("OOM");
+    b.modules.put("gstd", gstd) catch @panic("OOM");
+    b.modules.put("embed", embed) catch @panic("OOM");
+    b.modules.put("openapi", openapi) catch @panic("OOM");
+    b.modules.put("codegen", codegen) catch @panic("OOM");
+    b.modules.put("openapi-codegen", codegen) catch @panic("OOM");
+    b.modules.put("desktop", desktop) catch @panic("OOM");
     for (thirdparty_modules) |module_name| {
         b.modules.put(module_name, thirdparty_dep.module(module_name)) catch @panic("OOM");
     }

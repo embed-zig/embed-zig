@@ -1,13 +1,13 @@
 const std = @import("std");
-const helpers = @import("helpers");
-const codegen_helpers = @import("../codegen_helpers.zig");
+const helpers = @import("../../helpers.zig");
+const codegen_helpers = @import("../../codegen_helpers.zig");
 const openapi = @import("openapi");
 const glib = @import("glib");
 const lib = std;
 
 pub const Phase = enum {
     spec,
-    shared_response,
+    path_refs,
 };
 
 fn specRunner() glib.testing.TestRunner {
@@ -30,18 +30,20 @@ fn specRunner() glib.testing.TestRunner {
             defer arena.deinit();
             const a = arena.allocator();
             const spec = try openapi.json.parseAlloc(a, @embedFile("spec.json"));
-            try std.testing.expectEqualStrings("3.0.4", spec.openapi);
-            try std.testing.expectEqualStrings("API", spec.info.title);
-            try std.testing.expectEqualStrings("0.0.1", spec.info.version);
+            try std.testing.expectEqualStrings("3.0.1", spec.openapi);
+            try std.testing.expectEqualStrings("Test", spec.info.title);
+            try std.testing.expectEqualStrings("1.0.0", spec.info.version);
             try std.testing.expectEqual(@as(usize, 1), spec.paths.len);
             {
-                const p_or = Spec.findNamed(Spec.PathItemOrRef, spec.paths, "/things") orelse return error.FixtureMismatch;
-                const p_it = switch (p_or) {
-                    .path_item => |x| x,
-                    .reference => return error.FixtureMismatch,
+                const p_or = Spec.findNamed(Spec.PathItemOrRef, spec.paths, "/bionicle/{name}") orelse return error.FixtureMismatch;
+                const ref = switch (p_or) {
+                    .path_item => return error.FixtureMismatch,
+                    .reference => |x| x,
                 };
-                const get_op = p_it.get orelse return error.FixtureMismatch;
-                try std.testing.expectEqualStrings("listThings", get_op.operation_id orelse return error.FixtureMismatch);
+                try std.testing.expectEqualStrings(
+                    "bionicle.yaml#/paths/~1bionicle~1{name}",
+                    ref.ref_path,
+                );
             }
         }
     };
@@ -56,15 +58,16 @@ fn specRunner() glib.testing.TestRunner {
 pub fn TestRunner(comptime phase: Phase) glib.testing.TestRunner {
     return switch (phase) {
         .spec => specRunner(),
-        .shared_response => glib.testing.TestRunner.fromFn(std, 1024 * 1024, struct {
+        .path_refs => glib.testing.TestRunner.fromFn(std, 1024 * 1024, struct {
             fn run(t: *glib.testing.T, allocator: std.mem.Allocator) !void {
                 _ = t;
                 _ = allocator;
                 comptime {
                     const files: openapi.Files = .{
                         .items = &.{
-                            .{ .name = "spec.yaml", .spec = openapi.json.parse(@embedFile("spec.json")) },
-                            .{ .name = "./common/spec.yaml", .spec = openapi.json.parse(@embedFile("common/spec.json")) },
+                            .{ .name = "foo-service.yaml", .spec = openapi.json.parse(@embedFile("spec.json")) },
+                            .{ .name = "bionicle.yaml", .spec = openapi.json.parse(@embedFile("../bionicle/spec.json")) },
+                            .{ .name = "common.yaml", .spec = openapi.json.parse(@embedFile("../common/spec.json")) },
                         },
                     };
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Emit explicit checkFixture() bodies (+ TestRunner) from spec.json. Run from repo root:
-    python3 tests/oapi-codegen/tools/emit_fixture_checks.py
+    python3 tests/openapi_codegen/oapi-codegen/tools/emit_fixture_checks.py
 """
 
 from __future__ import annotations
@@ -9,8 +9,8 @@ import json
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent  # tests/oapi-codegen
-REPO = ROOT.parent.parent  # repo root
+ROOT = Path(__file__).resolve().parent.parent  # tests/openapi_codegen/oapi-codegen
+REPO = ROOT.parent.parent.parent  # repo root
 
 
 def zig_str(s: str) -> str:
@@ -482,7 +482,7 @@ def main() -> None:
         if new_txt != txt:
             test_zig.write_text(new_txt)
 
-    root = REPO / "tests" / "oapi-codegen.zig"
+    root = REPO / "tests" / "openapi_codegen" / "oapi-codegen.zig"
     z = root.read_text()
     z2 = z.replace(").runnerSpec()", ").TestRunner()")
     z2 = z2.replace(").runner()", ").TestRunner()")

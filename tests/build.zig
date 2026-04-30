@@ -112,11 +112,6 @@ fn createModule(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Module {
-    const glib_dep = b.dependency("glib", .{ .target = target, .optimize = optimize });
-    const gstd_dep = b.dependency("gstd", .{ .target = target, .optimize = optimize });
-    const embed_dep = b.dependency("embed", .{ .target = target, .optimize = optimize });
-    const thirdparty_dep = b.dependency("thirdparty", .{ .target = target, .optimize = optimize });
-    const gstd = gstd_dep.module("gstd");
     const test_target = b.addOptions();
     test_target.addOption(std.Target.Os.Tag, "os_tag", target.result.os.tag);
 
@@ -125,21 +120,28 @@ fn createModule(
         .target = target,
         .optimize = optimize,
     });
-    mod.addImport("glib", glib_dep.module("glib"));
-    mod.addImport("gstd", gstd);
-    mod.addImport("embed", embed_dep.module("embed"));
-    mod.addImport("core_bluetooth", thirdparty_dep.module("core_bluetooth"));
-    mod.addImport("core_wlan", thirdparty_dep.module("core_wlan"));
+    mod.addImport("glib", exportedModule(b, "glib"));
+    mod.addImport("gstd", exportedModule(b, "gstd"));
+    mod.addImport("embed", exportedModule(b, "embed"));
+    mod.addImport("openapi", exportedModule(b, "openapi"));
+    mod.addImport("codegen", exportedModule(b, "codegen"));
+    mod.addImport("desktop", exportedModule(b, "desktop"));
+    mod.addImport("core_bluetooth", exportedModule(b, "core_bluetooth"));
+    mod.addImport("core_wlan", exportedModule(b, "core_wlan"));
     mod.addOptions("test_target", test_target);
-    mod.addImport("lvgl", thirdparty_dep.module("lvgl"));
-    mod.addImport("lvgl_osal", thirdparty_dep.module("lvgl_osal"));
-    mod.addImport("mbedtls", thirdparty_dep.module("mbedtls"));
-    mod.addImport("opus", thirdparty_dep.module("opus"));
-    mod.addImport("portaudio", thirdparty_dep.module("portaudio"));
-    mod.addImport("speexdsp", thirdparty_dep.module("speexdsp"));
-    mod.addImport("stb_truetype", thirdparty_dep.module("stb_truetype"));
+    mod.addImport("lvgl", exportedModule(b, "lvgl"));
+    mod.addImport("lvgl_osal", exportedModule(b, "lvgl_osal"));
+    mod.addImport("mbedtls", exportedModule(b, "mbedtls"));
+    mod.addImport("opus", exportedModule(b, "opus"));
+    mod.addImport("portaudio", exportedModule(b, "portaudio"));
+    mod.addImport("speexdsp", exportedModule(b, "speexdsp"));
+    mod.addImport("stb_truetype", exportedModule(b, "stb_truetype"));
 
     return mod;
+}
+
+fn exportedModule(b: *std.Build, name: []const u8) *std.Build.Module {
+    return b.modules.get(name) orelse @panic("missing exported module");
 }
 
 fn stepModuleName(b: *std.Build, module: []const u8) []const u8 {

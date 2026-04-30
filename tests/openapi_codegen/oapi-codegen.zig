@@ -1,8 +1,19 @@
+pub const meta = .{
+    .source_file = sourceFile(),
+    .module = "openapi-codegen",
+    .filter = "openapi-codegen/integration/oapi-codegen",
+    .label = .integration,
+};
+
+fn sourceFile() []const u8 {
+    return @src().file;
+}
+
 const std = @import("std");
 const glib = @import("glib");
 const gstd = @import("gstd");
 
-test "oapi-codegen" {
+test "openapi-codegen/integration/oapi-codegen" {
     std.testing.log_level = .info;
 
     var t = glib.testing.T.new(std, gstd.runtime.time, .oapi_codegen_fixtures);
