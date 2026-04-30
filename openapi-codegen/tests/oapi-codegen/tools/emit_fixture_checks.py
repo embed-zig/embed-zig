@@ -314,10 +314,8 @@ def ensure_std_testing_openapi_imports(text: str) -> str:
     to_add: list[str] = []
     if re.search(r"^const std = @import\(\"std\"\);", text, re.MULTILINE) is None:
         to_add.append('const std = @import("std");')
-    if re.search(r"^const embed = @import\(\"embed\"\);", text, re.MULTILINE) is None:
-        to_add.append('const embed = @import("embed");')
-    if re.search(r"^const testing = embed\.testing;", text, re.MULTILINE) is None:
-        to_add.append('const testing = embed.testing;')
+    if re.search(r"^const glib = @import\(\"glib\"\);", text, re.MULTILINE) is None:
+        to_add.append('const glib = @import("glib");')
     if re.search(r"^const openapi = @import\(\"openapi\"\);", text, re.MULTILINE) is None:
         to_add.append('const openapi = @import("openapi");')
     if not to_add:
@@ -342,16 +340,15 @@ def migrate_parse_assert_fixture_test(
 
 
 RUNNER_TEMPLATE_SINGLE = """const std = @import("std");
-const embed = @import("embed");
-const testing = embed.testing;
+const glib = @import("glib");
 const openapi = @import("openapi");
 const Spec = openapi.Spec;
 
-pub fn TestRunner() testing.TestRunner {{
+pub fn TestRunner() glib.testing.TestRunner {{
     const Runner = struct {{
         pub fn init(_: *@This(), _: std.mem.Allocator) !void {{}}
 
-        pub fn run(_: *@This(), t: *testing.T, allocator: std.mem.Allocator) bool {{
+        pub fn run(_: *@This(), t: *glib.testing.T, allocator: std.mem.Allocator) bool {{
             checkFixture(allocator) catch |e| {{
                 t.logFatal(@errorName(e));
                 return false;
@@ -374,7 +371,7 @@ pub fn TestRunner() testing.TestRunner {{
         var state: Runner = .{{}};
     }};
 
-    return testing.TestRunner.make(Runner).new(&holder.state);
+    return glib.testing.TestRunner.make(Runner).new(&holder.state);
 }}
 """
 

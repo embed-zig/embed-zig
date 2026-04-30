@@ -1,11 +1,12 @@
-const std = @import("std");
-const embed = @import("embed");
+const zig = @import("std");
+const glib = @import("glib");
 const openapi = @import("openapi");
 const models_mod = @import("models.zig");
+const runtime = @import("runtime");
 
 const Files = openapi.Files;
 const Spec = openapi.Spec;
-const Type = std.builtin.Type;
+const Type = zig.builtin.Type;
 
 const RootFile = struct {
     name: []const u8,
@@ -84,11 +85,11 @@ const ResponseVariant = struct {
     payload_type: type,
 };
 
-pub fn make(comptime lib: type, comptime files: Files) type {
+pub fn make(comptime std: type, comptime files: Files) type {
     @setEvalBranchQuota(300_000);
 
     const root = rootFile(files);
-    const net = embed.net.make(lib);
+    const net = runtime.net(std);
     const Http = net.http;
     const Models = models_mod.make(files);
     const default_base_url = copyString(defaultBaseUrl(root.spec));
@@ -96,12 +97,12 @@ pub fn make(comptime lib: type, comptime files: Files) type {
     const spec_version = copyString(root.spec.info.version);
 
     const State = struct {
-        allocator: lib.mem.Allocator,
+        allocator: std.mem.Allocator,
         http_client: *Http.Client,
         base_url: []const u8,
     };
 
-    const Operations = makeOperations(lib, files, root, State);
+    const Operations = makeOperations(std, files, root, State);
 
     return struct {
         state: *State,
@@ -112,9 +113,9 @@ pub fn make(comptime lib: type, comptime files: Files) type {
         pub const models = Models;
         pub const OperationSet = Operations;
         pub const HttpClient = Http.Client;
-        pub const Context = embed.context.Context;
+        pub const Context = glib.context.Context;
         pub const Options = struct {
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             http_client: *Http.Client,
             base_url: []const u8 = default_base_url,
         };
@@ -154,7 +155,7 @@ pub fn make(comptime lib: type, comptime files: Files) type {
 }
 
 fn makeOperations(
-    comptime lib: type,
+    comptime std: type,
     comptime files: Files,
     comptime root: RootFile,
     comptime State: type,
@@ -163,7 +164,7 @@ fn makeOperations(
     var fields: [operations.len]Type.StructField = undefined;
 
     for (operations, 0..) |operation_ref, i| {
-        const Operation = OperationHandle(lib, files, operation_ref, State);
+        const Operation = OperationHandle(std, files, operation_ref, State);
         ensureUniqueFieldName(fields[0..i], operation_ref.field_name, "operation");
         fields[i] = .{
             .name = operation_ref.field_name,
@@ -183,12 +184,12 @@ fn makeOperations(
 }
 
 fn OperationHandle(
-    comptime lib: type,
+    comptime std: type,
     comptime files: Files,
     comptime operation_ref: OperationRef,
     comptime State: type,
 ) type {
-    const net = embed.net.make(lib);
+    const net = runtime.net(std);
     const Http = net.http;
     const parameters_slice = collectEffectiveParameters(files, operation_ref.file_name, operation_ref.path_item, operation_ref.operation, operation_ref.field_name);
     const parameters = blk: {
@@ -208,7 +209,7 @@ fn OperationHandle(
         }
         break :blk items;
     };
-    const request_body = selectRequestBody(lib, files, operation_ref.file_name, operation_ref.operation.request_body, operation_ref.field_name);
+    const request_body = selectRequestBody(std, files, operation_ref.file_name, operation_ref.operation.request_body, operation_ref.field_name);
     const ArgsType = makeArgsType(parameters, request_body);
     const response_variants_slice = collectResponseVariants(files, operation_ref.file_name, operation_ref.operation.responses, operation_ref.field_name);
     const response_variants = blk: {
@@ -216,8 +217,8 @@ fn OperationHandle(
         for (response_variants_slice, 0..) |variant, i| items[i] = variant;
         break :blk items;
     };
-    const ResponsePayload = makeResponseType(lib, response_variants);
-    const ResponseType = makeOwnedResponseType(lib, ResponsePayload, response_variants);
+    const ResponsePayload = makeResponseType(std, response_variants);
+    const ResponseType = makeOwnedResponseType(std, ResponsePayload, response_variants);
     const method = copyString(operation_ref.method);
     const path = copyString(operation_ref.path);
 
@@ -235,13 +236,13 @@ fn OperationHandle(
 
         const SendResult = if (ResponseType == void) void else *ResponseType;
 
-        pub fn send(self: Self, ctx: embed.context.Context, allocator: lib.mem.Allocator, args: ArgsType) anyerror!SendResult {
-            var url_builder = try lib.ArrayList(u8).initCapacity(allocator, 0);
+        pub fn send(self: Self, ctx: glib.context.Context, allocator: std.mem.Allocator, args: ArgsType) anyerror!SendResult {
+            var url_builder = try std.ArrayList(u8).initCapacity(allocator, 0);
             defer url_builder.deinit(allocator);
 
-            try appendBaseUrl(lib, allocator, &url_builder, self.state.base_url, path);
-            try appendResolvedPath(lib, allocator, &url_builder, path, runtime_parameters, args);
-            try appendQueryString(lib, allocator, &url_builder, runtime_parameters, args);
+            try appendBaseUrl(std, allocator, &url_builder, self.state.base_url, path);
+            try appendResolvedPath(std, allocator, &url_builder, path, runtime_parameters, args);
+            try appendQueryString(std, allocator, &url_builder, runtime_parameters, args);
 
             const raw_url = try url_builder.toOwnedSlice(allocator);
             defer allocator.free(raw_url);
@@ -250,14 +251,14 @@ fn OperationHandle(
             defer request.deinit();
             request = request.withContext(ctx);
 
-            var owned_header_values = try lib.ArrayList([]const u8).initCapacity(allocator, 0);
+            var owned_header_values = try std.ArrayList([]const u8).initCapacity(allocator, 0);
             defer {
                 for (owned_header_values.items) |owned| allocator.free(owned);
                 owned_header_values.deinit(allocator);
             }
 
             try appendHeaderParameters(
-                lib,
+                std,
                 allocator,
                 &request,
                 runtime_parameters,
@@ -266,7 +267,7 @@ fn OperationHandle(
             );
 
             try appendCookieParameters(
-                lib,
+                std,
                 allocator,
                 &request,
                 runtime_parameters,
@@ -286,11 +287,11 @@ fn OperationHandle(
                             switch (@typeInfo(@TypeOf(body_value))) {
                                 .optional => {
                                     if (body_value) |payload| {
-                                        body_bytes = try encodeJsonBody(lib, allocator, payload);
+                                        body_bytes = try encodeJsonBody(std, allocator, payload);
                                     }
                                 },
                                 else => {
-                                    body_bytes = try encodeJsonBody(lib, allocator, body_value);
+                                    body_bytes = try encodeJsonBody(std, allocator, body_value);
                                 },
                             }
                         },
@@ -299,11 +300,11 @@ fn OperationHandle(
                             switch (@typeInfo(@TypeOf(body_value))) {
                                 .optional => {
                                     if (body_value) |rc| {
-                                        body_bytes = try readReadCloser(lib, allocator, rc);
+                                        body_bytes = try readReadCloser(std, allocator, rc);
                                     }
                                 },
                                 else => {
-                                    body_bytes = try readReadCloser(lib, allocator, body_value);
+                                    body_bytes = try readReadCloser(std, allocator, body_value);
                                 },
                             }
                         },
@@ -335,7 +336,7 @@ fn OperationHandle(
             inline for (response_variants) |variant| {
                 if (variant.status_code) |status_code| {
                     if (response_ptr.status_code == status_code) {
-                        const out = try decodeResponseVariant(lib, ResponseType, allocator, response_ptr, variant);
+                        const out = try decodeResponseVariant(std, ResponseType, allocator, response_ptr, variant);
                         dispose_http_response = false;
                         return out;
                     }
@@ -344,7 +345,7 @@ fn OperationHandle(
 
             inline for (response_variants) |variant| {
                 if (variant.status_code == null) {
-                    const out = try decodeResponseVariant(lib, ResponseType, allocator, response_ptr, variant);
+                    const out = try decodeResponseVariant(std, ResponseType, allocator, response_ptr, variant);
                     dispose_http_response = false;
                     return out;
                 }
@@ -363,13 +364,13 @@ fn OperationHandle(
     };
 }
 
-fn makeOwnedResponseType(comptime lib: type, comptime ResponsePayload: type, comptime variants: anytype) type {
+fn makeOwnedResponseType(comptime std: type, comptime ResponsePayload: type, comptime variants: anytype) type {
     if (ResponsePayload == void) return void;
 
     return struct {
-        allocator: lib.mem.Allocator,
+        allocator: std.mem.Allocator,
         /// Heap `Response` from `Client.do`; kept alive until caller-owned stream teardown finishes.
-        http_response: *embed.net.make(lib).http.Response,
+        http_response: *runtime.net(std).http.Response,
         value: ResponsePayload,
         /// If a raw or SSE response has no body reader, the caller-owned stream points here.
         raw_empty_body: FixedBufferBody = .{ .bytes = "" },
@@ -385,7 +386,7 @@ fn makeOwnedResponseType(comptime lib: type, comptime ResponsePayload: type, com
             switch (self.value) {
                 inline else => |*payload, tag| {
                     inline for (variants) |variant| {
-                        if (tag != @field(std.meta.FieldEnum(ResponsePayload), variant.field_name)) continue;
+                        if (tag != @field(zig.meta.FieldEnum(ResponsePayload), variant.field_name)) continue;
                         switch (variant.payload_kind) {
                             .none => {},
                             .json => payload.deinit(),
@@ -469,7 +470,7 @@ fn appendPathItemOperations(
             appendOperation(operations, index, current_file_name, path, path_item, path_item.trace, "TRACE");
         },
         .reference => |reference| {
-            const resolved = files.resolvePathRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolvePathRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
                 "Unsupported path reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -520,7 +521,7 @@ fn pathItemOperationCount(
 ) usize {
     return switch (path_item_or_ref) {
         .reference => |reference| blk: {
-            const resolved = files.resolvePathRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolvePathRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
                 "Unsupported path reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -663,7 +664,7 @@ fn collectEffectiveParameters(
     inline for (path_item.parameters) |parameter_or_ref| {
         const resolved = resolveParameterOrRef(files, current_file_name, parameter_or_ref);
         const parameter = resolved.parameter;
-        const selection = selectParameterSchema(parameter) orelse @compileError(std.fmt.comptimePrint(
+        const selection = selectParameterSchema(parameter) orelse @compileError(zig.fmt.comptimePrint(
             "Parameter '{s}' for '{s}' is missing schema support.",
             .{ parameter.name, context_name },
         ));
@@ -677,7 +678,7 @@ fn collectEffectiveParameters(
                 files,
                 resolved.file_name,
                 selection.schema.*,
-                std.fmt.comptimePrint("{s}{s}", .{ context_name, parameter.name }),
+                zig.fmt.comptimePrint("{s}{s}", .{ context_name, parameter.name }),
             ),
         };
         index += 1;
@@ -686,7 +687,7 @@ fn collectEffectiveParameters(
     inline for (operation.parameters) |parameter_or_ref| {
         const resolved = resolveParameterOrRef(files, current_file_name, parameter_or_ref);
         const parameter = resolved.parameter;
-        const selection = selectParameterSchema(parameter) orelse @compileError(std.fmt.comptimePrint(
+        const selection = selectParameterSchema(parameter) orelse @compileError(zig.fmt.comptimePrint(
             "Parameter '{s}' for '{s}' is missing schema support.",
             .{ parameter.name, context_name },
         ));
@@ -700,7 +701,7 @@ fn collectEffectiveParameters(
                 files,
                 resolved.file_name,
                 selection.schema.*,
-                std.fmt.comptimePrint("{s}{s}", .{ context_name, parameter.name }),
+                zig.fmt.comptimePrint("{s}{s}", .{ context_name, parameter.name }),
             ),
         };
         index += 1;
@@ -720,7 +721,7 @@ fn resolveParameterOrRef(
             .parameter = parameter,
         },
         .reference => |reference| blk: {
-            const resolved = files.resolveParameterRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveParameterRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
                 "Missing parameter reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -740,7 +741,7 @@ fn resolveResponseOrRef(
             .response = response,
         },
         .reference => |reference| blk: {
-            const resolved = files.resolveResponseRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveResponseRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
                 "Missing response reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -760,7 +761,7 @@ fn resolveRequestBodyOrRef(
             .request_body = request_body,
         },
         .reference => |reference| blk: {
-            const resolved = files.resolveRequestBodyRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveRequestBodyRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
                 "Missing request body reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -792,13 +793,13 @@ fn selectParameterSchema(comptime parameter: Spec.Parameter) ?struct {
 }
 
 fn selectRequestBody(
-    comptime lib: type,
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime request_body_or_ref: ?Spec.RequestBodyOrRef,
     comptime context_name: []const u8,
 ) ?SelectedRequestBody {
-    const Http = embed.net.make(lib).http;
+    const Http = runtime.net(std).http;
     const request_body = request_body_or_ref orelse return null;
     const resolved = resolveRequestBodyOrRef(files, current_file_name, request_body);
 
@@ -811,7 +812,7 @@ fn selectRequestBody(
                     files,
                     resolved.file_name,
                     schema.*,
-                    std.fmt.comptimePrint("{s}Body", .{context_name}),
+                    zig.fmt.comptimePrint("{s}Body", .{context_name}),
                 ),
                 .payload_kind = .json,
                 .content_type = copyString(entry.name),
@@ -867,7 +868,7 @@ fn responseVariant(
                 files,
                 current_file_name,
                 schema.*,
-                std.fmt.comptimePrint("{s}{s}Response", .{ context_name, status_name }),
+                zig.fmt.comptimePrint("{s}{s}Response", .{ context_name, status_name }),
             ),
         };
     }
@@ -903,11 +904,11 @@ fn responseVariant(
     };
 }
 
-fn makeResponseType(comptime lib: type, comptime variants: anytype) type {
+fn makeResponseType(comptime std: type, comptime variants: anytype) type {
     if (variants.len == 0) return void;
 
-    const Http = embed.net.make(lib).http;
-    const Sse = @import("../sse.zig").make(lib);
+    const Http = runtime.net(std).http;
+    const Sse = @import("../sse.zig").make(std);
 
     var enum_fields: [variants.len]Type.EnumField = undefined;
     var union_fields: [variants.len]Type.UnionField = undefined;
@@ -915,7 +916,7 @@ fn makeResponseType(comptime lib: type, comptime variants: anytype) type {
     inline for (variants, 0..) |variant, index| {
         const payload_type = switch (variant.payload_kind) {
             .none => void,
-            .json => lib.json.Parsed(variant.payload_type),
+            .json => std.json.Parsed(variant.payload_type),
             .raw => Http.ReadCloser,
             .sse => Sse.Reader,
         };
@@ -956,9 +957,9 @@ fn countParameters(comptime parameters: anytype, comptime location: Spec.Paramet
 }
 
 fn appendBaseUrl(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
-    builder: *lib.ArrayList(u8),
+    comptime std: type,
+    allocator: std.mem.Allocator,
+    builder: *std.ArrayList(u8),
     base_url: []const u8,
     path: []const u8,
 ) !void {
@@ -971,9 +972,9 @@ fn appendBaseUrl(
 }
 
 fn appendResolvedPath(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
-    builder: *lib.ArrayList(u8),
+    comptime std: type,
+    allocator: std.mem.Allocator,
+    builder: *std.ArrayList(u8),
     path_template: []const u8,
     comptime parameters: anytype,
     args: anytype,
@@ -997,8 +998,8 @@ fn appendResolvedPath(
         var matched = false;
         inline for (parameters) |resolved| {
             if (resolved.location != .path) continue;
-            if (std.mem.eql(u8, resolved.original_name, placeholder)) {
-                const rendered = try serializePathFieldValue(lib, allocator, @field(args.path, resolved.field_name), resolved.encoding);
+            if (zig.mem.eql(u8, resolved.original_name, placeholder)) {
+                const rendered = try serializePathFieldValue(std, allocator, @field(args.path, resolved.field_name), resolved.encoding);
                 defer allocator.free(rendered);
                 try builder.appendSlice(allocator, rendered);
                 index += close_index + 1;
@@ -1013,9 +1014,9 @@ fn appendResolvedPath(
 }
 
 fn appendQueryString(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
-    builder: *lib.ArrayList(u8),
+    comptime std: type,
+    allocator: std.mem.Allocator,
+    builder: *std.ArrayList(u8),
     comptime parameters: anytype,
     args: anytype,
 ) !void {
@@ -1026,7 +1027,7 @@ fn appendQueryString(
         if (resolved.location != .query) continue;
 
         if (try appendMaybeNamedValueWithEncoding(
-            lib,
+            std,
             allocator,
             builder,
             resolved.original_name,
@@ -1040,12 +1041,12 @@ fn appendQueryString(
 }
 
 fn appendHeaderParameters(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
+    comptime std: type,
+    allocator: std.mem.Allocator,
     request: anytype,
     comptime parameters: anytype,
     args: anytype,
-    owned_values: *lib.ArrayList([]const u8),
+    owned_values: *std.ArrayList([]const u8),
 ) !void {
     if (!@hasField(@TypeOf(args), "header")) return;
 
@@ -1056,13 +1057,13 @@ fn appendHeaderParameters(
         switch (@typeInfo(@TypeOf(value))) {
             .optional => {
                 if (value) |unwrapped| {
-                    const rendered = try serializeParameterValue(lib, allocator, unwrapped, resolved.encoding);
+                    const rendered = try serializeParameterValue(std, allocator, unwrapped, resolved.encoding);
                     try owned_values.append(allocator, rendered);
                     try request.addHeader(resolved.original_name, rendered);
                 }
             },
             else => {
-                const rendered = try serializeParameterValue(lib, allocator, value, resolved.encoding);
+                const rendered = try serializeParameterValue(std, allocator, value, resolved.encoding);
                 try owned_values.append(allocator, rendered);
                 try request.addHeader(resolved.original_name, rendered);
             },
@@ -1071,16 +1072,16 @@ fn appendHeaderParameters(
 }
 
 fn appendCookieParameters(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
+    comptime std: type,
+    allocator: std.mem.Allocator,
     request: anytype,
     comptime parameters: anytype,
     args: anytype,
-    owned_values: *lib.ArrayList([]const u8),
+    owned_values: *std.ArrayList([]const u8),
 ) !void {
     if (!@hasField(@TypeOf(args), "cookie")) return;
 
-    var builder = try lib.ArrayList(u8).initCapacity(allocator, 0);
+    var builder = try std.ArrayList(u8).initCapacity(allocator, 0);
     defer builder.deinit(allocator);
 
     var first = true;
@@ -1089,7 +1090,7 @@ fn appendCookieParameters(
 
         const value = @field(args.cookie, resolved.field_name);
         if (try appendMaybeNamedValueWithEncoding(
-            lib,
+            std,
             allocator,
             &builder,
             resolved.original_name,
@@ -1109,20 +1110,20 @@ fn appendCookieParameters(
 }
 
 fn appendMaybeNamedValue(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
-    builder: *lib.ArrayList(u8),
+    comptime std: type,
+    allocator: std.mem.Allocator,
+    builder: *std.ArrayList(u8),
     name: []const u8,
     value: anytype,
     first: *bool,
 ) !bool {
-    return appendMaybeNamedValueWithEncoding(lib, allocator, builder, name, value, .scalar, first, "?", "&");
+    return appendMaybeNamedValueWithEncoding(std, allocator, builder, name, value, .scalar, first, "?", "&");
 }
 
 fn appendMaybeNamedValueWithEncoding(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
-    builder: *lib.ArrayList(u8),
+    comptime std: type,
+    allocator: std.mem.Allocator,
+    builder: *std.ArrayList(u8),
     name: []const u8,
     value: anytype,
     comptime encoding: ParameterEncoding,
@@ -1133,22 +1134,22 @@ fn appendMaybeNamedValueWithEncoding(
     switch (@typeInfo(@TypeOf(value))) {
         .optional => {
             if (value) |unwrapped| {
-                try appendNamedValue(lib, allocator, builder, name, unwrapped, encoding, first, first_separator, separator);
+                try appendNamedValue(std, allocator, builder, name, unwrapped, encoding, first, first_separator, separator);
                 return true;
             }
             return false;
         },
         else => {
-            try appendNamedValue(lib, allocator, builder, name, value, encoding, first, first_separator, separator);
+            try appendNamedValue(std, allocator, builder, name, value, encoding, first, first_separator, separator);
             return true;
         },
     }
 }
 
 fn appendNamedValue(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
-    builder: *lib.ArrayList(u8),
+    comptime std: type,
+    allocator: std.mem.Allocator,
+    builder: *std.ArrayList(u8),
     name: []const u8,
     value: anytype,
     comptime encoding: ParameterEncoding,
@@ -1156,7 +1157,7 @@ fn appendNamedValue(
     comptime first_separator: []const u8,
     comptime separator: []const u8,
 ) !void {
-    const rendered = try serializeParameterValue(lib, allocator, value, encoding);
+    const rendered = try serializeParameterValue(std, allocator, value, encoding);
     defer allocator.free(rendered);
 
     try builder.appendSlice(allocator, if (first.*) first_separator else separator);
@@ -1166,38 +1167,38 @@ fn appendNamedValue(
     try builder.appendSlice(allocator, rendered);
 }
 
-fn serializeFieldValue(comptime lib: type, allocator: lib.mem.Allocator, value: anytype) ![]u8 {
+fn serializeFieldValue(comptime std: type, allocator: std.mem.Allocator, value: anytype) ![]u8 {
     return switch (@typeInfo(@TypeOf(value))) {
-        .optional => if (value) |unwrapped| serializeScalar(lib, allocator, unwrapped) else error.MissingRequiredArgument,
-        else => serializeScalar(lib, allocator, value),
+        .optional => if (value) |unwrapped| serializeScalar(std, allocator, unwrapped) else error.MissingRequiredArgument,
+        else => serializeScalar(std, allocator, value),
     };
 }
 
 fn serializePathFieldValue(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
+    comptime std: type,
+    allocator: std.mem.Allocator,
     value: anytype,
     comptime encoding: ParameterEncoding,
 ) ![]u8 {
     return switch (@typeInfo(@TypeOf(value))) {
-        .optional => if (value) |unwrapped| serializeParameterValue(lib, allocator, unwrapped, encoding) else error.MissingRequiredArgument,
-        else => serializeParameterValue(lib, allocator, value, encoding),
+        .optional => if (value) |unwrapped| serializeParameterValue(std, allocator, unwrapped, encoding) else error.MissingRequiredArgument,
+        else => serializeParameterValue(std, allocator, value, encoding),
     };
 }
 
 fn serializeParameterValue(
-    comptime lib: type,
-    allocator: lib.mem.Allocator,
+    comptime std: type,
+    allocator: std.mem.Allocator,
     value: anytype,
     comptime encoding: ParameterEncoding,
 ) ![]u8 {
     return switch (encoding) {
-        .scalar => serializeScalar(lib, allocator, value),
-        .json => encodeJsonBody(lib, allocator, value),
+        .scalar => serializeScalar(std, allocator, value),
+        .json => encodeJsonBody(std, allocator, value),
     };
 }
 
-fn serializeScalar(comptime lib: type, allocator: lib.mem.Allocator, value: anytype) ![]u8 {
+fn serializeScalar(comptime std: type, allocator: std.mem.Allocator, value: anytype) ![]u8 {
     const T = @TypeOf(value);
     return switch (@typeInfo(T)) {
         .pointer => |pointer| {
@@ -1206,7 +1207,7 @@ fn serializeScalar(comptime lib: type, allocator: lib.mem.Allocator, value: anyt
             }
             return error.UnsupportedParameterType;
         },
-        .int, .comptime_int, .float, .comptime_float => try lib.fmt.allocPrint(allocator, "{}", .{value}),
+        .int, .comptime_int, .float, .comptime_float => try std.fmt.allocPrint(allocator, "{}", .{value}),
         .bool => try allocator.dupe(u8, if (value) "true" else "false"),
         else => error.UnsupportedParameterType,
     };
@@ -1216,13 +1217,13 @@ fn HttpHeaderCookieName() []const u8 {
     return "Cookie";
 }
 
-fn encodeJsonBody(comptime lib: type, allocator: lib.mem.Allocator, value: anytype) ![]u8 {
-    return try lib.fmt.allocPrint(allocator, "{f}", .{lib.json.fmt(value, .{})});
+fn encodeJsonBody(comptime std: type, allocator: std.mem.Allocator, value: anytype) ![]u8 {
+    return try std.fmt.allocPrint(allocator, "{f}", .{std.json.fmt(value, .{})});
 }
 
-fn readReadCloser(comptime lib: type, allocator: lib.mem.Allocator, reader: anytype) ![]u8 {
+fn readReadCloser(comptime std: type, allocator: std.mem.Allocator, reader: anytype) ![]u8 {
     defer reader.close();
-    var list = try lib.ArrayList(u8).initCapacity(allocator, 0);
+    var list = try std.ArrayList(u8).initCapacity(allocator, 0);
     defer list.deinit(allocator);
 
     var buffer: [1024]u8 = undefined;
@@ -1235,9 +1236,9 @@ fn readReadCloser(comptime lib: type, allocator: lib.mem.Allocator, reader: anyt
     return try list.toOwnedSlice(allocator);
 }
 
-fn readResponseBody(comptime lib: type, allocator: lib.mem.Allocator, response: *const embed.net.make(lib).http.Response) ![]u8 {
+fn readResponseBody(comptime std: type, allocator: std.mem.Allocator, response: *const runtime.net(std).http.Response) ![]u8 {
     var body = response.body() orelse return try allocator.alloc(u8, 0);
-    var list = try lib.ArrayList(u8).initCapacity(allocator, 0);
+    var list = try std.ArrayList(u8).initCapacity(allocator, 0);
     defer list.deinit(allocator);
 
     var buffer: [1024]u8 = undefined;
@@ -1251,16 +1252,16 @@ fn readResponseBody(comptime lib: type, allocator: lib.mem.Allocator, response: 
 }
 
 fn decodeResponseVariant(
-    comptime lib: type,
+    comptime std: type,
     comptime ResponseType: type,
-    allocator: lib.mem.Allocator,
-    response: *embed.net.make(lib).http.Response,
+    allocator: std.mem.Allocator,
+    response: *runtime.net(std).http.Response,
     comptime variant: ResponseVariant,
 ) !if (ResponseType == void) void else *ResponseType {
     if (ResponseType == void) return;
 
-    const Http = embed.net.make(lib).http;
-    const Sse = @import("../sse.zig").make(lib);
+    const Http = runtime.net(std).http;
+    const Sse = @import("../sse.zig").make(std);
     const PayloadType = @FieldType(ResponseType, "value");
 
     switch (variant.payload_kind) {
@@ -1299,10 +1300,10 @@ fn decodeResponseVariant(
             return owned;
         },
         .json => {
-            const response_bytes = try readResponseBody(lib, allocator, response);
+            const response_bytes = try readResponseBody(std, allocator, response);
             defer allocator.free(response_bytes);
 
-            const parsed = try lib.json.parseFromSlice(variant.payload_type, allocator, response_bytes, .{
+            const parsed = try std.json.parseFromSlice(variant.payload_type, allocator, response_bytes, .{
                 .allocate = .alloc_always,
             });
             const owned = try allocator.create(ResponseType);
@@ -1330,7 +1331,7 @@ fn defaultBaseUrl(comptime spec: Spec) []const u8 {
 }
 
 fn parseLocalComponentRef(comptime ref_path: []const u8, comptime prefix: []const u8) ?[]const u8 {
-    if (!std.mem.startsWith(u8, ref_path, prefix)) return null;
+    if (!zig.mem.startsWith(u8, ref_path, prefix)) return null;
     return ref_path[prefix.len..];
 }
 
@@ -1340,40 +1341,40 @@ fn isSuccessResponseName(comptime name: []const u8) bool {
 
 fn isJsonContentType(comptime name: []const u8) bool {
     const base = mediaTypeBase(name);
-    return std.ascii.eqlIgnoreCase(base, "application/json") or
-        std.ascii.eqlIgnoreCase(base, "text/json") or
-        (base.len >= 5 and std.ascii.eqlIgnoreCase(base[base.len - 5 ..], "+json"));
+    return zig.ascii.eqlIgnoreCase(base, "application/json") or
+        zig.ascii.eqlIgnoreCase(base, "text/json") or
+        (base.len >= 5 and zig.ascii.eqlIgnoreCase(base[base.len - 5 ..], "+json"));
 }
 
 fn isSseContentType(comptime name: []const u8) bool {
-    return std.ascii.eqlIgnoreCase(mediaTypeBase(name), "text/event-stream");
+    return zig.ascii.eqlIgnoreCase(mediaTypeBase(name), "text/event-stream");
 }
 
 fn mediaTypeBase(comptime name: []const u8) []const u8 {
-    const end = std.mem.indexOfScalar(u8, name, ';') orelse name.len;
-    return std.mem.trim(u8, name[0..end], " \t");
+    const end = zig.mem.indexOfScalar(u8, name, ';') orelse name.len;
+    return zig.mem.trim(u8, name[0..end], " \t");
 }
 
 fn deriveOperationName(comptime method: []const u8, comptime path: []const u8) []const u8 {
-    return std.fmt.comptimePrint("{s}_{s}", .{ method, path });
+    return zig.fmt.comptimePrint("{s}_{s}", .{ method, path });
 }
 
 fn responseVariantFieldName(comptime status_name: []const u8, comptime index: usize) [:0]const u8 {
     _ = index;
-    if (std.mem.eql(u8, status_name, "default")) return "default";
-    return zigIdentifier(std.fmt.comptimePrint("status_{s}", .{status_name}));
+    if (zig.mem.eql(u8, status_name, "default")) return "default";
+    return zigIdentifier(zig.fmt.comptimePrint("status_{s}", .{status_name}));
 }
 
 fn parseStatusCode(comptime status_name: []const u8) ?u16 {
-    if (std.mem.eql(u8, status_name, "default")) return null;
-    return std.fmt.parseInt(u16, status_name, 10) catch @compileError(std.fmt.comptimePrint(
+    if (zig.mem.eql(u8, status_name, "default")) return null;
+    return zig.fmt.parseInt(u16, status_name, 10) catch @compileError(zig.fmt.comptimePrint(
         "Unsupported response status '{s}'.",
         .{status_name},
     ));
 }
 
 fn copyString(comptime value: []const u8) []const u8 {
-    return std.fmt.comptimePrint("{s}", .{value});
+    return zig.fmt.comptimePrint("{s}", .{value});
 }
 
 fn optionalType(comptime Child: type) type {
@@ -1386,8 +1387,8 @@ fn parsedValueType(comptime ParsedType: type) type {
 
 fn ensureUniqueOperationName(comptime operations: []const OperationRef, comptime field_name: []const u8, comptime operation_id: []const u8) void {
     inline for (operations) |operation| {
-        if (std.mem.eql(u8, operation.field_name, field_name)) {
-            @compileError(std.fmt.comptimePrint(
+        if (zig.mem.eql(u8, operation.field_name, field_name)) {
+            @compileError(zig.fmt.comptimePrint(
                 "Duplicate client operation name '{s}' generated from '{s}'.",
                 .{ field_name, operation_id },
             ));
@@ -1401,8 +1402,8 @@ fn ensureUniqueResponseVariantName(
     comptime status_name: []const u8,
 ) void {
     inline for (variants) |variant| {
-        if (std.mem.eql(u8, variant.field_name, field_name)) {
-            @compileError(std.fmt.comptimePrint(
+        if (zig.mem.eql(u8, variant.field_name, field_name)) {
+            @compileError(zig.fmt.comptimePrint(
                 "Duplicate response variant '{s}' generated for status '{s}'.",
                 .{ field_name, status_name },
             ));
@@ -1412,8 +1413,8 @@ fn ensureUniqueResponseVariantName(
 
 fn ensureUniqueFieldName(comptime fields: []const Type.StructField, comptime field_name: []const u8, comptime kind: []const u8) void {
     inline for (fields) |field| {
-        if (std.mem.eql(u8, field.name, field_name)) {
-            @compileError(std.fmt.comptimePrint(
+        if (zig.mem.eql(u8, field.name, field_name)) {
+            @compileError(zig.fmt.comptimePrint(
                 "Duplicate {s} field '{s}' while generating client.",
                 .{ kind, field_name },
             ));
@@ -1438,7 +1439,7 @@ fn zigIdentifier(comptime name: []const u8) [:0]const u8 {
     }
 
     buffer[index] = 0;
-    const rendered = std.fmt.comptimePrint("{s}\x00", .{buffer[0..index]});
+    const rendered = zig.fmt.comptimePrint("{s}\x00", .{buffer[0..index]});
     return rendered[0..index :0];
 }
 

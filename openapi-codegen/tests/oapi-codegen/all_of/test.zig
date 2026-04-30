@@ -1,13 +1,12 @@
 const std = @import("std");
-const embed = @import("embed");
-const testing = embed.testing;
+const glib = @import("glib");
 const openapi = @import("openapi");
 
-pub fn TestRunner() testing.TestRunner {
+pub fn TestRunner() glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(_: *@This(), _: std.mem.Allocator) !void {}
 
-        pub fn run(_: *@This(), t: *testing.T, allocator: std.mem.Allocator) bool {
+        pub fn run(_: *@This(), t: *glib.testing.T, allocator: std.mem.Allocator) bool {
             checkFixture(allocator) catch |e| {
                 t.logFatal(@errorName(e));
                 return false;
@@ -75,6 +74,5 @@ pub fn TestRunner() testing.TestRunner {
         var state: Runner = .{};
     };
 
-    return testing.TestRunner.make(Runner).new(&holder.state);
+    return glib.testing.TestRunner.make(Runner).new(&holder.state);
 }
-

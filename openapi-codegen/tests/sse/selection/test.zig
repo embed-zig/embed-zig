@@ -1,13 +1,11 @@
-const testing = embed.testing;
 const std = @import("std");
-const embed = @import("embed");
-const lib = @import("embed_std").std;
-const context_mod = embed.context;
+const glib = @import("glib");
+const lib = std;
 const openapi = @import("openapi");
 const codegen = @import("codegen");
-const net_mod = embed.net;
+const runtime = @import("runtime");
 
-const net = net_mod.make(lib);
+const net = runtime.net(lib);
 
 fn files() openapi.Files {
     const spec = openapi.json.parse(@embedFile("spec.json"));
@@ -59,7 +57,7 @@ const SingleResponseTransport = struct {
     }
 };
 
-fn runSelectionTests(_: *testing.T, allocator: lib.mem.Allocator) !void {
+fn runSelectionTests(_: *glib.testing.T, allocator: lib.mem.Allocator) !void {
     try runParameterizedSseSelectionTest(allocator);
     try runMixedResponseSelectionTest(allocator);
 }
@@ -79,7 +77,7 @@ fn runParameterizedSseSelectionTest(allocator: lib.mem.Allocator) !void {
     });
     defer api.deinit();
 
-    var ctx_ns = try context_mod.make(lib).init(allocator);
+    var ctx_ns = try glib.context.make(lib, runtime.time).init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
     const resp = try api.operations.watchEventsParameterized.send(bg, allocator, .{});
@@ -95,8 +93,8 @@ fn runParameterizedSseSelectionTest(allocator: lib.mem.Allocator) !void {
     try std.testing.expectEqual(@as(usize, 1), body.close_calls);
 }
 
-pub fn TestRunner() testing.TestRunner {
-    return testing.TestRunner.fromFn(lib, 1024 * 1024, runSelectionTests);
+pub fn TestRunner() glib.testing.TestRunner {
+    return glib.testing.TestRunner.fromFn(lib, 1024 * 1024, runSelectionTests);
 }
 
 fn runMixedResponseSelectionTest(allocator: lib.mem.Allocator) !void {
@@ -114,7 +112,7 @@ fn runMixedResponseSelectionTest(allocator: lib.mem.Allocator) !void {
     });
     defer api.deinit();
 
-    var ctx_ns = try context_mod.make(lib).init(allocator);
+    var ctx_ns = try glib.context.make(lib, runtime.time).init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
     const resp = try api.operations.getMixedResponse.send(bg, allocator, .{});

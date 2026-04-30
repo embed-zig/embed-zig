@@ -1,12 +1,10 @@
-const context = embed.context;
-const testing_api = embed.testing;
-const net_mod = embed.net;
 const openapi = @import("openapi");
 const codegen = @import("codegen");
 
-const embed = @import("embed");
-const lib = @import("embed_std").std;
-const net = embed.net.make(lib);
+const glib = @import("glib");
+const lib = @import("std");
+const runtime = @import("runtime");
+const net = runtime.net(lib);
 
 const raw_spec = @embedFile("spec.json");
 
@@ -51,7 +49,7 @@ const ChunkedPartsBody = struct {
     pub fn close(_: *@This()) void {}
 };
 
-fn runStreamUploadTest(t: *testing_api.T, alloc: lib.mem.Allocator) !void {
+fn runStreamUploadTest(t: *glib.testing.T, alloc: lib.mem.Allocator) !void {
     var app = AppContext{};
 
     var server = try ServerApi.init(alloc, &app, .{
@@ -100,7 +98,7 @@ const AppContext = struct {
 const Handlers = struct {
     fn streamUpload(
         ptr: *anyopaque,
-        ctx: context.Context,
+        ctx: glib.context.Context,
         allocator: lib.mem.Allocator,
         args: ServerApi.operations.streamUpload.Args,
     ) !ServerApi.operations.streamUpload.Response {
@@ -121,9 +119,9 @@ const Handlers = struct {
 };
 
 const ServerRun = struct {
-    listener: net_mod.Listener,
+    listener: glib.net.Listener,
     port: u16,
-    server_err: ?anyerror = null,
+    server_err: *?anyerror,
     thread: lib.Thread,
 
     fn stop(self: *@This(), server: *ServerApi) !void {
@@ -131,7 +129,8 @@ const ServerRun = struct {
         server.close();
         self.thread.join();
         defer self.listener.deinit();
-        if (self.server_err) |err| {
+        defer server.shared.allocator.destroy(self.server_err);
+        if (self.server_err.*) |err| {
             if (err != error.ServerClosed) return err;
         }
     }
@@ -139,26 +138,31 @@ const ServerRun = struct {
 
 fn startServer(server: *ServerApi) !ServerRun {
     const listener = try net.listen(server.shared.allocator, .{
-        .address = net_mod.netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 0),
+        .address = glib.net.netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 0),
     });
     const tcp_listener = try listener.as(net.TcpListener);
     const port = try tcp_listener.port();
 
+    const server_err = try server.shared.allocator.create(?anyerror);
+    errdefer server.shared.allocator.destroy(server_err);
+    server_err.* = null;
+
     var srv_run = ServerRun{
         .listener = listener,
         .port = port,
+        .server_err = server_err,
         .thread = undefined,
     };
     srv_run.thread = try lib.Thread.spawn(.{}, struct {
-        fn exec(s: *ServerApi, ln: net_mod.Listener, err: *?anyerror) void {
+        fn exec(s: *ServerApi, ln: glib.net.Listener, err: *?anyerror) void {
             s.serve(ln) catch |serve_err| {
                 err.* = serve_err;
             };
         }
-    }.exec, .{ server, listener, &srv_run.server_err });
+    }.exec, .{ server, listener, srv_run.server_err });
     return srv_run;
 }
 
-pub fn TestRunner() testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 1024 * 1024, runStreamUploadTest);
+pub fn TestRunner() glib.testing.TestRunner {
+    return glib.testing.TestRunner.fromFn(lib, 1024 * 1024, runStreamUploadTest);
 }

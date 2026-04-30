@@ -1,8 +1,9 @@
 const zig = @import("std");
-const embed = @import("embed");
+const glib = @import("glib");
+const runtime = @import("runtime");
 
-pub fn make(comptime lib: type, comptime Event: type) type {
-    const Http = embed.net.make(lib).http;
+pub fn make(comptime std: type, comptime Event: type) type {
+    const Http = runtime.net(std).http;
 
     return struct {
         rw: *Http.ResponseWriter,
@@ -101,9 +102,9 @@ fn trimTrailingCarriageReturn(value: []const u8) []const u8 {
     return value;
 }
 
-pub fn TestRunner(comptime lib: type, comptime testing_api: anytype) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
+pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
+    return glib.testing.TestRunner.fromFn(std, 1024 * 1024, struct {
+        fn run(_: *glib.testing.T, allocator: std.mem.Allocator) !void {
             const EventLocal = struct {
                 event: ?[]const u8 = null,
                 id: ?[]const u8 = null,
@@ -116,15 +117,15 @@ pub fn TestRunner(comptime lib: type, comptime testing_api: anytype) testing_api
             };
 
             const MockResponseWriter = struct {
-                allocator: lib.mem.Allocator,
-                headers: lib.ArrayList(Header) = .{},
-                body: lib.ArrayList(u8) = .{},
+                allocator: std.mem.Allocator,
+                headers: std.ArrayList(Header) = .{},
+                body: std.ArrayList(u8) = .{},
                 status_code: u16 = 0,
                 committed: bool = false,
                 keep_alive: bool = false,
                 flush_calls: usize = 0,
 
-                pub fn init(a: lib.mem.Allocator) @This() {
+                pub fn init(a: std.mem.Allocator) @This() {
                     return .{ .allocator = a };
                 }
 
@@ -210,7 +211,6 @@ pub fn TestRunner(comptime lib: type, comptime testing_api: anytype) testing_api
                 try writeEventTo(&rw, EventLocal{ .data = "" });
                 try zig.testing.expectEqualStrings("data:\n\n", rw.body.items);
             }
-
         }
     }.run);
 }

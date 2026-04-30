@@ -1,20 +1,19 @@
 const std = @import("std");
-const testing = embed.testing;
 const codegen_helpers = @import("../../codegen_helpers.zig");
 const openapi = @import("openapi");
-const embed = @import("embed");
-const lib = @import("embed_std").std;
+const glib = @import("glib");
+const lib = std;
 
 pub const Phase = enum {
     spec,
     parent_bundle,
 };
 
-fn specRunner() testing.TestRunner {
+fn specRunner() glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(_: *@This(), _: std.mem.Allocator) !void {}
 
-        pub fn run(_: *@This(), t: *testing.T, allocator: std.mem.Allocator) bool {
+        pub fn run(_: *@This(), t: *glib.testing.T, allocator: std.mem.Allocator) bool {
             checkFixture(allocator) catch |e| {
                 t.logFatal(@errorName(e));
                 return false;
@@ -50,27 +49,27 @@ fn specRunner() testing.TestRunner {
         var state: Runner = .{};
     };
 
-    return testing.TestRunner.make(Runner).new(&holder.state);
+    return glib.testing.TestRunner.make(Runner).new(&holder.state);
 }
 
-pub fn TestRunner(comptime phase: Phase) testing.TestRunner {
+pub fn TestRunner(comptime phase: Phase) glib.testing.TestRunner {
     return switch (phase) {
         .spec => specRunner(),
-        .parent_bundle => testing.TestRunner.fromFn(std, 1024 * 1024, struct {
-        fn run(t: *testing.T, allocator: std.mem.Allocator) !void {
-            _ = t;
-            _ = allocator;
-            comptime {
-                const files: openapi.Files = .{
-                    .items = &.{
-                        .{ .name = "child.api.yaml", .spec = openapi.json.parse(@embedFile("spec.json")) },
-                        .{ .name = "parent.api.yaml", .spec = openapi.json.parse(@embedFile("../parent.api/spec.json")) },
-                    },
-                };
+        .parent_bundle => glib.testing.TestRunner.fromFn(std, 1024 * 1024, struct {
+            fn run(t: *glib.testing.T, allocator: std.mem.Allocator) !void {
+                _ = t;
+                _ = allocator;
+                comptime {
+                    const files: openapi.Files = .{
+                        .items = &.{
+                            .{ .name = "child.api.yaml", .spec = openapi.json.parse(@embedFile("spec.json")) },
+                            .{ .name = "parent.api.yaml", .spec = openapi.json.parse(@embedFile("../parent.api/spec.json")) },
+                        },
+                    };
 
-                codegen_helpers.assertClientServerCompile(lib, files);
+                    codegen_helpers.assertClientServerCompile(lib, files);
+                }
             }
-        }
         }.run),
     };
 }

@@ -1,5 +1,4 @@
 const std = @import("std");
-const lib = @import("embed_std").std;
 const openapi = @import("openapi");
 const Spec = openapi.Spec;
 const Files = openapi.Files;
@@ -573,7 +572,6 @@ fn appendFlattenedFields(
         };
         appendOrMergePropertyField(fields, index, additional_properties_field_name, merged_type, context_name, "additionalProperties");
     }
-
 }
 
 fn appendFlattenedFieldsFromSchemaOrRef(
@@ -838,7 +836,7 @@ fn additionalPropertiesFieldType(
 
     const value_type = if (schema.additional_properties) |additional_properties|
         switch (additional_properties) {
-            .boolean => |enabled| if (enabled) lib.json.Value else return null,
+            .boolean => |enabled| if (enabled) std.json.Value else return null,
             .schema => |value_schema| lowerSchemaOrRef(
                 files,
                 current_file_name,
@@ -847,29 +845,29 @@ fn additionalPropertiesFieldType(
             ),
         }
     else
-        lib.json.Value;
+        std.json.Value;
 
     return AdditionalPropertiesMap(value_type);
 }
 
 fn AdditionalPropertiesMap(comptime ValueType: type) type {
-    const Inner = lib.json.ArrayHashMap(ValueType);
+    const Inner = std.json.ArrayHashMap(ValueType);
     return struct {
         storage: Inner = .{},
 
         pub const additional_properties_value_type = ValueType;
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             self.storage.deinit(allocator);
         }
 
-        pub fn jsonParse(allocator: lib.mem.Allocator, source: anytype, options: lib.json.ParseOptions) !@This() {
+        pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !@This() {
             return .{
                 .storage = try Inner.jsonParse(allocator, source, options),
             };
         }
 
-        pub fn jsonParseFromValue(allocator: lib.mem.Allocator, source: lib.json.Value, options: lib.json.ParseOptions) !@This() {
+        pub fn jsonParseFromValue(allocator: std.mem.Allocator, source: std.json.Value, options: std.json.ParseOptions) !@This() {
             return .{
                 .storage = try Inner.jsonParseFromValue(allocator, source, options),
             };
@@ -907,17 +905,17 @@ fn mergeAdditionalPropertiesFieldTypes(comptime existing_type: type, comptime in
     const incoming_base = if (incoming_optional) optionalChildType(incoming_type) else incoming_type;
 
     if (!isAdditionalPropertiesMapType(existing_base) or !isAdditionalPropertiesMapType(incoming_base)) {
-        return if (existing_type == incoming_type) existing_type else optionalizeType(lib.json.Value);
+        return if (existing_type == incoming_type) existing_type else optionalizeType(std.json.Value);
     }
 
     const existing_value = additionalPropertiesValueType(existing_base);
     const incoming_value = additionalPropertiesValueType(incoming_base);
-    const merged_value = if (existing_value == incoming_value or existing_value == lib.json.Value)
+    const merged_value = if (existing_value == incoming_value or existing_value == std.json.Value)
         existing_value
-    else if (incoming_value == lib.json.Value)
+    else if (incoming_value == std.json.Value)
         incoming_value
     else
-        lib.json.Value;
+        std.json.Value;
 
     const merged_base = AdditionalPropertiesMap(merged_value);
     if (existing_optional or incoming_optional) return optionalizeType(merged_base);
@@ -1132,4 +1130,3 @@ fn isKeyword(comptime name: []const u8) bool {
     }
     return false;
 }
-

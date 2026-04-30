@@ -32,9 +32,8 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
-        .embed_zig = .{
-            .url = "https://codeload.github.com/embed-zig/embed-zig/tar.gz/refs/tags/v1.1.0",
-            .hash = "embed_zig-1.1.0-prAy_J14VAC48mxSkq8VNM1VThXqedgqSXof5wiEQ-tK",
+        .glib = .{
+            .path = "../glib",
         },
     },
     .paths = .{

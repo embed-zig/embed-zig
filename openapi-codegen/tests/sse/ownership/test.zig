@@ -1,13 +1,11 @@
-const testing = embed.testing;
 const std = @import("std");
-const embed = @import("embed");
-const lib = @import("embed_std").std;
-const context_mod = embed.context;
+const glib = @import("glib");
+const lib = std;
 const openapi = @import("openapi");
 const codegen = @import("codegen");
-const net_mod = embed.net;
+const runtime = @import("runtime");
 
-const net = net_mod.make(lib);
+const net = runtime.net(lib);
 
 fn files() openapi.Files {
     const spec = openapi.json.parse(@embedFile("spec.json"));
@@ -59,7 +57,7 @@ const SingleResponseTransport = struct {
     }
 };
 
-fn runOwnershipTests(_: *testing.T, allocator: lib.mem.Allocator) !void {
+fn runOwnershipTests(_: *glib.testing.T, allocator: lib.mem.Allocator) !void {
     try runRawOwnershipTest(allocator);
     try runSseOwnershipTest(allocator);
 }
@@ -79,7 +77,7 @@ fn runRawOwnershipTest(allocator: lib.mem.Allocator) !void {
     });
     defer api.deinit();
 
-    var ctx_ns = try context_mod.make(lib).init(allocator);
+    var ctx_ns = try glib.context.make(lib, runtime.time).init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
     const resp = try api.operations.streamDownload.send(bg, allocator, .{});
@@ -96,8 +94,8 @@ fn runRawOwnershipTest(allocator: lib.mem.Allocator) !void {
     try std.testing.expectEqual(@as(usize, 1), body.close_calls);
 }
 
-pub fn TestRunner() testing.TestRunner {
-    return testing.TestRunner.fromFn(lib, 1024 * 1024, runOwnershipTests);
+pub fn TestRunner() glib.testing.TestRunner {
+    return glib.testing.TestRunner.fromFn(lib, 1024 * 1024, runOwnershipTests);
 }
 
 fn runSseOwnershipTest(allocator: lib.mem.Allocator) !void {
@@ -115,7 +113,7 @@ fn runSseOwnershipTest(allocator: lib.mem.Allocator) !void {
     });
     defer api.deinit();
 
-    var ctx_ns = try context_mod.make(lib).init(allocator);
+    var ctx_ns = try glib.context.make(lib, runtime.time).init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
     const resp = try api.operations.watchEvents.send(bg, allocator, .{});

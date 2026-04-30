@@ -1,12 +1,12 @@
-const testing = embed.testing;
-const embed = @import("embed");
-const lib = @import("embed_std").std;
+const glib = @import("glib");
+const lib = @import("std");
 
 const petstore = @import("examples/petstore/test.zig");
 const sse = @import("sse/roundtrip/test.zig");
+const runtime = @import("runtime");
 
 test "examples" {
-    var t = testing.T.new(lib, .examples);
+    var t = glib.testing.T.new(lib, runtime.time, .examples);
     defer t.deinit();
 
     t.run("petstore", petstore.TestRunner());

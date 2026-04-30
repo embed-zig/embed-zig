@@ -131,12 +131,12 @@ pub const LedStrip = struct {
     };
 };
 
-pub fn TestRunner(comptime lib: type) dep.testing.TestRunner {
+pub fn TestRunner(comptime std: type) dep.testing.TestRunner {
     const testing_api = dep.testing;
 
     const TestCase = struct {
         fn ledstripTracksPixels() !void {
-            var strip = try LedStrip.init(lib.testing.allocator, 3);
+            var strip = try LedStrip.init(std.testing.allocator, 3);
             defer strip.deinit();
 
             const handle = strip.handle();
@@ -145,10 +145,10 @@ pub fn TestRunner(comptime lib: type) dep.testing.TestRunner {
             handle.refresh();
 
             const snapshot = strip.snapshot();
-            try lib.testing.expectEqual(@as(usize, 3), snapshot.pixels.len);
-            try lib.testing.expectEqual(ledstrip.Color.red, snapshot.pixels[0]);
-            try lib.testing.expectEqual(ledstrip.Color.green, snapshot.pixels[1]);
-            try lib.testing.expectEqual(@as(usize, 1), snapshot.refresh_count);
+            try std.testing.expectEqual(@as(usize, 3), snapshot.pixels.len);
+            try std.testing.expectEqual(ledstrip.Color.red, snapshot.pixels[0]);
+            try std.testing.expectEqual(ledstrip.Color.green, snapshot.pixels[1]);
+            try std.testing.expectEqual(@as(usize, 1), snapshot.refresh_count);
         }
 
         fn ledstripRefreshHook() !void {
@@ -166,7 +166,7 @@ pub fn TestRunner(comptime lib: type) dep.testing.TestRunner {
                 }
             };
 
-            var strip = try LedStrip.init(lib.testing.allocator, 1);
+            var strip = try LedStrip.init(std.testing.allocator, 1);
             defer strip.deinit();
 
             var sink = Sink{};
@@ -174,23 +174,23 @@ pub fn TestRunner(comptime lib: type) dep.testing.TestRunner {
             strip.handle().setPixel(0, ledstrip.Color.blue);
             strip.handle().refresh();
 
-            try lib.testing.expectEqual(@as(usize, 1), sink.called);
-            try lib.testing.expectEqual(ledstrip.Color.blue, sink.last_color);
+            try std.testing.expectEqual(@as(usize, 1), sink.called);
+            try std.testing.expectEqual(ledstrip.Color.blue, sink.last_color);
 
             strip.clearRefreshHook();
             strip.handle().setPixel(0, ledstrip.Color.red);
             strip.handle().refresh();
-            try lib.testing.expectEqual(@as(usize, 1), sink.called);
+            try std.testing.expectEqual(@as(usize, 1), sink.called);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -205,7 +205,7 @@ pub fn TestRunner(comptime lib: type) dep.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -1,7 +1,7 @@
 const dep = @import("dep");
 const host_std = dep.host_std;
-const std = dep.embed_std.std;
-const Net = dep.net.make(std);
+const runtime_std = dep.embed_std.std;
+const Net = dep.net.make(runtime_std);
 const Http = Net.http;
 const ui_assets = @import("desktop_ui_assets");
 
@@ -10,7 +10,7 @@ const Server = @This();
 pub const AddrPort = dep.net.netip.AddrPort;
 pub const Listener = dep.net.Listener;
 
-allocator: std.mem.Allocator,
+allocator: runtime_std.mem.Allocator,
 inner: Http.Server,
 ui: *UiHandler,
 
@@ -19,7 +19,7 @@ pub const Options = struct {
     assets_dir: ?[]const u8 = null,
 };
 
-pub fn init(allocator: std.mem.Allocator, options: Options) !Server {
+pub fn init(allocator: runtime_std.mem.Allocator, options: Options) !Server {
     var inner = try Http.Server.init(allocator, options.server);
     errdefer inner.deinit();
 
@@ -61,13 +61,13 @@ pub fn close(self: *Server) void {
 const UiHandler = struct {
     assets: ResolvedAssets,
 
-    fn init(allocator: std.mem.Allocator, assets_dir: ?[]const u8) !@This() {
+    fn init(allocator: runtime_std.mem.Allocator, assets_dir: ?[]const u8) !@This() {
         return .{
             .assets = try resolveAssets(allocator, assets_dir),
         };
     }
 
-    fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+    fn deinit(self: *@This(), allocator: runtime_std.mem.Allocator) void {
         self.assets.deinit(allocator);
         self.* = undefined;
     }
@@ -90,7 +90,7 @@ const ResolvedAssets = struct {
     styles_css: []const u8 = ui_assets.styles_css,
     owns_main_js: bool = false,
 
-    fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+    fn deinit(self: *@This(), allocator: runtime_std.mem.Allocator) void {
         if (self.owns_main_js) allocator.free(self.main_js);
         self.* = undefined;
     }
@@ -110,7 +110,7 @@ pub fn serveUi(
     return serveAsset(rw, Http.status.not_found, "text/plain; charset=utf-8", "not found\n");
 }
 
-fn resolveAssets(allocator: std.mem.Allocator, assets_dir: ?[]const u8) !ResolvedAssets {
+fn resolveAssets(allocator: runtime_std.mem.Allocator, assets_dir: ?[]const u8) !ResolvedAssets {
     var assets = ResolvedAssets{};
 
     if (assets_dir) |dir| {
@@ -124,28 +124,28 @@ fn resolveAssets(allocator: std.mem.Allocator, assets_dir: ?[]const u8) !Resolve
 }
 
 fn lookupAsset(assets: *const ResolvedAssets, path: []const u8) ?Asset {
-    if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/index.html")) {
+    if (runtime_std.mem.eql(u8, path, "/") or runtime_std.mem.eql(u8, path, "/index.html")) {
         return .{
             .file_name = "index.html",
             .content_type = "text/html; charset=utf-8",
             .body = assets.index_html,
         };
     }
-    if (std.mem.eql(u8, path, "/main.js") or std.mem.eql(u8, path, "/index.js")) {
+    if (runtime_std.mem.eql(u8, path, "/main.js") or runtime_std.mem.eql(u8, path, "/index.js")) {
         return .{
             .file_name = "main.js",
             .content_type = "application/javascript; charset=utf-8",
             .body = assets.main_js,
         };
     }
-    if (std.mem.eql(u8, path, "/desktop-core.js")) {
+    if (runtime_std.mem.eql(u8, path, "/desktop-core.js")) {
         return .{
             .file_name = "desktop-core.js",
             .content_type = "application/javascript; charset=utf-8",
             .body = assets.desktop_core_js,
         };
     }
-    if (std.mem.eql(u8, path, "/styles.css") or std.mem.eql(u8, path, "/index.css")) {
+    if (runtime_std.mem.eql(u8, path, "/styles.css") or runtime_std.mem.eql(u8, path, "/index.css")) {
         return .{
             .file_name = "styles.css",
             .content_type = "text/css; charset=utf-8",
@@ -156,7 +156,7 @@ fn lookupAsset(assets: *const ResolvedAssets, path: []const u8) ?Asset {
 }
 
 fn tryReadExternalMainJs(
-    allocator: std.mem.Allocator,
+    allocator: runtime_std.mem.Allocator,
     assets_dir: []const u8,
 ) ?[]u8 {
     const full_path = host_std.fs.path.join(host_std.heap.page_allocator, &.{ assets_dir, "main.js" }) catch return null;
@@ -191,7 +191,7 @@ fn writeResponse(
     body: []const u8,
 ) void {
     var content_length_buf: [32]u8 = undefined;
-    const content_length = std.fmt.bufPrint(&content_length_buf, "{d}", .{body.len}) catch return;
+    const content_length = runtime_std.fmt.bufPrint(&content_length_buf, "{d}", .{body.len}) catch return;
 
     rw.setHeader(Http.Header.cache_control, "no-store") catch return;
     rw.setHeader(Http.Header.content_type, content_type) catch return;
@@ -200,7 +200,7 @@ fn writeResponse(
     _ = rw.write(body) catch {};
 }
 
-pub fn TestRunner(comptime lib: type) dep.testing.TestRunner {
+pub fn TestRunner(comptime std: type) dep.testing.TestRunner {
     const testing_api = dep.testing;
 
     const TestCase = struct {
@@ -208,23 +208,23 @@ pub fn TestRunner(comptime lib: type) dep.testing.TestRunner {
             const assets = ResolvedAssets{};
 
             const index = lookupAsset(&assets, "/") orelse return error.MissingAsset;
-            try lib.testing.expectEqualStrings("index.html", index.file_name);
-            try lib.testing.expect(lib.mem.indexOf(u8, index.body, "main.js") != null);
+            try std.testing.expectEqualStrings("index.html", index.file_name);
+            try std.testing.expect(std.mem.indexOf(u8, index.body, "main.js") != null);
 
             const main = lookupAsset(&assets, "/main.js") orelse return error.MissingAsset;
-            try lib.testing.expectEqualStrings("main.js", main.file_name);
-            try lib.testing.expect(lib.mem.indexOf(u8, main.body, "power-btn") != null);
+            try std.testing.expectEqualStrings("main.js", main.file_name);
+            try std.testing.expect(std.mem.indexOf(u8, main.body, "power-btn") != null);
 
             const core = lookupAsset(&assets, "/desktop-core.js") orelse return error.MissingAsset;
-            try lib.testing.expectEqualStrings("desktop-core.js", core.file_name);
-            try lib.testing.expect(lib.mem.indexOf(u8, core.body, "createDesktopController") != null);
+            try std.testing.expectEqualStrings("desktop-core.js", core.file_name);
+            try std.testing.expect(std.mem.indexOf(u8, core.body, "createDesktopController") != null);
 
             const styles = lookupAsset(&assets, "/styles.css") orelse return error.MissingAsset;
-            try lib.testing.expectEqualStrings("styles.css", styles.file_name);
-            try lib.testing.expect(lib.mem.indexOf(u8, styles.body, ".button") != null);
+            try std.testing.expectEqualStrings("styles.css", styles.file_name);
+            try std.testing.expect(std.mem.indexOf(u8, styles.body, ".button") != null);
 
             const alias = lookupAsset(&assets, "/index.js") orelse return error.MissingAsset;
-            try lib.testing.expectEqualStrings("main.js", alias.file_name);
+            try std.testing.expectEqualStrings("main.js", alias.file_name);
         }
 
         fn resolveAssetsOverridesOnlyMainJs() !void {
@@ -240,13 +240,13 @@ pub fn TestRunner(comptime lib: type) dep.testing.TestRunner {
                 .data = "console.log('external main');\n",
             });
 
-            var assets = try resolveAssets(lib.testing.allocator, assets_dir);
-            defer assets.deinit(lib.testing.allocator);
+            var assets = try resolveAssets(std.testing.allocator, assets_dir);
+            defer assets.deinit(std.testing.allocator);
 
-            try lib.testing.expect(assets.owns_main_js);
-            try lib.testing.expect(lib.mem.indexOf(u8, assets.main_js, "external main") != null);
-            try lib.testing.expectEqualStrings(ui_assets.desktop_core_js, assets.desktop_core_js);
-            try lib.testing.expectEqualStrings(ui_assets.styles_css, assets.styles_css);
+            try std.testing.expect(assets.owns_main_js);
+            try std.testing.expect(std.mem.indexOf(u8, assets.main_js, "external main") != null);
+            try std.testing.expectEqualStrings(ui_assets.desktop_core_js, assets.desktop_core_js);
+            try std.testing.expectEqualStrings(ui_assets.styles_css, assets.styles_css);
         }
 
         fn resolveAssetsFallsBackWithoutMainJs() !void {
@@ -257,22 +257,22 @@ pub fn TestRunner(comptime lib: type) dep.testing.TestRunner {
             var dir = try host_std.fs.cwd().makeOpenPath(assets_dir, .{});
             defer dir.close();
 
-            var assets = try resolveAssets(lib.testing.allocator, assets_dir);
-            defer assets.deinit(lib.testing.allocator);
+            var assets = try resolveAssets(std.testing.allocator, assets_dir);
+            defer assets.deinit(std.testing.allocator);
 
-            try lib.testing.expect(!assets.owns_main_js);
-            try lib.testing.expectEqualStrings(ui_assets.main_js, assets.main_js);
-            try lib.testing.expectEqualStrings(ui_assets.desktop_core_js, assets.desktop_core_js);
+            try std.testing.expect(!assets.owns_main_js);
+            try std.testing.expectEqualStrings(ui_assets.main_js, assets.main_js);
+            try std.testing.expectEqualStrings(ui_assets.desktop_core_js, assets.desktop_core_js);
         }
     };
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -291,7 +291,7 @@ pub fn TestRunner(comptime lib: type) dep.testing.TestRunner {
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

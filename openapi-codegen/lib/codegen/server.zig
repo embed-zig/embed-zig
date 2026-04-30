@@ -1,11 +1,12 @@
-const std = @import("std");
-const embed = @import("embed");
+const zig = @import("std");
+const glib = @import("glib");
 const openapi = @import("openapi");
 const models_mod = @import("models.zig");
+const runtime = @import("runtime");
 
 const Files = openapi.Files;
 const Spec = openapi.Spec;
-const Type = std.builtin.Type;
+const Type = zig.builtin.Type;
 
 const RootFile = struct {
     name: []const u8,
@@ -85,13 +86,13 @@ const ResponseVariant = struct {
     content_type: ?[]const u8,
 };
 
-pub fn make(comptime lib: type, comptime files: Files) type {
+pub fn make(comptime std: type, comptime files: Files) type {
     @setEvalBranchQuota(300_000);
 
     const root = rootFile(files);
-    const net = embed.net.make(lib);
+    const net = runtime.net(std);
     const Http = net.http;
-    const ContextNs = embed.context.make(lib);
+    const ContextNs = glib.context.make(std, runtime.time);
     const Models = models_mod.make(files);
     const spec_title = copyString(root.spec.info.title);
     const spec_version = copyString(root.spec.info.version);
@@ -101,11 +102,11 @@ pub fn make(comptime lib: type, comptime files: Files) type {
         for (operation_refs, 0..) |operation_ref, i| items[i] = operation_ref.field_name;
         break :blk items;
     };
-    const Operations = makeOperationNamespace(lib, files, operation_refs);
+    const Operations = makeOperationNamespace(std, files, operation_refs);
     const ConfigType = makeConfigType(Operations, operation_names);
 
     const Shared = struct {
-        allocator: lib.mem.Allocator,
+        allocator: std.mem.Allocator,
         ctx: *anyopaque,
         contexts: ContextNs,
         config: ConfigType,
@@ -136,7 +137,7 @@ pub fn make(comptime lib: type, comptime files: Files) type {
         pub const Config = ConfigType;
         pub const HttpServer = Http.Server;
 
-        pub fn init(allocator: lib.mem.Allocator, ctx: anytype, config: ConfigType) !Self {
+        pub fn init(allocator: std.mem.Allocator, ctx: anytype, config: ConfigType) !Self {
             const shared = try allocator.create(Shared);
             errdefer allocator.destroy(shared);
 
@@ -169,7 +170,7 @@ pub fn make(comptime lib: type, comptime files: Files) type {
             self.* = undefined;
         }
 
-        pub fn serve(self: *Self, listener: embed.net.Listener) anyerror!void {
+        pub fn serve(self: *Self, listener: glib.net.Listener) anyerror!void {
             return self.http_server.serve(listener);
         }
 
@@ -194,14 +195,14 @@ pub fn make(comptime lib: type, comptime files: Files) type {
 }
 
 fn makeOperationNamespace(
-    comptime lib: type,
+    comptime std: type,
     comptime files: Files,
     comptime operation_refs: []const OperationRef,
 ) type {
     var fields: [operation_refs.len]Type.StructField = undefined;
 
     inline for (operation_refs, 0..) |operation_ref, index| {
-        const Operation = OperationType(lib, files, operation_ref);
+        const Operation = OperationType(std, files, operation_ref);
         fields[index] = .{
             .name = operation_ref.field_name,
             .type = type,
@@ -243,13 +244,13 @@ fn makeConfigType(comptime Operations: type, comptime operation_names: anytype) 
 }
 
 fn OperationType(
-    comptime lib: type,
+    comptime std: type,
     comptime files: Files,
     comptime operation_ref: OperationRef,
 ) type {
-    const net = embed.net.make(lib);
+    const net = runtime.net(std);
     const Http = net.http;
-    const Context = embed.context.Context;
+    const Context = glib.context.Context;
     const parameters_slice = collectEffectiveParameters(files, operation_ref.file_name, operation_ref.path_item, operation_ref.operation, operation_ref.field_name);
     const parameters = blk: {
         var items: [parameters_slice.len]ResolvedParameter = undefined;
@@ -268,7 +269,7 @@ fn OperationType(
         }
         break :blk items;
     };
-    const request_body = selectRequestBody(lib, files, operation_ref.file_name, operation_ref.operation.request_body, operation_ref.field_name);
+    const request_body = selectRequestBody(std, files, operation_ref.file_name, operation_ref.operation.request_body, operation_ref.field_name);
     const response_variants_slice = collectResponseVariants(files, operation_ref.file_name, operation_ref.operation.responses, operation_ref.field_name);
     const response_variants = blk: {
         var items: [response_variants_slice.len]ResponseVariant = undefined;
@@ -276,7 +277,7 @@ fn OperationType(
         break :blk items;
     };
     const ArgsType = makeArgsType(parameters, request_body);
-    const ResponseType = makeServerResponseType(lib, response_variants);
+    const ResponseType = makeServerResponseType(std, response_variants);
     const method = copyString(operation_ref.method);
     const path = copyString(operation_ref.path);
     const handler_field_name = operation_ref.field_name;
@@ -285,10 +286,10 @@ fn OperationType(
         pub const Args = ArgsType;
         pub const Response = ResponseType;
         /// `allocator` is a request-scoped arena (reset after the response is written). Raw request bodies are `http.ReadCloser`; handlers must read and `close` them.
-        pub const Handler = *const fn (ptr: *anyopaque, ctx: Context, allocator: lib.mem.Allocator, args: ArgsType) anyerror!ResponseType;
+        pub const Handler = *const fn (ptr: *anyopaque, ctx: Context, allocator: std.mem.Allocator, args: ArgsType) anyerror!ResponseType;
 
         pub fn matches(req: *Http.Request) bool {
-            return std.mem.eql(u8, req.effectiveMethod(), method) and pathMatchesTemplate(path, req.url.path);
+            return zig.mem.eql(u8, req.effectiveMethod(), method) and pathMatchesTemplate(path, req.url.path);
         }
 
         pub fn serve(shared: anytype, rw: *Http.ResponseWriter, req: *Http.Request) void {
@@ -334,7 +335,7 @@ fn OperationType(
                 return;
             };
 
-            var temp_arena = std.heap.ArenaAllocator.init(shared.allocator);
+            var temp_arena = zig.heap.ArenaAllocator.init(shared.allocator);
             defer temp_arena.deinit();
             const temp_allocator = temp_arena.allocator();
             var raw_request_body_guard: RawRequestBodyGuard = undefined;
@@ -345,11 +346,11 @@ fn OperationType(
                 switch (body.payload_kind) {
                     .json => {
                         if (req.body()) |reader| {
-                            const body_bytes = readBody(lib, temp_allocator, reader) catch {
+                            const body_bytes = readBody(std, temp_allocator, reader) catch {
                                 writePlainStatus(rw, Http.status.bad_request, "Bad Request") catch {};
                                 return;
                             };
-                            const parsed = std.json.parseFromSliceLeaky(body.body_type, temp_allocator, body_bytes, .{}) catch {
+                            const parsed = zig.json.parseFromSliceLeaky(body.body_type, temp_allocator, body_bytes, .{}) catch {
                                 writePlainStatus(rw, Http.status.bad_request, "Bad Request") catch {};
                                 return;
                             };
@@ -390,7 +391,7 @@ fn OperationType(
         }
 
         fn parseParameterGroups(
-            allocator: lib.mem.Allocator,
+            allocator: std.mem.Allocator,
             req: *Http.Request,
             out_args: *ArgsType,
         ) !void {
@@ -411,8 +412,8 @@ fn OperationType(
             }
         }
 
-        fn writeResponse(allocator: lib.mem.Allocator, rw: *Http.ResponseWriter, response_value: ResponseType) !void {
-            const Sse = @import("../sse.zig").make(lib);
+        fn writeResponse(allocator: std.mem.Allocator, rw: *Http.ResponseWriter, response_value: ResponseType) !void {
+            const Sse = @import("../sse.zig").make(std);
             switch (response_value) {
                 inline else => |payload, tag| {
                     const variant = comptime responseVariantByName(response_variants, @tagName(tag));
@@ -424,7 +425,7 @@ fn OperationType(
                                 try rw.setHeader(Http.Header.content_type, content_type);
                             }
                             var len_buf: [32]u8 = undefined;
-                            const len_text = try std.fmt.bufPrint(&len_buf, "{d}", .{payload.len});
+                            const len_text = try zig.fmt.bufPrint(&len_buf, "{d}", .{payload.len});
                             try rw.setHeader(Http.Header.content_length, len_text);
                             try rw.writeHeader(status_code);
                             try writeAll(rw, payload);
@@ -436,7 +437,7 @@ fn OperationType(
                             try writer.flush();
                         },
                         .json => {
-                            const encoded = try encodeJsonBody(lib, allocator, payload);
+                            const encoded = try encodeJsonBody(std, allocator, payload);
                             defer allocator.free(encoded);
                             try rw.setHeader(Http.Header.content_type, variant.content_type orelse "application/json");
                             try rw.writeHeader(status_code);
@@ -492,7 +493,7 @@ fn appendPathItemOperations(
             appendOperation(operations, index, current_file_name, path, path_item, path_item.trace, "TRACE");
         },
         .reference => |reference| {
-            const resolved = files.resolvePathRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolvePathRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
                 "Unsupported path reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -543,7 +544,7 @@ fn pathItemOperationCount(
 ) usize {
     return switch (path_item_or_ref) {
         .reference => |reference| blk: {
-            const resolved = files.resolvePathRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolvePathRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
                 "Unsupported path reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -682,7 +683,7 @@ fn collectEffectiveParameters(
     inline for (path_item.parameters) |parameter_or_ref| {
         const resolved = resolveParameterOrRef(files, current_file_name, parameter_or_ref);
         const parameter = resolved.parameter;
-        const selection = selectParameterSchema(parameter) orelse @compileError(std.fmt.comptimePrint(
+        const selection = selectParameterSchema(parameter) orelse @compileError(zig.fmt.comptimePrint(
             "Parameter '{s}' for '{s}' is missing schema support.",
             .{ parameter.name, context_name },
         ));
@@ -696,7 +697,7 @@ fn collectEffectiveParameters(
                 files,
                 resolved.file_name,
                 selection.schema.*,
-                std.fmt.comptimePrint("{s}{s}", .{ context_name, parameter.name }),
+                zig.fmt.comptimePrint("{s}{s}", .{ context_name, parameter.name }),
             ),
         };
         index += 1;
@@ -705,7 +706,7 @@ fn collectEffectiveParameters(
     inline for (operation.parameters) |parameter_or_ref| {
         const resolved = resolveParameterOrRef(files, current_file_name, parameter_or_ref);
         const parameter = resolved.parameter;
-        const selection = selectParameterSchema(parameter) orelse @compileError(std.fmt.comptimePrint(
+        const selection = selectParameterSchema(parameter) orelse @compileError(zig.fmt.comptimePrint(
             "Parameter '{s}' for '{s}' is missing schema support.",
             .{ parameter.name, context_name },
         ));
@@ -719,7 +720,7 @@ fn collectEffectiveParameters(
                 files,
                 resolved.file_name,
                 selection.schema.*,
-                std.fmt.comptimePrint("{s}{s}", .{ context_name, parameter.name }),
+                zig.fmt.comptimePrint("{s}{s}", .{ context_name, parameter.name }),
             ),
         };
         index += 1;
@@ -739,7 +740,7 @@ fn resolveParameterOrRef(
             .parameter = parameter,
         },
         .reference => |reference| blk: {
-            const resolved = files.resolveParameterRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveParameterRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
                 "Missing parameter reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -759,7 +760,7 @@ fn resolveResponseOrRef(
             .response = response,
         },
         .reference => |reference| blk: {
-            const resolved = files.resolveResponseRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveResponseRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
                 "Missing response reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -779,7 +780,7 @@ fn resolveRequestBodyOrRef(
             .request_body = request_body,
         },
         .reference => |reference| blk: {
-            const resolved = files.resolveRequestBodyRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveRequestBodyRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
                 "Missing request body reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -811,13 +812,13 @@ fn selectParameterSchema(comptime parameter: Spec.Parameter) ?struct {
 }
 
 fn selectRequestBody(
-    comptime lib: type,
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime request_body_or_ref: ?Spec.RequestBodyOrRef,
     comptime context_name: []const u8,
 ) ?SelectedRequestBody {
-    const Http = embed.net.make(lib).http;
+    const Http = runtime.net(std).http;
     const request_body = request_body_or_ref orelse return null;
     const resolved = resolveRequestBodyOrRef(files, current_file_name, request_body);
 
@@ -830,7 +831,7 @@ fn selectRequestBody(
                     files,
                     resolved.file_name,
                     schema.*,
-                    std.fmt.comptimePrint("{s}Body", .{context_name}),
+                    zig.fmt.comptimePrint("{s}Body", .{context_name}),
                 ),
                 .payload_kind = .json,
                 .content_type = copyString(entry.name),
@@ -886,7 +887,7 @@ fn responseVariant(
                     files,
                     current_file_name,
                     schema.*,
-                    std.fmt.comptimePrint("{s}{s}Response", .{ context_name, status_name }),
+                    zig.fmt.comptimePrint("{s}{s}Response", .{ context_name, status_name }),
                 ),
                 .content_type = copyString(entry.name),
             };
@@ -927,10 +928,10 @@ fn responseVariant(
     };
 }
 
-fn makeServerResponseType(comptime lib: type, comptime variants: anytype) type {
+fn makeServerResponseType(comptime std: type, comptime variants: anytype) type {
     if (variants.len == 0) return void;
 
-    const Sse = @import("../sse.zig").make(lib);
+    const Sse = @import("../sse.zig").make(std);
     var enum_fields: [variants.len]Type.EnumField = undefined;
     var union_fields: [variants.len]Type.UnionField = undefined;
 
@@ -1022,7 +1023,7 @@ fn pathMatchesTemplate(template: []const u8, actual_path: []const u8) bool {
         }
 
         if (isPathPlaceholder(template_segment.?)) continue;
-        if (!std.mem.eql(u8, template_segment.?, actual_segment.?)) return false;
+        if (!zig.mem.eql(u8, template_segment.?, actual_segment.?)) return false;
     }
 }
 
@@ -1035,12 +1036,12 @@ fn lookupPathParam(actual_path: []const u8, template: []const u8, target_name: [
         const actual_segment = actual_it.next() orelse return null;
 
         if (!isPathPlaceholder(template_segment)) {
-            if (!std.mem.eql(u8, template_segment, actual_segment)) return null;
+            if (!zig.mem.eql(u8, template_segment, actual_segment)) return null;
             continue;
         }
 
         const placeholder = template_segment[1 .. template_segment.len - 1];
-        if (std.mem.eql(u8, placeholder, target_name)) return actual_segment;
+        if (zig.mem.eql(u8, placeholder, target_name)) return actual_segment;
     }
 }
 
@@ -1069,13 +1070,13 @@ fn isPathPlaceholder(segment: []const u8) bool {
 fn lookupQueryValue(raw_query: []const u8, name: []const u8) ?[]const u8 {
     var start: usize = 0;
     while (start <= raw_query.len) {
-        const end = std.mem.indexOfScalarPos(u8, raw_query, start, '&') orelse raw_query.len;
+        const end = zig.mem.indexOfScalarPos(u8, raw_query, start, '&') orelse raw_query.len;
         const pair = raw_query[start..end];
         if (pair.len != 0) {
-            const equal = std.mem.indexOfScalar(u8, pair, '=') orelse pair.len;
+            const equal = zig.mem.indexOfScalar(u8, pair, '=') orelse pair.len;
             const pair_name = pair[0..equal];
             const pair_value = if (equal < pair.len) pair[equal + 1 ..] else "";
-            if (std.mem.eql(u8, pair_name, name)) return pair_value;
+            if (zig.mem.eql(u8, pair_name, name)) return pair_value;
         }
         if (end == raw_query.len) break;
         start = end + 1;
@@ -1096,12 +1097,12 @@ fn lookupCookieValue(headers: anytype, name: []const u8) ?[]const u8 {
     while (start < raw.len) {
         while (start < raw.len and (raw[start] == ' ' or raw[start] == ';')) start += 1;
         if (start >= raw.len) break;
-        const end = std.mem.indexOfScalarPos(u8, raw, start, ';') orelse raw.len;
+        const end = zig.mem.indexOfScalarPos(u8, raw, start, ';') orelse raw.len;
         const pair = raw[start..end];
-        const equal = std.mem.indexOfScalar(u8, pair, '=') orelse pair.len;
+        const equal = zig.mem.indexOfScalar(u8, pair, '=') orelse pair.len;
         const pair_name = pair[0..equal];
         const pair_value = if (equal < pair.len) pair[equal + 1 ..] else "";
-        if (std.mem.eql(u8, pair_name, name)) return pair_value;
+        if (zig.mem.eql(u8, pair_name, name)) return pair_value;
         start = end + 1;
     }
     return null;
@@ -1122,30 +1123,30 @@ fn parseArgumentValue(comptime T: type, value: ?[]const u8, allocator: anytype, 
         .@"struct", .@"union", .array => {
             const text = value orelse return error.MissingRequiredParameter;
             return switch (encoding) {
-                .json => try std.json.parseFromSliceLeaky(T, allocator, text, .{}),
+                .json => try zig.json.parseFromSliceLeaky(T, allocator, text, .{}),
                 .scalar => error.UnsupportedParameterType,
             };
         },
         .int => {
             const text = value orelse return error.MissingRequiredParameter;
-            return try std.fmt.parseInt(T, text, 10);
+            return try zig.fmt.parseInt(T, text, 10);
         },
         .float => {
             const text = value orelse return error.MissingRequiredParameter;
-            return try std.fmt.parseFloat(T, text);
+            return try zig.fmt.parseFloat(T, text);
         },
         .bool => {
             const text = value orelse return error.MissingRequiredParameter;
-            if (std.mem.eql(u8, text, "true")) return true;
-            if (std.mem.eql(u8, text, "false")) return false;
+            if (zig.mem.eql(u8, text, "true")) return true;
+            if (zig.mem.eql(u8, text, "false")) return false;
             return error.InvalidBoolean;
         },
         else => return error.UnsupportedParameterType,
     }
 }
 
-fn readBody(comptime lib: type, allocator: lib.mem.Allocator, reader: anytype) ![]u8 {
-    var list = try lib.ArrayList(u8).initCapacity(allocator, 0);
+fn readBody(comptime std: type, allocator: std.mem.Allocator, reader: anytype) ![]u8 {
+    var list = try std.ArrayList(u8).initCapacity(allocator, 0);
     defer list.deinit(allocator);
 
     var buffer: [1024]u8 = undefined;
@@ -1159,8 +1160,8 @@ fn readBody(comptime lib: type, allocator: lib.mem.Allocator, reader: anytype) !
     return try list.toOwnedSlice(allocator);
 }
 
-fn encodeJsonBody(comptime lib: type, allocator: lib.mem.Allocator, value: anytype) ![]u8 {
-    return try lib.fmt.allocPrint(allocator, "{f}", .{lib.json.fmt(value, .{})});
+fn encodeJsonBody(comptime std: type, allocator: std.mem.Allocator, value: anytype) ![]u8 {
+    return try std.fmt.allocPrint(allocator, "{f}", .{std.json.fmt(value, .{})});
 }
 
 fn writePlainStatus(rw: anytype, status_code: u16, body: []const u8) !void {
@@ -1186,24 +1187,24 @@ fn opaquePtr(pointer: anytype) *anyopaque {
 }
 
 fn parseLocalComponentRef(comptime ref_path: []const u8, comptime prefix: []const u8) ?[]const u8 {
-    if (!std.mem.startsWith(u8, ref_path, prefix)) return null;
+    if (!zig.mem.startsWith(u8, ref_path, prefix)) return null;
     return ref_path[prefix.len..];
 }
 
 fn isJsonContentType(comptime name: []const u8) bool {
     const base = mediaTypeBase(name);
-    return std.ascii.eqlIgnoreCase(base, "application/json") or
-        std.ascii.eqlIgnoreCase(base, "text/json") or
-        (base.len >= 5 and std.ascii.eqlIgnoreCase(base[base.len - 5 ..], "+json"));
+    return zig.ascii.eqlIgnoreCase(base, "application/json") or
+        zig.ascii.eqlIgnoreCase(base, "text/json") or
+        (base.len >= 5 and zig.ascii.eqlIgnoreCase(base[base.len - 5 ..], "+json"));
 }
 
 fn isSseContentType(comptime name: []const u8) bool {
-    return std.ascii.eqlIgnoreCase(mediaTypeBase(name), "text/event-stream");
+    return zig.ascii.eqlIgnoreCase(mediaTypeBase(name), "text/event-stream");
 }
 
 fn mediaTypeBase(comptime name: []const u8) []const u8 {
-    const end = std.mem.indexOfScalar(u8, name, ';') orelse name.len;
-    return std.mem.trim(u8, name[0..end], " \t");
+    const end = zig.mem.indexOfScalar(u8, name, ';') orelse name.len;
+    return zig.mem.trim(u8, name[0..end], " \t");
 }
 
 fn writeAll(writer: anytype, bytes: []const u8) !void {
@@ -1214,18 +1215,18 @@ fn writeAll(writer: anytype, bytes: []const u8) !void {
 }
 
 fn deriveOperationName(comptime method: []const u8, comptime path: []const u8) []const u8 {
-    return std.fmt.comptimePrint("{s}_{s}", .{ method, path });
+    return zig.fmt.comptimePrint("{s}_{s}", .{ method, path });
 }
 
 fn responseVariantFieldName(comptime status_name: []const u8, comptime index: usize) [:0]const u8 {
     _ = index;
-    if (std.mem.eql(u8, status_name, "default")) return "default";
-    return zigIdentifier(std.fmt.comptimePrint("status_{s}", .{status_name}));
+    if (zig.mem.eql(u8, status_name, "default")) return "default";
+    return zigIdentifier(zig.fmt.comptimePrint("status_{s}", .{status_name}));
 }
 
 fn parseStatusCode(comptime status_name: []const u8) ?u16 {
-    if (std.mem.eql(u8, status_name, "default")) return null;
-    return std.fmt.parseInt(u16, status_name, 10) catch @compileError(std.fmt.comptimePrint(
+    if (zig.mem.eql(u8, status_name, "default")) return null;
+    return zig.fmt.parseInt(u16, status_name, 10) catch @compileError(zig.fmt.comptimePrint(
         "Unsupported response status '{s}'.",
         .{status_name},
     ));
@@ -1236,13 +1237,13 @@ fn optionalType(comptime Child: type) type {
 }
 
 fn copyString(comptime value: []const u8) []const u8 {
-    return std.fmt.comptimePrint("{s}", .{value});
+    return zig.fmt.comptimePrint("{s}", .{value});
 }
 
 fn ensureUniqueOperationName(comptime operations: []const OperationRef, comptime field_name: []const u8, comptime operation_id: []const u8) void {
     inline for (operations) |operation| {
-        if (std.mem.eql(u8, operation.field_name, field_name)) {
-            @compileError(std.fmt.comptimePrint(
+        if (zig.mem.eql(u8, operation.field_name, field_name)) {
+            @compileError(zig.fmt.comptimePrint(
                 "Duplicate server operation name '{s}' generated from '{s}'.",
                 .{ field_name, operation_id },
             ));
@@ -1256,8 +1257,8 @@ fn ensureUniqueResponseVariantName(
     comptime status_name: []const u8,
 ) void {
     inline for (variants) |variant| {
-        if (std.mem.eql(u8, variant.field_name, field_name)) {
-            @compileError(std.fmt.comptimePrint(
+        if (zig.mem.eql(u8, variant.field_name, field_name)) {
+            @compileError(zig.fmt.comptimePrint(
                 "Duplicate server response variant '{s}' generated for status '{s}'.",
                 .{ field_name, status_name },
             ));
@@ -1267,9 +1268,9 @@ fn ensureUniqueResponseVariantName(
 
 fn responseVariantByName(comptime variants: anytype, comptime field_name: []const u8) ResponseVariant {
     inline for (variants) |variant| {
-        if (std.mem.eql(u8, variant.field_name, field_name)) return variant;
+        if (zig.mem.eql(u8, variant.field_name, field_name)) return variant;
     }
-    @compileError(std.fmt.comptimePrint("Missing response variant '{s}'.", .{field_name}));
+    @compileError(zig.fmt.comptimePrint("Missing response variant '{s}'.", .{field_name}));
 }
 
 fn zigIdentifier(comptime name: []const u8) [:0]const u8 {
@@ -1289,7 +1290,7 @@ fn zigIdentifier(comptime name: []const u8) [:0]const u8 {
     }
 
     buffer[index] = 0;
-    const rendered = std.fmt.comptimePrint("{s}\x00", .{buffer[0..index]});
+    const rendered = zig.fmt.comptimePrint("{s}\x00", .{buffer[0..index]});
     return rendered[0..index :0];
 }
 

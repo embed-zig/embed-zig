@@ -3,9 +3,28 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const embed_dep = b.dependency("embed_zig", .{});
-    const embed_mod = embed_dep.module("embed");
-    const embed_std_mod = embed_dep.module("embed_std");
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const glib_mod = glib_dep.module("glib");
+    const runtime_net_mod = b.createModule(.{
+        .root_source_file = b.path("../gstd/src/net.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "glib", .module = glib_mod },
+        },
+    });
+    const runtime_mod = b.createModule(.{
+        .root_source_file = b.path("lib/runtime.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "glib", .module = glib_mod },
+            .{ .name = "runtime_net", .module = runtime_net_mod },
+        },
+    });
 
     const openapi_mod = b.addModule("openapi", .{
         .root_source_file = b.path("lib/openapi.zig"),
@@ -19,8 +38,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
-            .{ .name = "embed", .module = embed_mod },
-            .{ .name = "embed_std", .module = embed_std_mod },
+            .{ .name = "glib", .module = glib_mod },
+            .{ .name = "runtime", .module = runtime_mod },
         },
     });
     const oapi_codegen_fixtures_mod = b.createModule(.{
@@ -30,8 +49,8 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "codegen", .module = codegen_mod },
-            .{ .name = "embed", .module = embed_mod },
-            .{ .name = "embed_std", .module = embed_std_mod },
+            .{ .name = "glib", .module = glib_mod },
+            .{ .name = "runtime", .module = runtime_mod },
             .{ .name = "helpers", .module = b.createModule(.{
                 .root_source_file = b.path("tests/oapi-codegen/helpers.zig"),
                 .target = target,
@@ -54,8 +73,8 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "codegen", .module = codegen_mod },
-            .{ .name = "embed", .module = embed_mod },
-            .{ .name = "embed_std", .module = embed_std_mod },
+            .{ .name = "glib", .module = glib_mod },
+            .{ .name = "runtime", .module = runtime_mod },
         },
     });
     const unit_tests = b.addTest(.{
@@ -70,8 +89,8 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "codegen", .module = codegen_mod },
-            .{ .name = "embed", .module = embed_mod },
-            .{ .name = "embed_std", .module = embed_std_mod },
+            .{ .name = "glib", .module = glib_mod },
+            .{ .name = "runtime", .module = runtime_mod },
         },
     });
     const examples_tests = b.addTest(.{
@@ -86,8 +105,8 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "codegen", .module = codegen_mod },
-            .{ .name = "embed", .module = embed_mod },
-            .{ .name = "embed_std", .module = embed_std_mod },
+            .{ .name = "glib", .module = glib_mod },
+            .{ .name = "runtime", .module = runtime_mod },
         },
     });
     const stream_tests = b.addTest(.{

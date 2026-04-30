@@ -1,9 +1,9 @@
 const zig = @import("std");
-const embed = @import("embed");
+const glib = @import("glib");
+const runtime = @import("runtime");
 
-pub fn make(comptime lib: type, comptime Event: type) type {
-    const std = lib;
-    const Http = embed.net.make(lib).http;
+pub fn make(comptime std: type, comptime Event: type) type {
+    const Http = runtime.net(std).http;
 
     return struct {
         allocator: std.mem.Allocator,
@@ -155,24 +155,24 @@ fn trimTrailingCarriageReturn(line: []u8) []u8 {
     return line;
 }
 
-pub fn TestRunner(comptime lib: type, comptime testing_api: anytype) testing_api.TestRunner {
-    return testing_api.TestRunner.fromFn(lib, 1024 * 1024, struct {
-        fn run(_: *testing_api.T, allocator: lib.mem.Allocator) !void {
-            const Http = embed.net.make(lib).http;
+pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
+    return glib.testing.TestRunner.fromFn(std, 1024 * 1024, struct {
+        fn run(_: *glib.testing.T, allocator: std.mem.Allocator) !void {
+            const Http = runtime.net(std).http;
             const Event = struct {
                 event: ?[]const u8 = null,
                 id: ?[]const u8 = null,
                 data: ?[]const u8 = null,
                 retry: ?u64 = null,
 
-                pub fn deinit(self: *@This(), a: lib.mem.Allocator) void {
+                pub fn deinit(self: *@This(), a: std.mem.Allocator) void {
                     if (self.event) |value| a.free(value);
                     if (self.id) |value| a.free(value);
                     if (self.data) |value| a.free(value);
                     self.* = .{};
                 }
             };
-            const Reader = make(lib, Event);
+            const Reader = make(std, Event);
 
             const ChunkedBody = struct {
                 parts: []const []const u8,

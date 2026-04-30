@@ -1,11 +1,11 @@
 const std = @import("std");
-const embed = @import("embed");
-const testing = embed.testing;
+const glib = @import("glib");
+const runtime = @import("runtime");
 
 test "oapi-codegen" {
     std.testing.log_level = .info;
-    
-    var t = testing.T.new(std, .oapi_codegen_fixtures);
+
+    var t = glib.testing.T.new(std, runtime.time, .oapi_codegen_fixtures);
     defer t.deinit();
 
     t.run("all_of: parse, roundtrip, and validate structure", @import("oapi-codegen/all_of/test.zig").TestRunner());

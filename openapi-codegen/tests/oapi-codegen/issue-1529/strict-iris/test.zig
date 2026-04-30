@@ -1,13 +1,12 @@
-const testing = embed.testing;
 const std = @import("std");
 const openapi = @import("openapi");
 const codegen = @import("codegen");
-const net_mod = embed.net;
 
-const embed = @import("embed");
-const lib = @import("embed_std").std;
-const Context = embed.context.Context;
-const net = embed.net.make(lib);
+const glib = @import("glib");
+const runtime = @import("runtime");
+const lib = std;
+const Context = glib.context.Context;
+const net = runtime.net(lib);
 
 const ClientApi = blk: {
     const spec = openapi.json.parse(@embedFile("spec.json"));
@@ -34,11 +33,11 @@ pub const Phase = enum {
     strict_framework,
 };
 
-fn specRunner() testing.TestRunner {
+fn specRunner() glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(_: *@This(), _: std.mem.Allocator) !void {}
 
-        pub fn run(_: *@This(), t: *testing.T, allocator: std.mem.Allocator) bool {
+        pub fn run(_: *@This(), t: *glib.testing.T, allocator: std.mem.Allocator) bool {
             checkFixture(allocator) catch |e| {
                 t.logFatal(@errorName(e));
                 return false;
@@ -85,7 +84,7 @@ fn specRunner() testing.TestRunner {
         var state: Runner = .{};
     };
 
-    return testing.TestRunner.make(Runner).new(&holder.state);
+    return glib.testing.TestRunner.make(Runner).new(&holder.state);
 }
 
 const AppContext = struct {
@@ -104,9 +103,9 @@ const Handlers = struct {
 };
 
 const ServerRun = struct {
-    listener: net_mod.Listener,
+    listener: glib.net.Listener,
     port: u16,
-    server_err: ?anyerror = null,
+    server_err: *?anyerror,
     thread: lib.Thread,
 
     fn stop(self: *@This(), server: *ServerApi) !void {
@@ -114,7 +113,8 @@ const ServerRun = struct {
         server.close();
         self.thread.join();
         defer self.listener.deinit();
-        if (self.server_err) |err| {
+        defer server.shared.allocator.destroy(self.server_err);
+        if (self.server_err.*) |err| {
             if (err != error.ServerClosed) return err;
         }
     }
@@ -122,30 +122,35 @@ const ServerRun = struct {
 
 fn startServer(server: *ServerApi) !ServerRun {
     const listener = try net.listen(std.testing.allocator, .{
-        .address = net_mod.netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 0),
+        .address = glib.net.netip.AddrPort.from4(.{ 127, 0, 0, 1 }, 0),
     });
     const tcp_listener = try listener.as(net.TcpListener);
     const port = try tcp_listener.port();
 
+    const server_err = try server.shared.allocator.create(?anyerror);
+    errdefer server.shared.allocator.destroy(server_err);
+    server_err.* = null;
+
     var run = ServerRun{
         .listener = listener,
         .port = port,
+        .server_err = server_err,
         .thread = undefined,
     };
     run.thread = try lib.Thread.spawn(.{}, struct {
-        fn exec(s: *ServerApi, ln: net_mod.Listener, err: *?anyerror) void {
+        fn exec(s: *ServerApi, ln: glib.net.Listener, err: *?anyerror) void {
             s.serve(ln) catch |serve_err| {
                 err.* = serve_err;
             };
         }
-    }.exec, .{ server, listener, &run.server_err });
+    }.exec, .{ server, listener, run.server_err });
     return run;
 }
 
-fn run_zig_semantic_equivalent_for_strict_framework_response_handli(t: *testing.T, allocator: std.mem.Allocator) !void {
+fn run_zig_semantic_equivalent_for_strict_framework_response_handli(t: *glib.testing.T, allocator: std.mem.Allocator) !void {
     _ = t;
     _ = allocator;
-    var ctx_ns = try embed.context.make(lib).init(std.testing.allocator);
+    var ctx_ns = try glib.context.make(lib, runtime.time).init(std.testing.allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
 
@@ -182,9 +187,9 @@ fn run_zig_semantic_equivalent_for_strict_framework_response_handli(t: *testing.
     try std.testing.expectEqual(@as(usize, 1), ctx.call_count);
 }
 
-pub fn TestRunner(comptime phase: Phase) testing.TestRunner {
+pub fn TestRunner(comptime phase: Phase) glib.testing.TestRunner {
     return switch (phase) {
         .spec => specRunner(),
-        .strict_framework => testing.TestRunner.fromFn(std, 1024 * 1024, run_zig_semantic_equivalent_for_strict_framework_response_handli),
+        .strict_framework => glib.testing.TestRunner.fromFn(std, 1024 * 1024, run_zig_semantic_equivalent_for_strict_framework_response_handli),
     };
 }

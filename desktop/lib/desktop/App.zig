@@ -1,5 +1,5 @@
 const dep = @import("dep");
-const std = dep.embed_std.std;
+const runtime_std = dep.embed_std.std;
 const desktop_http = @import("../http.zig");
 
 const App = @This();
@@ -12,7 +12,7 @@ pub const Options = struct {
     assets_dir: ?[]const u8 = null,
 };
 
-pub fn init(allocator: std.mem.Allocator, options: Options) !App {
+pub fn init(allocator: runtime_std.mem.Allocator, options: Options) !App {
     return .{
         .address = options.address,
         .server = try desktop_http.Server.init(allocator, .{
@@ -38,23 +38,23 @@ pub fn close(self: *App) void {
     self.server.close();
 }
 
-pub fn TestRunner(comptime lib: type) dep.testing.TestRunner {
+pub fn TestRunner(comptime std: type) dep.testing.TestRunner {
     const testing_api = dep.testing;
 
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: lib.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_api.T, allocator: lib.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = t;
             _ = allocator;
             return true;
         }
 
-        pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = self;
             _ = allocator;
         }

@@ -1,7 +1,7 @@
 const ReaderMod = @import("sse/Reader.zig");
 const WriterMod = @import("sse/Writer.zig");
 
-pub fn make(comptime lib: type) type {
+pub fn make(comptime std: type) type {
     return struct {
         pub const Event = struct {
             event: ?[]const u8 = null,
@@ -9,7 +9,7 @@ pub fn make(comptime lib: type) type {
             data: ?[]const u8 = null,
             retry: ?u64 = null,
 
-            pub fn deinit(self: *@This(), allocator: lib.mem.Allocator) void {
+            pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
                 if (self.event) |value| allocator.free(value);
                 if (self.id) |value| allocator.free(value);
                 if (self.data) |value| allocator.free(value);
@@ -17,8 +17,8 @@ pub fn make(comptime lib: type) type {
             }
         };
 
-        pub const Reader = ReaderMod.make(lib, Event);
-        pub const Writer = WriterMod.make(lib, Event);
+        pub const Reader = ReaderMod.make(std, Event);
+        pub const Writer = WriterMod.make(std, Event);
         pub const ReaderTestRunner = ReaderMod.TestRunner;
         pub const WriterTestRunner = WriterMod.TestRunner;
         pub const Handler = *const fn (ptr: *anyopaque, writer: *Writer) anyerror!void;

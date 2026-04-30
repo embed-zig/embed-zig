@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "sh -c \"rm -rf ./dist && mkdir -p ./dist && bun build ./src/main.ts ./src/desktop-core.ts --outdir ./dist --target browser --entry-naming='[name].[ext]' --chunk-naming='[name].[ext]' --asset-naming='[name].[ext]' && cp ./src/index.html ./dist/index.html && cp ./src/styles.css ./dist/styles.css\"",
-    "build:watch": "sh -c \"mkdir -p ./dist && cp ./src/index.html ./dist/index.html && cp ./src/styles.css ./dist/styles.css && bun build ./src/main.ts ./src/desktop-core.ts --outdir ./dist --target browser --entry-naming='[name].[ext]' --chunk-naming='[name].[ext]' --asset-naming='[name].[ext]' --watch\"",
+    "build": "sh -c \"rm -rf ./dist && mkdir -p ./dist && bun run generate:api && bun build ./src/main.ts ./src/desktop-core.ts --outdir ./dist --target browser --entry-naming='[name].[ext]' --chunk-naming='[name].[ext]' --asset-naming='[name].[ext]' && cp ./src/index.html ./dist/index.html && cp ./src/styles.css ./dist/styles.css\"",
+    "build:watch": "sh -c \"mkdir -p ./dist && cp ./src/index.html ./dist/index.html && cp ./src/styles.css ./dist/styles.css && bun run generate:api && bun build ./src/main.ts ./src/desktop-core.ts --outdir ./dist --target browser --entry-naming='[name].[ext]' --chunk-naming='[name].[ext]' --asset-naming='[name].[ext]' --watch\"",
     "generate:api": "openapi-ts",
     "mock:server": "bun run ./mock/server.ts",
     "test": "bun test",

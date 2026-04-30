@@ -1,13 +1,13 @@
-const testing = embed.testing;
-const embed = @import("embed");
-const lib = @import("embed_std").std;
+const glib = @import("glib");
+const lib = @import("std");
 
 const download = @import("stream/download/test.zig");
 const upload = @import("stream/upload/test.zig");
 const bidir = @import("stream/bidir/test.zig");
+const runtime = @import("runtime");
 
 test "stream" {
-    var t = testing.T.new(lib, .examples);
+    var t = glib.testing.T.new(lib, runtime.time, .examples);
     defer t.deinit();
 
     t.run("stream/download", download.TestRunner());

@@ -55,6 +55,8 @@ fn createUiBundle(
     const script =
         \\set -eu
         \\out="$1"
+        \\bun install --frozen-lockfile
+        \\bun run generate:api
         \\bun build ./src/main.ts ./src/desktop-core.ts --outdir "$out" --target browser --entry-naming='[name].[ext]' --chunk-naming='[name].[ext]' --asset-naming='[name].[ext]'
         \\cp ./src/index.html "$out/index.html"
         \\cp ./src/styles.css "$out/styles.css"

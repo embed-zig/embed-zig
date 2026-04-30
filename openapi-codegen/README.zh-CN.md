@@ -7,7 +7,7 @@
 ## 环境要求
 
 - **Zig** ≥ `0.15.2`（见 `build.zig.zon`）
-- **[embed-zig](https://github.com/embed-zig/embed-zig)**：提供生成 client/server 所需的运行时。本仓库在 `v1.1.0` 之后直接使用顶层 `embed` 作为模块命名空间（`net`、`context`、`testing` 等），并用 `embed_std.std` 作为注入的运行时 `lib`。
+- **[embed-zig](https://github.com/embed-zig/embed-zig)**：提供生成 client/server 所需的运行时。本仓库直接使用顶层 `glib` 作为模块命名空间（`net`、`context`、`testing` 等），并用 Zig 的 `std` 作为注入的运行时 `lib`。
 
 ## 能力概览
 
@@ -20,7 +20,7 @@
 | `**codegen.server**`             | `**codegen.server.make(lib, files)**` → 严格 handler 注册                                        |
 
 
-示例里统一写 `**const embed = @import("embed");**` 和 `**const lib = @import("embed_std").std;**`。`**embed.net**`、`**embed.context**`、`**embed.testing**` 走顶层模块；`**lib.mem**`、`**lib.json**`、`**lib.Thread**` 等 std-like 能力来自 `**embed_std.std**`。
+示例里统一写 `**const glib = @import("glib");**` 和 `**const lib = @import("std");**`。`**glib.net**`、`**glib.context**`、`**glib.testing**` 走顶层模块；`**lib.mem**`、`**lib.json**`、`**lib.Thread**` 等 std-like 能力来自 Zig 的 `std`。
 
 ## 克隆后自测
 
@@ -32,7 +32,7 @@ zig build test    # 运行 unit + example + tests/oapi-codegen/ 夹具
 
 ## 在你自己的工程里依赖
 
-在 `**build.zig.zon**` 声明 `**openapi_codegen**` 与 `**embed_zig**`；远端包用 `**zig fetch --save**` 写入 `**.hash**`。接线时先创建 `**openapi**` 模块，再直接透传 `**embed_dep.module("embed")**` 和 `**embed_dep.module("embed_std")**`，最后把它们传给 `**codegen**`。
+在 `**build.zig.zon**` 声明 `**openapi_codegen**` 与 `**glib**`；远端包用 `**zig fetch --save**` 写入 `**.hash**`。接线时先创建 `**openapi**` 模块，再直接透传 `**glib_dep.module("glib")**` 给 `**codegen**`。
 
 ```zig
 const std = @import("std");
@@ -41,7 +41,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const embed_dep = b.dependency("embed_zig", .{ .target = target, .optimize = optimize });
+    const glib_dep = b.dependency("glib", .{ .target = target, .optimize = optimize });
     const og = b.dependency("openapi_codegen", .{ .target = target, .optimize = optimize });
 
     const openapi_mod = b.addModule("openapi", .{
@@ -50,8 +50,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const embed_mod = embed_dep.module("embed");
-    const embed_std_mod = embed_dep.module("embed_std");
+    const glib_mod = glib_dep.module("glib");
 
     const codegen_mod = b.addModule("codegen", .{
         .root_source_file = og.path("lib/codegen.zig"),
@@ -59,8 +58,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
-            .{ .name = "embed", .module = embed_mod },
-            .{ .name = "embed_std", .module = embed_std_mod },
+            .{ .name = "glib", .module = glib_mod },
         },
     });
 
@@ -71,8 +69,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "codegen", .module = codegen_mod },
-            .{ .name = "embed", .module = embed_mod },
-            .{ .name = "embed_std", .module = embed_std_mod },
+            .{ .name = "glib", .module = glib_mod },
         },
     });
 
@@ -88,8 +85,8 @@ pub fn build(b: *std.Build) void {
 const openapi = @import("openapi");
 const codegen = @import("codegen");
 
-const embed = @import("embed");
-const lib = @import("embed_std").std;
+const glib = @import("glib");
+const lib = @import("std");
 
 const raw_service = @embedFile("service.json");
 const raw_structure = @embedFile("structure.json");
@@ -106,7 +103,7 @@ fn files() openapi.Files {
 }
 
 const ClientApi = codegen.client.make(lib, files());
-const net = embed.net.make(lib);
+const net = glib.net.make(lib);
 ```
 
 若只有一份 OpenAPI JSON，`**.items**` 里放一条即可。
@@ -138,7 +135,7 @@ defer api.deinit();
 示例测试里使用 harness 的 `**t.context()**`。在普通程序里可像 `**tests/oapi-codegen/strict-server/test.zig**` 那样：
 
 ```zig
-var ctx_ns = try embed.context.make(lib).init(alloc);
+var ctx_ns = try glib.context.make(lib).init(alloc);
 defer ctx_ns.deinit();
 const bg = ctx_ns.background();
 // 下面凡示例写 `t.context()` 的地方可换成 `bg`

@@ -1,5 +1,4 @@
-const embed = @import("embed");
-const testing = embed.testing;
+const glib = @import("glib");
 const std = @import("std");
 const openapi = @import("openapi");
 
@@ -8,11 +7,11 @@ pub const Phase = enum {
     additional_properties,
 };
 
-fn specRunner() testing.TestRunner {
+fn specRunner() glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(_: *@This(), _: std.mem.Allocator) !void {}
 
-        pub fn run(_: *@This(), t: *testing.T, allocator: std.mem.Allocator) bool {
+        pub fn run(_: *@This(), t: *glib.testing.T, allocator: std.mem.Allocator) bool {
             checkFixture(allocator) catch |e| {
                 t.logFatal(@errorName(e));
                 return false;
@@ -256,14 +255,14 @@ fn specRunner() testing.TestRunner {
         var state: Runner = .{};
     };
 
-    return testing.TestRunner.make(Runner).new(&holder.state);
+    return glib.testing.TestRunner.make(Runner).new(&holder.state);
 }
 
-pub fn TestRunner(comptime phase: Phase) testing.TestRunner {
+pub fn TestRunner(comptime phase: Phase) glib.testing.TestRunner {
     return switch (phase) {
         .spec => specRunner(),
-        .additional_properties => testing.TestRunner.fromFn(std, 1024 * 1024, struct {
-            fn run(t: *testing.T, allocator: std.mem.Allocator) !void {
+        .additional_properties => glib.testing.TestRunner.fromFn(std, 1024 * 1024, struct {
+            fn run(t: *glib.testing.T, allocator: std.mem.Allocator) !void {
                 _ = t;
                 _ = allocator;
                 const has_any = comptime blk: {

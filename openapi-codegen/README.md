@@ -7,7 +7,7 @@ Comptime-first OpenAPI 3.x tooling for Zig: parse specs, then `**codegen.models*
 ## Requirements
 
 - **Zig** ≥ `0.15.2` (see `build.zig.zon`)
-- **[embed-zig](https://github.com/embed-zig/embed-zig)** as the runtime surface for generated client/server code. With `v1.1.0`, this repo uses top-level `embed` for module namespaces (`net`, `context`, `testing`, ...) and `embed_std.std` as the injected runtime `lib`.
+- **[embed-zig](https://github.com/embed-zig/embed-zig)** as the runtime surface for generated client/server code. This repo uses top-level `glib` for module namespaces (`net`, `context`, `testing`, ...) and Zig's `std` as the injected runtime `lib`.
 
 ## What you get
 
@@ -20,7 +20,7 @@ Comptime-first OpenAPI 3.x tooling for Zig: parse specs, then `**codegen.models*
 | `**codegen.server**`              | `codegen.server.make(lib, files)` → strict handler registration                      |
 
 
-Examples in this repo use `**const embed = @import("embed");**` for module namespaces and `**const lib = @import("embed_std").std;**` for the injected std-like runtime. Generated code calls `**embed.net**`, `**embed.context**`, `**embed.testing**`, while `**lib.mem**`, `**lib.json**`, `**lib.Thread**`, and friends come from `**embed_std.std**`.
+Examples in this repo use `**const glib = @import("glib");**` for module namespaces and `**const lib = @import("std");**` for the injected std-like runtime. Generated code calls `**glib.net**`, `**glib.context**`, `**glib.testing**`, while `**lib.mem**`, `**lib.json**`, `**lib.Thread**`, and friends come from Zig's `std`.
 
 ## Clone and verify
 
@@ -32,9 +32,9 @@ zig build test    # runs unit + example + tests/oapi-codegen/ fixture suites
 
 ## Depend on the package
 
-Your `build.zig.zon` should list `**openapi_codegen**` and `**embed_zig**`. Use `zig fetch --save` (or a `path` dependency) so tar URLs get a correct `**.hash**`.
+Your `build.zig.zon` should list `**openapi_codegen**` and `**glib**`. Use `zig fetch --save` (or a `path` dependency) so tar URLs get a correct `**.hash**`.
 
-Wire modules like this repository’s `build.zig`: create an `**openapi**` module rooted at `lib/openapi.zig`, then pass through `**embed_dep.module("embed")**` as `**embed**` and `**embed_dep.module("embed_std")**` as `**embed_std**`, then wire `**codegen**` with imports `**openapi**`, `**embed**`, and `**embed_std**`.
+Wire modules like this repository’s `build.zig`: create an `**openapi**` module rooted at `lib/openapi.zig`, then pass through `**glib_dep.module("glib")**` as `**glib**`, then wire `**codegen**` with imports `**openapi**` and `**glib**`.
 
 ```zig
 const std = @import("std");
@@ -43,7 +43,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const embed_dep = b.dependency("embed_zig", .{ .target = target, .optimize = optimize });
+    const glib_dep = b.dependency("glib", .{ .target = target, .optimize = optimize });
     const og = b.dependency("openapi_codegen", .{ .target = target, .optimize = optimize });
 
     const openapi_mod = b.addModule("openapi", .{
@@ -52,8 +52,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const embed_mod = embed_dep.module("embed");
-    const embed_std_mod = embed_dep.module("embed_std");
+    const glib_mod = glib_dep.module("glib");
 
     const codegen_mod = b.addModule("codegen", .{
         .root_source_file = og.path("lib/codegen.zig"),
@@ -61,8 +60,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
-            .{ .name = "embed", .module = embed_mod },
-            .{ .name = "embed_std", .module = embed_std_mod },
+            .{ .name = "glib", .module = glib_mod },
         },
     });
 
@@ -73,8 +71,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "codegen", .module = codegen_mod },
-            .{ .name = "embed", .module = embed_mod },
-            .{ .name = "embed_std", .module = embed_std_mod },
+            .{ .name = "glib", .module = glib_mod },
         },
     });
 
@@ -90,8 +87,8 @@ The petstore example uses **two JSON files**: paths in `service.json`, `componen
 const openapi = @import("openapi");
 const codegen = @import("codegen");
 
-const embed = @import("embed");
-const lib = @import("embed_std").std;
+const glib = @import("glib");
+const lib = @import("std");
 
 const raw_service = @embedFile("service.json");
 const raw_structure = @embedFile("structure.json");
@@ -108,7 +105,7 @@ fn files() openapi.Files {
 }
 
 const ClientApi = codegen.client.make(lib, files());
-const net = embed.net.make(lib);
+const net = glib.net.make(lib);
 ```
 
 For a single-file OpenAPI document, use one entry in `.items` and one `@embedFile` instead.
@@ -137,10 +134,10 @@ defer api.deinit();
 
 **2. Context for `send`**
 
-`send` takes `**context.Context**` as the first argument. The example test uses the embed testing harness: `**t.context()**`. In ordinary code, create a background context the same way as `**tests/oapi-codegen/strict-server/test.zig**`:
+`send` takes `**context.Context**` as the first argument. The example test uses the glib testing harness: `**t.context()**`. In ordinary code, create a background context the same way as `**tests/oapi-codegen/strict-server/test.zig**`:
 
 ```zig
-var ctx_ns = try embed.context.make(lib).init(alloc);
+var ctx_ns = try glib.context.make(lib).init(alloc);
 defer ctx_ns.deinit();
 const bg = ctx_ns.background();
 // use `bg` wherever the example uses `t.context()`
