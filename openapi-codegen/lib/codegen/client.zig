@@ -2,7 +2,7 @@ const zig = @import("std");
 const glib = @import("glib");
 const openapi = @import("openapi");
 const models_mod = @import("models.zig");
-const runtime = @import("runtime");
+const gstd = @import("gstd");
 
 const Files = openapi.Files;
 const Spec = openapi.Spec;
@@ -89,7 +89,7 @@ pub fn make(comptime std: type, comptime files: Files) type {
     @setEvalBranchQuota(300_000);
 
     const root = rootFile(files);
-    const net = runtime.net(std);
+    const net = gstd.runtime.net;
     const Http = net.http;
     const Models = models_mod.make(files);
     const default_base_url = copyString(defaultBaseUrl(root.spec));
@@ -189,7 +189,7 @@ fn OperationHandle(
     comptime operation_ref: OperationRef,
     comptime State: type,
 ) type {
-    const net = runtime.net(std);
+    const net = gstd.runtime.net;
     const Http = net.http;
     const parameters_slice = collectEffectiveParameters(files, operation_ref.file_name, operation_ref.path_item, operation_ref.operation, operation_ref.field_name);
     const parameters = blk: {
@@ -370,7 +370,7 @@ fn makeOwnedResponseType(comptime std: type, comptime ResponsePayload: type, com
     return struct {
         allocator: std.mem.Allocator,
         /// Heap `Response` from `Client.do`; kept alive until caller-owned stream teardown finishes.
-        http_response: *runtime.net(std).http.Response,
+        http_response: *gstd.runtime.net.http.Response,
         value: ResponsePayload,
         /// If a raw or SSE response has no body reader, the caller-owned stream points here.
         raw_empty_body: FixedBufferBody = .{ .bytes = "" },
@@ -799,7 +799,8 @@ fn selectRequestBody(
     comptime request_body_or_ref: ?Spec.RequestBodyOrRef,
     comptime context_name: []const u8,
 ) ?SelectedRequestBody {
-    const Http = runtime.net(std).http;
+    _ = std;
+    const Http = gstd.runtime.net.http;
     const request_body = request_body_or_ref orelse return null;
     const resolved = resolveRequestBodyOrRef(files, current_file_name, request_body);
 
@@ -907,7 +908,7 @@ fn responseVariant(
 fn makeResponseType(comptime std: type, comptime variants: anytype) type {
     if (variants.len == 0) return void;
 
-    const Http = runtime.net(std).http;
+    const Http = gstd.runtime.net.http;
     const Sse = @import("../sse.zig").make(std);
 
     var enum_fields: [variants.len]Type.EnumField = undefined;
@@ -1236,7 +1237,7 @@ fn readReadCloser(comptime std: type, allocator: std.mem.Allocator, reader: anyt
     return try list.toOwnedSlice(allocator);
 }
 
-fn readResponseBody(comptime std: type, allocator: std.mem.Allocator, response: *const runtime.net(std).http.Response) ![]u8 {
+fn readResponseBody(comptime std: type, allocator: std.mem.Allocator, response: *const gstd.runtime.net.http.Response) ![]u8 {
     var body = response.body() orelse return try allocator.alloc(u8, 0);
     var list = try std.ArrayList(u8).initCapacity(allocator, 0);
     defer list.deinit(allocator);
@@ -1255,12 +1256,12 @@ fn decodeResponseVariant(
     comptime std: type,
     comptime ResponseType: type,
     allocator: std.mem.Allocator,
-    response: *runtime.net(std).http.Response,
+    response: *gstd.runtime.net.http.Response,
     comptime variant: ResponseVariant,
 ) !if (ResponseType == void) void else *ResponseType {
     if (ResponseType == void) return;
 
-    const Http = runtime.net(std).http;
+    const Http = gstd.runtime.net.http;
     const Sse = @import("../sse.zig").make(std);
     const PayloadType = @FieldType(ResponseType, "value");
 

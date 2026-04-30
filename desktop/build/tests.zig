@@ -38,7 +38,6 @@ pub fn create(
     _: std.Build.ResolvedTarget,
     _: std.builtin.OptimizeMode,
     comptime Libraries: type,
-    comptime Packages: type,
 ) void {
     const TestType = struct {
         label: []const u8,
@@ -74,21 +73,6 @@ pub fn create(
         }
     }
 
-    inline for (@typeInfo(Packages).@"struct".decls) |decl| {
-        if (b.modules.get(decl.name) != null) {
-            insertStepSpec(b.allocator, &step_specs, .{
-                .name = b.fmt("test-all-{s}", .{decl.name}),
-                .description = b.fmt("Run all {s} tests", .{decl.name}),
-            });
-            for (test_types) |test_type| {
-                insertStepSpec(b.allocator, &step_specs, .{
-                    .name = b.fmt("test-{s}-{s}", .{ test_type.label, decl.name }),
-                    .description = b.fmt("Run {s} {s} tests", .{ test_type.label, decl.name }),
-                });
-            }
-        }
-    }
-
     var steps: std.ArrayList(NamedStep) = .empty;
     defer steps.deinit(b.allocator);
 
@@ -121,30 +105,6 @@ pub fn create(
             parent_step.dependOn(&run_test.step);
             module_step.dependOn(&run_test.step);
             all_step.dependOn(&run_test.step);
-        }
-    }
-
-    inline for (@typeInfo(Packages).@"struct".decls) |decl| {
-        if (b.modules.get(decl.name)) |mod| {
-            const package_impl = @field(Packages, decl.name);
-            const link_hook: *const fn (b: *std.Build, compile: *std.Build.Step.Compile) void = package_impl.linkTest;
-            const all_step = getStep(steps.items, b.fmt("test-all-{s}", .{decl.name}));
-
-            for (test_types) |test_type| {
-                const module_step = getStep(steps.items, b.fmt("test-{s}-{s}", .{ test_type.label, decl.name }));
-                const parent_step = getStep(steps.items, test_type.parent_name);
-
-                const compile_test = b.addTest(.{
-                    .root_module = mod,
-                    .filters = &.{b.fmt("{s}/{s}/", .{ decl.name, test_type.label })},
-                });
-                link_hook(b, compile_test);
-                const run_test = b.addRunArtifact(compile_test);
-                run_test.setName(b.fmt("{s}:{s}", .{ decl.name, test_type.label }));
-                parent_step.dependOn(&run_test.step);
-                module_step.dependOn(&run_test.step);
-                all_step.dependOn(&run_test.step);
-            }
         }
     }
 }

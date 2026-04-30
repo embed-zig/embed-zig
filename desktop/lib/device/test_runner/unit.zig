@@ -1,9 +1,9 @@
-const dep = @import("dep");
+const glib = @import("glib");
 const ledstrip = @import("../ledstrip.zig");
 const single_button = @import("../single_button.zig");
 
-pub fn make(comptime std: type) dep.testing.TestRunner {
-    const testing_api = dep.testing;
+pub fn make(comptime std: type) glib.testing.TestRunner {
+    const testing_api = glib.testing;
 
     const Runner = struct {
         pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {

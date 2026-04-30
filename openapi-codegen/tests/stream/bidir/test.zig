@@ -3,8 +3,8 @@ const codegen = @import("codegen");
 
 const glib = @import("glib");
 const lib = @import("std");
-const runtime = @import("runtime");
-const net = runtime.net(lib);
+const gstd = @import("gstd");
+const net = gstd.runtime.net;
 
 const raw_spec = @embedFile("spec.json");
 

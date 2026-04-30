@@ -35,6 +35,9 @@
         .glib = .{
             .path = "../glib",
         },
+        .gstd = .{
+            .path = "../gstd",
+        },
     },
     .paths = .{
         "build.zig",

@@ -3,10 +3,10 @@ const openapi = @import("openapi");
 const codegen = @import("codegen");
 
 const glib = @import("glib");
-const runtime = @import("runtime");
+const gstd = @import("gstd");
 const lib = std;
 const sse = codegen.sse.make(lib);
-const net = runtime.net(lib);
+const net = gstd.runtime.net;
 
 const raw_spec = @embedFile("spec.json");
 

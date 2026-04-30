@@ -14,13 +14,17 @@ pub fn create(
 }
 
 pub fn link(b: *std.Build) void {
-    const dep = b.modules.get("dep") orelse @panic("desktop requires dep");
+    const embed = b.modules.get("embed") orelse @panic("embed module missing");
+    const glib = b.modules.get("glib") orelse @panic("glib module missing");
+    const gstd = b.modules.get("gstd") orelse @panic("gstd module missing");
     const openapi = b.modules.get("openapi") orelse @panic("openapi module missing");
     const codegen = b.modules.get("codegen") orelse @panic("codegen module missing");
     const api_spec = b.modules.get("desktop_api_spec") orelse @panic("desktop_api_spec module missing");
     const ui_assets = b.modules.get("desktop_ui_assets") orelse @panic("desktop_ui_assets module missing");
     const mod = b.modules.get("desktop") orelse @panic("desktop module missing");
-    mod.addImport("dep", dep);
+    mod.addImport("embed", embed);
+    mod.addImport("glib", glib);
+    mod.addImport("gstd", gstd);
     mod.addImport("openapi", openapi);
     mod.addImport("codegen", codegen);
     mod.addImport("desktop_api_spec", api_spec);

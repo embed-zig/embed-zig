@@ -3,10 +3,10 @@ const openapi = @import("openapi");
 const codegen = @import("codegen");
 
 const glib = @import("glib");
-const runtime = @import("runtime");
+const gstd = @import("gstd");
 const lib = std;
 const Context = glib.context.Context;
-const net = runtime.net(lib);
+const net = gstd.runtime.net;
 
 const ClientApi = blk: {
     const spec = openapi.json.parse(@embedFile("spec.json"));
@@ -321,7 +321,7 @@ fn startServer(server: *ServerApi) !ServerRun {
 
 fn run_generated_client_returns_status_union_responses(t: *glib.testing.T, allocator: std.mem.Allocator) !void {
     _ = t;
-    var ctx_ns = try glib.context.make(lib, runtime.time).init(allocator);
+    var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
 
@@ -380,7 +380,7 @@ fn run_generated_client_returns_status_union_responses(t: *glib.testing.T, alloc
 
 fn run_generated_client_and_server_exchange_raw_request_and_response(t: *glib.testing.T, allocator: std.mem.Allocator) !void {
     _ = t;
-    var ctx_ns = try glib.context.make(lib, runtime.time).init(allocator);
+    var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
 
@@ -457,7 +457,7 @@ fn run_generated_client_and_server_exchange_raw_request_and_response(t: *glib.te
 
 fn run_generated_client_closes_raw_request_stream_on_transport_error(t: *glib.testing.T, allocator: std.mem.Allocator) !void {
     _ = t;
-    var ctx_ns = try glib.context.make(lib, runtime.time).init(allocator);
+    var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
 

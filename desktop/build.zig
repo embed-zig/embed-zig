@@ -2,45 +2,60 @@ const std = @import("std");
 const Tests = @import("build/tests.zig");
 
 const lib_desktop = @import("build/lib/desktop.zig");
-const pkg_embed = @import("build/pkg/embed.zig");
-const pkg_openapi_codegen = @import("build/pkg/openapi_codegen.zig");
 
 const Libraries = struct {
     pub const desktop = lib_desktop;
 };
 
-const Packages = struct {
-    pub const dep = pkg_embed;
-    pub const openapi_codegen = pkg_openapi_codegen;
-};
-
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    createDependencyModules(b, target, optimize);
     createApiSpecModule(b, target, optimize);
     const ui_bundle = createUiBundle(b, target, optimize);
 
     inline for (@typeInfo(Libraries).@"struct".decls) |decl| {
         @field(Libraries, decl.name).create(b, target, optimize);
     }
-    inline for (@typeInfo(Packages).@"struct".decls) |decl| {
-        @field(Packages, decl.name).create(b, target, optimize);
-    }
 
     inline for (@typeInfo(Libraries).@"struct".decls) |decl| {
         @field(Libraries, decl.name).link(b);
-    }
-    inline for (@typeInfo(Packages).@"struct".decls) |decl| {
-        if (b.modules.get(decl.name) != null) {
-            @field(Packages, decl.name).link(b);
-        }
     }
 
     const ui_step = b.step("ui-build", "Bundle the desktop UI into zig-out/ui");
     ui_step.dependOn(&ui_bundle.install.step);
     b.getInstallStep().dependOn(&ui_bundle.install.step);
 
-    Tests.create(b, target, optimize, Libraries, Packages);
+    Tests.create(b, target, optimize, Libraries);
+}
+
+fn createDependencyModules(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) void {
+    const embed_dep = b.dependency("embed", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const gstd_dep = b.dependency("gstd", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const openapi_codegen_dep = b.dependency("openapi_codegen", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    b.modules.put("embed", embed_dep.module("embed")) catch @panic("OOM");
+    b.modules.put("glib", glib_dep.module("glib")) catch @panic("OOM");
+    b.modules.put("gstd", gstd_dep.module("gstd")) catch @panic("OOM");
+    b.modules.put("openapi", openapi_codegen_dep.module("openapi")) catch @panic("OOM");
+    b.modules.put("codegen", openapi_codegen_dep.module("codegen")) catch @panic("OOM");
 }
 
 const UiBundle = struct {

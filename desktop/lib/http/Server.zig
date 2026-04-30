@@ -1,26 +1,24 @@
-const dep = @import("dep");
-const host_std = dep.host_std;
-const runtime_std = dep.embed_std.std;
-const Net = dep.net.make(runtime_std);
-const Http = Net.http;
+const host_std = @import("std");
+const glib = @import("glib");
+const gstd = @import("gstd");
 const ui_assets = @import("desktop_ui_assets");
 
 const Server = @This();
 
-pub const AddrPort = dep.net.netip.AddrPort;
-pub const Listener = dep.net.Listener;
+pub const AddrPort = gstd.runtime.net.netip.AddrPort;
+pub const Listener = gstd.runtime.net.Listener;
 
-allocator: runtime_std.mem.Allocator,
-inner: Http.Server,
+allocator: gstd.runtime.std.mem.Allocator,
+inner: gstd.runtime.net.http.Server,
 ui: *UiHandler,
 
 pub const Options = struct {
-    server: Http.Server.Options = .{},
+    server: gstd.runtime.net.http.Server.Options = .{},
     assets_dir: ?[]const u8 = null,
 };
 
-pub fn init(allocator: runtime_std.mem.Allocator, options: Options) !Server {
-    var inner = try Http.Server.init(allocator, options.server);
+pub fn init(allocator: gstd.runtime.std.mem.Allocator, options: Options) !Server {
+    var inner = try gstd.runtime.net.http.Server.init(allocator, options.server);
     errdefer inner.deinit();
 
     const ui = try allocator.create(UiHandler);
@@ -28,7 +26,7 @@ pub fn init(allocator: runtime_std.mem.Allocator, options: Options) !Server {
     ui.* = try UiHandler.init(allocator, options.assets_dir);
     errdefer ui.deinit(allocator);
 
-    try inner.handle("/", Http.Handler.init(ui));
+    try inner.handle("/", gstd.runtime.net.http.Handler.init(ui));
 
     return .{
         .allocator = allocator,
@@ -49,7 +47,7 @@ pub fn serve(self: *Server, listener: Listener) !void {
 }
 
 pub fn listenAndServe(self: *Server, address: AddrPort) !void {
-    var listener = try Net.listen(self.allocator, .{ .address = address });
+    var listener = try gstd.runtime.net.listen(self.allocator, .{ .address = address });
     defer listener.deinit();
     try self.inner.serve(listener);
 }
@@ -61,18 +59,22 @@ pub fn close(self: *Server) void {
 const UiHandler = struct {
     assets: ResolvedAssets,
 
-    fn init(allocator: runtime_std.mem.Allocator, assets_dir: ?[]const u8) !@This() {
+    fn init(allocator: gstd.runtime.std.mem.Allocator, assets_dir: ?[]const u8) !@This() {
         return .{
             .assets = try resolveAssets(allocator, assets_dir),
         };
     }
 
-    fn deinit(self: *@This(), allocator: runtime_std.mem.Allocator) void {
+    fn deinit(self: *@This(), allocator: gstd.runtime.std.mem.Allocator) void {
         self.assets.deinit(allocator);
         self.* = undefined;
     }
 
-    pub fn serveHTTP(self: *@This(), rw: *Http.ResponseWriter, req: *Http.Request) void {
+    pub fn serveHTTP(
+        self: *@This(),
+        rw: *gstd.runtime.net.http.ResponseWriter,
+        req: *gstd.runtime.net.http.Request,
+    ) void {
         serveUi(&self.assets, rw, req);
     }
 };
@@ -90,7 +92,7 @@ const ResolvedAssets = struct {
     styles_css: []const u8 = ui_assets.styles_css,
     owns_main_js: bool = false,
 
-    fn deinit(self: *@This(), allocator: runtime_std.mem.Allocator) void {
+    fn deinit(self: *@This(), allocator: gstd.runtime.std.mem.Allocator) void {
         if (self.owns_main_js) allocator.free(self.main_js);
         self.* = undefined;
     }
@@ -98,19 +100,19 @@ const ResolvedAssets = struct {
 
 pub fn serveUi(
     assets: *const ResolvedAssets,
-    rw: *Http.ResponseWriter,
-    req: *Http.Request,
+    rw: *gstd.runtime.net.http.ResponseWriter,
+    req: *gstd.runtime.net.http.Request,
 ) void {
     const path = if (req.url.path.len == 0) "/" else req.url.path;
 
     if (lookupAsset(assets, path)) |asset| {
-        return serveAsset(rw, Http.status.ok, asset.content_type, asset.body);
+        return serveAsset(rw, gstd.runtime.net.http.status.ok, asset.content_type, asset.body);
     }
 
-    return serveAsset(rw, Http.status.not_found, "text/plain; charset=utf-8", "not found\n");
+    return serveAsset(rw, gstd.runtime.net.http.status.not_found, "text/plain; charset=utf-8", "not found\n");
 }
 
-fn resolveAssets(allocator: runtime_std.mem.Allocator, assets_dir: ?[]const u8) !ResolvedAssets {
+fn resolveAssets(allocator: gstd.runtime.std.mem.Allocator, assets_dir: ?[]const u8) !ResolvedAssets {
     var assets = ResolvedAssets{};
 
     if (assets_dir) |dir| {
@@ -124,28 +126,28 @@ fn resolveAssets(allocator: runtime_std.mem.Allocator, assets_dir: ?[]const u8) 
 }
 
 fn lookupAsset(assets: *const ResolvedAssets, path: []const u8) ?Asset {
-    if (runtime_std.mem.eql(u8, path, "/") or runtime_std.mem.eql(u8, path, "/index.html")) {
+    if (gstd.runtime.std.mem.eql(u8, path, "/") or gstd.runtime.std.mem.eql(u8, path, "/index.html")) {
         return .{
             .file_name = "index.html",
             .content_type = "text/html; charset=utf-8",
             .body = assets.index_html,
         };
     }
-    if (runtime_std.mem.eql(u8, path, "/main.js") or runtime_std.mem.eql(u8, path, "/index.js")) {
+    if (gstd.runtime.std.mem.eql(u8, path, "/main.js") or gstd.runtime.std.mem.eql(u8, path, "/index.js")) {
         return .{
             .file_name = "main.js",
             .content_type = "application/javascript; charset=utf-8",
             .body = assets.main_js,
         };
     }
-    if (runtime_std.mem.eql(u8, path, "/desktop-core.js")) {
+    if (gstd.runtime.std.mem.eql(u8, path, "/desktop-core.js")) {
         return .{
             .file_name = "desktop-core.js",
             .content_type = "application/javascript; charset=utf-8",
             .body = assets.desktop_core_js,
         };
     }
-    if (runtime_std.mem.eql(u8, path, "/styles.css") or runtime_std.mem.eql(u8, path, "/index.css")) {
+    if (gstd.runtime.std.mem.eql(u8, path, "/styles.css") or gstd.runtime.std.mem.eql(u8, path, "/index.css")) {
         return .{
             .file_name = "styles.css",
             .content_type = "text/css; charset=utf-8",
@@ -156,7 +158,7 @@ fn lookupAsset(assets: *const ResolvedAssets, path: []const u8) ?Asset {
 }
 
 fn tryReadExternalMainJs(
-    allocator: runtime_std.mem.Allocator,
+    allocator: gstd.runtime.std.mem.Allocator,
     assets_dir: []const u8,
 ) ?[]u8 {
     const full_path = host_std.fs.path.join(host_std.heap.page_allocator, &.{ assets_dir, "main.js" }) catch return null;
@@ -176,7 +178,7 @@ fn openAssetFile(full_path: []const u8) !host_std.fs.File {
 }
 
 fn serveAsset(
-    rw: *Http.ResponseWriter,
+    rw: *gstd.runtime.net.http.ResponseWriter,
     status_code: u16,
     content_type: []const u8,
     body: []const u8,
@@ -185,23 +187,23 @@ fn serveAsset(
 }
 
 fn writeResponse(
-    rw: *Http.ResponseWriter,
+    rw: *gstd.runtime.net.http.ResponseWriter,
     status_code: u16,
     content_type: []const u8,
     body: []const u8,
 ) void {
     var content_length_buf: [32]u8 = undefined;
-    const content_length = runtime_std.fmt.bufPrint(&content_length_buf, "{d}", .{body.len}) catch return;
+    const content_length = gstd.runtime.std.fmt.bufPrint(&content_length_buf, "{d}", .{body.len}) catch return;
 
-    rw.setHeader(Http.Header.cache_control, "no-store") catch return;
-    rw.setHeader(Http.Header.content_type, content_type) catch return;
-    rw.setHeader(Http.Header.content_length, content_length) catch return;
+    rw.setHeader(gstd.runtime.net.http.Header.cache_control, "no-store") catch return;
+    rw.setHeader(gstd.runtime.net.http.Header.content_type, content_type) catch return;
+    rw.setHeader(gstd.runtime.net.http.Header.content_length, content_length) catch return;
     rw.writeHeader(status_code) catch return;
     _ = rw.write(body) catch {};
 }
 
-pub fn TestRunner(comptime std: type) dep.testing.TestRunner {
-    const testing_api = dep.testing;
+pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
+    const testing_api = glib.testing;
 
     const TestCase = struct {
         fn lookupAssetMapsDefaultFrontendFiles() !void {

@@ -7,7 +7,7 @@ Comptime-first OpenAPI 3.x tooling for Zig: parse specs, then `**codegen.models*
 ## Requirements
 
 - **Zig** ≥ `0.15.2` (see `build.zig.zon`)
-- **[embed-zig](https://github.com/embed-zig/embed-zig)** as the runtime surface for generated client/server code. This repo uses top-level `glib` for module namespaces (`net`, `context`, `testing`, ...) and Zig's `std` as the injected runtime `lib`.
+- **[embed-zig](https://github.com/embed-zig/embed-zig)** as the runtime surface for generated client/server code. This repo wires `glib` for shared module namespaces and `gstd.runtime` for the HTTP/time runtime used by generated clients and servers.
 
 ## What you get
 
@@ -20,7 +20,7 @@ Comptime-first OpenAPI 3.x tooling for Zig: parse specs, then `**codegen.models*
 | `**codegen.server**`              | `codegen.server.make(lib, files)` → strict handler registration                      |
 
 
-Examples in this repo use `**const glib = @import("glib");**` for module namespaces and `**const lib = @import("std");**` for the injected std-like runtime. Generated code calls `**glib.net**`, `**glib.context**`, `**glib.testing**`, while `**lib.mem**`, `**lib.json**`, `**lib.Thread**`, and friends come from Zig's `std`.
+Examples in this repo use `**const gstd = @import("gstd");**` for runtime networking/time, `**const glib = @import("glib");**` for context/testing helpers, and `**const lib = @import("std");**` for the comptime std-like namespace passed into `codegen.*.make`.
 
 ## Clone and verify
 
@@ -32,9 +32,9 @@ zig build test    # runs unit + example + tests/oapi-codegen/ fixture suites
 
 ## Depend on the package
 
-Your `build.zig.zon` should list `**openapi_codegen**` and `**glib**`. Use `zig fetch --save` (or a `path` dependency) so tar URLs get a correct `**.hash**`.
+Your `build.zig.zon` should list `**openapi_codegen**`, `**glib**`, and `**gstd**`. Use `zig fetch --save` (or a `path` dependency) so tar URLs get a correct `**.hash**`.
 
-Wire modules like this repository’s `build.zig`: create an `**openapi**` module rooted at `lib/openapi.zig`, then pass through `**glib_dep.module("glib")**` as `**glib**`, then wire `**codegen**` with imports `**openapi**` and `**glib**`.
+Wire modules like this repository’s `build.zig`: create an `**openapi**` module rooted at `lib/openapi.zig`, then pass through `**glib_dep.module("glib")**` and `**gstd_dep.module("gstd")**` to `**codegen**`.
 
 ```zig
 const std = @import("std");
@@ -44,6 +44,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const glib_dep = b.dependency("glib", .{ .target = target, .optimize = optimize });
+    const gstd_dep = b.dependency("gstd", .{ .target = target, .optimize = optimize });
     const og = b.dependency("openapi_codegen", .{ .target = target, .optimize = optimize });
 
     const openapi_mod = b.addModule("openapi", .{
@@ -53,6 +54,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const glib_mod = glib_dep.module("glib");
+    const gstd_mod = gstd_dep.module("gstd");
 
     const codegen_mod = b.addModule("codegen", .{
         .root_source_file = og.path("lib/codegen.zig"),
@@ -61,6 +63,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "glib", .module = glib_mod },
+            .{ .name = "gstd", .module = gstd_mod },
         },
     });
 
@@ -72,6 +75,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "codegen", .module = codegen_mod },
             .{ .name = "glib", .module = glib_mod },
+            .{ .name = "gstd", .module = gstd_mod },
         },
     });
 
@@ -88,6 +92,7 @@ const openapi = @import("openapi");
 const codegen = @import("codegen");
 
 const glib = @import("glib");
+const gstd = @import("gstd");
 const lib = @import("std");
 
 const raw_service = @embedFile("service.json");
@@ -105,7 +110,7 @@ fn files() openapi.Files {
 }
 
 const ClientApi = codegen.client.make(lib, files());
-const net = glib.net.make(lib);
+const net = gstd.runtime.net;
 ```
 
 For a single-file OpenAPI document, use one entry in `.items` and one `@embedFile` instead.
@@ -137,7 +142,7 @@ defer api.deinit();
 `send` takes `**context.Context**` as the first argument. The example test uses the glib testing harness: `**t.context()**`. In ordinary code, create a background context the same way as `**tests/oapi-codegen/strict-server/test.zig**`:
 
 ```zig
-var ctx_ns = try glib.context.make(lib).init(alloc);
+var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(alloc);
 defer ctx_ns.deinit();
 const bg = ctx_ns.background();
 // use `bg` wherever the example uses `t.context()`

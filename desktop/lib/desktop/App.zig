@@ -1,5 +1,5 @@
-const dep = @import("dep");
-const runtime_std = dep.embed_std.std;
+const glib = @import("glib");
+const gstd = @import("gstd");
 const desktop_http = @import("../http.zig");
 
 const App = @This();
@@ -12,7 +12,7 @@ pub const Options = struct {
     assets_dir: ?[]const u8 = null,
 };
 
-pub fn init(allocator: runtime_std.mem.Allocator, options: Options) !App {
+pub fn init(allocator: gstd.runtime.std.mem.Allocator, options: Options) !App {
     return .{
         .address = options.address,
         .server = try desktop_http.Server.init(allocator, .{
@@ -38,8 +38,8 @@ pub fn close(self: *App) void {
     self.server.close();
 }
 
-pub fn TestRunner(comptime std: type) dep.testing.TestRunner {
-    const testing_api = dep.testing;
+pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
+    const testing_api = glib.testing;
 
     const Runner = struct {
         pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {

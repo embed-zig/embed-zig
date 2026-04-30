@@ -3,10 +3,10 @@ const openapi = @import("openapi");
 const codegen = @import("codegen");
 
 const glib = @import("glib");
-const runtime = @import("runtime");
+const gstd = @import("gstd");
 const lib = std;
 const Context = glib.context.Context;
-const net = runtime.net(lib);
+const net = gstd.runtime.net;
 
 const ClientApi = blk: {
     const spec = openapi.json.parse(@embedFile("spec.json"));
@@ -141,7 +141,7 @@ fn startServer(server: *ServerApi) !ServerRun {
 fn run_generated_client_and_server_round_trip_cookie_parameters(t: *glib.testing.T, allocator: std.mem.Allocator) !void {
     _ = t;
     _ = allocator;
-    var ctx_ns = try glib.context.make(lib, runtime.time).init(std.testing.allocator);
+    var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(std.testing.allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
 

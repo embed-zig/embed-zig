@@ -1,29 +1,28 @@
-const dep = @import("dep");
-const embed = dep.embed;
-const embed_std = dep.embed_std;
-const ledstrip = dep.ledstrip;
+const embed = @import("embed");
+const glib = @import("glib");
+const gstd = @import("gstd");
 
 pub const Snapshot = struct {
-    pixels: []const ledstrip.Color,
+    pixels: []const embed.ledstrip.Color,
     refresh_count: usize,
 };
 
 pub const LedStrip = struct {
     pub const RefreshHook = *const fn (ctx: *anyopaque, strip: *LedStrip) void;
 
-    allocator: embed.mem.Allocator,
-    mutex: embed_std.std.Thread.Mutex = .{},
-    pixels: []ledstrip.Color,
+    allocator: gstd.runtime.std.mem.Allocator,
+    mutex: gstd.runtime.std.Thread.Mutex = .{},
+    pixels: []embed.ledstrip.Color,
     refresh_count: usize = 0,
     refresh_ctx: ?*anyopaque = null,
     refresh_hook: ?RefreshHook = null,
 
-    pub fn init(allocator: embed.mem.Allocator, pixel_count: usize) !@This() {
-        const pixels = try allocator.alloc(ledstrip.Color, pixel_count);
+    pub fn init(allocator: gstd.runtime.std.mem.Allocator, pixel_count: usize) !@This() {
+        const pixels = try allocator.alloc(embed.ledstrip.Color, pixel_count);
         errdefer allocator.free(pixels);
 
         for (pixels) |*entry| {
-            entry.* = ledstrip.Color.black;
+            entry.* = embed.ledstrip.Color.black;
         }
 
         return .{
@@ -37,7 +36,7 @@ pub const LedStrip = struct {
         self.* = undefined;
     }
 
-    pub fn handle(self: *@This()) ledstrip.LedStrip {
+    pub fn handle(self: *@This()) embed.ledstrip.LedStrip {
         return .{
             .ptr = self,
             .vtable = &vtable,
@@ -73,17 +72,17 @@ pub const LedStrip = struct {
         return self.pixels.len;
     }
 
-    pub fn setPixel(self: *@This(), index: usize, color: ledstrip.Color) void {
+    pub fn setPixel(self: *@This(), index: usize, color: embed.ledstrip.Color) void {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (index >= self.pixels.len) return;
         self.pixels[index] = color;
     }
 
-    pub fn pixel(self: *@This(), index: usize) ledstrip.Color {
+    pub fn pixel(self: *@This(), index: usize) embed.ledstrip.Color {
         self.mutex.lock();
         defer self.mutex.unlock();
-        if (index >= self.pixels.len) return ledstrip.Color.black;
+        if (index >= self.pixels.len) return embed.ledstrip.Color.black;
         return self.pixels[index];
     }
 
@@ -100,7 +99,7 @@ pub const LedStrip = struct {
         }
     }
 
-    const vtable = ledstrip.LedStrip.VTable{
+    const vtable = embed.ledstrip.LedStrip.VTable{
         .deinit = struct {
             fn call(_: *anyopaque) void {}
         }.call,
@@ -111,13 +110,13 @@ pub const LedStrip = struct {
             }
         }.call,
         .setPixel = struct {
-            fn call(ptr: *anyopaque, index: usize, color: ledstrip.Color) void {
+            fn call(ptr: *anyopaque, index: usize, color: embed.ledstrip.Color) void {
                 const self: *LedStrip = @ptrCast(@alignCast(ptr));
                 self.setPixel(index, color);
             }
         }.call,
         .pixel = struct {
-            fn call(ptr: *anyopaque, index: usize) ledstrip.Color {
+            fn call(ptr: *anyopaque, index: usize) embed.ledstrip.Color {
                 const self: *LedStrip = @ptrCast(@alignCast(ptr));
                 return self.pixel(index);
             }
@@ -131,8 +130,8 @@ pub const LedStrip = struct {
     };
 };
 
-pub fn TestRunner(comptime std: type) dep.testing.TestRunner {
-    const testing_api = dep.testing;
+pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
+    const testing_api = glib.testing;
 
     const TestCase = struct {
         fn ledstripTracksPixels() !void {
@@ -140,21 +139,21 @@ pub fn TestRunner(comptime std: type) dep.testing.TestRunner {
             defer strip.deinit();
 
             const handle = strip.handle();
-            handle.setPixel(0, ledstrip.Color.red);
-            handle.setPixel(1, ledstrip.Color.green);
+            handle.setPixel(0, embed.ledstrip.Color.red);
+            handle.setPixel(1, embed.ledstrip.Color.green);
             handle.refresh();
 
             const snapshot = strip.snapshot();
             try std.testing.expectEqual(@as(usize, 3), snapshot.pixels.len);
-            try std.testing.expectEqual(ledstrip.Color.red, snapshot.pixels[0]);
-            try std.testing.expectEqual(ledstrip.Color.green, snapshot.pixels[1]);
+            try std.testing.expectEqual(embed.ledstrip.Color.red, snapshot.pixels[0]);
+            try std.testing.expectEqual(embed.ledstrip.Color.green, snapshot.pixels[1]);
             try std.testing.expectEqual(@as(usize, 1), snapshot.refresh_count);
         }
 
         fn ledstripRefreshHook() !void {
             const Sink = struct {
                 called: usize = 0,
-                last_color: ledstrip.Color = ledstrip.Color.black,
+                last_color: embed.ledstrip.Color = embed.ledstrip.Color.black,
 
                 fn onRefresh(ctx: *anyopaque, strip: *LedStrip) void {
                     const self: *@This() = @ptrCast(@alignCast(ctx));
@@ -171,14 +170,14 @@ pub fn TestRunner(comptime std: type) dep.testing.TestRunner {
 
             var sink = Sink{};
             strip.setRefreshHook(&sink, Sink.onRefresh);
-            strip.handle().setPixel(0, ledstrip.Color.blue);
+            strip.handle().setPixel(0, embed.ledstrip.Color.blue);
             strip.handle().refresh();
 
             try std.testing.expectEqual(@as(usize, 1), sink.called);
-            try std.testing.expectEqual(ledstrip.Color.blue, sink.last_color);
+            try std.testing.expectEqual(embed.ledstrip.Color.blue, sink.last_color);
 
             strip.clearRefreshHook();
-            strip.handle().setPixel(0, ledstrip.Color.red);
+            strip.handle().setPixel(0, embed.ledstrip.Color.red);
             strip.handle().refresh();
             try std.testing.expectEqual(@as(usize, 1), sink.called);
         }

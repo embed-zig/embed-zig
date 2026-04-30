@@ -1,9 +1,9 @@
 const zig = @import("std");
 const glib = @import("glib");
-const runtime = @import("runtime");
+const gstd = @import("gstd");
 
 pub fn make(comptime std: type, comptime Event: type) type {
-    const Http = runtime.net(std).http;
+    const Http = gstd.runtime.net.http;
 
     return struct {
         allocator: std.mem.Allocator,
@@ -158,7 +158,7 @@ fn trimTrailingCarriageReturn(line: []u8) []u8 {
 pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
     return glib.testing.TestRunner.fromFn(std, 1024 * 1024, struct {
         fn run(_: *glib.testing.T, allocator: std.mem.Allocator) !void {
-            const Http = runtime.net(std).http;
+            const Http = gstd.runtime.net.http;
             const Event = struct {
                 event: ?[]const u8 = null,
                 id: ?[]const u8 = null,

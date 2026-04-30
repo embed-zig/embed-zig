@@ -5,10 +5,10 @@ const codegen = @import("codegen");
 const sse = codegen.sse.make(lib);
 const ownership = @import("sse/ownership/test.zig");
 const selection = @import("sse/selection/test.zig");
-const runtime = @import("runtime");
+const gstd = @import("gstd");
 
 test "sse" {
-    var t = glib.testing.T.new(lib, runtime.time, .unit);
+    var t = glib.testing.T.new(lib, gstd.runtime.time, .unit);
     defer t.deinit();
 
     t.run("sse/Reader", sse.ReaderTestRunner(lib));

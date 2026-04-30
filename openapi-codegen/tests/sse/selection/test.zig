@@ -3,9 +3,9 @@ const glib = @import("glib");
 const lib = std;
 const openapi = @import("openapi");
 const codegen = @import("codegen");
-const runtime = @import("runtime");
+const gstd = @import("gstd");
 
-const net = runtime.net(lib);
+const net = gstd.runtime.net;
 
 fn files() openapi.Files {
     const spec = openapi.json.parse(@embedFile("spec.json"));
@@ -77,7 +77,7 @@ fn runParameterizedSseSelectionTest(allocator: lib.mem.Allocator) !void {
     });
     defer api.deinit();
 
-    var ctx_ns = try glib.context.make(lib, runtime.time).init(allocator);
+    var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
     const resp = try api.operations.watchEventsParameterized.send(bg, allocator, .{});
@@ -112,7 +112,7 @@ fn runMixedResponseSelectionTest(allocator: lib.mem.Allocator) !void {
     });
     defer api.deinit();
 
-    var ctx_ns = try glib.context.make(lib, runtime.time).init(allocator);
+    var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(allocator);
     defer ctx_ns.deinit();
     const bg = ctx_ns.background();
     const resp = try api.operations.getMixedResponse.send(bg, allocator, .{});

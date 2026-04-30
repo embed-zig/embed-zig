@@ -3,7 +3,7 @@ const openapi = @import("openapi");
 const codegen = @import("codegen");
 
 const glib = @import("glib");
-const runtime = @import("runtime");
+const gstd = @import("gstd");
 const lib = std;
 
 /// `service.json`: paths; `structure.json`: `components` (schemas, etc.). Cross-file `$ref` uses `structure.json#/components/...`. `deletePet` includes `204` on the service document.
@@ -24,7 +24,7 @@ fn files() openapi.Files {
 const ClientApi = codegen.client.make(lib, files());
 const ServerApi = codegen.server.make(lib, files());
 
-const net = runtime.net(lib);
+const net = gstd.runtime.net;
 
 const pet_id: i64 = 100;
 

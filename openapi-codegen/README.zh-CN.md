@@ -7,7 +7,7 @@
 ## 环境要求
 
 - **Zig** ≥ `0.15.2`（见 `build.zig.zon`）
-- **[embed-zig](https://github.com/embed-zig/embed-zig)**：提供生成 client/server 所需的运行时。本仓库直接使用顶层 `glib` 作为模块命名空间（`net`、`context`、`testing` 等），并用 Zig 的 `std` 作为注入的运行时 `lib`。
+- **[embed-zig](https://github.com/embed-zig/embed-zig)**：提供生成 client/server 所需的运行时。本仓库使用 `glib` 作为共享模块命名空间，并使用 `gstd.runtime` 作为生成 client/server 的 HTTP/time 运行时。
 
 ## 能力概览
 
@@ -20,7 +20,7 @@
 | `**codegen.server**`             | `**codegen.server.make(lib, files)**` → 严格 handler 注册                                        |
 
 
-示例里统一写 `**const glib = @import("glib");**` 和 `**const lib = @import("std");**`。`**glib.net**`、`**glib.context**`、`**glib.testing**` 走顶层模块；`**lib.mem**`、`**lib.json**`、`**lib.Thread**` 等 std-like 能力来自 Zig 的 `std`。
+示例里统一写 `**const gstd = @import("gstd");**` 获取运行时网络/时间，`**const glib = @import("glib");**` 获取 context/testing 辅助能力，`**const lib = @import("std");**` 作为传给 `codegen.*.make` 的 comptime std-like namespace。
 
 ## 克隆后自测
 
@@ -32,7 +32,7 @@ zig build test    # 运行 unit + example + tests/oapi-codegen/ 夹具
 
 ## 在你自己的工程里依赖
 
-在 `**build.zig.zon**` 声明 `**openapi_codegen**` 与 `**glib**`；远端包用 `**zig fetch --save**` 写入 `**.hash**`。接线时先创建 `**openapi**` 模块，再直接透传 `**glib_dep.module("glib")**` 给 `**codegen**`。
+在 `**build.zig.zon**` 声明 `**openapi_codegen**`、`**glib**` 与 `**gstd**`；远端包用 `**zig fetch --save**` 写入 `**.hash**`。接线时先创建 `**openapi**` 模块，再把 `**glib_dep.module("glib")**` 和 `**gstd_dep.module("gstd")**` 传给 `**codegen**`。
 
 ```zig
 const std = @import("std");
@@ -42,6 +42,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const glib_dep = b.dependency("glib", .{ .target = target, .optimize = optimize });
+    const gstd_dep = b.dependency("gstd", .{ .target = target, .optimize = optimize });
     const og = b.dependency("openapi_codegen", .{ .target = target, .optimize = optimize });
 
     const openapi_mod = b.addModule("openapi", .{
@@ -51,6 +52,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const glib_mod = glib_dep.module("glib");
+    const gstd_mod = gstd_dep.module("gstd");
 
     const codegen_mod = b.addModule("codegen", .{
         .root_source_file = og.path("lib/codegen.zig"),
@@ -59,6 +61,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "glib", .module = glib_mod },
+            .{ .name = "gstd", .module = gstd_mod },
         },
     });
 
@@ -70,6 +73,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "codegen", .module = codegen_mod },
             .{ .name = "glib", .module = glib_mod },
+            .{ .name = "gstd", .module = gstd_mod },
         },
     });
 
@@ -86,6 +90,7 @@ const openapi = @import("openapi");
 const codegen = @import("codegen");
 
 const glib = @import("glib");
+const gstd = @import("gstd");
 const lib = @import("std");
 
 const raw_service = @embedFile("service.json");
@@ -103,7 +108,7 @@ fn files() openapi.Files {
 }
 
 const ClientApi = codegen.client.make(lib, files());
-const net = glib.net.make(lib);
+const net = gstd.runtime.net;
 ```
 
 若只有一份 OpenAPI JSON，`**.items**` 里放一条即可。
@@ -135,7 +140,7 @@ defer api.deinit();
 示例测试里使用 harness 的 `**t.context()**`。在普通程序里可像 `**tests/oapi-codegen/strict-server/test.zig**` 那样：
 
 ```zig
-var ctx_ns = try glib.context.make(lib).init(alloc);
+var ctx_ns = try glib.context.make(lib, gstd.runtime.time).init(alloc);
 defer ctx_ns.deinit();
 const bg = ctx_ns.background();
 // 下面凡示例写 `t.context()` 的地方可换成 `bg`

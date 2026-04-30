@@ -1,5 +1,5 @@
-const dep = @import("dep");
-const embed_std = dep.embed_std;
+const glib = @import("glib");
+const gstd = @import("gstd");
 
 pub const SingleButton = struct {
     pub const Handle = struct {
@@ -10,7 +10,7 @@ pub const SingleButton = struct {
         }
     };
 
-    mutex: embed_std.std.Thread.Mutex = .{},
+    mutex: gstd.runtime.std.Thread.Mutex = .{},
     pressed: bool = false,
 
     pub fn handle(self: *@This()) Handle {
@@ -38,8 +38,8 @@ pub const SingleButton = struct {
     }
 };
 
-pub fn TestRunner(comptime std: type) dep.testing.TestRunner {
-    const testing_api = dep.testing;
+pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
+    const testing_api = glib.testing;
 
     const Runner = struct {
         pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {

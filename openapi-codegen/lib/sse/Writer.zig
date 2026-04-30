@@ -1,9 +1,10 @@
 const zig = @import("std");
 const glib = @import("glib");
-const runtime = @import("runtime");
+const gstd = @import("gstd");
 
 pub fn make(comptime std: type, comptime Event: type) type {
-    const Http = runtime.net(std).http;
+    _ = std;
+    const Http = gstd.runtime.net.http;
 
     return struct {
         rw: *Http.ResponseWriter,

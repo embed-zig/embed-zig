@@ -2,7 +2,7 @@ const zig = @import("std");
 const glib = @import("glib");
 const openapi = @import("openapi");
 const models_mod = @import("models.zig");
-const runtime = @import("runtime");
+const gstd = @import("gstd");
 
 const Files = openapi.Files;
 const Spec = openapi.Spec;
@@ -90,9 +90,9 @@ pub fn make(comptime std: type, comptime files: Files) type {
     @setEvalBranchQuota(300_000);
 
     const root = rootFile(files);
-    const net = runtime.net(std);
+    const net = gstd.runtime.net;
     const Http = net.http;
-    const ContextNs = glib.context.make(std, runtime.time);
+    const ContextNs = glib.context.make(std, gstd.runtime.time);
     const Models = models_mod.make(files);
     const spec_title = copyString(root.spec.info.title);
     const spec_version = copyString(root.spec.info.version);
@@ -248,7 +248,7 @@ fn OperationType(
     comptime files: Files,
     comptime operation_ref: OperationRef,
 ) type {
-    const net = runtime.net(std);
+    const net = gstd.runtime.net;
     const Http = net.http;
     const Context = glib.context.Context;
     const parameters_slice = collectEffectiveParameters(files, operation_ref.file_name, operation_ref.path_item, operation_ref.operation, operation_ref.field_name);
@@ -818,7 +818,8 @@ fn selectRequestBody(
     comptime request_body_or_ref: ?Spec.RequestBodyOrRef,
     comptime context_name: []const u8,
 ) ?SelectedRequestBody {
-    const Http = runtime.net(std).http;
+    _ = std;
+    const Http = gstd.runtime.net.http;
     const request_body = request_body_or_ref orelse return null;
     const resolved = resolveRequestBodyOrRef(files, current_file_name, request_body);
 
