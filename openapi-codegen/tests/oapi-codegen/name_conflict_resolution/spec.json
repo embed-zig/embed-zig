@@ -1,0 +1,793 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Comprehensive name collision resolution test",
+    "description": "Exercises all documented name collision patterns across issues and PRs:\n#200, #254, #255, #292, #407, #899, #1357, #1450, #1474, #1713, #1881, #2097, #2213\nAlso covers oapi-codegen-exp#14 (inline response object with $ref properties).\nPatterns K/L/M cover x-go-name preservation during collision resolution (PR #2213 review).\n",
+    "version": "0.0.0"
+  },
+  "paths": {
+    "/foo": {
+      "post": {
+        "operationId": "postFoo",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Bar"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Bar"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Bar"
+          }
+        }
+      }
+    },
+    "/items": {
+      "post": {
+        "operationId": "createItem",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateItemResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listItems",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListItemsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/query": {
+      "post": {
+        "operationId": "query",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "q": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/status": {
+      "get": {
+        "operationId": "getStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/qux": {
+      "get": {
+        "operationId": "getQux",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Qux"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postQux",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Qux"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/zap": {
+      "get": {
+        "operationId": "getZap",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Zap"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postZap",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Zap"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/orders": {
+      "post": {
+        "operationId": "createOrder",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Order"
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/entities": {
+      "get": {
+        "operationId": "listEntities",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Widget"
+                      }
+                    },
+                    "metadata": {
+                      "$ref": "#/components/schemas/Metadata"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/resources/{id}": {
+      "patch": {
+        "operationId": "patchResource",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Resource_MVO"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/200Resource_Patch"
+          }
+        }
+      }
+    },
+    "/renamed-schema": {
+      "get": {
+        "operationId": "getRenamedSchema",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Renamer"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postRenamedSchema",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Renamer"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/outcome": {
+      "get": {
+        "operationId": "getOutcome",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Outcome"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postOutcome",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Outcome"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/payload": {
+      "post": {
+        "operationId": "sendPayload",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Payload"
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Payload"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pets": {
+      "post": {
+        "operationId": "createPet",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Pet"
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pet"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Bar": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "Bar2": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "number"
+          }
+        }
+      },
+      "CreateItemResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ListItemsResponse": {
+        "type": "string"
+      },
+      "QueryResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "GetStatusResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "product": {
+            "type": "string"
+          }
+        }
+      },
+      "Pet": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "Widget": {
+        "type": "object",
+        "x-go-type": "string",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "Metadata": {
+        "type": "object",
+        "x-go-type": "string",
+        "properties": {
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "Resource_MVO": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "Resource": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "JsonPatch": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "op": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Renamer": {
+        "x-go-name": "SpecialName",
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "Outcome": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "Payload": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "Qux": {
+        "type": "object",
+        "x-go-type-name": "CustomQux",
+        "properties": {
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "Zap": {
+        "type": "object",
+        "x-go-type": "string",
+        "properties": {
+          "unused": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "parameters": {
+      "Bar": {
+        "name": "bar",
+        "in": "query",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "requestBodies": {
+      "Bar": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Order": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "product": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "application/merge-patch+json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "product": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "application/json-patch+json": {
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Pet": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "species": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Payload": {
+        "x-go-name": "PayloadBody",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Resource_MVO": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Resource_MVO"
+            }
+          },
+          "application/merge-patch+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Resource_MVO"
+            }
+          },
+          "application/json-patch+json": {
+            "schema": {
+              "$ref": "#/components/schemas/JsonPatch"
+            }
+          }
+        }
+      }
+    },
+    "headers": {
+      "Bar": {
+        "schema": {
+          "type": "boolean"
+        }
+      }
+    },
+    "responses": {
+      "Bar": {
+        "description": "Bar response",
+        "headers": {
+          "X-Bar": {
+            "$ref": "#/components/headers/Bar"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "value1": {
+                  "$ref": "#/components/schemas/Bar"
+                },
+                "value2": {
+                  "$ref": "#/components/schemas/Bar2"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Renamer": {
+        "description": "A Renamer response",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Outcome": {
+        "x-go-name": "OutcomeResult",
+        "description": "An Outcome response",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "result": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Qux": {
+        "description": "A Qux response",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "data": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Zap": {
+        "description": "A Zap response",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "result": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "200Resource_Patch": {
+        "description": "Patch success",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Resource"
+            }
+          },
+          "application/merge-patch+json": {
+            "schema": {
+              "$ref": "#/components/schemas/Resource"
+            }
+          },
+          "application/json-patch+json": {
+            "schema": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/Resource"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Resource"
+                  }
+                },
+                {
+                  "type": "string",
+                  "nullable": true
+                }
+              ]
+            }
+          },
+          "application/json-patch-query+json": {
+            "schema": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/Resource"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Resource"
+                  }
+                },
+                {
+                  "type": "string",
+                  "nullable": true
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

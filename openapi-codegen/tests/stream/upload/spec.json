@@ -1,0 +1,31 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "stream-upload",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/stream/upload": {
+      "post": {
+        "operationId": "streamUpload",
+        "summary": "Stream upload (octet-stream body as ReadCloser)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Accepted"
+          }
+        }
+      }
+    }
+  }
+}

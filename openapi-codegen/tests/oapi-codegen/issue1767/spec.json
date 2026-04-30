@@ -1,0 +1,28 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "version": "1.0.0",
+    "title": "An underscore in the name of a field is remapped to `Underscore`"
+  },
+  "paths": null,
+  "components": {
+    "schemas": {
+      "Alarm": {
+        "description": "Alarm Information\n",
+        "type": "object",
+        "properties": {
+          "_id": {
+            "description": "Identifier of the Alarm.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "description": "Identifier of the Alarm.",
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    }
+  }
+}

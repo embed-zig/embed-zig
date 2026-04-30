@@ -1,0 +1,44 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "sse-ownership",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/stream/download": {
+      "get": {
+        "operationId": "streamDownload",
+        "responses": {
+          "200": {
+            "description": "raw stream response",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events": {
+      "get": {
+        "operationId": "watchEvents",
+        "responses": {
+          "200": {
+            "description": "sse stream response",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

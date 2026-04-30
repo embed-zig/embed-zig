@@ -1,0 +1,56 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "sse-selection",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/events-parameterized": {
+      "get": {
+        "operationId": "watchEventsParameterized",
+        "responses": {
+          "200": {
+            "description": "SSE stream with parameters",
+            "content": {
+              "text/event-stream; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mixed": {
+      "get": {
+        "operationId": "getMixedResponse",
+        "responses": {
+          "200": {
+            "description": "JSON should win over SSE when both are declared",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "message"
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

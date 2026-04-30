@@ -1,0 +1,28 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "stream-download",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/stream/download": {
+      "get": {
+        "operationId": "streamDownload",
+        "summary": "Stream download (octet-stream)",
+        "responses": {
+          "200": {
+            "description": "Binary body; client reads via ReadCloser",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

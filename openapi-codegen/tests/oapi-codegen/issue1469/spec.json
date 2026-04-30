@@ -1,0 +1,24 @@
+{
+  "openapi": "3.0.1",
+  "paths": {
+    "/test": {
+      "get": {
+        "operationId": "test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "good"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "test schema"
+  },
+  "paths": null,
+  "components": {
+    "schemas": {
+      "Person": {
+        "allOf": [
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "metadata"
+            ],
+            "properties": {
+              "metadata": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "age": {
+                "type": "number"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
