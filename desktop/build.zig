@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const lib_desktop = @import("build/lib/desktop.zig");
 
@@ -82,6 +83,7 @@ fn createUiBundle(
 
     const run = b.addSystemCommand(&.{ "/bin/sh", "-c", script, "desktop-ui-bundle" });
     run.setCwd(b.path("ui"));
+    useNativeToolPath(b, run);
     const output_dir = run.addOutputDirectoryArg("desktop-ui");
 
     const assets_module = b.createModule(.{
@@ -100,6 +102,20 @@ fn createUiBundle(
     return .{
         .install = install,
     };
+}
+
+fn useNativeToolPath(b: *std.Build, run: *std.Build.Step.Run) void {
+    switch (builtin.target.os.tag) {
+        .linux => {
+            const system_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+            const path = if (b.graph.env_map.get("HOME")) |home|
+                b.fmt("{s}/.bun/bin:{s}", .{ home, system_path })
+            else
+                system_path;
+            run.setEnvironmentVariable("PATH", path);
+        },
+        else => {},
+    }
 }
 
 fn createApiSpecModule(

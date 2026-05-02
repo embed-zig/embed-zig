@@ -1,6 +1,6 @@
 const flow_event = @import("event.zig");
 
-pub fn make(comptime NodeLabel: type, comptime EdgeLabel: type, comptime initial_node: NodeLabel) type {
+pub fn make(comptime NodeLabel: type, comptime EdgeLabel: type) type {
     return struct {
         const State = @This();
 
@@ -9,7 +9,7 @@ pub fn make(comptime NodeLabel: type, comptime EdgeLabel: type, comptime initial
             edge: EdgeLabel,
         };
 
-        node: NodeLabel = initial_node,
+        node: NodeLabel,
         negative: ?Negative = null,
 
         pub fn clearNegative(self: *State) bool {

@@ -1,6 +1,7 @@
 const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
+const thread_sync = @import("../../test_utils/thread_sync.zig");
 
 pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Utils = test_utils.make(std, net);
@@ -20,6 +21,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     const Net = Utils.Net;
                     const Http = Utils.Http;
                     const Thread = std.Thread;
+                    const ThreadResult = thread_sync.ThreadResult(std);
                     const test_spawn_config: std.Thread.SpawnConfig = Utils.test_spawn_config;
                     const testing = struct {
                         pub var allocator: std.mem.Allocator = undefined;
@@ -78,23 +80,26 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
 
                     const listener_impl = try ln.as(Net.tls.Listener);
                     const port = try Utils.tlsListenerPort(ln, Net);
-                    var server_result: ?anyerror = null;
+                    var server_result = ThreadResult{};
                     var fake = FakeH2Transport{};
 
                     var server_thread = try Thread.spawn(test_spawn_config, struct {
-                        fn run(listener: *Net.tls.Listener, result: *?anyerror) void {
+                        fn run(listener: *Net.tls.Listener, result: *ThreadResult) void {
+                            var thread_err: ?anyerror = null;
+                            defer result.finish(thread_err);
+
                             var conn = listener.accept() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             defer conn.deinit();
 
                             const typed = conn.as(Net.tls.ServerConn) catch {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             };
                             typed.handshake() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
 
@@ -129,7 +134,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
 
                     transport.closeIdleConnections();
                     try testing.expectEqual(@as(usize, 1), fake.close_idle_calls);
-                    if (server_result) |err| return err;
+                    if (server_result.wait()) |err| return err;
                 }
             };
             Body.call(run_allocator) catch |err| {

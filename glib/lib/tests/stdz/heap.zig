@@ -1,5 +1,4 @@
 const stdz = @import("stdz");
-const host_std = @import("std");
 const testing_mod = @import("testing");
 
 pub fn make(comptime std: type) testing_mod.TestRunner {
@@ -13,13 +12,6 @@ pub fn make(comptime std: type) testing_mod.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("arena_allocator_type_identity", testing_mod.TestRunner.fromFn(std, 8 * 1024, struct {
-                fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
-                    _ = tt;
-                    _ = sub_allocator;
-                    try arenaAllocatorTypeIdentityCase(std);
-                }
-            }.run));
             t.run("arena_allocator_allocates", testing_mod.TestRunner.fromFn(std, 16 * 1024, struct {
                 fn run(tt: *testing_mod.T, sub_allocator: std.mem.Allocator) !void {
                     _ = tt;
@@ -39,12 +31,6 @@ pub fn make(comptime std: type) testing_mod.TestRunner {
     const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
     runner.* = .{};
     return testing_mod.TestRunner.make(Runner).new(runner);
-}
-
-fn arenaAllocatorTypeIdentityCase(comptime std: type) !void {
-    try std.testing.expect(stdz.heap.ArenaAllocator == host_std.heap.ArenaAllocator);
-    try std.testing.expect(std.heap.ArenaAllocator == host_std.heap.ArenaAllocator);
-    try std.testing.expect(std.heap.ArenaAllocator == stdz.heap.ArenaAllocator);
 }
 
 fn arenaAllocatorAllocatesCase(comptime std: type) !void {

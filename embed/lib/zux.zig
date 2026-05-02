@@ -1,6 +1,7 @@
 const Assembler = @import("zux/Assembler.zig");
 const Config = @import("zux/assembler/Config.zig");
 
+pub const AssemblerConfig = Config;
 pub const Store = @import("zux/Store.zig");
 pub const ReducerFnType = Store.Reducer.ReducerFnType;
 pub const pipeline = struct {
@@ -12,7 +13,9 @@ pub const events = struct {
 };
 
 pub const spec = struct {
+    pub const Builder = @import("zux/spec/Builder.zig");
     pub const Component = @import("zux/spec/Component.zig");
+    pub const StoreObject = @import("zux/spec/StoreObject.zig");
     pub const UserStory = @import("zux/spec/UserStory.zig");
 };
 

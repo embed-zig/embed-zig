@@ -157,8 +157,6 @@ pub fn TestRunner(comptime std: type, comptime time: type) Self {
 
     const TestCase = struct {
         fn testForwardsRunAndDeinit() !void {
-            const host_std = @import("std");
-
             const RunnerState = struct {
                 run_hits: usize = 0,
                 deinit_hits: usize = 0,
@@ -184,7 +182,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) Self {
             var state = RunnerState{};
             var handle = T.new(std, time, .test_run);
             defer {
-                host_std.testing.expect(handle.wait()) catch @panic("handle wait failed");
+                std.testing.expect(handle.wait()) catch @panic("handle wait failed");
                 handle.deinit();
             }
             var runner = Self.init(.{
@@ -197,19 +195,17 @@ pub fn TestRunner(comptime std: type, comptime time: type) Self {
                 .memory_limit = 99,
             });
 
-            try host_std.testing.expectEqual(@as(usize, 1234), runner.spawn_config.stack_size);
-            try host_std.testing.expectEqual(@as(?usize, 99), runner.memory_limit);
-            try host_std.testing.expect(runner.run(&handle, host_std.testing.allocator));
-            try host_std.testing.expectEqual(@as(usize, 1), state.run_hits);
-            try host_std.testing.expectEqual(@intFromPtr(host_std.testing.allocator.ptr), state.expected_allocator_ptr);
+            try std.testing.expectEqual(@as(usize, 1234), runner.spawn_config.stack_size);
+            try std.testing.expectEqual(@as(?usize, 99), runner.memory_limit);
+            try std.testing.expect(runner.run(&handle, std.testing.allocator));
+            try std.testing.expectEqual(@as(usize, 1), state.run_hits);
+            try std.testing.expectEqual(@intFromPtr(std.testing.allocator.ptr), state.expected_allocator_ptr);
 
-            runner.deinit(host_std.testing.allocator);
-            try host_std.testing.expectEqual(@as(usize, 1), state.deinit_hits);
+            runner.deinit(std.testing.allocator);
+            try std.testing.expectEqual(@as(usize, 1), state.deinit_hits);
         }
 
         fn testNewOwnsState() !void {
-            const host_std = @import("std");
-
             const OwnedArgs = struct {
                 seed: usize,
                 init_allocator_ptr: usize,
@@ -234,7 +230,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) Self {
 
             var t = T.new(std, time, .test_run);
             defer {
-                host_std.testing.expect(t.wait()) catch @panic("t wait failed");
+                std.testing.expect(t.wait()) catch @panic("t wait failed");
                 t.deinit();
             }
             var ctx = OwnedArgs{
@@ -244,17 +240,15 @@ pub fn TestRunner(comptime std: type, comptime time: type) Self {
             const RunnerType = Self.make(OwnedArgs);
             var runner = RunnerType.new(&ctx);
 
-            try host_std.testing.expectEqual(@as(usize, 4096), runner.spawn_config.stack_size);
-            try host_std.testing.expectEqual(@as(?usize, 21), runner.memory_limit);
-            try host_std.testing.expect(runner.run(&t, host_std.testing.allocator));
-            try host_std.testing.expectEqual(@as(usize, 0), ctx.deinit_hits);
-            runner.deinit(host_std.testing.allocator);
-            try host_std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
+            try std.testing.expectEqual(@as(usize, 4096), runner.spawn_config.stack_size);
+            try std.testing.expectEqual(@as(?usize, 21), runner.memory_limit);
+            try std.testing.expect(runner.run(&t, std.testing.allocator));
+            try std.testing.expectEqual(@as(usize, 0), ctx.deinit_hits);
+            runner.deinit(std.testing.allocator);
+            try std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
         }
 
         fn testNewDeinitWithoutRunIsOk() !void {
-            const host_std = @import("std");
-
             const OwnedArgs = struct {
                 deinit_hits: usize = 0,
 
@@ -280,39 +274,37 @@ pub fn TestRunner(comptime std: type, comptime time: type) Self {
             const RunnerType = Self.make(OwnedArgs);
             var runner = RunnerType.new(&ctx);
 
-            runner.deinit(host_std.testing.allocator);
-            try host_std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
+            runner.deinit(std.testing.allocator);
+            try std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
         }
 
         fn testInitFailureMarksTestFailed() !void {
-            const host_std = @import("std");
-
             const Support = struct {
-                var entries: host_std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: host_std.Thread.Mutex = .{};
+                var entries: std.ArrayListUnmanaged([]u8) = .{};
+                var mutex: std.Thread.Mutex = .{};
 
                 fn reset() void {
                     mutex.lock();
                     defer mutex.unlock();
                     for (entries.items) |entry| {
-                        host_std.testing.allocator.free(entry);
+                        std.testing.allocator.free(entry);
                     }
-                    entries.deinit(host_std.testing.allocator);
+                    entries.deinit(std.testing.allocator);
                     entries = .{};
                 }
 
                 fn append(comptime format: []const u8, args: anytype) void {
-                    const message = host_std.fmt.allocPrint(host_std.testing.allocator, format, args) catch @panic("OOM");
+                    const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
                     mutex.lock();
                     defer mutex.unlock();
-                    entries.append(host_std.testing.allocator, message) catch @panic("OOM");
+                    entries.append(std.testing.allocator, message) catch @panic("OOM");
                 }
 
-                fn joinedLog(allocator: host_std.mem.Allocator) ![]u8 {
+                fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
                     mutex.lock();
                     defer mutex.unlock();
 
-                    var bytes = try host_std.ArrayList(u8).initCapacity(allocator, 0);
+                    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
                     errdefer bytes.deinit(allocator);
 
                     for (entries.items, 0..) |entry, idx| {
@@ -397,7 +389,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) Self {
             var t: T = .{
                 .ptr = @ptrCast(&test_state),
                 .vtable = &TestVTable.vtable,
-                .allocator = host_std.testing.allocator,
+                .allocator = std.testing.allocator,
                 .ctx = undefined,
                 .test_name = "init_failure",
                 .relative_started = 0,
@@ -407,16 +399,16 @@ pub fn TestRunner(comptime std: type, comptime time: type) Self {
             const RunnerType = Self.make(OwnedArgs);
             var runner = RunnerType.new(&ctx);
 
-            try host_std.testing.expect(!runner.run(&t, host_std.testing.allocator));
-            try host_std.testing.expectEqual(@as(usize, 0), ctx.run_hits);
-            try host_std.testing.expect(!t.wait());
+            try std.testing.expect(!runner.run(&t, std.testing.allocator));
+            try std.testing.expectEqual(@as(usize, 0), ctx.run_hits);
+            try std.testing.expect(!t.wait());
 
-            runner.deinit(host_std.testing.allocator);
-            try host_std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
+            runner.deinit(std.testing.allocator);
+            try std.testing.expectEqual(@as(usize, 1), ctx.deinit_hits);
 
-            const log = try Support.joinedLog(host_std.testing.allocator);
-            defer host_std.testing.allocator.free(log);
-            try host_std.testing.expect(host_std.mem.indexOf(u8, log, "runner init failed: error.InitFailed") != null);
+            const log = try Support.joinedLog(std.testing.allocator);
+            defer std.testing.allocator.free(log);
+            try std.testing.expect(std.mem.indexOf(u8, log, "runner init failed: error.InitFailed") != null);
         }
     };
 

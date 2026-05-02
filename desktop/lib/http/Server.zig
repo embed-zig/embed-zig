@@ -1,4 +1,3 @@
-const host_std = @import("std");
 const glib = @import("glib");
 const gstd = @import("gstd");
 const ui_assets = @import("desktop_ui_assets");
@@ -161,8 +160,9 @@ fn tryReadExternalMainJs(
     allocator: gstd.runtime.std.mem.Allocator,
     assets_dir: []const u8,
 ) ?[]u8 {
-    const full_path = host_std.fs.path.join(host_std.heap.page_allocator, &.{ assets_dir, "main.js" }) catch return null;
-    defer host_std.heap.page_allocator.free(full_path);
+    const host = @import("std");
+    const full_path = host.fs.path.join(host.heap.page_allocator, &.{ assets_dir, "main.js" }) catch return null;
+    defer host.heap.page_allocator.free(full_path);
 
     const file = openAssetFile(full_path) catch return null;
     defer file.close();
@@ -170,11 +170,12 @@ fn tryReadExternalMainJs(
     return file.readToEndAlloc(allocator, 16 * 1024 * 1024) catch return null;
 }
 
-fn openAssetFile(full_path: []const u8) !host_std.fs.File {
-    if (host_std.fs.path.isAbsolute(full_path)) {
-        return host_std.fs.openFileAbsolute(full_path, .{});
+fn openAssetFile(full_path: []const u8) !@import("std").fs.File {
+    const host = @import("std");
+    if (host.fs.path.isAbsolute(full_path)) {
+        return host.fs.openFileAbsolute(full_path, .{});
     }
-    return host_std.fs.cwd().openFile(full_path, .{});
+    return host.fs.cwd().openFile(full_path, .{});
 }
 
 fn serveAsset(
@@ -230,12 +231,13 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
         }
 
         fn resolveAssetsOverridesOnlyMainJs() !void {
+            const fs = @import("std").fs;
             const assets_dir = try uniqueAssetsDir(std.testing.allocator, "desktop-http-assets-dir-test");
             defer std.testing.allocator.free(assets_dir);
-            host_std.fs.cwd().deleteTree(assets_dir) catch {};
-            defer host_std.fs.cwd().deleteTree(assets_dir) catch {};
+            fs.cwd().deleteTree(assets_dir) catch {};
+            defer fs.cwd().deleteTree(assets_dir) catch {};
 
-            var dir = try host_std.fs.cwd().makeOpenPath(assets_dir, .{});
+            var dir = try fs.cwd().makeOpenPath(assets_dir, .{});
             defer dir.close();
 
             try dir.writeFile(.{
@@ -253,12 +255,13 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
         }
 
         fn resolveAssetsFallsBackWithoutMainJs() !void {
+            const fs = @import("std").fs;
             const assets_dir = try uniqueAssetsDir(std.testing.allocator, "desktop-http-assets-empty-test");
             defer std.testing.allocator.free(assets_dir);
-            host_std.fs.cwd().deleteTree(assets_dir) catch {};
-            defer host_std.fs.cwd().deleteTree(assets_dir) catch {};
+            fs.cwd().deleteTree(assets_dir) catch {};
+            defer fs.cwd().deleteTree(assets_dir) catch {};
 
-            var dir = try host_std.fs.cwd().makeOpenPath(assets_dir, .{});
+            var dir = try fs.cwd().makeOpenPath(assets_dir, .{});
             defer dir.close();
 
             var assets = try resolveAssets(std.testing.allocator, assets_dir);
@@ -270,7 +273,7 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
         }
 
         fn uniqueAssetsDir(allocator: std.mem.Allocator, comptime prefix: []const u8) ![]u8 {
-            return std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}-{d}", .{ prefix, host_std.time.nanoTimestamp() });
+            return std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}-{d}", .{ prefix, @import("std").time.nanoTimestamp() });
         }
     };
 

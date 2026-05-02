@@ -1,17 +1,6 @@
 const std = @import("std");
+const build_modules = @import("build/modules.zig");
 const build_tests = @import("tests/build.zig");
-
-const thirdparty_modules = [_][]const u8{
-    "core_bluetooth",
-    "core_wlan",
-    "lvgl",
-    "lvgl_osal",
-    "mbedtls",
-    "opus",
-    "portaudio",
-    "speexdsp",
-    "stb_truetype",
-};
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -29,6 +18,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const desktop_dep = b.dependency("desktop", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const example_dep = b.dependency("example", .{
         .target = target,
         .optimize = optimize,
     });
@@ -54,8 +47,11 @@ pub fn build(b: *std.Build) void {
     b.modules.put("codegen", codegen) catch @panic("OOM");
     b.modules.put("openapi-codegen", codegen) catch @panic("OOM");
     b.modules.put("desktop", desktop) catch @panic("OOM");
-    for (thirdparty_modules) |module_name| {
-        b.modules.put(module_name, thirdparty_dep.module(module_name)) catch @panic("OOM");
+    for (build_modules.thirdparty_modules) |module_spec| {
+        b.modules.put(module_spec.export_name, thirdparty_dep.module(module_spec.dependency_module_name)) catch @panic("OOM");
+    }
+    for (build_modules.example_modules) |module_spec| {
+        b.modules.put(module_spec.export_name, example_dep.module(module_spec.dependency_module_name)) catch @panic("OOM");
     }
 
     build_tests.create(b, target, optimize);

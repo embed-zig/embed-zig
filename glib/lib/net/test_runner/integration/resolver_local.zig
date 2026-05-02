@@ -7,7 +7,7 @@
 //!   const runner = @import("net/test_runner/integration/resolver_local.zig").make(lib, net);
 //!   t.run("net/resolver_local", runner);
 
-const host_std = @import("std");
+const stdz = @import("stdz");
 const io = @import("io");
 const testing_api = @import("testing");
 const net_mod = @import("../../../net.zig");
@@ -399,8 +399,8 @@ fn Suite(comptime std: type, comptime net: type) type {
                     var head_buf: [2048]u8 = undefined;
                     var body_buf: [512]u8 = undefined;
                     const req = readHttpRequest(conn, &head_buf, &body_buf) catch return;
-                    if (!host_std.mem.eql(u8, req.method, "POST")) return;
-                    if (!host_std.mem.eql(u8, req.path, "/dns-query")) return;
+                    if (!std.mem.eql(u8, req.method, "POST")) return;
+                    if (!std.mem.eql(u8, req.path, "/dns-query")) return;
 
                     var dns_buf: [512]u8 = undefined;
                     const dns_len = buildAResponse(R, req.body, ip, &dns_buf) catch return;
@@ -465,8 +465,8 @@ fn Suite(comptime std: type, comptime net: type) type {
                     var head_buf: [2048]u8 = undefined;
                     var body_buf: [512]u8 = undefined;
                     const req = readHttpRequest(conn, &head_buf, &body_buf) catch return;
-                    if (!host_std.mem.eql(u8, req.method, "POST")) return;
-                    if (!host_std.mem.eql(u8, req.path, "/dns-query")) return;
+                    if (!std.mem.eql(u8, req.method, "POST")) return;
+                    if (!std.mem.eql(u8, req.path, "/dns-query")) return;
 
                     var dns_buf: [512]u8 = undefined;
                     const dns_len = buildAResponse(SpyResolver, req.body, ip, &dns_buf) catch return;
@@ -530,8 +530,8 @@ fn Suite(comptime std: type, comptime net: type) type {
                     var head_buf: [2048]u8 = undefined;
                     var body_buf: [512]u8 = undefined;
                     const req = readHttpRequest(conn, &head_buf, &body_buf) catch return;
-                    if (!host_std.mem.eql(u8, req.method, "POST")) return;
-                    if (!host_std.mem.eql(u8, req.path, "/dns-query")) return;
+                    if (!std.mem.eql(u8, req.method, "POST")) return;
+                    if (!std.mem.eql(u8, req.path, "/dns-query")) return;
 
                     const req_id = readU16(req.body[0..2]);
                     var dns_buf: [512]u8 = undefined;
@@ -1238,7 +1238,7 @@ fn readHttpRequest(conn: Conn, head_buf: *[2048]u8, body_buf: *[512]u8) !HttpReq
         const n = try c.read(head_buf[head_len..]);
         if (n == 0) return error.InvalidResponse;
         head_len += n;
-        head_end = host_std.mem.indexOf(u8, head_buf[0..head_len], "\r\n\r\n");
+        head_end = stdz.mem.indexOf(u8, head_buf[0..head_len], "\r\n\r\n");
     }
 
     const header_bytes = head_end.? + 4;
@@ -1264,25 +1264,25 @@ fn parseHttpRequestHead(head: []const u8) !struct {
     path: []const u8,
     content_length: usize,
 } {
-    const line_end = host_std.mem.indexOf(u8, head, "\r\n") orelse return error.InvalidResponse;
+    const line_end = stdz.mem.indexOf(u8, head, "\r\n") orelse return error.InvalidResponse;
     const request_line = head[0..line_end];
-    const sp1 = host_std.mem.indexOfScalar(u8, request_line, ' ') orelse return error.InvalidResponse;
+    const sp1 = stdz.mem.indexOfScalar(u8, request_line, ' ') orelse return error.InvalidResponse;
     const rest = request_line[sp1 + 1 ..];
-    const sp2 = host_std.mem.indexOfScalar(u8, rest, ' ') orelse return error.InvalidResponse;
+    const sp2 = stdz.mem.indexOfScalar(u8, rest, ' ') orelse return error.InvalidResponse;
 
     var content_length: usize = 0;
     var offset = line_end + 2;
     while (offset <= head.len) {
-        const next_end_rel = host_std.mem.indexOf(u8, head[offset..], "\r\n") orelse return error.InvalidResponse;
+        const next_end_rel = stdz.mem.indexOf(u8, head[offset..], "\r\n") orelse return error.InvalidResponse;
         const line = head[offset .. offset + next_end_rel];
         offset += next_end_rel + 2;
         if (line.len == 0) break;
 
-        const colon = host_std.mem.indexOfScalar(u8, line, ':') orelse return error.InvalidResponse;
+        const colon = stdz.mem.indexOfScalar(u8, line, ':') orelse return error.InvalidResponse;
         const name = line[0..colon];
-        const value = host_std.mem.trim(u8, line[colon + 1 ..], " \t");
-        if (host_std.ascii.eqlIgnoreCase(name, "Content-Length")) {
-            content_length = host_std.fmt.parseInt(usize, value, 10) catch return error.InvalidResponse;
+        const value = stdz.mem.trim(u8, line[colon + 1 ..], " \t");
+        if (stdz.ascii.eqlIgnoreCase(name, "Content-Length")) {
+            content_length = stdz.fmt.parseInt(usize, value, 10) catch return error.InvalidResponse;
         }
     }
 
@@ -1301,7 +1301,7 @@ fn writeHttpDnsResponse(conn: Conn, status_code: u16, body: []const u8) !void {
         404 => "Not Found",
         else => "Unexpected",
     };
-    const head = try host_std.fmt.bufPrint(
+    const head = try stdz.fmt.bufPrint(
         &head_buf,
         "HTTP/1.1 {d} {s}\r\nContent-Type: application/dns-message\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n",
         .{ status_code, status_text, body.len },

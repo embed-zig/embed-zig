@@ -1,7 +1,7 @@
 const glib = @import("glib");
+const AssemblerConfig = @import("../../assembler/Config.zig");
 const Builder = @import("../../spec/Builder.zig");
 const bt = @import("component/bt.zig");
-const imu = @import("component/imu.zig");
 
 pub fn make(comptime grt: type) glib.testing.TestRunner {
     const SpecType = comptime blk: {
@@ -17,6 +17,11 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             @embedFile("component/led_strip/flash_sequence.json"),
             @embedFile("component/led_strip/pingpong_sequence.json"),
             @embedFile("component/led_strip/rotate_sequence.json"),
+            @embedFile("component/imu/free_fall.json"),
+            @embedFile("component/imu/flip.json"),
+            @embedFile("component/imu/flip_then_shake.json"),
+            @embedFile("component/imu/shake.json"),
+            @embedFile("component/imu/tilt.json"),
             @embedFile("component/modem/attach_sequence.json"),
             @embedFile("component/modem/signal_sequence.json"),
             @embedFile("component/modem/apn_sequence.json"),
@@ -35,13 +40,14 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
         break :blk builder.build();
     };
 
-    const story_runner = comptime blk: {
+    const config: AssemblerConfig = .{
+        .pipeline = .{
+            .tick_interval = grt.time.duration.MilliSecond,
+        },
+    };
+    const AppType = comptime blk: {
         var spec = SpecType.init();
-        break :blk spec.testRunner(grt, .{
-            .pipeline = .{
-                .tick_interval = grt.time.duration.MilliSecond,
-            },
-        });
+        break :blk spec.buildApp(grt, config);
     };
 
     const Runner = struct {
@@ -52,11 +58,12 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
         pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            _ = allocator;
+
+            const spec = SpecType.init();
+            const story_runner = spec.testRunner(AppType, allocator);
 
             t.run("bt", bt.make(grt));
             t.run("stories", story_runner);
-            t.run("imu", imu.make(grt));
             return t.wait();
         }
 

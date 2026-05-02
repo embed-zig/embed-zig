@@ -2,6 +2,7 @@ const stdz = @import("stdz");
 const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
+const thread_sync = @import("../../test_utils/thread_sync.zig");
 
 pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Utils = test_utils.make(std, net);
@@ -21,6 +22,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     const Net = Utils.Net;
                     const Http = Utils.Http;
                     const Thread = std.Thread;
+                    const ThreadResult = thread_sync.ThreadResult(std);
                     const test_spawn_config: std.Thread.SpawnConfig = Utils.test_spawn_config;
                     const Context = @import("context").make(std, net.time);
                     const testing = struct {
@@ -94,33 +96,36 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
 
                     const listener_impl = try ln.as(Net.tls.Listener);
                     const port = try Utils.tlsListenerPort(ln, Net);
-                    var server_result: ?anyerror = null;
+                    var server_result = ThreadResult{};
                     var body_gate = BodyGate{};
 
                     var server_thread = try Thread.spawn(test_spawn_config, struct {
-                        fn run(listener: *Net.tls.Listener, result: *?anyerror, gate: *BodyGate) void {
+                        fn run(listener: *Net.tls.Listener, result: *ThreadResult, gate: *BodyGate) void {
+                            var thread_err: ?anyerror = null;
+                            defer result.finish(thread_err);
+
                             var conn = listener.accept() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             defer conn.deinit();
 
                             const typed = conn.as(Net.tls.ServerConn) catch {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             };
                             typed.handshake() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
 
                             var req_buf: [4096]u8 = undefined;
                             const req_head = Utils.readRequestHead(conn, &req_buf) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             if (!Utils.hasRequestLine(req_head, "GET /body-cancel HTTP/1.1")) {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             }
 
@@ -129,7 +134,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                                 &conn,
                                 "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n",
                             ) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             gate.wait();
@@ -168,7 +173,8 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     read_joined = true;
                     try testing.expect(read_task.err != null);
                     try testing.expectEqual(error.Canceled, read_task.err.?);
-                    if (server_result) |err| return err;
+                    body_gate.release();
+                    if (server_result.wait()) |err| return err;
                 }
             };
             Body.call(run_allocator) catch |err| {

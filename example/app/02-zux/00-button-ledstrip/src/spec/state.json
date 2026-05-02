@@ -1,0 +1,25 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Store",
+      "spec": {
+        "label": "scene",
+        "state": {
+          "mode": "u8",
+          "rainbow_stage": "u8",
+          "next_rainbow_step_ns": "i64"
+        }
+      }
+    },
+    {
+      "kind": "StatePath",
+      "spec": {
+        "path": "app/state",
+        "labels": [
+          "scene"
+        ]
+      }
+    }
+  ]
+}

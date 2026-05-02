@@ -3,6 +3,20 @@
   "spec": {
     "name": "modem gnss sequence",
     "description": "tracks gnss acquisition, a fixed position, and the later idle reset",
+    "initial_state": {
+      "single_button": {},
+      "grouped_button": {},
+      "strip": {},
+      "sensor": {},
+      "cell": {},
+      "reader": {},
+      "sta": {},
+      "ap": {},
+      "pairing": { "node": "idle" },
+      "loading": {},
+      "menu": { "count": 3, "loop": true },
+      "route": { "current_page": 1 }
+    },
     "steps": [
       {
         "inputs": [

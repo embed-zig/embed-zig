@@ -3,6 +3,9 @@
 //! `init()` binds but does not call `listen()`. Callers can invoke `listen()`
 //! directly, or use `net.listen(...)` / `net.tls.listen(...)` for a one-shot
 //! bind+listen convenience.
+//!
+//! A TcpListener supports one active accept loop. Concurrent `accept()` calls on
+//! the same listener are intentionally outside the contract.
 
 const Conn = @import("Conn.zig");
 const Listener = @import("Listener.zig");

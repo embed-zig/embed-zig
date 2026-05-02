@@ -1,4 +1,3 @@
-const host_std = @import("std");
 const testing_api = @import("testing");
 
 pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
@@ -38,7 +37,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                 }
 
                 fn sendLater(sock: *net.Runtime.Tcp) void {
-                    host_std.Thread.sleep(@intCast(20 * net.time.duration.MilliSecond));
+                    std.Thread.sleep(@intCast(20 * net.time.duration.MilliSecond));
                     _ = sock.send("x") catch {};
                 }
 
@@ -71,19 +70,19 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         server.deinit();
                     }
 
-                    var sender = try host_std.Thread.spawn(.{}, sendLater, .{&client});
+                    var sender = try std.Thread.spawn(.{}, sendLater, .{&client});
                     defer sender.join();
 
                     const started = net.time.instant.now();
                     const ready = try server.poll(.{ .read = true }, @intCast(1000 * net.time.duration.MilliSecond));
                     const elapsed_ms = @divFloor(@import("time").instant.sub(net.time.instant.now(), started), net.time.duration.MilliSecond);
-                    try host_std.testing.expect(ready.read);
-                    try host_std.testing.expect(elapsed_ms >= 10);
+                    try std.testing.expect(ready.read);
+                    try std.testing.expect(elapsed_ms >= 10);
 
                     var buf: [1]u8 = undefined;
                     const n = try server.recv(&buf);
-                    try host_std.testing.expectEqual(@as(usize, 1), n);
-                    try host_std.testing.expectEqual(@as(u8, 'x'), buf[0]);
+                    try std.testing.expectEqual(@as(usize, 1), n);
+                    try std.testing.expectEqual(@as(u8, 'x'), buf[0]);
                 }
             };
 

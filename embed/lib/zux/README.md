@@ -247,7 +247,6 @@ The staged integration fixtures currently model board specs as tagged entries:
     "label": "pairing",
     "id": 61,
     "flow": {
-      "initial": "idle",
       "nodes": ["idle", "searching", "confirming", "done"],
       "edges": [
         { "from": "idle", "to": "searching", "event": "start" }
@@ -258,9 +257,9 @@ The staged integration fixtures currently model board specs as tagged entries:
 ```
 
 For `Component/ui/flow`, the `spec` object now carries a nested `flow` object.
-That `flow` object requires `initial`, `nodes`, and `edges`; `initial` must name
-one of the declared nodes, and every edge `from` / `to` must reference a known
-node.
+That `flow` object requires `nodes` and `edges`; every edge `from` / `to` must
+reference a known node. Runtime initial state is provided by app init, not by
+the component spec.
 
 ## Naming
 

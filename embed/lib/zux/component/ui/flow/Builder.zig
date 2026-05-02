@@ -15,7 +15,6 @@ pub const Edge = struct {
 nodes: []const []const u8 = &.{},
 edge_labels: []const []const u8 = &.{},
 edges: []const Edge = &.{},
-initial_node: ?[]const u8 = null,
 
 pub fn init() Builder {
     return .{};
@@ -26,10 +25,6 @@ pub fn addNode(self: *Builder, comptime node_name: []const u8) void {
         @compileError("zux.component.ui.flow.Builder duplicate node");
     }
     self.nodes = self.nodes ++ &[_][]const u8{node_name};
-}
-
-pub fn setInitial(self: *Builder, comptime node_name: []const u8) void {
-    self.initial_node = node_name;
 }
 
 pub fn addEdge(
@@ -49,11 +44,8 @@ pub fn addEdge(
 
 pub fn build(comptime self: Builder) type {
     comptime {
-        if (self.initial_node == null) {
-            @compileError("zux.component.ui.flow.Builder requires setInitial before build");
-        }
-        if (!containsText(self.nodes, self.initial_node.?)) {
-            @compileError("zux.component.ui.flow.Builder initial node must be added with addNode");
+        if (self.nodes.len == 0) {
+            @compileError("zux.component.ui.flow.Builder requires at least one node before build");
         }
         for (self.edges) |edge| {
             if (!containsText(self.nodes, edge.from)) {
@@ -67,15 +59,15 @@ pub fn build(comptime self: Builder) type {
 
     const NodeLabelType = makeEnum(self.nodes, "zux.component.ui.flow.Builder duplicate node label");
     const EdgeLabelType = makeEnum(self.edge_labels, "zux.component.ui.flow.Builder duplicate edge label");
-    const initial_node = @field(NodeLabelType, self.initial_node.?);
+    const root_node = @field(NodeLabelType, self.nodes[0]);
     return struct {
         pub const NodeLabel = NodeLabelType;
         pub const EdgeLabel = EdgeLabelType;
-        pub const State = StateTemplate.make(NodeLabelType, EdgeLabelType, initial_node);
+        pub const State = StateTemplate.make(NodeLabelType, EdgeLabelType);
 
         const edges = makeEdges(self, NodeLabelType, EdgeLabelType);
         const dag: Dag = .{
-            .initial_node_id = @intFromEnum(initial_node),
+            .initial_node_id = @intFromEnum(root_node),
             .edges = &edges,
         };
         const forward_edge_counts = makeEdgeCounts(self, NodeLabelType, .forward);
@@ -89,10 +81,6 @@ pub fn build(comptime self: Builder) type {
 
         pub fn Reducer(comptime grt: type) type {
             return ReducerTemplate.make(grt, State, dag, NodeLabelType);
-        }
-
-        pub fn initialState() State {
-            return .{};
         }
 
         pub fn edgeId(edge: EdgeLabel) u32 {

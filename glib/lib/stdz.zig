@@ -24,6 +24,7 @@ pub const math = @import("stdz/math.zig");
 pub const debug = @import("stdz/debug.zig");
 pub const meta = @import("stdz/meta.zig");
 pub const atomic = @import("stdz/atomic.zig");
+pub const base64 = @import("stdz/base64.zig");
 pub const builtin = @import("stdz/builtin.zig");
 pub const testing = @import("stdz/testing.zig");
 
@@ -100,6 +101,7 @@ pub fn make(comptime Impl: type) type {
         pub const Io = root.Io;
         pub const debug = root.debug;
         pub const atomic = root.atomic.make(Impl.atomic);
+        pub const base64 = root.base64;
         pub const builtin = root.builtin;
         pub const testing = root.testing.make(Impl.testing);
         pub const Random = root.Random;

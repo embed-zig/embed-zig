@@ -4,7 +4,7 @@
 //! It intentionally starts as a small client-oriented subset and can grow
 //! as the parser/server/client layers land.
 
-const host_std = @import("std");
+const stdz = @import("stdz");
 const url_mod = @import("../url.zig");
 const Context = @import("context").Context;
 const ReadCloser = @import("ReadCloser.zig");
@@ -51,7 +51,7 @@ pub const GetBody = struct {
     }
 };
 
-allocator: host_std.mem.Allocator,
+allocator: stdz.mem.Allocator,
 method: []const u8 = "GET",
 url: url_mod.Url,
 proto: []const u8 = "HTTP/1.1",
@@ -69,11 +69,11 @@ host: []const u8 = "",
 close: bool = false,
 ctx: ?Context = null,
 
-pub fn init(allocator: host_std.mem.Allocator, method: []const u8, raw_url: []const u8) url_mod.ParseError!Request {
+pub fn init(allocator: stdz.mem.Allocator, method: []const u8, raw_url: []const u8) url_mod.ParseError!Request {
     return initParsed(allocator, method, try url_mod.parse(raw_url));
 }
 
-pub fn initParsed(allocator: host_std.mem.Allocator, method: []const u8, parsed_url: url_mod.Url) Request {
+pub fn initParsed(allocator: stdz.mem.Allocator, method: []const u8, parsed_url: url_mod.Url) Request {
     return .{
         .allocator = allocator,
         .method = if (method.len == 0) "GET" else method,
@@ -133,12 +133,12 @@ pub fn withTrailers(self: Request, trailers: []const Header) Request {
     return req;
 }
 
-pub fn addHeader(self: *Request, name: []const u8, value: []const u8) host_std.mem.Allocator.Error!void {
+pub fn addHeader(self: *Request, name: []const u8, value: []const u8) stdz.mem.Allocator.Error!void {
     const extra = [_]Header{Header.init(name, value)};
     try self.addHeaders(&extra);
 }
 
-pub fn addHeaders(self: *Request, headers: []const Header) host_std.mem.Allocator.Error!void {
+pub fn addHeaders(self: *Request, headers: []const Header) stdz.mem.Allocator.Error!void {
     if (headers.len == 0) return;
 
     const old_owned = self.owned_header_storage;

@@ -3,6 +3,20 @@
   "spec": {
     "name": "led strip rotate sequence",
     "description": "rotates a three-pixel rgb frame across the shared strip and checks every visible frame",
+    "initial_state": {
+      "single_button": {},
+      "grouped_button": {},
+      "strip": {},
+      "sensor": {},
+      "cell": {},
+      "reader": {},
+      "sta": {},
+      "ap": {},
+      "pairing": { "node": "idle" },
+      "loading": {},
+      "menu": { "count": 3, "loop": true },
+      "route": { "current_page": 1 }
+    },
     "steps": [
       {
         "inputs": [

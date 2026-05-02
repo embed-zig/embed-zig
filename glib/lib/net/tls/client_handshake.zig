@@ -1799,7 +1799,6 @@ pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunne
             }
 
             if (comptime std == @import("std")) {
-                const host_std = @import("std");
                 {
                     const client = make(std, time);
                     const tls_common = @import("common.zig").make(std);
@@ -1853,7 +1852,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunne
                             const session_id = body[pos..][0..session_id_len];
                             pos += session_id_len;
 
-                            const cipher_suites_len = host_std.mem.readInt(u16, body[pos..][0..2], .big);
+                            const cipher_suites_len = std.mem.readInt(u16, body[pos..][0..2], .big);
                             pos += 2;
                             const cipher_suites = body[pos..][0..cipher_suites_len];
                             pos += cipher_suites_len;
@@ -1863,7 +1862,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunne
                             const compression_methods = body[pos..][0..compression_methods_len];
                             pos += compression_methods_len;
 
-                            const extensions_len = host_std.mem.readInt(u16, body[pos..][0..2], .big);
+                            const extensions_len = std.mem.readInt(u16, body[pos..][0..2], .big);
                             pos += 2;
                             const extensions_data = body[pos..][0..extensions_len];
 
@@ -1881,7 +1880,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunne
                             var j: usize = 0;
                             var i: usize = 0;
                             while (i + 1 < haystack.len and j + 1 < needle.len) : (i += 2) {
-                                if (host_std.mem.eql(u8, needle[j .. j + 2], haystack[i .. i + 2])) {
+                                if (std.mem.eql(u8, needle[j .. j + 2], haystack[i .. i + 2])) {
                                     j += 2;
                                 }
                             }
@@ -1891,7 +1890,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunne
                         fn expectContainsCipherSuite(encoded: []const u8, suite: tls_common.CipherSuite) !void {
                             var i: usize = 0;
                             while (i + 1 < encoded.len) : (i += 2) {
-                                const got: tls_common.CipherSuite = @enumFromInt(host_std.mem.readInt(u16, encoded[i..][0..2], .big));
+                                const got: tls_common.CipherSuite = @enumFromInt(std.mem.readInt(u16, encoded[i..][0..2], .big));
                                 if (got == suite) return;
                             }
                             return error.TestUnexpectedResult;
@@ -1900,7 +1899,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunne
                         fn expectNotContainsCipherSuite(encoded: []const u8, suite: tls_common.CipherSuite) !void {
                             var i: usize = 0;
                             while (i + 1 < encoded.len) : (i += 2) {
-                                const got: tls_common.CipherSuite = @enumFromInt(host_std.mem.readInt(u16, encoded[i..][0..2], .big));
+                                const got: tls_common.CipherSuite = @enumFromInt(std.mem.readInt(u16, encoded[i..][0..2], .big));
                                 if (got == suite) return error.TestUnexpectedResult;
                             }
                         }
@@ -1913,16 +1912,16 @@ pub fn TestRunner(comptime std: type, comptime time: type) testing_api.TestRunne
                     _ = try hs.sendClientHello(&handshake_buf, &record_buf);
                     const ours = try Helpers.parseClientHello(conn.write_buf[0..conn.write_len]);
 
-                    var input_backing: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
-                    var input = host_std.Io.Reader.fixed(input_backing[0..]);
+                    var input_backing: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+                    var input = std.Io.Reader.fixed(input_backing[0..]);
                     input.seek = 0;
                     input.end = 0;
 
                     var output_backing: [4096]u8 = undefined;
-                    var output = host_std.Io.Writer.fixed(output_backing[0..]);
-                    var std_read_buf: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
-                    var std_write_buf: [host_std.crypto.tls.Client.min_buffer_len]u8 = undefined;
-                    _ = host_std.crypto.tls.Client.init(&input, &output, .{
+                    var output = std.Io.Writer.fixed(output_backing[0..]);
+                    var std_read_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+                    var std_write_buf: [std.crypto.tls.Client.min_buffer_len]u8 = undefined;
+                    _ = std.crypto.tls.Client.init(&input, &output, .{
                         .host = .{ .explicit = "example.com" },
                         .ca = .no_verification,
                         .read_buffer = &std_read_buf,

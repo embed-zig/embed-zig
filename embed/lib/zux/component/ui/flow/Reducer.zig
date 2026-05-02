@@ -28,10 +28,10 @@ pub fn make(
         allocator: glib.std.mem.Allocator,
 
         running_mu: Mutex = .{},
-        running_state: FlowState = .{},
+        running_state: FlowState = undefined,
 
         released_mu: RwLock = .{},
-        released_state: FlowState = .{},
+        released_state: FlowState = undefined,
 
         subscribers_mu: Mutex = .{},
         subscribers: SubscriberList = .empty,
@@ -199,7 +199,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         builder.addNode("idle");
         builder.addNode("searching");
         builder.addNode("paired");
-        builder.setInitial("idle");
         builder.addEdge("idle", "searching", "start");
         builder.addEdge("searching", "paired", "found");
         break :blk builder.build();
@@ -210,7 +209,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         builder.addNode("manual");
         builder.addNode("auto");
         builder.addNode("done");
-        builder.setInitial("idle");
         builder.addEdge("idle", "manual", "choose_manual");
         builder.addEdge("idle", "auto", "choose_auto");
         builder.addEdge("manual", "done", "finish_manual");
@@ -223,7 +221,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
     const TestCase = struct {
         fn move_respects_allowed_edges_and_reset(allocator: glib.std.mem.Allocator) !void {
-            var flow = LinearFlowStore.init(allocator, .{});
+            var flow = LinearFlowStore.init(allocator, .{ .node = .idle });
             defer flow.deinit();
 
             const NoopSink = struct {
@@ -315,7 +313,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn branch_forward_and_reverse_moves_work(allocator: glib.std.mem.Allocator) !void {
-            var flow = BranchFlowStore.init(allocator, .{});
+            var flow = BranchFlowStore.init(allocator, .{ .node = .idle });
             defer flow.deinit();
 
             const NoopSink = struct {

@@ -1,15 +1,13 @@
-const host_std = @import("std");
-const stdz = @import("stdz");
 const testing_mod = @import("testing");
 
 pub fn make(comptime std: type) testing_mod.TestRunner {
     const Runner = struct {
-        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
         }
 
-        pub fn run(self: *@This(), t: *testing_mod.T, allocator: stdz.mem.Allocator) bool {
+        pub fn run(self: *@This(), t: *testing_mod.T, allocator: std.mem.Allocator) bool {
             _ = self;
             _ = allocator;
 
@@ -65,7 +63,7 @@ pub fn make(comptime std: type) testing_mod.TestRunner {
             return t.wait();
         }
 
-        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             _ = allocator;
             std.testing.allocator.destroy(self);
         }
@@ -182,7 +180,7 @@ fn getsockoptTest(comptime std: type) !void {
     defer posix.close(sock);
 
     var err_code: i32 = -1;
-    try posix.getsockopt(sock, posix.SOL.SOCKET, posix.SO.ERROR, host_std.mem.asBytes(&err_code));
+    try posix.getsockopt(sock, posix.SOL.SOCKET, posix.SO.ERROR, std.mem.asBytes(&err_code));
     if (err_code != 0) return error.GetSockOptErrorNotZero;
 }
 

@@ -3,6 +3,7 @@
 const net_mod = @import("../../../../net.zig");
 const tls_fixtures = @import("../../../../net/tls/test_fixtures.zig");
 const tcp_test_utils = @import("../tcp/test_utils.zig");
+const thread_sync = @import("../../test_utils/thread_sync.zig");
 
 pub fn readAll(conn: net_mod.Conn, buf: []u8) !void {
     var filled: usize = 0;
@@ -34,6 +35,7 @@ pub fn runLoopbackCase(
     server_tls13_cipher_suites: ?[]const NetType.tls.CipherSuite,
 ) !void {
     const Thread = std.Thread;
+    const ThreadResult = thread_sync.ThreadResult(std);
     const test_spawn_config: Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 };
 
     var server_config: NetType.tls.ServerConfig = .{
@@ -57,49 +59,52 @@ pub fn runLoopbackCase(
     const tcp_listener = try tls_l.inner.as(NetType.TcpListener);
     const port = try tcp_listener.port();
 
-    var server_result: ?anyerror = null;
+    var server_result = ThreadResult{};
     var server_thread = try Thread.spawn(test_spawn_config, struct {
         fn run(
             listener: *NetType.tls.Listener,
             expected: NetType.tls.ProtocolVersion,
             suite: ?NetType.tls.CipherSuite,
-            result: *?anyerror,
+            result: *ThreadResult,
         ) void {
+            var thread_err: ?anyerror = null;
+            defer result.finish(thread_err);
+
             var conn = listener.accept() catch |err| {
-                result.* = err;
+                thread_err = err;
                 return;
             };
             defer conn.deinit();
 
             const typed = conn.as(NetType.tls.ServerConn) catch {
-                result.* = error.TestUnexpectedResult;
+                thread_err = error.TestUnexpectedResult;
                 return;
             };
             typed.handshake() catch |err| {
-                result.* = err;
+                thread_err = err;
                 return;
             };
             if (typed.handshake_state.version != expected) {
-                result.* = error.TestUnexpectedResult;
+                thread_err = error.TestUnexpectedResult;
                 return;
             }
             if (suite) |wanted_suite| {
                 if (typed.handshake_state.cipher_suite != wanted_suite) {
-                    result.* = error.TestUnexpectedResult;
+                    thread_err = error.TestUnexpectedResult;
                     return;
                 }
             }
 
             var buf: [4]u8 = undefined;
             readAll(conn, &buf) catch |err| {
-                result.* = err;
+                thread_err = err;
                 return;
             };
             writeAll(conn, "pong") catch |err| {
-                result.* = err;
+                thread_err = err;
                 return;
             };
-            if (!std.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
+            if (!std.mem.eql(u8, &buf, "ping")) thread_err = error.TestUnexpectedResult;
         }
     }.run, .{ tls_l, expected_version, expected_suite, &server_result });
     defer server_thread.join();
@@ -128,7 +133,7 @@ pub fn runLoopbackCase(
     var resp: [4]u8 = undefined;
     try readAll(conn, &resp);
     try std.testing.expectEqualStrings("pong", &resp);
-    if (server_result) |err| return err;
+    if (server_result.wait()) |err| return err;
 }
 
 fn nextTrafficSecret(

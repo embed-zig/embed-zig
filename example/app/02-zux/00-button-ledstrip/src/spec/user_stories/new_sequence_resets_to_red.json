@@ -1,0 +1,44 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "new sequence resets to red",
+    "description": "When a new scene run starts from off, the first tick turns the strip red",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": 0,
+        "rainbow_stage": 0,
+        "next_rainbow_step_ns": 0
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": 0,
+              "rainbow_stage": 0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 120000000,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": 1,
+              "rainbow_stage": 0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -4,9 +4,6 @@ const BuildContext = @import("assembler/BuildContext.zig");
 const assembler_build_config = @import("assembler/BuildConfig.zig");
 const NodeBuilder = @import("pipeline/NodeBuilder.zig");
 const Store = @import("Store.zig");
-const overlay = @import("component/ui/overlay.zig");
-const selection = @import("component/ui/selection.zig");
-const route = @import("component/ui/route.zig");
 const registry_adc_button = @import("assembler/registry/adc_button.zig");
 const registry_flow = @import("assembler/registry/flow.zig");
 const registry_gpio_button = @import("assembler/registry/gpio_button.zig");
@@ -247,11 +244,10 @@ pub fn make(
             self: *Self,
             comptime label: anytype,
             comptime id: u32,
-            comptime initial_item: route.Router.Item,
         ) void {
             ensureComponentUnique(self, label, id);
-            self.router_registry.add(label, id, initial_item);
-            self.store_builder.setStore(label, assembler_builder.makeRouterStoreType(grt, initial_item));
+            self.router_registry.add(label, id);
+            self.store_builder.setStore(label, assembler_builder.makeRouterStoreType(grt));
         }
 
         pub fn addFlow(
@@ -268,22 +264,20 @@ pub fn make(
             self: *Self,
             comptime label: anytype,
             comptime id: u32,
-            comptime initial_state: overlay.State,
         ) void {
             ensureComponentUnique(self, label, id);
-            self.overlay_registry.add(label, id, initial_state);
-            self.store_builder.setStore(label, assembler_builder.makeOverlayStoreType(grt, initial_state));
+            self.overlay_registry.add(label, id);
+            self.store_builder.setStore(label, assembler_builder.makeOverlayStoreType(grt));
         }
 
         pub fn addSelection(
             self: *Self,
             comptime label: anytype,
             comptime id: u32,
-            comptime initial_state: selection.State,
         ) void {
             ensureComponentUnique(self, label, id);
-            self.selection_registry.add(label, id, initial_state);
-            self.store_builder.setStore(label, assembler_builder.makeSelectionStoreType(grt, initial_state));
+            self.selection_registry.add(label, id);
+            self.store_builder.setStore(label, assembler_builder.makeSelectionStoreType(grt));
         }
 
         pub fn BuildConfig(comptime self: Self) type {

@@ -2,6 +2,7 @@ const stdz = @import("stdz");
 const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
+const thread_sync = @import("../../test_utils/thread_sync.zig");
 
 pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Utils = test_utils.make(std, net);
@@ -21,6 +22,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     const Net = Utils.Net;
                     const Http = Utils.Http;
                     const Thread = std.Thread;
+                    const ThreadResult = thread_sync.ThreadResult(std);
                     const test_spawn_config: std.Thread.SpawnConfig = Utils.test_spawn_config;
                     const testing = struct {
                         pub var allocator: std.mem.Allocator = undefined;
@@ -36,6 +38,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         accepted: usize = 0,
                         saw_header: bool = false,
                     };
+                    const ProxyResult = thread_sync.ThreadSnapshot(std, ProxyState);
 
                     var target_ln = try Net.tls.listen(testing.allocator, .{
                         .address = Utils.addr4(0),
@@ -43,32 +46,35 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     defer target_ln.deinit();
                     const target_listener = try target_ln.as(Net.tls.Listener);
                     const target_port = try Utils.tlsListenerPort(target_ln, Net);
-                    var target_result: ?anyerror = null;
+                    var target_result = ThreadResult{};
 
                     var target_thread = try Thread.spawn(test_spawn_config, struct {
-                        fn run(listener: *Net.tls.Listener, result: *?anyerror) void {
+                        fn run(listener: *Net.tls.Listener, result: *ThreadResult) void {
+                            var thread_err: ?anyerror = null;
+                            defer result.finish(thread_err);
+
                             var conn = listener.accept() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             defer conn.deinit();
 
                             const typed = conn.as(Net.tls.ServerConn) catch {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             };
                             typed.handshake() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
 
                             var req_buf: [4096]u8 = undefined;
                             const req_head = Utils.readRequestHead(conn, &req_buf) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             if (!Utils.hasRequestLine(req_head, "GET /via-proxy HTTP/1.1")) {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             }
 
@@ -79,15 +85,15 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                                 "HTTP/1.1 200 OK\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n",
                                 .{body.len},
                             ) catch {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             };
                             io.writeAll(@TypeOf(conn), &conn, head) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             io.writeAll(@TypeOf(conn), &conn, body) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                             };
                         }
                     }.run, .{ target_listener, &target_result });
@@ -97,54 +103,56 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     defer proxy_ln.deinit();
                     const proxy_listener = try proxy_ln.as(Net.TcpListener);
                     const proxy_port = try Utils.tcpListenerPort(proxy_ln, Net);
-                    var proxy_state = ProxyState{};
-                    var proxy_result: ?anyerror = null;
+                    var proxy_result = ProxyResult{};
 
                     var proxy_thread = try Thread.spawn(test_spawn_config, struct {
                         fn run(
                             listener: *Net.TcpListener,
                             target_port_value: u16,
-                            state: *ProxyState,
-                            result: *?anyerror,
+                            result: *ProxyResult,
                         ) void {
+                            var snapshot = ProxyState{};
+                            var thread_err: ?anyerror = null;
+                            defer result.finish(snapshot, thread_err);
+
                             var conn = listener.accept() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             defer conn.deinit();
-                            state.accepted += 1;
+                            snapshot.accepted += 1;
 
                             var req_buf: [4096]u8 = undefined;
                             const req_head = Utils.readRequestHead(conn, &req_buf) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             var line_buf: [64]u8 = undefined;
                             const expected = std.fmt.bufPrint(&line_buf, "CONNECT 127.0.0.1:{d} HTTP/1.1", .{target_port_value}) catch {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             };
                             if (!Utils.hasRequestLine(req_head, expected)) {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             }
-                            state.saw_header = std.mem.eql(u8, Utils.headerValue(req_head, "X-Connect-Test") orelse "", "proxy-test");
+                            snapshot.saw_header = std.mem.eql(u8, Utils.headerValue(req_head, "X-Connect-Test") orelse "", "proxy-test");
 
                             var upstream = Net.dial(testing.allocator, .tcp, Utils.addr4(target_port_value)) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             defer upstream.deinit();
 
                             io.writeAll(@TypeOf(conn), &conn, "HTTP/1.1 200 Connection established\r\nContent-Length: 0\r\n\r\n") catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             Utils.bridgeTunnel(conn, upstream) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                             };
                         }
-                    }.run, .{ proxy_listener, target_port, &proxy_state, &proxy_result });
+                    }.run, .{ proxy_listener, target_port, &proxy_result });
                     defer proxy_thread.join();
 
                     const proxy_raw_url = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}", .{proxy_port});
@@ -165,15 +173,19 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
 
                     var req = try Http.Request.init(testing.allocator, "GET", raw_url);
                     var resp = try transport.roundTrip(&req);
-                    defer resp.deinit();
+                    var resp_deinited = false;
+                    defer if (!resp_deinited) resp.deinit();
 
                     const body = try Utils.readBody(testing.allocator, resp);
                     defer testing.allocator.free(body);
                     try testing.expectEqualStrings("secure via proxy", body);
-                    try testing.expectEqual(@as(usize, 1), proxy_state.accepted);
-                    try testing.expect(proxy_state.saw_header);
-                    if (proxy_result) |err| return err;
-                    if (target_result) |err| return err;
+                    resp.deinit();
+                    resp_deinited = true;
+
+                    const proxy_snapshot = try proxy_result.wait();
+                    try testing.expectEqual(@as(usize, 1), proxy_snapshot.accepted);
+                    try testing.expect(proxy_snapshot.saw_header);
+                    if (target_result.wait()) |err| return err;
                 }
             };
             Body.call(run_allocator) catch |err| {

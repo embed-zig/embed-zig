@@ -1,5 +1,4 @@
 const time_mod = @import("time");
-const host_std = @import("std");
 const context_mod = @import("context");
 const sync = @import("sync");
 
@@ -407,7 +406,7 @@ pub fn Client(comptime std: type, comptime net: type, comptime ntp: type) type {
             self.mutex.lock();
             defer self.mutex.unlock();
 
-            host_std.debug.assert(self.active_races > 0);
+            std.debug.assert(self.active_races > 0);
             self.active_races -= 1;
             if (self.active_races == 0) self.cond.broadcast();
         }

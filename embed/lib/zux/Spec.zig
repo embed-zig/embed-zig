@@ -226,17 +226,17 @@ pub fn make(comptime spec_doc: anytype) type {
                         .wifi_ap => {
                             next.addWifiAp(label, component.id);
                         },
-                        .router => |router_component| {
-                            next.addRouter(label, component.id, router_component.initial_item);
+                        .router => {
+                            next.addRouter(label, component.id);
                         },
                         .flow => |flow_component| {
                             next.addFlow(label, component.id, flow_component.makeType());
                         },
-                        .overlay => |overlay_component| {
-                            next.addOverlay(label, component.id, overlay_component.initial_state);
+                        .overlay => {
+                            next.addOverlay(label, component.id);
                         },
-                        .selection => |selection_component| {
-                            next.addSelection(label, component.id, selection_component.initial_state);
+                        .selection => {
+                            next.addSelection(label, component.id);
                         },
                     }
                 }
@@ -272,33 +272,60 @@ pub fn make(comptime spec_doc: anytype) type {
             };
         }
 
-        pub fn testRunner(
+        pub fn buildApp(
             self: *Self,
             comptime grt: type,
             comptime config: AssemblerConfig,
-        ) glib.testing.TestRunner {
-            const BuiltApp = comptime blk: {
-                const assembled = self.assembler(grt, config);
-                break :blk assembled.build(makeTestBuildConfig(assembled.BuildConfig()));
-            };
+        ) type {
+            const assembled = self.assembler(grt, config);
+            return assembled.build(makeDefaultBuildConfig(assembled.BuildConfig()));
+        }
 
+        pub fn testRunner(
+            self: *const Self,
+            comptime AppType: type,
+            allocator: glib.std.mem.Allocator,
+        ) glib.testing.TestRunner {
+            const init_config = makeTestInitConfig(AppType, allocator);
+            return self.testRunnerWith(AppType, init_config);
+        }
+
+        pub fn testRunnerWith(
+            self: *const Self,
+            comptime AppType: type,
+            init_config: AppType.InitConfig,
+        ) glib.testing.TestRunner {
+            _ = self;
+            const InitConfig = AppType.InitConfig;
+            const InitialState = @FieldType(InitConfig, "initial_state");
             const Runner = struct {
+                app_init_config: InitConfig,
+
                 pub fn init(self_runner: *@This(), allocator: glib.std.mem.Allocator) !void {
                     _ = self_runner;
                     _ = allocator;
                 }
 
                 pub fn run(self_runner: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
-                    _ = self_runner;
-
                     inline for (user_stories) |story| {
-                        var app = BuiltApp.init(makeTestInitConfig(grt, BuiltApp, allocator)) catch |err| {
+                        var story_initial_state = story.decodeInitialState(InitialState, allocator) catch |err| {
+                            t.logFatal(@errorName(err));
+                            return false;
+                        };
+                        defer story.freeInitialState(InitialState, allocator, &story_initial_state);
+
+                        const app_init_config = makeStoryInitConfig(
+                            InitConfig,
+                            self_runner.app_init_config,
+                            story_initial_state,
+                        );
+                        var app = AppType.init(app_init_config) catch |err| {
                             t.logFatal(@errorName(err));
                             return false;
                         };
                         defer app.deinit();
 
-                        t.run(story.name, story.createTestRunner(BuiltApp, &app));
+                        t.run(story.name, story.createTestRunner(AppType, &app));
                         if (!t.wait()) return false;
                     }
 
@@ -312,7 +339,10 @@ pub fn make(comptime spec_doc: anytype) type {
             };
 
             const Holder = struct {
-                var runner: Runner = .{};
+                var runner: Runner = undefined;
+            };
+            Holder.runner = .{
+                .app_init_config = init_config,
             };
             return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
         }
@@ -341,7 +371,7 @@ pub fn make(comptime spec_doc: anytype) type {
             @compileError("zux.Spec.setRender received a label '" ++ label ++ "' that is not declared in the spec doc render list");
         }
 
-        fn makeTestBuildConfig(comptime BuildConfig: type) BuildConfig {
+        fn makeDefaultBuildConfig(comptime BuildConfig: type) BuildConfig {
             var build_config: BuildConfig = undefined;
 
             inline for (@typeInfo(BuildConfig).@"struct".fields) |field| {
@@ -352,16 +382,16 @@ pub fn make(comptime spec_doc: anytype) type {
         }
 
         fn makeTestInitConfig(
-            comptime grt: type,
             comptime AppType: type,
             allocator: glib.std.mem.Allocator,
         ) AppType.InitConfig {
-            _ = grt;
             var init_config: AppType.InitConfig = undefined;
 
             inline for (@typeInfo(AppType.InitConfig).@"struct".fields) |field| {
                 if (comptime comptimeEql(field.name, "allocator")) {
                     @field(init_config, field.name) = allocator;
+                } else if (comptime comptimeEql(field.name, "initial_state")) {
+                    @field(init_config, field.name) = undefined;
                 } else if (comptime comptimeEql(field.name, "user_root_config")) {
                     @field(init_config, field.name) = .{};
                 } else {
@@ -778,6 +808,20 @@ fn comptimeEql(comptime a: []const u8, comptime b: []const u8) bool {
     return true;
 }
 
+fn makeStoryInitConfig(
+    comptime InitConfig: type,
+    base_init_config: InitConfig,
+    initial_state: @FieldType(InitConfig, "initial_state"),
+) InitConfig {
+    var init_config: InitConfig = base_init_config;
+    inline for (@typeInfo(InitConfig).@"struct".fields) |field| {
+        if (comptime comptimeEql(field.name, "initial_state")) {
+            @field(init_config, field.name) = initial_state;
+        }
+    }
+    return init_config;
+}
+
 fn comptimeStartsWith(comptime text: []const u8, comptime prefix: []const u8) bool {
     if (prefix.len > text.len) return false;
     inline for (prefix, 0..) |ch, i| {
@@ -849,7 +893,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     \\      "spec": {
                     \\        "label": "counter_render",
                     \\        "state_path": "ui",
-                    \\        "render_fn_name": "counterRender"
+                    \\        "fn_name": "counterRender"
                     \\      }
                     \\    },
                     \\    {
@@ -995,7 +1039,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .id = 31,
                         .kind = .{
                             .flow = .{
-                                .initial = "idle",
                                 .nodes = &.{ "idle", "searching" },
                                 .edges = &.{
                                     .{
@@ -1029,7 +1072,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn test_runner_executes_user_stories(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
-            _ = allocator;
             const SpecType = make(.{
                 .stores = &.{
                     StoreObjectSpecType.make("counter", struct {
@@ -1046,6 +1088,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     UserStorySpec{
                         .name = "tick story",
                         .description = "updates store through the spec test runner",
+                        .initial_state = "{\"counter\":{\"ticks\":0}}",
                         .steps = &.{
                             .{
                                 .outputs = &.{
@@ -1098,19 +1141,22 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 }
             }.factory;
 
-            const runner = comptime blk: {
+            const config: AssemblerConfig = .{
+                .max_reducers = 1,
+                .store = .{
+                    .max_stores = 1,
+                    .max_state_nodes = 4,
+                    .max_store_refs = 4,
+                    .max_depth = 4,
+                },
+            };
+            const AppType = comptime blk: {
                 var spec = SpecType.init();
                 spec.setReducer("counter_reducer", ReducerFactory);
-                break :blk spec.testRunner(grt, .{
-                    .max_reducers = 1,
-                    .store = .{
-                        .max_stores = 1,
-                        .max_state_nodes = 4,
-                        .max_store_refs = 4,
-                        .max_depth = 4,
-                    },
-                });
+                break :blk spec.buildApp(grt, config);
             };
+            const spec = SpecType.init();
+            const runner = spec.testRunner(AppType, allocator);
 
             t.run("spec test runner", runner);
             try grt.std.testing.expect(t.wait());

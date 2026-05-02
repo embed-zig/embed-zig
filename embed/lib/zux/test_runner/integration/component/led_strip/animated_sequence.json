@@ -3,6 +3,20 @@
   "spec": {
     "name": "led strip animated sequence",
     "description": "sets a baseline frame and animates the shared strip toward a brighter red in 1ms ticks",
+    "initial_state": {
+      "single_button": {},
+      "grouped_button": {},
+      "strip": {},
+      "sensor": {},
+      "cell": {},
+      "reader": {},
+      "sta": {},
+      "ap": {},
+      "pairing": { "node": "idle" },
+      "loading": {},
+      "menu": { "count": 3, "loop": true },
+      "route": { "current_page": 1 }
+    },
     "steps": [
       {
         "inputs": [

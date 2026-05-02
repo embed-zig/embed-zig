@@ -191,7 +191,6 @@ pub fn TestRunner(comptime std: type) TestRunnerApi {
         }
 
         fn testTracksPeakConcurrentLiveBytes() !void {
-            const host_std = @import("std");
             const Sync = struct {
                 mutex: std.Thread.Mutex = .{},
                 cond: std.Thread.Condition = .{},
@@ -214,7 +213,7 @@ pub fn TestRunner(comptime std: type) TestRunnerApi {
                 }
             };
 
-            var allocator_state = Self.init(host_std.heap.page_allocator, null);
+            var allocator_state = Self.init(std.testing.allocator, null);
             const alloc_inst = allocator_state.allocator();
             var sync: Sync = .{};
 

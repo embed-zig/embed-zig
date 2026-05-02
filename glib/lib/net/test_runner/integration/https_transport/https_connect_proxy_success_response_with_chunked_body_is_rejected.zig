@@ -2,6 +2,7 @@ const stdz = @import("stdz");
 const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
+const thread_sync = @import("../../test_utils/thread_sync.zig");
 
 pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Utils = test_utils.make(std, net);
@@ -21,6 +22,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     const Net = Utils.Net;
                     const Http = Utils.Http;
                     const Thread = std.Thread;
+                    const ThreadResult = thread_sync.ThreadResult(std);
                     const test_spawn_config: std.Thread.SpawnConfig = Utils.test_spawn_config;
                     const testing = struct {
                         pub var allocator: std.mem.Allocator = undefined;
@@ -36,28 +38,31 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     defer proxy_ln.deinit();
                     const proxy_listener = try proxy_ln.as(Net.TcpListener);
                     const proxy_port = try Utils.tcpListenerPort(proxy_ln, Net);
-                    var proxy_result: ?anyerror = null;
+                    var proxy_result = ThreadResult{};
 
                     var proxy_thread = try Thread.spawn(test_spawn_config, struct {
-                        fn run(listener: *Net.TcpListener, result: *?anyerror) void {
+                        fn run(listener: *Net.TcpListener, result: *ThreadResult) void {
+                            var thread_err: ?anyerror = null;
+                            defer result.finish(thread_err);
+
                             var conn = listener.accept() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             defer conn.deinit();
 
                             var req_buf: [4096]u8 = undefined;
                             const req_head = Utils.readRequestHead(conn, &req_buf) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             if (!Utils.hasRequestLine(req_head, "CONNECT example.com:443 HTTP/1.1")) {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             }
 
                             io.writeAll(@TypeOf(conn), &conn, "HTTP/1.1 200 Connection established\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n4\r\nnope\r\n0\r\n\r\n") catch |err| {
-                                result.* = err;
+                                thread_err = err;
                             };
                         }
                     }.run, .{ proxy_listener, &proxy_result });
@@ -74,7 +79,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
 
                     var req = try Http.Request.init(testing.allocator, "GET", "https://example.com/invalid-connect-chunked");
                     try testing.expectError(error.InvalidResponse, transport.roundTrip(&req));
-                    if (proxy_result) |err| return err;
+                    if (proxy_result.wait()) |err| return err;
                 }
             };
             Body.call(run_allocator) catch |err| {

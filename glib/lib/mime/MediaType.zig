@@ -199,8 +199,31 @@ fn isValidQuotedPairChar(c: u8) bool {
 pub fn TestRunner(comptime std: type) testing_api.TestRunner {
     return testing_api.TestRunner.fromFn(std, 64 * 1024, struct {
         fn run(_: *testing_api.T, _: std.mem.Allocator) !void {
-            const host_std = @import("std");
             const testing = std.testing;
+            const FixedBuffer = struct {
+                buf: []u8,
+                len: usize = 0,
+
+                fn init(buf: []u8) @This() {
+                    return .{ .buf = buf };
+                }
+
+                pub fn writeAll(self: *@This(), bytes: []const u8) !void {
+                    if (self.buf.len - self.len < bytes.len) return error.NoSpaceLeft;
+                    @memcpy(self.buf[self.len..][0..bytes.len], bytes);
+                    self.len += bytes.len;
+                }
+
+                pub fn writeByte(self: *@This(), byte: u8) !void {
+                    if (self.len >= self.buf.len) return error.NoSpaceLeft;
+                    self.buf[self.len] = byte;
+                    self.len += 1;
+                }
+
+                fn getWritten(self: *const @This()) []const u8 {
+                    return self.buf[0..self.len];
+                }
+            };
 
             {
                 const params = [_]Parameter{
@@ -285,8 +308,8 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
                 const mt = MediaType.init("text/plain", &params);
 
                 var buf: [128]u8 = undefined;
-                var stream = host_std.io.fixedBufferStream(&buf);
-                try mt.format(stream.writer());
+                var stream = FixedBuffer.init(&buf);
+                try mt.format(&stream);
                 try testing.expectEqualStrings(
                     "text/plain; charset=utf-8; filename=\"hello world.txt\"",
                     stream.getWritten(),
@@ -300,8 +323,8 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
                 const mt = MediaType.init("text/plain", &params);
 
                 var buf: [128]u8 = undefined;
-                var stream = host_std.io.fixedBufferStream(&buf);
-                try mt.format(stream.writer());
+                var stream = FixedBuffer.init(&buf);
+                try mt.format(&stream);
                 try testing.expectEqualStrings(
                     "text/plain; title=\"hello\\\"world\\\\path\"",
                     stream.getWritten(),
@@ -315,8 +338,8 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
                 const mt = MediaType.init("text/plain", &params);
 
                 var buf: [128]u8 = undefined;
-                var stream = host_std.io.fixedBufferStream(&buf);
-                try testing.expectError(error.InvalidQuotedPair, mt.format(stream.writer()));
+                var stream = FixedBuffer.init(&buf);
+                try testing.expectError(error.InvalidQuotedPair, mt.format(&stream));
             }
 
             {
@@ -326,8 +349,8 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
                 const mt = MediaType.init("text/plain", &params);
 
                 var buf: [128]u8 = undefined;
-                var stream = host_std.io.fixedBufferStream(&buf);
-                try testing.expectError(error.InvalidQuotedPair, mt.format(stream.writer()));
+                var stream = FixedBuffer.init(&buf);
+                try testing.expectError(error.InvalidQuotedPair, mt.format(&stream));
                 try testing.expectEqual(@as(usize, 0), stream.getWritten().len);
             }
 
@@ -340,13 +363,13 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
                 const bad_name = MediaType.init("text/plain", &bad_name_params);
 
                 var type_buf: [128]u8 = undefined;
-                var type_stream = host_std.io.fixedBufferStream(&type_buf);
-                try testing.expectError(error.InvalidMediaType, bad_type.format(type_stream.writer()));
+                var type_stream = FixedBuffer.init(&type_buf);
+                try testing.expectError(error.InvalidMediaType, bad_type.format(&type_stream));
                 try testing.expectEqual(@as(usize, 0), type_stream.getWritten().len);
 
                 var name_buf: [128]u8 = undefined;
-                var name_stream = host_std.io.fixedBufferStream(&name_buf);
-                try testing.expectError(error.InvalidParameter, bad_name.format(name_stream.writer()));
+                var name_stream = FixedBuffer.init(&name_buf);
+                try testing.expectError(error.InvalidParameter, bad_name.format(&name_stream));
                 try testing.expectEqual(@as(usize, 0), name_stream.getWritten().len);
             }
 
@@ -355,8 +378,8 @@ pub fn TestRunner(comptime std: type) testing_api.TestRunner {
                 const parsed = try MediaType.parse("text/plain; title=\"hello\\\"world\\\\path\"", &parsed_params);
 
                 var buf: [128]u8 = undefined;
-                var stream = host_std.io.fixedBufferStream(&buf);
-                try parsed.format(stream.writer());
+                var stream = FixedBuffer.init(&buf);
+                try parsed.format(&stream);
                 try testing.expectEqualStrings(
                     "text/plain; title=\"hello\\\"world\\\\path\"",
                     stream.getWritten(),

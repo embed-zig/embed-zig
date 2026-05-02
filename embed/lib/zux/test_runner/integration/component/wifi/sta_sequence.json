@@ -3,6 +3,20 @@
   "spec": {
     "name": "wifi sta sequence",
     "description": "tracks scan, connect, ip acquisition, ip loss, and disconnect on the station store",
+    "initial_state": {
+      "single_button": {},
+      "grouped_button": {},
+      "strip": {},
+      "sensor": {},
+      "cell": {},
+      "reader": {},
+      "sta": {},
+      "ap": {},
+      "pairing": { "node": "idle" },
+      "loading": {},
+      "menu": { "count": 3, "loop": true },
+      "route": { "current_page": 1 }
+    },
     "steps": [
       {
         "inputs": [

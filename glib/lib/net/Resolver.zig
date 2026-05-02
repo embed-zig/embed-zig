@@ -15,7 +15,6 @@
 //!   7. Detached cleanup waits for lagging workers and frees lookup state
 //!   8. deinit() waits for all outstanding lookups to finish cleanup
 
-const host_std = @import("std");
 const context_mod = @import("context");
 const sync = @import("sync");
 const time = @import("time");
@@ -740,16 +739,16 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
             const host = try formatDohHost(server.addr, &host_buf);
             const port = server.addr.port();
             if (port == 443) {
-                return host_std.fmt.bufPrint(buf, "https://{s}{s}", .{ host, server.doh_path });
+                return std.fmt.bufPrint(buf, "https://{s}{s}", .{ host, server.doh_path });
             }
-            return host_std.fmt.bufPrint(buf, "https://{s}:{d}{s}", .{ host, port, server.doh_path });
+            return std.fmt.bufPrint(buf, "https://{s}:{d}{s}", .{ host, port, server.doh_path });
         }
 
         fn formatDohHost(addr_port: AddrPort, buf: []u8) ![]u8 {
             const addr = addr_port.addr();
             if (addr.is4()) {
                 const bytes = addr.as4().?;
-                return host_std.fmt.bufPrint(buf, "{d}.{d}.{d}.{d}", .{
+                return std.fmt.bufPrint(buf, "{d}.{d}.{d}.{d}", .{
                     bytes[0], bytes[1], bytes[2], bytes[3],
                 });
             }
@@ -769,7 +768,7 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
                 (@as(u16, bytes[14]) << 8) | bytes[15],
             };
 
-            return host_std.fmt.bufPrint(
+            return std.fmt.bufPrint(
                 buf,
                 "[{x}:{x}:{x}:{x}:{x}:{x}:{x}:{x}]",
                 .{
@@ -782,9 +781,9 @@ pub fn Resolver(comptime std: type, comptime net: type) type {
         fn responseHasDnsMessageContentType(resp: Http.Response) bool {
             for (resp.header) |hdr| {
                 if (hdr.is(Http.Header.content_type)) {
-                    const semi = host_std.mem.indexOfScalar(u8, hdr.value, ';') orelse hdr.value.len;
-                    const media_type = host_std.mem.trim(u8, hdr.value[0..semi], " \t");
-                    return host_std.ascii.eqlIgnoreCase(media_type, "application/dns-message");
+                    const semi = std.mem.indexOfScalar(u8, hdr.value, ';') orelse hdr.value.len;
+                    const media_type = std.mem.trim(u8, hdr.value[0..semi], " \t");
+                    return std.ascii.eqlIgnoreCase(media_type, "application/dns-message");
                 }
             }
             return false;

@@ -1,4 +1,3 @@
-const host_std = @import("std");
 const testing_api = @import("testing");
 
 pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
@@ -14,7 +13,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
 
             const Body = struct {
                 fn signalReadLater(sock: *net.Runtime.Tcp) void {
-                    host_std.Thread.sleep(@intCast(20 * net.time.duration.MilliSecond));
+                    std.Thread.sleep(@intCast(20 * net.time.duration.MilliSecond));
                     sock.signal(.read_interrupt);
                 }
 
@@ -27,13 +26,13 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         tcp.deinit();
                     }
 
-                    var signal_thread = try host_std.Thread.spawn(.{}, signalReadLater, .{&tcp});
+                    var signal_thread = try std.Thread.spawn(.{}, signalReadLater, .{&tcp});
                     defer signal_thread.join();
 
                     const first = try tcp.poll(.{ .read_interrupt = true }, @intCast(100 * net.time.duration.MilliSecond));
-                    try host_std.testing.expect(first.read_interrupt);
+                    try std.testing.expect(first.read_interrupt);
 
-                    try host_std.testing.expectError(error.TimedOut, tcp.poll(.{ .read_interrupt = true }, 0));
+                    try std.testing.expectError(error.TimedOut, tcp.poll(.{ .read_interrupt = true }, 0));
                 }
             };
 

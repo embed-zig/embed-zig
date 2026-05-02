@@ -1,4 +1,3 @@
-const route = @import("../../component/ui/route.zig");
 const registry_unique = @import("unique.zig");
 
 pub fn make(comptime max_routers: usize) type {
@@ -8,7 +7,6 @@ pub fn make(comptime max_routers: usize) type {
         pub const Router = struct {
             label: []const u8,
             id: u32,
-            initial_item: route.Router.Item,
         };
 
         periphs: [max_routers]Router = undefined,
@@ -22,7 +20,6 @@ pub fn make(comptime max_routers: usize) type {
             self: *Self,
             comptime label: anytype,
             comptime id: u32,
-            comptime initial_item: route.Router.Item,
         ) void {
             if (self.len >= max_routers) {
                 @compileError("zux.Assembler exceeded max_routers");
@@ -40,7 +37,6 @@ pub fn make(comptime max_routers: usize) type {
             self.periphs[self.len] = .{
                 .label = label_name,
                 .id = id,
-                .initial_item = initial_item,
             };
             self.len += 1;
         }

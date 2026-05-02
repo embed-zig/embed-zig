@@ -1,0 +1,59 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "unsupported tick keeps current color",
+    "description": "When the LED strip is blue, the user waits for an unsupported scene tick and the strip stays blue",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": 0,
+        "rainbow_stage": 0,
+        "next_rainbow_step_ns": 0
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": 0,
+              "rainbow_stage": 0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 120000000,
+          "n": 3
+        },
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": 3,
+              "rainbow_stage": 0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 120000000,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": 3,
+              "rainbow_stage": 0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

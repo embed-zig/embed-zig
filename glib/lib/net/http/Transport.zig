@@ -7,7 +7,7 @@
 //! application from `Request.context()`.
 
 const time_mod = @import("time");
-const host_std = @import("std");
+const stdz = @import("stdz");
 
 const io = @import("io");
 const dialer_mod = @import("../Dialer.zig");
@@ -42,7 +42,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
     const Thread = std.Thread;
     const default_user_agent = "stdz-zig-http-client/1.0";
     const default_max_header_bytes = 32 * 1024;
-    const unlimited_body_bytes = host_std.math.maxInt(usize);
+    const unlimited_body_bytes = stdz.math.maxInt(usize);
     const default_body_io_buf_len = 1024;
     const max_informational_responses = 8;
     const default_http2_alpn = [_][]const u8{ "h2", "http/1.1" };
@@ -52,8 +52,8 @@ pub fn Transport(comptime std: type, comptime net: type) type {
         options: Options,
         resolver: Resolver,
         idle_mu: Thread.Mutex = .{},
-        idle_conns: host_std.ArrayList(IdleConn),
-        host_states: host_std.ArrayList(HostState),
+        idle_conns: stdz.ArrayList(IdleConn),
+        host_states: stdz.ArrayList(HostState),
         idle_generation: usize = 0,
 
         const Self = @This();
@@ -291,8 +291,8 @@ pub fn Transport(comptime std: type, comptime net: type) type {
                 const line_buf = try self.allocator.alloc(u8, self.max_header_bytes);
                 defer self.allocator.free(line_buf);
                 const line = self.streamReadLine(line_buf) catch |err| return self.mapReadError(err);
-                const semi = host_std.mem.indexOfScalar(u8, line, ';') orelse line.len;
-                return host_std.fmt.parseInt(usize, host_std.mem.trim(u8, line[0..semi], " "), 16) catch error.InvalidResponse;
+                const semi = stdz.mem.indexOfScalar(u8, line, ';') orelse line.len;
+                return stdz.fmt.parseInt(usize, stdz.mem.trim(u8, line[0..semi], " "), 16) catch error.InvalidResponse;
             }
 
             fn discardTrailers(self: *BodyState) anyerror!void {
@@ -506,6 +506,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
                     .expect_continue_timeout = expect_continue_timeout,
                     .write_context_active = write_context_active,
                 };
+                state.buffered.wr = &state.conn;
                 state.thread = Thread.spawn(transport.options.spawn_config, run, .{state}) catch {
                     state.closeBody();
                     state.freeIoBuf();
@@ -712,8 +713,8 @@ pub fn Transport(comptime std: type, comptime net: type) type {
                 .allocator = allocator,
                 .options = owned_options,
                 .resolver = try Resolver.init(allocator, owned_options.resolver),
-                .idle_conns = try host_std.ArrayList(IdleConn).initCapacity(allocator, 0),
-                .host_states = try host_std.ArrayList(HostState).initCapacity(allocator, 0),
+                .idle_conns = try stdz.ArrayList(IdleConn).initCapacity(allocator, 0),
+                .host_states = try stdz.ArrayList(HostState).initCapacity(allocator, 0),
             };
         }
 
@@ -751,7 +752,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
                 if (ctx.err()) |err| return err;
             }
             try self.validateRequest(req);
-            if (host_std.ascii.eqlIgnoreCase(req.effectiveMethod(), "CONNECT")) return error.UnsupportedMethod;
+            if (stdz.ascii.eqlIgnoreCase(req.effectiveMethod(), "CONNECT")) return error.UnsupportedMethod;
             var attempt_req = req.*;
             var retried = false;
 
@@ -942,8 +943,8 @@ pub fn Transport(comptime std: type, comptime net: type) type {
 
         fn dialRoute(self: *Self, req: *const Request, route: RouteInfo, addr: Addr) RoundTripper.RoundTripError!Conn {
             if (route.proxy != null) return self.dialHttpsViaProxy(req, route, addr);
-            if (host_std.mem.eql(u8, req.url.scheme, "http")) return self.dialTcp(req, addr);
-            if (host_std.mem.eql(u8, req.url.scheme, "https")) return self.dialHttps(req, addr);
+            if (stdz.mem.eql(u8, req.url.scheme, "http")) return self.dialTcp(req, addr);
+            if (stdz.mem.eql(u8, req.url.scheme, "https")) return self.dialHttps(req, addr);
             return error.UnsupportedScheme;
         }
 
@@ -1153,19 +1154,19 @@ pub fn Transport(comptime std: type, comptime net: type) type {
         }
 
         fn alternateTransportForConn(self: *Self, req: *const Request, conn: Conn) RoundTripper.RoundTripError!?AlternateTransport {
-            if (!host_std.mem.eql(u8, req.url.scheme, "https")) return null;
+            if (!stdz.mem.eql(u8, req.url.scheme, "https")) return null;
             const tls_conn = conn.as(Tls.Conn) catch |err| return switch (err) {
                 error.TypeMismatch => null,
             };
             const negotiated = tls_conn.negotiatedProtocol() catch return error.Unexpected;
             const protocol = negotiated orelse return null;
-            if (host_std.mem.eql(u8, protocol, "http/1.1")) return null;
+            if (stdz.mem.eql(u8, protocol, "http/1.1")) return null;
             return self.findAlternateProtocol(protocol) orelse error.UnsupportedProtocol;
         }
 
         fn findAlternateProtocol(self: *Self, protocol: []const u8) ?AlternateTransport {
             for (self.options.alternate_protocols) |alt| {
-                if (host_std.mem.eql(u8, alt.protocol, protocol)) return alt.transport;
+                if (stdz.mem.eql(u8, alt.protocol, protocol)) return alt.transport;
             }
             return null;
         }
@@ -1270,7 +1271,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
             if (send_chunked and !has_transfer_encoding) {
                 try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ Header.transfer_encoding, ": ", "chunked" });
             } else if (!has_content_length and (body != null or req.content_length > 0)) {
-                const len_buf = try host_std.fmt.allocPrint(allocator, "{d}", .{content_length});
+                const len_buf = try stdz.fmt.allocPrint(allocator, "{d}", .{content_length});
                 defer allocator.free(len_buf);
                 try self.writeTextprotoLine(&writer, buffered, conn, req, &.{ Header.content_length, ": ", len_buf });
             }
@@ -1310,7 +1311,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
         fn shouldSendChunkedRequest(_: *Self, req: *const Request) bool {
             if (req.transfer_encoding.len != 0) {
                 for (req.transfer_encoding) |encoding| {
-                    if (host_std.ascii.eqlIgnoreCase(encoding, "chunked")) return true;
+                    if (stdz.ascii.eqlIgnoreCase(encoding, "chunked")) return true;
                 }
             }
             return req.content_length <= 0;
@@ -1374,7 +1375,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
                 total_written += n;
                 try self.checkRequestSendContext(req);
 
-                const size_line = host_std.fmt.bufPrint(&size_buf, "{x}\r\n", .{n}) catch return error.Unexpected;
+                const size_line = stdz.fmt.bufPrint(&size_buf, "{x}\r\n", .{n}) catch return error.Unexpected;
                 try self.writeAllBuffered(buffered, conn, req, size_line);
                 try self.writeAllBuffered(buffered, conn, req, buf[0..n]);
                 try self.writeAllBuffered(buffered, conn, req, "\r\n");
@@ -1397,21 +1398,21 @@ pub fn Transport(comptime std: type, comptime net: type) type {
 
             const path = if (req.url.path.len != 0) req.url.path else "/";
             if (req.url.raw_query.len == 0) return allocator.dupe(u8, path);
-            return host_std.fmt.allocPrint(allocator, "{s}?{s}", .{ path, req.url.raw_query });
+            return stdz.fmt.allocPrint(allocator, "{s}?{s}", .{ path, req.url.raw_query });
         }
 
         fn hostHeaderValue(_: *Self, allocator: Allocator, req: *const Request) Allocator.Error![]u8 {
             if (req.host.len != 0) return allocator.dupe(u8, req.host);
 
             const host = req.url.host;
-            const needs_brackets = host_std.mem.indexOfScalar(u8, host, ':') != null;
+            const needs_brackets = stdz.mem.indexOfScalar(u8, host, ':') != null;
             if (req.url.port.len == 0) {
-                if (needs_brackets) return host_std.fmt.allocPrint(allocator, "[{s}]", .{host});
+                if (needs_brackets) return stdz.fmt.allocPrint(allocator, "[{s}]", .{host});
                 return allocator.dupe(u8, host);
             }
 
-            if (needs_brackets) return host_std.fmt.allocPrint(allocator, "[{s}]:{s}", .{ host, req.url.port });
-            return host_std.fmt.allocPrint(allocator, "{s}:{s}", .{ host, req.url.port });
+            if (needs_brackets) return stdz.fmt.allocPrint(allocator, "[{s}]:{s}", .{ host, req.url.port });
+            return stdz.fmt.allocPrint(allocator, "{s}:{s}", .{ host, req.url.port });
         }
 
         fn validateRequestBodyLimit(self: *Self, req: *const Request) RoundTripper.RoundTripError!void {
@@ -1442,7 +1443,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
 
             for (req.header) |hdr| {
                 if (hdr.is(Header.content_length)) {
-                    const parsed = host_std.fmt.parseInt(i64, hdr.value, 10) catch return error.InvalidHeader;
+                    const parsed = stdz.fmt.parseInt(i64, hdr.value, 10) catch return error.InvalidHeader;
                     if (parsed < 0) return error.InvalidHeader;
                     if (header_content_length) |existing| {
                         if (existing != parsed) return error.InvalidHeader;
@@ -1643,24 +1644,24 @@ pub fn Transport(comptime std: type, comptime net: type) type {
         }
 
         fn parseHead(_: *Self, state: *ResponseState) RoundTripper.RoundTripError!ParsedHead {
-            const status_line_end = host_std.mem.indexOf(u8, state.head_storage, "\r\n") orelse return error.InvalidResponse;
+            const status_line_end = stdz.mem.indexOf(u8, state.head_storage, "\r\n") orelse return error.InvalidResponse;
             const status_line = state.head_storage[0..status_line_end];
 
-            const first_space = host_std.mem.indexOfScalar(u8, status_line, ' ') orelse return error.InvalidResponse;
+            const first_space = stdz.mem.indexOfScalar(u8, status_line, ' ') orelse return error.InvalidResponse;
             const proto = status_line[0..first_space];
             const rest = status_line[first_space + 1 ..];
-            const second_space = host_std.mem.indexOfScalar(u8, rest, ' ') orelse return error.InvalidResponse;
+            const second_space = stdz.mem.indexOfScalar(u8, rest, ' ') orelse return error.InvalidResponse;
             const code_slice = rest[0..second_space];
             const status_slice = rest;
-            const status_code = host_std.fmt.parseInt(u16, code_slice, 10) catch return error.InvalidResponse;
+            const status_code = stdz.fmt.parseInt(u16, code_slice, 10) catch return error.InvalidResponse;
 
             var proto_major: u8 = 1;
             var proto_minor: u8 = 1;
-            if (host_std.mem.startsWith(u8, proto, "HTTP/")) {
+            if (stdz.mem.startsWith(u8, proto, "HTTP/")) {
                 const version = proto["HTTP/".len..];
-                if (host_std.mem.indexOfScalar(u8, version, '.')) |dot| {
-                    proto_major = host_std.fmt.parseInt(u8, version[0..dot], 10) catch return error.InvalidResponse;
-                    proto_minor = host_std.fmt.parseInt(u8, version[dot + 1 ..], 10) catch return error.InvalidResponse;
+                if (stdz.mem.indexOfScalar(u8, version, '.')) |dot| {
+                    proto_major = stdz.fmt.parseInt(u8, version[0..dot], 10) catch return error.InvalidResponse;
+                    proto_minor = stdz.fmt.parseInt(u8, version[dot + 1 ..], 10) catch return error.InvalidResponse;
                 }
             }
 
@@ -1681,30 +1682,30 @@ pub fn Transport(comptime std: type, comptime net: type) type {
             var line_start: usize = 0;
             var header_index: usize = 0;
             while (line_start < header_block.len) {
-                const rel_end = host_std.mem.indexOf(u8, header_block[line_start..], "\r\n") orelse return error.InvalidResponse;
+                const rel_end = stdz.mem.indexOf(u8, header_block[line_start..], "\r\n") orelse return error.InvalidResponse;
                 if (rel_end == 0) break;
 
                 const line = header_block[line_start .. line_start + rel_end];
-                const colon = host_std.mem.indexOfScalar(u8, line, ':') orelse return error.InvalidResponse;
-                const name = host_std.mem.trim(u8, line[0..colon], " ");
-                const value = host_std.mem.trim(u8, line[colon + 1 ..], " ");
+                const colon = stdz.mem.indexOfScalar(u8, line, ':') orelse return error.InvalidResponse;
+                const name = stdz.mem.trim(u8, line[0..colon], " ");
+                const value = stdz.mem.trim(u8, line[colon + 1 ..], " ");
                 parsed.headers[header_index] = .{ .name = name, .value = value };
                 header_index += 1;
 
-                if (host_std.ascii.eqlIgnoreCase(name, Header.content_length)) {
-                    const content_length = host_std.fmt.parseInt(usize, value, 10) catch return error.InvalidResponse;
+                if (stdz.ascii.eqlIgnoreCase(name, Header.content_length)) {
+                    const content_length = stdz.fmt.parseInt(usize, value, 10) catch return error.InvalidResponse;
                     if (parsed.chunked) return error.InvalidResponse;
                     if (parsed.content_length) |existing| {
                         if (existing != content_length) return error.InvalidResponse;
                     } else {
                         parsed.content_length = content_length;
                     }
-                } else if (host_std.ascii.eqlIgnoreCase(name, Header.transfer_encoding)) {
+                } else if (stdz.ascii.eqlIgnoreCase(name, Header.transfer_encoding)) {
                     if (saw_transfer_encoding or parsed.content_length != null) return error.InvalidResponse;
                     if (!isSupportedChunkedTransferEncoding(value)) return error.InvalidResponse;
                     parsed.chunked = true;
                     saw_transfer_encoding = true;
-                } else if (host_std.ascii.eqlIgnoreCase(name, Header.connection)) {
+                } else if (stdz.ascii.eqlIgnoreCase(name, Header.connection)) {
                     if (containsToken(value, "close")) parsed.close = true;
                     if (containsToken(value, "keep-alive")) parsed.keep_alive = true;
                 }
@@ -1759,10 +1760,10 @@ pub fn Transport(comptime std: type, comptime net: type) type {
 
         fn requestRoute(self: *Self, req: *const Request) RoundTripper.RoundTripError!RouteInfo {
             const target_port = defaultPort(req.url) orelse return error.UnsupportedScheme;
-            if (host_std.mem.eql(u8, req.url.scheme, "https")) {
+            if (stdz.mem.eql(u8, req.url.scheme, "https")) {
                 if (self.options.https_proxy) |proxy| {
                     if (proxy.url.host.len == 0) return error.InvalidProxy;
-                    if (!host_std.mem.eql(u8, proxy.url.scheme, "http")) return error.UnsupportedProxyScheme;
+                    if (!stdz.mem.eql(u8, proxy.url.scheme, "http")) return error.UnsupportedProxyScheme;
                     const proxy_port = defaultPort(proxy.url) orelse return error.InvalidProxy;
                     return .{
                         .target_port = target_port,
@@ -1785,7 +1786,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
                 defer self.allocator.free(proxy_authority);
                 const target_authority = try authorityValue(self.allocator, req.url.host, route.target_port);
                 defer self.allocator.free(target_authority);
-                return host_std.fmt.allocPrint(self.allocator, "https+connect://{s}->{s}", .{ proxy_authority, target_authority });
+                return stdz.fmt.allocPrint(self.allocator, "https+connect://{s}->{s}", .{ proxy_authority, target_authority });
             }
             return connectionPoolKey(self.allocator, req.url.scheme, req.url.host, route.target_port);
         }
@@ -1915,7 +1916,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
             var i = self.idle_conns.items.len;
             while (i > 0) {
                 i -= 1;
-                if (!host_std.ascii.eqlIgnoreCase(self.idle_conns.items[i].key, pool_key)) continue;
+                if (!stdz.ascii.eqlIgnoreCase(self.idle_conns.items[i].key, pool_key)) continue;
                 const idle = self.idle_conns.orderedRemove(i);
                 return .{
                     .key = idle.key,
@@ -1984,7 +1985,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
         fn countIdleConnsForKeyLocked(self: *Self, pool_key: []const u8) usize {
             var count: usize = 0;
             for (self.idle_conns.items) |idle| {
-                if (host_std.ascii.eqlIgnoreCase(idle.key, pool_key)) count += 1;
+                if (stdz.ascii.eqlIgnoreCase(idle.key, pool_key)) count += 1;
             }
             return count;
         }
@@ -2012,7 +2013,7 @@ pub fn Transport(comptime std: type, comptime net: type) type {
 
         fn findHostStateIndexLocked(self: *Self, pool_key: []const u8) ?usize {
             for (self.host_states.items, 0..) |state, idx| {
-                if (host_std.ascii.eqlIgnoreCase(state.key, pool_key)) return idx;
+                if (stdz.ascii.eqlIgnoreCase(state.key, pool_key)) return idx;
             }
             return null;
         }
@@ -2198,7 +2199,7 @@ fn countHeaderLines(block: []const u8) usize {
     var count: usize = 0;
     var start: usize = 0;
     while (start < block.len) {
-        const rel_end = host_std.mem.indexOf(u8, block[start..], "\r\n") orelse break;
+        const rel_end = stdz.mem.indexOf(u8, block[start..], "\r\n") orelse break;
         if (rel_end == 0) break;
         count += 1;
         start += rel_end + 2;
@@ -2213,9 +2214,9 @@ fn isInformationalResponse(status_code: u16) bool {
 fn containsToken(value: []const u8, token: []const u8) bool {
     var start: usize = 0;
     while (start <= value.len) {
-        const comma = host_std.mem.indexOfScalarPos(u8, value, start, ',') orelse value.len;
-        const part = host_std.mem.trim(u8, value[start..comma], " ");
-        if (host_std.ascii.eqlIgnoreCase(part, token)) return true;
+        const comma = stdz.mem.indexOfScalarPos(u8, value, start, ',') orelse value.len;
+        const part = stdz.mem.trim(u8, value[start..comma], " ");
+        if (stdz.ascii.eqlIgnoreCase(part, token)) return true;
         if (comma == value.len) break;
         start = comma + 1;
     }
@@ -2226,10 +2227,10 @@ fn isSupportedChunkedTransferEncoding(value: []const u8) bool {
     var start: usize = 0;
     var saw_chunked = false;
     while (start <= value.len) {
-        const comma = host_std.mem.indexOfScalarPos(u8, value, start, ',') orelse value.len;
-        const part = host_std.mem.trim(u8, value[start..comma], " ");
+        const comma = stdz.mem.indexOfScalarPos(u8, value, start, ',') orelse value.len;
+        const part = stdz.mem.trim(u8, value[start..comma], " ");
         if (part.len == 0) return false;
-        if (!host_std.ascii.eqlIgnoreCase(part, "chunked")) return false;
+        if (!stdz.ascii.eqlIgnoreCase(part, "chunked")) return false;
         if (saw_chunked) return false;
         saw_chunked = true;
         if (comma == value.len) break;
@@ -2272,9 +2273,9 @@ fn isValidHeaderValue(value: []const u8) bool {
 }
 
 fn isForbiddenTrailerName(name: []const u8) bool {
-    return host_std.ascii.eqlIgnoreCase(name, Header.transfer_encoding) or
-        host_std.ascii.eqlIgnoreCase(name, Header.content_length) or
-        host_std.ascii.eqlIgnoreCase(name, Header.trailer);
+    return stdz.ascii.eqlIgnoreCase(name, Header.transfer_encoding) or
+        stdz.ascii.eqlIgnoreCase(name, Header.content_length) or
+        stdz.ascii.eqlIgnoreCase(name, Header.trailer);
 }
 
 fn requestHasHeader(headers: []const Header, name: []const u8) bool {
@@ -2292,10 +2293,10 @@ fn requestHasToken(headers: []const Header, name: []const u8, token: []const u8)
 }
 
 fn requestIsReplayable(req: *const Request) bool {
-    if (host_std.ascii.eqlIgnoreCase(req.effectiveMethod(), "GET")) return true;
-    if (host_std.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) return true;
-    if (host_std.ascii.eqlIgnoreCase(req.effectiveMethod(), "OPTIONS")) return true;
-    if (host_std.ascii.eqlIgnoreCase(req.effectiveMethod(), "TRACE")) return true;
+    if (stdz.ascii.eqlIgnoreCase(req.effectiveMethod(), "GET")) return true;
+    if (stdz.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) return true;
+    if (stdz.ascii.eqlIgnoreCase(req.effectiveMethod(), "OPTIONS")) return true;
+    if (stdz.ascii.eqlIgnoreCase(req.effectiveMethod(), "TRACE")) return true;
     if (requestHasHeader(req.header, "Idempotency-Key")) return true;
     if (requestHasHeader(req.header, "X-Idempotency-Key")) return true;
     return false;
@@ -2323,40 +2324,40 @@ fn minTimeout(a: ?time_mod.duration.Duration, b: ?time_mod.duration.Duration) ?t
 
 fn defaultPort(u: url_mod.Url) ?u16 {
     if (u.portAsNumber()) |port| return port;
-    if (host_std.mem.eql(u8, u.scheme, "http")) return 80;
-    if (host_std.mem.eql(u8, u.scheme, "https")) return 443;
+    if (stdz.mem.eql(u8, u.scheme, "http")) return 80;
+    if (stdz.mem.eql(u8, u.scheme, "https")) return 443;
     return null;
 }
 
-fn authorityValue(allocator: host_std.mem.Allocator, host: []const u8, port: u16) host_std.mem.Allocator.Error![]u8 {
-    const needs_brackets = host_std.mem.indexOfScalar(u8, host, ':') != null;
-    if (needs_brackets) return host_std.fmt.allocPrint(allocator, "[{s}]:{d}", .{ host, port });
-    return host_std.fmt.allocPrint(allocator, "{s}:{d}", .{ host, port });
+fn authorityValue(allocator: stdz.mem.Allocator, host: []const u8, port: u16) stdz.mem.Allocator.Error![]u8 {
+    const needs_brackets = stdz.mem.indexOfScalar(u8, host, ':') != null;
+    if (needs_brackets) return stdz.fmt.allocPrint(allocator, "[{s}]:{d}", .{ host, port });
+    return stdz.fmt.allocPrint(allocator, "{s}:{d}", .{ host, port });
 }
 
-fn proxyAuthorizationValue(allocator: host_std.mem.Allocator, proxy_url: url_mod.Url) anyerror!?[]u8 {
+fn proxyAuthorizationValue(allocator: stdz.mem.Allocator, proxy_url: url_mod.Url) anyerror!?[]u8 {
     if (proxy_url.username.len == 0 and proxy_url.password.len == 0) return null;
 
     const raw_userpass_len = proxy_url.username.len + proxy_url.password.len + 1;
     const max_encoded_len = proxy_authorization_value_limit - "Basic ".len;
-    if (host_std.base64.standard.Encoder.calcSize(raw_userpass_len) > max_encoded_len) return error.InvalidProxy;
+    if (stdz.base64.standard.Encoder.calcSize(raw_userpass_len) > max_encoded_len) return error.InvalidProxy;
 
-    var userpass = try host_std.ArrayList(u8).initCapacity(allocator, raw_userpass_len);
+    var userpass = try stdz.ArrayList(u8).initCapacity(allocator, raw_userpass_len);
     defer userpass.deinit(allocator);
 
     try appendPercentDecoded(&userpass, allocator, proxy_url.username);
     try userpass.append(allocator, ':');
     try appendPercentDecoded(&userpass, allocator, proxy_url.password);
 
-    const encoded_len = host_std.base64.standard.Encoder.calcSize(userpass.items.len);
+    const encoded_len = stdz.base64.standard.Encoder.calcSize(userpass.items.len);
     if ("Basic ".len + encoded_len > proxy_authorization_value_limit) return error.InvalidProxy;
     const value = try allocator.alloc(u8, "Basic ".len + encoded_len);
     @memcpy(value[0.."Basic ".len], "Basic ");
-    _ = host_std.base64.standard.Encoder.encode(value["Basic ".len..], userpass.items);
+    _ = stdz.base64.standard.Encoder.encode(value["Basic ".len..], userpass.items);
     return value;
 }
 
-fn appendPercentDecoded(bytes: *host_std.ArrayList(u8), allocator: host_std.mem.Allocator, value: []const u8) anyerror!void {
+fn appendPercentDecoded(bytes: *stdz.ArrayList(u8), allocator: stdz.mem.Allocator, value: []const u8) anyerror!void {
     var i: usize = 0;
     while (i < value.len) {
         if (value[i] != '%') {
@@ -2382,14 +2383,14 @@ fn hexNibble(c: u8) ?u8 {
     };
 }
 
-fn connectionPoolKey(allocator: host_std.mem.Allocator, scheme: []const u8, host: []const u8, port: u16) host_std.mem.Allocator.Error![]u8 {
+fn connectionPoolKey(allocator: stdz.mem.Allocator, scheme: []const u8, host: []const u8, port: u16) stdz.mem.Allocator.Error![]u8 {
     const authority = try authorityValue(allocator, host, port);
     defer allocator.free(authority);
-    return host_std.fmt.allocPrint(allocator, "{s}://{s}", .{ scheme, authority });
+    return stdz.fmt.allocPrint(allocator, "{s}://{s}", .{ scheme, authority });
 }
 
 fn responseMustBeBodyless(req: *const Request, status_code: u16) bool {
-    if (host_std.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) return true;
+    if (stdz.ascii.eqlIgnoreCase(req.effectiveMethod(), "HEAD")) return true;
     if (status_code >= 100 and status_code < 200) return true;
     return status_code == 204 or status_code == 304;
 }

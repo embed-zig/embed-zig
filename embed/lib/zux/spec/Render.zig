@@ -46,7 +46,7 @@ fn parseFromParser(parser: *JsonParser) Render {
     var render_fn_name: ?[]const u8 = null;
 
     if (parser.consumeByte('}')) {
-        @compileError("zux.spec.Render.parseSlice requires `label`, `state_path`, and `render_fn_name` fields");
+        @compileError("zux.spec.Render.parseSlice requires `label`, `state_path`, and `fn_name` fields");
     }
 
     while (true) {
@@ -67,17 +67,17 @@ fn parseFromParser(parser: *JsonParser) Render {
             }
             state_path = parser.parseString();
             validateStatePathComptime(state_path.?);
-        } else if (comptimeEql(key, "render_fn_name") or comptimeEql(key, "fn_name")) {
+        } else if (comptimeEql(key, "fn_name")) {
             if (render_fn_name != null) {
                 @compileError("zux.spec.Render.parseSlice duplicate render function field");
             }
             render_fn_name = parser.parseString();
             if (render_fn_name.?.len == 0) {
-                @compileError("zux.spec.Render.parseSlice `render_fn_name` must not be empty");
+                @compileError("zux.spec.Render.parseSlice `fn_name` must not be empty");
             }
         } else {
             _ = parser.parseValueSlice();
-            @compileError("zux.spec.Render.parseSlice only supports `label`, `state_path`, `path`, `render_fn_name`, and `fn_name` fields");
+            @compileError("zux.spec.Render.parseSlice only supports `label`, `state_path`, `path`, and `fn_name` fields");
         }
 
         if (parser.consumeByte(',')) continue;
@@ -88,7 +88,7 @@ fn parseFromParser(parser: *JsonParser) Render {
     return .{
         .label = label orelse @compileError("zux.spec.Render.parseSlice requires a `label` field"),
         .state_path = state_path orelse @compileError("zux.spec.Render.parseSlice requires a `state_path` or `path` field"),
-        .render_fn_name = render_fn_name orelse @compileError("zux.spec.Render.parseSlice requires a `render_fn_name` or `fn_name` field"),
+        .render_fn_name = render_fn_name orelse @compileError("zux.spec.Render.parseSlice requires a `fn_name` field"),
     };
 }
 
@@ -107,9 +107,8 @@ pub fn parseJsonValue(
         const state_path_value = object.get("state_path") orelse
             object.get("path") orelse
             @compileError("zux.spec.Render.parseJsonValue requires a `state_path` or `path` field");
-        const render_fn_name_value = object.get("render_fn_name") orelse
-            object.get("fn_name") orelse
-            @compileError("zux.spec.Render.parseJsonValue requires a `render_fn_name` or `fn_name` field");
+        const render_fn_name_value = object.get("fn_name") orelse
+            @compileError("zux.spec.Render.parseJsonValue requires a `fn_name` field");
 
         const label = switch (label_value) {
             .string => |text| blk: {
@@ -127,10 +126,10 @@ pub fn parseJsonValue(
         };
         const render_fn_name = switch (render_fn_name_value) {
             .string => |text| blk: {
-                if (text.len == 0) @compileError("zux.spec.Render.parseJsonValue `render_fn_name` must not be empty");
+                if (text.len == 0) @compileError("zux.spec.Render.parseJsonValue `fn_name` must not be empty");
                 break :blk text;
             },
-            else => @compileError("zux.spec.Render.parseJsonValue `render_fn_name` must be a JSON string"),
+            else => @compileError("zux.spec.Render.parseJsonValue `fn_name` must be a JSON string"),
         };
 
         return .{
@@ -149,8 +148,7 @@ pub fn parseJsonValue(
     const state_path_value = object.get("state_path") orelse
         object.get("path") orelse
         return error.MissingRenderStatePath;
-    const render_fn_name_value = object.get("render_fn_name") orelse
-        object.get("fn_name") orelse
+    const render_fn_name_value = object.get("fn_name") orelse
         return error.MissingRenderFnName;
 
     var iterator = object.iterator();
@@ -158,7 +156,6 @@ pub fn parseJsonValue(
         if (!glib.std.mem.eql(u8, entry.key_ptr.*, "label") and
             !glib.std.mem.eql(u8, entry.key_ptr.*, "state_path") and
             !glib.std.mem.eql(u8, entry.key_ptr.*, "path") and
-            !glib.std.mem.eql(u8, entry.key_ptr.*, "render_fn_name") and
             !glib.std.mem.eql(u8, entry.key_ptr.*, "fn_name"))
         {
             return error.UnknownRenderField;

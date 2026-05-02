@@ -777,44 +777,39 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
 
     const TestCase = struct {
         fn testFormatMemoryUsage() !void {
-            const host_std = @import("std");
-
             var buf: [32]u8 = undefined;
 
-            try host_std.testing.expectEqualStrings("0 B", formatMemoryUsage(&buf, 0));
-            try host_std.testing.expectEqualStrings("1023 B", formatMemoryUsage(&buf, 1023));
-            try host_std.testing.expectEqualStrings("1.000 KiB", formatMemoryUsage(&buf, 1024));
-            try host_std.testing.expectEqualStrings("1.500 KiB", formatMemoryUsage(&buf, 1536));
-            try host_std.testing.expectEqualStrings("15.640 MiB", formatMemoryUsage(&buf, 16399707));
-            try host_std.testing.expect(formatMemoryUsage(&buf, host_std.math.maxInt(usize)).len > 0);
+            try std.testing.expectEqualStrings("0 B", formatMemoryUsage(&buf, 0));
+            try std.testing.expectEqualStrings("1023 B", formatMemoryUsage(&buf, 1023));
+            try std.testing.expectEqualStrings("1.000 KiB", formatMemoryUsage(&buf, 1024));
+            try std.testing.expectEqualStrings("1.500 KiB", formatMemoryUsage(&buf, 1536));
+            try std.testing.expectEqualStrings("15.640 MiB", formatMemoryUsage(&buf, 16399707));
+            try std.testing.expect(formatMemoryUsage(&buf, std.math.maxInt(usize)).len > 0);
         }
         fn testContextCancelLogs() !void {
-            const host_std = @import("std");
-            const stdz = @import("stdz");
-
             const Support = struct {
-                var entries: host_std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: host_std.Thread.Mutex = .{};
-                var current_instant = host_std.atomic.Value(time.instant.Time).init(0);
-                var stage = host_std.atomic.Value(u32).init(0);
+                var entries: std.ArrayListUnmanaged([]u8) = .{};
+                var mutex: std.Thread.Mutex = .{};
+                var current_instant = std.atomic.Value(time.instant.Time).init(0);
+                var stage = std.atomic.Value(u32).init(0);
 
                 fn reset() void {
                     mutex.lock();
                     defer mutex.unlock();
                     for (entries.items) |entry| {
-                        host_std.testing.allocator.free(entry);
+                        std.testing.allocator.free(entry);
                     }
-                    entries.deinit(host_std.testing.allocator);
+                    entries.deinit(std.testing.allocator);
                     entries = .{};
                     current_instant.store(0, .release);
                     stage.store(0, .release);
                 }
 
                 fn append(comptime format: []const u8, args: anytype) void {
-                    const message = host_std.fmt.allocPrint(host_std.testing.allocator, format, args) catch @panic("OOM");
+                    const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
                     mutex.lock();
                     defer mutex.unlock();
-                    entries.append(host_std.testing.allocator, message) catch @panic("OOM");
+                    entries.append(std.testing.allocator, message) catch @panic("OOM");
                 }
 
                 fn advance(duration: time.duration.Duration) void {
@@ -837,11 +832,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     while (stage.load(.acquire) < target) {}
                 }
 
-                fn joinedLog(allocator: host_std.mem.Allocator) ![]u8 {
+                fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
                     mutex.lock();
                     defer mutex.unlock();
 
-                    var bytes = try host_std.ArrayList(u8).initCapacity(allocator, 0);
+                    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
                     errdefer bytes.deinit(allocator);
 
                     for (entries.items, 0..) |entry, idx| {
@@ -870,12 +865,12 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             };
 
             const TestThread = struct {
-                pub const SpawnConfig = host_std.Thread.SpawnConfig;
-                pub const Mutex = host_std.Thread.Mutex;
-                pub const RwLock = host_std.Thread.RwLock;
+                pub const SpawnConfig = std.Thread.SpawnConfig;
+                pub const Mutex = std.Thread.Mutex;
+                pub const RwLock = std.Thread.RwLock;
                 const ThreadSelf = @This();
                 pub const Condition = struct {
-                    inner: host_std.Thread.Condition = .{},
+                    inner: std.Thread.Condition = .{},
 
                     pub fn wait(self: *Condition, mutex: *Mutex) void {
                         self.inner.wait(mutex);
@@ -894,11 +889,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     }
                 };
 
-                inner: host_std.Thread,
+                inner: std.Thread,
 
                 pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
                     return .{
-                        .inner = try host_std.Thread.spawn(config, f, args),
+                        .inner = try std.Thread.spawn(config, f, args),
                     };
                 }
 
@@ -915,13 +910,13 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestStd = testing_std_mod.make(host_std, .{
+            const TestStd = testing_std_mod.make(std, .{
                 .Thread = TestThread,
                 .log = CapturingLog,
-                .mem = stdz.mem,
-                .fmt = stdz.fmt,
+                .mem = std.mem,
+                .fmt = std.fmt,
                 .testing = struct {
-                    pub const allocator = host_std.testing.allocator;
+                    pub const allocator = std.testing.allocator;
                 },
             });
 
@@ -941,24 +936,24 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     const Runner = struct {
                         memory_limit: ?usize,
 
-                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: std.mem.Allocator) bool {
                             _ = self;
                             var arg_byte: u8 = 0;
                             return run_fn(t, allocator, @ptrCast(&arg_byte));
                         }
 
-                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
                             _ = allocator;
-                            host_std.testing.allocator.destroy(self);
+                            std.testing.allocator.destroy(self);
                         }
                     };
 
-                    const runner = host_std.testing.allocator.create(Runner) catch @panic("OOM");
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
                     runner.* = .{ .memory_limit = memory_limit };
                     return TestRunnerHandle.make(Runner).new(runner);
                 }
@@ -1106,31 +1101,31 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     const Runner = struct {
                         memory_limit: ?usize,
 
-                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: std.mem.Allocator) bool {
                             _ = self;
                             var arg_byte: u8 = 0;
                             return run_fn(t, allocator, @ptrCast(&arg_byte));
                         }
 
-                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
                             _ = allocator;
-                            host_std.testing.allocator.destroy(self);
+                            std.testing.allocator.destroy(self);
                         }
                     };
 
-                    const runner = host_std.testing.allocator.create(Runner) catch @panic("OOM");
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
                     runner.* = .{ .memory_limit = memory_limit };
                     return TestRunnerHandle.make(Runner).new(runner);
                 }
 
-                fn appendNormalizedLine(bytes: *host_std.ArrayList(u8), line: []const u8) !void {
-                    var plain_line = host_std.ArrayList(u8).empty;
-                    defer plain_line.deinit(host_std.testing.allocator);
+                fn appendNormalizedLine(bytes: *std.ArrayList(u8), line: []const u8) !void {
+                    var plain_line = std.ArrayList(u8).empty;
+                    defer plain_line.deinit(std.testing.allocator);
 
                     var i: usize = 0;
                     while (i < line.len) {
@@ -1140,80 +1135,80 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                             if (i < line.len) i += 1;
                             continue;
                         }
-                        try plain_line.append(host_std.testing.allocator, line[i]);
+                        try plain_line.append(std.testing.allocator, line[i]);
                         i += 1;
                     }
 
                     const plain = plain_line.items;
-                    var compact_line = host_std.ArrayList(u8).empty;
-                    defer compact_line.deinit(host_std.testing.allocator);
+                    var compact_line = std.ArrayList(u8).empty;
+                    defer compact_line.deinit(std.testing.allocator);
                     const normalized_plain = blk: {
-                        if (host_std.mem.startsWith(u8, plain, ">>> ") or
-                            host_std.mem.startsWith(u8, plain, "<<< ") or
-                            host_std.mem.startsWith(u8, plain, "!!! "))
+                        if (std.mem.startsWith(u8, plain, ">>> ") or
+                            std.mem.startsWith(u8, plain, "<<< ") or
+                            std.mem.startsWith(u8, plain, "!!! "))
                         {
                             const prefix = plain[0..4];
                             const rest = plain[4..];
-                            const split_idx = host_std.mem.indexOfScalar(u8, rest, ' ') orelse break :blk plain;
+                            const split_idx = std.mem.indexOfScalar(u8, rest, ' ') orelse break :blk plain;
                             const label = rest[0..split_idx];
-                            const suffix = host_std.mem.trimLeft(u8, rest[split_idx..], " ");
-                            try compact_line.appendSlice(host_std.testing.allocator, prefix);
-                            try compact_line.appendSlice(host_std.testing.allocator, label);
-                            try compact_line.append(host_std.testing.allocator, ' ');
-                            try compact_line.appendSlice(host_std.testing.allocator, suffix);
+                            const suffix = std.mem.trimLeft(u8, rest[split_idx..], " ");
+                            try compact_line.appendSlice(std.testing.allocator, prefix);
+                            try compact_line.appendSlice(std.testing.allocator, label);
+                            try compact_line.append(std.testing.allocator, ' ');
+                            try compact_line.appendSlice(std.testing.allocator, suffix);
                             break :blk compact_line.items;
                         }
                         break :blk plain;
                     };
-                    const event_idx = host_std.mem.indexOf(u8, normalized_plain, " done at ") orelse
-                        host_std.mem.indexOf(u8, normalized_plain, " failed at ");
+                    const event_idx = std.mem.indexOf(u8, normalized_plain, " done at ") orelse
+                        std.mem.indexOf(u8, normalized_plain, " failed at ");
                     if (event_idx) |idx| {
-                        const prefix = host_std.mem.trimRight(u8, normalized_plain[0..idx], " ");
+                        const prefix = std.mem.trimRight(u8, normalized_plain[0..idx], " ");
                         const suffix = normalized_plain[idx + 1 ..];
-                        if (host_std.mem.indexOf(u8, suffix, "ms, ")) |ms_idx| {
-                            try bytes.appendSlice(host_std.testing.allocator, prefix);
-                            try bytes.append(host_std.testing.allocator, ' ');
-                            try bytes.appendSlice(host_std.testing.allocator, suffix[0 .. ms_idx + 4]);
-                            try bytes.appendSlice(host_std.testing.allocator, "<mem>");
+                        if (std.mem.indexOf(u8, suffix, "ms, ")) |ms_idx| {
+                            try bytes.appendSlice(std.testing.allocator, prefix);
+                            try bytes.append(std.testing.allocator, ' ');
+                            try bytes.appendSlice(std.testing.allocator, suffix[0 .. ms_idx + 4]);
+                            try bytes.appendSlice(std.testing.allocator, "<mem>");
                             return;
                         }
-                        try bytes.appendSlice(host_std.testing.allocator, prefix);
-                        try bytes.append(host_std.testing.allocator, ' ');
-                        try bytes.appendSlice(host_std.testing.allocator, suffix);
+                        try bytes.appendSlice(std.testing.allocator, prefix);
+                        try bytes.append(std.testing.allocator, ' ');
+                        try bytes.appendSlice(std.testing.allocator, suffix);
                         return;
                     }
-                    try bytes.appendSlice(host_std.testing.allocator, normalized_plain);
+                    try bytes.appendSlice(std.testing.allocator, normalized_plain);
                 }
 
                 fn normalizedLog() ![]u8 {
-                    const actual_log = try Support.joinedLog(host_std.testing.allocator);
-                    defer host_std.testing.allocator.free(actual_log);
+                    const actual_log = try Support.joinedLog(std.testing.allocator);
+                    defer std.testing.allocator.free(actual_log);
 
-                    var normalized = host_std.ArrayList(u8).empty;
-                    errdefer normalized.deinit(host_std.testing.allocator);
+                    var normalized = std.ArrayList(u8).empty;
+                    errdefer normalized.deinit(std.testing.allocator);
 
-                    var lines = host_std.mem.splitScalar(u8, actual_log, '\n');
+                    var lines = std.mem.splitScalar(u8, actual_log, '\n');
                     var first = true;
                     while (lines.next()) |line| {
-                        if (!first) try normalized.append(host_std.testing.allocator, '\n');
+                        if (!first) try normalized.append(std.testing.allocator, '\n');
                         try appendNormalizedLine(&normalized, line);
                         first = false;
                     }
-                    return normalized.toOwnedSlice(host_std.testing.allocator);
+                    return normalized.toOwnedSlice(std.testing.allocator);
                 }
 
                 fn expectLog(expected_log: []const u8) !void {
                     const actual_log = try normalizedLog();
-                    defer host_std.testing.allocator.free(actual_log);
-                    try host_std.testing.expectEqualStrings(expected_log, actual_log);
+                    defer std.testing.allocator.free(actual_log);
+                    try std.testing.expectEqualStrings(expected_log, actual_log);
                 }
 
                 fn expectOneOfLogs(expected_a: []const u8, expected_b: []const u8) !void {
                     const actual_log = try normalizedLog();
-                    defer host_std.testing.allocator.free(actual_log);
-                    if (host_std.mem.eql(u8, expected_a, actual_log)) return;
-                    if (host_std.mem.eql(u8, expected_b, actual_log)) return;
-                    try host_std.testing.expectEqualStrings(expected_a, actual_log);
+                    defer std.testing.allocator.free(actual_log);
+                    if (std.mem.eql(u8, expected_a, actual_log)) return;
+                    if (std.mem.eql(u8, expected_b, actual_log)) return;
+                    try std.testing.expectEqualStrings(expected_a, actual_log);
                 }
             };
 
@@ -1225,7 +1220,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 TestStd.Thread.sleep(220 * TestTime.duration.MilliSecond);
 
                 root.run("child", TaskRunner.make(ChildTask.run, null));
-                try host_std.testing.expect(!root.wait());
+                try std.testing.expect(!root.wait());
                 root.deinit();
 
                 const expected_log =
@@ -1245,7 +1240,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 TestStd.Thread.sleep(100 * TestTime.duration.MilliSecond);
 
                 root.run("parent", TaskRunner.make(NestedTimeoutTask.run, null));
-                try host_std.testing.expect(!root.wait());
+                try std.testing.expect(!root.wait());
                 root.deinit();
 
                 const expected_log =
@@ -1270,7 +1265,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 Support.waitForStage(1);
                 root.run("slow", TaskRunner.make(ParallelSlowTask.run, null));
 
-                try host_std.testing.expect(!root.wait());
+                try std.testing.expect(!root.wait());
                 root.deinit();
 
                 const expected_log_a =
@@ -1300,7 +1295,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 TestStd.Thread.sleep(100 * TestTime.duration.MilliSecond);
 
                 root.run("suite", TaskRunner.make(ComplexSuiteTask.run, null));
-                try host_std.testing.expect(!root.wait());
+                try std.testing.expect(!root.wait());
                 root.deinit();
 
                 const expected_log =
@@ -1328,32 +1323,29 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             }
         }
         fn testTimeout() !void {
-            const host_std = @import("std");
-            const stdz = @import("stdz");
-
             const Support = struct {
-                var entries: host_std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: host_std.Thread.Mutex = .{};
-                var current_instant = host_std.atomic.Value(time.instant.Time).init(0);
-                var stage = host_std.atomic.Value(u32).init(0);
+                var entries: std.ArrayListUnmanaged([]u8) = .{};
+                var mutex: std.Thread.Mutex = .{};
+                var current_instant = std.atomic.Value(time.instant.Time).init(0);
+                var stage = std.atomic.Value(u32).init(0);
 
                 fn reset() void {
                     mutex.lock();
                     defer mutex.unlock();
                     for (entries.items) |entry| {
-                        host_std.testing.allocator.free(entry);
+                        std.testing.allocator.free(entry);
                     }
-                    entries.deinit(host_std.testing.allocator);
+                    entries.deinit(std.testing.allocator);
                     entries = .{};
                     current_instant.store(0, .release);
                     stage.store(0, .release);
                 }
 
                 fn append(comptime format: []const u8, args: anytype) void {
-                    const message = host_std.fmt.allocPrint(host_std.testing.allocator, format, args) catch @panic("OOM");
+                    const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
                     mutex.lock();
                     defer mutex.unlock();
-                    entries.append(host_std.testing.allocator, message) catch @panic("OOM");
+                    entries.append(std.testing.allocator, message) catch @panic("OOM");
                 }
 
                 fn advance(duration: time.duration.Duration) void {
@@ -1373,14 +1365,14 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
 
                 fn waitForStage(target: u32) void {
-                    while (stage.load(.acquire) < target) host_std.Thread.yield() catch {};
+                    while (stage.load(.acquire) < target) std.Thread.yield() catch {};
                 }
 
-                fn joinedLog(allocator: host_std.mem.Allocator) ![]u8 {
+                fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
                     mutex.lock();
                     defer mutex.unlock();
 
-                    var bytes = try host_std.ArrayList(u8).initCapacity(allocator, 0);
+                    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
                     errdefer bytes.deinit(allocator);
 
                     for (entries.items, 0..) |entry, idx| {
@@ -1409,12 +1401,12 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             };
 
             const TestThread = struct {
-                pub const SpawnConfig = host_std.Thread.SpawnConfig;
-                pub const Mutex = host_std.Thread.Mutex;
-                pub const RwLock = host_std.Thread.RwLock;
+                pub const SpawnConfig = std.Thread.SpawnConfig;
+                pub const Mutex = std.Thread.Mutex;
+                pub const RwLock = std.Thread.RwLock;
                 const ThreadSelf = @This();
                 pub const Condition = struct {
-                    inner: host_std.Thread.Condition = .{},
+                    inner: std.Thread.Condition = .{},
 
                     pub fn wait(self: *Condition, mutex: *Mutex) void {
                         self.inner.wait(mutex);
@@ -1433,11 +1425,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     }
                 };
 
-                inner: host_std.Thread,
+                inner: std.Thread,
 
                 pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
                     return .{
-                        .inner = try host_std.Thread.spawn(config, f, args),
+                        .inner = try std.Thread.spawn(config, f, args),
                     };
                 }
 
@@ -1451,17 +1443,17 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
 
                 pub fn sleep(ns: u64) void {
                     Support.advance(@intCast(ns));
-                    host_std.Thread.sleep(ns);
+                    std.Thread.sleep(ns);
                 }
             };
 
-            const TestStd = testing_std_mod.make(host_std, .{
+            const TestStd = testing_std_mod.make(std, .{
                 .Thread = TestThread,
                 .log = CapturingLog,
-                .mem = stdz.mem,
-                .fmt = stdz.fmt,
+                .mem = std.mem,
+                .fmt = std.fmt,
                 .testing = struct {
-                    pub const allocator = host_std.testing.allocator;
+                    pub const allocator = std.testing.allocator;
                 },
             });
 
@@ -1481,24 +1473,24 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     const Runner = struct {
                         memory_limit: ?usize,
 
-                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: std.mem.Allocator) bool {
                             _ = self;
                             var arg_byte: u8 = 0;
                             return run_fn(t, allocator, @ptrCast(&arg_byte));
                         }
 
-                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
                             _ = allocator;
-                            host_std.testing.allocator.destroy(self);
+                            std.testing.allocator.destroy(self);
                         }
                     };
 
-                    const runner = host_std.testing.allocator.create(Runner) catch @panic("OOM");
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
                     runner.* = .{ .memory_limit = memory_limit };
                     return TestRunnerHandle.make(Runner).new(runner);
                 }
@@ -1766,31 +1758,31 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     const Runner = struct {
                         memory_limit: ?usize,
 
-                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: std.mem.Allocator) bool {
                             _ = self;
                             var arg_byte: u8 = 0;
                             return run_fn(t, allocator, @ptrCast(&arg_byte));
                         }
 
-                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
                             _ = allocator;
-                            host_std.testing.allocator.destroy(self);
+                            std.testing.allocator.destroy(self);
                         }
                     };
 
-                    const runner = host_std.testing.allocator.create(Runner) catch @panic("OOM");
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
                     runner.* = .{ .memory_limit = memory_limit };
                     return TestRunnerHandle.make(Runner).new(runner);
                 }
 
-                fn appendNormalizedLine(bytes: *host_std.ArrayList(u8), line: []const u8) !void {
-                    var plain_line = host_std.ArrayList(u8).empty;
-                    defer plain_line.deinit(host_std.testing.allocator);
+                fn appendNormalizedLine(bytes: *std.ArrayList(u8), line: []const u8) !void {
+                    var plain_line = std.ArrayList(u8).empty;
+                    defer plain_line.deinit(std.testing.allocator);
 
                     var i: usize = 0;
                     while (i < line.len) {
@@ -1800,72 +1792,72 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                             if (i < line.len) i += 1;
                             continue;
                         }
-                        try plain_line.append(host_std.testing.allocator, line[i]);
+                        try plain_line.append(std.testing.allocator, line[i]);
                         i += 1;
                     }
 
                     const plain = plain_line.items;
-                    var compact_line = host_std.ArrayList(u8).empty;
-                    defer compact_line.deinit(host_std.testing.allocator);
+                    var compact_line = std.ArrayList(u8).empty;
+                    defer compact_line.deinit(std.testing.allocator);
                     const normalized_plain = blk: {
-                        if (host_std.mem.startsWith(u8, plain, ">>> ") or
-                            host_std.mem.startsWith(u8, plain, "<<< ") or
-                            host_std.mem.startsWith(u8, plain, "!!! "))
+                        if (std.mem.startsWith(u8, plain, ">>> ") or
+                            std.mem.startsWith(u8, plain, "<<< ") or
+                            std.mem.startsWith(u8, plain, "!!! "))
                         {
                             const prefix = plain[0..4];
                             const rest = plain[4..];
-                            const split_idx = host_std.mem.indexOfScalar(u8, rest, ' ') orelse break :blk plain;
+                            const split_idx = std.mem.indexOfScalar(u8, rest, ' ') orelse break :blk plain;
                             const label = rest[0..split_idx];
-                            const suffix = host_std.mem.trimLeft(u8, rest[split_idx..], " ");
-                            try compact_line.appendSlice(host_std.testing.allocator, prefix);
-                            try compact_line.appendSlice(host_std.testing.allocator, label);
-                            try compact_line.append(host_std.testing.allocator, ' ');
-                            try compact_line.appendSlice(host_std.testing.allocator, suffix);
+                            const suffix = std.mem.trimLeft(u8, rest[split_idx..], " ");
+                            try compact_line.appendSlice(std.testing.allocator, prefix);
+                            try compact_line.appendSlice(std.testing.allocator, label);
+                            try compact_line.append(std.testing.allocator, ' ');
+                            try compact_line.appendSlice(std.testing.allocator, suffix);
                             break :blk compact_line.items;
                         }
                         break :blk plain;
                     };
-                    const event_idx = host_std.mem.indexOf(u8, normalized_plain, " done at ") orelse
-                        host_std.mem.indexOf(u8, normalized_plain, " failed at ");
+                    const event_idx = std.mem.indexOf(u8, normalized_plain, " done at ") orelse
+                        std.mem.indexOf(u8, normalized_plain, " failed at ");
                     if (event_idx) |idx| {
-                        const prefix = host_std.mem.trimRight(u8, normalized_plain[0..idx], " ");
+                        const prefix = std.mem.trimRight(u8, normalized_plain[0..idx], " ");
                         const suffix = normalized_plain[idx + 1 ..];
-                        if (host_std.mem.indexOf(u8, suffix, "ms, ")) |ms_idx| {
-                            try bytes.appendSlice(host_std.testing.allocator, prefix);
-                            try bytes.append(host_std.testing.allocator, ' ');
-                            try bytes.appendSlice(host_std.testing.allocator, suffix[0 .. ms_idx + 4]);
-                            try bytes.appendSlice(host_std.testing.allocator, "<mem>");
+                        if (std.mem.indexOf(u8, suffix, "ms, ")) |ms_idx| {
+                            try bytes.appendSlice(std.testing.allocator, prefix);
+                            try bytes.append(std.testing.allocator, ' ');
+                            try bytes.appendSlice(std.testing.allocator, suffix[0 .. ms_idx + 4]);
+                            try bytes.appendSlice(std.testing.allocator, "<mem>");
                             return;
                         }
-                        try bytes.appendSlice(host_std.testing.allocator, prefix);
-                        try bytes.append(host_std.testing.allocator, ' ');
-                        try bytes.appendSlice(host_std.testing.allocator, suffix);
+                        try bytes.appendSlice(std.testing.allocator, prefix);
+                        try bytes.append(std.testing.allocator, ' ');
+                        try bytes.appendSlice(std.testing.allocator, suffix);
                         return;
                     }
-                    try bytes.appendSlice(host_std.testing.allocator, normalized_plain);
+                    try bytes.appendSlice(std.testing.allocator, normalized_plain);
                 }
 
                 fn normalizedLog() ![]u8 {
-                    const actual_log = try Support.joinedLog(host_std.testing.allocator);
-                    defer host_std.testing.allocator.free(actual_log);
+                    const actual_log = try Support.joinedLog(std.testing.allocator);
+                    defer std.testing.allocator.free(actual_log);
 
-                    var normalized = host_std.ArrayList(u8).empty;
-                    errdefer normalized.deinit(host_std.testing.allocator);
+                    var normalized = std.ArrayList(u8).empty;
+                    errdefer normalized.deinit(std.testing.allocator);
 
-                    var lines = host_std.mem.splitScalar(u8, actual_log, '\n');
+                    var lines = std.mem.splitScalar(u8, actual_log, '\n');
                     var first = true;
                     while (lines.next()) |line| {
-                        if (!first) try normalized.append(host_std.testing.allocator, '\n');
+                        if (!first) try normalized.append(std.testing.allocator, '\n');
                         try appendNormalizedLine(&normalized, line);
                         first = false;
                     }
-                    return normalized.toOwnedSlice(host_std.testing.allocator);
+                    return normalized.toOwnedSlice(std.testing.allocator);
                 }
 
                 fn expectLog(expected_log: []const u8) !void {
                     const actual_log = try normalizedLog();
-                    defer host_std.testing.allocator.free(actual_log);
-                    try host_std.testing.expectEqualStrings(expected_log, actual_log);
+                    defer std.testing.allocator.free(actual_log);
+                    try std.testing.expectEqualStrings(expected_log, actual_log);
                 }
             };
 
@@ -1876,7 +1868,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 var root = new(TestStd, TestTime, .test_run);
                 root.timeout(0);
                 root.run("immediate", TaskRunner.make(ImmediateTimeoutTask.run, null));
-                try host_std.testing.expect(!root.wait());
+                try std.testing.expect(!root.wait());
                 root.deinit();
 
                 const expected_log =
@@ -1896,7 +1888,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 root.timeout(suite_timeout);
                 root.timeout(300 * TestTime.duration.MilliSecond);
                 root.run("suite", TaskRunner.make(ComplexTimeoutSuiteTask.run, null));
-                try host_std.testing.expect(!root.wait());
+                try std.testing.expect(!root.wait());
                 root.deinit();
 
                 const expected_log =
@@ -1925,7 +1917,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             {
                 var root = new(TestStd, TestTime, .test_run);
                 root.run("scoped", TaskRunner.make(ScopedTimeoutSuiteTask.run, null));
-                try host_std.testing.expect(!root.wait());
+                try std.testing.expect(!root.wait());
                 root.deinit();
 
                 const expected_log =
@@ -1945,30 +1937,27 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             }
         }
         fn testMemoryLimit() !void {
-            const host_std = @import("std");
-            const stdz = @import("stdz");
-
             const Support = struct {
-                var entries: host_std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: host_std.Thread.Mutex = .{};
-                var current_instant = host_std.atomic.Value(time.instant.Time).init(0);
+                var entries: std.ArrayListUnmanaged([]u8) = .{};
+                var mutex: std.Thread.Mutex = .{};
+                var current_instant = std.atomic.Value(time.instant.Time).init(0);
 
                 fn reset() void {
                     mutex.lock();
                     defer mutex.unlock();
                     for (entries.items) |entry| {
-                        host_std.testing.allocator.free(entry);
+                        std.testing.allocator.free(entry);
                     }
-                    entries.deinit(host_std.testing.allocator);
+                    entries.deinit(std.testing.allocator);
                     entries = .{};
                     current_instant.store(0, .release);
                 }
 
                 fn append(comptime format: []const u8, args: anytype) void {
-                    const message = host_std.fmt.allocPrint(host_std.testing.allocator, format, args) catch @panic("OOM");
+                    const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
                     mutex.lock();
                     defer mutex.unlock();
-                    entries.append(host_std.testing.allocator, message) catch @panic("OOM");
+                    entries.append(std.testing.allocator, message) catch @panic("OOM");
                 }
 
                 fn currentInstant() time.instant.Time {
@@ -1983,11 +1972,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     }
                 }
 
-                fn joinedLog(allocator: host_std.mem.Allocator) ![]u8 {
+                fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
                     mutex.lock();
                     defer mutex.unlock();
 
-                    var bytes = try host_std.ArrayList(u8).initCapacity(allocator, 0);
+                    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
                     errdefer bytes.deinit(allocator);
 
                     for (entries.items, 0..) |entry, idx| {
@@ -2016,12 +2005,12 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             };
 
             const TestThread = struct {
-                pub const SpawnConfig = host_std.Thread.SpawnConfig;
-                pub const Mutex = host_std.Thread.Mutex;
-                pub const RwLock = host_std.Thread.RwLock;
+                pub const SpawnConfig = std.Thread.SpawnConfig;
+                pub const Mutex = std.Thread.Mutex;
+                pub const RwLock = std.Thread.RwLock;
                 const ThreadSelf = @This();
                 pub const Condition = struct {
-                    inner: host_std.Thread.Condition = .{},
+                    inner: std.Thread.Condition = .{},
 
                     pub fn wait(self: *Condition, mutex: *Mutex) void {
                         self.inner.wait(mutex);
@@ -2040,11 +2029,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     }
                 };
 
-                inner: host_std.Thread,
+                inner: std.Thread,
 
                 pub fn spawn(config: SpawnConfig, comptime f: anytype, args: anytype) !ThreadSelf {
                     return .{
-                        .inner = try host_std.Thread.spawn(config, f, args),
+                        .inner = try std.Thread.spawn(config, f, args),
                     };
                 }
 
@@ -2061,13 +2050,13 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestStd = testing_std_mod.make(host_std, .{
+            const TestStd = testing_std_mod.make(std, .{
                 .Thread = TestThread,
                 .log = CapturingLog,
-                .mem = stdz.mem,
-                .fmt = stdz.fmt,
+                .mem = std.mem,
+                .fmt = std.fmt,
                 .testing = struct {
-                    pub const allocator = host_std.testing.allocator;
+                    pub const allocator = std.testing.allocator;
                 },
             });
 
@@ -2087,24 +2076,24 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     const Runner = struct {
                         memory_limit: ?usize,
 
-                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: std.mem.Allocator) bool {
                             _ = self;
                             var arg_byte: u8 = 0;
                             return run_fn(t, allocator, @ptrCast(&arg_byte));
                         }
 
-                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
                             _ = allocator;
-                            host_std.testing.allocator.destroy(self);
+                            std.testing.allocator.destroy(self);
                         }
                     };
 
-                    const runner = host_std.testing.allocator.create(Runner) catch @panic("OOM");
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
                     runner.* = .{ .memory_limit = memory_limit };
                     return TestRunnerHandle.make(Runner).new(runner);
                 }
@@ -2138,31 +2127,31 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     const Runner = struct {
                         memory_limit: ?usize,
 
-                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: std.mem.Allocator) bool {
                             _ = self;
                             var arg_byte: u8 = 0;
                             return run_fn(t, allocator, @ptrCast(&arg_byte));
                         }
 
-                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
                             _ = allocator;
-                            host_std.testing.allocator.destroy(self);
+                            std.testing.allocator.destroy(self);
                         }
                     };
 
-                    const runner = host_std.testing.allocator.create(Runner) catch @panic("OOM");
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
                     runner.* = .{ .memory_limit = memory_limit };
                     return TestRunnerHandle.make(Runner).new(runner);
                 }
 
-                fn appendNormalizedLine(bytes: *host_std.ArrayList(u8), line: []const u8) !void {
-                    var plain_line = host_std.ArrayList(u8).empty;
-                    defer plain_line.deinit(host_std.testing.allocator);
+                fn appendNormalizedLine(bytes: *std.ArrayList(u8), line: []const u8) !void {
+                    var plain_line = std.ArrayList(u8).empty;
+                    defer plain_line.deinit(std.testing.allocator);
 
                     var i: usize = 0;
                     while (i < line.len) {
@@ -2172,72 +2161,72 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                             if (i < line.len) i += 1;
                             continue;
                         }
-                        try plain_line.append(host_std.testing.allocator, line[i]);
+                        try plain_line.append(std.testing.allocator, line[i]);
                         i += 1;
                     }
 
                     const plain = plain_line.items;
-                    var compact_line = host_std.ArrayList(u8).empty;
-                    defer compact_line.deinit(host_std.testing.allocator);
+                    var compact_line = std.ArrayList(u8).empty;
+                    defer compact_line.deinit(std.testing.allocator);
                     const normalized_plain = blk: {
-                        if (host_std.mem.startsWith(u8, plain, ">>> ") or
-                            host_std.mem.startsWith(u8, plain, "<<< ") or
-                            host_std.mem.startsWith(u8, plain, "!!! "))
+                        if (std.mem.startsWith(u8, plain, ">>> ") or
+                            std.mem.startsWith(u8, plain, "<<< ") or
+                            std.mem.startsWith(u8, plain, "!!! "))
                         {
                             const prefix = plain[0..4];
                             const rest = plain[4..];
-                            const split_idx = host_std.mem.indexOfScalar(u8, rest, ' ') orelse break :blk plain;
+                            const split_idx = std.mem.indexOfScalar(u8, rest, ' ') orelse break :blk plain;
                             const label = rest[0..split_idx];
-                            const suffix = host_std.mem.trimLeft(u8, rest[split_idx..], " ");
-                            try compact_line.appendSlice(host_std.testing.allocator, prefix);
-                            try compact_line.appendSlice(host_std.testing.allocator, label);
-                            try compact_line.append(host_std.testing.allocator, ' ');
-                            try compact_line.appendSlice(host_std.testing.allocator, suffix);
+                            const suffix = std.mem.trimLeft(u8, rest[split_idx..], " ");
+                            try compact_line.appendSlice(std.testing.allocator, prefix);
+                            try compact_line.appendSlice(std.testing.allocator, label);
+                            try compact_line.append(std.testing.allocator, ' ');
+                            try compact_line.appendSlice(std.testing.allocator, suffix);
                             break :blk compact_line.items;
                         }
                         break :blk plain;
                     };
-                    const event_idx = host_std.mem.indexOf(u8, normalized_plain, " done at ") orelse
-                        host_std.mem.indexOf(u8, normalized_plain, " failed at ");
+                    const event_idx = std.mem.indexOf(u8, normalized_plain, " done at ") orelse
+                        std.mem.indexOf(u8, normalized_plain, " failed at ");
                     if (event_idx) |idx| {
-                        const prefix = host_std.mem.trimRight(u8, normalized_plain[0..idx], " ");
+                        const prefix = std.mem.trimRight(u8, normalized_plain[0..idx], " ");
                         const suffix = normalized_plain[idx + 1 ..];
-                        if (host_std.mem.indexOf(u8, suffix, "ms, ")) |ms_idx| {
-                            try bytes.appendSlice(host_std.testing.allocator, prefix);
-                            try bytes.append(host_std.testing.allocator, ' ');
-                            try bytes.appendSlice(host_std.testing.allocator, suffix[0 .. ms_idx + 4]);
-                            try bytes.appendSlice(host_std.testing.allocator, "<mem>");
+                        if (std.mem.indexOf(u8, suffix, "ms, ")) |ms_idx| {
+                            try bytes.appendSlice(std.testing.allocator, prefix);
+                            try bytes.append(std.testing.allocator, ' ');
+                            try bytes.appendSlice(std.testing.allocator, suffix[0 .. ms_idx + 4]);
+                            try bytes.appendSlice(std.testing.allocator, "<mem>");
                             return;
                         }
-                        try bytes.appendSlice(host_std.testing.allocator, prefix);
-                        try bytes.append(host_std.testing.allocator, ' ');
-                        try bytes.appendSlice(host_std.testing.allocator, suffix);
+                        try bytes.appendSlice(std.testing.allocator, prefix);
+                        try bytes.append(std.testing.allocator, ' ');
+                        try bytes.appendSlice(std.testing.allocator, suffix);
                         return;
                     }
-                    try bytes.appendSlice(host_std.testing.allocator, normalized_plain);
+                    try bytes.appendSlice(std.testing.allocator, normalized_plain);
                 }
 
                 fn normalizedLog() ![]u8 {
-                    const actual_log = try Support.joinedLog(host_std.testing.allocator);
-                    defer host_std.testing.allocator.free(actual_log);
+                    const actual_log = try Support.joinedLog(std.testing.allocator);
+                    defer std.testing.allocator.free(actual_log);
 
-                    var normalized = host_std.ArrayList(u8).empty;
-                    errdefer normalized.deinit(host_std.testing.allocator);
+                    var normalized = std.ArrayList(u8).empty;
+                    errdefer normalized.deinit(std.testing.allocator);
 
-                    var lines = host_std.mem.splitScalar(u8, actual_log, '\n');
+                    var lines = std.mem.splitScalar(u8, actual_log, '\n');
                     var first = true;
                     while (lines.next()) |line| {
-                        if (!first) try normalized.append(host_std.testing.allocator, '\n');
+                        if (!first) try normalized.append(std.testing.allocator, '\n');
                         try appendNormalizedLine(&normalized, line);
                         first = false;
                     }
-                    return normalized.toOwnedSlice(host_std.testing.allocator);
+                    return normalized.toOwnedSlice(std.testing.allocator);
                 }
 
                 fn expectLog(expected_log: []const u8) !void {
                     const actual_log = try normalizedLog();
-                    defer host_std.testing.allocator.free(actual_log);
-                    try host_std.testing.expectEqualStrings(expected_log, actual_log);
+                    defer std.testing.allocator.free(actual_log);
+                    try std.testing.expectEqualStrings(expected_log, actual_log);
                 }
             };
 
@@ -2247,7 +2236,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             {
                 var root = new(TestStd, TestTime, .test_run);
                 root.run("limited", TaskRunner.make(MemoryLimitFailTask.run, 32));
-                try host_std.testing.expect(!root.wait());
+                try std.testing.expect(!root.wait());
                 root.deinit();
 
                 const expected_log =
@@ -2264,7 +2253,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             {
                 var root = new(TestStd, TestTime, .test_run);
                 root.run("within_limit", TaskRunner.make(MemoryLimitOkTask.run, 32));
-                try host_std.testing.expect(root.wait());
+                try std.testing.expect(root.wait());
                 root.deinit();
 
                 const expected_log =
@@ -2277,35 +2266,32 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             }
         }
         fn testPeakMemoryUsesTreePeak() !void {
-            const host_std = @import("std");
-            const stdz = @import("stdz");
-
             const Support = struct {
-                var entries: host_std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: host_std.Thread.Mutex = .{};
+                var entries: std.ArrayListUnmanaged([]u8) = .{};
+                var mutex: std.Thread.Mutex = .{};
 
                 fn reset() void {
                     mutex.lock();
                     defer mutex.unlock();
                     for (entries.items) |entry| {
-                        host_std.testing.allocator.free(entry);
+                        std.testing.allocator.free(entry);
                     }
-                    entries.deinit(host_std.testing.allocator);
+                    entries.deinit(std.testing.allocator);
                     entries = .{};
                 }
 
                 fn append(comptime format: []const u8, args: anytype) void {
-                    const message = host_std.fmt.allocPrint(host_std.testing.allocator, format, args) catch @panic("OOM");
+                    const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
                     mutex.lock();
                     defer mutex.unlock();
-                    entries.append(host_std.testing.allocator, message) catch @panic("OOM");
+                    entries.append(std.testing.allocator, message) catch @panic("OOM");
                 }
 
-                fn joinedLog(allocator: host_std.mem.Allocator) ![]u8 {
+                fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
                     mutex.lock();
                     defer mutex.unlock();
 
-                    var bytes = try host_std.ArrayList(u8).initCapacity(allocator, 0);
+                    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
                     errdefer bytes.deinit(allocator);
 
                     for (entries.items, 0..) |entry, idx| {
@@ -2334,13 +2320,13 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             };
 
             const TestThread = struct {
-                pub const SpawnConfig = host_std.Thread.SpawnConfig;
-                pub const Mutex = host_std.Thread.Mutex;
-                pub const RwLock = host_std.Thread.RwLock;
+                pub const SpawnConfig = std.Thread.SpawnConfig;
+                pub const Mutex = std.Thread.Mutex;
+                pub const RwLock = std.Thread.RwLock;
                 const ThreadSelf = @This();
 
                 pub const Condition = struct {
-                    inner: host_std.Thread.Condition = .{},
+                    inner: std.Thread.Condition = .{},
 
                     pub fn wait(self: *Condition, mutex: *Mutex) void {
                         self.inner.wait(mutex);
@@ -2378,13 +2364,13 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestStd = testing_std_mod.make(host_std, .{
+            const TestStd = testing_std_mod.make(std, .{
                 .Thread = TestThread,
                 .log = CapturingLog,
-                .mem = stdz.mem,
-                .fmt = stdz.fmt,
+                .mem = std.mem,
+                .fmt = std.fmt,
                 .testing = struct {
-                    pub const allocator = host_std.testing.allocator;
+                    pub const allocator = std.testing.allocator;
                 },
             });
 
@@ -2402,30 +2388,30 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             const TaskRunner = struct {
                 fn make(comptime run_fn: anytype) TestRunnerHandle {
                     const Runner = struct {
-                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: std.mem.Allocator) bool {
                             _ = self;
                             return run_fn(t, allocator);
                         }
 
-                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
                             _ = allocator;
-                            host_std.testing.allocator.destroy(self);
+                            std.testing.allocator.destroy(self);
                         }
                     };
 
-                    const runner = host_std.testing.allocator.create(Runner) catch @panic("OOM");
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
                     runner.* = .{};
                     return TestRunnerHandle.make(Runner).new(runner);
                 }
             };
 
             const LeafTask = struct {
-                fn run(t: *Self, allocator: stdz.mem.Allocator) bool {
+                fn run(t: *Self, allocator: std.mem.Allocator) bool {
                     _ = t;
                     const bytes = allocator.alloc(u8, 384) catch return false;
                     defer allocator.free(bytes);
@@ -2434,7 +2420,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             };
 
             const SuiteTask = struct {
-                fn run(t: *Self, allocator: stdz.mem.Allocator) bool {
+                fn run(t: *Self, allocator: std.mem.Allocator) bool {
                     _ = allocator;
                     t.run("child_a", TaskRunner.make(LeafTask.run));
                     t.run("child_b", TaskRunner.make(LeafTask.run));
@@ -2444,11 +2430,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
 
             const Helper = struct {
                 fn plainLog() ![]u8 {
-                    const actual_log = try Support.joinedLog(host_std.testing.allocator);
-                    defer host_std.testing.allocator.free(actual_log);
+                    const actual_log = try Support.joinedLog(std.testing.allocator);
+                    defer std.testing.allocator.free(actual_log);
 
-                    var plain = host_std.ArrayList(u8).empty;
-                    errdefer plain.deinit(host_std.testing.allocator);
+                    var plain = std.ArrayList(u8).empty;
+                    errdefer plain.deinit(std.testing.allocator);
 
                     var i: usize = 0;
                     while (i < actual_log.len) {
@@ -2458,42 +2444,42 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                             if (i < actual_log.len) i += 1;
                             continue;
                         }
-                        try plain.append(host_std.testing.allocator, actual_log[i]);
+                        try plain.append(std.testing.allocator, actual_log[i]);
                         i += 1;
                     }
-                    return plain.toOwnedSlice(host_std.testing.allocator);
+                    return plain.toOwnedSlice(std.testing.allocator);
                 }
 
                 fn parseMemoryUsage(text: []const u8) !usize {
-                    const space_idx = host_std.mem.lastIndexOfScalar(u8, text, ' ') orelse return error.BadMemoryText;
+                    const space_idx = std.mem.lastIndexOfScalar(u8, text, ' ') orelse return error.BadMemoryText;
                     const number_text = text[0..space_idx];
                     const unit_text = text[space_idx + 1 ..];
-                    const scale: usize = if (host_std.mem.eql(u8, unit_text, "B"))
+                    const scale: usize = if (std.mem.eql(u8, unit_text, "B"))
                         1
-                    else if (host_std.mem.eql(u8, unit_text, "KiB"))
+                    else if (std.mem.eql(u8, unit_text, "KiB"))
                         1024
-                    else if (host_std.mem.eql(u8, unit_text, "MiB"))
+                    else if (std.mem.eql(u8, unit_text, "MiB"))
                         1024 * 1024
                     else
                         return error.BadMemoryUnit;
 
-                    if (scale == 1) return host_std.fmt.parseInt(usize, number_text, 10);
+                    if (scale == 1) return std.fmt.parseInt(usize, number_text, 10);
 
-                    const dot_idx = host_std.mem.indexOfScalar(u8, number_text, '.') orelse return error.BadMemoryNumber;
-                    const whole = try host_std.fmt.parseInt(usize, number_text[0..dot_idx], 10);
+                    const dot_idx = std.mem.indexOfScalar(u8, number_text, '.') orelse return error.BadMemoryNumber;
+                    const whole = try std.fmt.parseInt(usize, number_text[0..dot_idx], 10);
                     const frac_text = number_text[dot_idx + 1 ..];
-                    const frac = try host_std.fmt.parseInt(usize, frac_text, 10);
+                    const frac = try std.fmt.parseInt(usize, frac_text, 10);
                     return whole * scale + (frac * scale) / 1000;
                 }
 
                 fn peakForLabel(log: []const u8, label: []const u8) !usize {
-                    var lines = host_std.mem.splitScalar(u8, log, '\n');
+                    var lines = std.mem.splitScalar(u8, log, '\n');
                     while (lines.next()) |line| {
-                        if (!host_std.mem.startsWith(u8, line, "<<< ")) continue;
+                        if (!std.mem.startsWith(u8, line, "<<< ")) continue;
                         const rest = line[4..];
-                        if (!host_std.mem.startsWith(u8, rest, label)) continue;
-                        if (host_std.mem.indexOf(u8, rest[label.len..], "done at ") == null) continue;
-                        const mem_idx = host_std.mem.lastIndexOf(u8, line, ", ") orelse return error.BadPeakLine;
+                        if (!std.mem.startsWith(u8, rest, label)) continue;
+                        if (std.mem.indexOf(u8, rest[label.len..], "done at ") == null) continue;
+                        const mem_idx = std.mem.lastIndexOf(u8, line, ", ") orelse return error.BadPeakLine;
                         return parseMemoryUsage(line[mem_idx + 2 ..]);
                     }
                     return error.MissingPeakLine;
@@ -2505,35 +2491,32 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
 
             var root = new(TestStd, TestTime, .test_run);
             root.run("suite", TaskRunner.make(SuiteTask.run));
-            try host_std.testing.expect(root.wait());
+            try std.testing.expect(root.wait());
             root.deinit();
 
             const log = try Helper.plainLog();
-            defer host_std.testing.allocator.free(log);
+            defer std.testing.allocator.free(log);
 
             const suite_peak = try Helper.peakForLabel(log, "/suite");
             const child_a_peak = try Helper.peakForLabel(log, "/suite/child_a");
             const child_b_peak = try Helper.peakForLabel(log, "/suite/child_b");
 
-            try host_std.testing.expect(suite_peak + 64 < child_a_peak + child_b_peak);
+            try std.testing.expect(suite_peak + 64 < child_a_peak + child_b_peak);
         }
         fn testSubtestStartFailureCleanup() !void {
-            const host_std = @import("std");
-            const stdz = @import("stdz");
-
             const FailNthAllocator = struct {
-                backing: stdz.mem.Allocator,
+                backing: std.mem.Allocator,
                 alloc_index: usize = 0,
                 fail_at_alloc_index: ?usize = null,
 
-                fn allocator(self: *@This()) stdz.mem.Allocator {
+                fn allocator(self: *@This()) std.mem.Allocator {
                     return .{
                         .ptr = self,
                         .vtable = &vtable,
                     };
                 }
 
-                fn alloc(ptr: *anyopaque, len: usize, alignment: stdz.mem.Alignment, ret_addr: usize) ?[*]u8 {
+                fn alloc(ptr: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
                     const self: *@This() = @ptrCast(@alignCast(ptr));
                     defer self.alloc_index += 1;
                     if (self.fail_at_alloc_index) |fail_at| {
@@ -2542,22 +2525,22 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     return self.backing.rawAlloc(len, alignment, ret_addr);
                 }
 
-                fn resize(ptr: *anyopaque, memory: []u8, alignment: stdz.mem.Alignment, new_len: usize, ret_addr: usize) bool {
+                fn resize(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) bool {
                     const self: *@This() = @ptrCast(@alignCast(ptr));
                     return self.backing.rawResize(memory, alignment, new_len, ret_addr);
                 }
 
-                fn remap(ptr: *anyopaque, memory: []u8, alignment: stdz.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+                fn remap(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
                     const self: *@This() = @ptrCast(@alignCast(ptr));
                     return self.backing.rawRemap(memory, alignment, new_len, ret_addr);
                 }
 
-                fn free(ptr: *anyopaque, memory: []u8, alignment: stdz.mem.Alignment, ret_addr: usize) void {
+                fn free(ptr: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
                     const self: *@This() = @ptrCast(@alignCast(ptr));
                     self.backing.rawFree(memory, alignment, ret_addr);
                 }
 
-                const vtable: stdz.mem.Allocator.VTable = .{
+                const vtable: std.mem.Allocator.VTable = .{
                     .alloc = alloc,
                     .resize = resize,
                     .remap = remap,
@@ -2566,9 +2549,9 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             };
 
             const Support = struct {
-                var entries: host_std.ArrayListUnmanaged([]u8) = .{};
-                var mutex: host_std.Thread.Mutex = .{};
-                var current_instant = host_std.atomic.Value(time.instant.Time).init(0);
+                var entries: std.ArrayListUnmanaged([]u8) = .{};
+                var mutex: std.Thread.Mutex = .{};
+                var current_instant = std.atomic.Value(time.instant.Time).init(0);
                 var fail_spawn = false;
                 var runner_run_hits: usize = 0;
                 var runner_deinit_hits: usize = 0;
@@ -2577,9 +2560,9 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     mutex.lock();
                     defer mutex.unlock();
                     for (entries.items) |entry| {
-                        host_std.testing.allocator.free(entry);
+                        std.testing.allocator.free(entry);
                     }
-                    entries.deinit(host_std.testing.allocator);
+                    entries.deinit(std.testing.allocator);
                     entries = .{};
                     current_instant.store(0, .release);
                     fail_spawn = false;
@@ -2588,10 +2571,10 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
 
                 fn append(comptime format: []const u8, args: anytype) void {
-                    const message = host_std.fmt.allocPrint(host_std.testing.allocator, format, args) catch @panic("OOM");
+                    const message = std.fmt.allocPrint(std.testing.allocator, format, args) catch @panic("OOM");
                     mutex.lock();
                     defer mutex.unlock();
-                    entries.append(host_std.testing.allocator, message) catch @panic("OOM");
+                    entries.append(std.testing.allocator, message) catch @panic("OOM");
                 }
 
                 fn currentInstant() time.instant.Time {
@@ -2606,11 +2589,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     }
                 }
 
-                fn joinedLog(allocator: host_std.mem.Allocator) ![]u8 {
+                fn joinedLog(allocator: std.mem.Allocator) ![]u8 {
                     mutex.lock();
                     defer mutex.unlock();
 
-                    var bytes = try host_std.ArrayList(u8).initCapacity(allocator, 0);
+                    var bytes = try std.ArrayList(u8).initCapacity(allocator, 0);
                     errdefer bytes.deinit(allocator);
 
                     for (entries.items, 0..) |entry, idx| {
@@ -2639,13 +2622,13 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             };
 
             const TestThread = struct {
-                pub const SpawnConfig = host_std.Thread.SpawnConfig;
-                pub const Mutex = host_std.Thread.Mutex;
-                pub const RwLock = host_std.Thread.RwLock;
+                pub const SpawnConfig = std.Thread.SpawnConfig;
+                pub const Mutex = std.Thread.Mutex;
+                pub const RwLock = std.Thread.RwLock;
                 const ThreadSelf = @This();
 
                 pub const Condition = struct {
-                    inner: host_std.Thread.Condition = .{},
+                    inner: std.Thread.Condition = .{},
 
                     pub fn wait(self: *Condition, mutex: *Mutex) void {
                         self.inner.wait(mutex);
@@ -2684,13 +2667,13 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                 }
             };
 
-            const TestStd = testing_std_mod.make(host_std, .{
+            const TestStd = testing_std_mod.make(std, .{
                 .Thread = TestThread,
                 .log = CapturingLog,
-                .mem = stdz.mem,
-                .fmt = stdz.fmt,
+                .mem = std.mem,
+                .fmt = std.fmt,
                 .testing = struct {
-                    pub var allocator: stdz.mem.Allocator = undefined;
+                    pub var allocator: std.mem.Allocator = undefined;
                 },
             });
 
@@ -2708,12 +2691,12 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             const Helper = struct {
                 fn makeTrackedRunner() TestRunnerHandle {
                     const Runner = struct {
-                        pub fn init(self: *@This(), allocator: stdz.mem.Allocator) !void {
+                        pub fn init(self: *@This(), allocator: std.mem.Allocator) !void {
                             _ = self;
                             _ = allocator;
                         }
 
-                        pub fn run(self: *@This(), t: *Self, allocator: stdz.mem.Allocator) bool {
+                        pub fn run(self: *@This(), t: *Self, allocator: std.mem.Allocator) bool {
                             _ = self;
                             _ = t;
                             _ = allocator;
@@ -2721,24 +2704,24 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                             return true;
                         }
 
-                        pub fn deinit(self: *@This(), allocator: stdz.mem.Allocator) void {
+                        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
                             _ = allocator;
                             Support.runner_deinit_hits += 1;
-                            host_std.testing.allocator.destroy(self);
+                            std.testing.allocator.destroy(self);
                         }
                     };
 
-                    const runner = host_std.testing.allocator.create(Runner) catch @panic("OOM");
+                    const runner = std.testing.allocator.create(Runner) catch @panic("OOM");
                     runner.* = .{};
                     return TestRunnerHandle.make(Runner).new(runner);
                 }
 
                 fn normalizedLogContains(needle: []const u8) !bool {
-                    const actual_log = try Support.joinedLog(host_std.testing.allocator);
-                    defer host_std.testing.allocator.free(actual_log);
+                    const actual_log = try Support.joinedLog(std.testing.allocator);
+                    defer std.testing.allocator.free(actual_log);
 
-                    var plain = host_std.ArrayList(u8).empty;
-                    defer plain.deinit(host_std.testing.allocator);
+                    var plain = std.ArrayList(u8).empty;
+                    defer plain.deinit(std.testing.allocator);
 
                     var i: usize = 0;
                     while (i < actual_log.len) {
@@ -2748,11 +2731,11 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                             if (i < actual_log.len) i += 1;
                             continue;
                         }
-                        try plain.append(host_std.testing.allocator, actual_log[i]);
+                        try plain.append(std.testing.allocator, actual_log[i]);
                         i += 1;
                     }
 
-                    return host_std.mem.indexOf(u8, plain.items, needle) != null;
+                    return std.mem.indexOf(u8, plain.items, needle) != null;
                 }
             };
 
@@ -2766,7 +2749,7 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     Support.reset();
 
                     var allocator_state = FailNthAllocator{
-                        .backing = host_std.testing.allocator,
+                        .backing = std.testing.allocator,
                     };
                     TestStd.testing.allocator = allocator_state.allocator();
 
@@ -2778,35 +2761,34 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
                     root.deinit();
 
                     if (try Helper.normalizedLogContains("subtest state alloc failed")) {
-                        try host_std.testing.expect(!ok);
-                        try host_std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
-                        try host_std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
+                        try std.testing.expect(!ok);
+                        try std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
+                        try std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
                         found_pending_alloc_failure = true;
                         break;
                     }
                 }
 
-                try host_std.testing.expect(found_pending_alloc_failure);
+                try std.testing.expect(found_pending_alloc_failure);
             }
 
             Support.reset();
             Support.fail_spawn = true;
-            TestStd.testing.allocator = host_std.testing.allocator;
+            TestStd.testing.allocator = std.testing.allocator;
 
             {
                 var root = new(TestStd, TestTime, .test_run);
                 root.run("child", Helper.makeTrackedRunner());
-                try host_std.testing.expect(!root.wait());
+                try std.testing.expect(!root.wait());
                 root.deinit();
             }
 
-            try host_std.testing.expect(try Helper.normalizedLogContains("subtest spawn failed"));
-            try host_std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
-            try host_std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
+            try std.testing.expect(try Helper.normalizedLogContains("subtest spawn failed"));
+            try std.testing.expectEqual(@as(usize, 0), Support.runner_run_hits);
+            try std.testing.expectEqual(@as(usize, 1), Support.runner_deinit_hits);
         }
 
         fn testBeforeRunHook() !void {
-            const host_std = @import("std");
             const TR = @import("TestRunner.zig");
 
             const HookCtx = struct {
@@ -2855,9 +2837,9 @@ pub fn TestRunner(comptime std: type, comptime time: type) TestRunnerHandle {
             runner.memory_limit = child_limit;
 
             root.run("hooked", runner);
-            try host_std.testing.expect(root.wait());
-            try host_std.testing.expectEqual(@as(usize, 1), HookCtx.hits);
-            try host_std.testing.expectEqual(child_limit, HookCtx.saw_memory_limit);
+            try std.testing.expect(root.wait());
+            try std.testing.expectEqual(@as(usize, 1), HookCtx.hits);
+            try std.testing.expectEqual(child_limit, HookCtx.saw_memory_limit);
         }
     };
     const Runner = struct {

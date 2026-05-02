@@ -42,7 +42,6 @@ const write_timeout = @import("tcp/write_timeout.zig");
 const conn_as_downcast = @import("tcp/conn_as_downcast.zig");
 const multiple_accept = @import("tcp/multiple_accept.zig");
 const conn_concurrent_bidirectional_rw = @import("tcp/conn_concurrent_bidirectional_rw.zig");
-const listener_concurrent_accept = @import("tcp/listener_concurrent_accept.zig");
 
 pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
@@ -89,7 +88,6 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
             t.run("conn_as_downcast", conn_as_downcast.make(std, net));
             t.run("multiple_accept", multiple_accept.make(std, net));
             t.run("conn_concurrent_bidirectional_rw", conn_concurrent_bidirectional_rw.make(std, net));
-            t.run("listener_concurrent_accept", listener_concurrent_accept.make(std, net));
             return t.wait();
         }
 

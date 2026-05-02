@@ -5,16 +5,12 @@ const Store = @import("../../Store.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const Message = @import("../../pipeline/Message.zig");
 const registry_unique = @import("../../assembler/registry/unique.zig");
-const overlay = @import("../../component/ui/overlay.zig");
-const route = @import("../../component/ui/route.zig");
-const selection = @import("../../component/ui/selection.zig");
 const ui_flow = @import("../../component/ui/flow.zig");
 
 const PairingFlow = blk: {
     var builder = ui_flow.Builder.init();
     builder.addNode("idle");
     builder.addNode("searching");
-    builder.setInitial("idle");
     builder.addEdge("idle", "searching", "start");
     break :blk builder.build();
 };
@@ -182,10 +178,15 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
                     var app = try Built.init(.{
                         .allocator = grt.std.testing.allocator,
+                        .initial_state = .{
+                            .counter = .{
+                                .ticks = 41,
+                            },
+                        },
                     });
                     defer app.deinit();
 
-                    try grt.std.testing.expectEqual(@as(usize, 0), app.store.stores.counter.get().ticks);
+                    try grt.std.testing.expectEqual(@as(usize, 41), app.store.stores.counter.get().ticks);
                     _ = try app.impl.runtime.root.process(.{
                         .origin = .manual,
                         .timestamp = 0,
@@ -195,7 +196,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             },
                         },
                     });
-                    try grt.std.testing.expectEqual(@as(usize, 1), app.store.stores.counter.get().ticks);
+                    try grt.std.testing.expectEqual(@as(usize, 42), app.store.stores.counter.get().ticks);
                 }
 
                 fn manual_start_disables_auto_ticks_and_dispatch_processes_messages() !void {
@@ -251,6 +252,9 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
                     var app = try Built.init(.{
                         .allocator = grt.std.testing.allocator,
+                        .initial_state = .{
+                            .counter = .{},
+                        },
                     });
                     defer app.deinit();
 
@@ -412,15 +416,9 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         });
                         var next = AssemblerType.init();
                         next.addFlow(.pairing, 31, PairingFlow);
-                        next.addOverlay(.loading, 41, overlay.State{});
-                        next.addRouter(.nav, 51, route.Router.Item{
-                            .screen_id = 5,
-                            .arg0 = 1,
-                        });
-                        next.addSelection(.menu, 61, selection.State{
-                            .count = 3,
-                            .loop = false,
-                        });
+                        next.addOverlay(.loading, 41);
+                        next.addRouter(.nav, 51);
+                        next.addSelection(.menu, 61);
                         break :blk next;
                     };
 
@@ -429,13 +427,10 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     try grt.std.testing.expect(@hasDecl(assembler.flow_registry.periphs[0].FlowType, "Reducer"));
                     try grt.std.testing.expectEqual(@as(usize, 1), assembler.overlay_registry.len);
                     try grt.std.testing.expectEqual(@as(u32, 41), assembler.overlay_registry.periphs[0].id);
-                    try grt.std.testing.expect(!assembler.overlay_registry.periphs[0].initial_state.visible);
                     try grt.std.testing.expectEqual(@as(usize, 1), assembler.router_registry.len);
                     try grt.std.testing.expectEqual(@as(u32, 51), assembler.router_registry.periphs[0].id);
-                    try grt.std.testing.expectEqual(@as(u32, 5), assembler.router_registry.periphs[0].initial_item.screen_id);
                     try grt.std.testing.expectEqual(@as(usize, 1), assembler.selection_registry.len);
                     try grt.std.testing.expectEqual(@as(u32, 61), assembler.selection_registry.periphs[0].id);
-                    try grt.std.testing.expectEqual(@as(usize, 3), assembler.selection_registry.periphs[0].initial_state.count);
                     try grt.std.testing.expectEqual(@as(usize, 3), assembler.store_builder.store_count);
                 }
 
@@ -451,9 +446,9 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         var next = AssemblerType.init();
                         next.addSingleButton(.shared, 7);
                         next.addFlow(.pairing, 31, PairingFlow);
-                        next.addOverlay(.loading, 41, overlay.State{});
-                        next.addRouter(.nav, 51, .{ .screen_id = 1 });
-                        next.addSelection(.menu, 61, selection.State{ .count = 2 });
+                        next.addOverlay(.loading, 41);
+                        next.addRouter(.nav, 51);
+                        next.addSelection(.menu, 61);
                         break :blk next;
                     };
 
@@ -508,6 +503,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
                     var app = try Built.init(.{
                         .allocator = grt.std.testing.allocator,
+                        .initial_state = .{},
                     });
                     try app.start(.{});
                     try app.stop();
@@ -525,20 +521,12 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         var next = AssemblerType.init();
                         next.addFlow(.pairing_a, 31, PairingFlow);
                         next.addFlow(.pairing_b, 32, PairingFlow);
-                        next.addOverlay(.loading_a, 41, overlay.State{});
-                        next.addOverlay(.loading_b, 42, overlay.State{});
-                        next.addRouter(.nav_a, 51, route.Router.Item{
-                            .screen_id = 1,
-                        });
-                        next.addRouter(.nav_b, 52, route.Router.Item{
-                            .screen_id = 2,
-                        });
-                        next.addSelection(.menu_a, 61, selection.State{
-                            .count = 2,
-                        });
-                        next.addSelection(.menu_b, 62, selection.State{
-                            .count = 2,
-                        });
+                        next.addOverlay(.loading_a, 41);
+                        next.addOverlay(.loading_b, 42);
+                        next.addRouter(.nav_a, 51);
+                        next.addRouter(.nav_b, 52);
+                        next.addSelection(.menu_a, 61);
+                        next.addSelection(.menu_b, 62);
 
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{};
@@ -547,6 +535,16 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
                     var app = try Built.init(.{
                         .allocator = grt.std.testing.allocator,
+                        .initial_state = .{
+                            .pairing_a = .{ .node = .idle },
+                            .pairing_b = .{ .node = .idle },
+                            .loading_a = .{},
+                            .loading_b = .{},
+                            .nav_a = .{},
+                            .nav_b = .{},
+                            .menu_a = .{ .count = 2 },
+                            .menu_b = .{ .count = 2 },
+                        },
                     });
                     defer app.deinit();
 
@@ -654,9 +652,9 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         var next = AssemblerType.init();
                         next.addGroupedButton(.buttons, 7, 3);
                         next.addFlow(.pairing, 31, PairingFlow);
-                        next.addOverlay(.loading, 41, overlay.State{});
-                        next.addRouter(.nav, 51, .{ .screen_id = 5 });
-                        next.addSelection(.menu, 61, .{ .count = 2, .loop = false });
+                        next.addOverlay(.loading, 41);
+                        next.addRouter(.nav, 51);
+                        next.addSelection(.menu, 61);
 
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{
@@ -706,14 +704,9 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         next.addGroupedButton(.buttons, 7, 3);
                         next.addLedStrip(.strip, 11, 4);
                         next.addFlow(.pairing, 31, PairingFlow);
-                        next.addOverlay(.loading, 41, overlay.State{});
-                        next.addRouter(.nav, 51, route.Router.Item{
-                            .screen_id = 5,
-                        });
-                        next.addSelection(.menu, 61, selection.State{
-                            .count = 2,
-                            .loop = false,
-                        });
+                        next.addOverlay(.loading, 41);
+                        next.addRouter(.nav, 51);
+                        next.addSelection(.menu, 61);
 
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{
@@ -808,6 +801,14 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     var dummy_strip = DummyStrip{};
                     var app = try Built.init(.{
                         .allocator = grt.std.testing.allocator,
+                        .initial_state = .{
+                            .buttons = .{},
+                            .strip = .{},
+                            .pairing = .{ .node = .idle },
+                            .loading = .{},
+                            .nav = .{ .current_page = 5 },
+                            .menu = .{ .count = 2 },
+                        },
                         .buttons = drivers.button.Grouped.init(MockGrouped, &mock_grouped),
                         .strip = dummy_strip.handle(),
                     });
@@ -969,6 +970,9 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
                     var app = try Built.init(.{
                         .allocator = grt.std.testing.allocator,
+                        .initial_state = .{
+                            .counter = .{},
+                        },
                     });
                     defer app.deinit();
 

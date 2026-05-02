@@ -1,4 +1,5 @@
 const std = @import("std");
+const build_modules = @import("../build/modules.zig");
 const tests = @import("tests.zig");
 
 const StepSpec = struct {
@@ -120,27 +121,25 @@ fn createModule(
         .target = target,
         .optimize = optimize,
     });
-    mod.addImport("glib", exportedModule(b, "glib"));
-    mod.addImport("gstd", exportedModule(b, "gstd"));
-    mod.addImport("embed", exportedModule(b, "embed"));
-    mod.addImport("openapi", exportedModule(b, "openapi"));
-    mod.addImport("codegen", exportedModule(b, "codegen"));
-    mod.addImport("desktop", exportedModule(b, "desktop"));
-    mod.addImport("core_bluetooth", exportedModule(b, "core_bluetooth"));
-    mod.addImport("core_wlan", exportedModule(b, "core_wlan"));
+    addModuleImports(b, mod, &build_modules.base_test_modules);
     mod.addOptions("test_target", test_target);
-    mod.addImport("lvgl", exportedModule(b, "lvgl"));
-    mod.addImport("lvgl_osal", exportedModule(b, "lvgl_osal"));
-    mod.addImport("mbedtls", exportedModule(b, "mbedtls"));
-    mod.addImport("opus", exportedModule(b, "opus"));
-    mod.addImport("portaudio", exportedModule(b, "portaudio"));
-    mod.addImport("speexdsp", exportedModule(b, "speexdsp"));
-    mod.addImport("stb_truetype", exportedModule(b, "stb_truetype"));
+    addModuleImports(b, mod, &build_modules.thirdparty_modules);
+    addModuleImports(b, mod, &build_modules.example_modules);
 
     return mod;
 }
 
-fn exportedModule(b: *std.Build, name: []const u8) *std.Build.Module {
+fn addModuleImports(
+    b: *std.Build,
+    mod: *std.Build.Module,
+    module_specs: []const build_modules.ModuleSpec,
+) void {
+    for (module_specs) |module_spec| {
+        mod.addImport(module_spec.import_name, getMod(b, module_spec.export_name));
+    }
+}
+
+fn getMod(b: *std.Build, name: []const u8) *std.Build.Module {
     return b.modules.get(name) orelse @panic("missing exported module");
 }
 

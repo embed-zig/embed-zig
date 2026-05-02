@@ -1,4 +1,3 @@
-const overlay = @import("../../component/ui/overlay.zig");
 const registry_unique = @import("unique.zig");
 
 pub fn make(comptime max_overlays: usize) type {
@@ -8,7 +7,6 @@ pub fn make(comptime max_overlays: usize) type {
         pub const Overlay = struct {
             label: []const u8,
             id: u32,
-            initial_state: overlay.State,
         };
 
         periphs: [max_overlays]Overlay = undefined,
@@ -22,7 +20,6 @@ pub fn make(comptime max_overlays: usize) type {
             self: *Self,
             comptime label: anytype,
             comptime id: u32,
-            comptime initial_state: overlay.State,
         ) void {
             if (self.len >= max_overlays) {
                 @compileError("zux.Assembler exceeded max_overlays");
@@ -40,7 +37,6 @@ pub fn make(comptime max_overlays: usize) type {
             self.periphs[self.len] = .{
                 .label = label_name,
                 .id = id,
-                .initial_state = initial_state,
             };
             self.len += 1;
         }

@@ -61,13 +61,19 @@ pub fn make(comptime grt: type) type {
         released_transitioning: bool = false,
         version_value: u64 = 0,
 
-        pub fn init(allocator: glib.std.mem.Allocator, initial: Item) Error!Self {
+        pub fn init(allocator: glib.std.mem.Allocator, initial: State) Error!Self {
             var self: Self = .{
                 .allocator = allocator,
             };
-            try self.running_items.append(allocator, initial);
+            const initial_item: Item = .{
+                .screen_id = initial.current_page,
+            };
+            self.running_transitioning = initial.transitioning;
+            self.released_transitioning = initial.transitioning;
+            self.version_value = initial.version;
+            try self.running_items.append(allocator, initial_item);
             errdefer self.running_items.deinit(allocator);
-            try self.released_items.append(allocator, initial);
+            try self.released_items.append(allocator, initial_item);
             errdefer self.released_items.deinit(allocator);
             return self;
         }

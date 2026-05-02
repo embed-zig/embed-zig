@@ -1,34 +1,215 @@
 {
   "kind": "UserStory",
   "spec": {
-    "name": "imu shake sequence",
-    "description": "sets shake motion twice and clears it with a follow-up accel sample each time",
+    "name": "shake motion sequence",
+    "description": "When the device is steady, the user shakes it twice and each shake appears then clears in state",
+    "initial_state": {
+      "single_button": {},
+      "grouped_button": {},
+      "strip": {},
+      "sensor": {},
+      "cell": {},
+      "reader": {},
+      "sta": {},
+      "ap": {},
+      "pairing": { "node": "idle" },
+      "loading": {},
+      "menu": { "count": 3, "loop": true },
+      "route": { "current_page": 1 }
+    },
     "steps": [
       {
         "inputs": [
           {
-            "imu_motion": {
+            "raw_imu_accel": {
               "source_id": 17,
-              "motion": {
-                "shake": {
-                  "magnitude": 2.5,
-                  "duration": 120000000
-                }
-              }
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null,
+              "source_id": 0
             }
           }
         ]
       },
       {
         "tick": {
-          "interval": 1,
+          "interval": 10000000,
           "n": 1
         },
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.12
+            }
+          }
+        ],
         "outputs": [
           {
             "label": "sensor",
             "state": {
-              "motion": "shake"
+              "motion": null,
+              "source_id": 0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 10000000,
+          "n": 1
+        },
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.96
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null,
+              "source_id": 0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 30000000,
+          "n": 1
+        },
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 2.8
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null,
+              "source_id": 0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 10000000,
+          "n": 1
+        },
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.2
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null,
+              "source_id": 0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 10000000,
+          "n": 1
+        },
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 2.6
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null,
+              "source_id": 0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 50000000,
+          "n": 1
+        },
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null,
+              "source_id": 0
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 40000000,
+          "n": 1
+        },
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": "shake",
+              "source_id": 17
             }
           }
         ]
@@ -43,18 +224,13 @@
               "z": 1.0
             }
           }
-        ]
-      },
-      {
-        "tick": {
-          "interval": 1,
-          "n": 1
-        },
+        ],
         "outputs": [
           {
             "label": "sensor",
             "state": {
-              "motion": null
+              "motion": null,
+              "source_id": 17
             }
           }
         ]
@@ -62,28 +238,120 @@
       {
         "inputs": [
           {
-            "imu_motion": {
+            "raw_imu_accel": {
               "source_id": 17,
-              "motion": {
-                "shake": {
-                  "magnitude": 2.3,
-                  "duration": 110000000
-                }
-              }
+              "x": 0.0,
+              "y": 0.0,
+              "z": 2.7
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null,
+              "source_id": 17
             }
           }
         ]
       },
       {
         "tick": {
-          "interval": 1,
+          "interval": 10000000,
           "n": 1
         },
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.3
+            }
+          }
+        ],
         "outputs": [
           {
             "label": "sensor",
             "state": {
-              "motion": "shake"
+              "motion": null,
+              "source_id": 17
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 10000000,
+          "n": 1
+        },
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 2.5
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null,
+              "source_id": 17
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 50000000,
+          "n": 1
+        },
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": null,
+              "source_id": 17
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 40000000,
+          "n": 1
+        },
+        "inputs": [
+          {
+            "raw_imu_accel": {
+              "source_id": 17,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "sensor",
+            "state": {
+              "motion": "shake",
+              "source_id": 17
             }
           }
         ]
@@ -98,18 +366,13 @@
               "z": 1.0
             }
           }
-        ]
-      },
-      {
-        "tick": {
-          "interval": 1,
-          "n": 1
-        },
+        ],
         "outputs": [
           {
             "label": "sensor",
             "state": {
-              "motion": null
+              "motion": null,
+              "source_id": 17
             }
           }
         ]

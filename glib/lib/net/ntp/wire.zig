@@ -1,4 +1,4 @@
-const host_std = @import("std");
+const stdz = @import("stdz");
 const time_mod = @import("time");
 const types = @import("types.zig");
 const testing_api = @import("testing");
@@ -6,7 +6,7 @@ const testing_api = @import("testing");
 pub fn generateNonce(comptime std: type) i64 {
     var buf: [8]u8 = undefined;
     std.crypto.random.bytes(&buf);
-    const raw = host_std.mem.readInt(i64, &buf, .little);
+    const raw = std.mem.readInt(i64, &buf, .little);
     return if (raw == 0) 1 else raw;
 }
 
@@ -55,14 +55,14 @@ pub fn parseResponse(buf: *const [48]u8, expected_origin: types.NtpTimestamp) ty
 
 pub fn readTimestamp(buf: *const [8]u8) types.NtpTimestamp {
     return .{
-        .seconds = @as(i64, host_std.mem.readInt(u32, buf[0..4], .big)),
-        .fraction = host_std.mem.readInt(u32, buf[4..8], .big),
+        .seconds = @as(i64, stdz.mem.readInt(u32, buf[0..4], .big)),
+        .fraction = stdz.mem.readInt(u32, buf[4..8], .big),
     };
 }
 
 pub fn writeTimestamp(buf: *[8]u8, ts: types.NtpTimestamp) void {
-    host_std.mem.writeInt(u32, buf[0..4], @truncate(@as(u64, @bitCast(ts.seconds))), .big);
-    host_std.mem.writeInt(u32, buf[4..8], ts.fraction, .big);
+    stdz.mem.writeInt(u32, buf[0..4], @truncate(@as(u64, @bitCast(ts.seconds))), .big);
+    stdz.mem.writeInt(u32, buf[4..8], ts.fraction, .big);
 }
 
 pub fn ntpToTime(ntp: types.NtpTimestamp) time_mod.Time {

@@ -15,6 +15,11 @@
 //!       var conn = try ln.accept();
 //!       // handle conn...
 //!   }
+//!
+//! Concurrency note:
+//! concurrent `accept()` calls on the same Listener are not part of the shared
+//! Listener contract. Use one accept loop and dispatch accepted connections to
+//! workers when concurrent handling is needed.
 
 const Conn = @import("Conn.zig");
 

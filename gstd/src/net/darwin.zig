@@ -183,7 +183,7 @@ fn OpCommon(comptime Self: type) type {
                 .{
                     .ident = socketIdent(self),
                     .filter = system.EVFILT.READ,
-                    .flags = EV.ADD | EV.CLEAR,
+                    .flags = EV.ADD,
                     .fflags = 0,
                     .data = 0,
                     .udata = 0,
@@ -191,7 +191,7 @@ fn OpCommon(comptime Self: type) type {
                 .{
                     .ident = socketIdent(self),
                     .filter = system.EVFILT.WRITE,
-                    .flags = EV.ADD | EV.CLEAR,
+                    .flags = EV.ADD,
                     .fflags = 0,
                     .data = 0,
                     .udata = 0,

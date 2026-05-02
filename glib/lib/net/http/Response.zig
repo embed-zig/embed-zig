@@ -5,7 +5,6 @@
 //! The originating request is embedded by value so the response can
 //! safely outlive the caller's local request variable.
 
-const host_std = @import("std");
 const Header = @import("Header.zig");
 const Request = @import("Request.zig");
 const ReadCloser = @import("ReadCloser.zig");

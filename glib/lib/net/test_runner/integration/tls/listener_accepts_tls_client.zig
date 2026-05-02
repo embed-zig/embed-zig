@@ -3,6 +3,7 @@ const testing_api = @import("testing");
 const tls_fixtures = @import("../../../../net/tls/test_fixtures.zig");
 const tcp_test_utils = @import("../tcp/test_utils.zig");
 const test_utils = @import("test_utils.zig");
+const thread_sync = @import("../../test_utils/thread_sync.zig");
 
 pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Runner = struct {
@@ -19,6 +20,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                 fn call(a: std.mem.Allocator) !void {
                     const Net = net;
                     const Thread = std.Thread;
+                    const ThreadResult = thread_sync.ThreadResult(std);
                     const test_spawn_config: Thread.SpawnConfig = .{ .stack_size = 1024 * 1024 };
 
                     var ln = try Net.tls.listen(a, .{
@@ -35,34 +37,37 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     const tcp_impl = try tls_listener.inner.as(Net.TcpListener);
                     const port = try tcp_impl.port();
 
-                    var server_result: ?anyerror = null;
+                    var server_result = ThreadResult{};
                     var server_thread = try Thread.spawn(test_spawn_config, struct {
-                        fn run(listener: *Net.tls.Listener, result: *?anyerror) void {
+                        fn run(listener: *Net.tls.Listener, result: *ThreadResult) void {
+                            var thread_err: ?anyerror = null;
+                            defer result.finish(thread_err);
+
                             var conn = listener.accept() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             defer conn.deinit();
 
                             const typed = conn.as(Net.tls.ServerConn) catch {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             };
                             typed.handshake() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
 
                             var buf: [4]u8 = undefined;
                             test_utils.readAll(conn, &buf) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             test_utils.writeAll(conn, "pong") catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
-                            if (!std.mem.eql(u8, &buf, "ping")) result.* = error.TestUnexpectedResult;
+                            if (!std.mem.eql(u8, &buf, "ping")) thread_err = error.TestUnexpectedResult;
                         }
                     }.run, .{ tls_listener, &server_result });
                     defer server_thread.join();
@@ -84,7 +89,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     try test_utils.readAll(tls_client, &resp);
                     try std.testing.expectEqualStrings("pong", &resp);
 
-                    if (server_result) |err| return err;
+                    if (server_result.wait()) |err| return err;
                 }
             };
             Body.call(allocator) catch |err| {

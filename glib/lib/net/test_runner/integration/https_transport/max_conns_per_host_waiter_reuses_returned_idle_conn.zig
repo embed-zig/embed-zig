@@ -1,6 +1,7 @@
 const stdz = @import("stdz");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
+const thread_sync = @import("../../test_utils/thread_sync.zig");
 
 pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Utils = test_utils.make(std, net);
@@ -35,6 +36,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         reused: bool = false,
                         accepted: usize = 0,
                     };
+                    const ThreadSnapshot = thread_sync.ThreadSnapshot(std, ReuseState);
 
                     const RoundTripTask = struct {
                         mutex: Thread.Mutex = .{},
@@ -67,7 +69,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         }
                     };
 
-                    var state = ReuseState{};
+                    var server_state = ThreadSnapshot{};
                     var ln = try Net.tls.listen(testing.allocator, .{
                         .address = Utils.addr4(0),
                     }, Utils.tlsServerConfig());
@@ -75,28 +77,31 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
 
                     const listener_impl = try ln.as(Net.tls.Listener);
                     const port = try Utils.tlsListenerPort(ln, Net);
-                    var server_result: ?anyerror = null;
 
                     var server_thread = try Thread.spawn(test_spawn_config, struct {
-                        fn run(listener: *Net.tls.Listener, reuse_state: *ReuseState, result: *?anyerror) void {
+                        fn run(listener: *Net.tls.Listener, result: *ThreadSnapshot) void {
+                            var snapshot = ReuseState{};
+                            var thread_err: ?anyerror = null;
+                            defer result.finish(snapshot, thread_err);
+
                             var conn = listener.accept() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             defer conn.deinit();
-                            reuse_state.accepted += 1;
+                            snapshot.accepted += 1;
 
                             const typed = conn.as(Net.tls.ServerConn) catch {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             };
                             typed.handshake() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
 
                             _ = Utils.serveKeepAliveRequest(conn, "GET /cap-reuse-1 HTTP/1.1", "first over tls", false) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
 
@@ -107,13 +112,13 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                                 error.Unexpected,
                                 => false,
                                 else => {
-                                    result.* = err;
+                                    thread_err = err;
                                     return;
                                 },
                             };
-                            if (reused) reuse_state.reused = true;
+                            if (reused) snapshot.reused = true;
                         }
-                    }.run, .{ listener_impl, &state, &server_result });
+                    }.run, .{ listener_impl, &server_state });
                     defer server_thread.join();
 
                     var transport = try Http.Transport.init(testing.allocator, .{
@@ -155,9 +160,9 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     const body2 = try Utils.readBody(testing.allocator, resp2);
                     defer testing.allocator.free(body2);
                     try testing.expectEqualStrings("second over tls", body2);
-                    if (server_result) |err| return err;
-                    try testing.expect(state.reused);
-                    try testing.expectEqual(@as(usize, 1), state.accepted);
+                    const snapshot = try server_state.wait();
+                    try testing.expect(snapshot.reused);
+                    try testing.expectEqual(@as(usize, 1), snapshot.accepted);
                 }
             };
             Body.call(run_allocator) catch |err| {

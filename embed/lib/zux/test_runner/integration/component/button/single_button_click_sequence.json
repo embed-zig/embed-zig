@@ -3,6 +3,27 @@
   "spec": {
     "name": "single button click sequence",
     "description": "drives 1,2,1,2,3,4,5 tap sequences and settles each click count",
+    "initial_state": {
+      "single_button": {},
+      "grouped_button": {},
+      "strip": {},
+      "sensor": {},
+      "cell": {},
+      "reader": {},
+      "sta": {},
+      "ap": {},
+      "pairing": {
+        "node": "idle"
+      },
+      "loading": {},
+      "menu": {
+        "count": 3,
+        "loop": true
+      },
+      "route": {
+        "current_page": 1
+      }
+    },
     "steps": [
       {
         "inputs": [

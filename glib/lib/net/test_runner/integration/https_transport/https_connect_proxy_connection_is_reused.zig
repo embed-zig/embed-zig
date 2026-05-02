@@ -2,6 +2,7 @@ const stdz = @import("stdz");
 const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
+const thread_sync = @import("../../test_utils/thread_sync.zig");
 
 pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Utils = test_utils.make(std, net);
@@ -41,36 +42,41 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                         accepted: usize = 0,
                         saw_header: bool = false,
                     };
+                    const ReuseResult = thread_sync.ThreadSnapshot(std, ReuseState);
+                    const ProxyResult = thread_sync.ThreadSnapshot(std, ProxyState);
 
-                    var target_state = ReuseState{};
+                    var target_result = ReuseResult{};
                     var target_ln = try Net.tls.listen(testing.allocator, .{
                         .address = Utils.addr4(0),
                     }, Utils.tlsServerConfig());
                     defer target_ln.deinit();
                     const target_listener = try target_ln.as(Net.tls.Listener);
                     const target_port = try Utils.tlsListenerPort(target_ln, Net);
-                    var target_result: ?anyerror = null;
 
                     var target_thread = try Thread.spawn(test_spawn_config, struct {
-                        fn run(listener: *Net.tls.Listener, reuse_state: *ReuseState, result: *?anyerror) void {
+                        fn run(listener: *Net.tls.Listener, result: *ReuseResult) void {
+                            var snapshot = ReuseState{};
+                            var thread_err: ?anyerror = null;
+                            defer result.finish(snapshot, thread_err);
+
                             var conn = listener.accept() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             defer conn.deinit();
-                            reuse_state.accepted += 1;
+                            snapshot.accepted += 1;
 
                             const typed = conn.as(Net.tls.ServerConn) catch {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             };
                             typed.handshake() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
 
                             _ = Utils.serveKeepAliveRequest(conn, "GET /first HTTP/1.1", "first via proxy", false) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
 
@@ -81,66 +87,68 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                                 error.Unexpected,
                                 => false,
                                 else => {
-                                    result.* = err;
+                                    thread_err = err;
                                     return;
                                 },
                             };
-                            if (reused) reuse_state.reused = true;
+                            if (reused) snapshot.reused = true;
                         }
-                    }.run, .{ target_listener, &target_state, &target_result });
+                    }.run, .{ target_listener, &target_result });
                     defer target_thread.join();
 
                     var proxy_ln = try Net.listen(testing.allocator, .{ .address = Utils.addr4(0) });
                     defer proxy_ln.deinit();
                     const proxy_listener = try proxy_ln.as(Net.TcpListener);
                     const proxy_port = try Utils.tcpListenerPort(proxy_ln, Net);
-                    var proxy_state = ProxyState{};
-                    var proxy_result: ?anyerror = null;
+                    var proxy_result = ProxyResult{};
 
                     var proxy_thread = try Thread.spawn(test_spawn_config, struct {
                         fn run(
                             listener: *Net.TcpListener,
                             target_port_value: u16,
-                            state: *ProxyState,
-                            result: *?anyerror,
+                            result: *ProxyResult,
                         ) void {
+                            var snapshot = ProxyState{};
+                            var thread_err: ?anyerror = null;
+                            defer result.finish(snapshot, thread_err);
+
                             var conn = listener.accept() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             defer conn.deinit();
-                            state.accepted += 1;
+                            snapshot.accepted += 1;
 
                             var req_buf: [4096]u8 = undefined;
                             const req_head = Utils.readRequestHead(conn, &req_buf) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             var line_buf: [64]u8 = undefined;
                             const expected = std.fmt.bufPrint(&line_buf, "CONNECT 127.0.0.1:{d} HTTP/1.1", .{target_port_value}) catch {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             };
                             if (!Utils.hasRequestLine(req_head, expected)) {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             }
 
                             var upstream = Net.dial(testing.allocator, .tcp, Utils.addr4(target_port_value)) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             defer upstream.deinit();
 
                             io.writeAll(@TypeOf(conn), &conn, "HTTP/1.1 200 Connection established\r\nContent-Length: 0\r\n\r\n") catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             Utils.bridgeTunnel(conn, upstream) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                             };
                         }
-                    }.run, .{ proxy_listener, target_port, &proxy_state, &proxy_result });
+                    }.run, .{ proxy_listener, target_port, &proxy_result });
                     defer proxy_thread.join();
 
                     const proxy_raw_url = try std.fmt.allocPrint(testing.allocator, "http://127.0.0.1:{d}", .{proxy_port});
@@ -170,11 +178,11 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     try testing.expectEqualStrings("second via proxy", body2);
                     resp2.deinit();
 
-                    try testing.expectEqual(@as(usize, 1), proxy_state.accepted);
-                    try testing.expect(target_state.reused);
-                    try testing.expectEqual(@as(usize, 1), target_state.accepted);
-                    if (proxy_result) |err| return err;
-                    if (target_result) |err| return err;
+                    const proxy_snapshot = try proxy_result.wait();
+                    const target_snapshot = try target_result.wait();
+                    try testing.expectEqual(@as(usize, 1), proxy_snapshot.accepted);
+                    try testing.expect(target_snapshot.reused);
+                    try testing.expectEqual(@as(usize, 1), target_snapshot.accepted);
                 }
             };
             Body.call(run_allocator) catch |err| {

@@ -20,6 +20,7 @@ pub const Output = struct {
 
 name: []const u8 = "",
 description: []const u8 = "",
+initial_state: []const u8 = "",
 steps: []const Step,
 
 pub fn parseSlice(comptime source: []const u8) UserStory {
@@ -35,6 +36,33 @@ pub fn parseSlice(comptime source: []const u8) UserStory {
 
 pub fn deinit(self: *UserStory) void {
     _ = self;
+}
+
+pub fn decodeInitialState(
+    self: *const UserStory,
+    comptime InitialState: type,
+    allocator: glib.std.mem.Allocator,
+) !InitialState {
+    if (self.initial_state.len == 0) return error.MissingInitialState;
+
+    var parsed = try glib.std.json.parseFromSlice(
+        glib.std.json.Value,
+        allocator,
+        self.initial_state,
+        .{},
+    );
+    defer parsed.deinit();
+    return try decodeJsonValue(InitialState, allocator, parsed.value);
+}
+
+pub fn freeInitialState(
+    self: *const UserStory,
+    comptime InitialState: type,
+    allocator: glib.std.mem.Allocator,
+    value: *const InitialState,
+) void {
+    _ = self;
+    freeDecodedValue(InitialState, allocator, value);
 }
 
 pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *ZuxApp) glib.testing.TestRunner {
@@ -242,6 +270,7 @@ fn parseStoryFromParser(parser: *JsonParser) UserStory {
 
     var name: ?[]const u8 = null;
     var description: []const u8 = "";
+    var initial_state: []const u8 = "";
     var steps: ?[]const Step = null;
 
     if (parser.consumeByte('}')) {
@@ -259,6 +288,8 @@ fn parseStoryFromParser(parser: *JsonParser) UserStory {
             name = parser.parseString();
         } else if (comptimeEql(key, "description")) {
             description = parser.parseString();
+        } else if (comptimeEql(key, "initial_state")) {
+            initial_state = parser.parseValueSlice();
         } else if (comptimeEql(key, "steps")) {
             if (steps != null) {
                 @compileError("zux.spec.UserStory.parseSlice duplicate `steps` field");
@@ -266,7 +297,7 @@ fn parseStoryFromParser(parser: *JsonParser) UserStory {
             steps = parseStepArray(parser.parseValueSlice());
         } else {
             _ = parser.parseValueSlice();
-            @compileError("zux.spec.UserStory.parseSlice only supports `name`, `description`, and `steps` fields");
+            @compileError("zux.spec.UserStory.parseSlice only supports `name`, `description`, `initial_state`, and `steps` fields");
         }
 
         if (parser.consumeByte(',')) continue;
@@ -277,6 +308,7 @@ fn parseStoryFromParser(parser: *JsonParser) UserStory {
     return .{
         .name = name orelse @compileError("zux.spec.UserStory.parseSlice requires a `name` field"),
         .description = description,
+        .initial_state = initial_state,
         .steps = steps orelse @compileError("zux.spec.UserStory.parseSlice requires a `steps` field"),
     };
 }
@@ -883,6 +915,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 \\{
                 \\  "name": "counter story",
                 \\  "description": "drives a counter through ticks and button input",
+                \\  "initial_state": {
+                \\    "counter": {
+                \\      "ticks": 0,
+                \\      "pressed": false
+                \\    }
+                \\  },
                 \\  "steps": [
                 \\    {
                 \\      "tick": {
@@ -920,6 +958,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expectEqualStrings("counter story", parsed.name);
             try grt.std.testing.expectEqualStrings("drives a counter through ticks and button input", parsed.description);
+            try grt.std.testing.expect(parsed.initial_state.len != 0);
             try grt.std.testing.expectEqual(@as(usize, 3), parsed.steps.len);
 
             if (parsed.steps[0].tick) |tick| {

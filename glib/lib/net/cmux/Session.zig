@@ -272,6 +272,7 @@ pub fn make(comptime std: type, comptime time: type) type {
                 std.mem.copyForwards(u8, channel.rx.items[0 .. rx.len - n], channel.rx.items[n..rx.len]);
                 channel.rx.items.len = rx.len - n;
             }
+            channel.cond.broadcast();
             return n;
         }
 
@@ -628,8 +629,11 @@ pub fn make(comptime std: type, comptime time: type) type {
             channel.mutex.lock();
             defer channel.mutex.unlock();
             if (channel.phase != .open) return;
-            const next_len, const overflow = @addWithOverflow(channel.rx.items.len, info.len);
-            if (overflow != 0 or next_len > self.options.read_buffer_size) return error.FrameTooLarge;
+            if (info.len > self.options.read_buffer_size) return error.FrameTooLarge;
+            while (channel.phase == .open and availableRx(channel) > self.options.read_buffer_size - info.len) {
+                channel.cond.wait(&channel.mutex);
+            }
+            if (channel.phase != .open) return;
             try channel.rx.appendSlice(self.allocator, info);
             channel.cond.broadcast();
         }

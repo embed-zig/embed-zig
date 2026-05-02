@@ -1,0 +1,20 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Component/button/single",
+      "spec": {
+        "label": "button",
+        "id": 1
+      }
+    },
+    {
+      "kind": "Component/led_strip",
+      "spec": {
+        "label": "strip",
+        "id": 2,
+        "pixel_count": 8
+      }
+    }
+  ]
+}

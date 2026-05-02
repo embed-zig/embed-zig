@@ -28,15 +28,16 @@ pub fn init() root {
     return .{};
 }
 
-pub fn makeRouterStoreType(comptime grt: type, comptime initial: route_component.Router.Item) type {
+pub fn makeRouterStoreType(comptime grt: type) type {
     const Inner = route_component.Reducer.make(grt);
 
     return struct {
         const Self = @This();
+        pub const StateType = Inner.StateType;
 
         inner: Inner,
 
-        pub fn init(allocator: glib.std.mem.Allocator, _: anytype) !Self {
+        pub fn init(allocator: glib.std.mem.Allocator, initial: StateType) !Self {
             return .{
                 .inner = try Inner.init(allocator, initial),
             };
@@ -72,15 +73,16 @@ pub fn makeRouterStoreType(comptime grt: type, comptime initial: route_component
     };
 }
 
-pub fn makeSelectionStoreType(comptime grt: type, comptime initial: selection_component.State) type {
+pub fn makeSelectionStoreType(comptime grt: type) type {
     const Inner = selection_component.Reducer.make(grt);
 
     return struct {
         const Self = @This();
+        pub const StateType = Inner.StateType;
 
         inner: Inner,
 
-        pub fn init(allocator: glib.std.mem.Allocator, _: anytype) Self {
+        pub fn init(allocator: glib.std.mem.Allocator, initial: StateType) Self {
             return .{
                 .inner = Inner.init(allocator, initial),
             };
@@ -117,12 +119,13 @@ pub fn makeFlowStoreType(comptime grt: type, comptime FlowType: type) type {
 
     return struct {
         const Self = @This();
+        pub const StateType = Inner.StateType;
 
         inner: Inner,
 
-        pub fn init(allocator: glib.std.mem.Allocator, _: anytype) Self {
+        pub fn init(allocator: glib.std.mem.Allocator, initial: StateType) Self {
             return .{
-                .inner = Inner.init(allocator, FlowType.initialState()),
+                .inner = Inner.init(allocator, initial),
             };
         }
 
@@ -152,15 +155,16 @@ pub fn makeFlowStoreType(comptime grt: type, comptime FlowType: type) type {
     };
 }
 
-pub fn makeOverlayStoreType(comptime grt: type, comptime initial: overlay_component.State) type {
+pub fn makeOverlayStoreType(comptime grt: type) type {
     const Inner = overlay_component.Reducer.make(grt);
 
     return struct {
         const Self = @This();
+        pub const StateType = Inner.StateType;
 
         inner: Inner,
 
-        pub fn init(allocator: glib.std.mem.Allocator, _: anytype) Self {
+        pub fn init(allocator: glib.std.mem.Allocator, initial: StateType) Self {
             return .{
                 .inner = Inner.init(allocator, initial),
             };
@@ -257,6 +261,7 @@ pub fn build(builder: root, comptime context: anytype) type {
 
     const runtime_store_builder = makeRuntimeStoreBuilder(context);
     const StoreType = runtime_store_builder.make(context.grt);
+    const GeneratedInitialState = makeInitialStateType(StoreType.Stores);
 
     const UserRoot = if (has_user_root_config) context.node_builder.make() else void;
     const runtime_node_builder = makeRuntimeNodeBuilder(context);
@@ -272,6 +277,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const WifiApInstances = makePeriphInstancesType(context.build_config, wifi_ap_registry);
     const GeneratedInitConfig = makeInitConfigType(
         context.grt,
+        GeneratedInitialState,
         context.build_config,
         context.registries,
         has_user_root_config,
@@ -606,6 +612,7 @@ pub fn build(builder: root, comptime context: anytype) type {
         pub const InitConfig = GeneratedInitConfig;
         pub const StartConfig = App.StartConfig;
         pub const Store = StoreType;
+        pub const InitialState = GeneratedInitialState;
         pub const Root = BuiltRoot;
         pub const Label = AppLabel;
         pub const PeriphLabel = AppLabel;
@@ -697,7 +704,7 @@ pub fn build(builder: root, comptime context: anytype) type {
                 runtime.wifi_stas = initWifiStaInstances(init_config);
                 runtime.wifi_aps = initWifiApInstances(init_config);
 
-                const stores = try initStoreValues(init_config.allocator);
+                const stores = try initStoreValues(init_config.allocator, init_config.initial_state);
                 runtime.store = try StoreType.init(init_config.allocator, stores);
                 errdefer {
                     inline for (0..configured_render_count) |i| {
@@ -1063,22 +1070,30 @@ pub fn build(builder: root, comptime context: anytype) type {
                 return wifi_aps;
             }
 
-            fn initStoreValues(allocator: glib.std.mem.Allocator) !StoreType.Stores {
+            fn initStoreValues(allocator: glib.std.mem.Allocator, initial_state: InitialState) !StoreType.Stores {
                 var stores_value: StoreType.Stores = undefined;
                 var initialized_count: usize = 0;
                 errdefer deinitStoreValuesPrefix(&stores_value, initialized_count);
 
                 inline for (@typeInfo(StoreType.Stores).@"struct".fields) |field| {
-                    @field(stores_value, field.name) = try initStoreValue(field.type, allocator);
+                    @field(stores_value, field.name) = try initStoreValue(
+                        field.type,
+                        allocator,
+                        @field(initial_state, field.name),
+                    );
                     initialized_count += 1;
                 }
 
                 return stores_value;
             }
 
-            fn initStoreValue(comptime StoreFieldType: type, allocator: glib.std.mem.Allocator) !StoreFieldType {
+            fn initStoreValue(
+                comptime StoreFieldType: type,
+                allocator: glib.std.mem.Allocator,
+                initial_state: StoreFieldType.StateType,
+            ) !StoreFieldType {
                 if (@hasDecl(StoreFieldType, "init")) {
-                    const result = StoreFieldType.init(allocator, .{});
+                    const result = StoreFieldType.init(allocator, initial_state);
                     return switch (@typeInfo(@TypeOf(result))) {
                         .error_union => try result,
                         else => result,
@@ -2303,13 +2318,14 @@ fn makePeriphInstancesType(comptime build_config_value: anytype, comptime regist
 
 fn makeInitConfigType(
     comptime grt: type,
+    comptime InitialState: type,
     comptime build_config_value: anytype,
     comptime registries: anytype,
     comptime has_user_root_config: bool,
     comptime UserRootConfig: type,
 ) type {
     _ = grt;
-    const total_fields = 1 + totalPeriphLen(registries) + @as(usize, if (has_user_root_config) 1 else 0);
+    const total_fields = 2 + totalPeriphLen(registries) + @as(usize, if (has_user_root_config) 1 else 0);
     var fields: [total_fields]glib.std.builtin.Type.StructField = undefined;
     comptime var field_index: usize = 0;
 
@@ -2319,6 +2335,15 @@ fn makeInitConfigType(
         .default_value_ptr = null,
         .is_comptime = false,
         .alignment = @alignOf(glib.std.mem.Allocator),
+    };
+    field_index += 1;
+
+    fields[field_index] = .{
+        .name = "initial_state",
+        .type = InitialState,
+        .default_value_ptr = null,
+        .is_comptime = false,
+        .alignment = @alignOf(InitialState),
     };
     field_index += 1;
 
@@ -2348,6 +2373,31 @@ fn makeInitConfigType(
             .alignment = @alignOf(UserRootConfig),
         };
         field_index += 1;
+    }
+
+    return @Type(.{
+        .@"struct" = .{
+            .layout = .auto,
+            .fields = &fields,
+            .decls = &.{},
+            .is_tuple = false,
+        },
+    });
+}
+
+fn makeInitialStateType(comptime Stores: type) type {
+    const store_fields = @typeInfo(Stores).@"struct".fields;
+    var fields: [store_fields.len]glib.std.builtin.Type.StructField = undefined;
+
+    inline for (store_fields, 0..) |field, i| {
+        const StateType = field.type.StateType;
+        fields[i] = .{
+            .name = sentinelName(field.name),
+            .type = StateType,
+            .default_value_ptr = null,
+            .is_comptime = false,
+            .alignment = @alignOf(StateType),
+        };
     }
 
     return @Type(.{

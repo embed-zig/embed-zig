@@ -1,8 +1,5 @@
 const glib = @import("glib");
 const ui_flow = @import("../component/ui/flow.zig");
-const ui_overlay = @import("../component/ui/overlay.zig");
-const route = @import("../component/ui/route.zig");
-const ui_selection = @import("../component/ui/selection.zig");
 const JsonParser = @import("JsonParser.zig");
 const Component = @This();
 
@@ -13,7 +10,6 @@ pub const FlowEdge = struct {
 };
 
 pub const FlowSpec = struct {
-    initial: []const u8,
     nodes: []const []const u8,
     edges: []const FlowEdge,
 
@@ -22,7 +18,6 @@ pub const FlowSpec = struct {
         inline for (self.nodes) |node_name| {
             builder.addNode(node_name);
         }
-        builder.setInitial(self.initial);
         inline for (self.edges) |edge| {
             builder.addEdge(edge.from, edge.to, edge.event);
         }
@@ -43,16 +38,10 @@ pub const Kind = union(enum) {
     nfc: void,
     wifi_sta: void,
     wifi_ap: void,
-    router: struct {
-        initial_item: route.Router.Item,
-    },
+    router: void,
     flow: FlowSpec,
-    overlay: struct {
-        initial_state: ui_overlay.State,
-    },
-    selection: struct {
-        initial_state: ui_selection.State,
-    },
+    overlay: void,
+    selection: void,
 };
 
 label: []const u8,
@@ -292,7 +281,6 @@ fn freeRuntimeKind(kind: Kind, allocator: glib.std.mem.Allocator) void {
 }
 
 fn freeRuntimeFlow(flow: FlowSpec, allocator: glib.std.mem.Allocator) void {
-    allocator.free(flow.initial);
     freeRuntimeFlowNodes(flow.nodes, allocator);
     freeRuntimeFlowEdges(flow.edges, allocator);
 }
@@ -363,18 +351,8 @@ fn parseKindValue(
         return .{ .wifi_ap = {} };
     }
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "router")) {
-        var payload = try glib.std.json.parseFromValue(
-            struct { initial_item: route.Router.Item },
-            allocator,
-            entry.value_ptr.*,
-            .{},
-        );
-        defer payload.deinit();
-        return .{
-            .router = .{
-                .initial_item = payload.value.initial_item,
-            },
-        };
+        try expectEmptyPayload(entry.value_ptr.*);
+        return .{ .router = {} };
     }
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "flow")) {
         return .{
@@ -386,32 +364,12 @@ fn parseKindValue(
         };
     }
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "overlay")) {
-        var payload = try glib.std.json.parseFromValue(
-            struct { initial_state: ui_overlay.State },
-            allocator,
-            entry.value_ptr.*,
-            .{},
-        );
-        defer payload.deinit();
-        return .{
-            .overlay = .{
-                .initial_state = payload.value.initial_state,
-            },
-        };
+        try expectEmptyPayload(entry.value_ptr.*);
+        return .{ .overlay = {} };
     }
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "selection")) {
-        var payload = try glib.std.json.parseFromValue(
-            struct { initial_state: ui_selection.State },
-            allocator,
-            entry.value_ptr.*,
-            .{},
-        );
-        defer payload.deinit();
-        return .{
-            .selection = .{
-                .initial_state = payload.value.initial_state,
-            },
-        };
+        try expectEmptyPayload(entry.value_ptr.*);
+        return .{ .selection = {} };
     }
 
     return error.UnknownComponentKind;
@@ -428,23 +386,12 @@ fn parseFlowPayloadValue(
     };
     var iterator = object.iterator();
     while (iterator.next()) |entry| {
-        if (!glib.std.mem.eql(u8, entry.key_ptr.*, "initial") and
-            !glib.std.mem.eql(u8, entry.key_ptr.*, "nodes") and
+        if (!glib.std.mem.eql(u8, entry.key_ptr.*, "nodes") and
             !glib.std.mem.eql(u8, entry.key_ptr.*, "edges"))
         {
             return error.UnknownFlowField;
         }
     }
-
-    const initial = try parseRequiredNonEmptyStringFieldValue(
-        allocator,
-        object,
-        "initial",
-        error.MissingFlowInitial,
-        error.ExpectedFlowInitialString,
-        error.EmptyFlowInitial,
-    );
-    errdefer allocator.free(initial);
 
     const nodes = try parseFlowNodesValue(
         allocator,
@@ -458,9 +405,8 @@ fn parseFlowPayloadValue(
     );
     errdefer freeRuntimeFlowEdges(edges, allocator);
 
-    try validateRuntimeFlow(initial, nodes, edges, context);
+    try validateRuntimeFlow(nodes, edges, context);
     return .{
-        .initial = initial,
         .nodes = nodes,
         .edges = edges,
     };
@@ -576,27 +522,18 @@ fn parseFlowPayloadSlice(
     var parser = JsonParser.init(source);
     parser.expectByte('{');
 
-    var initial: ?[]const u8 = null;
     var nodes: ?[]const []const u8 = null;
     var edges: ?[]const FlowEdge = null;
 
     if (parser.consumeByte('}')) {
-        @compileError(context ++ " requires `initial`, `nodes`, and `edges` fields");
+        @compileError(context ++ " requires `nodes` and `edges` fields");
     }
 
     while (true) {
         const key = parser.parseString();
         parser.expectByte(':');
         const value_source = parser.parseValueSlice();
-        if (comptimeEql(key, "initial")) {
-            if (initial != null) {
-                @compileError(context ++ " contains duplicate `initial` field");
-            }
-            initial = parseRequiredStringValueSlice(
-                value_source,
-                context ++ " `initial`",
-            );
-        } else if (comptimeEql(key, "nodes")) {
+        if (comptimeEql(key, "nodes")) {
             if (nodes != null) {
                 @compileError(context ++ " contains duplicate `nodes` field");
             }
@@ -607,7 +544,7 @@ fn parseFlowPayloadSlice(
             }
             edges = parseFlowEdgesSlice(value_source, context ++ " `edges`");
         } else {
-            @compileError(context ++ " only supports `initial`, `nodes`, and `edges` fields");
+            @compileError(context ++ " only supports `nodes` and `edges` fields");
         }
 
         if (parser.consumeByte(',')) continue;
@@ -617,7 +554,6 @@ fn parseFlowPayloadSlice(
     parser.finish();
 
     const flow = FlowSpec{
-        .initial = initial orelse @compileError(context ++ " requires `initial`"),
         .nodes = nodes orelse @compileError(context ++ " requires `nodes`"),
         .edges = edges orelse @compileError(context ++ " requires `edges`"),
     };
@@ -753,20 +689,14 @@ fn parseFlowPayloadComptime(
     var iterator = object.iterator();
     while (iterator.next()) |entry| {
         const field_name = entry.key_ptr.*;
-        if (!comptimeEql(field_name, "initial") and
-            !comptimeEql(field_name, "nodes") and
+        if (!comptimeEql(field_name, "nodes") and
             !comptimeEql(field_name, "edges"))
         {
-            @compileError(context ++ " only supports `initial`, `nodes`, and `edges` fields");
+            @compileError(context ++ " only supports `nodes` and `edges` fields");
         }
     }
 
     const flow = FlowSpec{
-        .initial = parseNonEmptyStringValueComptime(
-            object.get("initial") orelse
-                @compileError(context ++ " requires an `initial` field"),
-            context ++ " `initial`",
-        ),
         .nodes = parseFlowNodesComptime(
             object.get("nodes") orelse
                 @compileError(context ++ " requires a `nodes` field"),
@@ -850,13 +780,11 @@ fn parseFlowEdgeComptime(
 }
 
 fn validateRuntimeFlow(
-    initial: []const u8,
     nodes: []const []const u8,
     edges: []const FlowEdge,
     comptime _: []const u8,
 ) !void {
     if (nodes.len == 0) return error.EmptyFlowNodes;
-    if (!containsText(nodes, initial)) return error.FlowInitialNotInNodes;
     if (hasDuplicateText(nodes)) return error.DuplicateFlowNode;
     if (!allFlowEdgeFromKnown(nodes, edges)) return error.FlowEdgeUnknownFrom;
     if (!allFlowEdgeToKnown(nodes, edges)) return error.FlowEdgeUnknownTo;
@@ -868,9 +796,6 @@ fn validateFlowComptime(
 ) void {
     if (flow.nodes.len == 0) {
         @compileError(context ++ " `nodes` must not be empty");
-    }
-    if (!containsText(flow.nodes, flow.initial)) {
-        @compileError(context ++ " `initial` must exist in `nodes`");
     }
     if (hasDuplicateText(flow.nodes)) {
         @compileError(context ++ " contains duplicate node labels");
@@ -1022,46 +947,28 @@ fn parseKindSlice(comptime source: []const u8) Kind {
         return .{ .wifi_ap = {} };
     }
     if (comptimeEql(kind_name, "router")) {
-        return .{
-            .router = .{
-                .initial_item = parseRouterItemSlice(
-                    parseRequiredValueFieldFromObjectSlice(
-                        payload_source,
-                        "initial_item",
-                        "zux.spec.Component.parseSlice router payload",
-                    ),
-                ),
-            },
-        };
+        expectEmptyPayloadSlice(
+            payload_source,
+            "zux.spec.Component.parseSlice router payload",
+        );
+        return .{ .router = {} };
     }
     if (comptimeEql(kind_name, "flow")) {
         return .{ .flow = parseFlowPayloadSlice(payload_source, "zux.spec.Component.parseSlice flow payload") };
     }
     if (comptimeEql(kind_name, "overlay")) {
-        return .{
-            .overlay = .{
-                .initial_state = parseOverlayStateSlice(
-                    parseRequiredValueFieldFromObjectSlice(
-                        payload_source,
-                        "initial_state",
-                        "zux.spec.Component.parseSlice overlay payload",
-                    ),
-                ),
-            },
-        };
+        expectEmptyPayloadSlice(
+            payload_source,
+            "zux.spec.Component.parseSlice overlay payload",
+        );
+        return .{ .overlay = {} };
     }
     if (comptimeEql(kind_name, "selection")) {
-        return .{
-            .selection = .{
-                .initial_state = parseSelectionStateSlice(
-                    parseRequiredValueFieldFromObjectSlice(
-                        payload_source,
-                        "initial_state",
-                        "zux.spec.Component.parseSlice selection payload",
-                    ),
-                ),
-            },
-        };
+        expectEmptyPayloadSlice(
+            payload_source,
+            "zux.spec.Component.parseSlice selection payload",
+        );
+        return .{ .selection = {} };
     }
 
     @compileError("zux.spec.Component.parseSlice encountered an unknown component kind");
@@ -1109,17 +1016,7 @@ fn parsePathKindSlice(comptime kind_path: []const u8, comptime source: []const u
         return .{ .wifi_ap = {} };
     }
     if (comptimeEql(kind_path, "ui/route")) {
-        return .{
-            .router = .{
-                .initial_item = parseRouterItemSlice(
-                    parseRequiredValueFieldFromObjectSlice(
-                        source,
-                        "initial_item",
-                        "zux.spec.Component.parseSlice Component/ui/route",
-                    ),
-                ),
-            },
-        };
+        return .{ .router = {} };
     }
     if (comptimeEql(kind_path, "ui/flow")) {
         return .{
@@ -1134,30 +1031,10 @@ fn parsePathKindSlice(comptime kind_path: []const u8, comptime source: []const u
         };
     }
     if (comptimeEql(kind_path, "ui/overlay")) {
-        return .{
-            .overlay = .{
-                .initial_state = parseOverlayStateSlice(
-                    parseRequiredValueFieldFromObjectSlice(
-                        source,
-                        "initial_state",
-                        "zux.spec.Component.parseSlice Component/ui/overlay",
-                    ),
-                ),
-            },
-        };
+        return .{ .overlay = {} };
     }
     if (comptimeEql(kind_path, "ui/selection")) {
-        return .{
-            .selection = .{
-                .initial_state = parseSelectionStateSlice(
-                    parseRequiredValueFieldFromObjectSlice(
-                        source,
-                        "initial_state",
-                        "zux.spec.Component.parseSlice Component/ui/selection",
-                    ),
-                ),
-            },
-        };
+        return .{ .selection = {} };
     }
 
     @compileError("zux.spec.Component.parseSlice encountered an unknown component kind path");
@@ -1211,14 +1088,7 @@ fn parsePathKindValue(
         return .{ .wifi_ap = {} };
     }
     if (glib.std.mem.eql(u8, kind_path, "ui/route")) {
-        const initial_item_value = object.get("initial_item") orelse return error.MissingRouterInitialItem;
-        var payload = try glib.std.json.parseFromValue(route.Router.Item, allocator, initial_item_value, .{});
-        defer payload.deinit();
-        return .{
-            .router = .{
-                .initial_item = payload.value,
-            },
-        };
+        return .{ .router = {} };
     }
     if (glib.std.mem.eql(u8, kind_path, "ui/flow")) {
         return .{
@@ -1230,144 +1100,13 @@ fn parsePathKindValue(
         };
     }
     if (glib.std.mem.eql(u8, kind_path, "ui/overlay")) {
-        const initial_state_value = object.get("initial_state") orelse return error.MissingOverlayInitialState;
-        var payload = try glib.std.json.parseFromValue(
-            ui_overlay.State,
-            allocator,
-            initial_state_value,
-            .{},
-        );
-        defer payload.deinit();
-        return .{
-            .overlay = .{
-                .initial_state = payload.value,
-            },
-        };
+        return .{ .overlay = {} };
     }
     if (glib.std.mem.eql(u8, kind_path, "ui/selection")) {
-        const initial_state_value = object.get("initial_state") orelse return error.MissingSelectionInitialState;
-        var payload = try glib.std.json.parseFromValue(
-            ui_selection.State,
-            allocator,
-            initial_state_value,
-            .{},
-        );
-        defer payload.deinit();
-        return .{
-            .selection = .{
-                .initial_state = payload.value,
-            },
-        };
+        return .{ .selection = {} };
     }
 
     return error.UnknownComponentKind;
-}
-
-fn parseRouterItemSlice(comptime source: []const u8) route.Router.Item {
-    var parser = JsonParser.init(source);
-    parser.expectByte('{');
-
-    var item: route.Router.Item = .{};
-    if (parser.consumeByte('}')) {
-        parser.finish();
-        return item;
-    }
-
-    while (true) {
-        const field_name = parser.parseString();
-        parser.expectByte(':');
-
-        if (comptimeEql(field_name, "screen_id")) {
-            item.screen_id = parser.parseU32();
-        } else if (comptimeEql(field_name, "arg0")) {
-            item.arg0 = parser.parseU32();
-        } else if (comptimeEql(field_name, "arg1")) {
-            item.arg1 = parser.parseU32();
-        } else if (comptimeEql(field_name, "flags")) {
-            item.flags = parser.parseU32();
-        } else {
-            _ = parser.parseValueSlice();
-            @compileError("zux.spec.Component.parseSlice router initial_item contains an unknown field");
-        }
-
-        if (parser.consumeByte(',')) continue;
-        parser.expectByte('}');
-        break;
-    }
-
-    parser.finish();
-    return item;
-}
-
-fn parseOverlayStateSlice(comptime source: []const u8) ui_overlay.State {
-    var parser = JsonParser.init(source);
-    parser.expectByte('{');
-
-    var state: ui_overlay.State = .{};
-    if (parser.consumeByte('}')) {
-        parser.finish();
-        return state;
-    }
-
-    while (true) {
-        const field_name = parser.parseString();
-        parser.expectByte(':');
-
-        if (comptimeEql(field_name, "visible")) {
-            state.visible = parser.parseBool();
-        } else if (comptimeEql(field_name, "name")) {
-            const fields = ui_overlay.State.nameFields(parser.parseString()) catch
-                @compileError("zux.spec.Component.parseSlice overlay initial_state `name` is too long");
-            state.name = fields.name;
-            state.name_len = fields.name_len;
-        } else if (comptimeEql(field_name, "blocking")) {
-            state.blocking = parser.parseBool();
-        } else {
-            _ = parser.parseValueSlice();
-            @compileError("zux.spec.Component.parseSlice overlay initial_state contains an unknown field");
-        }
-
-        if (parser.consumeByte(',')) continue;
-        parser.expectByte('}');
-        break;
-    }
-
-    parser.finish();
-    return state;
-}
-
-fn parseSelectionStateSlice(comptime source: []const u8) ui_selection.State {
-    var parser = JsonParser.init(source);
-    parser.expectByte('{');
-
-    var state: ui_selection.State = .{};
-    if (parser.consumeByte('}')) {
-        parser.finish();
-        return state;
-    }
-
-    while (true) {
-        const field_name = parser.parseString();
-        parser.expectByte(':');
-
-        if (comptimeEql(field_name, "index")) {
-            state.index = parser.parseUsize();
-        } else if (comptimeEql(field_name, "count")) {
-            state.count = parser.parseUsize();
-        } else if (comptimeEql(field_name, "loop")) {
-            state.loop = parser.parseBool();
-        } else {
-            _ = parser.parseValueSlice();
-            @compileError("zux.spec.Component.parseSlice selection initial_state contains an unknown field");
-        }
-
-        if (parser.consumeByte(',')) continue;
-        parser.expectByte('}');
-        break;
-    }
-
-    parser.finish();
-    return state;
 }
 
 fn parseRequiredUsizeFieldFromObjectSlice(
@@ -1693,18 +1432,11 @@ fn parseKindValueComptime(comptime value: glib.std.json.Value) Kind {
         return .{ .wifi_ap = {} };
     }
     if (comptimeEql(kind_name, "router")) {
-        const payload_object = expectObjectComptime(
+        expectEmptyPayloadComptime(
             payload,
             "zux.spec.Component.parseJsonValue router payload",
         );
-        return .{
-            .router = .{
-                .initial_item = parseRouterItemComptime(
-                    payload_object.get("initial_item") orelse
-                        @compileError("zux.spec.Component.parseJsonValue router payload requires an `initial_item` field"),
-                ),
-            },
-        };
+        return .{ .router = {} };
     }
     if (comptimeEql(kind_name, "flow")) {
         return .{
@@ -1715,143 +1447,21 @@ fn parseKindValueComptime(comptime value: glib.std.json.Value) Kind {
         };
     }
     if (comptimeEql(kind_name, "overlay")) {
-        const payload_object = expectObjectComptime(
+        expectEmptyPayloadComptime(
             payload,
             "zux.spec.Component.parseJsonValue overlay payload",
         );
-        return .{
-            .overlay = .{
-                .initial_state = parseOverlayStateComptime(
-                    payload_object.get("initial_state") orelse
-                        @compileError("zux.spec.Component.parseJsonValue overlay payload requires an `initial_state` field"),
-                ),
-            },
-        };
+        return .{ .overlay = {} };
     }
     if (comptimeEql(kind_name, "selection")) {
-        const payload_object = expectObjectComptime(
+        expectEmptyPayloadComptime(
             payload,
             "zux.spec.Component.parseJsonValue selection payload",
         );
-        return .{
-            .selection = .{
-                .initial_state = parseSelectionStateComptime(
-                    payload_object.get("initial_state") orelse
-                        @compileError("zux.spec.Component.parseJsonValue selection payload requires an `initial_state` field"),
-                ),
-            },
-        };
+        return .{ .selection = {} };
     }
 
     @compileError("zux.spec.Component.parseJsonValue encountered an unknown component kind");
-}
-
-fn parseRouterItemComptime(comptime value: glib.std.json.Value) route.Router.Item {
-    const object = expectObjectComptime(
-        value,
-        "zux.spec.Component.parseJsonValue router initial_item",
-    );
-    var item: route.Router.Item = .{};
-    var iterator = object.iterator();
-
-    while (iterator.next()) |entry| {
-        const field_name = entry.key_ptr.*;
-        if (comptimeEql(field_name, "screen_id")) {
-            item.screen_id = parseU32ValueComptime(
-                entry.value_ptr.*,
-                "zux.spec.Component.parseJsonValue router initial_item `screen_id`",
-            );
-        } else if (comptimeEql(field_name, "arg0")) {
-            item.arg0 = parseU32ValueComptime(
-                entry.value_ptr.*,
-                "zux.spec.Component.parseJsonValue router initial_item `arg0`",
-            );
-        } else if (comptimeEql(field_name, "arg1")) {
-            item.arg1 = parseU32ValueComptime(
-                entry.value_ptr.*,
-                "zux.spec.Component.parseJsonValue router initial_item `arg1`",
-            );
-        } else if (comptimeEql(field_name, "flags")) {
-            item.flags = parseU32ValueComptime(
-                entry.value_ptr.*,
-                "zux.spec.Component.parseJsonValue router initial_item `flags`",
-            );
-        } else {
-            @compileError("zux.spec.Component.parseJsonValue router initial_item contains an unknown field");
-        }
-    }
-
-    return item;
-}
-
-fn parseOverlayStateComptime(comptime value: glib.std.json.Value) ui_overlay.State {
-    const object = expectObjectComptime(
-        value,
-        "zux.spec.Component.parseJsonValue overlay initial_state",
-    );
-    var state: ui_overlay.State = .{};
-    var iterator = object.iterator();
-
-    while (iterator.next()) |entry| {
-        const field_name = entry.key_ptr.*;
-        if (comptimeEql(field_name, "visible")) {
-            state.visible = parseBoolValueComptime(
-                entry.value_ptr.*,
-                "zux.spec.Component.parseJsonValue overlay initial_state `visible`",
-            );
-        } else if (comptimeEql(field_name, "name")) {
-            const fields = ui_overlay.State.nameFields(
-                parseStringValueComptime(
-                    entry.value_ptr.*,
-                    "zux.spec.Component.parseJsonValue overlay initial_state `name`",
-                ),
-            ) catch @compileError("zux.spec.Component.parseJsonValue overlay initial_state `name` is too long");
-            state.name = fields.name;
-            state.name_len = fields.name_len;
-        } else if (comptimeEql(field_name, "blocking")) {
-            state.blocking = parseBoolValueComptime(
-                entry.value_ptr.*,
-                "zux.spec.Component.parseJsonValue overlay initial_state `blocking`",
-            );
-        } else {
-            @compileError("zux.spec.Component.parseJsonValue overlay initial_state contains an unknown field");
-        }
-    }
-
-    return state;
-}
-
-fn parseSelectionStateComptime(comptime value: glib.std.json.Value) ui_selection.State {
-    const object = expectObjectComptime(
-        value,
-        "zux.spec.Component.parseJsonValue selection initial_state",
-    );
-    var state: ui_selection.State = .{};
-    var iterator = object.iterator();
-
-    while (iterator.next()) |entry| {
-        const field_name = entry.key_ptr.*;
-        if (comptimeEql(field_name, "index")) {
-            state.index = parseUsizeValueComptime(
-                entry.value_ptr.*,
-                "zux.spec.Component.parseJsonValue selection initial_state `index`",
-            );
-        } else if (comptimeEql(field_name, "count")) {
-            state.count = parseUsizeValueComptime(
-                entry.value_ptr.*,
-                "zux.spec.Component.parseJsonValue selection initial_state `count`",
-            );
-        } else if (comptimeEql(field_name, "loop")) {
-            state.loop = parseBoolValueComptime(
-                entry.value_ptr.*,
-                "zux.spec.Component.parseJsonValue selection initial_state `loop`",
-            );
-        } else {
-            @compileError("zux.spec.Component.parseJsonValue selection initial_state contains an unknown field");
-        }
-    }
-
-    return state;
 }
 
 fn expectObjectComptime(
@@ -2006,7 +1616,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 \\  "label": "pairing",
                 \\  "id": 31,
                 \\  "flow": {
-                \\    "initial": "idle",
                 \\    "nodes": ["idle", "searching", "confirming", "done"],
                 \\    "edges": [
                 \\      { "from": "idle", "to": "searching", "event": "start" },
@@ -2025,7 +1634,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(u32, 31), parsed.id);
             switch (parsed.kind) {
                 .flow => |flow_component| {
-                    try grt.std.testing.expectEqualStrings("idle", flow_component.initial);
                     try grt.std.testing.expectEqual(@as(usize, 4), flow_component.nodes.len);
                     try grt.std.testing.expectEqual(@as(usize, 4), flow_component.edges.len);
                     try grt.std.testing.expectEqualStrings("confirming", flow_component.nodes[2]);

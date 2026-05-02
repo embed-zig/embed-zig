@@ -1,0 +1,20 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Reducer",
+      "spec": {
+        "label": "scene_reducer",
+        "fn_name": "sceneReducer"
+      }
+    },
+    {
+      "kind": "Render",
+      "spec": {
+        "label": "scene_render",
+        "state_path": "app/state",
+        "fn_name": "renderScene"
+      }
+    }
+  ]
+}

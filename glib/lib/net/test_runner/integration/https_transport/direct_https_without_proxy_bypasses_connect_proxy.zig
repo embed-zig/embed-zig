@@ -2,6 +2,7 @@ const stdz = @import("stdz");
 const io = @import("io");
 const testing_api = @import("testing");
 const test_utils = @import("test_utils.zig");
+const thread_sync = @import("../../test_utils/thread_sync.zig");
 
 pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
     const Utils = test_utils.make(std, net);
@@ -21,6 +22,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     const Net = Utils.Net;
                     const Http = Utils.Http;
                     const Thread = std.Thread;
+                    const ThreadResult = thread_sync.ThreadResult(std);
                     const test_spawn_config: std.Thread.SpawnConfig = Utils.test_spawn_config;
                     const testing = struct {
                         pub var allocator: std.mem.Allocator = undefined;
@@ -43,37 +45,40 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
                     defer target_ln.deinit();
                     const target_listener = try target_ln.as(Net.tls.Listener);
                     const target_port = try Utils.tlsListenerPort(target_ln, Net);
-                    var target_result: ?anyerror = null;
+                    var target_result = ThreadResult{};
 
                     var target_thread = try Thread.spawn(test_spawn_config, struct {
-                        fn run(listener: *Net.tls.Listener, result: *?anyerror) void {
+                        fn run(listener: *Net.tls.Listener, result: *ThreadResult) void {
+                            var thread_err: ?anyerror = null;
+                            defer result.finish(thread_err);
+
                             var conn = listener.accept() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             defer conn.deinit();
 
                             const typed = conn.as(Net.tls.ServerConn) catch {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             };
                             typed.handshake() catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
 
                             var req_buf: [4096]u8 = undefined;
                             const req_head = Utils.readRequestHead(conn, &req_buf) catch |err| {
-                                result.* = err;
+                                thread_err = err;
                                 return;
                             };
                             if (!Utils.hasRequestLine(req_head, "GET /direct HTTP/1.1")) {
-                                result.* = error.TestUnexpectedResult;
+                                thread_err = error.TestUnexpectedResult;
                                 return;
                             }
 
                             io.writeAll(@TypeOf(conn), &conn, "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect") catch |err| {
-                                result.* = err;
+                                thread_err = err;
                             };
                         }
                     }.run, .{ target_listener, &target_result });
@@ -138,7 +143,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
 
                     try testing.expect(proxy_state.saw_probe);
                     try testing.expect(!proxy_state.saw_connect);
-                    if (target_result) |err| return err;
+                    if (target_result.wait()) |err| return err;
                 }
             };
             Body.call(run_allocator) catch |err| {

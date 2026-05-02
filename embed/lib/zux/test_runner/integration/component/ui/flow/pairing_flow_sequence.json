@@ -3,6 +3,20 @@
   "spec": {
     "name": "pairing flow sequence",
     "description": "drives the pairing flow through forward, reverse, found, and reset transitions",
+    "initial_state": {
+      "single_button": {},
+      "grouped_button": {},
+      "strip": {},
+      "sensor": {},
+      "cell": {},
+      "reader": {},
+      "sta": {},
+      "ap": {},
+      "pairing": { "node": "idle" },
+      "loading": {},
+      "menu": { "count": 3, "loop": true },
+      "route": { "current_page": 1 }
+    },
     "steps": [
       {
         "outputs": [

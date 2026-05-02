@@ -28,7 +28,7 @@ pub fn make(comptime grt: type) type {
         subscribers_notifying: bool = false,
         tick_count: AtomicU64 = AtomicU64.init(0),
 
-        pub fn init(allocator: glib.std.mem.Allocator, initial: Item) Error!Self {
+        pub fn init(allocator: glib.std.mem.Allocator, initial: State) Error!Self {
             return .{
                 .allocator = allocator,
                 .router_impl = try RouterImpl.init(allocator, initial),
@@ -157,7 +157,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn reduce_updates_version_and_router_snapshot(allocator: glib.std.mem.Allocator) !void {
             var route = try RouteStore.init(allocator, .{
-                .screen_id = 1,
+                .current_page = 1,
             });
             defer route.deinit();
 
@@ -239,7 +239,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
         fn pop_to_root_and_noop_tick_behave_as_expected(allocator: glib.std.mem.Allocator) !void {
             var route = try RouteStore.init(allocator, .{
-                .screen_id = 10,
+                .current_page = 10,
             });
             defer route.deinit();
 
@@ -265,7 +265,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
         fn push_supports_dynamic_depth(allocator: glib.std.mem.Allocator) !void {
             var route = try RouteStore.init(allocator, .{
-                .screen_id = 20,
+                .current_page = 20,
             });
             defer route.deinit();
 

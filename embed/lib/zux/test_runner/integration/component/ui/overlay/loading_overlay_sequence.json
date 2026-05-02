@@ -3,6 +3,20 @@
   "spec": {
     "name": "loading overlay sequence",
     "description": "shows, updates, hides, and re-shows the loading overlay while checking visible state",
+    "initial_state": {
+      "single_button": {},
+      "grouped_button": {},
+      "strip": {},
+      "sensor": {},
+      "cell": {},
+      "reader": {},
+      "sta": {},
+      "ap": {},
+      "pairing": { "node": "idle" },
+      "loading": {},
+      "menu": { "count": 3, "loop": true },
+      "route": { "current_page": 1 }
+    },
     "steps": [
       {
         "outputs": [

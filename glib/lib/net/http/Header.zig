@@ -3,7 +3,7 @@
 //! This is a minimal allocation-free representation used by Request,
 //! Response, and Transport. Higher-level helpers can be layered on top later.
 
-const host_std = @import("std");
+const stdz = @import("stdz");
 const testing_api = @import("testing");
 
 const Header = @This();
@@ -38,7 +38,7 @@ pub fn init(name: []const u8, value: []const u8) Header {
 
 /// HTTP header field names are case-insensitive.
 pub fn is(self: Header, expected_name: []const u8) bool {
-    return host_std.ascii.eqlIgnoreCase(self.name, expected_name);
+    return stdz.ascii.eqlIgnoreCase(self.name, expected_name);
 }
 
 pub fn TestRunner(comptime std: type) testing_api.TestRunner {
