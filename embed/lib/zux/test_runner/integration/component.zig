@@ -58,9 +58,15 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
         pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
+            _ = allocator;
 
+            const InitConfigFactory = struct {
+                fn make(init_config: AppType.InitConfig) AppType.InitConfig {
+                    return init_config;
+                }
+            };
             const spec = SpecType.init();
-            const story_runner = spec.testRunner(AppType, allocator);
+            const story_runner = spec.testRunner(AppType, InitConfigFactory.make);
 
             t.run("bt", bt.make(grt));
             t.run("stories", story_runner);

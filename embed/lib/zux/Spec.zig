@@ -284,22 +284,14 @@ pub fn make(comptime spec_doc: anytype) type {
         pub fn testRunner(
             self: *const Self,
             comptime AppType: type,
-            allocator: glib.std.mem.Allocator,
-        ) glib.testing.TestRunner {
-            const init_config = makeTestInitConfig(AppType, allocator);
-            return self.testRunnerWith(AppType, init_config);
-        }
-
-        pub fn testRunnerWith(
-            self: *const Self,
-            comptime AppType: type,
-            init_config: AppType.InitConfig,
+            comptime init_config_factory: fn (AppType.InitConfig) AppType.InitConfig,
         ) glib.testing.TestRunner {
             _ = self;
             const InitConfig = AppType.InitConfig;
             const InitialState = @FieldType(InitConfig, "initial_state");
             const Runner = struct {
-                app_init_config: InitConfig,
+                const StoryInitialState = InitialState;
+                const makeInitConfig = init_config_factory;
 
                 pub fn init(self_runner: *@This(), allocator: glib.std.mem.Allocator) !void {
                     _ = self_runner;
@@ -307,18 +299,23 @@ pub fn make(comptime spec_doc: anytype) type {
                 }
 
                 pub fn run(self_runner: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
+                    _ = self_runner;
+
                     inline for (user_stories) |story| {
-                        var story_initial_state = story.decodeInitialState(InitialState, allocator) catch |err| {
+                        const base_init_config = makeTestInitConfig(AppType, allocator);
+                        const story_allocator = base_init_config.allocator;
+                        var story_initial_state = story.decodeInitialState(StoryInitialState, story_allocator) catch |err| {
                             t.logFatal(@errorName(err));
                             return false;
                         };
-                        defer story.freeInitialState(InitialState, allocator, &story_initial_state);
+                        defer story.freeInitialState(StoryInitialState, story_allocator, &story_initial_state);
 
-                        const app_init_config = makeStoryInitConfig(
+                        const story_init_config = makeStoryInitConfig(
                             InitConfig,
-                            self_runner.app_init_config,
+                            base_init_config,
                             story_initial_state,
                         );
+                        const app_init_config = makeInitConfig(story_init_config);
                         var app = AppType.init(app_init_config) catch |err| {
                             t.logFatal(@errorName(err));
                             return false;
@@ -339,10 +336,7 @@ pub fn make(comptime spec_doc: anytype) type {
             };
 
             const Holder = struct {
-                var runner: Runner = undefined;
-            };
-            Holder.runner = .{
-                .app_init_config = init_config,
+                var runner: Runner = .{};
             };
             return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
         }
@@ -1072,6 +1066,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn test_runner_executes_user_stories(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
+            _ = allocator;
+
             const SpecType = make(.{
                 .stores = &.{
                     StoreObjectSpecType.make("counter", struct {
@@ -1094,7 +1090,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                                 .outputs = &.{
                                     .{
                                         .label = "counter",
-                                        .state = "{\"ticks\":0}",
+                                        .state = "{\"ticks\":10}",
                                     },
                                 },
                             },
@@ -1108,7 +1104,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                                 .outputs = &.{
                                     .{
                                         .label = "counter",
-                                        .state = "{\"ticks\":1}",
+                                        .state = "{\"ticks\":11}",
                                     },
                                 },
                             },
@@ -1155,8 +1151,19 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 spec.setReducer("counter_reducer", ReducerFactory);
                 break :blk spec.buildApp(grt, config);
             };
+            const InitConfigFactory = struct {
+                fn make(init_config: AppType.InitConfig) AppType.InitConfig {
+                    if (init_config.initial_state.counter.ticks != 0) {
+                        @panic("zux.Spec.testRunner factory received config before story initial_state was applied");
+                    }
+                    var next = init_config;
+                    next.initial_state.counter.ticks = 10;
+                    return next;
+                }
+            };
+
             const spec = SpecType.init();
-            const runner = spec.testRunner(AppType, allocator);
+            const runner = spec.testRunner(AppType, InitConfigFactory.make);
 
             t.run("spec test runner", runner);
             try grt.std.testing.expect(t.wait());

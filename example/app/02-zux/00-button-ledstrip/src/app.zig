@@ -39,8 +39,13 @@ pub fn run(comptime platform_ctx: type, comptime platform_grt: type) !void {
     var t = glib.testing.T.new(platform_grt.std, platform_grt.time, .zux_app);
     defer t.deinit();
 
+    const InitConfigFactory = struct {
+        fn make(init_config: AppType.InitConfig) AppType.InitConfig {
+            return init_config;
+        }
+    };
     const spec = SpecType.init();
-    const story_runner = spec.testRunner(AppType, t.allocator);
+    const story_runner = spec.testRunner(AppType, InitConfigFactory.make);
 
     t.run("button-ledstrip/stories", story_runner);
     if (!t.wait()) return error.TestFailed;
