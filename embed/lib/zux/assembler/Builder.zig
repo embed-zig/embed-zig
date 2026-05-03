@@ -2323,6 +2323,7 @@ fn makeInitConfigType(
     var fields: [total_fields]glib.std.builtin.Type.StructField = undefined;
     comptime var field_index: usize = 0;
 
+    ensureUniqueInitConfigField(fields, field_index, "allocator");
     fields[field_index] = .{
         .name = "allocator",
         .type = glib.std.mem.Allocator,
@@ -2332,6 +2333,7 @@ fn makeInitConfigType(
     };
     field_index += 1;
 
+    ensureUniqueInitConfigField(fields, field_index, "initial_state");
     fields[field_index] = .{
         .name = "initial_state",
         .type = InitialState,
@@ -2341,6 +2343,7 @@ fn makeInitConfigType(
     };
     field_index += 1;
 
+    ensureUniqueInitConfigField(fields, field_index, "custom_pipeline_node");
     fields[field_index] = .{
         .name = "custom_pipeline_node",
         .type = ?Node,
@@ -2355,12 +2358,7 @@ fn makeInitConfigType(
         inline for (0..registryPeriphLen(registry)) |i| {
             const periph = registry.periphs[i];
             const label_name = periphLabel(periph);
-            if (comptimeEql(label_name, "allocator") or
-                comptimeEql(label_name, "initial_state") or
-                comptimeEql(label_name, "custom_pipeline_node"))
-            {
-                @compileError("zux.assembler.Builder.build InitConfig field label '" ++ label_name ++ "' is reserved");
-            }
+            ensureUniqueInitConfigField(fields, field_index, label_name);
             const FieldType = @field(build_config_value, label_name);
             fields[field_index] = .{
                 .name = sentinelName(label_name),
@@ -2381,6 +2379,29 @@ fn makeInitConfigType(
             .is_tuple = false,
         },
     });
+}
+
+fn ensureUniqueInitConfigField(
+    comptime fields: anytype,
+    comptime field_count: usize,
+    comptime field_name: []const u8,
+) void {
+    if (hasInitConfigField(fields, field_count, field_name)) {
+        @compileError("zux.assembler.Builder.build found duplicate InitConfig field '" ++ field_name ++ "'");
+    }
+}
+
+fn hasInitConfigField(
+    comptime fields: anytype,
+    comptime field_count: usize,
+    comptime field_name: []const u8,
+) bool {
+    inline for (0..field_count) |i| {
+        if (comptimeEql(fields[i].name, field_name)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 fn makeInitialStateType(comptime Stores: type) type {
@@ -2741,4 +2762,62 @@ fn labelText(comptime raw_label: anytype) []const u8 {
 fn sentinelName(comptime text: []const u8) [:0]const u8 {
     const terminated = text ++ "\x00";
     return terminated[0..text.len :0];
+}
+
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            const TestCase = struct {
+                fn init_config_field_lookup_detects_user_label_duplicates() !void {
+                    const StructField = glib.std.builtin.Type.StructField;
+                    const fields = comptime blk: {
+                        var out: [3]StructField = undefined;
+                        out[0] = testStructField("allocator", glib.std.mem.Allocator);
+                        out[1] = testStructField("button", u8);
+                        out[2] = testStructField("strip", u16);
+                        break :blk out;
+                    };
+
+                    try grt.std.testing.expect(comptime hasInitConfigField(fields, 3, "button"));
+                    try grt.std.testing.expect(comptime hasInitConfigField(fields, 3, "strip"));
+                    try grt.std.testing.expect(!(comptime hasInitConfigField(fields, 3, "scene_render")));
+                }
+
+                fn testStructField(comptime name: []const u8, comptime FieldType: type) glib.std.builtin.Type.StructField {
+                    return .{
+                        .name = sentinelName(name),
+                        .type = FieldType,
+                        .default_value_ptr = null,
+                        .is_comptime = false,
+                        .alignment = @alignOf(FieldType),
+                    };
+                }
+            };
+
+            TestCase.init_config_field_lookup_detects_user_label_duplicates() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

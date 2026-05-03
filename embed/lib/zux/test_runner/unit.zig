@@ -1,5 +1,6 @@
 const glib = @import("glib");
 const builtin = @import("builtin");
+const assembler_builder = @import("../assembler/Builder.zig");
 const Component = @import("../spec/Component.zig");
 const JsonParser = @import("../spec/JsonParser.zig");
 const Spec = @import("../Spec.zig");
@@ -35,6 +36,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
             t.parallel();
             t.run("assembler", assembler.make(grt));
+            t.run("assembler/Builder", assembler_builder.TestRunner(grt));
             t.run("Spec", Spec.TestRunner(grt));
             t.run("spec/JsonParser", JsonParser.TestRunner(grt));
             t.run("spec/Component", Component.TestRunner(grt));
