@@ -16,6 +16,7 @@ pub const spec = struct {
     pub const Builder = @import("zux/spec/Builder.zig");
     pub const Component = @import("zux/spec/Component.zig");
     pub const StoreObject = @import("zux/spec/StoreObject.zig");
+    pub const UserStoryConfigFactory = @import("zux/spec/UserStoryConfigFactory.zig");
     pub const UserStory = @import("zux/spec/UserStory.zig");
 };
 

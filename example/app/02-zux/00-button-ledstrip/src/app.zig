@@ -25,12 +25,12 @@ pub const SpecType = blk: {
 };
 
 pub fn run(comptime platform_ctx: type, comptime platform_grt: type) !void {
-    const config: zux.AssemblerConfig = .{};
+    const assembler_config: zux.AssemblerConfig = .{};
     const AppType = comptime blk: {
         var spec = SpecType.init();
         spec.setReducer("scene_reducer", scene_hooks.sceneReducer);
         spec.setRender("scene_render", scene_hooks.renderScene);
-        break :blk spec.buildApp(platform_grt, config);
+        break :blk spec.buildApp(platform_grt, assembler_config);
     };
 
     try platform_ctx.setup();
@@ -39,13 +39,28 @@ pub fn run(comptime platform_ctx: type, comptime platform_grt: type) !void {
     var t = glib.testing.T.new(platform_grt.std, platform_grt.time, .zux_app);
     defer t.deinit();
 
-    const InitConfigFactory = struct {
-        fn make(init_config: AppType.InitConfig) AppType.InitConfig {
-            return init_config;
+    const UserStoryConfigFactoryImpl = struct {
+        instance: Instance = undefined,
+
+        pub const Instance = struct {
+            init_config: AppType.InitConfig,
+
+            pub fn config(self_instance: *@This()) AppType.InitConfig {
+                return self_instance.init_config;
+            }
+
+            pub fn deinit(self_instance: *@This()) void {
+                _ = self_instance;
+            }
+        };
+
+        pub fn make(self_factory: *@This(), init_config: AppType.InitConfig) !*Instance {
+            self_factory.instance = .{ .init_config = init_config };
+            return &self_factory.instance;
         }
     };
     const spec = SpecType.init();
-    const story_runner = spec.testRunner(AppType, InitConfigFactory.make);
+    const story_runner = spec.testRunner(AppType, UserStoryConfigFactoryImpl);
 
     t.run("button-ledstrip/stories", story_runner);
     if (!t.wait()) return error.TestFailed;

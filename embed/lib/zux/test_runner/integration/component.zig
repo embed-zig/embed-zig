@@ -40,14 +40,14 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
         break :blk builder.build();
     };
 
-    const config: AssemblerConfig = .{
+    const assembler_config: AssemblerConfig = .{
         .pipeline = .{
             .tick_interval = grt.time.duration.MilliSecond,
         },
     };
     const AppType = comptime blk: {
         var spec = SpecType.init();
-        break :blk spec.buildApp(grt, config);
+        break :blk spec.buildApp(grt, assembler_config);
     };
 
     const Runner = struct {
@@ -60,13 +60,28 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             _ = self;
             _ = allocator;
 
-            const InitConfigFactory = struct {
-                fn make(init_config: AppType.InitConfig) AppType.InitConfig {
-                    return init_config;
+            const UserStoryConfigFactoryImpl = struct {
+                instance: Instance = undefined,
+
+                pub const Instance = struct {
+                    init_config: AppType.InitConfig,
+
+                    pub fn config(self_instance: *@This()) AppType.InitConfig {
+                        return self_instance.init_config;
+                    }
+
+                    pub fn deinit(self_instance: *@This()) void {
+                        _ = self_instance;
+                    }
+                };
+
+                pub fn make(self_factory: *@This(), init_config: AppType.InitConfig) !*Instance {
+                    self_factory.instance = .{ .init_config = init_config };
+                    return &self_factory.instance;
                 }
             };
             const spec = SpecType.init();
-            const story_runner = spec.testRunner(AppType, InitConfigFactory.make);
+            const story_runner = spec.testRunner(AppType, UserStoryConfigFactoryImpl);
 
             t.run("bt", bt.make(grt));
             t.run("stories", story_runner);

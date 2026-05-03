@@ -5,6 +5,7 @@ const ledstrip = @import("ledstrip");
 const Assembler = @import("Assembler.zig");
 const Store = @import("Store.zig");
 const AssemblerConfig = @import("assembler/Config.zig");
+const UserStoryConfigFactory = @import("spec/UserStoryConfigFactory.zig");
 const ComponentSpec = @import("spec/Component.zig");
 const Doc = @import("spec/Doc.zig");
 const ReducerSpec = @import("spec/Reducer.zig");
@@ -284,14 +285,17 @@ pub fn make(comptime spec_doc: anytype) type {
         pub fn testRunner(
             self: *const Self,
             comptime AppType: type,
-            comptime init_config_factory: fn (AppType.InitConfig) AppType.InitConfig,
+            comptime UserStoryConfigFactoryImpl: type,
         ) glib.testing.TestRunner {
             _ = self;
             const InitConfig = AppType.InitConfig;
             const InitialState = @FieldType(InitConfig, "initial_state");
+            const UserStoryConfigFactoryType = UserStoryConfigFactory.make(AppType);
+
             const Runner = struct {
                 const StoryInitialState = InitialState;
-                const makeInitConfig = init_config_factory;
+
+                user_story_config_factory: UserStoryConfigFactoryImpl = .{},
 
                 pub fn init(self_runner: *@This(), allocator: glib.std.mem.Allocator) !void {
                     _ = self_runner;
@@ -299,8 +303,6 @@ pub fn make(comptime spec_doc: anytype) type {
                 }
 
                 pub fn run(self_runner: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
-                    _ = self_runner;
-
                     inline for (user_stories) |story| {
                         const base_init_config = makeTestInitConfig(AppType, allocator);
                         const story_allocator = base_init_config.allocator;
@@ -315,7 +317,14 @@ pub fn make(comptime spec_doc: anytype) type {
                             base_init_config,
                             story_initial_state,
                         );
-                        const app_init_config = makeInitConfig(story_init_config);
+                        const user_story_config_factory = UserStoryConfigFactoryType.wrap(&self_runner.user_story_config_factory);
+                        const user_story_config_instance = user_story_config_factory.makeInstance(story_init_config) catch |err| {
+                            t.logFatal(@errorName(err));
+                            return false;
+                        };
+                        defer user_story_config_instance.deinit();
+
+                        const app_init_config = user_story_config_instance.config();
                         var app = AppType.init(app_init_config) catch |err| {
                             t.logFatal(@errorName(err));
                             return false;
@@ -1137,7 +1146,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 }
             }.factory;
 
-            const config: AssemblerConfig = .{
+            const assembler_config: AssemblerConfig = .{
                 .max_reducers = 1,
                 .store = .{
                     .max_stores = 1,
@@ -1149,21 +1158,36 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const AppType = comptime blk: {
                 var spec = SpecType.init();
                 spec.setReducer("counter_reducer", ReducerFactory);
-                break :blk spec.buildApp(grt, config);
+                break :blk spec.buildApp(grt, assembler_config);
             };
-            const InitConfigFactory = struct {
-                fn make(init_config: AppType.InitConfig) AppType.InitConfig {
+            const UserStoryConfigFactoryImpl = struct {
+                instance: Instance = undefined,
+
+                pub const Instance = struct {
+                    init_config: AppType.InitConfig,
+
+                    pub fn config(self_instance: *@This()) AppType.InitConfig {
+                        return self_instance.init_config;
+                    }
+
+                    pub fn deinit(self_instance: *@This()) void {
+                        _ = self_instance;
+                    }
+                };
+
+                pub fn make(self_factory: *@This(), init_config: AppType.InitConfig) !*Instance {
                     if (init_config.initial_state.counter.ticks != 0) {
                         @panic("zux.Spec.testRunner factory received config before story initial_state was applied");
                     }
-                    var next = init_config;
-                    next.initial_state.counter.ticks = 10;
-                    return next;
+
+                    self_factory.instance = .{ .init_config = init_config };
+                    self_factory.instance.init_config.initial_state.counter.ticks = 10;
+                    return &self_factory.instance;
                 }
             };
 
             const spec = SpecType.init();
-            const runner = spec.testRunner(AppType, InitConfigFactory.make);
+            const runner = spec.testRunner(AppType, UserStoryConfigFactoryImpl);
 
             t.run("spec test runner", runner);
             try grt.std.testing.expect(t.wait());
