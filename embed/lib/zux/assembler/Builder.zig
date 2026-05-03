@@ -17,6 +17,7 @@ const route_component = @import("../component/ui/route.zig");
 const Emitter = @import("../pipeline/Emitter.zig");
 const Message = @import("../pipeline/Message.zig");
 const Node = @import("../pipeline/Node.zig");
+const NodeBuilder = @import("../pipeline/NodeBuilder.zig");
 const Poller = @import("../pipeline/Poller.zig");
 const Pipeline = @import("../pipeline/Pipeline.zig");
 const store = @import("../Store.zig");
@@ -247,7 +248,6 @@ pub fn build(builder: root, comptime context: anytype) type {
     const has_overlay_runtime = overlay_count > 0;
     const has_router_runtime = router_count > 0;
     const has_selection_runtime = selection_count > 0;
-    const has_user_root_config = context.node_builder.len > 0;
     const runtime_poller_count = totalPollerCount(context.registries);
     const ledstrip_pixel_count = ledStripPixelCount(ledstrip_registry);
     const ledstrip_frame_capacity = ledStripFrameCapacity(ledstrip_registry);
@@ -263,7 +263,6 @@ pub fn build(builder: root, comptime context: anytype) type {
     const StoreType = runtime_store_builder.make(context.grt);
     const GeneratedInitialState = makeInitialStateType(StoreType.Stores);
 
-    const UserRoot = if (has_user_root_config) context.node_builder.make() else void;
     const runtime_node_builder = makeRuntimeNodeBuilder(context);
     const BuiltRoot = runtime_node_builder.make();
 
@@ -280,8 +279,6 @@ pub fn build(builder: root, comptime context: anytype) type {
         GeneratedInitialState,
         context.build_config,
         context.registries,
-        has_user_root_config,
-        if (has_user_root_config) UserRoot.Config else void,
     );
 
     const AppLabel = makeLabelEnum(context.registries);
@@ -336,6 +333,25 @@ pub fn build(builder: root, comptime context: anytype) type {
         }
     };
     const StoreReducerType = store.Reducer.make(StoreType);
+    const BypassNode = struct {
+        out: ?Emitter = null,
+
+        pub fn node(self: *@This()) Node {
+            return Node.init(@This(), self);
+        }
+
+        pub fn bindOutput(self: *@This(), out: Emitter) void {
+            self.out = out;
+        }
+
+        pub fn process(self: *@This(), message: Message) !usize {
+            if (self.out) |out| {
+                try out.emit(message);
+                return 1;
+            }
+            return 0;
+        }
+    };
     const StoreTickNode = struct {
         store: *StoreType,
         out: ?Emitter = null,
@@ -679,6 +695,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             selection_store_reducer: if (has_selection_runtime) StoreReducerType else void,
             configured_reducers: [configured_reducer_count]StoreReducerType = undefined,
             render_subscribers: [configured_render_count]@import("../Store.zig").Subscriber = undefined,
+            custom_pipeline_bypass: BypassNode = .{},
             store_tick: StoreTickNode,
             root_config: BuiltRoot.Config,
             root: Node,
@@ -811,6 +828,7 @@ pub fn build(builder: root, comptime context: anytype) type {
                 runtime.store_tick = .{
                     .store = &runtime.store,
                 };
+                runtime.custom_pipeline_bypass = .{};
 
                 runtime.pipeline = try BuiltPipeline.init(init_config.allocator);
                 errdefer runtime.pipeline.deinit();
@@ -973,21 +991,11 @@ pub fn build(builder: root, comptime context: anytype) type {
                     const binding = context.reducer_bindings[i];
                     @field(config, binding.name) = runtime.configured_reducers[i].node();
                 }
+                config._zux_custom_pipeline_node = init_config.custom_pipeline_node orelse
+                    runtime.custom_pipeline_bypass.node();
                 config._zux_store_tick = runtime.store_tick.node();
 
-                if (has_user_root_config) {
-                    copyUserRootConfig(&config, init_config.user_root_config);
-                }
-
                 return config;
-            }
-
-            fn copyUserRootConfig(dst: *BuiltRoot.Config, user_root_config: UserRoot.Config) void {
-                inline for (@typeInfo(UserRoot.Config).@"struct".fields) |field| {
-                    if (!comptimeEql(field.name, "__branches")) {
-                        @field(dst.*, field.name) = @field(user_root_config, field.name);
-                    }
-                }
             }
 
             fn initSingleButtonInstances(init_config: InitConfig) SingleButtonInstances {
@@ -2224,8 +2232,8 @@ fn makeRuntimeStoreBuilder(comptime context: anytype) @TypeOf(context.store_buil
     return builder;
 }
 
-fn makeRuntimeNodeBuilder(comptime context: anytype) @TypeOf(context.node_builder) {
-    const NodeBuilderType = @TypeOf(context.node_builder);
+fn makeRuntimeNodeBuilder(comptime context: anytype) NodeBuilder.Builder(context.assembler_config.node) {
+    const NodeBuilderType = NodeBuilder.Builder(context.assembler_config.node);
     var builder = NodeBuilderType.init();
 
     if (buttonPollerCount(context.registries) > 0) {
@@ -2266,23 +2274,10 @@ fn makeRuntimeNodeBuilder(comptime context: anytype) @TypeOf(context.node_builde
     }
     inline for (0..context.reducer_count) |i| {
         const binding = context.reducer_bindings[i];
-        if (nodeBuilderHasTag(context.node_builder, binding.label)) {
-            @compileError(
-                "zux.assembler.Builder.build reducer label '" ++ binding.name ++ "' is already present in node_builder; reducer nodes are wired automatically",
-            );
-        }
         builder.addNode(binding.label);
     }
 
-    inline for (0..context.node_builder.len) |i| {
-        switch (context.node_builder.ops[i]) {
-            .node => |tag| builder.addNode(tag),
-            .begin_switch => builder.beginSwitch(),
-            .route => |kind| builder.addCase(kind),
-            .end_switch => builder.endSwitch(),
-        }
-    }
-
+    builder.addNode(._zux_custom_pipeline_node);
     builder.addNode(._zux_store_tick);
 
     return builder;
@@ -2321,11 +2316,10 @@ fn makeInitConfigType(
     comptime InitialState: type,
     comptime build_config_value: anytype,
     comptime registries: anytype,
-    comptime has_user_root_config: bool,
-    comptime UserRootConfig: type,
 ) type {
     _ = grt;
-    const total_fields = 2 + totalPeriphLen(registries) + @as(usize, if (has_user_root_config) 1 else 0);
+    const total_fields = 3 + totalPeriphLen(registries);
+    const default_custom_pipeline_node: ?Node = null;
     var fields: [total_fields]glib.std.builtin.Type.StructField = undefined;
     comptime var field_index: usize = 0;
 
@@ -2347,11 +2341,26 @@ fn makeInitConfigType(
     };
     field_index += 1;
 
+    fields[field_index] = .{
+        .name = "custom_pipeline_node",
+        .type = ?Node,
+        .default_value_ptr = @ptrCast(&default_custom_pipeline_node),
+        .is_comptime = false,
+        .alignment = @alignOf(?Node),
+    };
+    field_index += 1;
+
     inline for (configStructInfo(registries).fields) |field| {
         const registry = @field(registries, field.name);
         inline for (0..registryPeriphLen(registry)) |i| {
             const periph = registry.periphs[i];
             const label_name = periphLabel(periph);
+            if (comptimeEql(label_name, "allocator") or
+                comptimeEql(label_name, "initial_state") or
+                comptimeEql(label_name, "custom_pipeline_node"))
+            {
+                @compileError("zux.assembler.Builder.build InitConfig field label '" ++ label_name ++ "' is reserved");
+            }
             const FieldType = @field(build_config_value, label_name);
             fields[field_index] = .{
                 .name = sentinelName(label_name),
@@ -2362,17 +2371,6 @@ fn makeInitConfigType(
             };
             field_index += 1;
         }
-    }
-
-    if (has_user_root_config) {
-        fields[field_index] = .{
-            .name = "user_root_config",
-            .type = UserRootConfig,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = @alignOf(UserRootConfig),
-        };
-        field_index += 1;
     }
 
     return @Type(.{

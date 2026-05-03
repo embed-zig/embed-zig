@@ -4,6 +4,7 @@ const Assembler = @import("../../Assembler.zig");
 const Store = @import("../../Store.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const Message = @import("../../pipeline/Message.zig");
+const Node = @import("../../pipeline/Node.zig");
 const registry_unique = @import("../../assembler/registry/unique.zig");
 const ui_flow = @import("../../component/ui/flow.zig");
 
@@ -27,7 +28,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             _ = allocator;
 
             const TestCase = struct {
-                fn make_uses_store_and_node_builder_config() !void {
+                fn make_uses_store_and_runtime_config() !void {
                     const AssemblerType = Assembler.make(grt, .{
                         .store = .{
                             .max_stores = 8,
@@ -56,7 +57,6 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     try grt.std.testing.expect(AssemblerType.Lib == grt);
                     try grt.std.testing.expectEqual(@as(usize, 8), assembler.store_builder.store_bindings.len);
                     try grt.std.testing.expectEqual(@as(usize, 32), assembler.store_builder.state_bindings.len);
-                    try grt.std.testing.expectEqual(@as(usize, 24), assembler.node_builder.ops.len);
                     try grt.std.testing.expectEqual(AssemblerType.Config.max_reducers, assembler.reducer_bindings.len);
                     try grt.std.testing.expectEqual(@as(usize, 4), assembler.adc_button_registry.periphs.len);
                     try grt.std.testing.expectEqual(@as(usize, 6), assembler.gpio_button_registry.periphs.len);
@@ -71,7 +71,6 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     try grt.std.testing.expectEqual(@as(usize, 2), assembler.router_registry.periphs.len);
                     try grt.std.testing.expectEqual(@as(usize, 2), assembler.selection_registry.periphs.len);
                     try grt.std.testing.expectEqual(@as(usize, 0), assembler.store_builder.store_count);
-                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.node_builder.len);
                     try grt.std.testing.expectEqual(@as(usize, 0), assembler.adc_button_registry.len);
                     try grt.std.testing.expectEqual(@as(usize, 0), assembler.gpio_button_registry.len);
                     try grt.std.testing.expectEqual(@as(usize, 0), assembler.imu_registry.len);
@@ -87,8 +86,9 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     try grt.std.testing.expectEqual(@as(usize, 0), assembler.reducer_count);
                 }
 
-                fn reexports_store_and_node_builder_methods() !void {
-                    const WifiStore = struct { enabled: bool = false };
+                fn custom_pipeline_node_runs_before_store_tick() !void {
+                    const WifiState = struct { enabled: bool = false };
+                    const WifiStore = Store.Object.make(grt, WifiState, .wifi);
                     const ReducerFactory = struct {
                         fn factory(
                             comptime StoresType: type,
@@ -106,30 +106,53 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         }
                     }.factory;
 
-                    const assembler = comptime blk: {
+                    const Built = comptime blk: {
                         const AssemblerType = Assembler.make(grt, .{});
                         var next = AssemblerType.init();
                         next.setStore(.wifi, WifiStore);
                         next.setState("ui/home", .{.wifi});
                         next.addReducer(.wifi_reducer, ReducerFactory);
-                        next.addNode(.root);
-                        next.beginSwitch();
-                        next.addCase(.tick);
-                        next.addNode(.tick_node);
-                        next.endSwitch();
-                        break :blk next;
+                        const BuildConfig = next.BuildConfig();
+                        const build_config: BuildConfig = .{};
+                        break :blk next.build(build_config);
                     };
 
-                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.store_builder.store_count);
-                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.store_builder.state_binding_count);
-                    try grt.std.testing.expectEqual(@as(usize, 2), assembler.node_builder.tag_len);
-                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.node_builder.switch_count);
-                    try grt.std.testing.expectEqual(@as(usize, 5), assembler.node_builder.len);
-                    try grt.std.testing.expectEqual(@as(usize, 1), assembler.reducer_count);
-                    try grt.std.testing.expect(grt.std.mem.eql(u8, "wifi_reducer", assembler.reducer_bindings[0].name));
-                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.adc_button_registry.len);
-                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.gpio_button_registry.len);
-                    try grt.std.testing.expectEqual(@as(usize, 0), assembler.ledstrip_registry.len);
+                    const CustomPipelineNode = struct {
+                        out: ?Emitter = null,
+                        calls: usize = 0,
+
+                        pub fn bindOutput(self_node: *@This(), out: Emitter) void {
+                            self_node.out = out;
+                        }
+
+                        pub fn process(self_node: *@This(), message: Message) !usize {
+                            self_node.calls += 1;
+                            if (self_node.out) |out| {
+                                try out.emit(message);
+                                return 1;
+                            }
+                            return 0;
+                        }
+                    };
+                    var custom_pipeline_node = CustomPipelineNode{};
+                    var app = try Built.init(.{
+                        .allocator = grt.std.testing.allocator,
+                        .initial_state = .{ .wifi = .{} },
+                        .custom_pipeline_node = Node.init(CustomPipelineNode, &custom_pipeline_node),
+                    });
+                    defer app.deinit();
+
+                    _ = try app.impl.runtime.root.process(.{
+                        .origin = .manual,
+                        .timestamp = 0,
+                        .body = .{
+                            .tick = .{
+                                .seq = 1,
+                            },
+                        },
+                    });
+
+                    try grt.std.testing.expectEqual(@as(usize, 1), custom_pipeline_node.calls);
                 }
 
                 fn build_auto_wires_configured_reducers() !void {
@@ -988,11 +1011,11 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                 }
             };
 
-            TestCase.make_uses_store_and_node_builder_config() catch |err| {
+            TestCase.make_uses_store_and_runtime_config() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.reexports_store_and_node_builder_methods() catch |err| {
+            TestCase.custom_pipeline_node_runs_before_store_tick() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

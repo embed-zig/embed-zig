@@ -5,6 +5,8 @@ pub const AssemblerConfig = Config;
 pub const Store = @import("zux/Store.zig");
 pub const ReducerFnType = Store.Reducer.ReducerFnType;
 pub const pipeline = struct {
+    pub const Node = @import("zux/pipeline/Node.zig");
+    pub const NodeBuilder = @import("zux/pipeline/NodeBuilder.zig");
     pub const Message = @import("zux/pipeline/Message.zig");
 };
 

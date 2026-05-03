@@ -30,9 +30,6 @@ pub fn make(comptime input: anytype) blk: {
     if (!@hasField(Input, "store_builder")) {
         @compileError("zux.assembler.BuildContext.make requires .store_builder");
     }
-    if (!@hasField(Input, "node_builder")) {
-        @compileError("zux.assembler.BuildContext.make requires .node_builder");
-    }
     if (!@hasField(Input, "render_bindings")) {
         @compileError("zux.assembler.BuildContext.make requires .render_bindings");
     }
@@ -55,7 +52,6 @@ pub fn make(comptime input: anytype) blk: {
         overlay_registry: @TypeOf(@field(input, "overlay_registry")),
         selection_registry: @TypeOf(@field(input, "selection_registry")),
         store_builder: @TypeOf(@field(input, "store_builder")),
-        node_builder: @TypeOf(@field(input, "node_builder")),
         render_bindings: @TypeOf(@field(input, "render_bindings")),
         render_count: @TypeOf(@field(input, "render_count")),
         reducer_bindings: @TypeOf(@field(input, "reducer_bindings")),
@@ -72,7 +68,6 @@ pub fn make(comptime input: anytype) blk: {
         .overlay_registry = @field(input, "overlay_registry"),
         .selection_registry = @field(input, "selection_registry"),
         .store_builder = @field(input, "store_builder"),
-        .node_builder = @field(input, "node_builder"),
         .render_bindings = @field(input, "render_bindings"),
         .render_count = @field(input, "render_count"),
         .reducer_bindings = @field(input, "reducer_bindings"),

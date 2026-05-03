@@ -2,7 +2,6 @@ const Config = @import("assembler/Config.zig");
 const assembler_builder = @import("assembler/Builder.zig");
 const BuildContext = @import("assembler/BuildContext.zig");
 const assembler_build_config = @import("assembler/BuildConfig.zig");
-const NodeBuilder = @import("pipeline/NodeBuilder.zig");
 const Store = @import("Store.zig");
 const registry_adc_button = @import("assembler/registry/adc_button.zig");
 const registry_flow = @import("assembler/registry/flow.zig");
@@ -44,7 +43,6 @@ pub fn make(
     comptime config: Config,
 ) type {
     const StoreBuilderType = Store.Builder(config.store);
-    const NodeBuilderType = NodeBuilder.Builder(config.node);
     const ReducerFactoryType = ReducerFnFactory;
     const max_render_bindings = config.max_handles;
     const RenderBinding = struct {
@@ -73,7 +71,6 @@ pub fn make(
         const Self = @This();
 
         store_builder: StoreBuilderType,
-        node_builder: NodeBuilderType,
         adc_button_registry: AdcButtonRegistryType,
         flow_registry: FlowRegistryType,
         gpio_button_registry: GpioButtonRegistryType,
@@ -98,7 +95,6 @@ pub fn make(
         pub fn init() Self {
             return .{
                 .store_builder = StoreBuilderType.init(),
-                .node_builder = NodeBuilderType.init(),
                 .adc_button_registry = AdcButtonRegistryType.init(),
                 .flow_registry = FlowRegistryType.init(),
                 .gpio_button_registry = GpioButtonRegistryType.init(),
@@ -146,11 +142,6 @@ pub fn make(
         ) void {
             const label_name = validateReducerLabel(label);
 
-            if (nodeBuilderHasTag(self.node_builder, label_name)) {
-                @compileError(
-                    "zux.Assembler.addReducer label '" ++ label_name ++ "' is already used by node_builder; reducer nodes are wired automatically",
-                );
-            }
             if (self.reducer_count >= self.reducer_bindings.len) {
                 @compileError("zux.Assembler.addReducer exceeded max_reducers");
             }
@@ -313,36 +304,11 @@ pub fn make(
                 .router_registry = self.router_registry,
                 .selection_registry = self.selection_registry,
                 .store_builder = self.store_builder,
-                .node_builder = self.node_builder,
                 .render_bindings = self.render_bindings,
                 .render_count = self.render_count,
                 .reducer_bindings = self.reducer_bindings,
                 .reducer_count = self.reducer_count,
             }));
-        }
-
-        pub fn addNode(self: *Self, comptime tag: anytype) void {
-            self.node_builder.addNode(tag);
-        }
-
-        pub fn beginSwitch(self: *Self) void {
-            self.node_builder.beginSwitch();
-        }
-
-        pub fn addCase(self: *Self, comptime kind: @import("pipeline/Message.zig").Kind) void {
-            self.node_builder.addCase(kind);
-        }
-
-        pub fn endSwitch(self: *Self) void {
-            self.node_builder.endSwitch();
-        }
-
-        pub fn node(self: *Self, comptime tag: anytype) void {
-            self.addNode(tag);
-        }
-
-        pub fn case(self: *Self, comptime kind: @import("pipeline/Message.zig").Kind) void {
-            self.addCase(kind);
         }
 
         fn ensureComponentUnique(
@@ -384,13 +350,6 @@ pub fn make(
         fn hasReducerLabel(self: *Self, comptime label: []const u8) bool {
             inline for (0..self.reducer_count) |i| {
                 if (comptimeEql(self.reducer_bindings[i].label, label)) return true;
-            }
-            return false;
-        }
-
-        fn nodeBuilderHasTag(node_builder: NodeBuilderType, comptime label: []const u8) bool {
-            inline for (0..node_builder.tag_len) |i| {
-                if (comptimeEql(node_builder.tags[i], label)) return true;
             }
             return false;
         }

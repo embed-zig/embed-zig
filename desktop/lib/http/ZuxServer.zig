@@ -421,6 +421,9 @@ pub fn make(comptime ZuxApp: type) type {
             ) ZuxApp.InitConfig {
                 var init_config: ZuxApp.InitConfig = undefined;
                 init_config.allocator = allocator;
+                if (@hasField(ZuxApp.InitConfig, "custom_pipeline_node")) {
+                    init_config.custom_pipeline_node = null;
+                }
 
                 inline for (0..gpio_count) |i| {
                     const periph = registries.gpio_button.periphs[i];
@@ -605,9 +608,6 @@ fn validateZuxApp(comptime ZuxApp: type) void {
     if (registries.nfc.len != 0) @compileError("desktop ZuxServer does not support nfc yet");
     if (registries.wifi_sta.len != 0) @compileError("desktop ZuxServer does not support wifi sta yet");
     if (registries.wifi_ap.len != 0) @compileError("desktop ZuxServer does not support wifi ap yet");
-    if (@hasField(ZuxApp.InitConfig, "user_root_config")) {
-        @compileError("desktop ZuxServer does not support user_root_config yet");
-    }
 }
 
 fn labelText(comptime label: anytype) []const u8 {

@@ -395,8 +395,8 @@ pub fn make(comptime spec_doc: anytype) type {
                     @field(init_config, field.name) = allocator;
                 } else if (comptime comptimeEql(field.name, "initial_state")) {
                     @field(init_config, field.name) = undefined;
-                } else if (comptime comptimeEql(field.name, "user_root_config")) {
-                    @field(init_config, field.name) = .{};
+                } else if (comptime comptimeEql(field.name, "custom_pipeline_node")) {
+                    @field(init_config, field.name) = null;
                 } else {
                     @field(init_config, field.name) = makeTestPeriphValue(field.name, field.type);
                 }
