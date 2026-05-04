@@ -89,29 +89,12 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                 fn custom_pipeline_node_runs_before_store_tick() !void {
                     const WifiState = struct { enabled: bool = false };
                     const WifiStore = Store.Object.make(grt, WifiState, .wifi);
-                    const ReducerFactory = struct {
-                        fn factory(
-                            comptime StoresType: type,
-                            comptime MessageType: type,
-                            comptime EmitterType: type,
-                        ) Store.Reducer.ReducerFnType(StoresType, MessageType, EmitterType) {
-                            return struct {
-                                fn reduce(stores: *StoresType, message: MessageType, emit: EmitterType) !usize {
-                                    _ = stores;
-                                    _ = message;
-                                    _ = emit;
-                                    return 0;
-                                }
-                            }.reduce;
-                        }
-                    }.factory;
 
                     const Built = comptime blk: {
                         const AssemblerType = Assembler.make(grt, .{});
                         var next = AssemblerType.init();
-                        next.setStore(.wifi, WifiStore);
-                        next.setState("ui/home", .{.wifi});
-                        next.addReducer(.wifi_reducer, ReducerFactory);
+                        next.setStore("wifi", WifiStore);
+                        next.setState("ui/home", .{"wifi"});
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{};
                         break :blk next.build(build_config);
@@ -160,44 +143,60 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         ticks: usize = 0,
                     };
                     const CounterStore = Store.Object.make(grt, CounterState, .counter);
-                    const CounterReducerFactory = struct {
-                        fn factory(
-                            comptime StoresType: type,
-                            comptime MessageType: type,
-                            comptime EmitterType: type,
-                        ) Store.Reducer.ReducerFnType(StoresType, MessageType, EmitterType) {
-                            return struct {
-                                fn reduce(stores: *StoresType, message: MessageType, emit: EmitterType) !usize {
-                                    _ = emit;
-                                    switch (message.body) {
-                                        .tick => {
-                                            stores.counter.invoke({}, struct {
-                                                fn apply(state: *CounterState, _: void) void {
-                                                    state.ticks += 1;
-                                                }
-                                            }.apply);
-                                            return 1;
-                                        },
-                                        else => return 0,
-                                    }
-                                }
-                            }.reduce;
-                        }
-                    }.factory;
 
                     const Built = comptime blk: {
                         const AssemblerType = Assembler.make(grt, .{
                             .max_reducers = 2,
                         });
                         var next = AssemblerType.init();
-                        next.setStore(.counter, CounterStore);
-                        next.addReducer(.counter, CounterReducerFactory);
+                        next.setStore("counter", CounterStore);
+                        next.addReducer("counter");
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{};
                         break :blk next.build(build_config);
                     };
 
                     try grt.std.testing.expect(@hasField(Built.Root.Config, "counter"));
+                    try grt.std.testing.expect(@hasField(Built.InitConfig, "counter"));
+                    const reducer_field = comptime initConfigField(Built.InitConfig, "counter");
+                    try grt.std.testing.expect(reducer_field.type == ?Built.ReducerHook);
+                    try grt.std.testing.expect(initConfigFieldDefaultValue(reducer_field) == null);
+
+                    try grt.std.testing.expectError(error.MissingReducerHook, Built.init(.{
+                        .allocator = grt.std.testing.allocator,
+                        .initial_state = .{
+                            .counter = .{},
+                        },
+                    }));
+
+                    const RuntimeCounterReducer = struct {
+                        calls: usize = 0,
+                        increment_by: usize = 1,
+
+                        pub fn reduce(
+                            self_hook: *@This(),
+                            stores: *Built.Store.Stores,
+                            message: Message,
+                            emit: Emitter,
+                        ) !usize {
+                            _ = emit;
+                            switch (message.body) {
+                                .tick => {
+                                    self_hook.calls += 1;
+                                    stores.counter.invoke(self_hook.increment_by, struct {
+                                        fn apply(state: *CounterState, increment_by: usize) void {
+                                            state.ticks += increment_by;
+                                        }
+                                    }.apply);
+                                    return 1;
+                                },
+                                else => return 0,
+                            }
+                        }
+                    };
+                    var runtime_reducer = RuntimeCounterReducer{
+                        .increment_by = 5,
+                    };
 
                     var app = try Built.init(.{
                         .allocator = grt.std.testing.allocator,
@@ -206,6 +205,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                                 .ticks = 41,
                             },
                         },
+                        .counter = Built.ReducerHook.init(&runtime_reducer),
                     });
                     defer app.deinit();
 
@@ -219,7 +219,8 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             },
                         },
                     });
-                    try grt.std.testing.expectEqual(@as(usize, 42), app.store.stores.counter.get().ticks);
+                    try grt.std.testing.expectEqual(@as(usize, 1), runtime_reducer.calls);
+                    try grt.std.testing.expectEqual(@as(usize, 46), app.store.stores.counter.get().ticks);
                 }
 
                 fn manual_start_disables_auto_ticks_and_dispatch_processes_messages() !void {
@@ -228,56 +229,57 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         pressed: bool = false,
                     };
                     const CounterStore = Store.Object.make(grt, CounterState, .counter);
-                    const CounterReducerFactory = struct {
-                        fn factory(
-                            comptime StoresType: type,
-                            comptime MessageType: type,
-                            comptime EmitterType: type,
-                        ) Store.Reducer.ReducerFnType(StoresType, MessageType, EmitterType) {
-                            return struct {
-                                fn reduce(stores: *StoresType, message: MessageType, emit: EmitterType) !usize {
-                                    _ = emit;
-                                    switch (message.body) {
-                                        .tick => {
-                                            stores.counter.invoke({}, struct {
-                                                fn apply(state: *CounterState, _: void) void {
-                                                    state.ticks += 1;
-                                                }
-                                            }.apply);
-                                            return 1;
-                                        },
-                                        .raw_single_button => |button| {
-                                            stores.counter.invoke(button.pressed, struct {
-                                                fn apply(state: *CounterState, pressed: bool) void {
-                                                    state.pressed = pressed;
-                                                }
-                                            }.apply);
-                                            return 1;
-                                        },
-                                        else => return 0,
-                                    }
-                                }
-                            }.reduce;
-                        }
-                    }.factory;
 
                     const Built = comptime blk: {
                         const AssemblerType = Assembler.make(grt, .{
                             .max_reducers = 1,
                         });
                         var next = AssemblerType.init();
-                        next.setStore(.counter, CounterStore);
-                        next.addReducer(.counter, CounterReducerFactory);
+                        next.setStore("counter", CounterStore);
+                        next.addReducer("counter");
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{};
                         break :blk next.build(build_config);
                     };
 
+                    const RuntimeCounterReducer = struct {
+                        pub fn reduce(
+                            self_hook: *@This(),
+                            stores: *Built.Store.Stores,
+                            message: Message,
+                            emit: Emitter,
+                        ) !usize {
+                            _ = self_hook;
+                            _ = emit;
+                            switch (message.body) {
+                                .tick => {
+                                    stores.counter.invoke({}, struct {
+                                        fn apply(state: *CounterState, _: void) void {
+                                            state.ticks += 1;
+                                        }
+                                    }.apply);
+                                    return 1;
+                                },
+                                .raw_single_button => |button| {
+                                    stores.counter.invoke(button.pressed, struct {
+                                        fn apply(state: *CounterState, pressed: bool) void {
+                                            state.pressed = pressed;
+                                        }
+                                    }.apply);
+                                    return 1;
+                                },
+                                else => return 0,
+                            }
+                        }
+                    };
+
+                    var runtime_reducer = RuntimeCounterReducer{};
                     var app = try Built.init(.{
                         .allocator = grt.std.testing.allocator,
                         .initial_state = .{
                             .counter = .{},
                         },
+                        .counter = Built.ReducerHook.init(&runtime_reducer),
                     });
                     defer app.deinit();
 
@@ -344,7 +346,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             .max_adc_buttons = 2,
                         });
                         var next = AssemblerType.init();
-                        next.addGroupedButton(.buttons, 7, 3);
+                        next.addGroupedButton("buttons", 7, 3);
                         break :blk next;
                     };
 
@@ -365,13 +367,13 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             .max_wifi_ap = 1,
                         });
                         var next = AssemblerType.init();
-                        next.addGroupedButton(.buttons, 7, 3);
-                        next.addImu(.imu, 13);
-                        next.addLedStrip(.strip, 9, 4);
-                        next.addModem(.modem, 15);
-                        next.addNfc(.nfc, 17);
-                        next.addWifiSta(.sta, 19);
-                        next.addWifiAp(.ap, 21);
+                        next.addGroupedButton("buttons", 7, 3);
+                        next.addImu("imu", 13);
+                        next.addLedStrip("strip", 9, 4);
+                        next.addModem("modem", 15);
+                        next.addNfc("nfc", 17);
+                        next.addWifiSta("sta", 19);
+                        next.addWifiAp("ap", 21);
                         break :blk next.BuildConfig();
                     };
 
@@ -390,7 +392,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             .max_led_strips = 2,
                         });
                         var next = AssemblerType.init();
-                        next.addLedStrip(.strip, 9, 4);
+                        next.addLedStrip("strip", 9, 4);
                         break :blk next;
                     };
 
@@ -409,11 +411,11 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             .max_wifi_ap = 1,
                         });
                         var next = AssemblerType.init();
-                        next.addImu(.imu, 13);
-                        next.addModem(.modem, 15);
-                        next.addNfc(.nfc, 17);
-                        next.addWifiSta(.sta, 19);
-                        next.addWifiAp(.ap, 21);
+                        next.addImu("imu", 13);
+                        next.addModem("modem", 15);
+                        next.addNfc("nfc", 17);
+                        next.addWifiSta("sta", 19);
+                        next.addWifiAp("ap", 21);
                         break :blk next;
                     };
 
@@ -438,10 +440,10 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             .max_selections = 1,
                         });
                         var next = AssemblerType.init();
-                        next.addFlow(.pairing, 31, PairingFlow);
-                        next.addOverlay(.loading, 41);
-                        next.addRouter(.nav, 51);
-                        next.addSelection(.menu, 61);
+                        next.addFlow("pairing", 31, PairingFlow);
+                        next.addOverlay("loading", 41);
+                        next.addRouter("nav", 51);
+                        next.addSelection("menu", 61);
                         break :blk next;
                     };
 
@@ -467,11 +469,11 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             .max_selections = 1,
                         });
                         var next = AssemblerType.init();
-                        next.addSingleButton(.shared, 7);
-                        next.addFlow(.pairing, 31, PairingFlow);
-                        next.addOverlay(.loading, 41);
-                        next.addRouter(.nav, 51);
-                        next.addSelection(.menu, 61);
+                        next.addSingleButton("shared", 7);
+                        next.addFlow("pairing", 31, PairingFlow);
+                        next.addOverlay("loading", 41);
+                        next.addRouter("nav", 51);
+                        next.addSelection("menu", 61);
                         break :blk next;
                     };
 
@@ -542,14 +544,14 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             .max_selections = 2,
                         });
                         var next = AssemblerType.init();
-                        next.addFlow(.pairing_a, 31, PairingFlow);
-                        next.addFlow(.pairing_b, 32, PairingFlow);
-                        next.addOverlay(.loading_a, 41);
-                        next.addOverlay(.loading_b, 42);
-                        next.addRouter(.nav_a, 51);
-                        next.addRouter(.nav_b, 52);
-                        next.addSelection(.menu_a, 61);
-                        next.addSelection(.menu_b, 62);
+                        next.addFlow("pairing_a", 31, PairingFlow);
+                        next.addFlow("pairing_b", 32, PairingFlow);
+                        next.addOverlay("loading_a", 41);
+                        next.addOverlay("loading_b", 42);
+                        next.addRouter("nav_a", 51);
+                        next.addRouter("nav_b", 52);
+                        next.addSelection("menu_a", 61);
+                        next.addSelection("menu_b", 62);
 
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{};
@@ -673,11 +675,11 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             .max_selections = 1,
                         });
                         var next = AssemblerType.init();
-                        next.addGroupedButton(.buttons, 7, 3);
-                        next.addFlow(.pairing, 31, PairingFlow);
-                        next.addOverlay(.loading, 41);
-                        next.addRouter(.nav, 51);
-                        next.addSelection(.menu, 61);
+                        next.addGroupedButton("buttons", 7, 3);
+                        next.addFlow("pairing", 31, PairingFlow);
+                        next.addOverlay("loading", 41);
+                        next.addRouter("nav", 51);
+                        next.addSelection("menu", 61);
 
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{
@@ -724,12 +726,12 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             },
                         });
                         var next = AssemblerType.init();
-                        next.addGroupedButton(.buttons, 7, 3);
-                        next.addLedStrip(.strip, 11, 4);
-                        next.addFlow(.pairing, 31, PairingFlow);
-                        next.addOverlay(.loading, 41);
-                        next.addRouter(.nav, 51);
-                        next.addSelection(.menu, 61);
+                        next.addGroupedButton("buttons", 7, 3);
+                        next.addLedStrip("strip", 11, 4);
+                        next.addFlow("pairing", 31, PairingFlow);
+                        next.addOverlay("loading", 41);
+                        next.addRouter("nav", 51);
+                        next.addSelection("menu", 61);
 
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{
@@ -952,22 +954,6 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     const CounterStore = Store.Object.make(grt, struct {
                         value: u32 = 0,
                     }, .counter);
-                    const RenderNamespace = struct {
-                        var call_count: usize = 0;
-                        var last_value: u32 = 0;
-
-                        fn factory(comptime Built: type, comptime path: []const u8) *const fn (*Built) anyerror!void {
-                            _ = path;
-
-                            return struct {
-                                fn render(app: *Built) !void {
-                                    call_count += 1;
-                                    last_value = app.runtime.store.stores.counter.get().value;
-                                }
-                            }.render;
-                        }
-                    };
-                    const RenderFactory = RenderNamespace.factory;
 
                     const Built = comptime blk: {
                         const AssemblerType = Assembler.make(grt, .{
@@ -980,34 +966,74 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                             },
                         });
                         var next = AssemblerType.init();
-                        next.setStore(.counter, CounterStore);
-                        next.setState("ui", .{.counter});
-                        next.addRender("ui", RenderFactory);
+                        next.setStore("counter", CounterStore);
+                        next.setState("ui", .{"counter"});
+                        next.addRender("counter_render", "ui");
                         const BuildConfig = next.BuildConfig();
                         const build_config: BuildConfig = .{};
                         break :blk next.build(build_config);
                     };
 
-                    RenderNamespace.call_count = 0;
-                    RenderNamespace.last_value = 0;
+                    try grt.std.testing.expect(@hasField(Built.InitConfig, "counter_render"));
+                    const render_field = comptime initConfigField(Built.InitConfig, "counter_render");
+                    try grt.std.testing.expect(render_field.type == ?Built.RenderHook);
+                    try grt.std.testing.expect(initConfigFieldDefaultValue(render_field) == null);
+
+                    try grt.std.testing.expectError(error.MissingRenderHook, Built.init(.{
+                        .allocator = grt.std.testing.allocator,
+                        .initial_state = .{
+                            .counter = .{},
+                        },
+                    }));
+
+                    const RuntimeRender = struct {
+                        call_count: usize = 0,
+                        last_value: u32 = 0,
+
+                        pub fn render(self_hook: *@This(), app: *Built.ImplType) !void {
+                            self_hook.call_count += 1;
+                            self_hook.last_value = app.runtime.store.stores.counter.get().value;
+                        }
+                    };
+                    var runtime_render = RuntimeRender{};
 
                     var app = try Built.init(.{
                         .allocator = grt.std.testing.allocator,
                         .initial_state = .{
                             .counter = .{},
                         },
+                        .counter_render = Built.RenderHook.init(&runtime_render),
                     });
                     defer app.deinit();
 
                     app.impl.runtime.store.stores.counter.patch(.{
                         .value = 7,
                     });
-                    try grt.std.testing.expectEqual(@as(usize, 0), RenderNamespace.call_count);
 
                     app.impl.runtime.store.stores.counter.tick();
 
-                    try grt.std.testing.expectEqual(@as(usize, 1), RenderNamespace.call_count);
-                    try grt.std.testing.expectEqual(@as(u32, 7), RenderNamespace.last_value);
+                    try grt.std.testing.expectEqual(@as(usize, 1), runtime_render.call_count);
+                    try grt.std.testing.expectEqual(@as(u32, 7), runtime_render.last_value);
+                }
+
+                fn initConfigField(
+                    comptime InitConfig: type,
+                    comptime field_name: []const u8,
+                ) glib.std.builtin.Type.StructField {
+                    inline for (@typeInfo(InitConfig).@"struct".fields) |field| {
+                        if (glib.std.mem.eql(u8, field.name, field_name)) return field;
+                    }
+
+                    @compileError("missing InitConfig field '" ++ field_name ++ "'");
+                }
+
+                fn initConfigFieldDefaultValue(
+                    comptime field: glib.std.builtin.Type.StructField,
+                ) field.type {
+                    const default_value_ptr = field.default_value_ptr orelse
+                        @compileError("missing InitConfig field default value");
+                    const default_value: *const field.type = @ptrCast(@alignCast(default_value_ptr));
+                    return default_value.*;
                 }
             };
 

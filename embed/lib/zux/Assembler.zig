@@ -2,7 +2,6 @@ const Config = @import("assembler/Config.zig");
 const assembler_builder = @import("assembler/Builder.zig");
 const BuildContext = @import("assembler/BuildContext.zig");
 const assembler_build_config = @import("assembler/BuildConfig.zig");
-const Store = @import("Store.zig");
 const registry_adc_button = @import("assembler/registry/adc_button.zig");
 const registry_flow = @import("assembler/registry/flow.zig");
 const registry_gpio_button = @import("assembler/registry/gpio_button.zig");
@@ -16,22 +15,8 @@ const registry_overlay = @import("assembler/registry/overlay.zig");
 const registry_router = @import("assembler/registry/router.zig");
 const registry_selection = @import("assembler/registry/selection.zig");
 const registry_unique = @import("assembler/registry/unique.zig");
+const Store = @import("Store.zig");
 
-pub const ReducerFnFactory = @TypeOf(struct {
-    fn factory(
-        comptime Stores: type,
-        comptime MessageType: type,
-        comptime EmitterType: type,
-    ) Store.Reducer.ReducerFnType(Stores, MessageType, EmitterType) {
-        unreachable;
-    }
-}.factory);
-pub const RenderFnFactory = @TypeOf(struct {
-    fn factory(comptime ZuxApp: type, comptime path: []const u8) *const fn (*ZuxApp) anyerror!void {
-        _ = path;
-        unreachable;
-    }
-}.factory);
 pub const FlowTypeFactory = @TypeOf(struct {
     fn factory() type {
         unreachable;
@@ -43,16 +28,15 @@ pub fn make(
     comptime config: Config,
 ) type {
     const StoreBuilderType = Store.Builder(config.store);
-    const ReducerFactoryType = ReducerFnFactory;
     const max_render_bindings = config.max_handles;
     const RenderBinding = struct {
+        label: []const u8,
+        name: []const u8,
         path: []const u8,
-        AdapterType: type,
     };
     const ReducerBinding = struct {
         label: []const u8,
         name: []const u8,
-        factory: ReducerFactoryType,
     };
     const AdcButtonRegistryType = registry_adc_button.make(config.max_adc_buttons);
     const FlowRegistryType = registry_flow.make(config.max_flows);
@@ -110,7 +94,7 @@ pub fn make(
             };
         }
 
-        pub fn setStore(self: *Self, comptime label: anytype, comptime StoreType: type) void {
+        pub fn setStore(self: *Self, comptime label: []const u8, comptime StoreType: type) void {
             self.store_builder.setStore(label, StoreType);
         }
 
@@ -120,25 +104,26 @@ pub fn make(
 
         pub fn addRender(
             self: *Self,
+            comptime label: []const u8,
             comptime path: []const u8,
-            comptime factory: RenderFnFactory,
         ) void {
+            const label_name = validateRenderLabel(label);
             const normalized_path = validateRenderPath(path);
             if (self.render_count >= self.render_bindings.len) {
                 @compileError("zux.Assembler.addRender exceeded max_handles");
             }
 
             self.render_bindings[self.render_count] = .{
+                .label = label_name,
+                .name = label_name,
                 .path = normalized_path,
-                .AdapterType = makeRenderAdapter(normalized_path, factory),
             };
             self.render_count += 1;
         }
 
         pub fn addReducer(
             self: *Self,
-            comptime label: anytype,
-            comptime factory: ReducerFactoryType,
+            comptime label: []const u8,
         ) void {
             const label_name = validateReducerLabel(label);
 
@@ -152,14 +137,13 @@ pub fn make(
             self.reducer_bindings[self.reducer_count] = .{
                 .label = label_name,
                 .name = label_name,
-                .factory = factory,
             };
             self.reducer_count += 1;
         }
 
         pub fn addGroupedButton(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
             comptime button_count: usize,
         ) void {
@@ -169,7 +153,7 @@ pub fn make(
 
         pub fn addSingleButton(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -178,7 +162,7 @@ pub fn make(
 
         pub fn addImu(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -187,7 +171,7 @@ pub fn make(
 
         pub fn addLedStrip(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
             comptime pixel_count: usize,
         ) void {
@@ -197,7 +181,7 @@ pub fn make(
 
         pub fn addModem(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -206,7 +190,7 @@ pub fn make(
 
         pub fn addNfc(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -215,7 +199,7 @@ pub fn make(
 
         pub fn addWifiSta(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -224,7 +208,7 @@ pub fn make(
 
         pub fn addWifiAp(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -233,7 +217,7 @@ pub fn make(
 
         pub fn addRouter(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -243,7 +227,7 @@ pub fn make(
 
         pub fn addFlow(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
             comptime FlowType: type,
         ) void {
@@ -253,7 +237,7 @@ pub fn make(
 
         pub fn addOverlay(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -263,7 +247,7 @@ pub fn make(
 
         pub fn addSelection(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
@@ -313,7 +297,7 @@ pub fn make(
 
         fn ensureComponentUnique(
             self: *Self,
-            comptime label: anytype,
+            comptime label: []const u8,
             comptime id: u32,
         ) void {
             const label_name = registry_unique.labelText(label);
@@ -339,12 +323,18 @@ pub fn make(
             );
         }
 
-        fn validateReducerLabel(comptime label: anytype) []const u8 {
-            const label_name = registry_unique.labelText(label);
-            if (label_name.len == 0) {
+        fn validateReducerLabel(comptime label: []const u8) []const u8 {
+            if (label.len == 0) {
                 @compileError("zux.Assembler.addReducer labels must not be empty");
             }
-            return label_name;
+            return label;
+        }
+
+        fn validateRenderLabel(comptime label: []const u8) []const u8 {
+            if (label.len == 0) {
+                @compileError("zux.Assembler.addRender labels must not be empty");
+            }
+            return label;
         }
 
         fn hasReducerLabel(self: *Self, comptime label: []const u8) bool {
@@ -387,55 +377,6 @@ pub fn make(
                 if (ch != b[idx]) return false;
             }
             return true;
-        }
-
-        fn makeRenderAdapter(comptime path: []const u8, comptime factory: RenderFnFactory) type {
-            return struct {
-                const render_path = path;
-                const render_factory = factory;
-
-                pub fn makeSubscriber(comptime App: type, comptime Runtime: type, runtime: *Runtime) Store.Subscriber {
-                    const gen = struct {
-                        fn notifyFn(ctx: *anyopaque, notification: Store.Subscriber.Notification) void {
-                            _ = notification;
-
-                            const runtime_ptr: *Runtime = @ptrCast(@alignCast(ctx));
-                            var app: App = undefined;
-                            if (!@hasField(App, "runtime")) {
-                                @compileError("zux.Assembler.addRender app adapter requires App.runtime");
-                            }
-                            @field(app, "runtime") = runtime_ptr;
-                            if (@hasField(App, "started")) {
-                                @field(app, "started") = true;
-                            }
-                            if (@hasField(App, "closed")) {
-                                @field(app, "closed") = false;
-                            }
-                            if (@hasField(App, "last_event")) {
-                                @field(app, "last_event") = null;
-                            }
-                            if (@hasField(App, "last_grouped_button_ids")) {
-                                const Ids = @FieldType(App, "last_grouped_button_ids");
-                                @field(app, "last_grouped_button_ids") = [_]?u32{null} ** @typeInfo(Ids).array.len;
-                            }
-
-                            const render_fn = render_factory(App, render_path);
-                            render_fn(&app) catch |err| {
-                                @panic(@errorName(err));
-                            };
-                        }
-
-                        const vtable = Store.Subscriber.VTable{
-                            .notify = notifyFn,
-                        };
-                    };
-
-                    return .{
-                        .ctx = runtime,
-                        .vtable = &gen.vtable,
-                    };
-                }
-            };
         }
     };
 }

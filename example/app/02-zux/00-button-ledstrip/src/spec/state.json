@@ -7,8 +7,7 @@
         "label": "scene",
         "state": {
           "mode": "u8",
-          "rainbow_stage": "u8",
-          "next_rainbow_step_ns": "i64"
+          "rainbow_stage": "u8"
         }
       }
     },

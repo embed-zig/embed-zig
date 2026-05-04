@@ -394,6 +394,8 @@ pub fn make(comptime Impl: type) type {
         pub const registries = impl_registries;
         pub const Store = if (@hasDecl(Impl, "Store")) Impl.Store else void;
         pub const Root = if (@hasDecl(Impl, "Root")) Impl.Root else void;
+        pub const ReducerHook = if (@hasDecl(Impl, "ReducerHook")) Impl.ReducerHook else void;
+        pub const RenderHook = if (@hasDecl(Impl, "RenderHook")) Impl.RenderHook else void;
         pub const Imu = drivers.imu;
         pub const Modem = modem_api.Modem;
         pub const Nfc = drivers.nfc;

@@ -8,8 +8,7 @@
       "strip": {},
       "scene": {
         "mode": 0,
-        "rainbow_stage": 0,
-        "next_rainbow_step_ns": 0
+        "rainbow_stage": 0
       }
     },
     "steps": [

@@ -420,10 +420,18 @@ pub fn make(comptime ZuxApp: type) type {
                 strips: *[ledstrip_count]device.ledstrip.LedStrip,
             ) ZuxApp.InitConfig {
                 var init_config: ZuxApp.InitConfig = undefined;
-                init_config.allocator = allocator;
                 if (@hasField(ZuxApp.InitConfig, "custom_pipeline_node")) {
                     init_config.custom_pipeline_node = null;
                 }
+                inline for (@typeInfo(ZuxApp.InitConfig).@"struct".fields) |field| {
+                    if (isOptionalOf(field.type, ZuxApp.ReducerHook)) {
+                        @compileError("desktop ZuxServer cannot synthesize runtime reducer hook field '" ++ field.name ++ "'");
+                    }
+                    if (isOptionalOf(field.type, ZuxApp.RenderHook)) {
+                        @compileError("desktop ZuxServer cannot synthesize runtime render hook field '" ++ field.name ++ "'");
+                    }
+                }
+                init_config.allocator = allocator;
 
                 inline for (0..gpio_count) |i| {
                     const periph = registries.gpio_button.periphs[i];
@@ -438,6 +446,12 @@ pub fn make(comptime ZuxApp: type) type {
                 }
 
                 return init_config;
+            }
+
+            fn isOptionalOf(comptime FieldType: type, comptime ChildType: type) bool {
+                if (ChildType == void) return false;
+                const info = @typeInfo(FieldType);
+                return info == .optional and info.optional.child == ChildType;
             }
         };
 

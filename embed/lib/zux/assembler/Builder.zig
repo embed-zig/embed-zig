@@ -274,13 +274,6 @@ pub fn build(builder: root, comptime context: anytype) type {
     const NfcInstances = makePeriphInstancesType(context.build_config, nfc_registry);
     const WifiStaInstances = makePeriphInstancesType(context.build_config, wifi_sta_registry);
     const WifiApInstances = makePeriphInstancesType(context.build_config, wifi_ap_registry);
-    const GeneratedInitConfig = makeInitConfigType(
-        context.grt,
-        GeneratedInitialState,
-        context.build_config,
-        context.registries,
-    );
-
     const AppLabel = makeLabelEnum(context.registries);
     const GeneratedFlowLabel = makeSingleRegistryLabelEnum(flow_registry);
     const GeneratedOverlayLabel = makeSingleRegistryLabelEnum(overlay_registry);
@@ -333,6 +326,44 @@ pub fn build(builder: root, comptime context: anytype) type {
         }
     };
     const StoreReducerType = store.Reducer.make(StoreType);
+    const RuntimeReducerHook = makeRuntimeReducerHook(StoreType);
+    const ConfiguredReducerNode = struct {
+        stores: *StoreType.Stores,
+        hook: RuntimeReducerHook,
+        out: ?Emitter = null,
+
+        pub fn init(stores: *StoreType.Stores, hook: RuntimeReducerHook) @This() {
+            return .{
+                .stores = stores,
+                .hook = hook,
+            };
+        }
+
+        pub fn node(self: *@This()) Node {
+            return Node.init(@This(), self);
+        }
+
+        pub fn bindOutput(self: *@This(), out: Emitter) void {
+            self.out = out;
+        }
+
+        pub fn process(self: *@This(), message: Message) !usize {
+            const NoopSink = struct {
+                pub fn emit(_: *@This(), _: Message) !void {}
+            };
+
+            var noop = NoopSink{};
+            const emit = self.out orelse Emitter.init(&noop);
+            const reduced = try self.hook.reduce(self.stores, message, emit);
+            if (message.body == .tick) {
+                if (self.out) |out| {
+                    try out.emit(message);
+                    return reduced + 1;
+                }
+            }
+            return reduced;
+        }
+    };
     const BypassNode = struct {
         out: ?Emitter = null,
 
@@ -625,7 +656,20 @@ pub fn build(builder: root, comptime context: anytype) type {
             .router = router_registry,
             .selection = selection_registry,
         };
-        pub const InitConfig = GeneratedInitConfig;
+        pub const ReducerHook = RuntimeReducerHook;
+        pub const RenderHook = makeRuntimeRenderHook(Self);
+        pub const InitConfig = makeInitConfigType(
+            context.grt,
+            GeneratedInitialState,
+            context.build_config,
+            context.registries,
+            ReducerHook,
+            RenderHook,
+            context.reducer_bindings,
+            configured_reducer_count,
+            context.render_bindings,
+            configured_render_count,
+        );
         pub const StartConfig = App.StartConfig;
         pub const Store = StoreType;
         pub const InitialState = GeneratedInitialState;
@@ -664,6 +708,35 @@ pub fn build(builder: root, comptime context: anytype) type {
             };
         }
 
+        const RuntimeRenderSubscriber = struct {
+            runtime: *Runtime,
+            hook: RenderHook,
+
+            pub fn notify(self: *@This(), notification: @import("../Store.zig").Subscriber.Notification) void {
+                _ = notification;
+
+                var app: Self = undefined;
+                app.runtime = self.runtime;
+                if (@hasField(Self, "started")) {
+                    app.started = true;
+                }
+                if (@hasField(Self, "closed")) {
+                    app.closed = false;
+                }
+                if (@hasField(Self, "last_event")) {
+                    app.last_event = null;
+                }
+                if (@hasField(Self, "last_grouped_button_ids")) {
+                    const Ids = @FieldType(Self, "last_grouped_button_ids");
+                    app.last_grouped_button_ids = [_]?u32{null} ** @typeInfo(Ids).array.len;
+                }
+
+                self.hook.render(&app) catch |err| {
+                    @panic(@errorName(err));
+                };
+            }
+        };
+
         const Runtime = struct {
             allocator: glib.std.mem.Allocator,
             store: StoreType,
@@ -693,7 +766,8 @@ pub fn build(builder: root, comptime context: anytype) type {
             overlay_store_reducer: if (has_overlay_runtime) StoreReducerType else void,
             route_store_reducer: if (has_router_runtime) StoreReducerType else void,
             selection_store_reducer: if (has_selection_runtime) StoreReducerType else void,
-            configured_reducers: [configured_reducer_count]StoreReducerType = undefined,
+            configured_reducers: [configured_reducer_count]ConfiguredReducerNode = undefined,
+            render_hooks: [configured_render_count]RuntimeRenderSubscriber = undefined,
             render_subscribers: [configured_render_count]@import("../Store.zig").Subscriber = undefined,
             custom_pipeline_bypass: BypassNode = .{},
             store_tick: StoreTickNode,
@@ -734,7 +808,12 @@ pub fn build(builder: root, comptime context: anytype) type {
                 }
                 inline for (0..configured_render_count) |i| {
                     const binding = context.render_bindings[i];
-                    runtime.render_subscribers[i] = binding.AdapterType.makeSubscriber(Self, Runtime, runtime);
+                    const hook = @field(init_config, binding.name) orelse return error.MissingRenderHook;
+                    runtime.render_hooks[i] = .{
+                        .runtime = runtime,
+                        .hook = hook,
+                    };
+                    runtime.render_subscribers[i] = @import("../Store.zig").Subscriber.init(&runtime.render_hooks[i]);
                     try runtime.store.subscribePath(binding.path, &runtime.render_subscribers[i]);
                     subscribed_render_count = i + 1;
                 }
@@ -820,9 +899,10 @@ pub fn build(builder: root, comptime context: anytype) type {
                 }
                 inline for (0..configured_reducer_count) |i| {
                     const binding = context.reducer_bindings[i];
-                    runtime.configured_reducers[i] = StoreReducerType.init(
+                    const hook = @field(init_config, binding.name) orelse return error.MissingReducerHook;
+                    runtime.configured_reducers[i] = ConfiguredReducerNode.init(
                         &runtime.store.stores,
-                        binding.factory(StoreType.Stores, Message, Emitter),
+                        hook,
                     );
                 }
                 runtime.store_tick = .{
@@ -2311,15 +2391,122 @@ fn makePeriphInstancesType(comptime build_config_value: anytype, comptime regist
     });
 }
 
+fn makeRuntimeReducerHook(comptime StoreType: type) type {
+    return struct {
+        ptr: *anyopaque,
+        vtable: *const VTable,
+
+        const RuntimeReducerHook = @This();
+
+        pub const VTable = struct {
+            reduce: *const fn (
+                ptr: *anyopaque,
+                stores: *StoreType.Stores,
+                message: Message,
+                emit: Emitter,
+            ) anyerror!usize,
+        };
+
+        pub fn init(pointer: anytype) RuntimeReducerHook {
+            const Ptr = @TypeOf(pointer);
+            const info = @typeInfo(Ptr);
+            if (info != .pointer or info.pointer.size != .one) {
+                @compileError("zux.RuntimeReducerHook.init expects a single-item pointer");
+            }
+
+            const Impl = info.pointer.child;
+            const gen = struct {
+                fn reduceFn(
+                    ptr: *anyopaque,
+                    stores: *StoreType.Stores,
+                    message: Message,
+                    emit: Emitter,
+                ) !usize {
+                    const impl: *Impl = @ptrCast(@alignCast(ptr));
+                    return impl.reduce(stores, message, emit);
+                }
+
+                const vtable = VTable{
+                    .reduce = reduceFn,
+                };
+            };
+
+            return .{
+                .ptr = pointer,
+                .vtable = &gen.vtable,
+            };
+        }
+
+        pub fn reduce(
+            self: RuntimeReducerHook,
+            stores: *StoreType.Stores,
+            message: Message,
+            emit: Emitter,
+        ) !usize {
+            return self.vtable.reduce(self.ptr, stores, message, emit);
+        }
+    };
+}
+
+fn makeRuntimeRenderHook(comptime AppType: type) type {
+    return struct {
+        ptr: *anyopaque,
+        vtable: *const VTable,
+
+        const RuntimeRenderHook = @This();
+
+        pub const VTable = struct {
+            render: *const fn (ptr: *anyopaque, app: *AppType) anyerror!void,
+        };
+
+        pub fn init(pointer: anytype) RuntimeRenderHook {
+            const Ptr = @TypeOf(pointer);
+            const info = @typeInfo(Ptr);
+            if (info != .pointer or info.pointer.size != .one) {
+                @compileError("zux.RuntimeRenderHook.init expects a single-item pointer");
+            }
+
+            const Impl = info.pointer.child;
+            const gen = struct {
+                fn renderFn(ptr: *anyopaque, app: *AppType) !void {
+                    const impl: *Impl = @ptrCast(@alignCast(ptr));
+                    try impl.render(app);
+                }
+
+                const vtable = VTable{
+                    .render = renderFn,
+                };
+            };
+
+            return .{
+                .ptr = pointer,
+                .vtable = &gen.vtable,
+            };
+        }
+
+        pub fn render(self: RuntimeRenderHook, app: *AppType) !void {
+            try self.vtable.render(self.ptr, app);
+        }
+    };
+}
+
 fn makeInitConfigType(
     comptime grt: type,
     comptime InitialState: type,
     comptime build_config_value: anytype,
     comptime registries: anytype,
+    comptime RuntimeReducerHook: type,
+    comptime RuntimeRenderHook: type,
+    comptime reducer_bindings: anytype,
+    comptime reducer_count: usize,
+    comptime render_bindings: anytype,
+    comptime render_count: usize,
 ) type {
     _ = grt;
-    const total_fields = 3 + totalPeriphLen(registries);
+    const total_fields = 3 + totalPeriphLen(registries) + reducer_count + render_count;
     const default_custom_pipeline_node: ?Node = null;
+    const default_reducer_hook: ?RuntimeReducerHook = null;
+    const default_render_hook: ?RuntimeRenderHook = null;
     var fields: [total_fields]glib.std.builtin.Type.StructField = undefined;
     comptime var field_index: usize = 0;
 
@@ -2369,6 +2556,32 @@ fn makeInitConfigType(
             };
             field_index += 1;
         }
+    }
+
+    inline for (0..reducer_count) |i| {
+        const binding = reducer_bindings[i];
+        ensureUniqueInitConfigField(fields, field_index, binding.name);
+        fields[field_index] = .{
+            .name = sentinelName(binding.name),
+            .type = ?RuntimeReducerHook,
+            .default_value_ptr = @ptrCast(&default_reducer_hook),
+            .is_comptime = false,
+            .alignment = @alignOf(?RuntimeReducerHook),
+        };
+        field_index += 1;
+    }
+
+    inline for (0..render_count) |i| {
+        const binding = render_bindings[i];
+        ensureUniqueInitConfigField(fields, field_index, binding.name);
+        fields[field_index] = .{
+            .name = sentinelName(binding.name),
+            .type = ?RuntimeRenderHook,
+            .default_value_ptr = @ptrCast(&default_render_hook),
+            .is_comptime = false,
+            .alignment = @alignOf(?RuntimeRenderHook),
+        };
+        field_index += 1;
     }
 
     return @Type(.{

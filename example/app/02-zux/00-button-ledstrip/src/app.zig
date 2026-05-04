@@ -28,8 +28,6 @@ pub fn run(comptime platform_ctx: type, comptime platform_grt: type) !void {
     const assembler_config: zux.AssemblerConfig = .{};
     const AppType = comptime blk: {
         var spec = SpecType.init();
-        spec.setReducer("scene_reducer", scene_hooks.sceneReducer);
-        spec.setRender("scene_render", scene_hooks.renderScene);
         break :blk spec.buildApp(platform_grt, assembler_config);
     };
 
@@ -44,6 +42,7 @@ pub fn run(comptime platform_ctx: type, comptime platform_grt: type) !void {
 
         pub const Instance = struct {
             init_config: AppType.InitConfig,
+            scene: scene_hooks.Scene = .{},
 
             pub fn config(self_instance: *@This()) AppType.InitConfig {
                 return self_instance.init_config;
@@ -56,6 +55,8 @@ pub fn run(comptime platform_ctx: type, comptime platform_grt: type) !void {
 
         pub fn make(self_factory: *@This(), init_config: AppType.InitConfig) !*Instance {
             self_factory.instance = .{ .init_config = init_config };
+            self_factory.instance.init_config.scene_reducer = AppType.ReducerHook.init(&self_factory.instance.scene);
+            self_factory.instance.init_config.scene_render = AppType.RenderHook.init(&self_factory.instance.scene);
             return &self_factory.instance;
         }
     };

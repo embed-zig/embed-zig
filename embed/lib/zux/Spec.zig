@@ -135,16 +135,9 @@ pub fn make(comptime spec_doc: anytype) type {
     const reducers_doc = if (@hasField(SpecDocType, "reducers")) spec_doc.reducers else &.{};
     const renders_doc = if (@hasField(SpecDocType, "renders")) spec_doc.renders else &.{};
     const user_stories_doc = if (@hasField(SpecDocType, "user_stories")) spec_doc.user_stories else &.{};
-    const reducer_count = reducers_doc.len;
-    const render_count = renders_doc.len;
 
     return struct {
         const Self = @This();
-
-        reducer_hooks: [reducer_count]?Assembler.ReducerFnFactory =
-            [_]?Assembler.ReducerFnFactory{null} ** reducer_count,
-        render_hooks: [render_count]?Assembler.RenderFnFactory =
-            [_]?Assembler.RenderFnFactory{null} ** render_count,
 
         pub const stores = stores_doc;
         pub const state_paths = state_paths_doc;
@@ -157,29 +150,12 @@ pub fn make(comptime spec_doc: anytype) type {
             return .{};
         }
 
-        pub fn setReducer(
-            self: *Self,
-            comptime label: []const u8,
-            comptime factory: Assembler.ReducerFnFactory,
-        ) void {
-            const idx = reducerIndex(label);
-            self.reducer_hooks[idx] = factory;
-        }
-
-        pub fn setRender(
-            self: *Self,
-            comptime label: []const u8,
-            comptime factory: Assembler.RenderFnFactory,
-        ) void {
-            const idx = renderIndex(label);
-            self.render_hooks[idx] = factory;
-        }
-
         pub fn assembler(
             self: *Self,
             comptime grt: type,
             comptime config: AssemblerConfig,
         ) Assembler.make(grt, config) {
+            _ = self;
             const AssemblerType = Assembler.make(grt, config);
 
             return comptime blk: {
@@ -242,31 +218,12 @@ pub fn make(comptime spec_doc: anytype) type {
                     }
                 }
 
-                for (reducers, 0..) |reducer_spec, i| {
-                    const reducer_factory = self.reducer_hooks[i] orelse
-                        @compileError(
-                            "zux.Spec.assembler missing reducer implementation for label '" ++
-                                reducer_spec.label ++
-                                "' (reducer_fn_name '" ++
-                                reducer_spec.reducer_fn_name ++
-                                "'); call spec.setReducer(\"" ++ reducer_spec.label ++ "\", ...)",
-                        );
-                    next.addReducer(
-                        reducer_spec.label,
-                        reducer_factory,
-                    );
+                for (reducers) |reducer_spec| {
+                    next.addReducer(reducer_spec.label);
                 }
 
-                for (renders, 0..) |render_spec, i| {
-                    const render_factory = self.render_hooks[i] orelse
-                        @compileError(
-                            "zux.Spec.assembler missing render implementation for label '" ++
-                                render_spec.label ++
-                                "' (render_fn_name '" ++
-                                render_spec.render_fn_name ++
-                                "'); call spec.setRender(\"" ++ render_spec.label ++ "\", ...)",
-                        );
-                    next.addRender(render_spec.state_path, render_factory);
+                for (renders) |render_spec| {
+                    next.addRender(render_spec.label, render_spec.state_path);
                 }
 
                 break :blk next;
@@ -350,28 +307,12 @@ pub fn make(comptime spec_doc: anytype) type {
             return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
         }
 
-        fn reducerIndex(comptime label: []const u8) usize {
-            inline for (reducers, 0..) |reducer, i| {
-                if (glib.std.mem.eql(u8, reducer.label, label)) return i;
-            }
-
-            @compileError("zux.Spec.setReducer received a label '" ++ label ++ "' that is not declared in the spec doc reducer list");
-        }
-
         fn componentIndex(comptime label: []const u8) usize {
             inline for (components, 0..) |component, i| {
                 if (glib.std.mem.eql(u8, component.label, label)) return i;
             }
 
             @compileError("zux.Spec received a component label '" ++ label ++ "' that is not declared in the spec doc component list");
-        }
-
-        fn renderIndex(comptime label: []const u8) usize {
-            inline for (renders, 0..) |render_spec, i| {
-                if (glib.std.mem.eql(u8, render_spec.label, label)) return i;
-            }
-
-            @compileError("zux.Spec.setRender received a label '" ++ label ++ "' that is not declared in the spec doc render list");
         }
 
         fn makeDefaultBuildConfig(comptime BuildConfig: type) BuildConfig {
@@ -395,8 +336,9 @@ pub fn make(comptime spec_doc: anytype) type {
                     @field(init_config, field.name) = allocator;
                 } else if (comptime comptimeEql(field.name, "initial_state")) {
                     @field(init_config, field.name) = undefined;
-                } else if (comptime comptimeEql(field.name, "custom_pipeline_node")) {
-                    @field(init_config, field.name) = null;
+                } else if (field.default_value_ptr) |default_value_ptr| {
+                    const default_value: *const field.type = @ptrCast(@alignCast(default_value_ptr));
+                    @field(init_config, field.name) = default_value.*;
                 } else {
                     @field(init_config, field.name) = makeTestPeriphValue(field.name, field.type);
                 }
@@ -989,33 +931,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             });
-            const ReducerFactory = struct {
-                fn factory(
-                    comptime StoresType: type,
-                    comptime MessageType: type,
-                    comptime EmitterType: type,
-                ) Store.Reducer.ReducerFnType(StoresType, MessageType, EmitterType) {
-                    return struct {
-                        fn reduce(_: *StoresType, _: MessageType, _: EmitterType) !usize {
-                            return 0;
-                        }
-                    }.reduce;
-                }
-            }.factory;
-            const RenderFactory = struct {
-                fn factory(comptime App: type, comptime path: []const u8) *const fn (*App) anyerror!void {
-                    _ = path;
-
-                    return struct {
-                        fn render(_: *App) !void {}
-                    }.render;
-                }
-            }.factory;
-
             const assembled = comptime blk: {
                 var spec = SpecType.init();
-                spec.setReducer("counter_reducer", ReducerFactory);
-                spec.setRender("counter_render", RenderFactory);
                 break :blk spec.assembler(grt, .{
                     .max_reducers = 1,
                     .max_handles = 1,
@@ -1121,31 +1038,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             });
-            const ReducerFactory = struct {
-                fn factory(
-                    comptime StoresType: type,
-                    comptime MessageType: type,
-                    comptime EmitterType: type,
-                ) Store.Reducer.ReducerFnType(StoresType, MessageType, EmitterType) {
-                    return struct {
-                        fn reduce(stores: *StoresType, message: MessageType, emit: EmitterType) !usize {
-                            _ = emit;
-                            switch (message.body) {
-                                .tick => {
-                                    stores.counter.invoke({}, struct {
-                                        fn apply(state: *@FieldType(StoresType, "counter").StateType, _: void) void {
-                                            state.ticks += 1;
-                                        }
-                                    }.apply);
-                                    return 1;
-                                },
-                                else => return 0,
-                            }
-                        }
-                    }.reduce;
-                }
-            }.factory;
-
             const assembler_config: AssemblerConfig = .{
                 .max_reducers = 1,
                 .store = .{
@@ -1157,14 +1049,36 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
             const AppType = comptime blk: {
                 var spec = SpecType.init();
-                spec.setReducer("counter_reducer", ReducerFactory);
                 break :blk spec.buildApp(grt, assembler_config);
+            };
+            const CounterReducer = struct {
+                pub fn reduce(
+                    self_reducer: *@This(),
+                    stores_value: *AppType.Store.Stores,
+                    message: AppType.Message,
+                    emit: AppType.Emitter,
+                ) !usize {
+                    _ = self_reducer;
+                    _ = emit;
+                    switch (message.body) {
+                        .tick => {
+                            stores_value.counter.invoke({}, struct {
+                                fn apply(state: *@FieldType(AppType.Store.Stores, "counter").StateType, _: void) void {
+                                    state.ticks += 1;
+                                }
+                            }.apply);
+                            return 1;
+                        },
+                        else => return 0,
+                    }
+                }
             };
             const UserStoryConfigFactoryImpl = struct {
                 instance: Instance = undefined,
 
                 pub const Instance = struct {
                     init_config: AppType.InitConfig,
+                    counter_reducer: CounterReducer,
 
                     pub fn config(self_instance: *@This()) AppType.InitConfig {
                         return self_instance.init_config;
@@ -1180,8 +1094,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         @panic("zux.Spec.testRunner factory received config before story initial_state was applied");
                     }
 
-                    self_factory.instance = .{ .init_config = init_config };
+                    self_factory.instance = .{
+                        .init_config = init_config,
+                        .counter_reducer = .{},
+                    };
                     self_factory.instance.init_config.initial_state.counter.ticks = 10;
+                    self_factory.instance.init_config.counter_reducer =
+                        AppType.ReducerHook.init(&self_factory.instance.counter_reducer);
                     return &self_factory.instance;
                 }
             };

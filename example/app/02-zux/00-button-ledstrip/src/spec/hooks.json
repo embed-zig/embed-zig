@@ -5,7 +5,7 @@
       "kind": "Reducer",
       "spec": {
         "label": "scene_reducer",
-        "fn_name": "sceneReducer"
+        "fn_name": "Scene.reduce"
       }
     },
     {
@@ -13,7 +13,7 @@
       "spec": {
         "label": "scene_render",
         "state_path": "app/state",
-        "fn_name": "renderScene"
+        "fn_name": "Scene.render"
       }
     }
   ]
