@@ -11,6 +11,7 @@ pub const base_test_modules = [_]ModuleSpec{
     module("openapi"),
     module("codegen"),
     module("desktop"),
+    module("esp"),
 };
 
 pub const thirdparty_modules = [_]ModuleSpec{
@@ -25,9 +26,9 @@ pub const thirdparty_modules = [_]ModuleSpec{
     module2("thirdparty", "stb_truetype"),
 };
 
-pub const example_modules = [_]ModuleSpec{
-    module2("example", "unit-test_std"),
-    module2("example", "zux_button-ledstrip"),
+pub const apps_modules = [_]ModuleSpec{
+    module2("apps", "glib_unit-test"),
+    module2("apps", "zux_button-ledstrip"),
 };
 
 fn module(name: []const u8) ModuleSpec {

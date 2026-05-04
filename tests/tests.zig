@@ -11,8 +11,8 @@ pub const Label = enum {
 
 pub const modules = modulesFor(target.os_tag == .linux, target.os_tag == .macos);
 
-pub fn modulesFor(comptime is_linux: bool, comptime is_macos: bool) @TypeOf(glib_unit_base_modules ++ includeIf(!is_linux, glib_unit_non_linux_modules) ++ includeIf(is_macos, glib_unit_macos_modules) ++ glib_integration_base_modules ++ includeIf(!is_linux, glib_integration_non_linux_modules) ++ includeIf(is_macos, glib_integration_macos_modules) ++ gstd_unit_base_modules ++ includeIf(!is_linux, gstd_unit_non_linux_modules) ++ includeIf(is_macos, gstd_unit_macos_modules) ++ desktop_unit_base_modules ++ example_unit_base_modules ++ example_zux_base_modules ++ openapi_codegen_unit_base_modules ++ openapi_codegen_integration_base_modules ++ embed_unit_base_modules ++ includeIf(!is_linux, embed_unit_non_linux_modules) ++ includeIf(is_macos, embed_unit_macos_modules) ++ embed_integration_base_modules ++ includeIf(!is_linux, embed_integration_non_linux_modules) ++ includeIf(is_macos, embed_integration_macos_modules) ++ thirdparty_unit_base_modules ++ includeIf(!is_linux, thirdparty_unit_non_linux_modules) ++ includeIf(is_macos, thirdparty_unit_macos_modules) ++ thirdparty_integration_base_modules ++ includeIf(!is_linux, thirdparty_integration_non_linux_modules) ++ includeIf(is_macos, thirdparty_integration_macos_modules)) {
-    return glib_unit_base_modules ++ includeIf(!is_linux, glib_unit_non_linux_modules) ++ includeIf(is_macos, glib_unit_macos_modules) ++ glib_integration_base_modules ++ includeIf(!is_linux, glib_integration_non_linux_modules) ++ includeIf(is_macos, glib_integration_macos_modules) ++ gstd_unit_base_modules ++ includeIf(!is_linux, gstd_unit_non_linux_modules) ++ includeIf(is_macos, gstd_unit_macos_modules) ++ desktop_unit_base_modules ++ example_unit_base_modules ++ example_zux_base_modules ++ openapi_codegen_unit_base_modules ++ openapi_codegen_integration_base_modules ++ embed_unit_base_modules ++ includeIf(!is_linux, embed_unit_non_linux_modules) ++ includeIf(is_macos, embed_unit_macos_modules) ++ embed_integration_base_modules ++ includeIf(!is_linux, embed_integration_non_linux_modules) ++ includeIf(is_macos, embed_integration_macos_modules) ++ thirdparty_unit_base_modules ++ includeIf(!is_linux, thirdparty_unit_non_linux_modules) ++ includeIf(is_macos, thirdparty_unit_macos_modules) ++ thirdparty_integration_base_modules ++ includeIf(!is_linux, thirdparty_integration_non_linux_modules) ++ includeIf(is_macos, thirdparty_integration_macos_modules);
+pub fn modulesFor(comptime is_linux: bool, comptime is_macos: bool) @TypeOf(glib_unit_base_modules ++ includeIf(!is_linux, glib_unit_non_linux_modules) ++ includeIf(is_macos, glib_unit_macos_modules) ++ glib_integration_base_modules ++ includeIf(!is_linux, glib_integration_non_linux_modules) ++ includeIf(is_macos, glib_integration_macos_modules) ++ gstd_unit_base_modules ++ includeIf(!is_linux, gstd_unit_non_linux_modules) ++ includeIf(is_macos, gstd_unit_macos_modules) ++ desktop_unit_base_modules ++ esp_unit_base_modules ++ apps_unit_base_modules ++ apps_zux_base_modules ++ openapi_codegen_unit_base_modules ++ openapi_codegen_integration_base_modules ++ embed_unit_base_modules ++ includeIf(!is_linux, embed_unit_non_linux_modules) ++ includeIf(is_macos, embed_unit_macos_modules) ++ embed_integration_base_modules ++ includeIf(!is_linux, embed_integration_non_linux_modules) ++ includeIf(is_macos, embed_integration_macos_modules) ++ thirdparty_unit_base_modules ++ includeIf(!is_linux, thirdparty_unit_non_linux_modules) ++ includeIf(is_macos, thirdparty_unit_macos_modules) ++ thirdparty_integration_base_modules ++ includeIf(!is_linux, thirdparty_integration_non_linux_modules) ++ includeIf(is_macos, thirdparty_integration_macos_modules)) {
+    return glib_unit_base_modules ++ includeIf(!is_linux, glib_unit_non_linux_modules) ++ includeIf(is_macos, glib_unit_macos_modules) ++ glib_integration_base_modules ++ includeIf(!is_linux, glib_integration_non_linux_modules) ++ includeIf(is_macos, glib_integration_macos_modules) ++ gstd_unit_base_modules ++ includeIf(!is_linux, gstd_unit_non_linux_modules) ++ includeIf(is_macos, gstd_unit_macos_modules) ++ desktop_unit_base_modules ++ esp_unit_base_modules ++ apps_unit_base_modules ++ apps_zux_base_modules ++ openapi_codegen_unit_base_modules ++ openapi_codegen_integration_base_modules ++ embed_unit_base_modules ++ includeIf(!is_linux, embed_unit_non_linux_modules) ++ includeIf(is_macos, embed_unit_macos_modules) ++ embed_integration_base_modules ++ includeIf(!is_linux, embed_integration_non_linux_modules) ++ includeIf(is_macos, embed_integration_macos_modules) ++ thirdparty_unit_base_modules ++ includeIf(!is_linux, thirdparty_unit_non_linux_modules) ++ includeIf(is_macos, thirdparty_unit_macos_modules) ++ thirdparty_integration_base_modules ++ includeIf(!is_linux, thirdparty_integration_non_linux_modules) ++ includeIf(is_macos, thirdparty_integration_macos_modules);
 }
 
 const glib_unit_base_modules = .{
@@ -66,12 +66,16 @@ const desktop_unit_base_modules = .{
     @import("desktop_unit/std.zig"),
 };
 
-const example_unit_base_modules = .{
-    @import("example_unit/std.zig"),
+const esp_unit_base_modules = .{
+    @import("esp_unit/idf.zig"),
 };
 
-const example_zux_base_modules = .{
-    @import("example_zux/button_ledstrip.zig"),
+const apps_unit_base_modules = .{
+    @import("apps_unit/glib_unit_test.zig"),
+};
+
+const apps_zux_base_modules = .{
+    @import("apps_zux/button_ledstrip.zig"),
 };
 
 const openapi_codegen_unit_base_modules = .{

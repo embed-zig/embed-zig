@@ -424,10 +424,10 @@ pub fn make(comptime ZuxApp: type) type {
                     init_config.custom_pipeline_node = null;
                 }
                 inline for (@typeInfo(ZuxApp.InitConfig).@"struct".fields) |field| {
-                    if (isOptionalOf(field.type, ZuxApp.ReducerHook)) {
+                    if (@hasDecl(ZuxApp, "ReducerHook") and isOptionalOf(field.type, ZuxApp.ReducerHook)) {
                         @compileError("desktop ZuxServer cannot synthesize runtime reducer hook field '" ++ field.name ++ "'");
                     }
-                    if (isOptionalOf(field.type, ZuxApp.RenderHook)) {
+                    if (@hasDecl(ZuxApp, "RenderHook") and isOptionalOf(field.type, ZuxApp.RenderHook)) {
                         @compileError("desktop ZuxServer cannot synthesize runtime render hook field '" ++ field.name ++ "'");
                     }
                 }

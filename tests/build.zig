@@ -124,7 +124,7 @@ fn createModule(
     addModuleImports(b, mod, &build_modules.base_test_modules);
     mod.addOptions("test_target", test_target);
     addModuleImports(b, mod, &build_modules.thirdparty_modules);
-    addModuleImports(b, mod, &build_modules.example_modules);
+    addModuleImports(b, mod, &build_modules.apps_modules);
 
     return mod;
 }

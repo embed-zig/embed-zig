@@ -1,0 +1,18 @@
+.{
+    .name = .led_rainbow,
+    .version = "0.0.0",
+    .fingerprint = 0x1bdd4fada573f325,
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "build_config.zig",
+        "components",
+        "src",
+    },
+    .dependencies = .{
+        .esp = .{
+            .path = "../../../esp",
+        },
+    },
+}

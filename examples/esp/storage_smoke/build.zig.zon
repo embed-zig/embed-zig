@@ -1,0 +1,19 @@
+.{
+    .name = .storage_smoke,
+    .version = "0.0.0",
+    .fingerprint = 0x2492205a5c39df81,
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "build_config.zig",
+        "components",
+        "src",
+        "partitions",
+    },
+    .dependencies = .{
+        .esp = .{
+            .path = "../../../esp",
+        },
+    },
+}

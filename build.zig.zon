@@ -15,8 +15,11 @@
         .desktop = .{
             .path = "desktop",
         },
-        .example = .{
-            .path = "example",
+        .apps = .{
+            .path = "apps",
+        },
+        .esp = .{
+            .path = "esp",
         },
         .openapi_codegen = .{
             .path = "openapi-codegen",
@@ -33,9 +36,11 @@
         "build/",
         "build.zig",
         "build.zig.zon",
+        "apps/",
         "desktop/",
+        "esp/",
         "embed/",
-        "example/",
+        "examples/",
         "glib/",
         "gstd/",
         "openapi-codegen/",

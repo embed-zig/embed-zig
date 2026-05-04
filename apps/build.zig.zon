@@ -1,0 +1,24 @@
+.{
+    .name = .apps,
+    .version = "0.1.0",
+    .fingerprint = 0x101c7e5a522f09fd,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .glib = .{
+            .path = "../glib",
+        },
+        .gstd = .{
+            .path = "../gstd",
+        },
+        .embed = .{
+            .path = "../embed",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "README.md",
+        "glib/",
+        "zux/",
+    },
+}

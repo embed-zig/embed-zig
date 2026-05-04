@@ -1,0 +1,16 @@
+.{
+    .name = .esp,
+    .version = "0.1.1",
+    .fingerprint = 0xe54a8bd08ffdb3ce,
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "lib",
+    },
+    .dependencies = .{
+        .glib = .{
+            .path = "../glib",
+        },
+    },
+}

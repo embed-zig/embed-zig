@@ -1,0 +1,6 @@
+openteam/
+.*zig-*/
+zig-out/
+.build/
+__pycache__/
+.cursor/
