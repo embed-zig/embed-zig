@@ -7,13 +7,20 @@
 #define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
 #endif
 
-#include "mbedtls/aes.h"
 #include "mbedtls/md.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/private_access.h"
+#if defined(MBEDTLS_MAJOR_VERSION) && MBEDTLS_MAJOR_VERSION >= 4
+#include "mbedtls/private/aes.h"
+#include "mbedtls/private/rsa.h"
+#include "mbedtls/private/sha256.h"
+#include "mbedtls/private/sha512.h"
+#else
+#include "mbedtls/aes.h"
 #include "mbedtls/rsa.h"
 #include "mbedtls/sha256.h"
 #include "mbedtls/sha512.h"
+#endif
 #include "mbedtls/x509.h"
 #include "mbedtls/x509_crt.h"
 #include "psa/crypto.h"
@@ -115,6 +122,78 @@ static mbedtls_aes_context *espz_aes_ctx(espz_mbedtls_aes_context *ctx) {
 static const mbedtls_aes_context *espz_aes_ctx_const(const espz_mbedtls_aes_context *ctx) {
     return (const mbedtls_aes_context *) ctx->storage;
 }
+
+#if defined(MBEDTLS_MAJOR_VERSION) && MBEDTLS_MAJOR_VERSION >= 4
+static size_t der_len_len(size_t len) {
+    if (len < 0x80) {
+        return 1;
+    }
+    if (len <= 0xff) {
+        return 2;
+    }
+    if (len <= 0xffff) {
+        return 3;
+    }
+    return 4;
+}
+
+static unsigned char *der_write_len(unsigned char *out, size_t len) {
+    if (len < 0x80) {
+        *out++ = (unsigned char) len;
+    } else if (len <= 0xff) {
+        *out++ = 0x81;
+        *out++ = (unsigned char) len;
+    } else if (len <= 0xffff) {
+        *out++ = 0x82;
+        *out++ = (unsigned char) (len >> 8);
+        *out++ = (unsigned char) len;
+    } else {
+        *out++ = 0x83;
+        *out++ = (unsigned char) (len >> 16);
+        *out++ = (unsigned char) (len >> 8);
+        *out++ = (unsigned char) len;
+    }
+    return out;
+}
+
+static const unsigned char *strip_leading_zeroes(const unsigned char *value, size_t *len) {
+    while (*len > 1 && value[0] == 0) {
+        value += 1;
+        *len -= 1;
+    }
+    return value;
+}
+
+static size_t der_integer_value_len(const unsigned char *value, size_t len) {
+    value = strip_leading_zeroes(value, &len);
+    return len + ((len > 0 && (value[0] & 0x80) != 0) ? 1 : 0);
+}
+
+static unsigned char *der_write_integer(unsigned char *out, const unsigned char *value, size_t len) {
+    value = strip_leading_zeroes(value, &len);
+    const size_t value_len = der_integer_value_len(value, len);
+    *out++ = 0x02;
+    out = der_write_len(out, value_len);
+    if (value_len > len) {
+        *out++ = 0;
+    }
+    memcpy(out, value, len);
+    return out + len;
+}
+
+static psa_algorithm_t hash_kind_to_psa_alg(espz_mbedtls_rsa_hash_kind hash_kind) {
+    switch (hash_kind) {
+        case ESPZ_MBEDTLS_RSA_HASH_SHA256:
+            return PSA_ALG_SHA_256;
+        case ESPZ_MBEDTLS_RSA_HASH_SHA384:
+            return PSA_ALG_SHA_384;
+        case ESPZ_MBEDTLS_RSA_HASH_SHA512:
+            return PSA_ALG_SHA_512;
+        default:
+            return 0;
+    }
+}
+#endif
 
 static int espz_psa_init(void) {
     static bool initialized = false;
@@ -348,6 +427,7 @@ static int aead_decrypt(
     return rc;
 }
 
+#if !(defined(MBEDTLS_MAJOR_VERSION) && MBEDTLS_MAJOR_VERSION >= 4)
 static int verify_cert_signature(mbedtls_x509_crt *subject, mbedtls_x509_crt *issuer) {
     if (subject->issuer_raw.len != issuer->subject_raw.len ||
         memcmp(subject->issuer_raw.p, issuer->subject_raw.p, subject->issuer_raw.len) != 0) {
@@ -393,6 +473,7 @@ static int verify_cert_signature(mbedtls_x509_crt *subject, mbedtls_x509_crt *is
     );
 #endif
 }
+#endif
 
 static int rsa_verify_common(
     const unsigned char *modulus,
@@ -406,6 +487,64 @@ static int rsa_verify_common(
     size_t signature_len,
     bool use_pss
 ) {
+#if defined(MBEDTLS_MAJOR_VERSION) && MBEDTLS_MAJOR_VERSION >= 4
+    if (modulus_len == 0 || exponent_len == 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    int rc = espz_psa_init();
+    if (rc != PSA_SUCCESS) {
+        return rc;
+    }
+
+    const psa_algorithm_t hash_alg = hash_kind_to_psa_alg(hash_kind);
+    if (hash_alg == 0) {
+        return PSA_ERROR_INVALID_ARGUMENT;
+    }
+
+    size_t normalized_modulus_len = modulus_len;
+    const unsigned char *normalized_modulus = strip_leading_zeroes(modulus, &normalized_modulus_len);
+    size_t normalized_exponent_len = exponent_len;
+    const unsigned char *normalized_exponent = strip_leading_zeroes(exponent, &normalized_exponent_len);
+    const size_t modulus_value_len = der_integer_value_len(normalized_modulus, normalized_modulus_len);
+    const size_t exponent_value_len = der_integer_value_len(normalized_exponent, normalized_exponent_len);
+    const size_t modulus_der_len = 1 + der_len_len(modulus_value_len) + modulus_value_len;
+    const size_t exponent_der_len = 1 + der_len_len(exponent_value_len) + exponent_value_len;
+    const size_t sequence_len = modulus_der_len + exponent_der_len;
+    const size_t public_key_len = 1 + der_len_len(sequence_len) + sequence_len;
+    unsigned char *public_key = calloc(1, public_key_len);
+    if (public_key == NULL) {
+        return PSA_ERROR_INSUFFICIENT_MEMORY;
+    }
+
+    unsigned char *out = public_key;
+    *out++ = 0x30;
+    out = der_write_len(out, sequence_len);
+    out = der_write_integer(out, normalized_modulus, normalized_modulus_len);
+    out = der_write_integer(out, normalized_exponent, normalized_exponent_len);
+    if ((size_t) (out - public_key) != public_key_len) {
+        free(public_key);
+        return PSA_ERROR_GENERIC_ERROR;
+    }
+
+    psa_key_attributes_t attrs = PSA_KEY_ATTRIBUTES_INIT;
+    mbedtls_svc_key_id_t key_id = 0;
+    psa_set_key_type(&attrs, PSA_KEY_TYPE_RSA_PUBLIC_KEY);
+    psa_set_key_bits(&attrs, normalized_modulus_len * 8);
+    psa_set_key_usage_flags(&attrs, PSA_KEY_USAGE_VERIFY_HASH);
+    const psa_algorithm_t alg = use_pss ? PSA_ALG_RSA_PSS_ANY_SALT(hash_alg) : PSA_ALG_RSA_PKCS1V15_SIGN(hash_alg);
+    psa_set_key_algorithm(&attrs, alg);
+
+    rc = (int) psa_import_key(&attrs, public_key, public_key_len, &key_id);
+    free(public_key);
+    if (rc != PSA_SUCCESS) {
+        return rc;
+    }
+
+    const psa_status_t status = psa_verify_hash(key_id, alg, digest, digest_len, signature, signature_len);
+    psa_destroy_key(key_id);
+    return (int) status;
+#else
     mbedtls_pk_context pk;
     mbedtls_rsa_context *rsa = NULL;
     mbedtls_pk_init(&pk);
@@ -493,6 +632,7 @@ static int rsa_verify_common(
 
     mbedtls_pk_free(&pk);
     return rc;
+#endif
 }
 
 void espz_mbedtls_sha256_init(espz_mbedtls_sha256_context *ctx) {
@@ -887,7 +1027,17 @@ int espz_mbedtls_certificate_verify(
         goto done;
     }
 
+#if defined(MBEDTLS_MAJOR_VERSION) && MBEDTLS_MAJOR_VERSION >= 4
+    uint32_t flags = 0;
+    rc = mbedtls_x509_crt_verify(&subject, &issuer, NULL, NULL, &flags, NULL, NULL);
+    if (flags != 0) {
+        /* Validity is checked against now_sec above; do not trust platform wall-clock time here. */
+        const uint32_t time_flags = MBEDTLS_X509_BADCERT_EXPIRED | MBEDTLS_X509_BADCERT_FUTURE;
+        rc = (flags & ~time_flags) == 0 ? 0 : MBEDTLS_ERR_X509_CERT_VERIFY_FAILED;
+    }
+#else
     rc = verify_cert_signature(&subject, &issuer);
+#endif
 
 done:
     mbedtls_x509_crt_free(&issuer);

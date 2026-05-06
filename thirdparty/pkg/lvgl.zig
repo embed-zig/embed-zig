@@ -32,6 +32,7 @@ pub const Obj = object.Obj;
 pub const widget = @import("lvgl/src/widget.zig");
 pub const Label = widget.Label;
 pub const Button = widget.Button;
+pub const Bar = widget.Bar;
 pub const test_runner = struct {
     pub const unit = @import("lvgl/test_runner/unit.zig");
     pub const integration = @import("lvgl/test_runner/integration.zig");

@@ -4,6 +4,7 @@ const glib = @import("glib");
 
 const Gpio = @This();
 
+pub const Pca9557 = @import("gpio/pca9557.zig");
 pub const Tca9554 = @import("gpio/tca9554.zig");
 
 ptr: *anyopaque,
@@ -94,6 +95,44 @@ pub fn init(pointer: anytype) Gpio {
 }
 
 pub fn fromTca9554(pointer: anytype, comptime pin: anytype) Gpio {
+    const Impl = childType(@TypeOf(pointer));
+
+    const gen = struct {
+        fn readFn(ptr: *anyopaque) Error!Level {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            return try self.read(pin);
+        }
+
+        fn writeFn(ptr: *anyopaque, level: Level) Error!void {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            try self.write(pin, switch (level) {
+                .high => .high,
+                .low => .low,
+            });
+        }
+
+        fn setDirectionFn(ptr: *anyopaque, direction: Direction) Error!void {
+            const self: *Impl = @ptrCast(@alignCast(ptr));
+            try self.setDirection(pin, switch (direction) {
+                .output => .output,
+                .input => .input,
+            });
+        }
+
+        const vtable = VTable{
+            .read = readFn,
+            .write = writeFn,
+            .setDirection = setDirectionFn,
+        };
+    };
+
+    return .{
+        .ptr = pointer,
+        .vtable = &gen.vtable,
+    };
+}
+
+pub fn fromPca9557(pointer: anytype, comptime pin: anytype) Gpio {
     const Impl = childType(@TypeOf(pointer));
 
     const gen = struct {
@@ -230,6 +269,39 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(?Level, .low), expander.last_level);
             try grt.std.testing.expectEqual(@as(?Direction, .input), expander.last_direction);
         }
+
+        fn fromPca9557AdaptsChipMethods() !void {
+            const Expander = struct {
+                pub const Pin = enum { pin1 };
+
+                last_direction: ?Direction = null,
+                last_level: ?Level = null,
+                level: Level = .low,
+
+                fn read(self: *@This(), comptime actual_pin: Pin) Error!Level {
+                    _ = actual_pin;
+                    return self.level;
+                }
+
+                fn write(self: *@This(), comptime actual_pin: Pin, level: Level) Error!void {
+                    _ = actual_pin;
+                    self.last_level = level;
+                }
+
+                fn setDirection(self: *@This(), comptime actual_pin: Pin, direction: Direction) Error!void {
+                    _ = actual_pin;
+                    self.last_direction = direction;
+                }
+            };
+
+            var expander = Expander{ .level = .high };
+            const gpio = Gpio.fromPca9557(&expander, .pin1);
+            try grt.std.testing.expectEqual(Level.high, try gpio.read());
+            try gpio.setLow();
+            try gpio.setInput();
+            try grt.std.testing.expectEqual(@as(?Level, .low), expander.last_level);
+            try grt.std.testing.expectEqual(@as(?Direction, .input), expander.last_direction);
+        }
     };
 
     const Runner = struct {
@@ -247,6 +319,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 TestCase.propagatesBackendErrors,
                 TestCase.writeAndDirectionDispatch,
                 TestCase.fromTca9554AdaptsChipMethods,
+                TestCase.fromPca9557AdaptsChipMethods,
             }) |case| {
                 case() catch |err| {
                     t.logFatal(@errorName(err));

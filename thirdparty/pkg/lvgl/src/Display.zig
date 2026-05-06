@@ -12,6 +12,7 @@ pub const Rotation = enum(c_int) {
     deg180 = 2,
     deg270 = 3,
 };
+pub const FlushCb = binding.DisplayFlushCb;
 
 pub fn fromRaw(handle: *binding.Display) Self {
     return .{ .handle = handle };
@@ -66,6 +67,32 @@ pub fn setDpi(self: *const Self, new_dpi: i32) void {
     binding.lv_display_set_dpi(self.handle, new_dpi);
 }
 
+pub fn setBuffers(
+    self: *const Self,
+    buf1: ?*anyopaque,
+    buf2: ?*anyopaque,
+    size_bytes: u32,
+    render_mode: binding.DisplayRenderMode,
+) void {
+    binding.lv_display_set_buffers(self.handle, buf1, buf2, size_bytes, render_mode);
+}
+
+pub fn setFlushCb(self: *const Self, flush_cb: FlushCb) void {
+    binding.lv_display_set_flush_cb(self.handle, flush_cb);
+}
+
+pub fn setColorFormat(self: *const Self, color_format: binding.ColorFormat) void {
+    binding.lv_display_set_color_format(self.handle, color_format);
+}
+
+pub fn setUserData(self: *const Self, user_data: ?*anyopaque) void {
+    binding.lv_display_set_user_data(self.handle, user_data);
+}
+
+pub fn getUserData(self: *const Self) ?*anyopaque {
+    return binding.lv_display_get_user_data(self.handle);
+}
+
 pub fn width(self: *const Self) i32 {
     return binding.lv_display_get_horizontal_resolution(self.handle);
 }
@@ -115,6 +142,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(raw_handle, display.raw());
 
             _ = Self.activeScreen;
+            _ = Self.setBuffers;
+            _ = Self.setFlushCb;
+            _ = Self.setColorFormat;
+            _ = Self.setUserData;
+            _ = Self.getUserData;
         }
 
         fn runtime_properties_roundtrip_through_wrapper(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {

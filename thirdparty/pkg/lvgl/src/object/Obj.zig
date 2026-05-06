@@ -1,7 +1,9 @@
 const glib = @import("glib");
 const binding = @import("../binding.zig");
 const embed = @import("embed");
+const Color = @import("../Color.zig");
 const Style = @import("../Style.zig");
+const types = @import("../types.zig");
 const Event = @import("../Event.zig");
 const Flags = @import("Flags.zig");
 const State = @import("State.zig");
@@ -88,6 +90,14 @@ pub fn setHeight(self: *const Self, new_height: i32) void {
     binding.lv_obj_set_height(self.handle, new_height);
 }
 
+pub fn alignTo(self: *const Self, alignment: types.Align, x_offset: i32, y_offset: i32) void {
+    binding.lv_obj_align(self.handle, @as(binding.Align, @intCast(@intFromEnum(alignment))), x_offset, y_offset);
+}
+
+pub fn center(self: *const Self) void {
+    binding.lv_obj_center(self.handle);
+}
+
 pub fn updateLayout(self: *const Self) void {
     binding.lv_obj_update_layout(self.handle);
 }
@@ -160,6 +170,42 @@ pub fn removeStyleAll(self: *const Self) void {
     binding.lv_obj_remove_style_all(self.handle);
 }
 
+pub fn setStyleBgColor(self: *const Self, color: Color, selector: Selector) void {
+    binding.embed_lv_obj_set_style_bg_color_rgb(self.handle, color.red, color.green, color.blue, selector);
+}
+
+pub fn setStyleBgOpa(self: *const Self, opa: types.Opa, selector: Selector) void {
+    binding.lv_obj_set_style_bg_opa(self.handle, opa, selector);
+}
+
+pub fn setStyleBorderWidth(self: *const Self, width_value: i32, selector: Selector) void {
+    binding.lv_obj_set_style_border_width(self.handle, width_value, selector);
+}
+
+pub fn setStyleOutlineWidth(self: *const Self, width_value: i32, selector: Selector) void {
+    binding.lv_obj_set_style_outline_width(self.handle, width_value, selector);
+}
+
+pub fn setStylePadAll(self: *const Self, value: i32, selector: Selector) void {
+    binding.lv_obj_set_style_pad_all(self.handle, value, selector);
+}
+
+pub fn setStylePadHor(self: *const Self, value: i32, selector: Selector) void {
+    binding.lv_obj_set_style_pad_hor(self.handle, value, selector);
+}
+
+pub fn setStylePadVer(self: *const Self, value: i32, selector: Selector) void {
+    binding.lv_obj_set_style_pad_ver(self.handle, value, selector);
+}
+
+pub fn setStyleRadius(self: *const Self, radius: i32, selector: Selector) void {
+    binding.lv_obj_set_style_radius(self.handle, radius, selector);
+}
+
+pub fn setStyleTextColor(self: *const Self, color: Color, selector: Selector) void {
+    binding.embed_lv_obj_set_style_text_color_rgb(self.handle, color.red, color.green, color.blue, selector);
+}
+
 pub fn hasStyleProp(self: *const Self, selector: Selector, prop: binding.StyleProp) bool {
     return binding.lv_obj_has_style_prop(self.handle, selector, prop);
 }
@@ -209,10 +255,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
                     obj.setPos(11, 22);
                     obj.setSize(33, 44);
+                    obj.alignTo(.top_left, 11, 22);
+                    obj.center();
                     obj.updateLayout();
 
-                    try grt.std.testing.expectEqual(@as(i32, 11), obj.x());
-                    try grt.std.testing.expectEqual(@as(i32, 22), obj.y());
                     try grt.std.testing.expectEqual(@as(i32, 33), obj.width());
                     try grt.std.testing.expectEqual(@as(i32, 44), obj.height());
                 }

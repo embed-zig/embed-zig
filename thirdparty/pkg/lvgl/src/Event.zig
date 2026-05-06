@@ -6,6 +6,9 @@ const Self = @This();
 handle: *binding.Event,
 
 pub const Code = binding.EventCode;
+pub const clicked: Code = codeFromInt(binding.LV_EVENT_CLICKED);
+pub const pressed: Code = codeFromInt(binding.LV_EVENT_PRESSED);
+pub const released: Code = codeFromInt(binding.LV_EVENT_RELEASED);
 
 pub fn fromRaw(handle: *binding.Event) Self {
     return .{ .handle = handle };

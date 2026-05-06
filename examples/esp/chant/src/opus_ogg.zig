@@ -22,10 +22,17 @@ var pcm_storage: [opus_max_frame_samples]i16 align(16) = undefined;
 
 pub const PlayResult = enum {
     ended,
-    switched,
+    next,
+    previous,
 };
 
-pub fn play(path: [:0]const u8, shouldSwitch: *const fn () bool) !PlayResult {
+pub const ControlResult = enum {
+    none,
+    next,
+    previous,
+};
+
+pub fn play(path: [:0]const u8, pollControl: *const fn () ControlResult) !PlayResult {
     log.info("opening Ogg Opus track with POSIX read: {s}", .{path});
 
     const fd = open(path, 0);
@@ -74,6 +81,11 @@ pub fn play(path: [:0]const u8, shouldSwitch: *const fn () bool) !PlayResult {
                                         continue;
                                     }
 
+                                    switch (pollControl()) {
+                                        .none => {},
+                                        .next => return .next,
+                                        .previous => return .previous,
+                                    }
                                     if (decoder == null) return error.MissingOpusHead;
                                     const packet_samples = try opus.packetGetSamples(payload, output_sample_rate);
                                     if (packet_samples > pcm_storage.len) return error.OpusFrameTooLarge;
@@ -82,7 +94,11 @@ pub fn play(path: [:0]const u8, shouldSwitch: *const fn () bool) !PlayResult {
                                     else
                                         unreachable;
                                     try board.writePcm(samples);
-                                    if (shouldSwitch()) return .switched;
+                                    switch (pollControl()) {
+                                        .none => {},
+                                        .next => return .next,
+                                        .previous => return .previous,
+                                    }
                                 },
                                 .hole => return error.OggPacketHole,
                                 .none => break,

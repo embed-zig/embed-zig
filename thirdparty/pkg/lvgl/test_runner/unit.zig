@@ -22,6 +22,7 @@ const Flags = @import("../src/object/Flags.zig");
 const State = @import("../src/object/State.zig");
 const Label = @import("../src/widget/Label.zig");
 const Button = @import("../src/widget/Button.zig");
+const Bar = @import("../src/widget/Bar.zig");
 const TestingDisplay = @import("integration/bitmap/test_utils/TestingDisplay.zig");
 
 pub fn make(comptime grt: type) glib.testing.TestRunner {
@@ -54,6 +55,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("object/State", State.TestRunner(grt));
             t.run("widget/Label", Label.TestRunner(grt));
             t.run("widget/Button", Button.TestRunner(grt));
+            t.run("widget/Bar", Bar.TestRunner(grt));
             t.run("display/TestingDisplay", TestingDisplay.TestRunner(grt));
 
             return t.wait();

@@ -11,6 +11,14 @@ Hardware:
 - Display: ST7789 320x240
 - Storage: 16MB flash board recommended
 
+Controls use the BOOT/GPIO0 button:
+
+- Single click: play/pause
+- Double click: next track
+- Triple click: previous track
+- Hold: volume up
+- Single click, then hold: volume down
+
 Build:
 
 ```sh

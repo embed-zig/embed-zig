@@ -18,6 +18,7 @@ pub const wifi = @import("drivers/wifi.zig");
 pub const Es7210 = audio.Es7210;
 pub const Es8311 = audio.Es8311;
 pub const Qmi8658 = imu.Qmi8658;
+pub const Pca9557 = gpio.Pca9557;
 pub const Tca9554 = gpio.Tca9554;
 pub const Fm175xx = nfc.Fm175xx;
 pub const AdcButton = button.AdcButton;

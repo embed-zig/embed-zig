@@ -10,11 +10,11 @@ var has_custom_config_header: bool = false;
 var upstream_archive: ?buildtools.Archive = null;
 
 /// Pinned upstream tree, fetched over HTTPS from GitHub codeload.
-const upstream_version_key = "85aa60d18b3d5e5588d7b247abf90198f07c8a63";
-const upstream_tarball_url = "https://codeload.github.com/lvgl/lvgl/tar.gz/" ++ upstream_version_key;
+pub const upstream_version_key = "85aa60d18b3d5e5588d7b247abf90198f07c8a63";
+pub const upstream_tarball_url = "https://codeload.github.com/lvgl/lvgl/tar.gz/" ++ upstream_version_key;
 const bundled_custom_include = "lv_os_custom.h";
 
-const c_sources: []const []const u8 = &.{
+pub const c_sources: []const []const u8 = &.{
     "src/core/lv_group.c",
     "src/core/lv_obj.c",
     "src/core/lv_obj_class.c",
@@ -514,8 +514,9 @@ pub fn create(
     lib.root_module.addCSourceFiles(.{
         .root = repo.root(),
         .files = c_sources,
+        .flags = &.{"-g0"},
     });
-    lib.root_module.addCSourceFile(.{ .file = b.path("pkg/lvgl/src/binding.c") });
+    lib.root_module.addCSourceFile(.{ .file = b.path("pkg/lvgl/src/binding.c"), .flags = &.{"-g0"} });
     repo.dependOn(&lib.step);
 
     const mod = b.createModule(.{
@@ -550,7 +551,9 @@ pub fn link(
     const lib = library orelse @panic("lvgl library missing");
     mod.addImport("glib", b.dependency("glib", .{ .target = target, .optimize = optimize }).module("glib"));
     mod.addImport("embed", b.dependency("embed", .{ .target = target, .optimize = optimize }).module("embed"));
-    mod.addObjectFile(lib.getEmittedBin());
+    if (target.result.os.tag != .freestanding) {
+        mod.addObjectFile(lib.getEmittedBin());
+    }
 }
 
 fn getUpstreamArchive(b: *std.Build) buildtools.Archive {

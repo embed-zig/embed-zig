@@ -29,8 +29,8 @@ int szp_audio_play_test_tone(uint32_t frequency_hz, uint32_t duration_ms);
 int szp_button_init(void);
 bool szp_button_read_raw(void);
 
-int szp_display_init(void);
-int szp_display_show_track(szp_track_t track);
+int szp_display_native_init(void);
+int szp_display_native_draw_rgb565(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels, size_t len);
 
 #ifdef __cplusplus
 }

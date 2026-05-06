@@ -9,6 +9,8 @@ const pkg_portaudio = @import("build/pkg/portaudio.zig");
 const pkg_speexdsp = @import("build/pkg/speexdsp.zig");
 const pkg_stb_truetype = @import("build/pkg/stb_truetype.zig");
 
+pub const lvgl = pkg_lvgl;
+
 const Packages = struct {
     pub const core_bluetooth = pkg_core_bluetooth;
     pub const core_wlan = pkg_core_wlan;

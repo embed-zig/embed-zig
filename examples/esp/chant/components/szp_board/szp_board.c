@@ -14,5 +14,5 @@ int szp_board_init(void)
     rc = szp_button_init();
     if (rc != 0) return rc;
 
-    return szp_display_init();
+    return szp_display_native_init();
 }

@@ -12,7 +12,6 @@ pub fn addTo(b: *std.Build) *esp.idf.Component {
         .root = b.path(component_root),
         .files = &.{
             "szp_board.c",
-            "szp_pca9557.c",
             "szp_storage.c",
             "szp_audio.c",
             "szp_button.c",
@@ -22,6 +21,7 @@ pub fn addTo(b: *std.Build) *esp.idf.Component {
     component.addRequire("driver");
     component.addRequire("esp_driver_gpio");
     component.addRequire("esp_driver_i2s");
+    component.addRequire("esp_driver_ledc");
     component.addRequire("esp_driver_spi");
     component.addRequire("esp_lcd");
     component.addRequire("esp_timer");
