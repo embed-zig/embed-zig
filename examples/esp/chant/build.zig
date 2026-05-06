@@ -54,6 +54,15 @@ pub fn build(b: *std.Build) void {
     const opus_osal_module = thirdparty_dep.module("opus_osal");
     const lvgl_module = thirdparty_dep.module("lvgl");
     const lvgl_osal_module = thirdparty_dep.module("lvgl_osal");
+    const szp_board_module = b.createModule(.{
+        .root_source_file = b.path("components/szp_board/binding.zig"),
+        .target = context.target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "esp", .module = esp_dep.module("esp") },
+            .{ .name = "embed", .module = embed_dep.module("embed") },
+        },
+    });
     if (context.toolchain_sysroot) |sysroot| {
         opus_module.addSystemIncludePath(sysroot.include_dir);
         for (opus_module.link_objects.items) |link_object| {
@@ -76,6 +85,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "lvgl_osal", .module = lvgl_osal_module },
             .{ .name = "opus", .module = opus_module },
             .{ .name = "opus_osal", .module = opus_osal_module },
+            .{ .name = "szp_board", .module = szp_board_module },
         },
         .link_libc = true,
     });

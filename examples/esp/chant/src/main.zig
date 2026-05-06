@@ -4,7 +4,7 @@ const lvgl_osal = @import("lvgl_osal");
 const opus_osal = @import("opus_osal");
 const assets = @import("assets.zig");
 const board = @import("board.zig");
-const player = @import("player.zig");
+const Player = @import("audio/Player.zig");
 
 const log = esp.grt.std.log.scoped(.chant_main);
 const opus_exports = opus_osal.make(esp.grt, esp.heap.Allocator(.{
@@ -42,6 +42,7 @@ pub export fn zig_esp_main() void {
     board.initAudio() catch |err| fail("audio init", err);
     log.info("board initialized; tracks={d}", .{assets.tracks.len});
 
+    var player = Player.init();
     player.run();
 }
 

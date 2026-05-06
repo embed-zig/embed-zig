@@ -10,6 +10,7 @@ pub fn make(comptime grt: type, comptime samples_per_channel: usize) type {
     return struct {
         const Self = @This();
 
+        pub const Error = AudioSystem.Error;
         pub const Frame = [samples_per_channel]i16;
         pub const frame_samples_per_channel: usize = samples_per_channel;
 
@@ -21,13 +22,13 @@ pub fn make(comptime grt: type, comptime samples_per_channel: usize) type {
 
             sampleRate: *const fn (ptr: *anyopaque) u32,
 
-            write: *const fn (ptr: *anyopaque, frame: []const i16) Error!usize,
+            write: *const fn (ptr: *anyopaque, frame: []const i16) AudioSystem.Error!usize,
 
             gain: *const fn (ptr: *anyopaque) ?i8,
-            setGain: *const fn (ptr: *anyopaque, gain_db: i8) Error!void,
+            setGain: *const fn (ptr: *anyopaque, gain_db: i8) AudioSystem.Error!void,
 
-            enable: *const fn (ptr: *anyopaque) Error!void,
-            disable: *const fn (ptr: *anyopaque) Error!void,
+            enable: *const fn (ptr: *anyopaque) AudioSystem.Error!void,
+            disable: *const fn (ptr: *anyopaque) AudioSystem.Error!void,
         };
 
         pub fn init(ptr: *anyopaque, vtable: *const VTable) Self {
@@ -45,7 +46,7 @@ pub fn make(comptime grt: type, comptime samples_per_channel: usize) type {
             return self.vtable.sampleRate(self.ptr);
         }
 
-        pub fn write(self: Self, frame: []const i16) Error!usize {
+        pub fn write(self: Self, frame: []const i16) AudioSystem.Error!usize {
             return self.vtable.write(self.ptr, frame);
         }
 
@@ -53,15 +54,15 @@ pub fn make(comptime grt: type, comptime samples_per_channel: usize) type {
             return self.vtable.gain(self.ptr);
         }
 
-        pub fn setGain(self: Self, gain_db: i8) Error!void {
+        pub fn setGain(self: Self, gain_db: i8) AudioSystem.Error!void {
             return self.vtable.setGain(self.ptr, gain_db);
         }
 
-        pub fn enable(self: Self) Error!void {
+        pub fn enable(self: Self) AudioSystem.Error!void {
             return self.vtable.enable(self.ptr);
         }
 
-        pub fn disable(self: Self) Error!void {
+        pub fn disable(self: Self) AudioSystem.Error!void {
             return self.vtable.disable(self.ptr);
         }
     };

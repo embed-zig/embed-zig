@@ -1,7 +1,9 @@
 const esp = @import("esp");
-const assets = @import("assets.zig");
-const board = @import("board.zig");
+
+const assets = @import("../assets.zig");
+const board = @import("../board.zig");
 const opus_ogg = @import("opus_ogg.zig");
+const Player = @This();
 
 const log = esp.grt.std.log.scoped(.chant);
 const Thread = esp.grt.std.Thread;
@@ -11,6 +13,7 @@ const poll_interval_ms: u32 = 20;
 const multi_click_ms: u32 = 320;
 const long_press_ms: u32 = 700;
 const volume_step: u8 = 0x10;
+const default_volume: u8 = 0xb0;
 
 const ButtonAction = enum {
     none,
@@ -27,28 +30,32 @@ const PlaybackMode = enum {
     microphone,
 };
 
-var button_was_pressed = false;
-var button_press_ms: u32 = 0;
-var button_release_ms: u32 = 0;
-var button_click_count: u8 = 0;
-var button_long_sent = false;
-var current_track_index: usize = 0;
-var playback_mode: PlaybackMode = .music;
-var playing = true;
-var volume: u8 = board.default_volume;
+button_was_pressed: bool = false,
+button_press_ms: u32 = 0,
+button_release_ms: u32 = 0,
+button_click_count: u8 = 0,
+button_long_sent: bool = false,
+current_track_index: usize = 0,
+playback_mode: PlaybackMode = .music,
+playing: bool = true,
+volume: u8 = default_volume,
 
-pub fn run() noreturn {
+pub fn init() Player {
+    return .{};
+}
+
+pub fn run(self: *Player) noreturn {
     var current: usize = 0;
 
     while (true) {
-        current_track_index = current;
-        playback_mode = .music;
-        playing = true;
+        self.current_track_index = current;
+        self.playback_mode = .music;
+        self.playing = true;
         const track = assets.tracks[current];
-        refreshDisplay(track.id);
+        self.refreshDisplay(track.id);
         log.info("playing {s} from {s}", .{ track.name, track.path });
 
-        const result = opus_ogg.play(track.path, pollPlaybackControl) catch |err| recover: {
+        const result = opus_ogg.play(track.path, self, pollPlaybackControl) catch |err| recover: {
             log.err("playback failed for {s}: {s}", .{ track.name, @errorName(err) });
             sleepMs(1000);
             break :recover .ended;
@@ -64,7 +71,7 @@ pub fn run() noreturn {
                 continue;
             },
             .microphone => {
-                switch (runMicrophoneMode()) {
+                switch (self.runMicrophoneMode()) {
                     .none => {},
                     .next => current = nextIndex(current),
                     .previous => current = previousIndex(current),
@@ -75,11 +82,11 @@ pub fn run() noreturn {
             .ended => {},
         }
 
-        switch (waitBetweenLoops()) {
+        switch (self.waitBetweenLoops()) {
             .none => {},
             .next => current = nextIndex(current),
             .previous => current = previousIndex(current),
-            .microphone => switch (runMicrophoneMode()) {
+            .microphone => switch (self.runMicrophoneMode()) {
                 .none => {},
                 .next => current = nextIndex(current),
                 .previous => current = previousIndex(current),
@@ -89,10 +96,10 @@ pub fn run() noreturn {
     }
 }
 
-fn waitBetweenLoops() opus_ogg.ControlResult {
+fn waitBetweenLoops(self: *Player) opus_ogg.ControlResult {
     var elapsed: u32 = 0;
     while (elapsed < 2000) : (elapsed += 20) {
-        switch (pollControlAction()) {
+        switch (self.pollControlAction()) {
             .none => {},
             .next => return .next,
             .previous => return .previous,
@@ -111,56 +118,57 @@ fn previousIndex(current: usize) usize {
     return if (current == 0) assets.tracks.len - 1 else current - 1;
 }
 
-fn pollPlaybackControl() opus_ogg.ControlResult {
+fn pollPlaybackControl(ctx: *anyopaque) opus_ogg.ControlResult {
+    const self: *Player = @ptrCast(@alignCast(ctx));
     while (true) {
-        switch (pollControlAction()) {
+        switch (self.pollControlAction()) {
             .none => {},
             .next => return .next,
             .previous => return .previous,
             .microphone => return .microphone,
         }
 
-        if (playing) return .none;
+        if (self.playing) return .none;
         sleepMs(poll_interval_ms);
     }
 }
 
-fn pollControlAction() opus_ogg.ControlResult {
+fn pollControlAction(self: *Player) opus_ogg.ControlResult {
     board.tickDisplay(poll_interval_ms);
-    switch (pollInputAction()) {
+    switch (self.pollInputAction()) {
         .none => return .none,
         .play_pause => {
-            playing = !playing;
-            refreshDisplay(assets.tracks[current_track_index].id);
+            self.playing = !self.playing;
+            self.refreshDisplay(assets.tracks[self.current_track_index].id);
             return .none;
         },
         .next => {
-            playing = true;
+            self.playing = true;
             return .next;
         },
         .previous => {
-            playing = true;
+            self.playing = true;
             return .previous;
         },
         .mic => {
-            playing = false;
+            self.playing = false;
             return .microphone;
         },
         .volume_up => {
-            adjustVolume(.up);
+            self.adjustVolume(.up);
             return .none;
         },
         .volume_down => {
-            adjustVolume(.down);
+            self.adjustVolume(.down);
             return .none;
         },
     }
 }
 
-fn pollInputAction() ButtonAction {
+fn pollInputAction(self: *Player) ButtonAction {
     const display_action = displayAction();
     if (display_action != .none) return display_action;
-    return pollButtonAction();
+    return self.pollButtonAction();
 }
 
 fn displayAction() ButtonAction {
@@ -175,44 +183,44 @@ fn displayAction() ButtonAction {
     };
 }
 
-fn pollButtonAction() ButtonAction {
+fn pollButtonAction(self: *Player) ButtonAction {
     const pressed = board.buttonPressedRaw();
     if (pressed) {
-        if (!button_was_pressed) {
-            button_was_pressed = true;
-            button_press_ms = 0;
-            button_long_sent = false;
+        if (!self.button_was_pressed) {
+            self.button_was_pressed = true;
+            self.button_press_ms = 0;
+            self.button_long_sent = false;
             return .none;
         }
 
-        button_press_ms += poll_interval_ms;
-        if (!button_long_sent and button_press_ms >= long_press_ms) {
-            button_long_sent = true;
-            const action: ButtonAction = if (button_click_count == 0) .volume_up else .volume_down;
-            button_click_count = 0;
-            button_release_ms = 0;
+        self.button_press_ms += poll_interval_ms;
+        if (!self.button_long_sent and self.button_press_ms >= long_press_ms) {
+            self.button_long_sent = true;
+            const action: ButtonAction = if (self.button_click_count == 0) .volume_up else .volume_down;
+            self.button_click_count = 0;
+            self.button_release_ms = 0;
             return action;
         }
         return .none;
     }
 
-    if (button_was_pressed) {
-        button_was_pressed = false;
-        button_press_ms = 0;
-        if (!button_long_sent) {
-            button_click_count += 1;
-            button_release_ms = 0;
+    if (self.button_was_pressed) {
+        self.button_was_pressed = false;
+        self.button_press_ms = 0;
+        if (!self.button_long_sent) {
+            self.button_click_count += 1;
+            self.button_release_ms = 0;
         }
         return .none;
     }
 
-    if (button_click_count == 0) return .none;
-    button_release_ms += poll_interval_ms;
-    if (button_release_ms < multi_click_ms) return .none;
+    if (self.button_click_count == 0) return .none;
+    self.button_release_ms += poll_interval_ms;
+    if (self.button_release_ms < multi_click_ms) return .none;
 
-    const count = button_click_count;
-    button_click_count = 0;
-    button_release_ms = 0;
+    const count = self.button_click_count;
+    self.button_click_count = 0;
+    self.button_release_ms = 0;
     return switch (count) {
         1 => .play_pause,
         2 => .next,
@@ -220,41 +228,41 @@ fn pollButtonAction() ButtonAction {
     };
 }
 
-fn runMicrophoneMode() opus_ogg.ControlResult {
-    playback_mode = .microphone;
-    playing = false;
-    refreshDisplay(assets.tracks[current_track_index].id);
+fn runMicrophoneMode(self: *Player) opus_ogg.ControlResult {
+    self.playback_mode = .microphone;
+    self.playing = false;
+    self.refreshDisplay(assets.tracks[self.current_track_index].id);
     board.startMicrophoneStream() catch |err| {
         log.warn("mic stream start failed: {s}", .{@errorName(err)});
-        playback_mode = .music;
-        playing = true;
-        refreshDisplay(assets.tracks[current_track_index].id);
+        self.playback_mode = .music;
+        self.playing = true;
+        self.refreshDisplay(assets.tracks[self.current_track_index].id);
         return .none;
     };
     defer board.stopMicrophoneStream();
 
     while (true) {
         board.tickDisplay(poll_interval_ms);
-        switch (pollInputAction()) {
+        switch (self.pollInputAction()) {
             .none => {},
             .play_pause, .mic => {
-                playback_mode = .music;
-                playing = true;
-                refreshDisplay(assets.tracks[current_track_index].id);
+                self.playback_mode = .music;
+                self.playing = true;
+                self.refreshDisplay(assets.tracks[self.current_track_index].id);
                 return .none;
             },
             .next => {
-                playback_mode = .music;
-                playing = true;
+                self.playback_mode = .music;
+                self.playing = true;
                 return .next;
             },
             .previous => {
-                playback_mode = .music;
-                playing = true;
+                self.playback_mode = .music;
+                self.playing = true;
                 return .previous;
             },
-            .volume_up => adjustVolume(.up),
-            .volume_down => adjustVolume(.down),
+            .volume_up => self.adjustVolume(.up),
+            .volume_down => self.adjustVolume(.down),
         }
 
         board.processMicrophoneFrame() catch |err| {
@@ -269,24 +277,24 @@ const VolumeDirection = enum {
     down,
 };
 
-fn adjustVolume(direction: VolumeDirection) void {
-    volume = switch (direction) {
-        .up => if (volume > 0xff - volume_step) 0xff else volume + volume_step,
-        .down => if (volume < volume_step) 0 else volume - volume_step,
+fn adjustVolume(self: *Player, direction: VolumeDirection) void {
+    self.volume = switch (direction) {
+        .up => if (self.volume > 0xff - volume_step) 0xff else self.volume + volume_step,
+        .down => if (self.volume < volume_step) 0 else self.volume - volume_step,
     };
 
-    board.setVolume(volume) catch |err| {
+    board.setVolume(self.volume) catch |err| {
         log.warn("volume update failed: {s}", .{@errorName(err)});
     };
-    refreshDisplay(assets.tracks[current_track_index].id);
+    self.refreshDisplay(assets.tracks[self.current_track_index].id);
 }
 
-fn refreshDisplay(track: board.Track) void {
-    const mode: board.Mode = switch (playback_mode) {
+fn refreshDisplay(self: *Player, track: board.Track) void {
+    const mode: board.Mode = switch (self.playback_mode) {
         .music => .music,
         .microphone => .microphone,
     };
-    board.showPlayer(track, mode, playing, volume) catch |err| {
+    board.showPlayer(track, mode, self.playing, self.volume) catch |err| {
         log.warn("display update failed: {s}", .{@errorName(err)});
     };
 }

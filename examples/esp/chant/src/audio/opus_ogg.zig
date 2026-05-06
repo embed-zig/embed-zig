@@ -1,8 +1,9 @@
 const glib = @import("glib");
 const ogg = @import("embed").audio.ogg;
 const opus = @import("opus");
-const board = @import("board.zig");
 const esp = @import("esp");
+
+const AudioSpeaker = @import("Speaker.zig");
 
 const mem = glib.std.mem;
 const log = esp.grt.std.log.scoped(.opus_ogg);
@@ -34,7 +35,11 @@ pub const ControlResult = enum {
     microphone,
 };
 
-pub fn play(path: [:0]const u8, pollControl: *const fn () ControlResult) !PlayResult {
+pub fn play(
+    path: [:0]const u8,
+    poll_context: *anyopaque,
+    pollControl: *const fn (*anyopaque) ControlResult,
+) !PlayResult {
     log.info("opening Ogg Opus track with POSIX read: {s}", .{path});
 
     const fd = open(path, 0);
@@ -52,6 +57,7 @@ pub fn play(path: [:0]const u8, pollControl: *const fn () ControlResult) !PlayRe
 
     var decoder: ?opus.Decoder = null;
     defer if (decoder) |*d| d.deinit(allocator);
+    const speaker = AudioSpeaker.driver();
 
     var header_count: u8 = 0;
     var eof = false;
@@ -83,7 +89,7 @@ pub fn play(path: [:0]const u8, pollControl: *const fn () ControlResult) !PlayRe
                                         continue;
                                     }
 
-                                    switch (pollControl()) {
+                                    switch (pollControl(poll_context)) {
                                         .none => {},
                                         .next => return .next,
                                         .previous => return .previous,
@@ -96,8 +102,9 @@ pub fn play(path: [:0]const u8, pollControl: *const fn () ControlResult) !PlayRe
                                         try active_decoder.decode(payload, pcm_storage[0..], false)
                                     else
                                         unreachable;
-                                    try board.writePcm(samples);
-                                    switch (pollControl()) {
+                                    const written = try speaker.write(samples);
+                                    if (written != samples.len) return error.ShortAudioWrite;
+                                    switch (pollControl(poll_context)) {
                                         .none => {},
                                         .next => return .next,
                                         .previous => return .previous,
