@@ -12,17 +12,17 @@ fn sourceFile() []const u8 {
 const app = @import("glib_unit-test");
 
 test "apps/unit/glib/unit-test" {
-    const std = @import("std");
+    const glib = @import("glib");
     const gstd = @import("gstd");
+    const std = @import("std");
 
     std.testing.log_level = .info;
 
-    const TestContext = struct {
-        pub const allocator = std.testing.allocator;
+    const Launcher = app.make(gstd.runtime);
 
-        pub fn setup() !void {}
-        pub fn teardown() void {}
-    };
+    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .compat_tests);
+    defer t.deinit();
 
-    try app.run(TestContext, gstd.runtime);
+    t.run("std/unit", Launcher.createTestRunner());
+    if (!t.wait()) return error.TestFailed;
 }

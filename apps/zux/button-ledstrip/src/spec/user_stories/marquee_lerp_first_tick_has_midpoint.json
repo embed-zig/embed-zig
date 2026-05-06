@@ -1,0 +1,40 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "marquee lerp first tick has midpoint",
+    "description": "The first marquee 10ms tick from black toward red produces a midpoint.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "marquee",
+        "target_color_name": "red",
+        "target_color": 16711680,
+        "visible_color": 0,
+        "transitioning": true,
+        "marquee_stage": "red"
+      }
+    },
+    "steps": [
+      {
+        "tick": {
+          "interval": 10000000,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "marquee",
+              "target_color_name": "red",
+              "target_color": 16711680,
+              "visible_color": 1048576,
+              "transitioning": true,
+              "marquee_stage": "red"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

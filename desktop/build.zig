@@ -83,6 +83,17 @@ fn createUiBundle(
 
     const run = b.addSystemCommand(&.{ "/bin/sh", "-c", script, "desktop-ui-bundle" });
     run.setCwd(b.path("ui"));
+    run.addFileInput(b.path("api.json"));
+    run.addFileInput(b.path("ui/bun.lock"));
+    run.addFileInput(b.path("ui/package.json"));
+    run.addFileInput(b.path("ui/openapi-ts.config.ts"));
+    run.addFileInput(b.path("ui/src/api/client-config.ts"));
+    run.addFileInput(b.path("ui/src/api/client.ts"));
+    run.addFileInput(b.path("ui/src/api/events.ts"));
+    run.addFileInput(b.path("ui/src/desktop-core.ts"));
+    run.addFileInput(b.path("ui/src/index.html"));
+    run.addFileInput(b.path("ui/src/main.ts"));
+    run.addFileInput(b.path("ui/src/styles.css"));
     useNativeToolPath(b, run);
     const output_dir = run.addOutputDirectoryArg("desktop-ui");
 
@@ -134,6 +145,7 @@ fn createApiSpecModule(
 
     const run = b.addSystemCommand(&.{ "/bin/sh", "-c", script, "desktop-api-spec" });
     run.setCwd(b.path("."));
+    run.addFileInput(b.path("api.json"));
     const output_dir = run.addOutputDirectoryArg("desktop-api-spec");
 
     const spec_module = b.createModule(.{

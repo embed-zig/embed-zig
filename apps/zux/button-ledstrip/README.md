@@ -1,0 +1,82 @@
+# button-ledstrip User Story
+
+## Golden User Stories
+
+- Given the LED strip's current target color is red, when the user clicks `Power` once, the LED strip target color switches to blue.
+- Given the LED strip's current target color is blue, when the user clicks `Power` once, the LED strip target color switches to green.
+- Given the LED strip's current target color is green, when the user clicks `Power` once, the LED strip target color switches to yellow.
+- Given the LED strip's current target color is yellow, when the user clicks `Power` once, the LED strip target color switches to red.
+- Given the LED strip is currently on, when the user holds `Power` for 3 seconds, the LED strip turns off.
+- Given the LED strip is currently off, when the user holds `Power` for 3 seconds, the LED strip turns on as white.
+- Given the LED strip's current target color is white, when the user clicks `Power` once, the LED strip target color switches to red.
+- Given the LED strip is switching colors, the visible color does not jump immediately; it interpolates toward the target color on later ticks.
+- Given any current state, when the user holds `Power` for 5 seconds, the LED strip enters marquee mode.
+- Given the LED strip is currently on, when the user keeps holding `Power` for 5 seconds, the LED strip turns off at the 3-second mark and enters marquee mode at the 5-second mark.
+- Given the LED strip is currently off, when the user keeps holding `Power` for 5 seconds, the LED strip turns on as white at the 3-second mark and enters marquee mode at the 5-second mark.
+- Given the LED strip is in marquee mode and has a target color, when the user waits 10ms, the LED strip interpolates once from the current color toward the target color; when the current color is close enough to the target color, the LED strip switches to the next target color in red, green, blue order and keeps interpolating.
+
+## Converage User Stoires
+
+- `red_click_targets_blue`: Positive: Given the LED strip's current target color is red, when the user clicks `Power` once, the LED strip target color switches to blue.
+- `red_idle_keeps_target_red`: Negative: Given the LED strip's current target color is red, when the user does not click `Power`, the LED strip target color does not switch to blue.
+- `red_click_does_not_target_other_colors`: Negative: Given the LED strip's current target color is red, when the user clicks `Power` once, the LED strip target color does not switch to green, yellow, or white.
+- `blue_click_targets_green`: Positive: Given the LED strip's current target color is blue, when the user clicks `Power` once, the LED strip target color switches to green.
+- `blue_idle_keeps_target_blue`: Negative: Given the LED strip's current target color is blue, when the user does not click `Power`, the LED strip target color does not switch to green.
+- `blue_click_does_not_target_other_colors`: Negative: Given the LED strip's current target color is blue, when the user clicks `Power` once, the LED strip target color does not switch to red, yellow, or white.
+- `green_click_targets_yellow`: Positive: Given the LED strip's current target color is green, when the user clicks `Power` once, the LED strip target color switches to yellow.
+- `green_idle_keeps_target_green`: Negative: Given the LED strip's current target color is green, when the user does not click `Power`, the LED strip target color does not switch to yellow.
+- `green_click_does_not_target_other_colors`: Negative: Given the LED strip's current target color is green, when the user clicks `Power` once, the LED strip target color does not switch to red, blue, or white.
+- `yellow_click_targets_red`: Positive: Given the LED strip's current target color is yellow, when the user clicks `Power` once, the LED strip target color switches to red.
+- `yellow_idle_keeps_target_yellow`: Negative: Given the LED strip's current target color is yellow, when the user does not click `Power`, the LED strip target color does not switch to red.
+- `yellow_click_does_not_target_other_colors`: Negative: Given the LED strip's current target color is yellow, when the user clicks `Power` once, the LED strip target color does not switch to blue, green, or white.
+- `white_click_targets_red`: Positive: Given the LED strip's current target color is white, when the user clicks `Power` once, the LED strip target color switches to red.
+- `white_idle_keeps_target_white`: Negative: Given the LED strip's current target color is white, when the user does not click `Power`, the LED strip target color does not switch to red.
+- `short_click_changes_target_only`: Positive: Given the LED strip's visible color and target color are the same, when the user clicks `Power` once, the LED strip only changes the target color, and the visible color is driven by later ticks.
+- `short_click_does_not_jump_visible_color`: Negative: Given the LED strip's visible color and target color are the same, when the user clicks `Power` once and no later tick has happened yet, the visible color does not jump immediately to the new target color.
+- `pending_color_click_uses_current_target`: Positive: Given the LED strip is still interpolating toward the current target color, when the user clicks `Power` again, the LED strip advances from the current target color to the next target color.
+- `rapid_two_clicks_advance_two_targets`: Positive: Given the LED strip's current target color is red, when the user clicks `Power` twice in a row, the LED strip target color advances through blue and ends at green.
+- `off_short_click_keeps_off`: Negative: Given the LED strip is currently off, when the user only clicks `Power` once, the LED strip does not turn on, does not enter the color cycle, and does not enter marquee mode.
+- `off_idle_ticks_keep_off`: Negative: Given the LED strip is currently off, when the user does not click `Power` and only waits for ticks, the LED strip stays off.
+- `on_hold_3s_turns_off`: Positive: Given the LED strip is currently on, when the user holds `Power` for at least 3 seconds and releases before 5 seconds, the LED strip turns off.
+- `on_states_hold_3s_turn_off`: Positive: Given the LED strip is currently white, red, blue, green, yellow, or in marquee mode, when the user holds `Power` for at least 3 seconds and releases before 5 seconds, the LED strip turns off.
+- `on_hold_less_than_3s_keeps_on`: Negative: Given the LED strip is currently on, when the user holds `Power` for less than 3 seconds, the LED strip does not turn off because of this hold.
+- `on_short_click_does_not_turn_off`: Negative: Given the LED strip is currently on, when the user only clicks `Power` once, the LED strip does not turn off because of the short click.
+- `on_hold_exactly_3s_turns_off`: Positive: Given the LED strip is currently on, when the user holds `Power` for exactly 3 seconds, the LED strip turns off.
+- `on_hold_between_3s_and_5s_turns_off_not_marquee`: Negative: Given the LED strip is currently on, when the user holds `Power` for more than 3 seconds but less than 5 seconds and then releases, the LED strip turns off but does not enter marquee mode.
+- `off_hold_3s_turns_white`: Positive: Given the LED strip is currently off, when the user holds `Power` for at least 3 seconds and releases before 5 seconds, the LED strip turns on as white.
+- `off_hold_less_than_3s_keeps_off`: Negative: Given the LED strip is currently off, when the user holds `Power` for less than 3 seconds, the LED strip does not turn on as white.
+- `off_hold_exactly_3s_turns_white`: Positive: Given the LED strip is currently off, when the user holds `Power` for exactly 3 seconds, the LED strip turns on as white.
+- `off_hold_between_3s_and_5s_turns_white_not_marquee`: Negative: Given the LED strip is currently off, when the user holds `Power` for more than 3 seconds but less than 5 seconds and then releases, the LED strip turns on as white but does not enter marquee mode.
+- `any_hold_5s_enters_marquee`: Positive: Given any current state, when the user holds `Power` for at least 5 seconds, the LED strip enters marquee mode.
+- `hold_less_than_5s_not_marquee`: Negative: Given any current state, when the user holds `Power` for less than 5 seconds and then releases, the LED strip does not enter marquee mode.
+- `hold_exactly_5s_enters_marquee`: Positive: Given any current state, when the user holds `Power` for exactly 5 seconds, the LED strip enters marquee mode.
+- `on_hold_5s_off_then_marquee`: Positive: Given the LED strip is currently on, when the user keeps holding `Power` for 5 seconds, the LED strip turns off at the 3-second mark and enters marquee mode at the 5-second mark.
+- `off_hold_5s_white_then_marquee`: Positive: Given the LED strip is currently off, when the user keeps holding `Power` for 5 seconds, the LED strip turns on as white at the 3-second mark and enters marquee mode at the 5-second mark.
+- `hold_5s_overrides_3s_state`: Positive: Given any current state, when the user keeps holding `Power` for 5 seconds, the LED strip enters marquee mode at the 5-second mark and overrides the off or white state triggered at the 3-second mark.
+- `hold_5s_does_not_remain_at_3s_state`: Negative: Given any current state, after the user keeps holding `Power` for 5 seconds, the LED strip does not remain in the off or white state triggered at the 3-second mark.
+- `hold_3s_fires_once_during_same_press`: Negative: Given the user keeps holding `Power` and this same press has already crossed the 3-second threshold once, while the user is still holding and has not reached 5 seconds yet, the 3-second hold action does not fire again during the same press.
+- `hold_between_3s_and_5s_keeps_3s_state_without_flicker`: Negative: Given the user keeps holding `Power` for more than 3 seconds but less than 5 seconds, the LED strip keeps the state produced at the 3-second mark and does not repeatedly toggle or flicker between off and on.
+- `color_lerps_on_tick`: Positive: Given the LED strip is switching from the current color to a target color, when the user waits for a later tick, the LED strip interpolates once toward the target color.
+- `color_lerp_first_tick_has_midpoint`: Positive: Given the LED strip visible color is red, the target color is blue, and the strip is transitioning, when the user waits 10ms, the visible color advances one small intermediate step toward blue instead of staying red or jumping directly to blue.
+- `color_lerp_second_tick_has_next_midpoint`: Positive: Given the LED strip has already interpolated once from red toward blue but has not reached blue yet, when the user waits another 10ms, the visible color advances to the next small intermediate step closer to blue.
+- `color_lerp_monotonic_toward_target`: Positive: Given the LED strip is interpolating from red toward blue, when the user waits for several 10ms ticks, the red channel decreases step by step and the blue channel increases step by step without moving away from the target.
+- `color_lerp_does_not_emit_target_on_first_tick`: Negative: Given the LED strip is interpolating from red toward blue, when the user waits for only one 10ms tick, the LED strip does not display blue immediately.
+- `color_lerp_render_outputs_midpoint_to_strip`: Positive: Given `visible_color` has advanced one small intermediate step after a 10ms tick, the render logic outputs that intermediate color to the actual LED strip pixels.
+- `color_lerp_render_does_not_skip_midpoint`: Negative: Given the LED strip is interpolating from red toward blue and the first render happens, the actual LED strip pixels do not skip the intermediate color and display the target blue directly.
+- `color_lerp_reaches_target_after_finite_ticks`: Positive: Given the LED strip keeps interpolating from red toward blue, when the user keeps waiting for 10ms ticks, the LED strip reaches the target blue within a finite number of ticks.
+- `color_does_not_lerp_without_tick`: Negative: Given the LED strip is switching from the current color to a target color, when no later tick has happened yet, the LED strip does not complete this interpolation step.
+- `color_does_not_jump_before_threshold`: Negative: Given the LED strip is switching from the current color to a target color, while the current color is not yet close to the target color, the LED strip does not jump directly to the target color.
+- `color_stable_when_target_reached`: Positive: Given the LED strip's visible color already equals its target color, when the user keeps waiting for ticks, the LED strip keeps the current color unchanged.
+- `marquee_starts_with_red_target`: Positive: Given the LED strip enters marquee mode, the first marquee target color is red.
+- `marquee_short_click_keeps_marquee`: Negative: Given the LED strip is in marquee mode, when the user only clicks `Power` once, the LED strip does not exit marquee mode and does not switch back to the normal color cycle.
+- `marquee_tick_lerps_to_target`: Positive: Given the LED strip is in marquee mode and has a target color, when the user waits 10ms, the LED strip interpolates once from the current color toward the target color.
+- `marquee_lerp_first_tick_has_midpoint`: Positive: Given the LED strip is in marquee mode, the visible color is black, and the target color is red, when the user waits 10ms, the LED strip displays one small intermediate step toward red.
+- `marquee_lerp_render_outputs_midpoint_to_strip`: Positive: Given `visible_color` has advanced one small intermediate step after a 10ms tick in marquee mode, the render logic outputs that intermediate color to the actual LED strip pixels.
+- `marquee_lerp_does_not_skip_to_target`: Negative: Given the LED strip is interpolating from black toward red in marquee mode and the first render happens, the actual LED strip pixels do not skip the intermediate color and display red directly.
+- `marquee_wait_less_than_10ms_no_lerp`: Negative: Given the LED strip is in marquee mode and has a target color, when the user waits less than 10ms, the LED strip does not perform this interpolation step.
+- `marquee_close_to_red_targets_green`: Positive: Given the LED strip is in marquee mode and the current color is close enough to red, when the user waits for the next 10ms tick, the LED strip switches the target color to green and keeps interpolating.
+- `marquee_close_to_green_targets_blue`: Positive: Given the LED strip is in marquee mode and the current color is close enough to green, when the user waits for the next 10ms tick, the LED strip switches the target color to blue and keeps interpolating.
+- `marquee_close_to_blue_targets_red`: Positive: Given the LED strip is in marquee mode and the current color is close enough to blue, when the user waits for the next 10ms tick, the LED strip switches the target color to red and keeps interpolating.
+- `marquee_not_close_keeps_target`: Negative: Given the LED strip is in marquee mode but the current color is not yet close to the target color, when the user waits for the next 10ms tick, the LED strip does not switch to the next target color.
+- `marquee_reaches_target_finitely`: Positive: Given the LED strip is interpolating toward a target color, when the user keeps waiting for ticks, the LED strip reaches the target color within a finite number of ticks and switches to the next target color.
+- `marquee_no_infinite_convergence`: Negative: Given the LED strip is interpolating toward a target color, when the user keeps waiting for ticks, the LED strip does not get stuck forever due to infinite convergence and fail to switch to the next target color.

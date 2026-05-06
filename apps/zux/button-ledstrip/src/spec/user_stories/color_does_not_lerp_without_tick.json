@@ -1,0 +1,51 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "color does not lerp without tick",
+    "description": "Without a later tick, a pending color transition does not advance.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "solid",
+        "target_color_name": "blue",
+        "target_color": 255,
+        "visible_color": 16711680,
+        "transitioning": true,
+        "marquee_stage": "none"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "blue",
+              "target_color": 255,
+              "visible_color": 16711680,
+              "transitioning": true,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      },
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "blue",
+              "target_color": 255,
+              "visible_color": 16711680,
+              "transitioning": true,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

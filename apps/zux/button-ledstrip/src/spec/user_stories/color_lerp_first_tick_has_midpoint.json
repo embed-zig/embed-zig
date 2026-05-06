@@ -1,0 +1,40 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "color lerp first tick has midpoint",
+    "description": "The first 10ms tick from red toward blue produces a midpoint instead of an endpoint.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "solid",
+        "target_color_name": "blue",
+        "target_color": 255,
+        "visible_color": 16711680,
+        "transitioning": true,
+        "marquee_stage": "none"
+      }
+    },
+    "steps": [
+      {
+        "tick": {
+          "interval": 10000000,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "blue",
+              "target_color": 255,
+              "visible_color": 15663120,
+              "transitioning": true,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

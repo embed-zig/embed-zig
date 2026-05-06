@@ -1,0 +1,55 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "off idle ticks keep off",
+    "description": "Ticks alone keep an off LED strip off.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "off",
+        "target_color_name": "none",
+        "target_color": 0,
+        "visible_color": 0,
+        "transitioning": false,
+        "marquee_stage": "none"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "off",
+              "target_color_name": "none",
+              "target_color": 0,
+              "visible_color": 0,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 10000000,
+          "n": 10
+        },
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "off",
+              "target_color_name": "none",
+              "target_color": 0,
+              "visible_color": 0,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "on states hold 3s turn off",
+    "description": "Holding Power for 3s while in marquee also turns the strip off.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "marquee",
+        "target_color_name": "red",
+        "target_color": 16711680,
+        "visible_color": 16711680,
+        "transitioning": false,
+        "marquee_stage": "red"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "marquee",
+              "target_color_name": "red",
+              "target_color": 16711680,
+              "visible_color": 16711680,
+              "transitioning": false,
+              "marquee_stage": "red"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "long_press": 3000000000
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "off",
+              "target_color_name": "none",
+              "target_color": 0,
+              "visible_color": 0,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

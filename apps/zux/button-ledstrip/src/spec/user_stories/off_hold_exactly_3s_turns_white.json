@@ -1,0 +1,61 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "off hold exactly 3s turns white",
+    "description": "Holding Power for exactly 3s while off turns the strip white.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "off",
+        "target_color_name": "none",
+        "target_color": 0,
+        "visible_color": 0,
+        "transitioning": false,
+        "marquee_stage": "none"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "off",
+              "target_color_name": "none",
+              "target_color": 0,
+              "visible_color": 0,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "long_press": 3000000000
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "white",
+              "target_color": 16777215,
+              "visible_color": 16777215,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

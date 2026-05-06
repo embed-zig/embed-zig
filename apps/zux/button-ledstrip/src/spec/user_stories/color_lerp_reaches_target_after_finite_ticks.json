@@ -1,0 +1,48 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "color lerp reaches target after finite ticks",
+    "description": "Repeated 10ms ticks from red toward blue eventually reach blue.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "solid",
+        "target_color_name": "blue",
+        "target_color": 255,
+        "visible_color": 16711680,
+        "transitioning": true,
+        "marquee_stage": "none"
+      }
+    },
+    "steps": [
+      {
+        "tick": {
+          "interval": 10000000,
+          "n": 53
+        },
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "blue",
+              "target_color": 255,
+              "visible_color": 255,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          },
+          {
+            "label": "strip_pixel0",
+            "state": {
+              "r": 0,
+              "g": 0,
+              "b": 255
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

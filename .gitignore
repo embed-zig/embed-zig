@@ -7,3 +7,5 @@ zig-out/
 AGENTS.md
 !/AGENTS.md
 .DS_Store
+test-results/
+playwright-report/

@@ -1,0 +1,61 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "hold exactly 5s enters marquee",
+    "description": "Holding Power exactly 5s enters marquee.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "solid",
+        "target_color_name": "green",
+        "target_color": 65280,
+        "visible_color": 65280,
+        "transitioning": false,
+        "marquee_stage": "none"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "green",
+              "target_color": 65280,
+              "visible_color": 65280,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "long_press": 5000000000
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "marquee",
+              "target_color_name": "red",
+              "target_color": 16711680,
+              "visible_color": 0,
+              "transitioning": true,
+              "marquee_stage": "red"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

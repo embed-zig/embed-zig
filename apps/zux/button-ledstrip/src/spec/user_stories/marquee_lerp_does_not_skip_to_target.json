@@ -1,0 +1,37 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "marquee lerp does not skip to target",
+    "description": "The first marquee render from black toward red does not skip directly to red.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "marquee",
+        "target_color_name": "red",
+        "target_color": 16711680,
+        "visible_color": 0,
+        "transitioning": true,
+        "marquee_stage": "red"
+      }
+    },
+    "steps": [
+      {
+        "tick": {
+          "interval": 10000000,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "strip_pixel0",
+            "state": {
+              "r": 16,
+              "g": 0,
+              "b": 0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

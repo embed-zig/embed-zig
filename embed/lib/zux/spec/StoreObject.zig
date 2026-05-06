@@ -124,9 +124,157 @@ fn parseStructType(parser: *JsonParser) type {
 fn parseFieldType(parser: *JsonParser) type {
     switch (parser.peekByte()) {
         '"' => return typeFromName(parser.parseString()),
-        '{' => return parseStructType(parser),
-        else => @compileError("zux.spec.StoreObject state fields must be type-name strings or nested JSON objects"),
+        '{' => return parseObjectFieldType(parser.parseValueSlice()),
+        else => @compileError("zux.spec.StoreObject state fields must be type-name strings, enum objects, or nested JSON objects"),
     }
+}
+
+fn parseObjectFieldType(comptime source: []const u8) type {
+    if (objectHasKey(source, "enum")) {
+        return parseEnumFieldType(source);
+    }
+
+    var parser = JsonParser.init(source);
+    const StructType = parseStructType(&parser);
+    parser.finish();
+    return StructType;
+}
+
+fn objectHasKey(comptime source: []const u8, comptime expected: []const u8) bool {
+    var parser = JsonParser.init(source);
+    parser.expectByte('{');
+    if (parser.consumeByte('}')) return false;
+
+    while (true) {
+        const key = parser.parseString();
+        parser.expectByte(':');
+        if (comptimeEql(key, expected)) {
+            return true;
+        }
+
+        _ = parser.parseValueSlice();
+        if (parser.consumeByte(',')) continue;
+        parser.expectByte('}');
+        return false;
+    }
+}
+
+fn parseEnumFieldType(comptime source: []const u8) type {
+    var parser = JsonParser.init(source);
+    parser.expectByte('{');
+
+    var enum_source: ?[]const u8 = null;
+
+    if (parser.consumeByte('}')) {
+        @compileError("zux.spec.StoreObject enum field descriptors require `enum`");
+    }
+
+    while (true) {
+        const key = parser.parseString();
+        parser.expectByte(':');
+
+        if (comptimeEql(key, "enum")) {
+            if (enum_source != null) {
+                @compileError("zux.spec.StoreObject enum field descriptors must not duplicate `enum`");
+            }
+            enum_source = parser.parseValueSlice();
+        } else {
+            _ = parser.parseValueSlice();
+            @compileError("zux.spec.StoreObject enum field descriptors only support `enum`");
+        }
+
+        if (parser.consumeByte(',')) continue;
+        parser.expectByte('}');
+        break;
+    }
+
+    parser.finish();
+    return parseEnumType(enum_source orelse @compileError("zux.spec.StoreObject enum field descriptors require `enum`"));
+}
+
+fn parseEnumType(comptime source: []const u8) type {
+    var parser = JsonParser.init(source);
+    parser.expectByte('{');
+
+    var tag_type: ?type = null;
+    var fields: ?[]const glib.std.builtin.Type.EnumField = null;
+
+    if (parser.consumeByte('}')) {
+        @compileError("zux.spec.StoreObject enum descriptors require `type` and `values`");
+    }
+
+    while (true) {
+        const key = parser.parseString();
+        parser.expectByte(':');
+
+        if (comptimeEql(key, "type")) {
+            if (tag_type != null) {
+                @compileError("zux.spec.StoreObject enum descriptors must not duplicate `type`");
+            }
+            tag_type = typeFromName(parser.parseString());
+            validateEnumTagType(tag_type.?);
+        } else if (comptimeEql(key, "values")) {
+            if (fields != null) {
+                @compileError("zux.spec.StoreObject enum descriptors must not duplicate `values`");
+            }
+            fields = parseEnumFields(parser.parseValueSlice());
+        } else {
+            _ = parser.parseValueSlice();
+            @compileError("zux.spec.StoreObject enum descriptors only support `type` and `values` fields");
+        }
+
+        if (parser.consumeByte(',')) continue;
+        parser.expectByte('}');
+        break;
+    }
+
+    parser.finish();
+    const enum_tag_type = tag_type orelse @compileError("zux.spec.StoreObject enum descriptors require `type`");
+    const enum_fields = fields orelse @compileError("zux.spec.StoreObject enum descriptors require `values`");
+    return @Type(.{
+        .@"enum" = .{
+            .tag_type = enum_tag_type,
+            .fields = enum_fields,
+            .decls = &.{},
+            .is_exhaustive = true,
+        },
+    });
+}
+
+fn parseEnumFields(comptime source: []const u8) []const glib.std.builtin.Type.EnumField {
+    var parser = JsonParser.init(source);
+    const field_count = parser.countArrayItems();
+    if (field_count == 0) {
+        @compileError("zux.spec.StoreObject enum descriptors require at least one value");
+    }
+
+    parser.expectByte('[');
+    var fields: [field_count]glib.std.builtin.Type.EnumField = undefined;
+    var field_index: usize = 0;
+
+    while (true) {
+        const field_name = parser.parseString();
+        validateFieldName(field_name);
+        var duplicate_index: usize = 0;
+        while (duplicate_index < field_index) : (duplicate_index += 1) {
+            if (comptimeEql(fields[duplicate_index].name, field_name)) {
+                @compileError("zux.spec.StoreObject enum values must be unique");
+            }
+        }
+
+        fields[field_index] = .{
+            .name = sentinelName(field_name),
+            .value = field_index,
+        };
+        field_index += 1;
+
+        if (parser.consumeByte(',')) continue;
+        parser.expectByte(']');
+        break;
+    }
+
+    parser.finish();
+    return fields[0..];
 }
 
 fn typeFromName(comptime name: []const u8) type {
@@ -150,6 +298,13 @@ fn typeFromName(comptime name: []const u8) type {
     if (comptimeEql(name, "string")) return []const u8;
 
     @compileError("zux.spec.StoreObject encountered an unsupported type name in JSON");
+}
+
+fn validateEnumTagType(comptime tag_type: type) void {
+    switch (@typeInfo(tag_type)) {
+        .int => {},
+        else => @compileError("zux.spec.StoreObject enum `tag_type` must be an integer type"),
+    }
 }
 
 fn validateLabel(comptime label: []const u8) void {
@@ -237,6 +392,27 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(@FieldType(@FieldType(Spec.StateType, "user"), "age") == u32);
         }
 
+        fn parse_from_slice_generates_enum_state_type() !void {
+            const Spec = parseSlice(
+                \\{
+                \\  "label": "scene",
+                \\  "state": {
+                \\    "mode": { "enum": { "type": "u8", "values": ["off", "solid", "marquee"] } }
+                \\  }
+                \\}
+            );
+            const Mode = @FieldType(Spec.StateType, "mode");
+            const mode_info = @typeInfo(Mode).@"enum";
+            const marquee: Mode = .marquee;
+
+            try grt.std.testing.expect(mode_info.tag_type == u8);
+            try grt.std.testing.expectEqual(@as(usize, 3), mode_info.fields.len);
+            try grt.std.testing.expectEqualStrings("off", mode_info.fields[0].name);
+            try grt.std.testing.expectEqualStrings("solid", mode_info.fields[1].name);
+            try grt.std.testing.expectEqualStrings("marquee", mode_info.fields[2].name);
+            try grt.std.testing.expectEqual(@as(u8, 2), @intFromEnum(marquee));
+        }
+
         fn make_preserves_label_and_state_type() !void {
             const State = struct {
                 count: usize,
@@ -263,6 +439,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.parse_from_slice_generates_nested_state_type() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.parse_from_slice_generates_enum_state_type() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

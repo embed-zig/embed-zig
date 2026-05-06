@@ -1,0 +1,61 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "on hold less than 3s keeps on",
+    "description": "Holding Power for less than 3s while on does not turn the strip off.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "solid",
+        "target_color_name": "red",
+        "target_color": 16711680,
+        "visible_color": 16711680,
+        "transitioning": false,
+        "marquee_stage": "none"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "red",
+              "target_color": 16711680,
+              "visible_color": 16711680,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "long_press": 2999999999
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "red",
+              "target_color": 16711680,
+              "visible_color": 16711680,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

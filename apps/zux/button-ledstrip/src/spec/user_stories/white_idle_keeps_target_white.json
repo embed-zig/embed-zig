@@ -1,0 +1,55 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "white idle keeps target white",
+    "description": "Given target white, waiting without Power keeps the target white.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "solid",
+        "target_color_name": "white",
+        "target_color": 16777215,
+        "visible_color": 16777215,
+        "transitioning": false,
+        "marquee_stage": "none"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "white",
+              "target_color": 16777215,
+              "visible_color": 16777215,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      },
+      {
+        "tick": {
+          "interval": 10000000,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "white",
+              "target_color": 16777215,
+              "visible_color": 16777215,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

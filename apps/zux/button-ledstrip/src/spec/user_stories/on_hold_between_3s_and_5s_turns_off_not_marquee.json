@@ -1,0 +1,61 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "on hold between 3s and 5s turns off not marquee",
+    "description": "Holding Power longer than 3s but less than 5s turns off without marquee.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "solid",
+        "target_color_name": "blue",
+        "target_color": 255,
+        "visible_color": 255,
+        "transitioning": false,
+        "marquee_stage": "none"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "blue",
+              "target_color": 255,
+              "visible_color": 255,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "long_press": 4000000000
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "off",
+              "target_color_name": "none",
+              "target_color": 0,
+              "visible_color": 0,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

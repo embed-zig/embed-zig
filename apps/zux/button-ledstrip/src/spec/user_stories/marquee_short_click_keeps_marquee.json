@@ -1,0 +1,61 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "marquee short click keeps marquee",
+    "description": "A short Power click in marquee does not exit marquee or return to normal color cycle.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "marquee",
+        "target_color_name": "red",
+        "target_color": 16711680,
+        "visible_color": 8388608,
+        "transitioning": true,
+        "marquee_stage": "red"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "marquee",
+              "target_color_name": "red",
+              "target_color": 16711680,
+              "visible_color": 8388608,
+              "transitioning": true,
+              "marquee_stage": "red"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "click": 1
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "marquee",
+              "target_color_name": "red",
+              "target_color": 16711680,
+              "visible_color": 8388608,
+              "transitioning": true,
+              "marquee_stage": "red"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

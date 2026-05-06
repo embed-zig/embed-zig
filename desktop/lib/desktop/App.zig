@@ -3,8 +3,9 @@ const gstd = @import("gstd");
 const desktop_http = @import("../http.zig");
 const embed = @import("embed");
 
-pub fn make(comptime ZuxApp: type) type {
-    const ZuxServer = desktop_http.ZuxServer.make(ZuxApp);
+pub fn make(comptime Launcher: type) type {
+    const ZuxServer = desktop_http.ZuxServer.make(Launcher);
+    const ZuxApp = Launcher.ZuxApp;
 
     return struct {
         const App = @This();
@@ -15,6 +16,7 @@ pub fn make(comptime ZuxApp: type) type {
         pub const Options = struct {
             address: desktop_http.AddrPort,
             assets_dir: ?[]const u8 = null,
+            start_config: ZuxApp.StartConfig = .{},
         };
 
         pub fn init(allocator: gstd.runtime.std.mem.Allocator, options: Options) !App {
@@ -22,6 +24,7 @@ pub fn make(comptime ZuxApp: type) type {
                 .address = options.address,
                 .server = try ZuxServer.init(allocator, .{
                     .assets_dir = options.assets_dir,
+                    .start_config = options.start_config,
                 }),
             };
         }
@@ -139,7 +142,61 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 }
             };
 
-            const GenericApp = make(FakeZuxApp);
+            const FakeZuxAppHost = struct {
+                pub const ZuxApp = FakeZuxApp;
+
+                allocator: std.mem.Allocator,
+                zux_app: ZuxApp,
+
+                pub fn init(app_allocator: std.mem.Allocator, config: ZuxApp.InitConfig) !*@This() {
+                    const self = try app_allocator.create(@This());
+                    errdefer app_allocator.destroy(self);
+
+                    self.* = .{
+                        .allocator = app_allocator,
+                        .zux_app = try ZuxApp.init(config),
+                    };
+                    return self;
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    const app_allocator = self.allocator;
+                    self.zux_app.deinit();
+                    self.* = undefined;
+                    app_allocator.destroy(self);
+                }
+            };
+
+            const FakeLauncher = struct {
+                pub const AppHost = FakeZuxAppHost;
+                pub const ZuxApp = FakeZuxAppHost.ZuxApp;
+                pub const InitConfig = ZuxApp.InitConfig;
+                pub const StartConfig = ZuxApp.StartConfig;
+                pub const Allocator = std.mem.Allocator;
+
+                app_host: *AppHost,
+
+                pub fn init(app_allocator: Allocator, init_config: InitConfig) !@This() {
+                    return .{
+                        .app_host = try AppHost.init(app_allocator, init_config),
+                    };
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    self.app_host.deinit();
+                    self.* = undefined;
+                }
+
+                pub fn app(self: *@This()) *AppHost {
+                    return self.app_host;
+                }
+
+                pub fn zux(self: *@This()) *ZuxApp {
+                    return &self.app().zux_app;
+                }
+            };
+
+            const GenericApp = make(FakeLauncher);
             var app = GenericApp.init(std.testing.allocator, .{
                 .address = desktop_http.AddrPort.from4(.{ 127, 0, 0, 1 }, 0),
             }) catch |err| {

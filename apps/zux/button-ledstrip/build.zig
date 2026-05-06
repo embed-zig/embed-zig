@@ -20,6 +20,7 @@ pub fn register(registry: anytype) void {
             .{ .name = "embed", .module = embed },
             .{ .name = "glib", .module = glib },
             .{ .name = "gstd", .module = gstd },
+            .{ .name = "launcher", .module = registry.launcher },
         },
     }));
 }

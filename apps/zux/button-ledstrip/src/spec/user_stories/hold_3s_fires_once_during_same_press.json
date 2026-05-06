@@ -1,0 +1,71 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "hold 3s fires once during same press",
+    "description": "The 3s hold action fires only once while the same press remains held before 5s.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "solid",
+        "target_color_name": "red",
+        "target_color": 16711680,
+        "visible_color": 16711680,
+        "transitioning": false,
+        "marquee_stage": "none"
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "long_press": 3000000000
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "off",
+              "target_color_name": "none",
+              "target_color": 0,
+              "visible_color": 0,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "long_press": 4000000000
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "off",
+              "target_color_name": "none",
+              "target_color": 0,
+              "visible_color": 0,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

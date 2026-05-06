@@ -25,7 +25,7 @@ steps: []const Step,
 
 pub fn parseSlice(comptime source: []const u8) UserStory {
     comptime {
-        @setEvalBranchQuota(60_000);
+        @setEvalBranchQuota(2_000_000);
     }
 
     var parser = JsonParser.init(source);
@@ -123,6 +123,7 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                             },
                         },
                     }) catch |err| return err;
+                    runner.app.store.tick();
                 }
             }
 
@@ -138,35 +139,68 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                 defer freeDecodedValue(ZuxApp.Event, allocator, &event);
 
                 try runner.dispatchInput(event, timestamp.*);
+                runner.app.store.tick();
             }
 
             runner.app.store.tick();
 
             for (step.outputs) |output| {
-                inline for (@typeInfo(ZuxApp.Store.Stores).@"struct".fields) |field| {
-                    if (glib.std.mem.eql(u8, output.label, field.name)) {
-                        var state_value = try glib.std.json.parseFromSlice(
-                            glib.std.json.Value,
-                            allocator,
-                            output.state,
-                            .{},
+                try runner.checkOutput(allocator, output);
+            }
+        }
+
+        fn checkOutput(runner: *@This(), allocator: glib.std.mem.Allocator, output: Output) !void {
+            inline for (@typeInfo(ZuxApp.Store.Stores).@"struct".fields) |field| {
+                if (glib.std.mem.eql(u8, output.label, field.name)) {
+                    var state_value = try glib.std.json.parseFromSlice(
+                        glib.std.json.Value,
+                        allocator,
+                        output.state,
+                        .{},
+                    );
+                    defer state_value.deinit();
+                    const actual_state = @field(runner.app.store.stores, field.name).get();
+                    const StateType = @TypeOf(actual_state);
+                    if (!try jsonValueMatches(StateType, state_value.value, actual_state)) {
+                        glib.std.debug.print(
+                            "zux UserStory mismatch label={s} expected={s} actual={any}\n",
+                            .{ output.label, output.state, actual_state },
                         );
-                        defer state_value.deinit();
-                        const actual_state = @field(runner.app.store.stores, field.name).get();
-                        const StateType = @TypeOf(actual_state);
-                        if (!try jsonValueMatches(StateType, state_value.value, actual_state)) {
-                            glib.std.debug.print(
-                                "zux UserStory mismatch label={s} expected={s} actual={any}\n",
-                                .{ output.label, output.state, actual_state },
-                            );
-                            return error.StateMismatch;
-                        }
-                        break;
+                        return error.StateMismatch;
                     }
-                } else {
-                    return error.UnknownStoreLabel;
+                    return;
                 }
             }
+
+            if (try runner.checkLedStripOutput(allocator, output)) return;
+            return error.UnknownStoreLabel;
+        }
+
+        fn checkLedStripOutput(runner: *@This(), allocator: glib.std.mem.Allocator, output: Output) !bool {
+            inline for (0..ZuxApp.registries.ledstrip.len) |i| {
+                const periph = ZuxApp.registries.ledstrip.periphs[i];
+                const pixel0_label = comptime periph.label ++ "_pixel0";
+                if (glib.std.mem.eql(u8, output.label, pixel0_label)) {
+                    var state_value = try glib.std.json.parseFromSlice(
+                        glib.std.json.Value,
+                        allocator,
+                        output.state,
+                        .{},
+                    );
+                    defer state_value.deinit();
+                    const actual_color = @field(runner.app.impl.runtime.led_strips, periph.label).pixel(0);
+                    if (!try jsonValueMatches(@TypeOf(actual_color), state_value.value, actual_color)) {
+                        glib.std.debug.print(
+                            "zux UserStory mismatch label={s} expected={s} actual={any}\n",
+                            .{ output.label, output.state, actual_color },
+                        );
+                        return error.StateMismatch;
+                    }
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         fn dispatchInput(

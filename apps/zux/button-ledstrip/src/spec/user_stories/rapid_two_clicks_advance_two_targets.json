@@ -1,0 +1,69 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "rapid two clicks advance two targets",
+    "description": "Two rapid Power clicks advance target red through blue and end at green.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "solid",
+        "target_color_name": "red",
+        "target_color": 16711680,
+        "visible_color": 16711680,
+        "transitioning": false,
+        "marquee_stage": "none"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "red",
+              "target_color": 16711680,
+              "visible_color": 16711680,
+              "transitioning": false,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "click": 1
+              }
+            }
+          },
+          {
+            "button_gesture": {
+              "source_id": 1,
+              "gesture": {
+                "click": 1
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "solid",
+              "target_color_name": "green",
+              "target_color": 65280,
+              "visible_color": 16711680,
+              "transitioning": true,
+              "marquee_stage": "none"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

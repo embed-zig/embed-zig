@@ -199,9 +199,17 @@
       "TopologyResponse": {
         "type": "object",
         "required": [
+          "title",
+          "description",
           "gears"
         ],
         "properties": {
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
           "gears": {
             "type": "array",
             "items": {

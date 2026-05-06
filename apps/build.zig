@@ -7,17 +7,20 @@ const AppRegistry = struct {
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    launcher: *std.Build.Module,
     modules: std.StringHashMap(*std.Build.Module),
 
     fn init(
         b: *std.Build,
         target: std.Build.ResolvedTarget,
         optimize: std.builtin.OptimizeMode,
+        launcher: *std.Build.Module,
     ) AppRegistry {
         return .{
             .b = b,
             .target = target,
             .optimize = optimize,
+            .launcher = launcher,
             .modules = std.StringHashMap(*std.Build.Module).init(b.allocator),
         };
     }
@@ -42,7 +45,21 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    var registry = AppRegistry.init(b, target, optimize);
+    const glib = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("glib");
+
+    const launcher = b.addModule("launcher", .{
+        .root_source_file = b.path("src/Launcher.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "glib", .module = glib },
+        },
+    });
+
+    var registry = AppRegistry.init(b, target, optimize, launcher);
     defer registry.deinit();
 
     glib_unit_test.register(&registry);

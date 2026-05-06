@@ -6,8 +6,43 @@
       "spec": {
         "label": "scene",
         "state": {
-          "mode": "u8",
-          "rainbow_stage": "u8"
+          "mode": {
+            "enum": {
+              "type": "u8",
+              "values": [
+                "off",
+                "solid",
+                "marquee"
+              ]
+            }
+          },
+          "target_color_name": {
+            "enum": {
+              "type": "u8",
+              "values": [
+                "none",
+                "red",
+                "blue",
+                "green",
+                "yellow",
+                "white"
+              ]
+            }
+          },
+          "target_color": "u32",
+          "visible_color": "u32",
+          "transitioning": "bool",
+          "marquee_stage": {
+            "enum": {
+              "type": "u8",
+              "values": [
+                "none",
+                "red",
+                "green",
+                "blue"
+              ]
+            }
+          }
         }
       }
     },

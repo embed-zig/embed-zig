@@ -3,9 +3,11 @@ import {
   getLedStripState,
   getSingleButtonState,
 } from './desktop-core.ts';
+import { getTopology } from './api/client.ts';
 import type { StateResponse } from './api/generated/types.gen';
 
-const logEl = getElement('log', HTMLPreElement);
+const titleEl = getElement('app-title', HTMLHeadingElement);
+const descriptionEl = getElement('app-description', HTMLParagraphElement);
 const stripEl = getElement('strip', HTMLDivElement);
 const buttonEl = getElement('power-btn', HTMLButtonElement);
 
@@ -13,7 +15,7 @@ let latestState: StateResponse | null = null;
 
 function log(message: string, data?: unknown): void {
   const line = data ? `${message} ${JSON.stringify(data, null, 2)}` : message;
-  logEl.textContent = `${line}\n\n${logEl.textContent}`;
+  console.log(line);
 }
 
 function render(state: StateResponse): void {
@@ -42,6 +44,11 @@ const controller = await createDesktopController({
     log(`sse ${event.event}`, event.data);
   },
 });
+const topology = await getTopology();
+
+document.title = topology.title;
+titleEl.textContent = topology.title;
+descriptionEl.textContent = topology.description;
 
 buttonEl.addEventListener('pointerdown', () => {
   void emit('press');

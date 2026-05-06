@@ -9,9 +9,11 @@ const ui_assets = @import("desktop_ui_assets");
 
 const Sse = codegen.sse.make(gstd.runtime.std);
 
-pub fn make(comptime ZuxApp: type) type {
-    comptime validateZuxApp(ZuxApp);
+pub fn make(comptime Launcher: type) type {
+    comptime validateLauncher(Launcher);
 
+    const AppHost = Launcher.AppHost;
+    const ZuxApp = Launcher.ZuxApp;
     const registries = ZuxApp.registries;
     const gpio_count = registries.gpio_button.len;
     const ledstrip_count = registries.ledstrip.len;
@@ -31,6 +33,7 @@ pub fn make(comptime ZuxApp: type) type {
         pub const Options = struct {
             server: gstd.runtime.net.http.Server.Options = .{},
             assets_dir: ?[]const u8 = null,
+            start_config: ZuxApp.StartConfig = .{},
         };
 
         pub fn init(allocator: gstd.runtime.std.mem.Allocator, options: Options) !Server {
@@ -39,7 +42,7 @@ pub fn make(comptime ZuxApp: type) type {
 
             const api_handler = try allocator.create(ApiHandler);
             errdefer allocator.destroy(api_handler);
-            api_handler.* = try ApiHandler.init(allocator);
+            api_handler.* = try ApiHandler.init(allocator, options.start_config);
             errdefer api_handler.deinit(allocator);
 
             const ui = try allocator.create(UiHandler);
@@ -89,11 +92,12 @@ pub fn make(comptime ZuxApp: type) type {
             runtime: *RuntimeState,
             server: api.ServerApi,
 
-            fn init(allocator: gstd.runtime.std.mem.Allocator) !@This() {
+            fn init(allocator: gstd.runtime.std.mem.Allocator, start_config: ZuxApp.StartConfig) !@This() {
                 const runtime = try allocator.create(RuntimeState);
                 errdefer allocator.destroy(runtime);
-                runtime.* = try RuntimeState.init(allocator);
+                try runtime.init(allocator, start_config);
                 errdefer runtime.deinit();
+                runtime.attachStripRefreshHooks();
 
                 const server = try api.ServerApi.init(allocator, runtime, .{
                     .getTopology = RuntimeState.handleGetTopology,
@@ -127,7 +131,7 @@ pub fn make(comptime ZuxApp: type) type {
 
         const RuntimeState = struct {
             allocator: gstd.runtime.std.mem.Allocator,
-            app: ZuxApp,
+            launcher: Launcher,
             mutex: gstd.runtime.std.Thread.Mutex = .{},
             buttons: [gpio_count]device.single_button.SingleButton,
             strips: [ledstrip_count]device.ledstrip.LedStrip,
@@ -168,30 +172,38 @@ pub fn make(comptime ZuxApp: type) type {
                 }
             };
 
-            fn init(allocator: gstd.runtime.std.mem.Allocator) !Self {
-                var buttons = [_]device.single_button.SingleButton{.{}} ** gpio_count;
-                var strips = try initStripDevices(allocator);
-                errdefer deinitStripDevices(&strips);
+            fn init(self: *Self, allocator: gstd.runtime.std.mem.Allocator, start_config: ZuxApp.StartConfig) !void {
+                self.allocator = allocator;
+                self.mutex = .{};
+                self.buttons = [_]device.single_button.SingleButton{.{}} ** gpio_count;
+                self.strips = try initStripDevices(allocator);
+                errdefer deinitStripDevices(&self.strips);
+                self.revision = gstd.runtime.std.atomic.Value(u64).init(1);
 
-                var app = try ZuxApp.init(makeInitConfig(allocator, &buttons, &strips));
-                errdefer app.deinit();
+                self.launcher = try Launcher.init(allocator, makeInitConfig(allocator, &self.buttons, &self.strips));
+                errdefer self.launcher.deinit();
 
-                try app.start(.{ .ticker = .manual });
-                errdefer app.stop() catch {};
-
-                return .{
-                    .allocator = allocator,
-                    .app = app,
-                    .buttons = buttons,
-                    .strips = strips,
-                };
+                try self.launcher.zux().start(start_config);
+                errdefer self.launcher.zux().stop() catch {};
             }
 
             fn deinit(self: *Self) void {
-                self.app.stop() catch {};
-                self.app.deinit();
+                self.launcher.zux().stop() catch {};
+                self.launcher.deinit();
                 deinitStripDevices(&self.strips);
                 self.* = undefined;
+            }
+
+            fn attachStripRefreshHooks(self: *Self) void {
+                inline for (0..ledstrip_count) |i| {
+                    self.strips[i].setRefreshHook(self, onStripRefresh);
+                }
+            }
+
+            fn onStripRefresh(ctx: *anyopaque, strip: *device.ledstrip.LedStrip) void {
+                _ = strip;
+                const self: *Self = @ptrCast(@alignCast(ctx));
+                self.bumpRevision();
             }
 
             fn makeTopologyResponse(_: *Self, allocator: gstd.runtime.std.mem.Allocator) !Models.TopologyResponse {
@@ -218,7 +230,11 @@ pub fn make(comptime ZuxApp: type) type {
                     index += 1;
                 }
 
-                return .{ .gears = gears };
+                return .{
+                    .title = comptime desktopTitle(AppHost),
+                    .description = comptime desktopDescription(AppHost),
+                    .gears = gears,
+                };
             }
 
             fn makeStateResponse(self: *Self, allocator: gstd.runtime.std.mem.Allocator, ts_ms: i64) !Models.StateResponse {
@@ -292,10 +308,8 @@ pub fn make(comptime ZuxApp: type) type {
                     if (gstd.runtime.std.mem.eql(u8, gear_label, label_name)) {
                         if (gstd.runtime.std.mem.eql(u8, event_name, "press")) {
                             self.buttons[i].press();
-                            self.app.press_single_button(periph.label) catch return error.InvalidEvent;
                         } else if (gstd.runtime.std.mem.eql(u8, event_name, "release")) {
                             self.buttons[i].release();
-                            self.app.release_single_button(periph.label) catch return error.InvalidEvent;
                         } else {
                             return error.InvalidEvent;
                         }
@@ -423,14 +437,6 @@ pub fn make(comptime ZuxApp: type) type {
                 if (@hasField(ZuxApp.InitConfig, "custom_pipeline_node")) {
                     init_config.custom_pipeline_node = null;
                 }
-                inline for (@typeInfo(ZuxApp.InitConfig).@"struct".fields) |field| {
-                    if (@hasDecl(ZuxApp, "ReducerHook") and isOptionalOf(field.type, ZuxApp.ReducerHook)) {
-                        @compileError("desktop ZuxServer cannot synthesize runtime reducer hook field '" ++ field.name ++ "'");
-                    }
-                    if (@hasDecl(ZuxApp, "RenderHook") and isOptionalOf(field.type, ZuxApp.RenderHook)) {
-                        @compileError("desktop ZuxServer cannot synthesize runtime render hook field '" ++ field.name ++ "'");
-                    }
-                }
                 init_config.allocator = allocator;
 
                 inline for (0..gpio_count) |i| {
@@ -446,12 +452,6 @@ pub fn make(comptime ZuxApp: type) type {
                 }
 
                 return init_config;
-            }
-
-            fn isOptionalOf(comptime FieldType: type, comptime ChildType: type) bool {
-                if (ChildType == void) return false;
-                const info = @typeInfo(FieldType);
-                return info == .optional and info.optional.child == ChildType;
             }
         };
 
@@ -603,12 +603,28 @@ pub fn make(comptime ZuxApp: type) type {
     };
 }
 
-fn validateZuxApp(comptime ZuxApp: type) void {
+fn validateLauncher(comptime Launcher: type) void {
+    if (!@hasDecl(Launcher, "AppHost")) @compileError("desktop ZuxServer requires Launcher.AppHost");
+    if (!@hasDecl(Launcher, "ZuxApp")) @compileError("desktop ZuxServer requires Launcher.ZuxApp");
+    if (!@hasDecl(Launcher, "InitConfig")) @compileError("desktop ZuxServer requires Launcher.InitConfig");
+    if (!@hasDecl(Launcher, "StartConfig")) @compileError("desktop ZuxServer requires Launcher.StartConfig");
+    if (!@hasDecl(Launcher, "Allocator")) @compileError("desktop ZuxServer requires Launcher.Allocator");
+
+    const ZuxApp = Launcher.ZuxApp;
+    if (Launcher.AppHost.ZuxApp != ZuxApp) @compileError("desktop ZuxServer requires Launcher.AppHost.ZuxApp to match Launcher.ZuxApp");
+    if (Launcher.InitConfig != ZuxApp.InitConfig) @compileError("desktop ZuxServer requires Launcher.InitConfig to match ZuxApp.InitConfig");
+    if (Launcher.StartConfig != ZuxApp.StartConfig) @compileError("desktop ZuxServer requires Launcher.StartConfig to match ZuxApp.StartConfig");
+    if (Launcher.Allocator != gstd.runtime.std.mem.Allocator) @compileError("desktop ZuxServer requires Launcher.Allocator to match gstd allocator");
+
+    _ = @as(*const fn (Launcher.Allocator, ZuxApp.InitConfig) anyerror!Launcher, &Launcher.init);
+    _ = @as(*const fn (*Launcher) void, &Launcher.deinit);
+    _ = @as(*const fn (*Launcher) *Launcher.AppHost, &Launcher.app);
+    _ = @as(*const fn (*Launcher) *ZuxApp, &Launcher.zux);
+
     if (!@hasDecl(ZuxApp, "registries")) @compileError("desktop ZuxServer requires ZuxApp.registries");
     if (!@hasDecl(ZuxApp, "InitConfig")) @compileError("desktop ZuxServer requires ZuxApp.InitConfig");
     if (!@hasDecl(ZuxApp, "StartConfig")) @compileError("desktop ZuxServer requires ZuxApp.StartConfig");
     if (!@hasDecl(ZuxApp, "PeriphLabel")) @compileError("desktop ZuxServer requires ZuxApp.PeriphLabel");
-    _ = @as(*const fn (ZuxApp.InitConfig) anyerror!ZuxApp, &ZuxApp.init);
     _ = @as(*const fn (*ZuxApp) void, &ZuxApp.deinit);
     _ = @as(*const fn (*ZuxApp, ZuxApp.StartConfig) anyerror!void, &ZuxApp.start);
     _ = @as(*const fn (*ZuxApp) anyerror!void, &ZuxApp.stop);
@@ -624,8 +640,41 @@ fn validateZuxApp(comptime ZuxApp: type) void {
     if (registries.wifi_ap.len != 0) @compileError("desktop ZuxServer does not support wifi ap yet");
 }
 
+fn desktopTitle(comptime ZuxAppHost: type) []const u8 {
+    if (@hasDecl(ZuxAppHost, "desktop")) {
+        const desktop = ZuxAppHost.desktop;
+        if (@hasField(@TypeOf(desktop), "title")) {
+            return desktop.title;
+        }
+    }
+    return "desktop runtime";
+}
+
+fn desktopDescription(comptime ZuxAppHost: type) []const u8 {
+    if (@hasDecl(ZuxAppHost, "desktop")) {
+        const desktop = ZuxAppHost.desktop;
+        if (@hasField(@TypeOf(desktop), "description")) {
+            return desktop.description;
+        }
+    }
+    return "Local input and output runtime over GET and SSE.";
+}
+
 fn labelText(comptime label: anytype) []const u8 {
-    return @tagName(label);
+    return switch (@typeInfo(@TypeOf(label))) {
+        .enum_literal => @tagName(label),
+        .@"enum" => @tagName(label),
+        .pointer => |ptr| switch (ptr.size) {
+            .slice => label,
+            .one => switch (@typeInfo(ptr.child)) {
+                .array => label[0..],
+                else => @compileError("desktop ZuxServer label must be an enum literal, enum value, or []const u8"),
+            },
+            else => @compileError("desktop ZuxServer label must be an enum literal, enum value, or []const u8"),
+        },
+        .array => label[0..],
+        else => @compileError("desktop ZuxServer label must be an enum literal, enum value, or []const u8"),
+    };
 }
 
 fn glibContext() type {

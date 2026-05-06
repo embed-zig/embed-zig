@@ -720,6 +720,9 @@ pub fn build(builder: root, comptime context: anytype) type {
                 if (@hasField(Self, "started")) {
                     app.started = true;
                 }
+                if (@hasField(Self, "manual_ticker")) {
+                    app.manual_ticker = true;
+                }
                 if (@hasField(Self, "closed")) {
                     app.closed = false;
                 }
@@ -1214,13 +1217,17 @@ pub fn build(builder: root, comptime context: anytype) type {
                         inline for (0..gpio_count) |i| {
                             const periph = gpio_registry.periphs[i];
                             if (button_gesture.source_id == periphIdForRecord(periph)) {
-                                return button.Reducer.reduce(&@field(stores, periphLabel(periph)), message, emit);
+                                const reduced = try button.Reducer.reduce(&@field(stores, periphLabel(periph)), message, emit);
+                                try emit.emit(message);
+                                return reduced + 1;
                             }
                         }
                         inline for (0..adc_count) |i| {
                             const periph = adc_registry.periphs[i];
                             if (button_gesture.source_id == periphIdForRecord(periph)) {
-                                return button.Reducer.reduce(&@field(stores, periphLabel(periph)), message, emit);
+                                const reduced = try button.Reducer.reduce(&@field(stores, periphLabel(periph)), message, emit);
+                                try emit.emit(message);
+                                return reduced + 1;
                             }
                         }
                         try emit.emit(message);
@@ -1728,13 +1735,17 @@ pub fn build(builder: root, comptime context: anytype) type {
         pub fn set_led_strip_pixels(self: *Self, label: PeriphLabel, frame: FrameType, brightness: u8) !void {
             if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
             if (dispatchKind(label) != .led_strip) return error.InvalidPeriphKind;
-            try self.emitBody(.{
-                .ledstrip_set_pixels = .{
-                    .source_id = periphId(label),
-                    .pixels = frame.pixels[0..],
-                    .brightness = brightness,
-                },
-            });
+            const output = frame.withBrightness(brightness);
+            inline for (0..ledstrip_count) |i| {
+                const periph = ledstrip_registry.periphs[i];
+                if (label == @field(PeriphLabel, periphLabel(periph))) {
+                    const strip = @field(self.runtime.led_strips, periphLabel(periph));
+                    strip.setPixels(0, output.pixels[0..]);
+                    strip.refresh();
+                    return;
+                }
+            }
+            return error.InvalidPeriphKind;
         }
 
         pub fn set_led_strip_animated(

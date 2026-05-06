@@ -9,6 +9,7 @@ pub fn register(registry: anytype) void {
         .optimize = registry.optimize,
         .imports = &.{
             .{ .name = "glib", .module = glib },
+            .{ .name = "launcher", .module = registry.launcher },
         },
     }));
 }

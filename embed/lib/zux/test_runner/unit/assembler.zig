@@ -865,15 +865,10 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         },
                         else => return error.UnexpectedMessage,
                     }
-                    try app.set_led_strip_pixels(.strip, Built.FrameType{}, 200);
-                    switch (app.impl.last_event.?) {
-                        .ledstrip_set_pixels => |event_value| {
-                            try grt.std.testing.expectEqual(@as(u32, 11), event_value.source_id);
-                            try grt.std.testing.expectEqual(@as(usize, 4), event_value.pixels.len);
-                            try grt.std.testing.expectEqual(@as(u8, 200), event_value.brightness);
-                        },
-                        else => return error.UnexpectedMessage,
-                    }
+                    var immediate_frame = Built.FrameType{};
+                    immediate_frame.pixels[0] = ledstrip_mod.Color.red;
+                    try app.set_led_strip_pixels(.strip, immediate_frame, 200);
+                    try grt.std.testing.expectEqual(ledstrip_mod.Color.rgb(200, 0, 0), dummy_strip.pixels[0]);
                     try app.set_led_strip_animated(.strip, Built.FrameType{}, 128, 42);
                     switch (app.impl.last_event.?) {
                         .ledstrip_set => |event_value| {
