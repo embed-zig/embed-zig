@@ -2,6 +2,7 @@ const std = @import("std");
 const buildtools = @import("buildtools");
 
 var library: ?*std.Build.Step.Compile = null;
+var osal_module: ?*std.Build.Module = null;
 
 /// Upstream tree from GitHub codeload; `ref` may be a release tag, branch, or commit SHA.
 const upstream_tarball_url = "https://codeload.github.com/xiph/opus/tar.gz/v1.6.1";
@@ -169,7 +170,6 @@ pub fn create(
             "Optional path to a complete Opus config header; otherwise includes pkg/opus/config.default.h",
         ) orelse b.path("pkg/opus/config.default.h"),
     );
-
     const lib = b.addLibrary(.{
         .linkage = .static,
         .name = "opus",
@@ -182,13 +182,11 @@ pub fn create(
     });
     lib.root_module.addConfigHeader(config_header);
     lib.root_module.addCMacro("HAVE_CONFIG_H", "1");
+    if (optimize == .Debug) {
+        lib.root_module.addCMacro("OPUS_WILL_BE_SLOW", "1");
+    }
     for (include_dirs) |dir| {
         lib.root_module.addIncludePath(upstream.includePath(dir));
-    }
-    if (b.sysroot) |sysroot| {
-        lib.root_module.addSystemIncludePath(.{
-            .cwd_relative = b.pathJoin(&.{ sysroot, "include" }),
-        });
     }
     for (c_sources) |src| {
         lib.root_module.addCSourceFile(.{ .file = upstream.sourcePath(src) });
@@ -198,7 +196,23 @@ pub fn create(
 
     const mod = createOpusModule(b, target, optimize, config_header, upstream);
     b.modules.put("opus", mod) catch @panic("OOM");
+
+    const glib_dep = b.dependency("glib", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const osal_mod = b.createModule(.{
+        .root_source_file = b.path("pkg/opus_osal.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "glib", .module = glib_dep.module("glib") },
+        },
+    });
+    b.modules.put("opus_osal", osal_mod) catch @panic("OOM");
+
     library = lib;
+    osal_module = osal_mod;
 }
 
 pub fn link(
@@ -210,15 +224,11 @@ pub fn link(
         .target = target,
         .optimize = optimize,
     });
-    const embed_dep = b.dependency("embed", .{
-        .target = target,
-        .optimize = optimize,
-    });
     const mod = b.modules.get("opus") orelse @panic("opus module missing");
     const lib = library orelse @panic("opus library missing");
     mod.addImport("glib", glib_dep.module("glib"));
-    mod.addImport("embed", embed_dep.module("embed"));
-    mod.addObjectFile(lib.getEmittedBin());
+    mod.linkLibrary(lib);
+    _ = osal_module orelse @panic("opus_osal module missing");
 }
 
 fn createOpusModule(
@@ -238,11 +248,6 @@ fn createOpusModule(
     mod.addCMacro("HAVE_CONFIG_H", "1");
     for (include_dirs) |dir| {
         mod.addIncludePath(upstream.includePath(dir));
-    }
-    if (b.sysroot) |sysroot| {
-        mod.addSystemIncludePath(.{
-            .cwd_relative = b.pathJoin(&.{ sysroot, "include" }),
-        });
     }
     return mod;
 }

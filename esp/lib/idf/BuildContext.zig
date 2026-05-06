@@ -176,22 +176,12 @@ pub fn resolve(
             esp_root.path(b, "lib/idf/tools/idf_env.py").getPath(b),
             idf_path,
         );
-    const toolchain_sysroot = blk: {
-        if (resolved_idf_env.variables.len == 0) {
-            break :blk chip_mod.resolveToolchainSysroot(
-                b,
-                processed_build_config.chip,
-                &b.graph.env_map,
-            );
-        }
-        var env_map = createProcessEnvMap(b.allocator, &b.graph.env_map, resolved_idf_env.variables) catch @panic("OOM");
-        defer env_map.deinit();
-        break :blk chip_mod.resolveToolchainSysroot(
-            b,
-            processed_build_config.chip,
-            &env_map,
-        );
-    };
+    const toolchain_sysroot = resolveToolchainSysroot(
+        b,
+        processed_build_config.chip,
+        idf_path,
+        resolved_idf_env.variables,
+    );
     return .{
         .build_config_module = opts.build_config,
         .grt_module = grt_module,
@@ -469,6 +459,23 @@ fn getEnvOrNull(b: *std.Build, name: []const u8) ?[]const u8 {
         return null;
     }
     return trimmed;
+}
+
+fn resolveToolchainSysroot(
+    b: *std.Build,
+    chip: []const u8,
+    idf_path: []const u8,
+    idf_env: []const EnvironmentVariable,
+) ?ToolchainSysroot {
+    const resolved = blk: {
+        if (idf_env.len == 0) {
+            break :blk chip_mod.resolveToolchainSysroot(b, chip, &b.graph.env_map);
+        }
+        var env_map = createProcessEnvMap(b.allocator, &b.graph.env_map, idf_env) catch @panic("OOM");
+        defer env_map.deinit();
+        break :blk chip_mod.resolveToolchainSysroot(b, chip, &env_map);
+    };
+    return resolved orelse chip_mod.resolveToolchainSysrootBySourcingIdf(b, chip, idf_path);
 }
 
 fn resolveIdfEnvironment(

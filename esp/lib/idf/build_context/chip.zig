@@ -52,6 +52,42 @@ pub fn resolveToolchainSysroot(
     };
 }
 
+pub fn resolveToolchainSysrootBySourcingIdf(
+    b: *std.Build,
+    chip: []const u8,
+    idf_path: []const u8,
+) ?ToolchainSysroot {
+    if (idf_path.len == 0) return null;
+    const compiler = toolchainCompiler(chip) orelse return null;
+    const command = std.fmt.allocPrint(
+        b.allocator,
+        "source \"{s}/export.sh\" >/dev/null && {s} -print-sysroot",
+        .{ idf_path, compiler },
+    ) catch return null;
+    defer b.allocator.free(command);
+
+    const result = std.process.Child.run(.{
+        .allocator = b.allocator,
+        .argv = &.{ "zsh", "-lc", command },
+        .max_output_bytes = 64 * 1024,
+    }) catch return null;
+    defer b.allocator.free(result.stdout);
+    defer b.allocator.free(result.stderr);
+
+    switch (result.term) {
+        .Exited => |code| if (code != 0) return null,
+        else => return null,
+    }
+
+    const trimmed = std.mem.trim(u8, result.stdout, " \t\r\n");
+    if (trimmed.len == 0) return null;
+    const root = b.allocator.dupe(u8, trimmed) catch return null;
+    return .{
+        .root = root,
+        .include_dir = .{ .cwd_relative = b.pathJoin(&.{ root, "include" }) },
+    };
+}
+
 fn toolchainCompiler(chip: []const u8) ?[]const u8 {
     for (chip_targets) |entry| {
         if (std.mem.eql(u8, chip, entry.name)) {

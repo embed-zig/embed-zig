@@ -14,7 +14,7 @@ const gstd = @import("gstd");
 const lvgl = @import("lvgl");
 
 test "thirdparty/lvgl/integration" {
-    _ = @import("../thirdparty_lvgl_osal.zig");
+    _ = @import("../utils/thirdparty_lvgl_osal.zig");
 
     const std = @import("std");
     std.testing.log_level = .info;

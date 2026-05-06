@@ -14,7 +14,7 @@ const gstd = @import("gstd");
 const lvgl = @import("lvgl");
 
 test "thirdparty/lvgl/unit" {
-    _ = @import("../thirdparty_lvgl_osal.zig");
+    _ = @import("../utils/thirdparty_lvgl_osal.zig");
 
     const std = @import("std");
     var t = glib.testing.T.new(std, gstd.runtime.time, .lvgl_unit);

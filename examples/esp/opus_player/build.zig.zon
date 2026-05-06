@@ -1,0 +1,29 @@
+.{
+    .name = .opus_player,
+    .version = "0.0.0",
+    .fingerprint = 0x3a4f04fb847d8758,
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "build_config.zig",
+        "components",
+        "src",
+        "partitions",
+        "README.md",
+    },
+    .dependencies = .{
+        .esp = .{
+            .path = "../../../esp",
+        },
+        .glib = .{
+            .path = "../../../glib",
+        },
+        .embed = .{
+            .path = "../../../embed",
+        },
+        .thirdparty = .{
+            .path = "../../../thirdparty",
+        },
+    },
+}

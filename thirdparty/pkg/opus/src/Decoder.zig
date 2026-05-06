@@ -1,5 +1,4 @@
 const glib = @import("glib");
-const embed = @import("embed");
 const binding = @import("binding.zig");
 const opus_error = @import("error.zig");
 pub const Error = @import("types.zig").Error;
