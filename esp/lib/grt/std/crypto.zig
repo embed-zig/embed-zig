@@ -1,7 +1,6 @@
 const zig_std = @import("std");
 const glib = @import("glib");
 const build_config = @import("build_config");
-const esp_idf = @import("esp_idf");
 const binding = @import("crypto/binding.zig");
 
 const AuthenticationError = glib.std.crypto.errors.AuthenticationError;

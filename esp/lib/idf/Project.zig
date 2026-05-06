@@ -38,6 +38,12 @@ const grt_source_files = [_][]const u8{
     "time/binding.c",
     "net/binding.c",
 };
+const embed_idf_requires = [_][]const u8{
+    "esp_driver_i2c",
+};
+const embed_source_files = [_][]const u8{
+    "i2c/binding.c",
+};
 
 owner: *std.Build,
 context: ?BuildContext.BuildContext = null,
@@ -83,6 +89,7 @@ pub fn create(
     project.entry_component = project.createEntryComponent();
     project.addComponent(project.entry_component);
     _ = project.addGrtComponent();
+    _ = project.addEmbedComponent();
     for (components) |component| {
         project.addComponent(component);
         project.addEntryRequire(component.name);
@@ -119,6 +126,28 @@ fn addGrtComponent(project: *Self) *Component {
             .files = source_files.items,
         });
     }
+
+    project.addComponent(component);
+    project.addEntryRequire(component.name);
+    return component;
+}
+
+fn addEmbedComponent(project: *Self) *Component {
+    const bctx = project.context orelse
+        std.debug.panic("idf.Project.addEmbedComponent() requires project.context", .{});
+
+    const component = Component.create(project.owner, .{
+        .name = "esp_embed",
+    });
+
+    for (embed_idf_requires) |component_name| {
+        component.addRequire(component_name);
+    }
+
+    component.addCSourceFiles(.{
+        .root = bctx.esp_zig_root.path(project.owner, "lib/embed"),
+        .files = &embed_source_files,
+    });
 
     project.addComponent(component);
     project.addEntryRequire(component.name);

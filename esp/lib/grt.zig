@@ -4,7 +4,6 @@ pub const std = @import("grt/std.zig");
 pub const sync = @import("grt/sync.zig");
 pub const time = @import("grt/time.zig");
 pub const net = @import("grt/net.zig");
-pub const build = @import("grt/build.zig");
 
 const stdz_impl = struct {
     pub const heap = std.heap;

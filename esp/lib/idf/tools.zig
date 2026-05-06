@@ -375,6 +375,20 @@ const FileScopeMemo = struct {
         const path = moduleRootSourcePath(b, module, module_name);
         const file_hash = self.getFileHash(path);
 
+        var base_hasher = std.hash.Wyhash.init(0);
+        updateHasherWithPathFingerprint(&base_hasher, path, file_hash);
+        const base: CachedModuleInfo = .{
+            .fingerprint = base_hasher.final(),
+        };
+
+        self.mutex.lock();
+        if (self.modules.get(key)) |cached| {
+            self.mutex.unlock();
+            return cached;
+        }
+        self.modules.put(std.heap.page_allocator, key, base) catch @panic("OOM");
+        self.mutex.unlock();
+
         const computed: CachedModuleInfo = .{
             .fingerprint = self.computeModuleFingerprint(b, module, path, file_hash),
         };
@@ -382,7 +396,6 @@ const FileScopeMemo = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
-        if (self.modules.get(key)) |cached| return cached;
         self.modules.put(std.heap.page_allocator, key, computed) catch @panic("OOM");
         return computed;
     }

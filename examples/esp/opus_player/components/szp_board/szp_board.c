@@ -14,8 +14,5 @@ int szp_board_init(void)
     rc = szp_button_init();
     if (rc != 0) return rc;
 
-    rc = szp_audio_init();
-    if (rc != 0) return rc;
-
     return szp_display_init();
 }

@@ -7,14 +7,13 @@
 #define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
 #endif
 
-#include "mbedtls/private/aes.h"
+#include "mbedtls/aes.h"
 #include "mbedtls/md.h"
 #include "mbedtls/pk.h"
-#include "mbedtls/private/pk_private.h"
 #include "mbedtls/private_access.h"
-#include "mbedtls/private/rsa.h"
-#include "mbedtls/private/sha256.h"
-#include "mbedtls/private/sha512.h"
+#include "mbedtls/rsa.h"
+#include "mbedtls/sha256.h"
+#include "mbedtls/sha512.h"
 #include "mbedtls/x509.h"
 #include "mbedtls/x509_crt.h"
 #include "psa/crypto.h"
@@ -371,6 +370,7 @@ static int verify_cert_signature(mbedtls_x509_crt *subject, mbedtls_x509_crt *is
     if (!mbedtls_pk_can_do(&issuer->pk, subject->MBEDTLS_PRIVATE(sig_pk))) {
         return MBEDTLS_ERR_X509_CERT_VERIFY_FAILED;
     }
+#if defined(MBEDTLS_PK_SIGALG_RSA_PSS)
     return mbedtls_pk_verify_ext(
         subject->MBEDTLS_PRIVATE(sig_pk),
         &issuer->pk,
@@ -380,6 +380,18 @@ static int verify_cert_signature(mbedtls_x509_crt *subject, mbedtls_x509_crt *is
         subject->MBEDTLS_PRIVATE(sig).p,
         subject->MBEDTLS_PRIVATE(sig).len
     );
+#else
+    return mbedtls_pk_verify_ext(
+        subject->MBEDTLS_PRIVATE(sig_pk),
+        subject->MBEDTLS_PRIVATE(sig_opts),
+        &issuer->pk,
+        subject->MBEDTLS_PRIVATE(sig_md),
+        hash,
+        hash_len,
+        subject->MBEDTLS_PRIVATE(sig).p,
+        subject->MBEDTLS_PRIVATE(sig).len
+    );
+#endif
 }
 
 static int rsa_verify_common(
@@ -430,6 +442,7 @@ static int rsa_verify_common(
     }
 
     if (use_pss) {
+#if defined(MBEDTLS_PK_SIGALG_RSA_PSS)
         rc = mbedtls_pk_verify_ext(
             MBEDTLS_PK_SIGALG_RSA_PSS,
             &pk,
@@ -439,7 +452,24 @@ static int rsa_verify_common(
             signature,
             signature_len
         );
+#else
+        mbedtls_pk_rsassa_pss_options opts = {
+            .mgf1_hash_id = md_type,
+            .expected_salt_len = MBEDTLS_RSA_SALT_LEN_ANY,
+        };
+        rc = mbedtls_pk_verify_ext(
+            MBEDTLS_PK_RSASSA_PSS,
+            &opts,
+            &pk,
+            md_type,
+            digest,
+            digest_len,
+            signature,
+            signature_len
+        );
+#endif
     } else {
+#if defined(MBEDTLS_PK_SIGALG_RSA_PKCS1V15)
         rc = mbedtls_pk_verify_ext(
             MBEDTLS_PK_SIGALG_RSA_PKCS1V15,
             &pk,
@@ -449,6 +479,16 @@ static int rsa_verify_common(
             signature,
             signature_len
         );
+#else
+        rc = mbedtls_pk_verify(
+            &pk,
+            md_type,
+            digest,
+            digest_len,
+            signature,
+            signature_len
+        );
+#endif
     }
 
     mbedtls_pk_free(&pk);

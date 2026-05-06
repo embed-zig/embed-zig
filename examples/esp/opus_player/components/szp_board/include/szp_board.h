@@ -22,6 +22,7 @@ int szp_storage_info(size_t *total, size_t *used);
 int szp_storage_unmount(void);
 
 int szp_audio_init(void);
+int szp_audio_set_pa(bool enabled);
 int szp_audio_write_i16(const int16_t *pcm, size_t sample_count);
 int szp_audio_play_test_tone(uint32_t frequency_hz, uint32_t duration_ms);
 

@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     const build_config_module = b.createModule(.{
         .root_source_file = b.path("build_config.zig"),
         .imports = &.{
-            .{ .name = "esp_idf", .module = esp_build_dep.module("esp_idf") },
+            .{ .name = "esp", .module = esp_build_dep.module("esp") },
         },
     });
     const context = esp.idf.resolveBuildContext(b, .{
@@ -31,11 +31,12 @@ pub fn build(b: *std.Build) void {
     const runtime_build_config_module = b.createModule(.{
         .root_source_file = b.path("build_config.zig"),
         .imports = &.{
-            .{ .name = "esp_idf", .module = esp_dep.module("esp_idf") },
+            .{ .name = "esp", .module = esp_dep.module("esp") },
         },
     });
-    esp_dep.module("esp_grt").addImport("build_config", runtime_build_config_module);
-    esp_dep.module("esp_grt").addImport("esp_idf", esp_dep.module("esp_idf"));
+    const esp_grt_module = esp_dep.module("esp").import_table.get("esp_grt") orelse
+        @panic("esp module is missing esp_grt import");
+    esp_grt_module.addImport("build_config", runtime_build_config_module);
 
     const embed_dep = b.dependency("embed", .{
         .target = context.target,

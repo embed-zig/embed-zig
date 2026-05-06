@@ -12,5 +12,8 @@
         .glib = .{
             .path = "../glib",
         },
+        .embed = .{
+            .path = "../embed",
+        },
     },
 }

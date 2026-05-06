@@ -1,4 +1,4 @@
-const esp_idf = @import("esp_idf");
+const esp_idf = @import("esp").idf;
 
 pub const chip = "esp32s3";
 
@@ -52,4 +52,11 @@ pub const sdk_config = esp_idf.SdkConfig.make(.{
     .ESP_COREDUMP_STACK_SIZE = 2048,
     .SPIFFS_MAX_PARTITIONS = 3,
     .SPI_FLASH_SIZE_OVERRIDE = true,
+    .SPIRAM = true,
+    .SPIRAM_MODE_QUAD = false,
+    .SPIRAM_MODE_OCT = true,
+    .SPIRAM_SPEED_40M = false,
+    .SPIRAM_SPEED_80M = true,
+    .SPIRAM_USE_CAPS_ALLOC = true,
+    .SPIRAM_USE_MALLOC = false,
 });

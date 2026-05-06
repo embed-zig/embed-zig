@@ -6,7 +6,7 @@ const player = @import("player.zig");
 
 const log = esp.grt.std.log.scoped(.opus_player_main);
 const opus_exports = opus_osal.make(esp.grt, esp.heap.Allocator(.{
-    .caps = .internal_8bit,
+    .caps = .spiram_8bit,
     .alignment = .align_u32,
 }));
 
@@ -23,6 +23,7 @@ pub export fn zig_esp_main() void {
     log.info("spiffs total={d} used={d}", .{ info.total, info.used });
 
     board.initBoard() catch |err| fail("board init", err);
+    board.initAudio() catch |err| fail("audio init", err);
     log.info("board initialized; tracks={d}", .{assets.tracks.len});
 
     player.run();

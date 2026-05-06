@@ -25,11 +25,11 @@ pub const BuildContext = Self;
 /// App-specific build profile module that defines board/config/partition inputs.
 build_config_module: *std.Build.Module,
 
-/// ESP-specific glib runtime implementation module.
-grt_module: *std.Build.Module,
-
 /// Public ESP-IDF Zig module used by build helpers and generated tools.
 esp_idf_module: *std.Build.Module,
+
+/// Public ESP Zig namespace module.
+esp_module: *std.Build.Module,
 
 /// Root of the `esp-zig` package.
 esp_zig_root: std.Build.LazyPath,
@@ -144,13 +144,15 @@ pub fn resolve(
     const sdkconfig_output_path = b.pathJoin(&.{ build_dir, "sdkconfig.generated" });
     const partition_table_output_path = b.pathJoin(&.{ build_dir, partition_file_name });
     const esp_dep = opts.esp_dep orelse b.dependency("esp", .{});
-    const grt_module = esp_dep.module("esp_grt");
-    grt_module.addImport("build_config", opts.build_config);
-    grt_module.addImport("esp_idf", esp_dep.module("esp_idf"));
+    const esp_module = esp_dep.module("esp");
+    const esp_idf_module = esp_module.import_table.get("esp_idf") orelse
+        @panic("esp module is missing esp_idf import");
+    const esp_grt_module = esp_module.import_table.get("esp_grt") orelse
+        @panic("esp module is missing esp_grt import");
+    esp_grt_module.addImport("build_config", opts.build_config);
     const processed_build_config = processBuildConfig(
         b,
         opts.build_config,
-        esp_dep.module("esp_idf"),
     );
     const maybe_idf_path = b.option(
         []const u8,
@@ -184,8 +186,8 @@ pub fn resolve(
     );
     return .{
         .build_config_module = opts.build_config,
-        .grt_module = grt_module,
-        .esp_idf_module = esp_dep.module("esp_idf"),
+        .esp_idf_module = esp_idf_module,
+        .esp_module = esp_module,
         .esp_zig_root = esp_root,
         .idf_path = idf_path,
         .idf_py_executable_path = idf_py_executable_path,
@@ -265,7 +267,6 @@ const ResolvedIdfEnvironment = struct {
 fn processBuildConfig(
     b: *std.Build,
     build_config_module: *std.Build.Module,
-    idf_module: *std.Build.Module,
 ) ProcessedBuildConfig {
     const build_config_path = moduleRootSourcePath(b, build_config_module, "build_config");
     const probe_key = std.hash.Wyhash.hash(0, build_config_path);
@@ -319,28 +320,17 @@ fn processBuildConfig(
         "espz_process_build_config",
         "--dep",
         "build_config",
-        "--dep",
-        "esp_idf",
     }) catch @panic("OOM");
     appendFmtArg(b, &argv, &owned_args, "-Mroot={s}", .{probe_source_path});
-    for (build_config_module.import_table.keys(), build_config_module.import_table.values()) |name, imported_module| {
-        argv.appendSlice(b.allocator, &.{ "--dep", name }) catch @panic("OOM");
-        if (std.mem.eql(u8, name, "esp_idf")) continue;
-        appendFmtArg(
-            b,
-            &argv,
-            &owned_args,
-            "-M{s}={s}",
-            .{ name, moduleRootSourcePath(b, imported_module, name) },
-        );
-    }
-    appendFmtArg(b, &argv, &owned_args, "-Mbuild_config={s}", .{build_config_path});
-    appendFmtArg(
+    var emitted_modules = std.AutoHashMap(*std.Build.Module, []const u8).init(b.allocator);
+    defer emitted_modules.deinit();
+    appendProbeModule(
         b,
         &argv,
         &owned_args,
-        "-Mesp_idf={s}",
-        .{moduleRootSourcePath(b, idf_module, "esp_idf")},
+        &emitted_modules,
+        build_config_module,
+        "build_config",
     );
     if (b.cache_root.path) |path| {
         argv.appendSlice(b.allocator, &.{ "--cache-dir", path }) catch @panic("OOM");
@@ -427,6 +417,52 @@ fn moduleRootSourcePath(
     const root = module.root_source_file orelse
         std.debug.panic("module '{s}' must have a root_source_file", .{module_name});
     return root.getPath(b);
+}
+
+fn appendProbeModule(
+    b: *std.Build,
+    argv: *std.ArrayList([]const u8),
+    owned_args: *std.ArrayList([]const u8),
+    emitted_modules: *std.AutoHashMap(*std.Build.Module, []const u8),
+    module: *std.Build.Module,
+    module_name: []const u8,
+) void {
+    if (emitted_modules.contains(module)) return;
+    emitted_modules.put(module, module_name) catch @panic("OOM");
+
+    for (module.import_table.keys(), module.import_table.values()) |import_name, imported_module| {
+        const imported_module_name = emitted_modules.get(imported_module) orelse import_name;
+        if (std.mem.eql(u8, import_name, imported_module_name)) {
+            argv.appendSlice(b.allocator, &.{ "--dep", import_name }) catch @panic("OOM");
+        } else {
+            argv.append(b.allocator, "--dep") catch @panic("OOM");
+            appendFmtArg(
+                b,
+                argv,
+                owned_args,
+                "{s}={s}",
+                .{ import_name, imported_module_name },
+            );
+        }
+    }
+    appendFmtArg(
+        b,
+        argv,
+        owned_args,
+        "-M{s}={s}",
+        .{ module_name, moduleRootSourcePath(b, module, module_name) },
+    );
+
+    for (module.import_table.keys(), module.import_table.values()) |import_name, imported_module| {
+        appendProbeModule(
+            b,
+            argv,
+            owned_args,
+            emitted_modules,
+            imported_module,
+            emitted_modules.get(imported_module) orelse import_name,
+        );
+    }
 }
 
 fn appendFmtArg(

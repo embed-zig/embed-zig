@@ -10,22 +10,33 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const embed_dep = b.dependency("embed", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const glib_module = glib_dep.module("glib");
-    const heap_module = b.addModule("esp_heap", .{
+    const embed_module = embed_dep.module("embed");
+    const heap_module = b.createModule(.{
         .root_source_file = b.path("lib/heap/heap.zig"),
         .imports = &.{
             .{ .name = "glib", .module = glib_module },
         },
     });
-    const grt_module = b.addModule("esp_grt", .{
+    const idf_module = b.createModule(.{
+        .root_source_file = b.path("lib/idf.zig"),
+    });
+    const embed_adapter_module = b.createModule(.{
+        .root_source_file = b.path("lib/embed.zig"),
+        .imports = &.{
+            .{ .name = "embed", .module = embed_module },
+        },
+    });
+    const grt_module = b.createModule(.{
         .root_source_file = b.path("lib/grt.zig"),
         .imports = &.{
             .{ .name = "glib", .module = glib_module },
             .{ .name = "esp_heap", .module = heap_module },
         },
-    });
-    const idf_module = b.addModule("esp_idf", .{
-        .root_source_file = b.path("lib/idf.zig"),
     });
     _ = b.addModule("esp", .{
         .root_source_file = b.path("lib/esp.zig"),
@@ -34,6 +45,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "esp_grt", .module = grt_module },
             .{ .name = "esp_heap", .module = heap_module },
             .{ .name = "esp_idf", .module = idf_module },
+            .{ .name = "esp_embed", .module = embed_adapter_module },
         },
     });
 

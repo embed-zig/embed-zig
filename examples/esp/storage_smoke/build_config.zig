@@ -1,4 +1,4 @@
-const esp_idf = @import("esp_idf");
+const esp_idf = @import("esp").idf;
 
 pub const chip = "esp32s3";
 
