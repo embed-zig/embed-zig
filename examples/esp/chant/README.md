@@ -1,4 +1,4 @@
-# Opus Player
+# Chant
 
 ESP32-S3 firmware example for the Lichuang SZP board. The app mounts a SPIFFS
 partition containing Ogg Opus tracks, decodes them with the local `opus` package

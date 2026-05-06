@@ -1,7 +1,7 @@
 .{
-    .name = .opus_player,
+    .name = .chant,
     .version = "0.0.0",
-    .fingerprint = 0x3a4f04fb847d8758,
+    .fingerprint = 0x3217777849f434d,
     .minimum_zig_version = "0.15.2",
     .paths = .{
         "build.zig",

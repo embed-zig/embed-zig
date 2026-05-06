@@ -3,7 +3,7 @@ const assets = @import("assets.zig");
 const board = @import("board.zig");
 const opus_ogg = @import("opus_ogg.zig");
 
-const log = esp.grt.std.log.scoped(.opus_player);
+const log = esp.grt.std.log.scoped(.chant);
 const Thread = esp.grt.std.Thread;
 
 const ns_per_ms: u64 = 1_000_000;

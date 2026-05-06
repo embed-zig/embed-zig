@@ -2,7 +2,7 @@ const embed = @import("embed");
 const esp = @import("esp");
 
 const Es8311 = embed.drivers.audio.Es8311;
-const log = esp.grt.std.log.scoped(.opus_player_board);
+const log = esp.grt.std.log.scoped(.chant_board);
 
 const i2c_port = 0;
 const i2c_sda_gpio = 1;

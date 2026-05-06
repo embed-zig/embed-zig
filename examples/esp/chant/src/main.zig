@@ -4,7 +4,7 @@ const assets = @import("assets.zig");
 const board = @import("board.zig");
 const player = @import("player.zig");
 
-const log = esp.grt.std.log.scoped(.opus_player_main);
+const log = esp.grt.std.log.scoped(.chant_main);
 const opus_exports = opus_osal.make(esp.grt, esp.heap.Allocator(.{
     .caps = .spiram_8bit,
     .alignment = .align_u32,
@@ -31,5 +31,5 @@ pub export fn zig_esp_main() void {
 
 fn fail(name: []const u8, err: anyerror) noreturn {
     log.err("{s} failed: {s}", .{ name, @errorName(err) });
-    @panic("opus_player init failed");
+    @panic("chant init failed");
 }

@@ -74,7 +74,7 @@ pub fn build(b: *std.Build) void {
 
     const szp_board = szp_board_component.addTo(b);
 
-    const app = esp.idf.addApp(b, "opus_player", .{
+    const app = esp.idf.addApp(b, "chant", .{
         .context = context,
         .entry = .{
             .symbol = "zig_esp_main",
@@ -83,14 +83,14 @@ pub fn build(b: *std.Build) void {
         .components = &.{szp_board},
     });
 
-    const build_step = b.step("build", "Build the opus_player example");
+    const build_step = b.step("build", "Build the chant example");
     build_step.dependOn(app.combine_binaries);
     build_step.dependOn(app.elf_layout);
     b.default_step = build_step;
 
-    const flash_step = b.step("flash", "Flash the opus_player example");
+    const flash_step = b.step("flash", "Flash the chant example");
     flash_step.dependOn(app.flash);
 
-    const monitor_step = b.step("monitor", "Monitor the opus_player example");
+    const monitor_step = b.step("monitor", "Monitor the chant example");
     monitor_step.dependOn(app.monitor);
 }
