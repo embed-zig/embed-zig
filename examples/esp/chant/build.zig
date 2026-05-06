@@ -111,6 +111,12 @@ pub fn build(b: *std.Build) void {
         .flags = &.{"-DLV_CONF_INCLUDE_SIMPLE=1"},
     });
     const szp_board = szp_board_component.addTo(b);
+    const json_compat = esp.idf.Component.create(b, .{ .name = "json" });
+    json_compat.addFile(.{
+        .relative_path = "idf_component.yml",
+        .file = b.path("components/json_compat/idf_component.yml"),
+    });
+    json_compat.addRequire("espressif__cjson");
 
     const app = esp.idf.addApp(b, "chant", .{
         .context = context,
@@ -118,7 +124,7 @@ pub fn build(b: *std.Build) void {
             .symbol = "zig_esp_main",
             .module = entry_module,
         },
-        .components = &.{ szp_board, lvgl_component },
+        .components = &.{ szp_board, lvgl_component, json_compat },
     });
 
     const build_step = b.step("build", "Build the chant example");

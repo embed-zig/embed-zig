@@ -3,6 +3,7 @@ const esp = @import("esp");
 const Display = @import("Display.zig");
 const player_ui = @import("ui/player.zig");
 
+const Es7210 = embed.drivers.audio.Es7210;
 const Es8311 = embed.drivers.audio.Es8311;
 const Pca9557 = embed.drivers.gpio.Pca9557;
 const log = esp.grt.std.log.scoped(.chant_board);
@@ -12,6 +13,7 @@ const i2c_sda_gpio = 1;
 const i2c_scl_gpio = 2;
 const i2c_frequency_hz = 100_000;
 const audio_sample_rate = 16_000;
+const es7210_address = @intFromEnum(Es7210.Address.ad1_ad0_01);
 const es8311_address = @intFromEnum(Es8311.Address.ad0_low);
 const pca9557_address = 0x19;
 const pca_lcd_cs_pin = Pca9557.Pin.pin0;
@@ -33,11 +35,13 @@ var board_i2c_bus = esp.embed.I2c.MasterBus.init(.{
     .scl_speed_hz = i2c_frequency_hz,
 });
 var pca9557: ?Pca9557 = null;
+var audio_adc: ?Es7210 = null;
 var audio_codec: ?Es8311 = null;
 var audio_volume: u8 = default_volume;
 var audio_ready = false;
 
 pub const Track = player_ui.Track;
+pub const Mode = player_ui.Mode;
 pub const DisplayAction = player_ui.Action;
 
 pub const TouchPoint = struct {
@@ -54,6 +58,9 @@ extern fn szp_audio_init() c_int;
 extern fn szp_audio_set_pa(enabled: bool) c_int;
 extern fn szp_audio_write_i16(pcm: [*]const i16, sample_count: usize) c_int;
 extern fn szp_audio_play_test_tone(frequency_hz: u32, duration_ms: u32) c_int;
+extern fn szp_audio_mic_start() c_int;
+extern fn szp_audio_mic_process_frame() c_int;
+extern fn szp_audio_mic_stop() c_int;
 extern fn szp_button_init() c_int;
 extern fn szp_button_read_raw() bool;
 
@@ -106,6 +113,15 @@ pub fn initAudio() !void {
     try codec.setVolume(audio_volume);
     try codec.setMute(false);
 
+    const adc_i2c = try board_i2c_bus.device(es7210_address);
+    var adc = Es7210.init(adc_i2c, .{
+        .address = es7210_address,
+        .mic_select = .{ .mic1 = true, .mic2 = true, .mic3 = true, .mic4 = true },
+    });
+    try adc.open();
+    try adc.enable(true);
+
+    audio_adc = adc;
     audio_codec = codec;
     try check("szp_audio_set_pa", szp_audio_set_pa(true));
     audio_ready = true;
@@ -119,6 +135,21 @@ pub fn playTestTone(frequency_hz: u32, duration_ms: u32) !void {
 pub fn writePcm(samples: []const i16) !void {
     if (samples.len == 0) return;
     try check("szp_audio_write_i16", szp_audio_write_i16(samples.ptr, samples.len));
+}
+
+pub fn startMicrophoneStream() !void {
+    try initAudio();
+    try check("szp_audio_mic_start", szp_audio_mic_start());
+}
+
+pub fn processMicrophoneFrame() !void {
+    try check("szp_audio_mic_process_frame", szp_audio_mic_process_frame());
+}
+
+pub fn stopMicrophoneStream() void {
+    check("szp_audio_mic_stop", szp_audio_mic_stop()) catch |err| {
+        log.warn("mic stream stop failed: {s}", .{@errorName(err)});
+    };
 }
 
 pub fn setVolume(volume: u8) !void {
@@ -161,12 +192,12 @@ pub fn initDisplay() !void {
 }
 
 pub fn showTrack(track: Track) !void {
-    try showPlayer(track, true, default_volume);
+    try showPlayer(track, .music, true, default_volume);
 }
 
-pub fn showPlayer(track: Track, playing: bool, volume: u8) !void {
+pub fn showPlayer(track: Track, mode: Mode, playing: bool, volume: u8) !void {
     try Display.init();
-    try player_ui.show(Display.driver(), track, playing, volume);
+    try player_ui.show(Display.driver(), track, mode, playing, volume);
 }
 
 pub fn tickDisplay(elapsed_ms: u32) void {

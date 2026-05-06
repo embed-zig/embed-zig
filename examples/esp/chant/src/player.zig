@@ -15,10 +15,16 @@ const volume_step: u8 = 0x10;
 const ButtonAction = enum {
     none,
     play_pause,
+    mic,
     next,
     previous,
     volume_up,
     volume_down,
+};
+
+const PlaybackMode = enum {
+    music,
+    microphone,
 };
 
 var button_was_pressed = false;
@@ -27,6 +33,7 @@ var button_release_ms: u32 = 0;
 var button_click_count: u8 = 0;
 var button_long_sent = false;
 var current_track_index: usize = 0;
+var playback_mode: PlaybackMode = .music;
 var playing = true;
 var volume: u8 = board.default_volume;
 
@@ -35,6 +42,7 @@ pub fn run() noreturn {
 
     while (true) {
         current_track_index = current;
+        playback_mode = .music;
         playing = true;
         const track = assets.tracks[current];
         refreshDisplay(track.id);
@@ -55,6 +63,15 @@ pub fn run() noreturn {
                 current = previousIndex(current);
                 continue;
             },
+            .microphone => {
+                switch (runMicrophoneMode()) {
+                    .none => {},
+                    .next => current = nextIndex(current),
+                    .previous => current = previousIndex(current),
+                    .microphone => {},
+                }
+                continue;
+            },
             .ended => {},
         }
 
@@ -62,6 +79,12 @@ pub fn run() noreturn {
             .none => {},
             .next => current = nextIndex(current),
             .previous => current = previousIndex(current),
+            .microphone => switch (runMicrophoneMode()) {
+                .none => {},
+                .next => current = nextIndex(current),
+                .previous => current = previousIndex(current),
+                .microphone => {},
+            },
         }
     }
 }
@@ -73,6 +96,7 @@ fn waitBetweenLoops() opus_ogg.ControlResult {
             .none => {},
             .next => return .next,
             .previous => return .previous,
+            .microphone => return .microphone,
         }
         sleepMs(poll_interval_ms);
     }
@@ -93,6 +117,7 @@ fn pollPlaybackControl() opus_ogg.ControlResult {
             .none => {},
             .next => return .next,
             .previous => return .previous,
+            .microphone => return .microphone,
         }
 
         if (playing) return .none;
@@ -117,6 +142,10 @@ fn pollControlAction() opus_ogg.ControlResult {
             playing = true;
             return .previous;
         },
+        .mic => {
+            playing = false;
+            return .microphone;
+        },
         .volume_up => {
             adjustVolume(.up);
             return .none;
@@ -138,6 +167,7 @@ fn displayAction() ButtonAction {
     return switch (board.takeDisplayAction()) {
         .none => .none,
         .play_pause => .play_pause,
+        .mic => .mic,
         .next => .next,
         .previous => .previous,
         .volume_up => .volume_up,
@@ -190,6 +220,50 @@ fn pollButtonAction() ButtonAction {
     };
 }
 
+fn runMicrophoneMode() opus_ogg.ControlResult {
+    playback_mode = .microphone;
+    playing = false;
+    refreshDisplay(assets.tracks[current_track_index].id);
+    board.startMicrophoneStream() catch |err| {
+        log.warn("mic stream start failed: {s}", .{@errorName(err)});
+        playback_mode = .music;
+        playing = true;
+        refreshDisplay(assets.tracks[current_track_index].id);
+        return .none;
+    };
+    defer board.stopMicrophoneStream();
+
+    while (true) {
+        board.tickDisplay(poll_interval_ms);
+        switch (pollInputAction()) {
+            .none => {},
+            .play_pause, .mic => {
+                playback_mode = .music;
+                playing = true;
+                refreshDisplay(assets.tracks[current_track_index].id);
+                return .none;
+            },
+            .next => {
+                playback_mode = .music;
+                playing = true;
+                return .next;
+            },
+            .previous => {
+                playback_mode = .music;
+                playing = true;
+                return .previous;
+            },
+            .volume_up => adjustVolume(.up),
+            .volume_down => adjustVolume(.down),
+        }
+
+        board.processMicrophoneFrame() catch |err| {
+            log.warn("mic stream frame failed: {s}", .{@errorName(err)});
+            sleepMs(poll_interval_ms);
+        };
+    }
+}
+
 const VolumeDirection = enum {
     up,
     down,
@@ -208,7 +282,11 @@ fn adjustVolume(direction: VolumeDirection) void {
 }
 
 fn refreshDisplay(track: board.Track) void {
-    board.showPlayer(track, playing, volume) catch |err| {
+    const mode: board.Mode = switch (playback_mode) {
+        .music => .music,
+        .microphone => .microphone,
+    };
+    board.showPlayer(track, mode, playing, volume) catch |err| {
         log.warn("display update failed: {s}", .{@errorName(err)});
     };
 }

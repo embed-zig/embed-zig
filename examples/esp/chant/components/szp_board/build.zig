@@ -7,6 +7,10 @@ pub fn addTo(b: *std.Build) *esp.idf.Component {
     const component = esp.idf.Component.create(b, .{
         .name = "szp_board",
     });
+    component.addFile(.{
+        .relative_path = "idf_component.yml",
+        .file = b.path(component_root ++ "/idf_component.yml"),
+    });
     component.addIncludePath(b.path(component_root ++ "/include"));
     component.addCSourceFiles(.{
         .root = b.path(component_root),

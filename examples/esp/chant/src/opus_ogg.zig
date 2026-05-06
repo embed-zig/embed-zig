@@ -24,12 +24,14 @@ pub const PlayResult = enum {
     ended,
     next,
     previous,
+    microphone,
 };
 
 pub const ControlResult = enum {
     none,
     next,
     previous,
+    microphone,
 };
 
 pub fn play(path: [:0]const u8, pollControl: *const fn () ControlResult) !PlayResult {
@@ -85,6 +87,7 @@ pub fn play(path: [:0]const u8, pollControl: *const fn () ControlResult) !PlayRe
                                         .none => {},
                                         .next => return .next,
                                         .previous => return .previous,
+                                        .microphone => return .microphone,
                                     }
                                     if (decoder == null) return error.MissingOpusHead;
                                     const packet_samples = try opus.packetGetSamples(payload, output_sample_rate);
@@ -98,6 +101,7 @@ pub fn play(path: [:0]const u8, pollControl: *const fn () ControlResult) !PlayRe
                                         .none => {},
                                         .next => return .next,
                                         .previous => return .previous,
+                                        .microphone => return .microphone,
                                     }
                                 },
                                 .hole => return error.OggPacketHole,

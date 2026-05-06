@@ -25,6 +25,9 @@ int szp_audio_init(void);
 int szp_audio_set_pa(bool enabled);
 int szp_audio_write_i16(const int16_t *pcm, size_t sample_count);
 int szp_audio_play_test_tone(uint32_t frequency_hz, uint32_t duration_ms);
+int szp_audio_mic_start(void);
+int szp_audio_mic_process_frame(void);
+int szp_audio_mic_stop(void);
 
 int szp_button_init(void);
 bool szp_button_read_raw(void);

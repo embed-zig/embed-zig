@@ -46,6 +46,9 @@ pub const sdk_config = esp_idf.SdkConfig.make(.{
     .ESP_MAIN_TASK_STACK_SIZE = 24 * 1024,
     .ESP_SYSTEM_PANIC_PRINT_REBOOT = true,
     .ESP_SYSTEM_PANIC_SILENT_REBOOT = false,
+    .ESP_DEFAULT_CPU_FREQ_MHZ_160 = false,
+    .ESP_DEFAULT_CPU_FREQ_MHZ_240 = true,
+    .ESP_DEFAULT_CPU_FREQ_MHZ = 240,
     .ESP_COREDUMP_ENABLE_TO_FLASH = true,
     .ESP_COREDUMP_ENABLE_TO_NONE = false,
     .ESP_COREDUMP_MAX_TASKS_NUM = 16,
@@ -59,4 +62,6 @@ pub const sdk_config = esp_idf.SdkConfig.make(.{
     .SPIRAM_SPEED_80M = true,
     .SPIRAM_USE_CAPS_ALLOC = true,
     .SPIRAM_USE_MALLOC = false,
+    .USE_AFE = true,
+    .AFE_INTERFACE_V1 = true,
 });

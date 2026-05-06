@@ -23,10 +23,16 @@ pub const Track = enum(c_int) {
 pub const Action = enum {
     none,
     play_pause,
+    mic,
     next,
     previous,
     volume_up,
     volume_down,
+};
+
+pub const Mode = enum {
+    music,
+    microphone,
 };
 
 pub const TouchPoint = struct {
@@ -40,6 +46,7 @@ const UiObjects = struct {
     title: lvgl.Label,
     status: lvgl.Label,
     play_label: lvgl.Label,
+    mic_button: lvgl.Obj,
     volume: lvgl.Bar,
 };
 
@@ -57,6 +64,7 @@ var pending_action: Action = .none;
 var volume_down_action: Action = .volume_down;
 var previous_action: Action = .previous;
 var play_pause_action: Action = .play_pause;
+var mic_action: Action = .mic;
 var next_action: Action = .next;
 var volume_up_action: Action = .volume_up;
 
@@ -64,13 +72,17 @@ pub fn setTouchReader(reader: TouchReader) void {
     touch_reader = reader;
 }
 
-pub fn show(display: DisplayApi, track: Track, playing: bool, volume: u8) !void {
+pub fn show(display: DisplayApi, track: Track, mode: Mode, playing: bool, volume: u8) !void {
     try ensure(display);
     const objects = ui_objects orelse return error.DisplayError;
 
-    objects.title.setTextStatic(trackTitle(track));
-    objects.status.setTextStatic(if (playing) "Playing" else "Paused");
+    objects.title.setTextStatic(if (mode == .microphone) "Microphone" else trackTitle(track));
+    objects.status.setTextStatic(switch (mode) {
+        .music => if (playing) "Playing" else "Paused",
+        .microphone => "Live AEC/NS",
+    });
     objects.play_label.setTextStatic(if (playing) "||" else ">");
+    setMicButtonActive(&objects.mic_button, mode == .microphone);
     objects.volume.setValue(volume, false);
 
     tick(1);
@@ -172,16 +184,19 @@ fn createObjects(display: *const lvgl.Display) !void {
     volume.asObj().setStyleRadius(4, selector_indicator);
     volume.setRange(0, 255);
 
-    _ = try createButton(&card, 42, "-", false, &volume_down_action);
-    _ = try createButton(&card, 92, "<<", false, &previous_action);
-    const play_label = try createButton(&card, 142, ">", true, &play_pause_action);
-    _ = try createButton(&card, 192, ">>", false, &next_action);
-    _ = try createButton(&card, 242, "+", false, &volume_up_action);
+    _ = try createButton(&card, 20, "-", false, &volume_down_action);
+    _ = try createButton(&card, 64, "<<", false, &previous_action);
+    const play_label = try createButton(&card, 108, ">", true, &play_pause_action);
+    const mic_label = try createButton(&card, 152, "MIC", false, &mic_action);
+    const mic_button = mic_label.asObj().parent() orelse return error.DisplayError;
+    _ = try createButton(&card, 196, ">>", false, &next_action);
+    _ = try createButton(&card, 240, "+", false, &volume_up_action);
 
     ui_objects = .{
         .title = title,
         .status = status,
         .play_label = play_label,
+        .mic_button = mic_button,
         .volume = volume,
     };
 }
@@ -221,6 +236,17 @@ fn createButton(parent: *const lvgl.Obj, x: i32, text: [:0]const u8, primary: bo
         selector_main,
     );
     return label;
+}
+
+fn setMicButtonActive(button: *const lvgl.Obj, active: bool) void {
+    button.setStyleBgColor(
+        if (active) lvgl.Color.fromHex(0x35C77B) else lvgl.Color.fromHex(0xE0E6F6),
+        selector_main,
+    );
+    button.setStyleBgColor(
+        if (active) lvgl.Color.fromHex(0x24A966) else lvgl.Color.fromHex(0xCAD4F0),
+        selector_pressed,
+    );
 }
 
 fn buttonEventCb(event: ?*lvgl.binding.Event) callconv(.c) void {
