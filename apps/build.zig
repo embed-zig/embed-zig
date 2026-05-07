@@ -1,6 +1,14 @@
 const std = @import("std");
 
-const glib_unit_test = @import("glib/unit-test/build.zig");
+const glib_integration_test_net = @import("glib/integration-test/net/build.zig");
+const glib_integration_test_sync = @import("glib/integration-test/sync/build.zig");
+const glib_unit_test_context = @import("glib/unit-test/context/build.zig");
+const glib_unit_test_io = @import("glib/unit-test/io/build.zig");
+const glib_unit_test_mime = @import("glib/unit-test/mime/build.zig");
+const glib_unit_test_net = @import("glib/unit-test/net/build.zig");
+const glib_unit_test_std = @import("glib/unit-test/std/build.zig");
+const glib_unit_test_sync = @import("glib/unit-test/sync/build.zig");
+const glib_unit_test_testing = @import("glib/unit-test/testing/build.zig");
 const zux_button_ledstrip = @import("zux/button-ledstrip/build.zig");
 
 const AppRegistry = struct {
@@ -8,6 +16,7 @@ const AppRegistry = struct {
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     launcher: *std.Build.Module,
+    glib_empty_zux_app: *std.Build.Module,
     modules: std.StringHashMap(*std.Build.Module),
 
     fn init(
@@ -15,12 +24,14 @@ const AppRegistry = struct {
         target: std.Build.ResolvedTarget,
         optimize: std.builtin.OptimizeMode,
         launcher: *std.Build.Module,
+        glib_empty_zux_app: *std.Build.Module,
     ) AppRegistry {
         return .{
             .b = b,
             .target = target,
             .optimize = optimize,
             .launcher = launcher,
+            .glib_empty_zux_app = glib_empty_zux_app,
             .modules = std.StringHashMap(*std.Build.Module).init(b.allocator),
         };
     }
@@ -58,10 +69,23 @@ pub fn build(b: *std.Build) void {
             .{ .name = "glib", .module = glib },
         },
     });
+    const glib_empty_zux_app = b.addModule("glib_empty_zux_app", .{
+        .root_source_file = b.path("glib/src/EmptyZuxApp.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
-    var registry = AppRegistry.init(b, target, optimize, launcher);
+    var registry = AppRegistry.init(b, target, optimize, launcher, glib_empty_zux_app);
     defer registry.deinit();
 
-    glib_unit_test.register(&registry);
+    glib_unit_test_std.register(&registry);
+    glib_unit_test_mime.register(&registry);
+    glib_unit_test_testing.register(&registry);
+    glib_unit_test_io.register(&registry);
+    glib_unit_test_context.register(&registry);
+    glib_unit_test_sync.register(&registry);
+    glib_unit_test_net.register(&registry);
+    glib_integration_test_sync.register(&registry);
+    glib_integration_test_net.register(&registry);
     zux_button_ledstrip.register(&registry);
 }

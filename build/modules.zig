@@ -28,7 +28,15 @@ pub const thirdparty_modules = [_]ModuleSpec{
 };
 
 pub const apps_modules = [_]ModuleSpec{
-    module2("apps", "glib_unit-test"),
+    module2("apps", "glib_unit-test-std"),
+    module2("apps", "glib_unit-test-mime"),
+    module2("apps", "glib_unit-test-testing"),
+    module2("apps", "glib_unit-test-io"),
+    module2("apps", "glib_unit-test-context"),
+    module2("apps", "glib_unit-test-sync"),
+    module2("apps", "glib_unit-test-net"),
+    module2("apps", "glib_integration-test-sync"),
+    module2("apps", "glib_integration-test-net"),
     module2("apps", "zux_button-ledstrip"),
 };
 

@@ -1,12 +1,14 @@
 const glib = @import("glib");
+const glib_empty_zux_app = @import("glib_empty_zux_app");
 const launcher = @import("launcher");
+const net = @import("glib").net;
 const testing = @import("glib").testing;
 
 pub fn make(comptime platform_grt: type) type {
     return launcher.make(struct {
         const Self = @This();
 
-        pub const ZuxApp = EmptyZuxApp(platform_grt);
+        pub const ZuxApp = glib_empty_zux_app.make(platform_grt);
 
         allocator: ZuxApp.Allocator,
         zux_app: ZuxApp,
@@ -41,7 +43,7 @@ pub fn make(comptime platform_grt: type) type {
                     _ = allocator;
 
                     t.timeout(240 * glib.time.duration.Second);
-                    t.run("std/unit", glib.std.test_runner.unit.make(platform_grt.std));
+                    t.run("net/unit", net.test_runner.unit.make(platform_grt.std, platform_grt.net));
                     return t.wait();
                 }
 
@@ -66,77 +68,13 @@ pub fn run(comptime platform_ctx: type, comptime platform_grt: type) !void {
     try platform_ctx.setup();
     defer platform_ctx.teardown();
 
-    log.info("starting embed unit runner", .{});
+    log.info("starting net unit runner", .{});
 
     var runner = testing.T.new(platform_grt.std, platform_grt.time, .compat_tests);
     defer runner.deinit();
 
-    runner.run("std/unit", Launcher.createTestRunner());
+    runner.run("net/unit", Launcher.createTestRunner());
     const passed = runner.wait();
-    log.info("embed unit runner finished", .{});
+    log.info("net unit runner finished", .{});
     if (!passed) return error.TestsFailed;
-}
-
-fn EmptyZuxApp(comptime platform_grt: type) type {
-    const allocator_type = platform_grt.std.mem.Allocator;
-    const EmptyRegistry = struct {
-        periphs: [0]u8 = .{},
-        len: usize = 0,
-    };
-
-    return struct {
-        pub const Allocator = allocator_type;
-        pub const InitConfig = struct {
-            allocator: Allocator,
-        };
-        pub const StartConfig = struct {};
-        pub const PeriphLabel = enum { none };
-        pub const registries = .{
-            .adc_button = EmptyRegistry{},
-            .gpio_button = EmptyRegistry{},
-            .imu = EmptyRegistry{},
-            .ledstrip = EmptyRegistry{},
-            .modem = EmptyRegistry{},
-            .nfc = EmptyRegistry{},
-            .wifi_sta = EmptyRegistry{},
-            .wifi_ap = EmptyRegistry{},
-            .flow = EmptyRegistry{},
-            .overlay = EmptyRegistry{},
-            .router = EmptyRegistry{},
-            .selection = EmptyRegistry{},
-        };
-
-        allocator: Allocator,
-
-        pub fn init(init_config: InitConfig) !@This() {
-            return .{
-                .allocator = init_config.allocator,
-            };
-        }
-
-        pub fn deinit(self: *@This()) void {
-            self.* = undefined;
-        }
-
-        pub fn start(self: *@This(), start_config: StartConfig) !void {
-            _ = self;
-            _ = start_config;
-        }
-
-        pub fn stop(self: *@This()) !void {
-            _ = self;
-        }
-
-        pub fn press_single_button(self: *@This(), label: PeriphLabel) !void {
-            _ = self;
-            _ = label;
-            return error.InvalidPeriphKind;
-        }
-
-        pub fn release_single_button(self: *@This(), label: PeriphLabel) !void {
-            _ = self;
-            _ = label;
-            return error.InvalidPeriphKind;
-        }
-    };
 }
