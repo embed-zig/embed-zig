@@ -5,6 +5,7 @@ const lvgl = @import("lvgl");
 
 const Ctrl = @This();
 const DisplayApi = embed.drivers.Display;
+const TouchApi = embed.drivers.Touch;
 const Rgb = DisplayApi.Rgb;
 const Thread = esp.grt.std.Thread;
 const AtomicBool = esp.grt.std.atomic.Value(bool);
@@ -45,13 +46,6 @@ pub const Mode = enum {
     music,
     microphone,
 };
-
-pub const TouchPoint = struct {
-    x: u16,
-    y: u16,
-};
-
-pub const TouchReader = *const fn () ?TouchPoint;
 
 pub const RenderThreadConfig = struct {
     spawn: Thread.SpawnConfig = .{
@@ -141,6 +135,7 @@ const IntSubject = struct {
 };
 
 display: DisplayApi = undefined,
+touch: ?TouchApi = null,
 display_ready: bool = false,
 lv_display: ?lvgl.Display = null,
 lv_indev: ?lvgl.Indev = null,
@@ -148,8 +143,7 @@ ui_ready: bool = false,
 ui_objects: ?UiObjects = null,
 draw_buffer: [max_draw_bytes]u8 align(64) = undefined,
 flush_buffer: [max_draw_pixels]Rgb = undefined,
-touch_reader: ?TouchReader = null,
-last_touch: TouchPoint = .{ .x = 0, .y = 0 },
+last_touch: TouchApi.Point = .{ .x = 0, .y = 0 },
 
 track: Track = .twinkle,
 playing: bool = true,
@@ -193,22 +187,23 @@ pub fn deinit(self: *Ctrl) void {
     if (active_ctrl == self) active_ctrl = null;
 }
 
-pub fn attachTouchReader(self: *Ctrl, reader: TouchReader) void {
-    self.touch_reader = reader;
+pub fn attachTouch(self: *Ctrl, touch: TouchApi) void {
+    self.touch = touch;
 }
 
-pub fn ensure(self: *Ctrl, display: DisplayApi) !void {
+pub fn ensure(self: *Ctrl, display: DisplayApi, touch: TouchApi) !void {
     if (!lvgl.isInitialized()) {
         lvgl.init();
     }
     lvgl.binding.lv_lock();
     defer lvgl.binding.lv_unlock();
-    try self.ensureLocked(display);
+    try self.ensureLocked(display, touch);
 }
 
-fn ensureLocked(self: *Ctrl, display: DisplayApi) !void {
+fn ensureLocked(self: *Ctrl, display: DisplayApi, touch: TouchApi) !void {
     active_ctrl = self;
     self.display = display;
+    self.touch = touch;
     self.display_ready = true;
 
     self.ensureSubjects();
@@ -237,14 +232,14 @@ fn ensureLocked(self: *Ctrl, display: DisplayApi) !void {
     self.ui_ready = true;
 }
 
-pub fn showState(self: *Ctrl, display: DisplayApi, track: Track, mode: Mode, playing: bool, volume: u8) !void {
+pub fn showState(self: *Ctrl, display: DisplayApi, touch: TouchApi, track: Track, mode: Mode, playing: bool, volume: u8) !void {
     if (!lvgl.isInitialized()) {
         lvgl.init();
     }
     lvgl.binding.lv_lock();
     defer lvgl.binding.lv_unlock();
 
-    try self.ensureLocked(display);
+    try self.ensureLocked(display, touch);
     self.setTrack(track);
     self.setPlaying(playing);
     self.setMicActive(mode == .microphone);
@@ -300,9 +295,9 @@ pub fn takePendingAction(self: *Ctrl) Action {
     return action;
 }
 
-pub fn startRenderThread(self: *Ctrl, display: DisplayApi, config: RenderThreadConfig) !void {
+pub fn startRenderThread(self: *Ctrl, display: DisplayApi, touch: TouchApi, config: RenderThreadConfig) !void {
     if (self.render_thread != null) return;
-    try self.ensure(display);
+    try self.ensure(display, touch);
     self.render_stop.store(false, .release);
     self.render_thread = try Thread.spawn(config.spawn, renderLoop, .{self});
 }
@@ -329,12 +324,12 @@ fn renderTickLocked(self: *Ctrl, elapsed_ms: u32) void {
     _ = lvgl.Tick.timerHandler();
 }
 
-pub fn setTouchReaderForDefault(reader: TouchReader) void {
-    default_ctrl.attachTouchReader(reader);
+pub fn setTouchForDefault(touch: TouchApi) void {
+    default_ctrl.attachTouch(touch);
 }
 
-pub fn showDefault(display: DisplayApi, track: Track, mode: Mode, playing: bool, volume: u8) !void {
-    try default_ctrl.showState(display, track, mode, playing, volume);
+pub fn showDefault(display: DisplayApi, touch: TouchApi, track: Track, mode: Mode, playing: bool, volume: u8) !void {
+    try default_ctrl.showState(display, touch, track, mode, playing, volume);
 }
 
 pub fn tickDefault(elapsed_ms: u32) void {
@@ -555,14 +550,22 @@ fn buttonEventCb(event: ?*lvgl.binding.Event) callconv(.c) void {
 fn touchReadCb(_: ?*lvgl.binding.Indev, data: ?*lvgl.binding.IndevData) callconv(.c) void {
     const out = data orelse return;
     const ctrl = active_ctrl orelse return;
-    if (ctrl.touch_reader) |reader| {
-        if (reader()) |point| {
+    if (ctrl.touch) |touch| {
+        var points: [TouchApi.max_points]TouchApi.Point = undefined;
+        if (touch.read(points[0..])) |sample| {
+            if (sample.len == 0) {
+                out.point.x = @intCast(ctrl.last_touch.x);
+                out.point.y = @intCast(ctrl.last_touch.y);
+                out.state = @as(lvgl.binding.IndevState, @intCast(@intFromEnum(lvgl.Indev.State.released)));
+                return;
+            }
+            const point = sample[0];
             ctrl.last_touch = point;
             out.point.x = @intCast(point.x);
             out.point.y = @intCast(point.y);
             out.state = @as(lvgl.binding.IndevState, @intCast(@intFromEnum(lvgl.Indev.State.pressed)));
             return;
-        }
+        } else |_| {}
     }
 
     out.point.x = @intCast(ctrl.last_touch.x);
@@ -663,12 +666,12 @@ fn copyZ(dest: *[title_buffer_len:0]u8, source: [:0]const u8) void {
     @memcpy(dest[0..n], source[0..n]);
 }
 
-pub fn setTouchReader(reader: TouchReader) void {
-    setTouchReaderForDefault(reader);
+pub fn setTouch(touch: TouchApi) void {
+    setTouchForDefault(touch);
 }
 
-pub fn show(display: DisplayApi, track: Track, mode: Mode, playing: bool, volume: u8) !void {
-    try showDefault(display, track, mode, playing, volume);
+pub fn show(display: DisplayApi, touch: TouchApi, track: Track, mode: Mode, playing: bool, volume: u8) !void {
+    try showDefault(display, touch, track, mode, playing, volume);
 }
 
 pub fn tick(elapsed_ms: u32) void {

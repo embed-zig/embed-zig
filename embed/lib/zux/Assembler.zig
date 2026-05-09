@@ -9,6 +9,7 @@ const registry_imu = @import("assembler/registry/imu.zig");
 const registry_ledstrip = @import("assembler/registry/ledstrip.zig");
 const registry_modem = @import("assembler/registry/modem.zig");
 const registry_nfc = @import("assembler/registry/nfc.zig");
+const registry_touch = @import("assembler/registry/touch.zig");
 const registry_wifi_ap = @import("assembler/registry/wifi_ap.zig");
 const registry_wifi_sta = @import("assembler/registry/wifi_sta.zig");
 const registry_overlay = @import("assembler/registry/overlay.zig");
@@ -45,6 +46,7 @@ pub fn make(
     const LedStripRegistryType = registry_ledstrip.make(config.max_led_strips);
     const ModemRegistryType = registry_modem.make(config.max_modem);
     const NfcRegistryType = registry_nfc.make(config.max_nfc);
+    const TouchRegistryType = registry_touch.make(config.max_touch);
     const WifiStaRegistryType = registry_wifi_sta.make(config.max_wifi_sta);
     const WifiApRegistryType = registry_wifi_ap.make(config.max_wifi_ap);
     const OverlayRegistryType = registry_overlay.make(config.max_overlays);
@@ -62,6 +64,7 @@ pub fn make(
         ledstrip_registry: LedStripRegistryType,
         modem_registry: ModemRegistryType,
         nfc_registry: NfcRegistryType,
+        touch_registry: TouchRegistryType,
         wifi_sta_registry: WifiStaRegistryType,
         wifi_ap_registry: WifiApRegistryType,
         overlay_registry: OverlayRegistryType,
@@ -86,6 +89,7 @@ pub fn make(
                 .ledstrip_registry = LedStripRegistryType.init(),
                 .modem_registry = ModemRegistryType.init(),
                 .nfc_registry = NfcRegistryType.init(),
+                .touch_registry = TouchRegistryType.init(),
                 .wifi_sta_registry = WifiStaRegistryType.init(),
                 .wifi_ap_registry = WifiApRegistryType.init(),
                 .overlay_registry = OverlayRegistryType.init(),
@@ -197,6 +201,15 @@ pub fn make(
             self.nfc_registry.add(label, id);
         }
 
+        pub fn addTouch(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.touch_registry.add(label, id);
+        }
+
         pub fn addWifiSta(
             self: *Self,
             comptime label: []const u8,
@@ -263,6 +276,7 @@ pub fn make(
                 .ledstrip = self.ledstrip_registry,
                 .modem = self.modem_registry,
                 .nfc = self.nfc_registry,
+                .touch = self.touch_registry,
                 .wifi_sta = self.wifi_sta_registry,
                 .wifi_ap = self.wifi_ap_registry,
             });
@@ -280,6 +294,7 @@ pub fn make(
                     .ledstrip = self.ledstrip_registry,
                     .modem = self.modem_registry,
                     .nfc = self.nfc_registry,
+                    .touch = self.touch_registry,
                     .wifi_sta = self.wifi_sta_registry,
                     .wifi_ap = self.wifi_ap_registry,
                 },
@@ -309,6 +324,7 @@ pub fn make(
                     self.ledstrip_registry,
                     self.modem_registry,
                     self.nfc_registry,
+                    self.touch_registry,
                     self.wifi_sta_registry,
                     self.wifi_ap_registry,
                     self.flow_registry,

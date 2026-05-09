@@ -215,6 +215,11 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                         ledStripFrame(value.pixels),
                         value.brightness,
                     );
+                    try runner.app.dispatch(.{
+                        .origin = .manual,
+                        .timestamp = timestamp,
+                        .body = event,
+                    });
                 },
                 .ledstrip_set => |value| {
                     try runner.app.set_led_strip_animated(

@@ -20,6 +20,7 @@ const Es8311 = drivers.audio.Es8311;
 const Qmi8658 = drivers.imu.Qmi8658;
 const Pca9557 = drivers.gpio.Pca9557;
 const Tca9554 = drivers.gpio.Tca9554;
+const Ft5x06 = drivers.Touch.Ft5x06;
 const Fm175xx = drivers.nfc.Fm175xx;
 ```
 
@@ -31,6 +32,7 @@ The root module also re-exports the first-wave driver types directly:
 - `drivers.Qmi8658`
 - `drivers.Pca9557`
 - `drivers.Tca9554`
+- `drivers.Ft5x06`
 - `drivers.Fm175xx`
 
 ## Package Shape
@@ -56,6 +58,11 @@ lib/
     Display.zig
     display/
       Rgb.zig
+    Touch.zig
+    touch/
+      ft5x06.zig
+      ft5x06.md
+      ft5x06.pdf
     Imu.zig
     imu/
       qmi8658.zig
@@ -108,6 +115,7 @@ than being promoted into `lib/io`.
 - `drivers.imu.Qmi8658`: QMI8658 IMU driver over I2C plus delay hook
 - `drivers.gpio.Pca9557`: PCA9557 GPIO expander driver over I2C
 - `drivers.gpio.Tca9554`: TCA9554 GPIO expander driver over I2C
+- `drivers.Touch.Ft5x06`: FocalTech FT5x06 capacitive touch controller over I2C
 - `drivers.nfc.Fm175xx`: FM175xx NFC reader driver over I2C or SPI, with
 `ISO14443A` activation and raw `NTAG` reads
 

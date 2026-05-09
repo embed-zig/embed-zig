@@ -30,6 +30,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             @embedFile("component/modem/gnss_sequence.json"),
             @embedFile("component/modem/mixed_sequence.json"),
             @embedFile("component/nfc/found_read_sequence.json"),
+            @embedFile("component/touch/press_move_release_sequence.json"),
             @embedFile("component/wifi/sta_sequence.json"),
             @embedFile("component/wifi/ap_sequence.json"),
             @embedFile("component/ui/flow/pairing_flow_sequence.json"),
@@ -72,7 +73,9 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                 };
 
                 pub fn make(self_factory: *@This(), init_config: AppType.InitConfig) !*Instance {
-                    self_factory.instance = .{ .init_config = init_config };
+                    var next_config = init_config;
+                    next_config.pipeline_config.tick_interval = 1 * glib.time.duration.MilliSecond;
+                    self_factory.instance = .{ .init_config = next_config };
                     return &self_factory.instance;
                 }
             };

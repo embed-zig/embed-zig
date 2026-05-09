@@ -197,6 +197,9 @@ pub fn make(comptime spec_doc: anytype) type {
                         .nfc => {
                             next.addNfc(label, component.id);
                         },
+                        .touch => {
+                            next.addTouch(label, component.id);
+                        },
                         .wifi_sta => {
                             next.addWifiSta(label, component.id);
                         },
@@ -356,6 +359,7 @@ pub fn make(comptime spec_doc: anytype) type {
                 .led_strip => ledstrip.LedStrip,
                 .modem => drivers.Modem,
                 .nfc => drivers.nfc.Reader,
+                .touch => drivers.Touch,
                 .wifi_sta => drivers.wifi.Sta,
                 .wifi_ap => drivers.wifi.Ap,
                 else => @compileError(
@@ -392,6 +396,9 @@ pub fn make(comptime spec_doc: anytype) type {
             }
             if (PeriphType == drivers.nfc.Reader) {
                 return makeTestNfcReader();
+            }
+            if (PeriphType == drivers.Touch) {
+                return makeTestTouch();
             }
             if (PeriphType == drivers.wifi.Sta) {
                 return makeTestWifiSta();
@@ -679,6 +686,22 @@ pub fn make(comptime spec_doc: anytype) type {
                 var impl = Impl{};
             };
             return drivers.nfc.Reader.init(&Holder.impl);
+        }
+
+        fn makeTestTouch() drivers.Touch {
+            const Impl = struct {
+                pub fn read(_: *@This(), _: []drivers.Touch.Point) !usize {
+                    return 0;
+                }
+
+                pub fn setEventCallback(_: *@This(), _: *const anyopaque, _: drivers.Touch.CallbackFn) void {}
+
+                pub fn clearEventCallback(_: *@This()) void {}
+            };
+            const Holder = struct {
+                var impl = Impl{};
+            };
+            return drivers.Touch.init(&Holder.impl);
         }
 
         fn makeTestWifiSta() drivers.wifi.Sta {

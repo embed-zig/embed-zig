@@ -10,6 +10,7 @@
       "sensor": {},
       "cell": {},
       "reader": {},
+      "touch": {},
       "sta": {},
       "ap": {},
       "pairing": { "node": "idle" },

@@ -39,6 +39,13 @@
       }
     },
     {
+      "kind": "Component/touch",
+      "spec": {
+        "label": "touch",
+        "id": 25
+      }
+    },
+    {
       "kind": "Component/wifi/sta",
       "spec": {
         "label": "sta",

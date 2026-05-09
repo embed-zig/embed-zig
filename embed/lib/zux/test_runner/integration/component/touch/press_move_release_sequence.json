@@ -1,0 +1,143 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "touch press move release sequence",
+    "description": "tracks primary touch coordinates and keeps the last touch position after release.",
+    "initial_state": {
+      "single_button": {},
+      "grouped_button": {},
+      "strip": {},
+      "sensor": {},
+      "cell": {},
+      "reader": {},
+      "touch": {},
+      "sta": {},
+      "ap": {},
+      "pairing": {
+        "node": "idle"
+      },
+      "loading": {},
+      "menu": {
+        "count": 3,
+        "loop": true
+      },
+      "route": {
+        "current_page": 1
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "touch",
+            "state": {
+              "pressed": false,
+              "point_count": 0,
+              "primary": null,
+              "last_primary": null
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "raw_touch": {
+              "source_id": 25,
+              "pressed": true,
+              "point_count": 1,
+              "id": 1,
+              "x": 120,
+              "y": 80,
+              "pressure": 42
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "touch",
+            "state": {
+              "source_id": 25,
+              "pressed": true,
+              "point_count": 1,
+              "primary": {
+                "id": 1,
+                "x": 120,
+                "y": 80,
+                "pressure": 42
+              },
+              "last_primary": {
+                "id": 1,
+                "x": 120,
+                "y": 80,
+                "pressure": 42
+              }
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "raw_touch": {
+              "source_id": 25,
+              "pressed": true,
+              "point_count": 1,
+              "id": 1,
+              "x": 160,
+              "y": 100
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "touch",
+            "state": {
+              "pressed": true,
+              "point_count": 1,
+              "primary": {
+                "id": 1,
+                "x": 160,
+                "y": 100,
+                "pressure": null
+              },
+              "last_primary": {
+                "id": 1,
+                "x": 160,
+                "y": 100,
+                "pressure": null
+              }
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "raw_touch": {
+              "source_id": 25,
+              "pressed": false,
+              "point_count": 0
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "touch",
+            "state": {
+              "pressed": false,
+              "point_count": 0,
+              "primary": null,
+              "last_primary": {
+                "id": 1,
+                "x": 160,
+                "y": 100,
+                "pressure": null
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

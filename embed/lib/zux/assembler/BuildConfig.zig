@@ -98,6 +98,7 @@ fn periphBuildType(comptime periph: anytype) type {
     if (ControlType == drivers.imu) return drivers.imu;
     if (ControlType == modem_api.Modem) return modem_api.Modem;
     if (ControlType == drivers.nfc.Reader) return drivers.nfc.Reader;
+    if (ControlType == drivers.Touch) return drivers.Touch;
     if (ControlType == drivers.wifi.Sta) return drivers.wifi.Sta;
     if (ControlType == drivers.wifi.Ap) return drivers.wifi.Ap;
     if (ControlType == ledstrip.LedStrip) return ledstrip.LedStrip;

@@ -6,6 +6,7 @@ const bt_event = @import("component/bt/event.zig");
 const button_event = @import("component/button/event.zig");
 const modem_event = @import("component/modem/event.zig");
 const nfc_event = @import("component/nfc/event.zig");
+const touch_event = @import("component/touch/event.zig");
 const ui_flow_event = @import("component/ui/flow/event.zig");
 const ui_overlay_event = @import("component/ui/overlay/event.zig");
 const ui_route_event = @import("component/ui/route/event.zig");
@@ -79,6 +80,7 @@ pub const Event = make(.{
     modem_event.GnssFixChanged,
     nfc_event.Found,
     nfc_event.Read,
+    touch_event.Raw,
     wifi_event.StaScanResult,
     wifi_event.StaConnected,
     wifi_event.StaDisconnected,

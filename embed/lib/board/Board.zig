@@ -47,6 +47,7 @@ pub fn make(comptime grt: type, comptime spec: SpecType) type {
             ledStrip: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!ledstrip.LedStrip = null,
             modem: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.Modem = null,
             nfc: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.nfc.Reader = null,
+            touch: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.Touch = null,
             wifiSta: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.wifi.Sta = null,
             wifiAp: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!drivers.wifi.Ap = null,
             btCentral: ?*const fn (ptr: *anyopaque, label: []const u8) anyerror!bt.Central = null,
@@ -153,6 +154,14 @@ pub fn make(comptime grt: type, comptime spec: SpecType) type {
                     return error.Unsupported;
                 }
 
+                fn touchFn(ptr: *anyopaque, label: []const u8) anyerror!drivers.Touch {
+                    const self: *Impl = @ptrCast(@alignCast(ptr));
+                    if (comptime @hasDecl(Impl, "touch")) {
+                        return self.touch(label);
+                    }
+                    return error.Unsupported;
+                }
+
                 fn wifiStaFn(ptr: *anyopaque, label: []const u8) anyerror!drivers.wifi.Sta {
                     const self: *Impl = @ptrCast(@alignCast(ptr));
                     if (comptime @hasDecl(Impl, "wifiSta")) {
@@ -229,6 +238,7 @@ pub fn make(comptime grt: type, comptime spec: SpecType) type {
                     .ledStrip = ledStripFn,
                     .modem = modemFn,
                     .nfc = nfcFn,
+                    .touch = touchFn,
                     .wifiSta = wifiStaFn,
                     .wifiAp = wifiApFn,
                     .btCentral = btCentralFn,
@@ -301,6 +311,11 @@ pub fn make(comptime grt: type, comptime spec: SpecType) type {
 
         pub fn nfc(self: Board, label: []const u8) !drivers.nfc.Reader {
             if (self.vtable.nfc) |f| return f(self.ptr, label);
+            return error.Unsupported;
+        }
+
+        pub fn touch(self: Board, label: []const u8) !drivers.Touch {
+            if (self.vtable.touch) |f| return f(self.ptr, label);
             return error.Unsupported;
         }
 

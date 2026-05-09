@@ -8,6 +8,7 @@ const button = @import("../component/button.zig");
 const component_imu = @import("../component/Imu.zig");
 const component_modem = @import("../component/modem.zig");
 const component_nfc = @import("../component/Nfc.zig");
+const component_touch = @import("../component/touch.zig");
 const component_wifi = @import("../component/wifi.zig");
 const ledstrip_component = @import("../component/ledstrip.zig");
 const flow_component = @import("../component/ui/flow.zig");
@@ -217,6 +218,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const ledstrip_registry = context.registries.ledstrip;
     const modem_registry = context.registries.modem;
     const nfc_registry = context.registries.nfc;
+    const touch_registry = context.registries.touch;
     const wifi_sta_registry = context.registries.wifi_sta;
     const wifi_ap_registry = context.registries.wifi_ap;
     const flow_registry = context.flow_registry;
@@ -229,6 +231,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const ledstrip_count = registryPeriphLen(ledstrip_registry);
     const modem_count = registryPeriphLen(modem_registry);
     const nfc_count = registryPeriphLen(nfc_registry);
+    const touch_count = registryPeriphLen(touch_registry);
     const wifi_sta_count = registryPeriphLen(wifi_sta_registry);
     const wifi_ap_count = registryPeriphLen(wifi_ap_registry);
     const flow_count = registryPeriphLen(flow_registry);
@@ -242,6 +245,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const has_ledstrip_runtime = ledstrip_count > 0;
     const has_modem_runtime = modem_count > 0;
     const has_nfc_runtime = nfc_count > 0;
+    const has_touch_runtime = touch_count > 0;
     const has_wifi_sta_runtime = wifi_sta_count > 0;
     const has_wifi_ap_runtime = wifi_ap_count > 0;
     const has_flow_runtime = flow_count > 0;
@@ -264,6 +268,7 @@ pub fn build(builder: root, comptime context: anytype) type {
     const LedStripInstances = makePeriphInstancesType(context.build_config, ledstrip_registry);
     const ModemInstances = makePeriphInstancesType(context.build_config, modem_registry);
     const NfcInstances = makePeriphInstancesType(context.build_config, nfc_registry);
+    const TouchInstances = makePeriphInstancesType(context.build_config, touch_registry);
     const WifiStaInstances = makePeriphInstancesType(context.build_config, wifi_sta_registry);
     const WifiApInstances = makePeriphInstancesType(context.build_config, wifi_ap_registry);
     const AppLabel = makeLabelEnum(context.registries);
@@ -638,6 +643,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             .ledstrip = ledstrip_registry,
             .modem = modem_registry,
             .nfc = nfc_registry,
+            .touch = touch_registry,
             .wifi_sta = wifi_sta_registry,
             .wifi_ap = wifi_ap_registry,
             .flow = flow_registry,
@@ -738,6 +744,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             led_strips: LedStripInstances,
             modems: ModemInstances,
             nfcs: NfcInstances,
+            touches: TouchInstances,
             wifi_stas: WifiStaInstances,
             wifi_aps: WifiApInstances,
             detector: if (has_button_runtime) button.Reducer else void,
@@ -750,6 +757,8 @@ pub fn build(builder: root, comptime context: anytype) type {
             modem_store_reducer: if (has_modem_runtime) ModemStoreReducerNode else void,
             nfc_event_hooks: if (has_nfc_runtime) [nfc_count]component_nfc.EventHook else void,
             nfc_store_reducer: if (has_nfc_runtime) NfcStoreReducerNode else void,
+            touch_event_hooks: if (has_touch_runtime) [touch_count]component_touch.EventHook else void,
+            touch_store_reducer: if (has_touch_runtime) StoreReducerType else void,
             wifi_sta_reducer: if (has_wifi_sta_runtime) component_wifi.StaReducer else void,
             wifi_ap_reducers: if (has_wifi_ap_runtime) [wifi_ap_count]component_wifi.ApReducer else void,
             wifi_sta_store_reducer: if (has_wifi_sta_runtime) WifiStaStoreReducerNode else void,
@@ -785,6 +794,7 @@ pub fn build(builder: root, comptime context: anytype) type {
                 runtime.led_strips = initLedStripInstances(init_config);
                 runtime.modems = initModemInstances(init_config);
                 runtime.nfcs = initNfcInstances(init_config);
+                runtime.touches = initTouchInstances(init_config);
                 runtime.wifi_stas = initWifiStaInstances(init_config);
                 runtime.wifi_aps = initWifiApInstances(init_config);
 
@@ -927,6 +937,19 @@ pub fn build(builder: root, comptime context: anytype) type {
                         .stores = &runtime.store.stores,
                     };
                 }
+                if (has_touch_runtime) {
+                    inline for (0..touch_count) |i| {
+                        const periph = touch_registry.periphs[i];
+                        runtime.touch_event_hooks[i] = component_touch.EventHook.init(.{
+                            .source_id = periphIdForRecord(periph),
+                        });
+                        runtime.touch_event_hooks[i].bindOutput(Emitter.init(&runtime.pipeline_sink));
+                    }
+                    runtime.touch_store_reducer = StoreReducerType.init(
+                        &runtime.store.stores,
+                        TouchStoreReducerFn.reduce,
+                    );
+                }
 
                 initPollers(runtime);
                 runtime.root_config = buildRootConfig(runtime, init_config);
@@ -956,6 +979,11 @@ pub fn build(builder: root, comptime context: anytype) type {
                 }
                 if (has_nfc_runtime) {
                     inline for (&runtime.nfc_event_hooks) |*hook| {
+                        hook.clearOutput();
+                    }
+                }
+                if (has_touch_runtime) {
+                    inline for (&runtime.touch_event_hooks) |*hook| {
                         hook.clearOutput();
                     }
                 }
@@ -1042,6 +1070,9 @@ pub fn build(builder: root, comptime context: anytype) type {
                 }
                 if (has_nfc_runtime) {
                     config._zux_nfc_store_reducer = runtime.nfc_store_reducer.node();
+                }
+                if (has_touch_runtime) {
+                    config._zux_touch_store_reducer = runtime.touch_store_reducer.node();
                 }
                 if (has_wifi_sta_runtime) {
                     config._zux_wifi_sta_store_reducer = runtime.wifi_sta_store_reducer.node();
@@ -1131,6 +1162,16 @@ pub fn build(builder: root, comptime context: anytype) type {
                     @field(nfcs, label_name) = @field(init_config, label_name);
                 }
                 return nfcs;
+            }
+
+            fn initTouchInstances(init_config: InitConfig) TouchInstances {
+                var touches: TouchInstances = undefined;
+                inline for (0..touch_count) |i| {
+                    const periph = touch_registry.periphs[i];
+                    const label_name = comptime periphLabel(periph);
+                    @field(touches, label_name) = @field(init_config, label_name);
+                }
+                return touches;
             }
 
             fn initWifiStaInstances(init_config: InitConfig) WifiStaInstances {
@@ -1271,6 +1312,32 @@ pub fn build(builder: root, comptime context: anytype) type {
                 }
                 try emit.emit(message);
                 return 1;
+            }
+        };
+
+        const TouchStoreReducerFn = struct {
+            fn reduce(stores: *StoreType.Stores, message: Message, emit: Emitter) !usize {
+                switch (message.body) {
+                    .raw_touch => |raw_touch| {
+                        inline for (0..touch_count) |i| {
+                            const periph = touch_registry.periphs[i];
+                            if (raw_touch.source_id == periphIdForRecord(periph)) {
+                                return component_touch.Reducer.reduce(
+                                    &@field(stores, periphLabel(periph)),
+                                    message,
+                                    emit,
+                                );
+                            }
+                        }
+                        try emit.emit(message);
+                        return 1;
+                    },
+                    else => {
+                        if (message.body == .tick) return 0;
+                        try emit.emit(message);
+                        return 1;
+                    },
+                }
             }
         };
 
@@ -1505,6 +1572,13 @@ pub fn build(builder: root, comptime context: anytype) type {
                     self.runtime.nfc_event_hooks[i].attach(@field(self.runtime.nfcs, label_name));
                 }
             }
+            if (has_touch_runtime) {
+                inline for (0..touch_count) |i| {
+                    const periph = touch_registry.periphs[i];
+                    const label_name = comptime periphLabel(periph);
+                    self.runtime.touch_event_hooks[i].attach(@field(self.runtime.touches, label_name));
+                }
+            }
 
             self.started = true;
         }
@@ -1525,6 +1599,13 @@ pub fn build(builder: root, comptime context: anytype) type {
                         const periph = nfc_registry.periphs[i];
                         const label_name = comptime periphLabel(periph);
                         self.runtime.nfc_event_hooks[i].detach(@field(self.runtime.nfcs, label_name));
+                    }
+                }
+                if (has_touch_runtime) {
+                    inline for (0..touch_count) |i| {
+                        const periph = touch_registry.periphs[i];
+                        const label_name = comptime periphLabel(periph);
+                        self.runtime.touch_event_hooks[i].detach(@field(self.runtime.touches, label_name));
                     }
                 }
                 inline for (&self.runtime.pollers) |*poller| {
@@ -1624,6 +1705,38 @@ pub fn build(builder: root, comptime context: anytype) type {
                     .x = gyro.x,
                     .y = gyro.y,
                     .z = gyro.z,
+                },
+            });
+        }
+
+        pub fn touch_down(self: *Self, label: PeriphLabel, point: drivers.Touch.Point) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
+            if (dispatchKind(label) != .touch) return error.InvalidPeriphKind;
+            try self.emitBody(.{
+                .raw_touch = .{
+                    .source_id = periphId(label),
+                    .pressed = true,
+                    .point_count = 1,
+                    .id = point.id,
+                    .x = point.x,
+                    .y = point.y,
+                    .pressure = point.pressure,
+                },
+            });
+        }
+
+        pub fn touch_move(self: *Self, label: PeriphLabel, point: drivers.Touch.Point) !void {
+            try self.touch_down(label, point);
+        }
+
+        pub fn touch_up(self: *Self, label: PeriphLabel) !void {
+            if (comptime periph_ids.len == 0) return error.InvalidPeriphKind;
+            if (dispatchKind(label) != .touch) return error.InvalidPeriphKind;
+            try self.emitBody(.{
+                .raw_touch = .{
+                    .source_id = periphId(label),
+                    .pressed = false,
+                    .point_count = 0,
                 },
             });
         }
@@ -2288,6 +2401,10 @@ fn makeRuntimeStoreBuilder(comptime context: anytype) @TypeOf(context.store_buil
         const periph = context.registries.nfc.periphs[i];
         builder.setStore(periph.label, store.Object.make(context.grt, component_nfc.State, periph.label));
     }
+    inline for (0..registryPeriphLen(context.registries.touch)) |i| {
+        const periph = context.registries.touch.periphs[i];
+        builder.setStore(periph.label, store.Object.make(context.grt, component_touch.State, periph.label));
+    }
     inline for (0..registryPeriphLen(context.registries.wifi_sta)) |i| {
         const periph = context.registries.wifi_sta.periphs[i];
         builder.setStore(periph.label, store.Object.make(context.grt, component_wifi.state.Sta, periph.label));
@@ -2338,6 +2455,9 @@ fn makeRuntimeNodeBuilder(comptime context: anytype) NodeBuilder.Builder(context
     }
     if (registryPeriphLen(context.registries.nfc) > 0) {
         builder.addNode(._zux_nfc_store_reducer);
+    }
+    if (registryPeriphLen(context.registries.touch) > 0) {
+        builder.addNode(._zux_touch_store_reducer);
     }
     if (registryPeriphLen(context.registries.wifi_sta) > 0) {
         builder.addNode(._zux_wifi_sta_store_reducer);
@@ -2821,6 +2941,7 @@ const PeriphDispatchKind = enum {
     led_strip,
     modem,
     nfc,
+    touch,
     wifi_sta,
     wifi_ap,
 };
@@ -2845,6 +2966,7 @@ fn dispatchKindForRecord(comptime periph: anytype) PeriphDispatchKind {
     if (ControlType == ledstrip.LedStrip) return .led_strip;
     if (ControlType == modem_api.Modem) return .modem;
     if (ControlType == @import("drivers").nfc.Reader) return .nfc;
+    if (ControlType == @import("drivers").Touch) return .touch;
     if (ControlType == @import("drivers").wifi.Sta) return .wifi_sta;
     if (ControlType == @import("drivers").wifi.Ap) return .wifi_ap;
     @compileError("zux.assembler.Builder.build encountered unsupported periph control_type");
@@ -2895,6 +3017,7 @@ fn messageSourceId(message: Message) u32 {
         .modem_gnss_fix_changed => |event| event.source_id,
         .nfc_found => |event| event.source_id,
         .nfc_read => |event| event.source_id,
+        .raw_touch => |event| event.source_id,
         .wifi_sta_scan_result => |event| event.source_id,
         .wifi_sta_connected => |event| event.source_id,
         .wifi_sta_disconnected => |event| event.source_id,

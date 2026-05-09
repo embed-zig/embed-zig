@@ -13,6 +13,7 @@ pub const gpio = Gpio;
 pub const nfc = @import("drivers/Nfc.zig");
 pub const button = @import("drivers/button.zig");
 pub const Spi = @import("drivers/Spi.zig");
+pub const Touch = @import("drivers/Touch.zig");
 pub const wifi = @import("drivers/wifi.zig");
 
 pub const Es7210 = audio.Es7210;
@@ -23,6 +24,7 @@ pub const Tca9554 = gpio.Tca9554;
 pub const Fm175xx = nfc.Fm175xx;
 pub const AdcButton = button.AdcButton;
 pub const GpioButton = button.GpioButton;
+pub const Ft5x06 = Touch.Ft5x06;
 pub const test_runner = struct {
     pub const unit = @import("drivers/test_runner/unit.zig");
 };

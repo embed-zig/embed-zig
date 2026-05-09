@@ -36,6 +36,7 @@ pub const Kind = union(enum) {
     },
     modem: void,
     nfc: void,
+    touch: void,
     wifi_sta: void,
     wifi_ap: void,
     router: void,
@@ -341,6 +342,10 @@ fn parseKindValue(
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "nfc")) {
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .nfc = {} };
+    }
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "touch")) {
+        try expectEmptyPayload(entry.value_ptr.*);
+        return .{ .touch = {} };
     }
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "wifi_sta")) {
         try expectEmptyPayload(entry.value_ptr.*);
@@ -932,6 +937,13 @@ fn parseKindSlice(comptime source: []const u8) Kind {
         );
         return .{ .nfc = {} };
     }
+    if (comptimeEql(kind_name, "touch")) {
+        expectEmptyPayloadSlice(
+            payload_source,
+            "zux.spec.Component.parseSlice touch payload",
+        );
+        return .{ .touch = {} };
+    }
     if (comptimeEql(kind_name, "wifi_sta")) {
         expectEmptyPayloadSlice(
             payload_source,
@@ -1009,6 +1021,9 @@ fn parsePathKindSlice(comptime kind_path: []const u8, comptime source: []const u
     if (comptimeEql(kind_path, "nfc")) {
         return .{ .nfc = {} };
     }
+    if (comptimeEql(kind_path, "touch")) {
+        return .{ .touch = {} };
+    }
     if (comptimeEql(kind_path, "wifi/sta")) {
         return .{ .wifi_sta = {} };
     }
@@ -1080,6 +1095,9 @@ fn parsePathKindValue(
     }
     if (glib.std.mem.eql(u8, kind_path, "nfc")) {
         return .{ .nfc = {} };
+    }
+    if (glib.std.mem.eql(u8, kind_path, "touch")) {
+        return .{ .touch = {} };
     }
     if (glib.std.mem.eql(u8, kind_path, "wifi/sta")) {
         return .{ .wifi_sta = {} };
@@ -1416,6 +1434,13 @@ fn parseKindValueComptime(comptime value: glib.std.json.Value) Kind {
             "zux.spec.Component.parseJsonValue nfc payload",
         );
         return .{ .nfc = {} };
+    }
+    if (comptimeEql(kind_name, "touch")) {
+        expectEmptyPayloadComptime(
+            payload,
+            "zux.spec.Component.parseJsonValue touch payload",
+        );
+        return .{ .touch = {} };
     }
     if (comptimeEql(kind_name, "wifi_sta")) {
         expectEmptyPayloadComptime(
