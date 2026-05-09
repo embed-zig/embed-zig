@@ -11,6 +11,7 @@ const Error = Speaker.Error;
 
 const Impl = struct {
     gain_db: ?i8 = null,
+    logged_writes: u8 = 0,
 
     fn deinit(_: *Impl) void {}
 
@@ -18,10 +19,14 @@ const Impl = struct {
         return board.audio_sample_rate;
     }
 
-    fn write(_: *Impl, frame: []const i16) Error!usize {
+    fn write(self: *Impl, frame: []const i16) Error!usize {
         if (frame.len == 0) return 0;
         board.initAudio() catch |err| return fail("speaker init", err);
         board.writePcm(frame) catch |err| return fail("speaker write", err);
+        if (self.logged_writes < 3) {
+            log.info("speaker wrote {d} samples", .{frame.len});
+            self.logged_writes += 1;
+        }
         return frame.len;
     }
 

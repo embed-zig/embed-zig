@@ -41,11 +41,17 @@ uint32_t espz_heap_align_freertos_stack_size_bytes(uint32_t bytes)
 
 void *espz_heap_caps_malloc(size_t size, uint32_t caps)
 {
+    if (size == 0) {
+        return NULL;
+    }
     return heap_caps_malloc(size, (uint32_t)caps);
 }
 
 void *espz_heap_caps_aligned_alloc(size_t alignment, size_t size, uint32_t caps)
 {
+    if (size == 0) {
+        return NULL;
+    }
     return heap_caps_aligned_alloc(alignment, size, (uint32_t)caps);
 }
 

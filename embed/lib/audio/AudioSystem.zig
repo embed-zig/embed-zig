@@ -75,6 +75,11 @@ pub fn Builder(comptime grt: type) type {
                 pub const frame_mic_count: usize = mic_count;
                 pub const frame_samples_per_channel: usize = samples_per_channel;
 
+                pub const Config = struct {
+                    read_thread: grt.std.Thread.SpawnConfig = .{},
+                    write_thread: grt.std.Thread.SpawnConfig = .{},
+                };
+
                 allocator: glib.std.mem.Allocator,
                 mic_impl: ?AudioSystem.Mic = null,
                 speaker_impl: ?AudioSystem.Speaker = null,
@@ -88,8 +93,10 @@ pub fn Builder(comptime grt: type) type {
                 playback_config_locked: bool = false,
                 read_thread: ?grt.std.Thread = null,
                 write_thread: ?grt.std.Thread = null,
+                read_thread_config: grt.std.Thread.SpawnConfig = .{},
+                write_thread_config: grt.std.Thread.SpawnConfig = .{},
 
-                pub fn init(allocator: glib.std.mem.Allocator) !AudioSystem {
+                pub fn init(allocator: glib.std.mem.Allocator, config: Config) !AudioSystem {
                     const capture_rb = try SampleRingBuffer.init(allocator, capture_buffer_capacity);
                     errdefer {
                         var cleanup = capture_rb;
@@ -107,6 +114,8 @@ pub fn Builder(comptime grt: type) type {
                         .capture_rb = capture_rb,
                         .ref_rb = ref_rb,
                         .ref_write_scratch = &[_]i16{},
+                        .read_thread_config = config.read_thread,
+                        .write_thread_config = config.write_thread,
                     };
                 }
 
@@ -199,6 +208,10 @@ pub fn Builder(comptime grt: type) type {
                     return error.WouldBlock;
                 }
 
+                pub fn discardReadBuffer(self: *AudioSystem) void {
+                    discardBuffered(&self.capture_rb);
+                }
+
                 pub fn micGains(self: AudioSystem) Error!MicGains {
                     const mic_impl = self.mic_impl orelse return error.InvalidState;
                     return mic_impl.gains();
@@ -272,7 +285,7 @@ pub fn Builder(comptime grt: type) type {
                     }
 
                     const read_thread = if (read_enabled)
-                        grt.std.Thread.spawn(.{}, AudioSystem.readLoop, .{self}) catch {
+                        grt.std.Thread.spawn(self.read_thread_config, AudioSystem.readLoop, .{self}) catch {
                             self.state_mu.lock();
                             self.running = false;
                             self.state_mu.unlock();
@@ -282,7 +295,7 @@ pub fn Builder(comptime grt: type) type {
                         null;
 
                     const write_thread = if (write_enabled)
-                        grt.std.Thread.spawn(.{}, AudioSystem.writeLoop, .{self}) catch {
+                        grt.std.Thread.spawn(self.write_thread_config, AudioSystem.writeLoop, .{self}) catch {
                             self.state_mu.lock();
                             self.running = false;
                             self.state_mu.unlock();
@@ -374,22 +387,28 @@ pub fn Builder(comptime grt: type) type {
                             return;
                         };
 
-                        @memset(ref_chunk[0..], 0);
-                        const ref_n = readBuffered(&self.ref_rb, ref_chunk[0..]);
-                        frame.ref = if (ref_n == 0) null else ref_chunk;
+                        if (frame.ref == null) {
+                            @memset(ref_chunk[0..], 0);
+                            _ = readBuffered(&self.ref_rb, ref_chunk[0..]);
+                            frame.ref = ref_chunk;
+                        }
 
                         const n = ProcessorType.process(frame, processed[0..]) catch {
                             if (!self.isRunning()) return;
                             self.failAsync();
                             return;
                         };
-                        if (n == 0) continue;
+                        if (n == 0) {
+                            yieldToScheduler();
+                            continue;
+                        }
                         if (n > processed.len) {
                             self.failAsync();
                             return;
                         }
 
                         self.capture_rb.writeDroppingOldest(processed[0..n]);
+                        yieldToScheduler();
                     }
                 }
 
@@ -404,17 +423,15 @@ pub fn Builder(comptime grt: type) type {
 
                     while (self.isRunning()) {
                         @memset(mix_chunk[0..], 0);
-                        _ = playback.read(mix_chunk[0..]) orelse 0;
-
-                        writeSpeakerFrame(speaker_impl, mix_chunk[0..]) catch {
-                            if (!self.isRunning()) return;
-                            self.failAsync();
-                            return;
-                        };
+                        const mixed_n = playback.read(mix_chunk[0..]) orelse 0;
+                        if (mixed_n == 0) {
+                            sleepForSamples(mix_chunk.len, speaker_rate);
+                            continue;
+                        }
 
                         if (maybe_mic != null) {
                             const ref_n = convertSpeakerChunkToMicRate(
-                                mix_chunk[0..],
+                                mix_chunk[0..mixed_n],
                                 speaker_rate,
                                 self.ref_write_scratch,
                                 mic_rate,
@@ -428,7 +445,11 @@ pub fn Builder(comptime grt: type) type {
                             }
                         }
 
-                        sleepForSamples(mix_chunk.len, speaker_rate);
+                        writeSpeakerFrame(speaker_impl, mix_chunk[0..mixed_n]) catch {
+                            if (!self.isRunning()) return;
+                            self.failAsync();
+                            return;
+                        };
                     }
                 }
 
@@ -457,6 +478,10 @@ pub fn Builder(comptime grt: type) type {
                     const duration = durationForSamples(sample_count, sample_rate);
                     if (duration <= 0) return;
                     grt.std.Thread.sleep(@intCast(duration));
+                }
+
+                fn yieldToScheduler() void {
+                    grt.std.Thread.sleep(1 * grt.time.duration.MilliSecond);
                 }
 
                 fn durationForSamples(sample_count: usize, sample_rate: u32) glib.time.duration.Duration {
@@ -642,7 +667,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var mic_ctx = MicCtx{};
             var speaker_ctx = SpeakerCtx{};
-            var system = try Built.init(alloc);
+            var system = try Built.init(alloc, .{});
             defer system.deinit();
             try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
             try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
@@ -784,7 +809,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var mic_ctx = MicCtx{};
             var speaker_ctx = SpeakerCtx{};
-            var system = try Built.init(alloc);
+            var system = try Built.init(alloc, .{});
             defer system.deinit();
             try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
             try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
@@ -932,7 +957,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var mic_ctx = MicCtx{};
             var speaker_ctx = SpeakerCtx{};
             ProcessorBackend.emit.store(false, .release);
-            var system = try Built.init(alloc);
+            var system = try Built.init(alloc, .{});
             defer system.deinit();
             try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
             try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
@@ -1026,7 +1051,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             var mic_ctx = MicCtx{};
-            var system = try Built.init(alloc);
+            var system = try Built.init(alloc, .{});
             defer system.deinit();
             try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
 
@@ -1109,7 +1134,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             var speaker_ctx = SpeakerCtx{};
-            var system = try Built.init(alloc);
+            var system = try Built.init(alloc, .{});
             defer system.deinit();
             try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
 

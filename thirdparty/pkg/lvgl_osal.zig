@@ -9,9 +9,18 @@ const glib = @import("glib");
 const c = @cImport({
     @cInclude("lv_os_custom.h");
     @cInclude("src/osal/lv_os.h");
+    @cInclude("src/stdlib/lv_mem.h");
 });
 
 pub fn make(comptime grt: type, comptime allocator: glib.std.mem.Allocator) type {
+    return makeWithAllocators(grt, allocator, allocator);
+}
+
+pub fn makeWithAllocators(
+    comptime grt: type,
+    comptime os_allocator: glib.std.mem.Allocator,
+    comptime memory_allocator: glib.std.mem.Allocator,
+) type {
     comptime {
         if (!glib.runtime.is(grt)) @compileError("lvgl_osal.make requires a glib runtime namespace");
     }
@@ -19,6 +28,19 @@ pub fn make(comptime grt: type, comptime allocator: glib.std.mem.Allocator) type
     return struct {
         const Thread = grt.std.Thread;
         const ThreadCallback = *const fn (?*anyopaque) callconv(.c) void;
+        const allocation_alignment: glib.std.mem.Alignment = .@"16";
+        const allocation_header_len: usize = 16;
+
+        const AllocationHeader = extern struct {
+            total_len: usize,
+            payload_len: usize,
+        };
+
+        comptime {
+            if (@sizeOf(AllocationHeader) > allocation_header_len) {
+                @compileError("LVGL allocation header does not fit reserved prefix");
+            }
+        }
 
         const MutexImpl = struct {
             guard: Thread.Mutex = .{},
@@ -158,7 +180,7 @@ pub fn make(comptime grt: type, comptime allocator: glib.std.mem.Allocator) type
             const defaults = Thread.SpawnConfig{};
             return .{
                 .stack_size = normalizeStackSize(stack_size),
-                .allocator = allocator,
+                .allocator = os_allocator,
                 .priority = clampPriority(prio, defaults.priority),
                 .name = name orelse defaults.name,
                 .core_id = defaults.core_id,
@@ -178,11 +200,35 @@ pub fn make(comptime grt: type, comptime allocator: glib.std.mem.Allocator) type
         }
 
         fn createImpl(comptime T: type) ?*T {
-            return allocator.create(T) catch return null;
+            return os_allocator.create(T) catch return null;
         }
 
         fn destroyImpl(comptime T: type, impl: *T) void {
-            allocator.destroy(impl);
+            os_allocator.destroy(impl);
+        }
+
+        fn allocationTotalLen(payload_len: usize) ?usize {
+            const total_len, const overflow = @addWithOverflow(allocation_header_len, payload_len);
+            if (overflow != 0) return null;
+            return total_len;
+        }
+
+        fn allocationHeader(payload_ptr: *anyopaque) *AllocationHeader {
+            const payload_addr = @intFromPtr(payload_ptr);
+            const raw_addr = payload_addr - allocation_header_len;
+            return @ptrCast(@alignCast(@as([*]u8, @ptrFromInt(raw_addr))));
+        }
+
+        fn payloadSlice(payload_ptr: *anyopaque) []u8 {
+            const header = allocationHeader(payload_ptr);
+            const payload_bytes: [*]u8 = @ptrCast(payload_ptr);
+            return payload_bytes[0..header.payload_len];
+        }
+
+        fn rawSlice(payload_ptr: *anyopaque) []u8 {
+            const header = allocationHeader(payload_ptr);
+            const raw_bytes: [*]u8 = @ptrCast(header);
+            return raw_bytes[0..header.total_len];
         }
 
         pub export fn lv_mutex_init(handle: ?*c.lv_mutex_t) c.lv_result_t {
@@ -291,6 +337,61 @@ pub fn make(comptime grt: type, comptime allocator: glib.std.mem.Allocator) type
             thread.impl = null;
             impl.handle.join();
             destroyImpl(ThreadImpl, impl);
+            return ok();
+        }
+
+        pub export fn lv_mem_init() void {}
+
+        pub export fn lv_mem_deinit() void {}
+
+        pub export fn lv_mem_add_pool(mem: ?*anyopaque, bytes: usize) c.lv_mem_pool_t {
+            _ = mem;
+            _ = bytes;
+            return null;
+        }
+
+        pub export fn lv_mem_remove_pool(pool: c.lv_mem_pool_t) void {
+            _ = pool;
+        }
+
+        pub export fn lv_malloc_core(size: usize) ?*anyopaque {
+            if (size == 0) return null;
+            const total_len = allocationTotalLen(size) orelse return null;
+            const raw = memory_allocator.rawAlloc(total_len, allocation_alignment, @returnAddress()) orelse return null;
+            const header: *AllocationHeader = @ptrCast(@alignCast(raw));
+            header.* = .{
+                .total_len = total_len,
+                .payload_len = size,
+            };
+            return @ptrCast(raw + allocation_header_len);
+        }
+
+        pub export fn lv_realloc_core(ptr: ?*anyopaque, new_size: usize) ?*anyopaque {
+            const payload_ptr = ptr orelse return lv_malloc_core(new_size);
+            if (new_size == 0) {
+                lv_free_core(payload_ptr);
+                return null;
+            }
+
+            const old_payload = payloadSlice(payload_ptr);
+            const new_payload = lv_malloc_core(new_size) orelse return null;
+            const new_bytes: [*]u8 = @ptrCast(new_payload);
+            const copy_len = @min(old_payload.len, new_size);
+            @memcpy(new_bytes[0..copy_len], old_payload[0..copy_len]);
+            lv_free_core(payload_ptr);
+            return new_payload;
+        }
+
+        pub export fn lv_free_core(ptr: ?*anyopaque) void {
+            const payload_ptr = ptr orelse return;
+            memory_allocator.rawFree(rawSlice(payload_ptr), allocation_alignment, @returnAddress());
+        }
+
+        pub export fn lv_mem_monitor_core(mon_p: ?*c.lv_mem_monitor_t) void {
+            _ = mon_p;
+        }
+
+        pub export fn lv_mem_test_core() c.lv_result_t {
             return ok();
         }
     };

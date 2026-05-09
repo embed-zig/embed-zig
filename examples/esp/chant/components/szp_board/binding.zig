@@ -40,6 +40,18 @@ pub extern fn szp_audio_play_test_tone(frequency_hz: u32, duration_ms: u32) c_in
 pub extern fn szp_audio_mic_start() c_int;
 pub extern fn szp_audio_mic_process_frame() c_int;
 pub extern fn szp_audio_mic_stop() c_int;
+pub extern fn szp_audio_mic_capture_start() c_int;
+pub extern fn szp_audio_mic_read_i16(mic0: [*]i16, mic1: [*]i16, ref: [*]i16, sample_capacity: usize, sample_count: *usize) c_int;
+pub extern fn szp_audio_mic_capture_stop() c_int;
+pub extern fn szp_audio_afe_process_i16(
+    mic0: [*]const i16,
+    mic1: [*]const i16,
+    ref: [*]const i16,
+    sample_count: usize,
+    out: [*]i16,
+    out_capacity: usize,
+    out_count: *usize,
+) c_int;
 
 pub extern fn szp_button_init() c_int;
 pub extern fn szp_button_read_raw() bool;

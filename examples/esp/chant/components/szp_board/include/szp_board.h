@@ -28,6 +28,17 @@ int szp_audio_play_test_tone(uint32_t frequency_hz, uint32_t duration_ms);
 int szp_audio_mic_start(void);
 int szp_audio_mic_process_frame(void);
 int szp_audio_mic_stop(void);
+int szp_audio_mic_capture_start(void);
+int szp_audio_mic_read_i16(int16_t *mic0, int16_t *mic1, int16_t *ref, size_t sample_capacity, size_t *sample_count);
+int szp_audio_mic_capture_stop(void);
+int szp_audio_afe_process_i16(
+    const int16_t *mic0,
+    const int16_t *mic1,
+    const int16_t *ref,
+    size_t sample_count,
+    int16_t *out,
+    size_t out_capacity,
+    size_t *out_count);
 
 int szp_button_init(void);
 bool szp_button_read_raw(void);

@@ -15,6 +15,7 @@ pub fn make(comptime grt: type) type {
         label_buf: []u8,
         gain_bits: u32 = @bitCast(@as(f32, 1.0)),
         read_bytes_val: usize = 0,
+        fade_out_mu: grt.std.Thread.Mutex = .{},
         fade_out_duration_val: glib.time.duration.Duration = 0,
         refs: usize = 0,
         owner_ptr: ?*anyopaque = null,
@@ -94,7 +95,9 @@ pub fn make(comptime grt: type) type {
         }
 
         pub fn setFadeOutDuration(self: *@This(), duration: glib.time.duration.Duration) void {
-            @atomicStore(glib.time.duration.Duration, &self.fade_out_duration_val, duration, .release);
+            self.fade_out_mu.lock();
+            self.fade_out_duration_val = duration;
+            self.fade_out_mu.unlock();
         }
 
         pub fn closeWrite(self: *@This()) void {
@@ -102,7 +105,10 @@ pub fn make(comptime grt: type) type {
         }
 
         pub fn close(self: *@This()) void {
-            if (@atomicLoad(glib.time.duration.Duration, &self.fade_out_duration_val, .acquire) > 0) {
+            self.fade_out_mu.lock();
+            const fade_out_duration = self.fade_out_duration_val;
+            self.fade_out_mu.unlock();
+            if (fade_out_duration > 0) {
                 self.setGain(0);
             }
             self.closeWrite();

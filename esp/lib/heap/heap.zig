@@ -29,7 +29,6 @@ pub fn Allocator(comptime options: Options) glib.std.mem.Allocator {
 
 extern fn espz_heap_align_freertos_stack_size_bytes(size: u32) u32;
 extern fn espz_heap_caps_malloc(size: usize, caps: u32) ?*anyopaque;
-extern fn espz_heap_caps_aligned_alloc(alignment: usize, size: usize, caps: u32) ?*anyopaque;
 extern fn espz_heap_caps_free(ptr: ?*anyopaque) void;
 
 extern const espz_heap_cap_8bit: u32;
@@ -43,14 +42,11 @@ fn allocatorFromCapsProvider(comptime options: Options) glib.std.mem.Allocator {
 
             const effective_alignment = requiredAlignmentBytes(requested_alignment, options.alignment);
             const effective_len = paddedSize(len, options.padding) orelse return null;
-            const resolved_caps = resolveCaps(options.caps);
-            const raw = if (effective_alignment <= 1)
-                espz_heap_caps_malloc(effective_len, resolved_caps)
-            else
-                espz_heap_caps_aligned_alloc(effective_alignment, effective_len, resolved_caps);
+            if (effective_len == 0) {
+                return @ptrFromInt(effective_alignment);
+            }
 
-            const ptr = raw orelse return null;
-            return @ptrCast(ptr);
+            return heapCapsAlloc(effective_len, effective_alignment, resolveCaps(options.caps));
         }
 
         fn resize(
@@ -79,9 +75,9 @@ fn allocatorFromCapsProvider(comptime options: Options) glib.std.mem.Allocator {
         }
 
         fn free(_: *anyopaque, memory: []u8, requested_alignment: glib.std.mem.Alignment, ret_addr: usize) void {
-            _ = requested_alignment;
             _ = ret_addr;
-            espz_heap_caps_free(memory.ptr);
+            if (memory.len == 0) return;
+            heapCapsFree(memory.ptr, requiredAlignmentBytes(requested_alignment, options.alignment));
         }
 
         const vtable: glib.std.mem.Allocator.VTable = .{
@@ -112,6 +108,44 @@ fn minimumAlignmentBytes(comptime alignment: Alignment) usize {
         .natural => 1,
         .align_u32 => @alignOf(u32),
     };
+}
+
+fn heapCapsMallocAlignmentBytes() usize {
+    return @alignOf(usize);
+}
+
+fn heapCapsAlloc(len: usize, alignment: usize, caps: u32) ?[*]u8 {
+    if (alignment <= heapCapsMallocAlignmentBytes()) {
+        const raw = espz_heap_caps_malloc(len, caps) orelse return null;
+        return @ptrCast(raw);
+    }
+
+    const with_header, const header_overflow = @addWithOverflow(len, @sizeOf(usize));
+    if (header_overflow != 0) return null;
+    const total_len, const alignment_overflow = @addWithOverflow(with_header, alignment - 1);
+    if (alignment_overflow != 0) return null;
+
+    const raw = espz_heap_caps_malloc(total_len, caps) orelse return null;
+    const payload_addr, const payload_overflow = @addWithOverflow(@intFromPtr(raw), @sizeOf(usize));
+    if (payload_overflow != 0) {
+        espz_heap_caps_free(raw);
+        return null;
+    }
+
+    const aligned_addr = glib.std.mem.alignForward(usize, payload_addr, alignment);
+    const raw_addr_slot: *usize = @ptrFromInt(aligned_addr - @sizeOf(usize));
+    raw_addr_slot.* = @intFromPtr(raw);
+    return @ptrFromInt(aligned_addr);
+}
+
+fn heapCapsFree(ptr: [*]u8, alignment: usize) void {
+    if (alignment <= heapCapsMallocAlignmentBytes()) {
+        espz_heap_caps_free(ptr);
+        return;
+    }
+
+    const raw_addr_slot: *usize = @ptrFromInt(@intFromPtr(ptr) - @sizeOf(usize));
+    espz_heap_caps_free(@ptrFromInt(raw_addr_slot.*));
 }
 
 fn paddedSize(len: usize, comptime padding: Padding) ?usize {

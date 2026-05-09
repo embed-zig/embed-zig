@@ -3,8 +3,6 @@ const ogg = @import("embed").audio.ogg;
 const opus = @import("opus");
 const esp = @import("esp");
 
-const AudioSpeaker = @import("Speaker.zig");
-
 const mem = glib.std.mem;
 const log = esp.grt.std.log.scoped(.opus_ogg);
 
@@ -25,18 +23,19 @@ pub const PlayResult = enum {
     ended,
     next,
     previous,
-    microphone,
+    stopped,
 };
 
 pub const ControlResult = enum {
     none,
     next,
     previous,
-    microphone,
+    stop,
 };
 
-pub fn play(
+pub fn playToTrack(
     path: [:0]const u8,
+    track: anytype,
     poll_context: *anyopaque,
     pollControl: *const fn (*anyopaque) ControlResult,
 ) !PlayResult {
@@ -57,7 +56,6 @@ pub fn play(
 
     var decoder: ?opus.Decoder = null;
     defer if (decoder) |*d| d.deinit(allocator);
-    const speaker = AudioSpeaker.driver();
 
     var header_count: u8 = 0;
     var eof = false;
@@ -93,7 +91,7 @@ pub fn play(
                                         .none => {},
                                         .next => return .next,
                                         .previous => return .previous,
-                                        .microphone => return .microphone,
+                                        .stop => return .stopped,
                                     }
                                     if (decoder == null) return error.MissingOpusHead;
                                     const packet_samples = try opus.packetGetSamples(payload, output_sample_rate);
@@ -102,13 +100,12 @@ pub fn play(
                                         try active_decoder.decode(payload, pcm_storage[0..], false)
                                     else
                                         unreachable;
-                                    const written = try speaker.write(samples);
-                                    if (written != samples.len) return error.ShortAudioWrite;
+                                    try track.write(.{ .rate = output_sample_rate, .channels = .mono }, samples);
                                     switch (pollControl(poll_context)) {
                                         .none => {},
                                         .next => return .next,
                                         .previous => return .previous,
-                                        .microphone => return .microphone,
+                                        .stop => return .stopped,
                                     }
                                 },
                                 .hole => return error.OggPacketHole,

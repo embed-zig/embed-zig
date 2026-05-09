@@ -20,7 +20,6 @@
 #define I2S_DOUT_GPIO 45
 #define I2S_DIN_GPIO 12
 #define MONO_CHUNK_SAMPLES 256
-#define MIC_INPUT_FORMAT "MR"
 #define MIC_TASK_STACK_BYTES (8 * 1024)
 #define MIC_AFE_TASK_PRIORITY 8
 #define MIC_FEED_TASK_PRIORITY 7
@@ -31,25 +30,34 @@
 #define AFE_CHANNELS (AFE_MIC_CHANNELS + AFE_REF_CHANNELS)
 #define MIC_OUTPUT_GAIN_NUM 3
 #define MIC_OUTPUT_GAIN_DEN 1
+#define TX_REF_SATURATION_THRESHOLD 32000
 
 static const char *TAG = "szp_audio";
 static i2s_chan_handle_t tx_chan;
 static i2s_chan_handle_t rx_chan;
 static bool audio_ready;
 static volatile bool mic_streaming;
+static volatile bool mic_monitoring;
 static int32_t stereo_frame_32[MONO_CHUNK_SAMPLES * 2];
 static const esp_afe_sr_iface_t *afe_handle;
 static esp_afe_sr_data_t *afe_data;
 static int16_t *afe_feed_buffer;
 static int16_t *mic_rx_buffer;
 static int16_t *mic_output_buffer;
+static int16_t mic_raw_capture_buffer[MONO_CHUNK_SAMPLES * MIC_RX_CHANNELS];
 static size_t afe_feed_sample_count;
 static size_t afe_feed_byte_count;
+static size_t afe_feed_fill_count;
+static size_t afe_feed_since_fetch;
+static size_t afe_output_pending_offset;
+static size_t afe_output_pending_count;
 static size_t mic_frame_count;
 static size_t mic_output_sample_capacity;
 static TaskHandle_t mic_feed_task;
 static TaskHandle_t mic_fetch_task;
 static SemaphoreHandle_t audio_write_mutex;
+static volatile bool mic_capture_streaming;
+static uint32_t raw_capture_log_count;
 
 int szp_pca9557_set_pa(bool enabled);
 int szp_audio_write_i16(const int16_t *pcm, size_t sample_count);
@@ -83,6 +91,10 @@ static void deinit_afe_resources(void)
     mic_output_buffer = NULL;
     afe_feed_sample_count = 0;
     afe_feed_byte_count = 0;
+    afe_feed_fill_count = 0;
+    afe_feed_since_fetch = 0;
+    afe_output_pending_offset = 0;
+    afe_output_pending_count = 0;
     mic_frame_count = 0;
     mic_output_sample_capacity = 0;
 }
@@ -230,29 +242,77 @@ static int16_t apply_monitor_gain(int16_t sample)
     return (int16_t)value;
 }
 
+static int16_t peak_abs_i16(int16_t peak, int16_t sample)
+{
+    const int16_t value = sample == INT16_MIN ? INT16_MAX : (sample < 0 ? -sample : sample);
+    return value > peak ? value : peak;
+}
+
+static esp_err_t start_mic_feed_task(void)
+{
+    if (mic_feed_task != NULL) return ESP_OK;
+    if (xTaskCreatePinnedToCore(mic_feed_task_fn, "chant_mic_feed", MIC_TASK_STACK_BYTES, NULL, MIC_FEED_TASK_PRIORITY, &mic_feed_task, 1) != pdPASS) {
+        mic_streaming = false;
+        mic_monitoring = false;
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t fetch_mic_output(int16_t *pcm, size_t sample_capacity, size_t *sample_count, bool apply_gain)
+{
+    if (pcm == NULL || sample_count == NULL) return ESP_ERR_INVALID_ARG;
+    if (!mic_streaming || afe_handle == NULL || afe_data == NULL) return ESP_ERR_INVALID_STATE;
+
+    *sample_count = 0;
+    afe_fetch_result_t *result = afe_handle->fetch(afe_data);
+    if (!mic_streaming) return ESP_ERR_INVALID_STATE;
+    if (result == NULL) return ESP_FAIL;
+    if (result->ret_value != ESP_OK) return result->ret_value;
+    if (result->data == NULL || result->data_size <= 0) return ESP_FAIL;
+
+    const size_t n = (size_t)result->data_size / sizeof(int16_t);
+    if (n > sample_capacity) return ESP_ERR_INVALID_SIZE;
+    for (size_t i = 0; i < n; i += 1) {
+        pcm[i] = apply_gain ? apply_monitor_gain(result->data[i]) : result->data[i];
+    }
+    *sample_count = n;
+    return ESP_OK;
+}
+
+static size_t drain_pending_afe_output(int16_t *out, size_t out_capacity, size_t produced)
+{
+    if (produced >= out_capacity || afe_output_pending_count == 0) return produced;
+
+    const size_t space = out_capacity - produced;
+    const size_t n = afe_output_pending_count < space ? afe_output_pending_count : space;
+    for (size_t i = 0; i < n; i += 1) {
+        out[produced + i] = mic_output_buffer[afe_output_pending_offset + i];
+    }
+    afe_output_pending_offset += n;
+    afe_output_pending_count -= n;
+    if (afe_output_pending_count == 0) {
+        afe_output_pending_offset = 0;
+    }
+    return produced + n;
+}
+
 static void mic_fetch_task_fn(void *arg)
 {
     (void)arg;
     uint32_t logged_frames = 0;
-    while (mic_streaming) {
-        afe_fetch_result_t *result = afe_handle->fetch(afe_data);
-        if (!mic_streaming) break;
-        if (result == NULL || result->ret_value == ESP_FAIL || result->data == NULL || result->data_size <= 0) {
+    while (mic_streaming && mic_monitoring) {
+        size_t sample_count = 0;
+        esp_err_t rc = fetch_mic_output(mic_output_buffer, mic_output_sample_capacity, &sample_count, true);
+        if (!mic_streaming || !mic_monitoring) break;
+        if (rc != ESP_OK) {
             continue;
-        }
-        const size_t sample_count = (size_t)result->data_size / sizeof(int16_t);
-        if (sample_count > mic_output_sample_capacity) {
-            ESP_LOGW(TAG, "mic output too large: %u samples", (unsigned)sample_count);
-            continue;
-        }
-        for (size_t i = 0; i < sample_count; i += 1) {
-            mic_output_buffer[i] = apply_monitor_gain(result->data[i]);
         }
         if (logged_frames < 3) {
             ESP_LOGI(TAG, "mic fetch output: %u samples", (unsigned)sample_count);
             logged_frames += 1;
         }
-        esp_err_t rc = szp_audio_write_i16(mic_output_buffer, sample_count);
+        rc = szp_audio_write_i16(mic_output_buffer, sample_count);
         if (rc != ESP_OK) {
             ESP_LOGW(TAG, "write mic output failed: %s", esp_err_to_name(rc));
         }
@@ -322,21 +382,22 @@ int szp_audio_mic_start(void)
 {
     ESP_RETURN_ON_ERROR(szp_audio_init(), TAG, "audio init");
     ESP_RETURN_ON_ERROR(init_afe(), TAG, "afe init");
-    if (mic_streaming) return ESP_OK;
+    if (mic_capture_streaming) return ESP_ERR_INVALID_STATE;
+    if (mic_streaming) {
+        return mic_monitoring ? ESP_OK : ESP_ERR_INVALID_STATE;
+    }
 
     if (afe_handle != NULL && afe_data != NULL) {
         afe_handle->reset_buffer(afe_data);
     }
     ESP_RETURN_ON_ERROR(szp_audio_set_pa(true), TAG, "enable pa");
     mic_streaming = true;
-    if (mic_feed_task == NULL &&
-        xTaskCreatePinnedToCore(mic_feed_task_fn, "chant_mic_feed", MIC_TASK_STACK_BYTES, NULL, MIC_FEED_TASK_PRIORITY, &mic_feed_task, 1) != pdPASS) {
-        mic_streaming = false;
-        return ESP_ERR_NO_MEM;
-    }
+    mic_monitoring = true;
+    ESP_RETURN_ON_ERROR(start_mic_feed_task(), TAG, "start mic feed task");
     if (mic_fetch_task == NULL &&
         xTaskCreatePinnedToCore(mic_fetch_task_fn, "chant_mic_fetch", MIC_TASK_STACK_BYTES, NULL, MIC_FETCH_TASK_PRIORITY, &mic_fetch_task, 1) != pdPASS) {
         mic_streaming = false;
+        mic_monitoring = false;
         if (afe_handle != NULL && afe_data != NULL) {
             afe_handle->reset_buffer(afe_data);
         }
@@ -349,16 +410,144 @@ int szp_audio_mic_start(void)
 
 int szp_audio_mic_process_frame(void)
 {
-    return mic_streaming ? ESP_OK : ESP_ERR_INVALID_STATE;
+    return (mic_streaming && mic_monitoring) ? ESP_OK : ESP_ERR_INVALID_STATE;
 }
 
 int szp_audio_mic_stop(void)
 {
     mic_streaming = false;
+    mic_monitoring = false;
     if (afe_handle != NULL && afe_data != NULL) {
         afe_handle->reset_buffer(afe_data);
     }
     wait_mic_tasks_stopped();
+    return ESP_OK;
+}
+
+int szp_audio_mic_capture_start(void)
+{
+    ESP_RETURN_ON_ERROR(szp_audio_init(), TAG, "audio init");
+    if (mic_streaming) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    mic_capture_streaming = true;
+    afe_feed_fill_count = 0;
+    raw_capture_log_count = 0;
+    ESP_LOGI(TAG, "raw mic capture started");
+    return ESP_OK;
+}
+
+int szp_audio_mic_read_i16(int16_t *mic0, int16_t *mic1, int16_t *ref, size_t sample_capacity, size_t *sample_count)
+{
+    if (sample_count != NULL) *sample_count = 0;
+    if (mic0 == NULL || mic1 == NULL || ref == NULL || sample_count == NULL) return ESP_ERR_INVALID_ARG;
+    if (!mic_capture_streaming || mic_streaming || !audio_ready) return ESP_ERR_INVALID_STATE;
+    if (sample_capacity == 0) return ESP_ERR_INVALID_SIZE;
+
+    const size_t requested = sample_capacity > MONO_CHUNK_SAMPLES ? MONO_CHUNK_SAMPLES : sample_capacity;
+    const size_t expected_bytes = requested * MIC_RX_CHANNELS * sizeof(int16_t);
+    size_t bytes_read = 0;
+    esp_err_t rc = i2s_channel_read(rx_chan, mic_raw_capture_buffer, expected_bytes, &bytes_read, pdMS_TO_TICKS(1000));
+    const size_t frames_read = bytes_read / (MIC_RX_CHANNELS * sizeof(int16_t));
+    if (frames_read == 0) return rc == ESP_OK ? ESP_ERR_TIMEOUT : rc;
+
+    int16_t peaks[MIC_RX_CHANNELS] = {0};
+    uint16_t saturations[MIC_RX_CHANNELS] = {0};
+
+    for (size_t i = 0; i < frames_read; i += 1) {
+        const int16_t raw_ref = mic_raw_capture_buffer[i * MIC_RX_CHANNELS];
+        const int16_t mic_a = mic_raw_capture_buffer[i * MIC_RX_CHANNELS + 1];
+        const int16_t mic_b = mic_raw_capture_buffer[i * MIC_RX_CHANNELS + 3];
+        if (raw_capture_log_count < 8) {
+            for (size_t lane = 0; lane < MIC_RX_CHANNELS; lane += 1) {
+                const int16_t sample = mic_raw_capture_buffer[i * MIC_RX_CHANNELS + lane];
+                const int16_t peak = peak_abs_i16(peaks[lane], sample);
+                peaks[lane] = peak;
+                if (peak_abs_i16(0, sample) >= TX_REF_SATURATION_THRESHOLD) {
+                    saturations[lane] += 1;
+                }
+            }
+        }
+        ref[i] = raw_ref;
+        mic0[i] = mic_a;
+        mic1[i] = mic_b;
+    }
+    if (raw_capture_log_count < 8) {
+        ESP_LOGI(TAG,
+                 "raw rx peaks: l0=%d sat=%u l1=%d sat=%u l2=%d sat=%u l3=%d sat=%u",
+                 peaks[0], saturations[0], peaks[1], saturations[1], peaks[2], saturations[2], peaks[3], saturations[3]);
+        raw_capture_log_count += 1;
+    }
+    *sample_count = frames_read;
+    if (rc != ESP_OK && frames_read < requested) {
+        ESP_LOGD(TAG, "raw mic partial read: %u/%u frames rc=%s", (unsigned)frames_read, (unsigned)requested, esp_err_to_name(rc));
+    }
+    return ESP_OK;
+}
+
+int szp_audio_afe_process_i16(
+    const int16_t *mic0,
+    const int16_t *mic1,
+    const int16_t *ref,
+    size_t sample_count,
+    int16_t *out,
+    size_t out_capacity,
+    size_t *out_count)
+{
+    if (out_count != NULL) *out_count = 0;
+    if (mic0 == NULL || mic1 == NULL || ref == NULL || out == NULL || out_count == NULL) return ESP_ERR_INVALID_ARG;
+    ESP_RETURN_ON_ERROR(init_afe(), TAG, "afe init");
+    if (sample_count == 0) return ESP_OK;
+
+    size_t produced = drain_pending_afe_output(out, out_capacity, 0);
+    for (size_t i = 0; i < sample_count; i += 1) {
+        const size_t feed_index = afe_feed_fill_count;
+        afe_feed_buffer[feed_index * AFE_CHANNELS] = mic0[i];
+        afe_feed_buffer[feed_index * AFE_CHANNELS + 1] = mic1[i];
+        afe_feed_buffer[feed_index * AFE_CHANNELS + 2] = ref[i];
+        afe_feed_fill_count += 1;
+
+        if (afe_feed_fill_count < mic_frame_count) continue;
+        afe_feed_fill_count = 0;
+
+        if (afe_handle->feed(afe_data, afe_feed_buffer) < 0) {
+            return ESP_FAIL;
+        }
+        afe_feed_since_fetch += mic_frame_count;
+        if (afe_feed_since_fetch < mic_output_sample_capacity) {
+            continue;
+        }
+        if (produced >= out_capacity) {
+            continue;
+        }
+
+        afe_fetch_result_t *result = afe_handle->fetch(afe_data);
+        if (result == NULL || result->ret_value != ESP_OK || result->data == NULL || result->data_size <= 0) {
+            continue;
+        }
+        afe_feed_since_fetch -= mic_output_sample_capacity;
+
+        const size_t n = (size_t)result->data_size / sizeof(int16_t);
+        if (n > mic_output_sample_capacity) return ESP_ERR_INVALID_SIZE;
+        for (size_t j = 0; j < n; j += 1) {
+            mic_output_buffer[j] = result->data[j];
+        }
+        afe_output_pending_offset = 0;
+        afe_output_pending_count = n;
+        produced = drain_pending_afe_output(out, out_capacity, produced);
+    }
+    *out_count = produced;
+    return ESP_OK;
+}
+
+int szp_audio_mic_capture_stop(void)
+{
+    mic_capture_streaming = false;
+    afe_feed_fill_count = 0;
+    afe_feed_since_fetch = 0;
+    afe_output_pending_offset = 0;
+    afe_output_pending_count = 0;
     return ESP_OK;
 }
 
