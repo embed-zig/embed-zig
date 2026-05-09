@@ -50,6 +50,8 @@ pub const SpecType = blk: {
         @embedFile("spec/user_stories/hold_5s_does_not_remain_at_3s_state.json"),
         @embedFile("spec/user_stories/hold_3s_fires_once_during_same_press.json"),
         @embedFile("spec/user_stories/hold_between_3s_and_5s_keeps_3s_state_without_flicker.json"),
+        @embedFile("spec/user_stories/marquee_hold_5s_stays_off_after_3s.json"),
+        @embedFile("spec/user_stories/marquee_raw_hold_3s_turns_off.json"),
         @embedFile("spec/user_stories/color_lerps_on_tick.json"),
         @embedFile("spec/user_stories/color_lerp_first_tick_has_midpoint.json"),
         @embedFile("spec/user_stories/color_lerp_second_tick_has_next_midpoint.json"),
@@ -67,10 +69,14 @@ pub const SpecType = blk: {
         @embedFile("spec/user_stories/marquee_lerp_first_tick_has_midpoint.json"),
         @embedFile("spec/user_stories/marquee_lerp_render_outputs_midpoint_to_strip.json"),
         @embedFile("spec/user_stories/marquee_lerp_does_not_skip_to_target.json"),
+        @embedFile("spec/user_stories/marquee_hold_after_5s_keeps_progress.json"),
         @embedFile("spec/user_stories/marquee_wait_less_than_10ms_no_lerp.json"),
-        @embedFile("spec/user_stories/marquee_close_to_red_targets_green.json"),
-        @embedFile("spec/user_stories/marquee_close_to_green_targets_blue.json"),
+        @embedFile("spec/user_stories/marquee_close_to_red_targets_yellow.json"),
+        @embedFile("spec/user_stories/marquee_red_to_yellow_lerps_after_loop_boundary.json"),
+        @embedFile("spec/user_stories/marquee_close_to_yellow_targets_blue.json"),
+        @embedFile("spec/user_stories/marquee_yellow_to_blue_lerps_after_loop_boundary.json"),
         @embedFile("spec/user_stories/marquee_close_to_blue_targets_red.json"),
+        @embedFile("spec/user_stories/marquee_blue_to_red_lerps_after_loop_boundary.json"),
         @embedFile("spec/user_stories/marquee_not_close_keeps_target.json"),
         @embedFile("spec/user_stories/marquee_reaches_target_finitely.json"),
         @embedFile("spec/user_stories/marquee_no_infinite_convergence.json"),
@@ -78,15 +84,18 @@ pub const SpecType = blk: {
     break :blk builder.build();
 };
 
-pub fn make(comptime platform_grt: type) type {
+pub fn make(comptime platform_ctx: type, comptime platform_grt: type) type {
+    _ = platform_ctx;
+    const assembler_config: zux.AssemblerConfig = .{};
     return launcher.make(struct {
         const Self = @This();
 
-        pub const ZuxApp = assemble(platform_grt);
-        pub const desktop = .{
-            .title = "button-ledstrip",
-            .description = "Single Power button driving a Zux LED strip user story.",
+        pub const ZuxApp = blk: {
+            var spec = SpecType.init();
+            break :blk spec.buildApp(platform_grt, assembler_config);
         };
+        pub const title = "button-ledstrip";
+        pub const description = "Single Power button driving a Zux LED strip user story.";
 
         allocator: glib.std.mem.Allocator,
         zux_app: ZuxApp,
@@ -161,7 +170,7 @@ pub fn make(comptime platform_grt: type) type {
 }
 
 pub fn run(comptime platform_ctx: type, comptime platform_grt: type) !void {
-    const Launcher = make(platform_grt);
+    const Launcher = make(platform_ctx, platform_grt);
 
     try platform_ctx.setup();
     defer platform_ctx.teardown();
@@ -171,12 +180,4 @@ pub fn run(comptime platform_ctx: type, comptime platform_grt: type) !void {
 
     t.run("button-ledstrip/stories", Launcher.createTestRunner());
     if (!t.wait()) return error.TestFailed;
-}
-
-fn assemble(comptime platform_grt: type) type {
-    const assembler_config: zux.AssemblerConfig = .{};
-    return comptime blk: {
-        var spec = SpecType.init();
-        break :blk spec.buildApp(platform_grt, assembler_config);
-    };
 }

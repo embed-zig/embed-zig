@@ -1,0 +1,6 @@
+name: []const u8 = "mbedz",
+description: []const u8 = "",
+vendor: []const u8 = "",
+model: []const u8 = "",
+chip: []const u8 = "",
+revision: []const u8 = "",

@@ -1,17 +1,10 @@
-const glib = @import("glib");
 const NodeBuilder = @import("../pipeline/NodeBuilder.zig");
-const Poller = @import("../pipeline/Poller.zig");
 const Store = @import("../Store.zig");
 
 const root = @This();
 
 store: Store.BuilderOptions = .{},
 node: NodeBuilder.BuilderOptions = .{},
-pipeline: struct {
-    tick_interval: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond,
-    spawn_config: glib.std.Thread.SpawnConfig = .{},
-} = .{},
-poller: Poller.Config = .{},
 max_adc_buttons: usize = 16,
 max_gpio_buttons: usize = 16,
 max_imu: usize = 8,

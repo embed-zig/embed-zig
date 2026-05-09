@@ -25,6 +25,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize) type {
         interval: glib.time.duration.Duration = 0,
         /// Cross-fade duration toward each keyframe for multi-frame modes.
         duration: glib.time.duration.Duration = 0,
+        tick_interval: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond,
         /// `Pipeline` tick sequence when the strip became stationary at `current_frame`
         /// (`glib.std.math.maxInt(u64)` while transitioning).
         rest_started_seq: u64 = glib.std.math.maxInt(u64),

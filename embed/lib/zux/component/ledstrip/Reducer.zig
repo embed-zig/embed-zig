@@ -4,13 +4,10 @@ const Message = @import("../../pipeline/Message.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const state_mod = @import("State.zig");
 
-pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interval: glib.time.duration.Duration) type {
+pub fn make(comptime n: usize, comptime max_frames: usize) type {
     comptime {
         if (max_frames == 0) {
             @compileError("zux.ledstrip.Reducer.make requires max_frames > 0");
-        }
-        if (tick_interval <= 0) {
-            @compileError("zux.ledstrip.Reducer.make requires tick_interval > 0");
         }
     }
 
@@ -86,7 +83,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
                     state.step_amount = computeStepAmount(
                         state.current,
                         targetForFrame(state, 0),
-                        durationToTransitionTicks(event.duration),
+                        durationToTransitionTicks(state, event.duration),
                     );
                     return true;
                 },
@@ -106,7 +103,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
                     state.step_amount = computeStepAmount(
                         state.current,
                         targetForFrame(state, 0),
-                        durationToTransitionTicks(event.duration),
+                        durationToTransitionTicks(state, event.duration),
                     );
                     return true;
                 },
@@ -127,7 +124,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
                     state.step_amount = computeStepAmount(
                         state.current,
                         targetForFrame(state, 0),
-                        durationToTransitionTicks(event.duration),
+                        durationToTransitionTicks(state, event.duration),
                     );
                     return true;
                 },
@@ -152,7 +149,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
                 return true;
             }
 
-            const need = intervalHoldTicks(state.interval);
+            const need = intervalHoldTicks(state, state.interval);
 
             if (state.rest_started_seq == glib.std.math.maxInt(u64)) {
                 state.rest_started_seq = seq;
@@ -177,7 +174,7 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
             state.step_amount = computeStepAmount(
                 state.current,
                 targetForFrame(state, state.current_frame),
-                durationToTransitionTicks(state.duration),
+                durationToTransitionTicks(state, state.duration),
             );
         }
 
@@ -185,10 +182,12 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
             const current = state.current;
             const brightness = state.brightness;
             const step_amount = state.step_amount;
+            const tick_interval = state.tick_interval;
             state.* = .{};
             state.current = current;
             state.brightness = brightness;
             state.step_amount = step_amount;
+            state.tick_interval = tick_interval;
         }
 
         fn currentState(store: anytype) State {
@@ -218,14 +217,18 @@ pub fn make(comptime n: usize, comptime max_frames: usize, comptime tick_interva
             return target;
         }
 
-        fn durationToTransitionTicks(duration: glib.time.duration.Duration) u32 {
+        fn durationToTransitionTicks(state: *const State, duration: glib.time.duration.Duration) u32 {
             if (duration <= 0) return 1;
+            if (state.tick_interval <= 0) return 1;
+            const tick_interval = state.tick_interval;
             const ticks = (@as(u128, @intCast(duration)) + @as(u128, @intCast(tick_interval)) - 1) / @as(u128, @intCast(tick_interval));
             return @max(1, @as(u32, @intCast(@min(ticks, @as(u128, glib.std.math.maxInt(u32))))));
         }
 
-        fn intervalHoldTicks(interval: glib.time.duration.Duration) u32 {
+        fn intervalHoldTicks(state: *const State, interval: glib.time.duration.Duration) u32 {
             if (interval <= 0) return 0;
+            if (state.tick_interval <= 0) return 0;
+            const tick_interval = state.tick_interval;
             const ticks = (@as(u128, @intCast(interval)) + @as(u128, @intCast(tick_interval)) - 1) / @as(u128, @intCast(tick_interval));
             return @as(u32, @intCast(@min(ticks, @as(u128, glib.std.math.maxInt(u32)))));
         }

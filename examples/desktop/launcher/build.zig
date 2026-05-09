@@ -4,6 +4,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const app_name = b.option([]const u8, "app", "App module exported by the apps package") orelse "zux_button-ledstrip";
+    const port = b.option(u16, "port", "HTTP port for the desktop launcher") orelse 8080;
 
     const apps_dep = b.dependency("apps", .{
         .target = target,
@@ -23,11 +24,13 @@ pub fn build(b: *std.Build) void {
     });
     const selected_app = apps_dep.module(app_name);
 
-    const generated_main = createMainSource(b, app_name);
     const generated_test = createTestSource(b);
+    const launcher_config = b.addOptions();
+    launcher_config.addOption([]const u8, "app_name", app_name);
+    launcher_config.addOption(u16, "port", port);
 
     const exe_mod = b.createModule(.{
-        .root_source_file = generated_main,
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
@@ -36,6 +39,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "selected_app", .module = selected_app },
         },
     });
+    exe_mod.addOptions("desktop_launcher_config", launcher_config);
 
     const exe = b.addExecutable(.{
         .name = "desktop_launcher",
@@ -73,43 +77,6 @@ pub fn build(b: *std.Build) void {
     b.default_step = build_step;
 }
 
-fn createMainSource(b: *std.Build, app_name: []const u8) std.Build.LazyPath {
-    const write_files = b.addWriteFiles();
-    return write_files.add("desktop_launcher_main.zig", b.fmt(
-        \\const std = @import("std");
-        \\const desktop = @import("desktop");
-        \\const gstd = @import("gstd");
-        \\const selected_app = @import("selected_app");
-        \\
-        \\pub fn main() void {{
-        \\    run() catch |err| {{
-        \\        std.log.err("desktop app '{f}' failed: {{s}}", .{{@errorName(err)}});
-        \\        std.process.exit(1);
-        \\    }};
-        \\}}
-        \\
-        \\fn run() !void {{
-        \\    const Launcher = selected_app.make(gstd.runtime);
-        \\    const DesktopApp = desktop.App.make(Launcher);
-        \\
-        \\    var gpa: std.heap.GeneralPurposeAllocator(.{{}}) = .{{}};
-        \\    defer _ = gpa.deinit();
-        \\
-        \\    var app = try DesktopApp.init(gpa.allocator(), .{{
-        \\        .address = desktop.http.AddrPort.from4(.{{ 127, 0, 0, 1 }}, 8080),
-        \\    }});
-        \\    defer app.deinit();
-        \\
-        \\    std.log.info("desktop app '{f}' listening on http://127.0.0.1:8080", .{{}});
-        \\    try app.listenAndServe();
-        \\}}
-        \\
-    , .{
-        std.zig.fmtString(app_name),
-        std.zig.fmtString(app_name),
-    }));
-}
-
 fn createTestSource(b: *std.Build) std.Build.LazyPath {
     const write_files = b.addWriteFiles();
     return write_files.add("desktop_launcher_test.zig",
@@ -117,8 +84,10 @@ fn createTestSource(b: *std.Build) std.Build.LazyPath {
         \\const gstd = @import("gstd");
         \\const selected_app = @import("selected_app");
         \\
+        \\const PlatformCtx = struct {};
+        \\
         \\test "desktop launcher selected app" {
-        \\    const Launcher = selected_app.make(gstd.runtime);
+        \\    const Launcher = selected_app.make(PlatformCtx, gstd.runtime);
         \\
         \\    var t = glib.testing.T.new(gstd.runtime.std, gstd.runtime.time, .desktop_launcher);
         \\    defer t.deinit();

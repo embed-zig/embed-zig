@@ -1,8 +1,8 @@
 {
   "kind": "UserStory",
   "spec": {
-    "name": "marquee close to red targets green",
-    "description": "When marquee is close to red, the next 10ms tick targets green.",
+    "name": "marquee close to red targets yellow",
+    "description": "When marquee reaches red, the next 10ms tick targets yellow.",
     "initial_state": {
       "button": {},
       "strip": {},
@@ -41,11 +41,11 @@
             "label": "scene",
             "state": {
               "mode": "marquee",
-              "target_color_name": "green",
-              "target_color": 65280,
+              "target_color_name": "yellow",
+              "target_color": 16776960,
               "visible_color": 16711680,
               "transitioning": true,
-              "marquee_stage": "green"
+              "marquee_stage": "yellow"
             }
           }
         ]

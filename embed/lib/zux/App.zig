@@ -8,24 +8,17 @@ const event_mod = @import("event.zig");
 const EmitterType = @import("pipeline/Emitter.zig");
 const MessageType = @import("pipeline/Message.zig");
 const NodeType = @import("pipeline/Node.zig");
-const Poller = @import("pipeline/Poller.zig");
 const SubscriberType = @import("store/Subscriber.zig");
 
 const root = @This();
 
-pub const Ticker = union(enum) {
-    interval: glib.time.duration.Duration,
+pub const Ticker = enum {
+    automatic,
     manual,
 };
 
-pub const PollerStart = union(enum) {
-    default,
-    config: Poller.Config,
-};
-
 pub const StartConfig = struct {
-    ticker: ?Ticker = .{ .interval = 10 * glib.time.duration.MilliSecond },
-    poller: PollerStart = .default,
+    ticker: Ticker = .automatic,
 };
 
 pub fn make(comptime Impl: type) type {

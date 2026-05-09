@@ -2,7 +2,7 @@
   "kind": "UserStory",
   "spec": {
     "name": "marquee reaches target finitely",
-    "description": "Repeated marquee ticks reach the current target in finite time and switch to the next target.",
+    "description": "A marquee tick that reaches the current target switches to the next target color immediately.",
     "initial_state": {
       "button": {},
       "strip": {},
@@ -10,7 +10,7 @@
         "mode": "marquee",
         "target_color_name": "red",
         "target_color": 16711680,
-        "visible_color": 0,
+        "visible_color": 16646144,
         "transitioning": true,
         "marquee_stage": "red"
       }
@@ -24,7 +24,7 @@
               "mode": "marquee",
               "target_color_name": "red",
               "target_color": 16711680,
-              "visible_color": 0,
+              "visible_color": 16646144,
               "transitioning": true,
               "marquee_stage": "red"
             }
@@ -34,18 +34,18 @@
       {
         "tick": {
           "interval": 10000000,
-          "n": 53
+          "n": 1
         },
         "outputs": [
           {
             "label": "scene",
             "state": {
               "mode": "marquee",
-              "target_color_name": "green",
-              "target_color": 65280,
+              "target_color_name": "yellow",
+              "target_color": 16776960,
               "visible_color": 16711680,
               "transitioning": true,
-              "marquee_stage": "green"
+              "marquee_stage": "yellow"
             }
           }
         ]

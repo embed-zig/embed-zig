@@ -2,7 +2,7 @@
   "kind": "UserStory",
   "spec": {
     "name": "marquee no infinite convergence",
-    "description": "Repeated marquee ticks do not get stuck forever before switching target colors.",
+    "description": "Repeated marquee ticks expose every red-channel step and do not get stuck before switching target colors.",
     "initial_state": {
       "button": {},
       "strip": {},
@@ -32,20 +32,225 @@
         ]
       },
       {
-        "tick": {
-          "interval": 10000000,
-          "n": 53
-        },
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 1048576, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 2031616, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 2949120, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 3866624, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 4718592, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 5505024, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 6225920, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 6881280, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 7536640, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 8126464, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 8716288, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 9240576, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 9764864, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 10223616, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 10682368, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 11075584, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 11468800, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 11796480, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 12124160, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 12451840, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 12779520, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 13041664, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 13303808, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 13565952, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 13762560, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 13959168, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 14155776, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 14352384, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 14548992, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 14745600, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 14876672, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 15007744, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 15138816, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 15269888, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 15400960, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 15532032, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 15663104, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 15728640, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 15794176, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 15859712, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 15925248, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 15990784, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 16056320, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 16121856, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 16187392, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 16252928, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 16318464, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 16384000, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 16449536, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 16515072, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 16580608, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
+        "outputs": [{ "label": "scene", "state": { "visible_color": 16646144, "transitioning": true } }]
+      },
+      {
+        "tick": { "interval": 10000000, "n": 1 },
         "outputs": [
           {
             "label": "scene",
             "state": {
               "mode": "marquee",
-              "target_color_name": "green",
-              "target_color": 65280,
+              "target_color_name": "yellow",
+              "target_color": 16776960,
               "visible_color": 16711680,
               "transitioning": true,
-              "marquee_stage": "green"
+              "marquee_stage": "yellow"
             }
           }
         ]

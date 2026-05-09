@@ -10,10 +10,15 @@
 - 在 LED 灯带当前熄灭的情况下，用户长按 `Power` 3 秒，LED 灯带点亮为白色。
 - 在 LED 灯带当前目标颜色为白色的情况下，用户按一下 `Power`，LED 灯带目标颜色切换为红色。
 - 在 LED 灯带颜色切换的情况下，颜色不会立刻跳变，而是在后续节拍中逐步向目标颜色插值。
+- 在 LED 灯带已经处于跑马灯状态的情况下，用户长按 `Power`，LED 灯带会在第 3 秒熄灭，并且同一次长按到第 5 秒时也不会重新进入跑马灯状态。
 - 在任意状态下，用户长按 `Power` 5 秒，LED 灯带进入跑马灯状态。
 - 在 LED 灯带当前亮着的情况下，用户持续按住 `Power` 5 秒，LED 灯带在第 3 秒先熄灭，并在第 5 秒进入跑马灯状态。
 - 在 LED 灯带当前熄灭的情况下，用户持续按住 `Power` 5 秒，LED 灯带在第 3 秒先点亮为白色，并在第 5 秒进入跑马灯状态。
-- 在 LED 灯带处于跑马灯状态且存在预期颜色的情况下，用户等待 10ms，LED 灯带沿着当前颜色向预期颜色插值一次；当当前颜色非常接近预期颜色时，LED 灯带按红色、绿色、蓝色的顺序切换到下一个预期颜色并继续插值。
+- 在 LED 灯带处于跑马灯状态且存在预期颜色的情况下，用户等待 10ms，LED 灯带沿着当前颜色向预期颜色插值一次；当当前颜色到达预期颜色时，LED 灯带按红色、黄色、蓝色的顺序切换到下一个预期颜色并继续插值。
+- 在 LED 灯带因为 5 秒长按进入跑马灯状态后，同一次仍然按住产生的后续长按事件不会重置当前跑马灯颜色进度。
+- 在 LED 灯带刚从红色跑马灯阶段循环到黄色跑马灯阶段后，下一次 10ms 节拍会经过橙色中间值，而不是直接跳到黄色。
+- 在 LED 灯带刚从黄色跑马灯阶段循环到蓝色跑马灯阶段后，下一次 10ms 节拍会经过中间值，而不是直接跳到蓝色。
+- 在 LED 灯带刚从蓝色跑马灯阶段循环到红色跑马灯阶段后，下一次 10ms 节拍会经过紫色中间值，而不是直接跳到红色。
 
 ## Converage User Stoires
 
@@ -56,6 +61,8 @@
 - `hold_5s_does_not_remain_at_3s_state`：负向：在任意状态下，用户持续按住 `Power` 5 秒后，LED 灯带不会停留在第 3 秒触发的熄灭或白色状态。
 - `hold_3s_fires_once_during_same_press`：负向：在用户持续按住 `Power` 且本次按住已经第一次超过 3 秒的情况下，后续仍然保持按住但尚未到 5 秒时，3 秒长按动作不会在同一次按住过程中重复触发。
 - `hold_between_3s_and_5s_keeps_3s_state_without_flicker`：负向：在用户持续按住 `Power` 超过 3 秒但尚未到 5 秒的情况下，LED 灯带保持第 3 秒触发后的状态，不会在熄灭和点亮之间反复切换或闪烁。
+- `marquee_hold_5s_stays_off_after_3s`：负向：在用户从跑马灯状态开始长按 `Power` 的情况下，LED 灯带在第 3 秒熄灭，并且同一次长按到第 5 秒时不会重新进入跑马灯状态。
+- `marquee_raw_hold_3s_turns_off`：正向：在跑马灯已经开启的情况下，用户按住底层 `Power` 按钮 3 秒会产生长按手势，并通过 desktop 和设备运行时相同的路径让 LED 灯带熄灭。
 - `color_lerps_on_tick`：正向：在 LED 灯带从当前颜色切换到目标颜色的情况下，用户等待一个后续节拍，LED 灯带向目标颜色插值一次。
 - `color_lerp_first_tick_has_midpoint`：正向：在 LED 灯带实际显示颜色为红色、目标颜色为蓝色且正在切换的情况下，用户等待 10ms，LED 灯带的实际显示颜色向蓝色推进一个较小的中间步进，而不是仍然保持红色或直接变成蓝色。
 - `color_lerp_second_tick_has_next_midpoint`：正向：在 LED 灯带已经从红色向蓝色插值过一次且尚未到达蓝色的情况下，用户再等待 10ms，LED 灯带继续向蓝色推进到下一个较小的中间步进。
@@ -73,10 +80,14 @@
 - `marquee_lerp_first_tick_has_midpoint`：正向：在 LED 灯带处于跑马灯状态、实际显示颜色为黑色、预期颜色为红色的情况下，用户等待 10ms，LED 灯带向红色推进一个较小的中间步进。
 - `marquee_lerp_render_outputs_midpoint_to_strip`：正向：在跑马灯状态下 `visible_color` 已经通过一次 10ms 节拍推进到较小的中间步进的情况下，渲染逻辑会把这个中间颜色输出到实际 LED 灯带像素。
 - `marquee_lerp_does_not_skip_to_target`：负向：在跑马灯状态下 LED 灯带从黑色向红色插值并发生第一次渲染的情况下，实际 LED 灯带像素不会跳过中间颜色直接显示红色。
+- `marquee_hold_after_5s_keeps_progress`：负向：在 LED 灯带因为 5 秒长按进入跑马灯状态并已经推进了显示颜色后，同一次仍然按住产生的后续长按事件不会把显示颜色重置回红色过渡的起点。
 - `marquee_wait_less_than_10ms_no_lerp`：负向：在 LED 灯带处于跑马灯状态且存在预期颜色的情况下，用户等待不足 10ms，LED 灯带不会进行本次插值。
-- `marquee_close_to_red_targets_green`：正向：在 LED 灯带处于跑马灯状态且当前颜色非常接近红色的情况下，用户等待下一次 10ms 节拍，LED 灯带将预期颜色切换为绿色并继续插值。
-- `marquee_close_to_green_targets_blue`：正向：在 LED 灯带处于跑马灯状态且当前颜色非常接近绿色的情况下，用户等待下一次 10ms 节拍，LED 灯带将预期颜色切换为蓝色并继续插值。
+- `marquee_close_to_red_targets_yellow`：正向：在 LED 灯带处于跑马灯状态且当前颜色已经到达红色的情况下，用户等待下一次 10ms 节拍，LED 灯带将预期颜色切换为黄色并继续插值。
+- `marquee_red_to_yellow_lerps_after_loop_boundary`：正向：在 LED 灯带处于跑马灯状态并刚从红色重新指向黄色的情况下，用户等待下一次 10ms 节拍，显示颜色会推进到橙色中间值，渲染也会输出这个中间值，而不是直接跳到黄色。
+- `marquee_close_to_yellow_targets_blue`：正向：在 LED 灯带处于跑马灯状态且当前颜色已经到达黄色的情况下，用户等待下一次 10ms 节拍，LED 灯带将预期颜色切换为蓝色并继续插值。
+- `marquee_yellow_to_blue_lerps_after_loop_boundary`：正向：在 LED 灯带处于跑马灯状态并刚从黄色重新指向蓝色的情况下，用户等待下一次 10ms 节拍，显示颜色会推进到中间值，渲染也会输出这个中间值，而不是直接跳到蓝色。
 - `marquee_close_to_blue_targets_red`：正向：在 LED 灯带处于跑马灯状态且当前颜色非常接近蓝色的情况下，用户等待下一次 10ms 节拍，LED 灯带将预期颜色切换为红色并继续插值。
+- `marquee_blue_to_red_lerps_after_loop_boundary`：正向：在 LED 灯带处于跑马灯状态并刚从蓝色重新指向红色的情况下，用户等待下一次 10ms 节拍，显示颜色会推进到紫色中间值，而不是直接跳到红色。
 - `marquee_not_close_keeps_target`：负向：在 LED 灯带处于跑马灯状态但当前颜色还没有接近预期颜色的情况下，用户等待下一次 10ms 节拍，LED 灯带不会切换到下一个预期颜色。
 - `marquee_reaches_target_finitely`：正向：在 LED 灯带向预期颜色插值的情况下，用户持续等待节拍，LED 灯带会在有限节拍内到达预期颜色并切换到下一个预期颜色。
 - `marquee_no_infinite_convergence`：负向：在 LED 灯带向预期颜色插值的情况下，用户持续等待节拍，LED 灯带不会因为无限逼近而永远无法切换到下一个预期颜色。

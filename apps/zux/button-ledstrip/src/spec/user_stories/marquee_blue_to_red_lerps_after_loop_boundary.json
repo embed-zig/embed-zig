@@ -1,0 +1,40 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "marquee blue to red lerps after loop boundary",
+    "description": "After marquee retargets from blue to red, the next 10ms tick lerps through a purple midpoint instead of jumping to red.",
+    "initial_state": {
+      "button": {},
+      "strip": {},
+      "scene": {
+        "mode": "marquee",
+        "target_color_name": "red",
+        "target_color": 16711680,
+        "visible_color": 255,
+        "transitioning": true,
+        "marquee_stage": "red"
+      }
+    },
+    "steps": [
+      {
+        "tick": {
+          "interval": 10000000,
+          "n": 1
+        },
+        "outputs": [
+          {
+            "label": "scene",
+            "state": {
+              "mode": "marquee",
+              "target_color_name": "red",
+              "target_color": 16711680,
+              "visible_color": 1048815,
+              "transitioning": true,
+              "marquee_stage": "red"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

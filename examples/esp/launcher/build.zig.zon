@@ -1,0 +1,25 @@
+.{
+    .name = .esp_launcher,
+    .version = "0.1.0",
+    .fingerprint = 0xe9f808c69ce5c3e0,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .esp = .{
+            .path = "../../../esp",
+        },
+        .embed = .{
+            .path = "../../../embed",
+        },
+        .apps = .{
+            .path = "../../../apps",
+        },
+        .esp_boards = .{
+            .path = "../boards",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

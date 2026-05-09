@@ -4,6 +4,8 @@ const Emitter = @import("Emitter.zig");
 const Message = @import("Message.zig");
 const Node = @import("Node.zig");
 
+const pipeline_mod = @This();
+
 pub fn Config(comptime grt: type) type {
     return struct {
         tick_interval: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond,
@@ -11,22 +13,17 @@ pub fn Config(comptime grt: type) type {
     };
 }
 
-pub fn make(comptime grt: type, comptime config: Config(grt)) type {
-    comptime {
-        if (config.tick_interval <= 0) {
-            @compileError("zux.pipeline.Pipeline.Config.tick_interval must be > 0");
-        }
-    }
-
+pub fn make(comptime grt: type) type {
     return struct {
         const Self = @This();
 
+        pub const Config = pipeline_mod.Config(grt);
         pub const MessageChannel = grt.sync.Channel(Message);
         pub const Allocator = glib.std.mem.Allocator;
         pub const Worker = grt.std.Thread;
         pub const default_capacity: usize = 64;
         pub const default_poll_timeout: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond;
-        pub const pipeline_config = config;
+        pub const default_config: Self.Config = .{};
         const BoolAtomic = grt.std.atomic.Value(bool);
         const PollerList = grt.std.ArrayList(PollWorker);
         const ReceiverList = grt.std.ArrayList(ReceiverBinding);
@@ -54,6 +51,7 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
         };
 
         allocator: Allocator,
+        config: Self.Config,
         outbound: ?Emitter = null,
         inbox: MessageChannel,
         driver_thread: ?Worker = null,
@@ -64,12 +62,15 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
         receivers: ReceiverList = .empty,
 
         stopping: BoolAtomic = BoolAtomic.init(false),
-        tick_interval: glib.time.duration.Duration = config.tick_interval,
+        tick_interval: glib.time.duration.Duration = default_config.tick_interval,
         tick_seq: u64 = 0,
 
-        pub fn init(allocator: Allocator) !Self {
+        pub fn init(allocator: Allocator, config: Self.Config) !Self {
+            if (config.tick_interval <= 0) return error.InvalidConfig;
+
             return .{
                 .allocator = allocator,
+                .config = config,
                 .outbound = null,
                 .inbox = try MessageChannel.make(allocator, default_capacity),
                 .tick_interval = config.tick_interval,
@@ -112,7 +113,7 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
 
             try self.pollers.ensureUnusedCapacity(self.allocator, 1);
 
-            const thread = try Worker.spawn(config.spawn_config, struct {
+            const thread = try Worker.spawn(self.config.spawn_config, struct {
                 fn run(pipeline: *Self, src: *Source) void {
                     pipeline.pollLoop(Source, src) catch |err| Self.reportAsyncFailure("poll worker failed", err);
                 }
@@ -162,7 +163,7 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
         pub fn start(self: *Self) !void {
             if (self.driver_thread != null or self.tick_thread != null) return;
             if (self.outbound == null) return error.OutputNotBound;
-            self.driver_thread = try Worker.spawn(config.spawn_config, struct {
+            self.driver_thread = try Worker.spawn(self.config.spawn_config, struct {
                 fn run(pipeline: *Self) void {
                     pipeline.driveLoop() catch |err| Self.reportAsyncFailure("driver thread failed", err);
                 }
@@ -175,7 +176,7 @@ pub fn make(comptime grt: type, comptime config: Config(grt)) type {
                 }
             }
 
-            self.tick_thread = try Worker.spawn(config.spawn_config, struct {
+            self.tick_thread = try Worker.spawn(self.config.spawn_config, struct {
                 fn run(pipeline: *Self) void {
                     pipeline.tickLoop() catch |err| Self.reportAsyncFailure("tick thread failed", err);
                 }
@@ -283,7 +284,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
     const TestCase = struct {
         fn pollFromDrivesRootAndStopsCleanly(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt, .{});
+            const TestPipeline = make(grt);
             const AtomicU32 = HarnessLib.atomic.Value(u32);
 
             const RootImpl = struct {
@@ -338,10 +339,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             var root_impl = RootImpl{};
-            const root = Node.init(RootImpl, &root_impl);
-            var pipeline = try TestPipeline.init(allocator);
+            const root_node = Node.init(RootImpl, &root_impl);
+            var pipeline = try TestPipeline.init(allocator, .{});
             defer pipeline.deinit();
-            pipeline.bindOutput(root.in);
+            pipeline.bindOutput(root_node.in);
 
             try pipeline.start();
 
@@ -367,18 +368,24 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn startRequiresBoundOutput(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt, .{});
+            const TestPipeline = make(grt);
 
-            var pipeline = try TestPipeline.init(allocator);
+            var pipeline = try TestPipeline.init(allocator, .{});
             defer pipeline.deinit();
 
             try grt.std.testing.expectError(error.OutputNotBound, pipeline.start());
         }
 
+        fn initRejectsNonPositiveTickInterval(allocator: glib.std.mem.Allocator) !void {
+            const TestPipeline = make(grt);
+
+            try grt.std.testing.expectError(error.InvalidConfig, TestPipeline.init(allocator, .{
+                .tick_interval = 0,
+            }));
+        }
+
         fn startEmitsTickMessages(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt, .{
-                .tick_interval = grt.time.duration.MilliSecond,
-            });
+            const TestPipeline = make(grt);
             const AtomicU32 = HarnessLib.atomic.Value(u32);
             const AtomicU8 = HarnessLib.atomic.Value(u8);
 
@@ -401,10 +408,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             var root_impl = RootImpl{};
-            const root = Node.init(RootImpl, &root_impl);
-            var pipeline = try TestPipeline.init(allocator);
+            const root_node = Node.init(RootImpl, &root_impl);
+            var pipeline = try TestPipeline.init(allocator, .{
+                .tick_interval = grt.time.duration.MilliSecond,
+            });
             defer pipeline.deinit();
-            pipeline.bindOutput(root.in);
+            pipeline.bindOutput(root_node.in);
 
             try pipeline.start();
 
@@ -421,9 +430,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn manualTickInjectsTickMessage(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt, .{
-                .tick_interval = 100 * grt.time.duration.MilliSecond,
-            });
+            const TestPipeline = make(grt);
             const AtomicU32 = HarnessLib.atomic.Value(u32);
 
             const RootImpl = struct {
@@ -443,10 +450,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             var root_impl = RootImpl{};
-            const root = Node.init(RootImpl, &root_impl);
-            var pipeline = try TestPipeline.init(allocator);
+            const root_node = Node.init(RootImpl, &root_impl);
+            var pipeline = try TestPipeline.init(allocator, .{
+                .tick_interval = 100 * grt.time.duration.MilliSecond,
+            });
             defer pipeline.deinit();
-            pipeline.bindOutput(root.in);
+            pipeline.bindOutput(root_node.in);
 
             try pipeline.start();
             try pipeline.tick();
@@ -463,9 +472,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn manualEmitWrapsBodyWithManualOrigin(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt, .{
-                .tick_interval = 100 * grt.time.duration.MilliSecond,
-            });
+            const TestPipeline = make(grt);
             const AtomicU8 = HarnessLib.atomic.Value(u8);
             const AtomicU32 = HarnessLib.atomic.Value(u32);
 
@@ -488,10 +495,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             var root_impl = RootImpl{};
-            const root = Node.init(RootImpl, &root_impl);
-            var pipeline = try TestPipeline.init(allocator);
+            const root_node = Node.init(RootImpl, &root_impl);
+            var pipeline = try TestPipeline.init(allocator, .{
+                .tick_interval = 100 * grt.time.duration.MilliSecond,
+            });
             defer pipeline.deinit();
-            pipeline.bindOutput(root.in);
+            pipeline.bindOutput(root_node.in);
 
             try pipeline.start();
             try pipeline.emit(.{
@@ -514,9 +523,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn hookOnForwardsCallbackBodiesAndUnsetsReceiverOnStop(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt, .{
-                .tick_interval = 100 * grt.time.duration.MilliSecond,
-            });
+            const TestPipeline = make(grt);
             const AtomicU8 = HarnessLib.atomic.Value(u8);
             const AtomicU32 = HarnessLib.atomic.Value(u32);
 
@@ -557,10 +564,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             var root_impl = RootImpl{};
-            const root = Node.init(RootImpl, &root_impl);
-            var pipeline = try TestPipeline.init(allocator);
+            const root_node = Node.init(RootImpl, &root_impl);
+            var pipeline = try TestPipeline.init(allocator, .{
+                .tick_interval = 100 * grt.time.duration.MilliSecond,
+            });
             defer pipeline.deinit();
-            pipeline.bindOutput(root.in);
+            pipeline.bindOutput(root_node.in);
 
             var source = Source{};
             try pipeline.hookOn(Source, &source);
@@ -600,6 +609,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             inline for (.{
                 TestCase.pollFromDrivesRootAndStopsCleanly,
                 TestCase.startRequiresBoundOutput,
+                TestCase.initRejectsNonPositiveTickInterval,
                 TestCase.startEmitsTickMessages,
                 TestCase.manualTickInjectsTickMessage,
                 TestCase.manualEmitWrapsBodyWithManualOrigin,

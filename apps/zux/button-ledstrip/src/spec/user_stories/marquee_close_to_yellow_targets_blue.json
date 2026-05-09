@@ -1,18 +1,18 @@
 {
   "kind": "UserStory",
   "spec": {
-    "name": "marquee close to green targets blue",
-    "description": "When marquee is close to green, the next 10ms tick targets blue.",
+    "name": "marquee close to yellow targets blue",
+    "description": "When marquee reaches yellow, the next 10ms tick targets blue.",
     "initial_state": {
       "button": {},
       "strip": {},
       "scene": {
         "mode": "marquee",
-        "target_color_name": "green",
-        "target_color": 65280,
-        "visible_color": 65280,
+        "target_color_name": "yellow",
+        "target_color": 16776960,
+        "visible_color": 16776960,
         "transitioning": false,
-        "marquee_stage": "green"
+        "marquee_stage": "yellow"
       }
     },
     "steps": [
@@ -22,11 +22,11 @@
             "label": "scene",
             "state": {
               "mode": "marquee",
-              "target_color_name": "green",
-              "target_color": 65280,
-              "visible_color": 65280,
+              "target_color_name": "yellow",
+              "target_color": 16776960,
+              "visible_color": 16776960,
               "transitioning": false,
-              "marquee_stage": "green"
+              "marquee_stage": "yellow"
             }
           }
         ]
@@ -43,7 +43,7 @@
               "mode": "marquee",
               "target_color_name": "blue",
               "target_color": 255,
-              "visible_color": 65280,
+              "visible_color": 16776960,
               "transitioning": true,
               "marquee_stage": "blue"
             }

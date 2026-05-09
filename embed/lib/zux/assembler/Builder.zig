@@ -251,14 +251,6 @@ pub fn build(builder: root, comptime context: anytype) type {
     const runtime_poller_count = totalPollerCount(context.registries);
     const ledstrip_pixel_count = ledStripPixelCount(ledstrip_registry);
     const ledstrip_frame_capacity = ledStripFrameCapacity(ledstrip_registry);
-    const runtime_pipeline_config: Pipeline.Config(context.grt) = .{
-        .tick_interval = context.assembler_config.pipeline.tick_interval,
-        .spawn_config = adaptSpawnConfig(
-            context.grt.std.Thread.SpawnConfig,
-            context.assembler_config.pipeline.spawn_config,
-        ),
-    };
-
     const runtime_store_builder = makeRuntimeStoreBuilder(context);
     const StoreType = runtime_store_builder.make(context.grt);
     const GeneratedInitialState = makeInitialStateType(StoreType.Stores);
@@ -281,7 +273,6 @@ pub fn build(builder: root, comptime context: anytype) type {
     const GeneratedSelectionLabel = makeSingleRegistryLabelEnum(selection_registry);
     const periph_ids = makePeriphIdTable(context.registries);
     const periph_kinds = makePeriphKindTable(context.registries);
-    const runtime_poller_config: Poller.Config = context.assembler_config.poller;
     const SingleButtonPoller = button.SinglePoller.make(context.grt);
     const GroupedButtonPoller = button.GroupedPoller.make(context.grt);
     const ImuPollerType = component_imu.Poller.make(context.grt);
@@ -313,11 +304,10 @@ pub fn build(builder: root, comptime context: anytype) type {
         ledstrip_component.Reducer.make(
             ledstrip_pixel_count,
             ledstrip_frame_capacity,
-            runtime_pipeline_config.tick_interval,
         )
     else
         void;
-    const BuiltPipeline = Pipeline.make(context.grt, runtime_pipeline_config);
+    const BuiltPipeline = Pipeline.make(context.grt);
     const PipelineSink = struct {
         pipeline: *BuiltPipeline,
 
@@ -641,7 +631,6 @@ pub fn build(builder: root, comptime context: anytype) type {
         pub const Config = context.assembler_config;
         pub const BuildConfig = @TypeOf(context.build_config);
         pub const build_config = context.build_config;
-        pub const pipeline_config = runtime_pipeline_config;
         pub const registries = .{
             .adc_button = adc_registry,
             .gpio_button = gpio_registry,
@@ -778,6 +767,7 @@ pub fn build(builder: root, comptime context: anytype) type {
             root: Node,
             pipeline: BuiltPipeline,
             pipeline_sink: PipelineSink,
+            poller_config: Poller.Config,
             single_button_pollers: [gpio_count]SingleButtonPoller = undefined,
             grouped_button_pollers: [adc_count]GroupedButtonPoller = undefined,
             imu_pollers: [imu_count]ImuPollerWrapper = undefined,
@@ -798,7 +788,8 @@ pub fn build(builder: root, comptime context: anytype) type {
                 runtime.wifi_stas = initWifiStaInstances(init_config);
                 runtime.wifi_aps = initWifiApInstances(init_config);
 
-                const stores = try initStoreValues(init_config.allocator, init_config.initial_state);
+                var stores = try initStoreValues(init_config.allocator, init_config.initial_state);
+                configureRuntimeStoreValues(&stores, init_config);
                 runtime.store = try StoreType.init(init_config.allocator, stores);
                 errdefer {
                     inline for (0..configured_render_count) |i| {
@@ -913,12 +904,13 @@ pub fn build(builder: root, comptime context: anytype) type {
                 };
                 runtime.custom_pipeline_bypass = .{};
 
-                runtime.pipeline = try BuiltPipeline.init(init_config.allocator);
+                runtime.pipeline = try BuiltPipeline.init(init_config.allocator, init_config.pipeline_config);
                 errdefer runtime.pipeline.deinit();
 
                 runtime.pipeline_sink = .{
                     .pipeline = &runtime.pipeline,
                 };
+                runtime.poller_config = init_config.poller_config;
 
                 if (has_modem_runtime) {
                     inline for (0..modem_count) |i| {
@@ -1193,6 +1185,18 @@ pub fn build(builder: root, comptime context: anytype) type {
                 return .{};
             }
 
+            fn configureRuntimeStoreValues(stores_value: *StoreType.Stores, init_config: InitConfig) void {
+                if (has_ledstrip_runtime) {
+                    inline for (0..ledstrip_count) |i| {
+                        const periph = ledstrip_registry.periphs[i];
+                        const label_name = comptime periphLabel(periph);
+                        const led_store = &@field(stores_value.*, label_name);
+                        led_store.running.tick_interval = init_config.pipeline_config.tick_interval;
+                        led_store.released.tick_interval = init_config.pipeline_config.tick_interval;
+                    }
+                }
+            }
+
             fn deinitStoreValues(stores_value: *StoreType.Stores) void {
                 deinitStoreValuesPrefix(stores_value, @typeInfo(StoreType.Stores).@"struct".fields.len);
             }
@@ -1461,18 +1465,13 @@ pub fn build(builder: root, comptime context: anytype) type {
         pub fn start(self: *Self, start_config: StartConfig) !void {
             if (self.started or self.closed) return error.InvalidState;
 
-            if (start_config.ticker) |ticker| switch (ticker) {
+            switch (start_config.ticker) {
                 .manual => {
                     self.manual_ticker = true;
                     self.started = true;
                     return;
                 },
-                .interval => |interval| {
-                    if (interval <= 0) return error.InvalidStartConfig;
-                    self.runtime.pipeline.tick_interval = interval;
-                },
-            } else {
-                self.runtime.pipeline.tick_interval = runtime_pipeline_config.tick_interval;
+                .automatic => {},
             }
 
             try self.runtime.pipeline.start();
@@ -1481,12 +1480,8 @@ pub fn build(builder: root, comptime context: anytype) type {
                 self.runtime.pipeline.wait();
             }
 
-            const poller_config = switch (start_config.poller) {
-                .default => runtime_poller_config,
-                .config => |config| config,
-            };
             inline for (0..runtime_poller_count) |i| {
-                self.runtime.pollers[i].start(poller_config) catch |err| {
+                self.runtime.pollers[i].start(self.runtime.poller_config) catch |err| {
                     inline for (0..i) |started_idx| {
                         self.runtime.pollers[started_idx].stop();
                     }
@@ -2513,8 +2508,10 @@ fn makeInitConfigType(
     comptime render_bindings: anytype,
     comptime render_count: usize,
 ) type {
-    _ = grt;
-    const total_fields = 3 + totalPeriphLen(registries) + reducer_count + render_count;
+    const PipelineConfig = Pipeline.Config(grt);
+    const default_pipeline_config: PipelineConfig = .{};
+    const default_poller_config: Poller.Config = .{};
+    const total_fields = 5 + totalPeriphLen(registries) + reducer_count + render_count;
     const default_custom_pipeline_node: ?Node = null;
     const default_reducer_hook: ?RuntimeReducerHook = null;
     const default_render_hook: ?RuntimeRenderHook = null;
@@ -2538,6 +2535,26 @@ fn makeInitConfigType(
         .default_value_ptr = null,
         .is_comptime = false,
         .alignment = @alignOf(InitialState),
+    };
+    field_index += 1;
+
+    ensureUniqueInitConfigField(fields, field_index, "pipeline_config");
+    fields[field_index] = .{
+        .name = "pipeline_config",
+        .type = PipelineConfig,
+        .default_value_ptr = @ptrCast(&default_pipeline_config),
+        .is_comptime = false,
+        .alignment = @alignOf(PipelineConfig),
+    };
+    field_index += 1;
+
+    ensureUniqueInitConfigField(fields, field_index, "poller_config");
+    fields[field_index] = .{
+        .name = "poller_config",
+        .type = Poller.Config,
+        .default_value_ptr = @ptrCast(&default_poller_config),
+        .is_comptime = false,
+        .alignment = @alignOf(Poller.Config),
     };
     field_index += 1;
 

@@ -18,6 +18,7 @@ pub const Scene = struct {
     last_tick_ns: ?i64 = null,
     last_hold_ns: ?glib.time.duration.Duration = null,
     hold_3s_applied: bool = false,
+    hold_started_in_marquee: bool = false,
 
     pub fn reduce(
         self: *@This(),
@@ -26,18 +27,34 @@ pub const Scene = struct {
         emit: anytype,
     ) !usize {
         _ = emit;
-        var scene = stores.scene.get();
-        const before = scene;
         const timestamp_ns: i64 = @intCast(message.timestamp);
-        switch (message.body) {
-            .button_gesture => |button| self.applyButton(&scene, button),
-            .tick => self.applyTick(&scene, timestamp_ns),
-            else => return 0,
-        }
+        const SceneState = @TypeOf(stores.scene.running);
+        const Context = struct {
+            scene_hook: *Scene,
+            message: @TypeOf(message),
+            timestamp_ns: i64,
+            changed: *bool,
+        };
 
-        if (sceneEqual(before, scene)) return 0;
-        stores.scene.set(scene);
-        return 1;
+        var changed = false;
+        const context: Context = .{
+            .scene_hook = self,
+            .message = message,
+            .timestamp_ns = timestamp_ns,
+            .changed = &changed,
+        };
+        stores.scene.invoke(context, struct {
+            fn apply(scene: *SceneState, ctx: Context) void {
+                const before = scene.*;
+                switch (ctx.message.body) {
+                    .button_gesture => |button| ctx.scene_hook.applyButton(scene, button),
+                    .tick => ctx.scene_hook.applyTick(scene, ctx.timestamp_ns),
+                    else => return,
+                }
+                ctx.changed.* = !sceneEqual(before, scene.*);
+            }
+        }.apply);
+        return if (changed) 1 else 0;
     }
 
     pub fn render(self: *@This(), app: anytype) !void {
@@ -82,17 +99,27 @@ pub const Scene = struct {
     }
 
     fn applyLongPress(self: *@This(), scene: anytype, held: glib.time.duration.Duration) void {
-        self.last_tick_ns = null;
-        self.updateHoldTracking(held);
+        const new_hold = self.updateHoldTracking(held);
+        if (new_hold) self.hold_started_in_marquee = scene.mode == .marquee;
+
         if (held >= marquee_hold_interval) {
+            self.hold_3s_applied = true;
+            if (self.hold_started_in_marquee) {
+                self.last_tick_ns = null;
+                setOff(scene);
+                return;
+            }
+            if (scene.mode == .marquee) return;
+
+            self.last_tick_ns = null;
             const visible_color = if (scene.target_color_name == .white) scene.visible_color else black;
             setMarquee(scene, .red, visible_color, true);
-            self.hold_3s_applied = true;
             return;
         }
 
         if (held < power_hold_interval) return;
         if (self.hold_3s_applied) return;
+        self.last_tick_ns = null;
         self.hold_3s_applied = true;
         if (scene.mode == .off) {
             setSolidTarget(scene, .white, false);
@@ -102,20 +129,28 @@ pub const Scene = struct {
         }
     }
 
-    fn updateHoldTracking(self: *@This(), held: glib.time.duration.Duration) void {
+    fn updateHoldTracking(self: *@This(), held: glib.time.duration.Duration) bool {
         if (self.last_hold_ns) |last_hold_ns| {
             if (held <= last_hold_ns) {
                 self.hold_3s_applied = false;
+                self.hold_started_in_marquee = false;
+                self.last_hold_ns = held;
+                return true;
             }
         } else {
             self.hold_3s_applied = false;
+            self.hold_started_in_marquee = false;
+            self.last_hold_ns = held;
+            return true;
         }
         self.last_hold_ns = held;
+        return false;
     }
 
     fn resetHoldTracking(self: *@This()) void {
         self.last_hold_ns = null;
         self.hold_3s_applied = false;
+        self.hold_started_in_marquee = false;
     }
 };
 
@@ -163,7 +198,7 @@ fn setMarquee(scene: anytype, stage: anytype, visible_color: u32, transitioning:
     scene.mode = .marquee;
     scene.target_color_name = switch (typed_stage) {
         .red => .red,
-        .green => .green,
+        .yellow => .yellow,
         .blue => .blue,
         .none => .none,
     };
@@ -186,8 +221,8 @@ fn nextColorName(color_name: anytype) @TypeOf(color_name) {
 
 fn nextMarqueeStage(stage: anytype) @TypeOf(stage) {
     return switch (stage) {
-        .red => .green,
-        .green => .blue,
+        .red => .yellow,
+        .yellow => .blue,
         .blue => .red,
         .none => .red,
     };

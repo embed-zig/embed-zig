@@ -1,4 +1,5 @@
 pub const audio = @import("audio");
+pub const board = @import("board");
 pub const bt = @import("bt");
 pub const drivers = @import("drivers");
 pub const ledstrip = @import("ledstrip");

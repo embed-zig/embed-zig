@@ -7,10 +7,6 @@ pub fn register(registry: anytype) void {
         .target = registry.target,
         .optimize = registry.optimize,
     }).module("glib");
-    const gstd = registry.b.dependency("gstd", .{
-        .target = registry.target,
-        .optimize = registry.optimize,
-    }).module("gstd");
 
     registry.add("zux_button-ledstrip", registry.b.addModule("zux_button-ledstrip", .{
         .root_source_file = registry.b.path("zux/button-ledstrip/src/app.zig"),
@@ -19,7 +15,6 @@ pub fn register(registry: anytype) void {
         .imports = &.{
             .{ .name = "embed", .module = embed },
             .{ .name = "glib", .module = glib },
-            .{ .name = "gstd", .module = gstd },
             .{ .name = "launcher", .module = registry.launcher },
         },
     }));

@@ -231,8 +231,8 @@ pub fn make(comptime Launcher: type) type {
                 }
 
                 return .{
-                    .title = comptime desktopTitle(AppHost),
-                    .description = comptime desktopDescription(AppHost),
+                    .title = comptime appTitle(AppHost),
+                    .description = comptime appDescription(AppHost),
                     .gears = gears,
                 };
             }
@@ -438,6 +438,8 @@ pub fn make(comptime Launcher: type) type {
                     init_config.custom_pipeline_node = null;
                 }
                 init_config.allocator = allocator;
+                init_config.pipeline_config = .{};
+                init_config.poller_config = .{};
 
                 inline for (0..gpio_count) |i| {
                     const periph = registries.gpio_button.periphs[i];
@@ -640,22 +642,16 @@ fn validateLauncher(comptime Launcher: type) void {
     if (registries.wifi_ap.len != 0) @compileError("desktop ZuxServer does not support wifi ap yet");
 }
 
-fn desktopTitle(comptime ZuxAppHost: type) []const u8 {
-    if (@hasDecl(ZuxAppHost, "desktop")) {
-        const desktop = ZuxAppHost.desktop;
-        if (@hasField(@TypeOf(desktop), "title")) {
-            return desktop.title;
-        }
+fn appTitle(comptime ZuxAppHost: type) []const u8 {
+    if (@hasDecl(ZuxAppHost, "title")) {
+        return ZuxAppHost.title;
     }
     return "desktop runtime";
 }
 
-fn desktopDescription(comptime ZuxAppHost: type) []const u8 {
-    if (@hasDecl(ZuxAppHost, "desktop")) {
-        const desktop = ZuxAppHost.desktop;
-        if (@hasField(@TypeOf(desktop), "description")) {
-            return desktop.description;
-        }
+fn appDescription(comptime ZuxAppHost: type) []const u8 {
+    if (@hasDecl(ZuxAppHost, "description")) {
+        return ZuxAppHost.description;
     }
     return "Local input and output runtime over GET and SSE.";
 }

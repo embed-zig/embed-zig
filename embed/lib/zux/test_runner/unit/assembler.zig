@@ -718,12 +718,6 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         const AssemblerType = Assembler.make(grt, .{
                             .max_adc_buttons = 2,
                             .max_led_strips = 1,
-                            .pipeline = .{
-                                .tick_interval = 7 * grt.time.duration.MilliSecond,
-                                .spawn_config = .{
-                                    .stack_size = 64 * 1024,
-                                },
-                            },
                         });
                         var next = AssemblerType.init();
                         next.addGroupedButton("buttons", 7, 3);
@@ -764,13 +758,8 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     try grt.std.testing.expectEqual(@as(usize, 4), Built.pixel_count);
                     try grt.std.testing.expectEqual(@as(usize, 4), Built.LedStrip(.strip).pixel_count);
                     try grt.std.testing.expectEqual(@as(usize, 4), Built.LedStrip(.strip).FrameType.pixel_count);
-                    try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 7 * grt.time.duration.MilliSecond), Built.ImplType.pipeline_config.tick_interval);
-                    if (@hasField(@TypeOf(Built.ImplType.pipeline_config.spawn_config), "stack_size")) {
-                        try grt.std.testing.expectEqual(
-                            @as(usize, 64 * 1024),
-                            Built.ImplType.pipeline_config.spawn_config.stack_size,
-                        );
-                    }
+                    try grt.std.testing.expect(@hasField(Built.InitConfig, "pipeline_config"));
+                    try grt.std.testing.expect(@hasField(Built.InitConfig, "poller_config"));
                     try grt.std.testing.expectEqualStrings("buttons", @typeInfo(Built.PeriphLabel).@"enum".fields[0].name);
                     try grt.std.testing.expect(@hasField(Built.Store.Stores, "buttons"));
                     try grt.std.testing.expect(@hasField(Built.Store.Stores, "strip"));

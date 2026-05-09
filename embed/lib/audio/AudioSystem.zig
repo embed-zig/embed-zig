@@ -381,6 +381,7 @@ pub fn Builder(comptime grt: type) type {
                     var processed: [samples_per_channel]i16 = undefined;
 
                     while (self.isRunning()) {
+                        frame.ref = null;
                         mic_impl.read(&frame) catch {
                             if (!self.isRunning()) return;
                             self.failAsync();
@@ -561,6 +562,18 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 const w = ctx.writes;
                 ctx.mu.unlock();
                 if (w > 0) return true;
+                Thread.sleep(@intCast(grt.time.duration.MilliSecond));
+            }
+            return false;
+        }
+
+        fn waitMicReads(ctx: anytype, min_reads: usize, deadline: glib.time.instant.Time) bool {
+            const Thread = grt.std.Thread;
+            while (grt.time.instant.now() < deadline) {
+                ctx.mu.lock();
+                const reads = ctx.reads;
+                ctx.mu.unlock();
+                if (reads >= min_reads) return true;
                 Thread.sleep(@intCast(grt.time.duration.MilliSecond));
             }
             return false;
@@ -822,8 +835,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(n > 0);
             try grt.std.testing.expect(out[0] != 0);
 
-            // writeLoop may lag readLoop; don't assert speaker writes synchronously.
-            try grt.std.testing.expect(waitSpeakerWrites(&speaker_ctx, glib.time.instant.add(grt.time.instant.now(), test_async_wait)));
+            speaker_ctx.mu.lock();
+            const speaker_writes = speaker_ctx.writes;
+            speaker_ctx.mu.unlock();
+            try grt.std.testing.expectEqual(@as(usize, 0), speaker_writes);
         }
 
         fn readReturnsWouldBlockWhenRunningAndEmpty(alloc: glib.std.mem.Allocator) !void {
@@ -971,6 +986,150 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             ProcessorBackend.emit.store(true, .release);
             const n = try pollReadSamples(&system, out[0..], test_async_wait);
             try grt.std.testing.expect(n > 0);
+        }
+
+        fn readLoopResetsMissingMicRef(alloc: glib.std.mem.Allocator) !void {
+            const Thread = grt.std.Thread;
+            const TestMic = MicMod.make(grt, 1, 4);
+            const TestSpeaker = SpeakerMod.make(grt, 4);
+            const ProcessorBackend = struct {
+                fn process(frame: TestMic.Frame, out: []i16) Error!usize {
+                    const ref = frame.ref orelse return error.InvalidState;
+                    const n = @min(ref.len, out.len);
+                    @memcpy(out[0..n], ref[0..n]);
+                    return n;
+                }
+            };
+
+            const Built = comptime blk: {
+                var builder = Builder(grt).init();
+                builder.configMic(1, 4);
+                builder.configSpeaker(4);
+                builder.setProcessor(&ProcessorBackend.process);
+                break :blk builder.build();
+            };
+
+            const MicCtx = struct {
+                reads: usize = 0,
+                enabled: bool = false,
+                mu: Thread.Mutex = .{},
+            };
+            const SpeakerCtx = struct {
+                enabled: bool = false,
+                mu: Thread.Mutex = .{},
+            };
+
+            const MicBackend = struct {
+                fn deinit(_: *anyopaque) void {}
+                fn sampleRate(_: *anyopaque) u32 {
+                    return 16000;
+                }
+                fn micCount(_: *anyopaque) u8 {
+                    return 1;
+                }
+                fn read(ptr: *anyopaque, frame: *TestMic.Frame) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    defer ctx.mu.unlock();
+                    if (!ctx.enabled) return error.InvalidState;
+
+                    @memset(frame.mic[0][0..], 1);
+                    if (ctx.reads == 0) {
+                        frame.ref = [_]i16{9} ** 4;
+                    }
+                    ctx.reads += 1;
+                }
+                fn gains(_: *anyopaque) TestMic.Gains {
+                    return .{null};
+                }
+                fn setGains(_: *anyopaque, _: []const ?i8) Error!void {
+                    return;
+                }
+                fn enable(ptr: *anyopaque) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = true;
+                    ctx.mu.unlock();
+                }
+                fn disable(ptr: *anyopaque) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = false;
+                    ctx.mu.unlock();
+                }
+
+                const vtable = TestMic.VTable{
+                    .deinit = deinit,
+                    .sampleRate = sampleRate,
+                    .micCount = micCount,
+                    .read = read,
+                    .gains = gains,
+                    .setGains = setGains,
+                    .enable = enable,
+                    .disable = disable,
+                };
+            };
+
+            const SpeakerBackend = struct {
+                fn deinit(_: *anyopaque) void {}
+                fn sampleRate(_: *anyopaque) u32 {
+                    return 16000;
+                }
+                fn write(ptr: *anyopaque, frame: []const i16) Error!usize {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    defer ctx.mu.unlock();
+                    if (!ctx.enabled) return error.InvalidState;
+                    return frame.len;
+                }
+                fn gain(_: *anyopaque) ?i8 {
+                    return null;
+                }
+                fn setGain(_: *anyopaque, _: i8) Error!void {
+                    return;
+                }
+                fn enable(ptr: *anyopaque) Error!void {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = true;
+                    ctx.mu.unlock();
+                }
+                fn disable(ptr: *anyopaque) Error!void {
+                    const ctx: *SpeakerCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = false;
+                    ctx.mu.unlock();
+                }
+
+                const vtable = TestSpeaker.VTable{
+                    .deinit = deinit,
+                    .sampleRate = sampleRate,
+                    .write = write,
+                    .gain = gain,
+                    .setGain = setGain,
+                    .enable = enable,
+                    .disable = disable,
+                };
+            };
+
+            var mic_ctx = MicCtx{};
+            var speaker_ctx = SpeakerCtx{};
+            var system = try Built.init(alloc, .{});
+            defer system.deinit();
+            try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
+            try system.setSpeaker(TestSpeaker.init(&speaker_ctx, &SpeakerBackend.vtable));
+
+            try system.start();
+            defer system.stop() catch {};
+
+            const deadline = glib.time.instant.add(grt.time.instant.now(), test_async_wait);
+            try grt.std.testing.expect(waitMicReads(&mic_ctx, 3, deadline));
+            system.discardReadBuffer();
+
+            var out: [4]i16 = @splat(9);
+            const n = try pollReadSamples(&system, out[0..], test_async_wait);
+            try grt.std.testing.expect(n > 0);
+            try grt.std.testing.expectEqual(@as(i16, 0), out[0]);
         }
 
         fn startAllowsMicOnlyMode(alloc: glib.std.mem.Allocator) !void {
@@ -1179,6 +1338,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             t.run("read_returns_wouldblock_when_running_and_empty", glib.testing.TestRunner.fromFn(grt.std, 256 * 1024, struct {
                 fn run(_: *glib.testing.T, case_allocator: glib.std.mem.Allocator) !void {
                     try TestCase.readReturnsWouldBlockWhenRunningAndEmpty(case_allocator);
+                }
+            }.run));
+            if (!t.wait()) return false;
+            t.run("readLoop_resets_missing_mic_ref", glib.testing.TestRunner.fromFn(grt.std, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: glib.std.mem.Allocator) !void {
+                    try TestCase.readLoopResetsMissingMicRef(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;

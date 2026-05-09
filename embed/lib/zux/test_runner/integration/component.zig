@@ -40,11 +40,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
         break :blk builder.build();
     };
 
-    const assembler_config: AssemblerConfig = .{
-        .pipeline = .{
-            .tick_interval = grt.time.duration.MilliSecond,
-        },
-    };
+    const assembler_config: AssemblerConfig = .{};
     const AppType = comptime blk: {
         var spec = SpecType.init();
         break :blk spec.buildApp(grt, assembler_config);
