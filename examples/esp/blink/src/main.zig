@@ -1,35 +1,49 @@
+const embed = @import("embed");
 const esp = @import("esp");
+const selected_board = @import("selected_board");
 
 const grt = esp.grt;
+const Board = selected_board.Board;
 
 const log = grt.std.log.scoped(.blink);
 
-const blink_gpio = 48;
 const blink_interval: u64 = @intCast(500 * grt.time.duration.MilliSecond);
 
-extern fn esp_example_blink_init() c_int;
-extern fn esp_example_blink_set_rgb(r: u8, g: u8, b: u8) c_int;
-extern fn esp_example_blink_clear() c_int;
-
 pub export fn zig_esp_main() void {
-    mustOk("esp_example_blink_init", esp_example_blink_init());
+    run() catch |err| {
+        log.err("blink failed: {s}", .{@errorName(err)});
+        @panic("blink failed");
+    };
+}
+
+fn run() !void {
+    var board_impl = try Board.init(.{});
+    defer board_impl.deinit();
+
+    try board_impl.powerOn();
+    try board_impl.start();
+
+    const board = board_impl.asBoard();
+    const strip = try board.ledStrip("strip");
 
     var led_on = false;
     while (true) {
         if (led_on) {
-            mustOk("esp_example_blink_set_rgb", esp_example_blink_set_rgb(16, 16, 16));
+            strip.setPixel(0, embed.ledstrip.Color.rgb(16, 16, 16));
         } else {
-            mustOk("esp_example_blink_clear", esp_example_blink_clear());
+            strip.clear();
         }
+        strip.refresh();
 
-        log.info("blink state={s} gpio={d}", .{ if (led_on) "on" else "off", blink_gpio });
+        log.info("blink state={s} board={s}", .{ if (led_on) "on" else "off", boardName() });
         led_on = !led_on;
         grt.std.Thread.sleep(blink_interval);
     }
 }
 
-fn mustOk(name: []const u8, rc: c_int) void {
-    if (rc == 0) return;
-    log.err("{s} failed with rc={d}", .{ name, rc });
-    @panic("blink platform call failed");
+fn boardName() []const u8 {
+    if (@hasDecl(Board, "metadata")) {
+        return Board.metadata.name;
+    }
+    return "unknown";
 }

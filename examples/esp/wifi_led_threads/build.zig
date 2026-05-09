@@ -1,24 +1,39 @@
 const std = @import("std");
 const esp = @import("esp");
+const boards = @import("esp_boards");
 
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
-    const esp_dep = b.dependency("esp", .{});
-    const build_config_module = b.createModule(.{
-        .root_source_file = b.path("build_config.zig"),
-        .imports = &.{
-            .{ .name = "esp", .module = esp_dep.module("esp") },
-        },
-    });
+    const board_name = b.option([]const u8, "board", "Board component under boards/") orelse "devkit";
+
+    const esp_build_dep = b.dependency("esp", .{});
+    const build_config_module = boards.createBuildConfigModule(
+        b,
+        board_name,
+        esp_build_dep.module("esp"),
+    );
     const app_options_module = createAppOptionsModule(b);
     const context = esp.idf.resolveBuildContext(b, .{
         .build_config = build_config_module,
-        .esp_dep = esp_dep,
+        .esp_dep = esp_build_dep,
     });
 
     if (context.toolchain_sysroot) |sysroot| {
         b.sysroot = sysroot.root;
     }
+
+    const esp_dep = b.dependency("esp", .{
+        .target = context.target,
+        .optimize = optimize,
+    });
+    const embed_dep = b.dependency("embed", .{
+        .target = context.target,
+        .optimize = optimize,
+    });
+    const board_module = boards.createBoardModule(b, board_name, context.target, optimize, .{
+        .embed = embed_dep.module("embed"),
+        .esp = esp_dep.module("esp"),
+    });
 
     const entry_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -26,35 +41,21 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "esp", .module = esp_dep.module("esp") },
+            .{ .name = "embed", .module = embed_dep.module("embed") },
             .{ .name = "app_options", .module = app_options_module },
+            .{ .name = "selected_board", .module = board_module },
         },
+        .link_libc = true,
     });
-    const platform_component = esp.idf.Component.create(b, .{
-        .name = "wifi_led_platform",
-    });
-    platform_component.addCSourceFiles(.{
-        .root = b.path("components/wifi_led_platform"),
-        .files = &.{"wifi_led_platform.c"},
-    });
-    platform_component.addFile(.{
-        .relative_path = "idf_component.yml",
-        .file = b.path("components/wifi_led_platform/idf_component.yml"),
-    });
-    platform_component.addRequire("esp_event");
-    platform_component.addRequire("esp_driver_gpio");
-    platform_component.addRequire("esp_netif");
-    platform_component.addRequire("esp_wifi");
-    platform_component.addRequire("led_strip");
-    platform_component.addRequire("log");
-    platform_component.addRequire("nvs_flash");
 
+    const board_component = boards.addComponent(b, board_name);
     const app = esp.idf.addApp(b, "wifi_led_threads", .{
         .context = context,
         .entry = .{
             .symbol = "zig_esp_main",
             .module = entry_module,
         },
-        .components = &.{platform_component},
+        .components = &.{board_component},
     });
 
     const build_step = b.step("build", "Build the wifi_led_threads example");

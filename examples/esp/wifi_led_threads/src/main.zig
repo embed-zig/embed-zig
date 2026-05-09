@@ -1,10 +1,14 @@
 const app_options = @import("app_options");
+const embed = @import("embed");
 const esp = @import("esp");
+const selected_board = @import("selected_board");
 
 const grt = esp.grt;
+const Board = selected_board.Board;
 
 const log = grt.std.log.scoped(.wifi_led_threads);
 const LedStateAtomic = grt.std.atomic.Value(u8);
+const EventCountAtomic = grt.std.atomic.Value(u32);
 
 const retry_delay: u64 = @intCast(2 * grt.time.duration.Second);
 const initial_red_delay: u64 = @intCast(500 * grt.time.duration.MilliSecond);
@@ -18,24 +22,38 @@ const LedState = enum(u8) {
     green,
 };
 
-const connect_failed: c_int = 0;
-const connect_success: c_int = 1;
-
 const AppState = struct {
     led_state: LedStateAtomic = LedStateAtomic.init(@intFromEnum(LedState.red)),
+    wifi_connected_events: EventCountAtomic = EventCountAtomic.init(0),
+    wifi_disconnected_events: EventCountAtomic = EventCountAtomic.init(0),
+    wifi_got_ip_events: EventCountAtomic = EventCountAtomic.init(0),
+    wifi_lost_ip_events: EventCountAtomic = EventCountAtomic.init(0),
+    wifi_scan_result_events: EventCountAtomic = EventCountAtomic.init(0),
+    wifi: embed.drivers.wifi.Sta,
+    strip: embed.ledstrip.LedStrip,
 };
 
-var app_state: AppState = .{};
-
-extern fn esp_example_wifi_led_platform_init(ssid: [*:0]const u8, password: [*:0]const u8) c_int;
-extern fn esp_example_wifi_led_platform_connect_blocking(timeout_ms: u32) c_int;
-extern fn esp_example_wifi_led_platform_set_rgb(r: u8, g: u8, b: u8) c_int;
+var board_impl: Board = undefined;
 
 pub export fn zig_esp_main() void {
-    mustOk(
-        "esp_example_wifi_led_platform_init",
-        esp_example_wifi_led_platform_init(app_options.wifi_ssid, app_options.wifi_password),
-    );
+    run() catch |err| {
+        log.err("wifi_led_threads failed: {s}", .{@errorName(err)});
+        @panic("wifi_led_threads failed");
+    };
+}
+
+fn run() !void {
+    board_impl = try Board.init(.{});
+
+    try board_impl.powerOn();
+    try board_impl.start();
+
+    const board = board_impl.asBoard();
+    var app_state = AppState{
+        .wifi = try board.wifiSta("wifi"),
+        .strip = try board.ledStrip("strip"),
+    };
+    app_state.wifi.addEventHook(@ptrCast(&app_state), wifiEventHook);
 
     const led_thread = grt.std.Thread.spawn(.{
         .name = "led_loop",
@@ -58,6 +76,10 @@ pub export fn zig_esp_main() void {
         @panic("failed to spawn wifi thread");
     };
     wifi_thread.detach();
+
+    while (true) {
+        grt.std.Thread.sleep(@intCast(5 * grt.time.duration.Second));
+    }
 }
 
 fn wifiLoop(state: *AppState) void {
@@ -72,19 +94,42 @@ fn wifiLoop(state: *AppState) void {
         setLedState(state, .connecting);
         log.info("connecting to wifi ssid={s}", .{ssid});
 
-        const result = esp_example_wifi_led_platform_connect_blocking(connect_timeout_ms);
-        if (result == connect_success) {
+        state.wifi.connect(.{
+            .ssid = ssid,
+            .password = grt.std.mem.sliceTo(app_options.wifi_password, 0),
+            .timeout = @intCast(connect_timeout_ms * grt.time.duration.MilliSecond),
+        }) catch |err| {
+            log.warn("wifi connect failed: {s}, events connected={d} got_ip={d} disconnected={d}, retrying in 2s", .{
+                @errorName(err),
+                state.wifi_connected_events.load(.acquire),
+                state.wifi_got_ip_events.load(.acquire),
+                state.wifi_disconnected_events.load(.acquire),
+            });
+            continue;
+        };
+
+        {
             setLedState(state, .green);
-            log.info("wifi connected", .{});
+            log.info("wifi connected, events connected={d} got_ip={d} disconnected={d}", .{
+                state.wifi_connected_events.load(.acquire),
+                state.wifi_got_ip_events.load(.acquire),
+                state.wifi_disconnected_events.load(.acquire),
+            });
             while (true) {
                 grt.std.Thread.sleep(@intCast(5 * grt.time.duration.Second));
             }
         }
-        if (result != connect_failed) {
-            log.warn("wifi connect returned unexpected status={d}", .{result});
-        } else {
-            log.warn("wifi connect failed, retrying in 2s", .{});
-        }
+    }
+}
+
+fn wifiEventHook(ctx: ?*anyopaque, event: embed.drivers.wifi.Sta.Event) void {
+    const state: *AppState = @ptrCast(@alignCast(ctx orelse return));
+    switch (event) {
+        .scan_result => _ = state.wifi_scan_result_events.fetchAdd(1, .monotonic),
+        .connected => _ = state.wifi_connected_events.fetchAdd(1, .monotonic),
+        .disconnected => _ = state.wifi_disconnected_events.fetchAdd(1, .monotonic),
+        .got_ip => _ = state.wifi_got_ip_events.fetchAdd(1, .monotonic),
+        .lost_ip => _ = state.wifi_lost_ip_events.fetchAdd(1, .monotonic),
     }
 }
 
@@ -98,14 +143,14 @@ fn ledLoop(state: *AppState) void {
         switch (next_state) {
             .red => {
                 if (!has_last_state or last_state != .red) {
-                    setLedRgb(32, 0, 0);
+                    setLedRgb(state, 32, 0, 0);
                     has_last_state = true;
                     last_state = .red;
                 }
                 grt.std.Thread.sleep(@intCast(100 * grt.time.duration.MilliSecond));
             },
             .connecting => {
-                setLedRgb(if (blink_on) 32 else 0, if (blink_on) 24 else 0, 0);
+                setLedRgb(state, if (blink_on) 32 else 0, if (blink_on) 24 else 0, 0);
                 blink_on = !blink_on;
                 has_last_state = true;
                 last_state = .connecting;
@@ -113,7 +158,7 @@ fn ledLoop(state: *AppState) void {
             },
             .green => {
                 if (!has_last_state or last_state != .green) {
-                    setLedRgb(0, 32, 0);
+                    setLedRgb(state, 0, 32, 0);
                     has_last_state = true;
                     last_state = .green;
                 }
@@ -131,12 +176,7 @@ fn setLedState(state: *AppState, next_state: LedState) void {
     state.led_state.store(@intFromEnum(next_state), .release);
 }
 
-fn setLedRgb(r: u8, g: u8, b: u8) void {
-    mustOk("esp_example_wifi_led_platform_set_rgb", esp_example_wifi_led_platform_set_rgb(r, g, b));
-}
-
-fn mustOk(name: []const u8, rc: c_int) void {
-    if (rc == 0) return;
-    log.err("{s} failed with rc={d}", .{ name, rc });
-    @panic("esp-idf platform call failed");
+fn setLedRgb(state: *AppState, r: u8, g: u8, b: u8) void {
+    state.strip.setPixel(0, embed.ledstrip.Color.rgb(r, g, b));
+    state.strip.refresh();
 }

@@ -1,23 +1,38 @@
 const std = @import("std");
 const esp = @import("esp");
+const boards = @import("esp_boards");
 
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
-    const esp_dep = b.dependency("esp", .{});
-    const build_config_module = b.createModule(.{
-        .root_source_file = b.path("build_config.zig"),
-        .imports = &.{
-            .{ .name = "esp", .module = esp_dep.module("esp") },
-        },
-    });
+    const board_name = b.option([]const u8, "board", "Board component under boards/") orelse "devkit";
+
+    const esp_build_dep = b.dependency("esp", .{});
+    const build_config_module = boards.createBuildConfigModule(
+        b,
+        board_name,
+        esp_build_dep.module("esp"),
+    );
     const context = esp.idf.resolveBuildContext(b, .{
         .build_config = build_config_module,
-        .esp_dep = esp_dep,
+        .esp_dep = esp_build_dep,
     });
 
     if (context.toolchain_sysroot) |sysroot| {
         b.sysroot = sysroot.root;
     }
+
+    const esp_dep = b.dependency("esp", .{
+        .target = context.target,
+        .optimize = optimize,
+    });
+    const embed_dep = b.dependency("embed", .{
+        .target = context.target,
+        .optimize = optimize,
+    });
+    const board_module = boards.createBoardModule(b, board_name, context.target, optimize, .{
+        .embed = embed_dep.module("embed"),
+        .esp = esp_dep.module("esp"),
+    });
 
     const entry_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -25,29 +40,20 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "esp", .module = esp_dep.module("esp") },
+            .{ .name = "embed", .module = embed_dep.module("embed") },
+            .{ .name = "selected_board", .module = board_module },
         },
+        .link_libc = true,
     });
-    const rainbow_component = esp.idf.Component.create(b, .{
-        .name = "rainbow_platform",
-    });
-    rainbow_component.addCSourceFiles(.{
-        .root = b.path("components/rainbow_platform"),
-        .files = &.{"rainbow_platform.c"},
-    });
-    rainbow_component.addFile(.{
-        .relative_path = "idf_component.yml",
-        .file = b.path("components/rainbow_platform/idf_component.yml"),
-    });
-    rainbow_component.addRequire("led_strip");
-    rainbow_component.addRequire("log");
 
+    const board_component = boards.addComponent(b, board_name);
     const app = esp.idf.addApp(b, "led_rainbow", .{
         .context = context,
         .entry = .{
             .symbol = "zig_esp_main",
             .module = entry_module,
         },
-        .components = &.{rainbow_component},
+        .components = &.{board_component},
     });
 
     const build_step = b.step("build", "Build the led_rainbow example");

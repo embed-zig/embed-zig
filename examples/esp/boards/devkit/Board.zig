@@ -5,6 +5,7 @@ const led_strip_binding = @import("bindings/led_strip.zig");
 const power_button_binding = @import("bindings/power_button.zig");
 const LedStrip = @import("LedStrip.zig");
 const PowerButton = @import("PowerButton.zig");
+const WifiSta = @import("WifiSta.zig");
 
 const Self = @This();
 
@@ -22,6 +23,7 @@ pub const InitConfig = struct {};
 
 power_button: PowerButton = .{},
 led_strip: LedStrip = .{},
+wifi_sta: WifiSta = .{},
 state_value: embed.board.State = .uninitialized,
 
 pub fn init(config: InitConfig) !Self {
@@ -30,6 +32,7 @@ pub fn init(config: InitConfig) !Self {
 }
 
 pub fn deinit(self: *Self) void {
+    self.wifi_sta.deinit();
     self.* = undefined;
 }
 
@@ -69,6 +72,16 @@ pub fn ledStrip(self: *Self, label: []const u8) !embed.ledstrip.LedStrip {
         else => return error.InvalidState,
     }
     return self.led_strip.handle();
+}
+
+pub fn wifiSta(self: *Self, label: []const u8) !embed.drivers.wifi.Sta {
+    if (!esp.grt.std.mem.eql(u8, label, "wifi")) return error.NotFound;
+    switch (self.state_value) {
+        .powered_on, .started => {},
+        else => return error.InvalidState,
+    }
+    try self.wifi_sta.init();
+    return self.wifi_sta.handle();
 }
 
 fn check(call_name: []const u8, rc: c_int) !void {

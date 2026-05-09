@@ -48,11 +48,16 @@ pub fn addComponent(b: *std.Build) *esp.idf.Component {
         .files = &.{
             "power_button.c",
             "led_strip.c",
+            "wifi_sta.c",
         },
     });
     component.addRequire("driver");
     component.addRequire("esp_driver_gpio");
+    component.addRequire("esp_event");
+    component.addRequire("esp_netif");
+    component.addRequire("esp_wifi");
     component.addRequire("led_strip");
     component.addRequire("log");
+    component.addRequire("nvs_flash");
     return component;
 }
