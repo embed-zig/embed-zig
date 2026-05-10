@@ -4,8 +4,6 @@ const lvgl_osal = @import("lvgl_osal");
 const opus_osal = @import("opus_osal");
 const assets = @import("assets.zig");
 const board = @import("board.zig");
-const AudioMic = @import("audio/Mic.zig");
-const AudioSpeaker = @import("audio/Speaker.zig");
 const AudioSystem = @import("audio/AudioSystem.zig").Type;
 const Player = @import("audio/Player.zig");
 const Recoder = @import("audio/Recoder.zig");
@@ -13,9 +11,6 @@ const Recoder = @import("audio/Recoder.zig");
 const log = esp.grt.std.log.scoped(.chant_main);
 const Thread = esp.grt.std.Thread;
 const audio_allocator = esp.heap.Allocator(.{ .caps = .spiram_8bit, .alignment = .align_u32 });
-const thread_allocator = esp.heap.Allocator(.{ .caps = .internal_8bit, .alignment = .align_u32 });
-const audio_read_thread_stack_size = 16 * 1024;
-const audio_write_thread_stack_size = 8 * 1024;
 const default_volume: u8 = 0xb0;
 const maximum_volume: u8 = 0xc6;
 const volume_step: u8 = 0x02;
@@ -65,35 +60,19 @@ pub export fn zig_esp_main() void {
 
     board.initBoard() catch |err| fail("board init", err);
     lvgl.init();
-    board.initAudio() catch |err| fail("audio init", err);
     board.initButton() catch |err| fail("button init", err);
     log.info("board initialized; tracks={d}", .{assets.tracks.len});
 
-    var system = AudioSystem.init(audio_allocator, .{
-        .read_thread = .{
-            .stack_size = audio_read_thread_stack_size,
-            .name = "audio_read",
-            .allocator = thread_allocator,
-            .core_id = 0,
-        },
-        .write_thread = .{
-            .stack_size = audio_write_thread_stack_size,
-            .name = "audio_write",
-            .allocator = thread_allocator,
-            .core_id = 1,
-        },
-    }) catch |err| fail("audio system init", err);
-    system.setMic(AudioMic.driver()) catch |err| fail("audio system mic", err);
-    system.setSpeaker(AudioSpeaker.driver()) catch |err| fail("audio system speaker", err);
+    const system = board.audioSystem() catch |err| fail("audio system", err);
 
-    var player = Player.init(audio_allocator, &system) catch |err| fail("music player", err);
-    var recoder = Recoder.init(audio_allocator, &system) catch |err| fail("mic recoder", err);
+    var player = Player.init(audio_allocator, system) catch |err| fail("music player", err);
+    var recoder = Recoder.init(audio_allocator, system) catch |err| fail("mic recoder", err);
 
     system.start() catch |err| fail("audio system start", err);
     player.startThread() catch |err| fail("music player start", err);
     recoder.startThread() catch |err| fail("mic recoder start", err);
 
-    runControlLoop(&system, &player, &recoder);
+    runControlLoop(system, &player, &recoder);
 }
 
 fn runControlLoop(system: *AudioSystem, player: *Player, recoder: *Recoder) noreturn {

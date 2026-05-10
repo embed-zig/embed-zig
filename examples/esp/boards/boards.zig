@@ -2,6 +2,7 @@ const std = @import("std");
 const esp = @import("esp");
 
 const devkit = @import("devkit/build.zig");
+const szp = @import("szp/build.zig");
 
 pub fn createBuildConfigModule(
     b: *std.Build,
@@ -10,6 +11,9 @@ pub fn createBuildConfigModule(
 ) *std.Build.Module {
     if (std.mem.eql(u8, name, devkit.name)) {
         return devkit.createBuildConfigModule(b, esp_module);
+    }
+    if (std.mem.eql(u8, name, szp.name)) {
+        return szp.createBuildConfigModule(b, esp_module);
     }
     std.debug.panic("unknown ESP launcher board: {s}", .{name});
 }
@@ -30,12 +34,21 @@ pub fn createBoardModule(
             .esp = deps.esp,
         });
     }
+    if (std.mem.eql(u8, name, szp.name)) {
+        return szp.createBoardModule(b, target, optimize, .{
+            .embed = deps.embed,
+            .esp = deps.esp,
+        });
+    }
     std.debug.panic("unknown ESP launcher board: {s}", .{name});
 }
 
 pub fn addComponent(b: *std.Build, name: []const u8) *esp.idf.Component {
     if (std.mem.eql(u8, name, devkit.name)) {
         return devkit.addComponent(b);
+    }
+    if (std.mem.eql(u8, name, szp.name)) {
+        return szp.addComponent(b);
     }
     std.debug.panic("unknown ESP launcher board: {s}", .{name});
 }

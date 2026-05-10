@@ -18,6 +18,45 @@ const pca_initial_output = pca_lcd_cs_pin.mask() | pca_dvp_pwdn_pin.mask();
 pub const esp_ok: c_int = 0;
 pub const esp_fail: c_int = -1;
 
+pub const connect_failed: c_int = 0;
+pub const connect_success: c_int = 1;
+pub const connect_timeout: c_int = 2;
+pub const connect_invalid_config: c_int = 3;
+
+pub const state_idle: c_int = 0;
+pub const state_connecting: c_int = 1;
+pub const state_connected: c_int = 2;
+pub const state_scanning: c_int = 3;
+
+pub const event_connected: c_int = 1;
+pub const event_disconnected: c_int = 2;
+pub const event_got_ip: c_int = 3;
+pub const event_lost_ip: c_int = 4;
+pub const event_scan_result: c_int = 5;
+
+pub const security_unknown: c_int = 0;
+pub const security_open: c_int = 1;
+pub const security_wep: c_int = 2;
+pub const security_wpa: c_int = 3;
+pub const security_wpa2: c_int = 4;
+pub const security_wpa3: c_int = 5;
+
+pub const Event = extern struct {
+    event: c_int,
+    ssid: [32]u8,
+    ssid_len: usize,
+    bssid: [6]u8,
+    channel: u8,
+    rssi: i16,
+    security: c_int,
+    reason: u16,
+    ip: [4]u8,
+    gateway: [4]u8,
+    netmask: [4]u8,
+};
+
+pub const EventCallback = *const fn (ctx: ?*anyopaque, event: *const Event) callconv(.c) void;
+
 var board_i2c_bus = esp.embed.I2c.MasterBus.init(.{
     .port = i2c_port,
     .sda_io_num = i2c_sda_gpio,
@@ -36,10 +75,6 @@ pub extern fn szp_storage_unmount() c_int;
 pub extern fn szp_audio_init() c_int;
 pub extern fn szp_audio_set_pa(enabled: bool) c_int;
 pub extern fn szp_audio_write_i16(pcm: [*]const i16, sample_count: usize) c_int;
-pub extern fn szp_audio_play_test_tone(frequency_hz: u32, duration_ms: u32) c_int;
-pub extern fn szp_audio_mic_start() c_int;
-pub extern fn szp_audio_mic_process_frame() c_int;
-pub extern fn szp_audio_mic_stop() c_int;
 pub extern fn szp_audio_mic_capture_start() c_int;
 pub extern fn szp_audio_mic_read_i16(mic0: [*]i16, mic1: [*]i16, ref: [*]i16, sample_capacity: usize, sample_count: *usize) c_int;
 pub extern fn szp_audio_mic_capture_stop() c_int;
@@ -65,6 +100,26 @@ pub extern fn szp_display_native_draw_rgb565(
     pixels: [*]const u16,
     len: usize,
 ) c_int;
+
+pub extern fn szp_wifi_sta_init() c_int;
+pub extern fn szp_wifi_sta_set_event_handler(ctx: ?*anyopaque, cb: ?EventCallback) void;
+pub extern fn szp_wifi_sta_start_scan(
+    ssid_ptr: [*]const u8,
+    ssid_len: usize,
+    channel: u8,
+    show_hidden: bool,
+    active: bool,
+) c_int;
+pub extern fn szp_wifi_sta_stop_scan() void;
+pub extern fn szp_wifi_sta_connect_blocking(
+    ssid_ptr: [*]const u8,
+    ssid_len: usize,
+    password_ptr: [*]const u8,
+    password_len: usize,
+    timeout_ms: u32,
+) c_int;
+pub extern fn szp_wifi_sta_disconnect() void;
+pub extern fn szp_wifi_sta_state() c_int;
 
 pub fn i2cDevice(address: embed.drivers.I2c.Address) !embed.drivers.I2c {
     try board_i2c_bus.open();

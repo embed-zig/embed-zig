@@ -1,0 +1,72 @@
+const std = @import("std");
+const esp = @import("esp");
+
+pub const name = "szp";
+pub const component_root = "../boards/szp";
+
+pub fn createBoardModule(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    deps: struct {
+        embed: *std.Build.Module,
+        esp: *std.Build.Module,
+    },
+) *std.Build.Module {
+    return b.createModule(.{
+        .root_source_file = b.path(component_root ++ "/Board.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "embed", .module = deps.embed },
+            .{ .name = "esp", .module = deps.esp },
+        },
+        .link_libc = true,
+    });
+}
+
+pub fn createBuildConfigModule(
+    b: *std.Build,
+    esp_module: *std.Build.Module,
+) *std.Build.Module {
+    return b.createModule(.{
+        .root_source_file = b.path(component_root ++ "/build_config.zig"),
+        .imports = &.{
+            .{ .name = "esp", .module = esp_module },
+        },
+    });
+}
+
+pub fn addComponent(b: *std.Build) *esp.idf.Component {
+    const component = esp.idf.Component.create(b, .{ .name = "szp_board" });
+    component.addFile(.{
+        .relative_path = "idf_component.yml",
+        .file = b.path(component_root ++ "/idf_component.yml"),
+    });
+    component.addIncludePath(b.path(component_root ++ "/include"));
+    component.addCSourceFiles(.{
+        .root = b.path(component_root ++ "/bindings"),
+        .files = &.{
+            "szp_board.c",
+            "szp_storage.c",
+            "szp_audio.c",
+            "szp_button.c",
+            "szp_display.c",
+            "wifi_sta.c",
+        },
+    });
+    component.addRequire("driver");
+    component.addRequire("esp_driver_gpio");
+    component.addRequire("esp_driver_i2s");
+    component.addRequire("esp_driver_ledc");
+    component.addRequire("esp_driver_spi");
+    component.addRequire("esp_event");
+    component.addRequire("esp_lcd");
+    component.addRequire("esp_netif");
+    component.addRequire("esp_timer");
+    component.addRequire("esp_wifi");
+    component.addRequire("log");
+    component.addRequire("nvs_flash");
+    component.addRequire("spiffs");
+    return component;
+}

@@ -8,12 +8,6 @@
 extern "C" {
 #endif
 
-typedef enum {
-    SZP_TRACK_TWINKLE = 0,
-    SZP_TRACK_HAPPY_BIRTHDAY = 1,
-    SZP_TRACK_DOLL_BEAR = 2,
-} szp_track_t;
-
 int szp_board_init(void);
 
 int szp_storage_init_nvs(void);
@@ -24,10 +18,6 @@ int szp_storage_unmount(void);
 int szp_audio_init(void);
 int szp_audio_set_pa(bool enabled);
 int szp_audio_write_i16(const int16_t *pcm, size_t sample_count);
-int szp_audio_play_test_tone(uint32_t frequency_hz, uint32_t duration_ms);
-int szp_audio_mic_start(void);
-int szp_audio_mic_process_frame(void);
-int szp_audio_mic_stop(void);
 int szp_audio_mic_capture_start(void);
 int szp_audio_mic_read_i16(int16_t *mic0, int16_t *mic1, int16_t *ref, size_t sample_capacity, size_t *sample_count);
 int szp_audio_mic_capture_stop(void);

@@ -2,7 +2,6 @@ const esp = @import("esp");
 const glib = @import("glib");
 
 const board = @import("../board.zig");
-const AudioMic = @import("Mic.zig");
 const Audio = @import("AudioSystem.zig");
 const AudioSystem = Audio.Type;
 
@@ -13,7 +12,8 @@ const Thread = esp.grt.std.Thread;
 const AtomicBool = esp.grt.std.atomic.Value(bool);
 
 const thread_allocator = esp.heap.Allocator(.{ .caps = .internal_8bit, .alignment = .align_u32 });
-const mic_track_buffer_capacity = AudioMic.frame_samples_per_channel * 2;
+const mic_frame_samples_per_channel = AudioSystem.frame_samples_per_channel;
+const mic_track_buffer_capacity = mic_frame_samples_per_channel * 2;
 const poll_interval_ms: u32 = 2;
 
 system: *AudioSystem,
@@ -92,7 +92,7 @@ pub fn isActive(self: *Recoder) bool {
 }
 
 fn runLoop(self: *Recoder) void {
-    var processed: [AudioMic.frame_samples_per_channel]i16 = undefined;
+    var processed: [mic_frame_samples_per_channel]i16 = undefined;
 
     while (!self.stopping.load(.acquire)) {
         const n = self.system.read(processed[0..]) catch |err| switch (err) {

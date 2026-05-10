@@ -1,20 +1,16 @@
 const std = @import("std");
 const buildtools = @import("buildtools");
 const esp = @import("esp");
+const boards = @import("esp_boards");
 const thirdparty_build = @import("thirdparty");
-const szp_board_component = @import("components/szp_board/build.zig");
 
 const lvgl_pkg = thirdparty_build.lvgl;
+const board_name = "szp";
 
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const esp_build_dep = b.dependency("esp", .{});
-    const build_config_module = b.createModule(.{
-        .root_source_file = b.path("build_config.zig"),
-        .imports = &.{
-            .{ .name = "esp", .module = esp_build_dep.module("esp") },
-        },
-    });
+    const build_config_module = boards.createBuildConfigModule(b, board_name, esp_build_dep.module("esp"));
     const context = esp.idf.resolveBuildContext(b, .{
         .build_config = build_config_module,
         .esp_dep = esp_build_dep,
@@ -32,12 +28,7 @@ pub fn build(b: *std.Build) void {
         .target = context.target,
         .optimize = optimize,
     });
-    const runtime_build_config_module = b.createModule(.{
-        .root_source_file = b.path("build_config.zig"),
-        .imports = &.{
-            .{ .name = "esp", .module = esp_dep.module("esp") },
-        },
-    });
+    const runtime_build_config_module = boards.createBuildConfigModule(b, board_name, esp_dep.module("esp"));
     const esp_grt_module = esp_dep.module("esp").import_table.get("esp_grt") orelse
         @panic("esp module is missing esp_grt import");
     esp_grt_module.addImport("build_config", runtime_build_config_module);
@@ -54,14 +45,9 @@ pub fn build(b: *std.Build) void {
     const opus_osal_module = thirdparty_dep.module("opus_osal");
     const lvgl_module = thirdparty_dep.module("lvgl");
     const lvgl_osal_module = thirdparty_dep.module("lvgl_osal");
-    const szp_board_module = b.createModule(.{
-        .root_source_file = b.path("components/szp_board/binding.zig"),
-        .target = context.target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "esp", .module = esp_dep.module("esp") },
-            .{ .name = "embed", .module = embed_dep.module("embed") },
-        },
+    const board_module = boards.createBoardModule(b, board_name, context.target, optimize, .{
+        .embed = embed_dep.module("embed"),
+        .esp = esp_dep.module("esp"),
     });
     if (context.toolchain_sysroot) |sysroot| {
         opus_module.addSystemIncludePath(sysroot.include_dir);
@@ -85,7 +71,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "lvgl_osal", .module = lvgl_osal_module },
             .{ .name = "opus", .module = opus_module },
             .{ .name = "opus_osal", .module = opus_osal_module },
-            .{ .name = "szp_board", .module = szp_board_module },
+            .{ .name = "selected_board", .module = board_module },
         },
         .link_libc = true,
     });
@@ -120,7 +106,7 @@ pub fn build(b: *std.Build) void {
         .files = &.{"chant_lvgl_binding.c"},
         .flags = &.{"-DLV_CONF_INCLUDE_SIMPLE=1"},
     });
-    const szp_board = szp_board_component.addTo(b);
+    const szp_board = boards.addComponent(b, board_name);
     const json_compat = esp.idf.Component.create(b, .{ .name = "json" });
     json_compat.addFile(.{
         .relative_path = "idf_component.yml",

@@ -22,6 +22,9 @@
         .embed = .{
             .path = "../../../embed",
         },
+        .esp_boards = .{
+            .path = "../boards",
+        },
         .thirdparty = .{
             .path = "../../../thirdparty",
         },

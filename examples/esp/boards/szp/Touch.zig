@@ -1,11 +1,11 @@
 const embed = @import("embed");
 const esp = @import("esp");
-const binding = @import("szp_board");
+const binding = @import("bindings/common.zig");
 
-const log = esp.grt.std.log.scoped(.chant_touch);
-const Touch = embed.drivers.Touch;
-const Ft5x06 = Touch.Ft5x06;
+const Touch = @This();
+const Ft5x06 = embed.drivers.Touch.Ft5x06;
 
+const log = esp.grt.std.log.scoped(.szp_touch);
 const touch_width: u16 = 320;
 const touch_height: u16 = 240;
 
@@ -21,13 +21,13 @@ const szp_parameters = Ft5x06.Parameters{
     .monitor_period = 40,
 };
 
-var native_touch: ?Ft5x06 = null;
+native_touch: ?Ft5x06 = null,
 
-pub fn init() !void {
-    if (native_touch != null) return;
+pub fn init(self: *Touch) !void {
+    if (self.native_touch != null) return;
 
     const i2c = try binding.i2cDevice(Ft5x06.default_address);
-    native_touch = Ft5x06.init(i2c, .{
+    self.native_touch = Ft5x06.init(i2c, .{
         .parameters = szp_parameters,
         .transform = .{
             .width = touch_width,
@@ -36,13 +36,13 @@ pub fn init() !void {
             .invert_y = true,
         },
     });
-    try native_touch.?.open();
+    try self.native_touch.?.open();
     log.info("ft5x06 touch initialized", .{});
 }
 
-pub fn driver() Touch {
-    if (native_touch) |*touch| {
+pub fn handle(self: *Touch) embed.drivers.Touch {
+    if (self.native_touch) |*touch| {
         return touch.asTouch();
     }
-    @panic("chant touch not initialized");
+    @panic("szp touch not initialized");
 }
