@@ -18,6 +18,9 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("lib/openapi.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "glib", .module = glib_mod },
+        },
     });
 
     _ = b.addModule("codegen", .{

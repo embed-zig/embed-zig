@@ -1,4 +1,3 @@
-const zig = @import("std");
 const glib = @import("glib");
 const openapi = @import("openapi");
 const models_mod = @import("models.zig");
@@ -6,7 +5,7 @@ const gstd = @import("gstd");
 
 const Files = openapi.Files;
 const Spec = openapi.Spec;
-const Type = zig.builtin.Type;
+const Type = glib.std.builtin.Type;
 
 const RootFile = struct {
     name: []const u8,
@@ -91,7 +90,7 @@ pub fn make(comptime std: type, comptime files: Files) type {
     const root = rootFile(files);
     const net = gstd.runtime.net;
     const Http = net.http;
-    const Models = models_mod.make(files);
+    const Models = models_mod.make(std, files);
     const default_base_url = copyString(defaultBaseUrl(root.spec));
     const spec_title = copyString(root.spec.info.title);
     const spec_version = copyString(root.spec.info.version);
@@ -191,7 +190,7 @@ fn OperationHandle(
 ) type {
     const net = gstd.runtime.net;
     const Http = net.http;
-    const parameters_slice = collectEffectiveParameters(files, operation_ref.file_name, operation_ref.path_item, operation_ref.operation, operation_ref.field_name);
+    const parameters_slice = collectEffectiveParameters(std, files, operation_ref.file_name, operation_ref.path_item, operation_ref.operation, operation_ref.field_name);
     const parameters = blk: {
         var items: [parameters_slice.len]ResolvedParameter = undefined;
         for (parameters_slice, 0..) |parameter, i| items[i] = parameter;
@@ -211,7 +210,7 @@ fn OperationHandle(
     };
     const request_body = selectRequestBody(std, files, operation_ref.file_name, operation_ref.operation.request_body, operation_ref.field_name);
     const ArgsType = makeArgsType(parameters, request_body);
-    const response_variants_slice = collectResponseVariants(files, operation_ref.file_name, operation_ref.operation.responses, operation_ref.field_name);
+    const response_variants_slice = collectResponseVariants(std, files, operation_ref.file_name, operation_ref.operation.responses, operation_ref.field_name);
     const response_variants = blk: {
         var items: [response_variants_slice.len]ResponseVariant = undefined;
         for (response_variants_slice, 0..) |variant, i| items[i] = variant;
@@ -386,7 +385,7 @@ fn makeOwnedResponseType(comptime std: type, comptime ResponsePayload: type, com
             switch (self.value) {
                 inline else => |*payload, tag| {
                     inline for (variants) |variant| {
-                        if (tag != @field(zig.meta.FieldEnum(ResponsePayload), variant.field_name)) continue;
+                        if (tag != @field(glib.std.meta.FieldEnum(ResponsePayload), variant.field_name)) continue;
                         switch (variant.payload_kind) {
                             .none => {},
                             .json => payload.deinit(),
@@ -470,7 +469,7 @@ fn appendPathItemOperations(
             appendOperation(operations, index, current_file_name, path, path_item, path_item.trace, "TRACE");
         },
         .reference => |reference| {
-            const resolved = files.resolvePathRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
+            const resolved = files.resolvePathRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Unsupported path reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -521,7 +520,7 @@ fn pathItemOperationCount(
 ) usize {
     return switch (path_item_or_ref) {
         .reference => |reference| blk: {
-            const resolved = files.resolvePathRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
+            const resolved = files.resolvePathRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Unsupported path reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -651,6 +650,7 @@ fn makeParameterGroupType(comptime parameters: anytype, comptime location: Spec.
 }
 
 fn collectEffectiveParameters(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime path_item: Spec.PathItem,
@@ -664,7 +664,7 @@ fn collectEffectiveParameters(
     inline for (path_item.parameters) |parameter_or_ref| {
         const resolved = resolveParameterOrRef(files, current_file_name, parameter_or_ref);
         const parameter = resolved.parameter;
-        const selection = selectParameterSchema(parameter) orelse @compileError(zig.fmt.comptimePrint(
+        const selection = selectParameterSchema(parameter) orelse @compileError(glib.std.fmt.comptimePrint(
             "Parameter '{s}' for '{s}' is missing schema support.",
             .{ parameter.name, context_name },
         ));
@@ -675,10 +675,11 @@ fn collectEffectiveParameters(
             .required = parameter.required,
             .encoding = selection.encoding,
             .field_type = models_mod.typeForSchemaOrRef(
+                std,
                 files,
                 resolved.file_name,
                 selection.schema.*,
-                zig.fmt.comptimePrint("{s}{s}", .{ context_name, parameter.name }),
+                glib.std.fmt.comptimePrint("{s}{s}", .{ context_name, parameter.name }),
             ),
         };
         index += 1;
@@ -687,7 +688,7 @@ fn collectEffectiveParameters(
     inline for (operation.parameters) |parameter_or_ref| {
         const resolved = resolveParameterOrRef(files, current_file_name, parameter_or_ref);
         const parameter = resolved.parameter;
-        const selection = selectParameterSchema(parameter) orelse @compileError(zig.fmt.comptimePrint(
+        const selection = selectParameterSchema(parameter) orelse @compileError(glib.std.fmt.comptimePrint(
             "Parameter '{s}' for '{s}' is missing schema support.",
             .{ parameter.name, context_name },
         ));
@@ -698,10 +699,11 @@ fn collectEffectiveParameters(
             .required = parameter.required,
             .encoding = selection.encoding,
             .field_type = models_mod.typeForSchemaOrRef(
+                std,
                 files,
                 resolved.file_name,
                 selection.schema.*,
-                zig.fmt.comptimePrint("{s}{s}", .{ context_name, parameter.name }),
+                glib.std.fmt.comptimePrint("{s}{s}", .{ context_name, parameter.name }),
             ),
         };
         index += 1;
@@ -721,7 +723,7 @@ fn resolveParameterOrRef(
             .parameter = parameter,
         },
         .reference => |reference| blk: {
-            const resolved = files.resolveParameterRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
+            const resolved = files.resolveParameterRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Missing parameter reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -741,7 +743,7 @@ fn resolveResponseOrRef(
             .response = response,
         },
         .reference => |reference| blk: {
-            const resolved = files.resolveResponseRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
+            const resolved = files.resolveResponseRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Missing response reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -761,7 +763,7 @@ fn resolveRequestBodyOrRef(
             .request_body = request_body,
         },
         .reference => |reference| blk: {
-            const resolved = files.resolveRequestBodyRef(current_file_name, reference.ref_path) orelse @compileError(zig.fmt.comptimePrint(
+            const resolved = files.resolveRequestBodyRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Missing request body reference '{s}'.",
                 .{reference.ref_path},
             ));
@@ -799,7 +801,6 @@ fn selectRequestBody(
     comptime request_body_or_ref: ?Spec.RequestBodyOrRef,
     comptime context_name: []const u8,
 ) ?SelectedRequestBody {
-    _ = std;
     const Http = gstd.runtime.net.http;
     const request_body = request_body_or_ref orelse return null;
     const resolved = resolveRequestBodyOrRef(files, current_file_name, request_body);
@@ -810,10 +811,11 @@ fn selectRequestBody(
             return .{
                 .required = resolved.request_body.required,
                 .body_type = models_mod.typeForSchemaOrRef(
+                    std,
                     files,
                     resolved.file_name,
                     schema.*,
-                    zig.fmt.comptimePrint("{s}Body", .{context_name}),
+                    glib.std.fmt.comptimePrint("{s}Body", .{context_name}),
                 ),
                 .payload_kind = .json,
                 .content_type = copyString(entry.name),
@@ -832,6 +834,7 @@ fn selectRequestBody(
 }
 
 fn collectResponseVariants(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime responses: []const Spec.Named(Spec.ResponseOrRef),
@@ -842,7 +845,7 @@ fn collectResponseVariants(
 
     inline for (responses) |named_response| {
         const resolved = resolveResponseOrRef(files, current_file_name, named_response.value);
-        variants[index] = responseVariant(files, resolved.file_name, named_response.name, resolved.response, context_name, index);
+        variants[index] = responseVariant(std, files, resolved.file_name, named_response.name, resolved.response, context_name, index);
         index += 1;
     }
 
@@ -850,6 +853,7 @@ fn collectResponseVariants(
 }
 
 fn responseVariant(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime status_name: []const u8,
@@ -866,10 +870,11 @@ fn responseVariant(
             .status_code = parseStatusCode(status_name),
             .payload_kind = .json,
             .payload_type = models_mod.typeForSchemaOrRef(
+                std,
                 files,
                 current_file_name,
                 schema.*,
-                zig.fmt.comptimePrint("{s}{s}Response", .{ context_name, status_name }),
+                glib.std.fmt.comptimePrint("{s}{s}Response", .{ context_name, status_name }),
             ),
         };
     }
@@ -999,7 +1004,7 @@ fn appendResolvedPath(
         var matched = false;
         inline for (parameters) |resolved| {
             if (resolved.location != .path) continue;
-            if (zig.mem.eql(u8, resolved.original_name, placeholder)) {
+            if (glib.std.mem.eql(u8, resolved.original_name, placeholder)) {
                 const rendered = try serializePathFieldValue(std, allocator, @field(args.path, resolved.field_name), resolved.encoding);
                 defer allocator.free(rendered);
                 try builder.appendSlice(allocator, rendered);
@@ -1332,7 +1337,7 @@ fn defaultBaseUrl(comptime spec: Spec) []const u8 {
 }
 
 fn parseLocalComponentRef(comptime ref_path: []const u8, comptime prefix: []const u8) ?[]const u8 {
-    if (!zig.mem.startsWith(u8, ref_path, prefix)) return null;
+    if (!glib.std.mem.startsWith(u8, ref_path, prefix)) return null;
     return ref_path[prefix.len..];
 }
 
@@ -1342,40 +1347,40 @@ fn isSuccessResponseName(comptime name: []const u8) bool {
 
 fn isJsonContentType(comptime name: []const u8) bool {
     const base = mediaTypeBase(name);
-    return zig.ascii.eqlIgnoreCase(base, "application/json") or
-        zig.ascii.eqlIgnoreCase(base, "text/json") or
-        (base.len >= 5 and zig.ascii.eqlIgnoreCase(base[base.len - 5 ..], "+json"));
+    return glib.std.ascii.eqlIgnoreCase(base, "application/json") or
+        glib.std.ascii.eqlIgnoreCase(base, "text/json") or
+        (base.len >= 5 and glib.std.ascii.eqlIgnoreCase(base[base.len - 5 ..], "+json"));
 }
 
 fn isSseContentType(comptime name: []const u8) bool {
-    return zig.ascii.eqlIgnoreCase(mediaTypeBase(name), "text/event-stream");
+    return glib.std.ascii.eqlIgnoreCase(mediaTypeBase(name), "text/event-stream");
 }
 
 fn mediaTypeBase(comptime name: []const u8) []const u8 {
-    const end = zig.mem.indexOfScalar(u8, name, ';') orelse name.len;
-    return zig.mem.trim(u8, name[0..end], " \t");
+    const end = glib.std.mem.indexOfScalar(u8, name, ';') orelse name.len;
+    return glib.std.mem.trim(u8, name[0..end], " \t");
 }
 
 fn deriveOperationName(comptime method: []const u8, comptime path: []const u8) []const u8 {
-    return zig.fmt.comptimePrint("{s}_{s}", .{ method, path });
+    return glib.std.fmt.comptimePrint("{s}_{s}", .{ method, path });
 }
 
 fn responseVariantFieldName(comptime status_name: []const u8, comptime index: usize) [:0]const u8 {
     _ = index;
-    if (zig.mem.eql(u8, status_name, "default")) return "default";
-    return zigIdentifier(zig.fmt.comptimePrint("status_{s}", .{status_name}));
+    if (glib.std.mem.eql(u8, status_name, "default")) return "default";
+    return zigIdentifier(glib.std.fmt.comptimePrint("status_{s}", .{status_name}));
 }
 
 fn parseStatusCode(comptime status_name: []const u8) ?u16 {
-    if (zig.mem.eql(u8, status_name, "default")) return null;
-    return zig.fmt.parseInt(u16, status_name, 10) catch @compileError(zig.fmt.comptimePrint(
+    if (glib.std.mem.eql(u8, status_name, "default")) return null;
+    return glib.std.fmt.parseInt(u16, status_name, 10) catch @compileError(glib.std.fmt.comptimePrint(
         "Unsupported response status '{s}'.",
         .{status_name},
     ));
 }
 
 fn copyString(comptime value: []const u8) []const u8 {
-    return zig.fmt.comptimePrint("{s}", .{value});
+    return glib.std.fmt.comptimePrint("{s}", .{value});
 }
 
 fn optionalType(comptime Child: type) type {
@@ -1388,8 +1393,8 @@ fn parsedValueType(comptime ParsedType: type) type {
 
 fn ensureUniqueOperationName(comptime operations: []const OperationRef, comptime field_name: []const u8, comptime operation_id: []const u8) void {
     inline for (operations) |operation| {
-        if (zig.mem.eql(u8, operation.field_name, field_name)) {
-            @compileError(zig.fmt.comptimePrint(
+        if (glib.std.mem.eql(u8, operation.field_name, field_name)) {
+            @compileError(glib.std.fmt.comptimePrint(
                 "Duplicate client operation name '{s}' generated from '{s}'.",
                 .{ field_name, operation_id },
             ));
@@ -1403,8 +1408,8 @@ fn ensureUniqueResponseVariantName(
     comptime status_name: []const u8,
 ) void {
     inline for (variants) |variant| {
-        if (zig.mem.eql(u8, variant.field_name, field_name)) {
-            @compileError(zig.fmt.comptimePrint(
+        if (glib.std.mem.eql(u8, variant.field_name, field_name)) {
+            @compileError(glib.std.fmt.comptimePrint(
                 "Duplicate response variant '{s}' generated for status '{s}'.",
                 .{ field_name, status_name },
             ));
@@ -1414,8 +1419,8 @@ fn ensureUniqueResponseVariantName(
 
 fn ensureUniqueFieldName(comptime fields: []const Type.StructField, comptime field_name: []const u8, comptime kind: []const u8) void {
     inline for (fields) |field| {
-        if (zig.mem.eql(u8, field.name, field_name)) {
-            @compileError(zig.fmt.comptimePrint(
+        if (glib.std.mem.eql(u8, field.name, field_name)) {
+            @compileError(glib.std.fmt.comptimePrint(
                 "Duplicate {s} field '{s}' while generating client.",
                 .{ kind, field_name },
             ));
@@ -1440,7 +1445,7 @@ fn zigIdentifier(comptime name: []const u8) [:0]const u8 {
     }
 
     buffer[index] = 0;
-    const rendered = zig.fmt.comptimePrint("{s}\x00", .{buffer[0..index]});
+    const rendered = glib.std.fmt.comptimePrint("{s}\x00", .{buffer[0..index]});
     return rendered[0..index :0];
 }
 

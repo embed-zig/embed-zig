@@ -1,4 +1,3 @@
-const zig = @import("std");
 const glib = @import("glib");
 const gstd = @import("gstd");
 
@@ -61,7 +60,7 @@ pub fn make(comptime std: type, comptime Event: type) type {
 
                 if (line[0] == ':') continue;
 
-                const colon = zig.mem.indexOfScalar(u8, line, ':');
+                const colon = std.mem.indexOfScalar(u8, line, ':');
                 const name = if (colon) |idx| line[0..idx] else line;
                 const raw_value = if (colon) |idx| blk: {
                     var start = idx + 1;
@@ -69,27 +68,27 @@ pub fn make(comptime std: type, comptime Event: type) type {
                     break :blk line[start..];
                 } else "";
 
-                if (zig.mem.eql(u8, name, "data")) {
+                if (std.mem.eql(u8, name, "data")) {
                     has_fields = true;
                     saw_data_field = true;
                     if (data_builder.items.len != 0) try data_builder.append(self.allocator, '\n');
                     try data_builder.appendSlice(self.allocator, raw_value);
                     continue;
                 }
-                if (zig.mem.eql(u8, name, "event")) {
+                if (std.mem.eql(u8, name, "event")) {
                     has_fields = true;
                     try replaceOwned(self.allocator, &event.event, raw_value);
                     continue;
                 }
-                if (zig.mem.eql(u8, name, "id")) {
-                    if (zig.mem.indexOfScalar(u8, raw_value, 0) != null) continue;
+                if (std.mem.eql(u8, name, "id")) {
+                    if (std.mem.indexOfScalar(u8, raw_value, 0) != null) continue;
                     has_fields = true;
                     try replaceOwned(self.allocator, &event.id, raw_value);
                     continue;
                 }
-                if (zig.mem.eql(u8, name, "retry")) {
+                if (std.mem.eql(u8, name, "retry")) {
                     has_fields = true;
-                    event.retry = try zig.fmt.parseInt(u64, raw_value, 10);
+                    event.retry = try std.fmt.parseInt(u64, raw_value, 10);
                     continue;
                 }
             }
@@ -97,7 +96,7 @@ pub fn make(comptime std: type, comptime Event: type) type {
 
         fn nextLine(self: *Self) !?[]u8 {
             while (true) {
-                if (zig.mem.indexOfScalarPos(u8, self.buffer.items, self.cursor, '\n')) |newline| {
+                if (std.mem.indexOfScalarPos(u8, self.buffer.items, self.cursor, '\n')) |newline| {
                     const line = trimTrailingCarriageReturn(self.buffer.items[self.cursor..newline]);
                     self.cursor = newline + 1;
                     if (self.cursor == self.buffer.items.len) {
@@ -205,15 +204,15 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 defer reader.deinit();
 
                 const first = (try reader.next()) orelse return error.ExpectedEvent;
-                try zig.testing.expectEqualStrings("message", first.event.?);
-                try zig.testing.expectEqualStrings("1", first.id.?);
-                try zig.testing.expectEqualStrings("hello", first.data.?);
+                try std.testing.expectEqualStrings("message", first.event.?);
+                try std.testing.expectEqualStrings("1", first.id.?);
+                try std.testing.expectEqualStrings("hello", first.data.?);
 
                 const second = (try reader.next()) orelse return error.ExpectedSecondEvent;
-                try zig.testing.expectEqualStrings("world", second.data.?);
-                try zig.testing.expect(second.event == null);
-                try zig.testing.expect(second.id == null);
-                try zig.testing.expect((try reader.next()) == null);
+                try std.testing.expectEqualStrings("world", second.data.?);
+                try std.testing.expect(second.event == null);
+                try std.testing.expect(second.id == null);
+                try std.testing.expect((try reader.next()) == null);
             }
 
             {
@@ -227,7 +226,7 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 defer reader.deinit();
 
                 const value = (try reader.next()) orelse return error.ExpectedMultilineEvent;
-                try zig.testing.expectEqualStrings("first\nsecond", value.data.?);
+                try std.testing.expectEqualStrings("first\nsecond", value.data.?);
             }
 
             {
@@ -241,7 +240,7 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 defer reader.deinit();
 
                 const value = (try reader.next()) orelse return error.ExpectedRetryEvent;
-                try zig.testing.expectEqual(@as(?u64, 1500), value.retry);
+                try std.testing.expectEqual(@as(?u64, 1500), value.retry);
             }
 
             {
@@ -252,7 +251,7 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 };
                 var reader = Reader.init(allocator, Http.ReadCloser.init(&body));
                 defer reader.deinit();
-                try zig.testing.expectError(error.UnexpectedEof, reader.next());
+                try std.testing.expectError(error.UnexpectedEof, reader.next());
             }
 
             {
@@ -263,7 +262,7 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 };
                 var reader = Reader.init(allocator, Http.ReadCloser.init(&body));
                 defer reader.deinit();
-                try zig.testing.expectError(error.InvalidCharacter, reader.next());
+                try std.testing.expectError(error.InvalidCharacter, reader.next());
             }
 
             {
@@ -279,8 +278,8 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 defer reader.deinit();
 
                 const value = (try reader.next()) orelse return error.ExpectedNullIdEvent;
-                try zig.testing.expect(value.id == null);
-                try zig.testing.expectEqualStrings("ok", value.data.?);
+                try std.testing.expect(value.id == null);
+                try std.testing.expectEqualStrings("ok", value.data.?);
             }
         }
     }.run);

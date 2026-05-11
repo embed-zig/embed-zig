@@ -46,15 +46,17 @@ pub fn build(b: *std.Build) void {
     const glib_dep = b.dependency("glib", .{ .target = target, .optimize = optimize });
     const gstd_dep = b.dependency("gstd", .{ .target = target, .optimize = optimize });
     const og = b.dependency("openapi_codegen", .{ .target = target, .optimize = optimize });
+    const glib_mod = glib_dep.module("glib");
+    const gstd_mod = gstd_dep.module("gstd");
 
     const openapi_mod = b.addModule("openapi", .{
         .root_source_file = og.path("lib/openapi.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "glib", .module = glib_mod },
+        },
     });
-
-    const glib_mod = glib_dep.module("glib");
-    const gstd_mod = gstd_dep.module("gstd");
 
     const codegen_mod = b.addModule("codegen", .{
         .root_source_file = og.path("lib/codegen.zig"),

@@ -24,8 +24,8 @@ pub fn makeFiles(comptime entries: anytype) openapi.Files {
     return .{ .items = &Holder.stored };
 }
 
-pub fn assertModelsCompile(comptime files: openapi.Files) void {
-    _ = codegen.models.make(files);
+pub fn assertModelsCompile(comptime std: type, comptime files: openapi.Files) void {
+    _ = codegen.models.make(std, files);
 }
 
 pub fn assertClientCompile(comptime std: type, comptime files: openapi.Files) void {
@@ -37,7 +37,7 @@ pub fn assertServerCompile(comptime std: type, comptime files: openapi.Files) vo
 }
 
 pub fn assertClientServerCompile(comptime std: type, comptime files: openapi.Files) void {
-    assertModelsCompile(files);
+    assertModelsCompile(std, files);
     assertClientCompile(std, files);
     assertServerCompile(std, files);
 }

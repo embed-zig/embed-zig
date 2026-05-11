@@ -1,9 +1,7 @@
-const zig = @import("std");
 const glib = @import("glib");
 const gstd = @import("gstd");
 
 pub fn make(comptime std: type, comptime Event: type) type {
-    _ = std;
     const Http = gstd.runtime.net.http;
 
     return struct {
@@ -32,7 +30,7 @@ pub fn make(comptime std: type, comptime Event: type) type {
 
         pub fn event(self: *Self, evt: Event) !void {
             if (!self.started) try self.writePrelude();
-            try writeEventTo(self.rw, evt);
+            try writeEventTo(std, self.rw, evt);
         }
 
         pub fn flush(self: *Self) !void {
@@ -48,16 +46,16 @@ fn writePreludeTo(rw: anytype, status_code: u16, content_type: []const u8) !void
     try rw.writeHeader(status_code);
 }
 
-fn writeEventTo(rw: anytype, evt: anytype) !void {
+fn writeEventTo(comptime std: type, rw: anytype, evt: anytype) !void {
     if (evt.event) |value| try writeFieldLine(rw, "event", value);
     if (evt.id) |value| try writeFieldLine(rw, "id", value);
     if (evt.retry) |value| {
         var retry_buf: [32]u8 = undefined;
-        const text = try zig.fmt.bufPrint(&retry_buf, "{d}", .{value});
+        const text = try std.fmt.bufPrint(&retry_buf, "{d}", .{value});
         try writeFieldLine(rw, "retry", text);
     }
     if (evt.data) |value| {
-        try writeDataLines(rw, value);
+        try writeDataLines(std, rw, value);
     }
     try writeAll(rw, "\n");
 }
@@ -73,7 +71,7 @@ fn writeFieldLine(rw: anytype, name: []const u8, value: []const u8) !void {
     try writeAll(rw, "\n");
 }
 
-fn writeDataLines(rw: anytype, value: []const u8) !void {
+fn writeDataLines(comptime std: type, rw: anytype, value: []const u8) !void {
     if (value.len == 0) {
         try writeFieldLine(rw, "data", "");
         return;
@@ -81,7 +79,7 @@ fn writeDataLines(rw: anytype, value: []const u8) !void {
 
     var start: usize = 0;
     while (true) {
-        const newline = zig.mem.indexOfScalarPos(u8, value, start, '\n') orelse {
+        const newline = std.mem.indexOfScalarPos(u8, value, start, '\n') orelse {
             try writeFieldLine(rw, "data", trimTrailingCarriageReturn(value[start..]));
             return;
         };
@@ -141,7 +139,7 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
 
                 pub fn setHeader(self: *@This(), name: []const u8, value: []const u8) !void {
                     for (self.headers.items) |*header| {
-                        if (zig.mem.eql(u8, header.name, name)) {
+                        if (std.mem.eql(u8, header.name, name)) {
                             header.value = value;
                             return;
                         }
@@ -165,7 +163,7 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
 
                 fn headerValue(self: *@This(), name: []const u8) ?[]const u8 {
                     for (self.headers.items) |header| {
-                        if (zig.mem.eql(u8, header.name, name)) return header.value;
+                        if (std.mem.eql(u8, header.name, name)) return header.value;
                     }
                     return null;
                 }
@@ -175,10 +173,10 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 defer rw.deinit();
 
                 try writePreludeTo(&rw, 200, "text/event-stream");
-                try zig.testing.expectEqual(@as(u16, 200), rw.status_code);
-                try zig.testing.expectEqualStrings("text/event-stream", rw.headerValue("Content-Type").?);
-                try zig.testing.expectEqualStrings("no-cache", rw.headerValue("Cache-Control").?);
-                try zig.testing.expect(rw.keep_alive);
+                try std.testing.expectEqual(@as(u16, 200), rw.status_code);
+                try std.testing.expectEqualStrings("text/event-stream", rw.headerValue("Content-Type").?);
+                try std.testing.expectEqualStrings("no-cache", rw.headerValue("Cache-Control").?);
+                try std.testing.expect(rw.keep_alive);
             }
 
             {
@@ -186,20 +184,20 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 defer rw.deinit();
 
                 try writePreludeTo(&rw, 200, "text/event-stream; charset=utf-8");
-                try zig.testing.expectEqualStrings("text/event-stream; charset=utf-8", rw.headerValue("Content-Type").?);
+                try std.testing.expectEqualStrings("text/event-stream; charset=utf-8", rw.headerValue("Content-Type").?);
             }
 
             {
                 var rw = MockResponseWriter.init(allocator);
                 defer rw.deinit();
 
-                try writeEventTo(&rw, EventLocal{
+                try writeEventTo(std, &rw, EventLocal{
                     .event = "message",
                     .id = "7",
                     .data = "hello\nworld",
                     .retry = 1500,
                 });
-                try zig.testing.expectEqualStrings(
+                try std.testing.expectEqualStrings(
                     "event: message\nid: 7\nretry: 1500\ndata: hello\ndata: world\n\n",
                     rw.body.items,
                 );
@@ -209,8 +207,8 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 var rw = MockResponseWriter.init(allocator);
                 defer rw.deinit();
 
-                try writeEventTo(&rw, EventLocal{ .data = "" });
-                try zig.testing.expectEqualStrings("data:\n\n", rw.body.items);
+                try writeEventTo(std, &rw, EventLocal{ .data = "" });
+                try std.testing.expectEqualStrings("data:\n\n", rw.body.items);
             }
         }
     }.run);

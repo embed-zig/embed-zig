@@ -1,4 +1,5 @@
-const std = @import("std");
+const glib = @import("glib");
+const std = glib.std;
 const Spec = @import("Spec.zig");
 
 const Self = @This();

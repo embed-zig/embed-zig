@@ -264,14 +264,13 @@ pub fn TestRunner(comptime phase: Phase) glib.testing.TestRunner {
         .additional_properties => glib.testing.TestRunner.fromFn(std, 1024 * 1024, struct {
             fn run(t: *glib.testing.T, allocator: std.mem.Allocator) !void {
                 _ = t;
-                _ = allocator;
                 const has_any = comptime blk: {
                     const files: openapi.Files = .{
                         .items = &.{
                             .{ .name = "spec.json", .spec = openapi.json.parse(@embedFile("spec.json")) },
                         },
                     };
-                    const Generated = @import("codegen").models.make(files);
+                    const Generated = @import("codegen").models.make(std, files);
                     break :blk @hasField(Generated.WithAnyAdditional1, "additional_properties");
                 };
                 const has_string = comptime blk: {
@@ -280,7 +279,7 @@ pub fn TestRunner(comptime phase: Phase) glib.testing.TestRunner {
                             .{ .name = "spec.json", .spec = openapi.json.parse(@embedFile("spec.json")) },
                         },
                     };
-                    const Generated = @import("codegen").models.make(files);
+                    const Generated = @import("codegen").models.make(std, files);
                     break :blk @hasField(Generated.WithStringAdditional1, "additional_properties");
                 };
                 const has_without = comptime blk: {
@@ -289,13 +288,47 @@ pub fn TestRunner(comptime phase: Phase) glib.testing.TestRunner {
                             .{ .name = "spec.json", .spec = openapi.json.parse(@embedFile("spec.json")) },
                         },
                     };
-                    const Generated = @import("codegen").models.make(files);
+                    const Generated = @import("codegen").models.make(std, files);
                     break :blk @hasField(Generated.WithoutAdditional1, "additional_properties");
                 };
 
                 try std.testing.expect(has_any);
                 try std.testing.expect(has_string);
                 try std.testing.expect(!has_without);
+
+                const codegen = @import("codegen");
+                const Generated = comptime blk: {
+                    const files: openapi.Files = .{
+                        .items = &.{
+                            .{ .name = "spec.json", .spec = openapi.json.parse(@embedFile("spec.json")) },
+                        },
+                    };
+                    break :blk codegen.models.make(std, files);
+                };
+
+                var parsed_string = try Generated.fromJson(Generated.WithStringAdditional1, allocator,
+                    \\{"field1":1,"field2":"ok","extra":"value"}
+                );
+                defer parsed_string.deinit();
+                try std.testing.expectEqual(@as(?i64, 1), parsed_string.value.field1);
+                try std.testing.expectEqualStrings("ok", parsed_string.value.field2.?);
+                try std.testing.expectEqual(@as(usize, 1), parsed_string.value.additional_properties.count());
+                try std.testing.expectEqualStrings("value", parsed_string.value.additional_properties.get("extra").?);
+
+                var parsed_any = try Generated.fromJson(Generated.WithAnyAdditional1, allocator,
+                    \\{"extra":7}
+                );
+                defer parsed_any.deinit();
+                try std.testing.expectEqual(@as(usize, 1), parsed_any.value.additional_properties.count());
+                try std.testing.expectEqual(@as(i64, 7), parsed_any.value.additional_properties.get("extra").?.integer);
+
+                const json = try Generated.toJson(allocator, parsed_any.value);
+                defer allocator.free(json);
+                try std.testing.expectEqualStrings("{\"extra\":7}", json);
+
+                const literal_json = try Generated.toJson(allocator, "literal");
+                defer allocator.free(literal_json);
+                try std.testing.expectEqualStrings("\"literal\"", literal_json);
             }
         }.run),
     };

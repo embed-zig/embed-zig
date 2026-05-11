@@ -1,13 +1,15 @@
-const std = @import("std");
+const glib = @import("glib");
 const openapi = @import("openapi");
 const Spec = openapi.Spec;
 const Files = openapi.Files;
-const Type = std.builtin.Type;
+const Type = glib.std.builtin.Type;
 const NamedProperty = Spec.Named(Spec.SchemaOrRef);
 const FlattenMode = enum {
     preserve_required,
     force_optional,
 };
+const to_json_field_name: [:0]const u8 = "toJson";
+const from_json_field_name: [:0]const u8 = "fromJson";
 const FileSchema = struct {
     file_name: []const u8,
     schema_name: []const u8,
@@ -15,15 +17,15 @@ const FileSchema = struct {
 
 const additional_properties_field_name: [:0]const u8 = "additional_properties";
 
-pub fn make(comptime files: Files) blk: {
+pub fn make(comptime std: type, comptime files: Files) blk: {
     @setEvalBranchQuota(200_000);
 
     const schemas = collectSchemas(files);
-    var fields: [schemas.len]Type.StructField = undefined;
+    var fields: [schemas.len + 2]Type.StructField = undefined;
 
     for (schemas, 0..) |file_schema, i| {
         const field_name = zigIdentifier(file_schema.schema_name);
-        const model_type = namedSchemaType(files, file_schema.file_name, file_schema.schema_name);
+        const model_type = namedSchemaType(std, files, file_schema.file_name, file_schema.schema_name);
         ensureUniqueSchemaFieldName(fields[0..i], field_name, file_schema.file_name, file_schema.schema_name);
 
         fields[i] = .{
@@ -35,6 +37,32 @@ pub fn make(comptime files: Files) blk: {
         };
     }
 
+    const Helpers = struct {
+        fn toJson(allocator: std.mem.Allocator, value: anytype) ![]u8 {
+            return toJsonWithStd(std, allocator, value);
+        }
+
+        fn fromJson(comptime T: type, allocator: std.mem.Allocator, data: []const u8) !std.json.Parsed(T) {
+            return fromJsonWithStd(std, T, allocator, data);
+        }
+    };
+    ensureUniqueSchemaFieldName(fields[0..schemas.len], to_json_field_name, "models.make", to_json_field_name);
+    fields[schemas.len] = .{
+        .name = to_json_field_name,
+        .type = @TypeOf(Helpers.toJson),
+        .default_value_ptr = @as(?*const anyopaque, @ptrCast(&Helpers.toJson)),
+        .is_comptime = true,
+        .alignment = 1,
+    };
+    ensureUniqueSchemaFieldName(fields[0 .. schemas.len + 1], from_json_field_name, "models.make", from_json_field_name);
+    fields[schemas.len + 1] = .{
+        .name = from_json_field_name,
+        .type = @TypeOf(Helpers.fromJson),
+        .default_value_ptr = @as(?*const anyopaque, @ptrCast(&Helpers.fromJson)),
+        .is_comptime = true,
+        .alignment = 1,
+    };
+
     break :blk @Type(.{ .@"struct" = .{
         .layout = .auto,
         .fields = &fields,
@@ -45,13 +73,36 @@ pub fn make(comptime files: Files) blk: {
     return .{};
 }
 
+fn toJsonWithStd(comptime std: type, allocator: std.mem.Allocator, value: anytype) ![]u8 {
+    var out = std.Io.Writer.Allocating.init(allocator);
+    errdefer out.deinit();
+    try writeJsonValue(std, &out.writer, value);
+    return try out.toOwnedSlice();
+}
+
+fn fromJsonWithStd(comptime std: type, comptime T: type, allocator: std.mem.Allocator, data: []const u8) !std.json.Parsed(T) {
+    var parsed = std.json.Parsed(T){
+        .arena = try allocator.create(std.heap.ArenaAllocator),
+        .value = undefined,
+    };
+    errdefer allocator.destroy(parsed.arena);
+    parsed.arena.* = std.heap.ArenaAllocator.init(allocator);
+    errdefer parsed.arena.deinit();
+
+    const arena_allocator = parsed.arena.allocator();
+    const source = try std.json.parseFromSliceLeaky(std.json.Value, arena_allocator, data, .{});
+    parsed.value = try parseJsonValue(std, T, arena_allocator, source);
+    return parsed;
+}
+
 pub fn typeForSchemaOrRef(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema_or_ref: Spec.SchemaOrRef,
     comptime context_name: []const u8,
 ) type {
-    return lowerSchemaOrRef(files, current_file_name, schema_or_ref, context_name);
+    return lowerSchemaOrRef(std, files, current_file_name, schema_or_ref, context_name);
 }
 
 fn collectSchemas(comptime files: Files) []const FileSchema {
@@ -92,8 +143,8 @@ fn ensureUniqueSchemaFieldName(
     comptime schema_name: []const u8,
 ) void {
     inline for (existing_fields) |existing| {
-        if (std.mem.eql(u8, existing.name, field_name)) {
-            @compileError(std.fmt.comptimePrint(
+        if (glib.std.mem.eql(u8, existing.name, field_name)) {
+            @compileError(glib.std.fmt.comptimePrint(
                 "Duplicate model name '{s}' from schema '{s}' in file '{s}'.",
                 .{ field_name, schema_name, file_name },
             ));
@@ -101,33 +152,35 @@ fn ensureUniqueSchemaFieldName(
     }
 }
 
-fn namedSchemaType(comptime files: Files, comptime file_name: []const u8, comptime schema_name: []const u8) type {
-    const schema_or_ref = files.findSchema(file_name, schema_name) orelse @compileError(std.fmt.comptimePrint(
+fn namedSchemaType(comptime std: type, comptime files: Files, comptime file_name: []const u8, comptime schema_name: []const u8) type {
+    const schema_or_ref = files.findSchema(file_name, schema_name) orelse @compileError(glib.std.fmt.comptimePrint(
         "Schema '{s}' was not found in file '{s}'.",
         .{ schema_name, file_name },
     ));
-    return lowerSchemaOrRef(files, file_name, schema_or_ref, schema_name);
+    return lowerSchemaOrRef(std, files, file_name, schema_or_ref, schema_name);
 }
 
 fn lowerSchemaOrRef(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema_or_ref: Spec.SchemaOrRef,
     comptime context_name: []const u8,
 ) type {
     return switch (schema_or_ref) {
-        .schema => |schema| lowerSchema(files, current_file_name, schema, context_name),
+        .schema => |schema| lowerSchema(std, files, current_file_name, schema, context_name),
         .reference => |reference| blk: {
-            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Unsupported schema reference '{s}' for '{s}' in file '{s}'.",
                 .{ reference.ref_path, context_name, current_file_name },
             ));
-            break :blk namedSchemaType(files, resolved.file_name, resolved.schema_name);
+            break :blk namedSchemaType(std, files, resolved.file_name, resolved.schema_name);
         },
     };
 }
 
 fn lowerSchema(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema: Spec.Schema,
@@ -135,37 +188,38 @@ fn lowerSchema(
 ) type {
     @setEvalBranchQuota(200_000);
 
-    if (schema.one_of.len != 0) return lowerOneOfSchema(files, current_file_name, schema, context_name);
-    if (schema.any_of.len != 0) return lowerAnyOfSchema(files, current_file_name, schema, context_name);
+    if (schema.one_of.len != 0) return lowerOneOfSchema(std, files, current_file_name, schema, context_name);
+    if (schema.any_of.len != 0) return lowerAnyOfSchema(std, files, current_file_name, schema, context_name);
 
-    if (schema.all_of.len != 0) return lowerAllOfSchema(files, current_file_name, schema, context_name);
-    if (isObjectSchema(schema)) return lowerObjectSchema(files, current_file_name, schema, context_name);
+    if (schema.all_of.len != 0) return lowerAllOfSchema(std, files, current_file_name, schema, context_name);
+    if (isObjectSchema(schema)) return lowerObjectSchema(std, files, current_file_name, schema, context_name);
 
-    const schema_type = schema.schema_type orelse @compileError(std.fmt.comptimePrint(
+    const schema_type = schema.schema_type orelse @compileError(glib.std.fmt.comptimePrint(
         "Schema '{s}' is missing a supported type.",
         .{context_name},
     ));
 
-    if (std.mem.eql(u8, schema_type, "array")) {
-        const items = schema.items orelse @compileError(std.fmt.comptimePrint(
+    if (glib.std.mem.eql(u8, schema_type, "array")) {
+        const items = schema.items orelse @compileError(glib.std.fmt.comptimePrint(
             "Array schema '{s}' is missing items.",
             .{context_name},
         ));
-        return []const lowerSchemaOrRef(files, current_file_name, items.*, std.fmt.comptimePrint("{s}Item", .{context_name}));
+        return []const lowerSchemaOrRef(std, files, current_file_name, items.*, glib.std.fmt.comptimePrint("{s}Item", .{context_name}));
     }
 
-    if (std.mem.eql(u8, schema_type, "string")) return []const u8;
-    if (std.mem.eql(u8, schema_type, "boolean")) return bool;
-    if (std.mem.eql(u8, schema_type, "integer")) return integerType(schema.format);
-    if (std.mem.eql(u8, schema_type, "number")) return numberType(schema.format);
+    if (glib.std.mem.eql(u8, schema_type, "string")) return []const u8;
+    if (glib.std.mem.eql(u8, schema_type, "boolean")) return bool;
+    if (glib.std.mem.eql(u8, schema_type, "integer")) return integerType(schema.format);
+    if (glib.std.mem.eql(u8, schema_type, "number")) return numberType(schema.format);
 
-    @compileError(std.fmt.comptimePrint(
+    @compileError(glib.std.fmt.comptimePrint(
         "Schema '{s}' uses unsupported type '{s}'.",
         .{ context_name, schema_type },
     ));
 }
 
 fn lowerOneOfSchema(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema: Spec.Schema,
@@ -173,7 +227,7 @@ fn lowerOneOfSchema(
 ) type {
     const variant_count = schema.one_of.len;
     if (variant_count == 0) {
-        @compileError(std.fmt.comptimePrint(
+        @compileError(glib.std.fmt.comptimePrint(
             "Schema '{s}' declares oneOf without variants.",
             .{context_name},
         ));
@@ -186,10 +240,11 @@ fn lowerOneOfSchema(
         const normalized_item = normalizeOneOfVariantSchema(schema, item);
         const variant_name = oneOfVariantName(files, current_file_name, schema, normalized_item, context_name, i);
         const variant_type = lowerSchemaOrRef(
+            std,
             files,
             current_file_name,
             normalized_item,
-            std.fmt.comptimePrint("{s}{d}", .{ context_name, i + 1 }),
+            glib.std.fmt.comptimePrint("{s}{d}", .{ context_name, i + 1 }),
         );
         ensureUniqueUnionFieldName(union_fields[0..i], variant_name, context_name);
 
@@ -200,7 +255,7 @@ fn lowerOneOfSchema(
         union_fields[i] = .{
             .name = variant_name,
             .type = variant_type,
-            .alignment = if (@sizeOf(variant_type) > 0) @alignOf(variant_type) else 0,
+            .alignment = @alignOf(variant_type),
         };
     }
 
@@ -265,9 +320,9 @@ fn oneOfVariantName(
     }
 
     return switch (schema_or_ref) {
-        .schema => zigIdentifier(std.fmt.comptimePrint("{s}Option{d}", .{ context_name, index + 1 })),
+        .schema => zigIdentifier(glib.std.fmt.comptimePrint("{s}Option{d}", .{ context_name, index + 1 })),
         .reference => |reference| blk: {
-            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Unsupported schema reference '{s}' for '{s}' in file '{s}'.",
                 .{ reference.ref_path, context_name, current_file_name },
             ));
@@ -285,7 +340,7 @@ fn discriminatorVariantName(
 
     inline for (discriminator.mapping) |entry| {
         const mapping_target = Files.parseSchemaRef(current_file_name, entry.value) orelse continue;
-        if (std.mem.eql(u8, target.file_name, mapping_target.file_name) and std.mem.eql(u8, target.schema_name, mapping_target.schema_name)) {
+        if (glib.std.mem.eql(u8, target.file_name, mapping_target.file_name) and glib.std.mem.eql(u8, target.schema_name, mapping_target.schema_name)) {
             return zigIdentifier(entry.name);
         }
     }
@@ -311,16 +366,17 @@ fn schemaOrRefDiscriminatorTarget(
 }
 
 fn lowerAnyOfSchema(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema: Spec.Schema,
     comptime context_name: []const u8,
 ) type {
-    const field_count = countFlattenedFields(files, current_file_name, schema, context_name, .preserve_required);
+    const field_count = countFlattenedFields(std, files, current_file_name, schema, context_name, .preserve_required);
     comptime var fields: [field_count]Type.StructField = undefined;
     comptime var index: usize = 0;
 
-    appendFlattenedFields(files, current_file_name, schema, context_name, .preserve_required, fields[0..], &index);
+    appendFlattenedFields(std, files, current_file_name, schema, context_name, .preserve_required, fields[0..], &index);
 
     return @Type(.{ .@"struct" = .{
         .layout = .auto,
@@ -354,7 +410,7 @@ fn countOptionalBranchFieldsFromSchemaOrRef(
     return switch (schema_or_ref) {
         .schema => |schema| countOptionalBranchFields(files, current_file_name, schema, context_name),
         .reference => |reference| blk: {
-            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Unsupported schema reference '{s}' for '{s}' in file '{s}'.",
                 .{ reference.ref_path, context_name, current_file_name },
             ));
@@ -370,14 +426,14 @@ fn countOptionalBranchFields(
     comptime context_name: []const u8,
 ) usize {
     if (schema.additional_properties != null) {
-        @compileError(std.fmt.comptimePrint(
+        @compileError(glib.std.fmt.comptimePrint(
             "Schema '{s}' uses additionalProperties inside anyOf, which models.make does not support yet.",
             .{context_name},
         ));
     }
 
     if (schema.one_of.len != 0) {
-        @compileError(std.fmt.comptimePrint(
+        @compileError(glib.std.fmt.comptimePrint(
             "Schema '{s}' uses oneOf inside anyOf, which models.make does not support yet.",
             .{context_name},
         ));
@@ -394,7 +450,7 @@ fn countOptionalBranchFields(
     }
 
     if (total == 0 and !isObjectSchema(schema)) {
-        @compileError(std.fmt.comptimePrint(
+        @compileError(glib.std.fmt.comptimePrint(
             "Schema '{s}' uses anyOf with a non-object branch, which models.make does not support yet.",
             .{context_name},
         ));
@@ -404,6 +460,7 @@ fn countOptionalBranchFields(
 }
 
 fn appendOptionalBranchFieldsFromSchemaOrRef(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema_or_ref: Spec.SchemaOrRef,
@@ -412,21 +469,22 @@ fn appendOptionalBranchFieldsFromSchemaOrRef(
     comptime index: *usize,
 ) void {
     switch (schema_or_ref) {
-        .schema => |schema| appendOptionalBranchFields(files, current_file_name, schema, context_name, fields, index),
+        .schema => |schema| appendOptionalBranchFields(std, files, current_file_name, schema, context_name, fields, index),
         .reference => |reference| {
-            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Unsupported schema reference '{s}' for '{s}' in file '{s}'.",
                 .{ reference.ref_path, context_name, current_file_name },
             ));
             switch (resolved.schema) {
-                .schema => |schema| appendOptionalBranchFields(files, resolved.file_name, schema, resolved.schema_name, fields, index),
-                .reference => |nested| appendOptionalBranchFieldsFromSchemaOrRef(files, resolved.file_name, .{ .reference = nested }, resolved.schema_name, fields, index),
+                .schema => |schema| appendOptionalBranchFields(std, files, resolved.file_name, schema, resolved.schema_name, fields, index),
+                .reference => |nested| appendOptionalBranchFieldsFromSchemaOrRef(std, files, resolved.file_name, .{ .reference = nested }, resolved.schema_name, fields, index),
             }
         },
     }
 }
 
 fn appendOptionalBranchFields(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema: Spec.Schema,
@@ -435,32 +493,32 @@ fn appendOptionalBranchFields(
     comptime index: *usize,
 ) void {
     if (schema.additional_properties != null) {
-        @compileError(std.fmt.comptimePrint(
+        @compileError(glib.std.fmt.comptimePrint(
             "Schema '{s}' uses additionalProperties inside anyOf, which models.make does not support yet.",
             .{context_name},
         ));
     }
 
     if (schema.one_of.len != 0) {
-        @compileError(std.fmt.comptimePrint(
+        @compileError(glib.std.fmt.comptimePrint(
             "Schema '{s}' uses oneOf inside anyOf, which models.make does not support yet.",
             .{context_name},
         ));
     }
 
     inline for (schema.all_of) |item| {
-        appendOptionalBranchFieldsFromSchemaOrRef(files, current_file_name, item, context_name, fields, index);
+        appendOptionalBranchFieldsFromSchemaOrRef(std, files, current_file_name, item, context_name, fields, index);
     }
 
     inline for (schema.any_of) |item| {
-        appendOptionalBranchFieldsFromSchemaOrRef(files, current_file_name, item, context_name, fields, index);
+        appendOptionalBranchFieldsFromSchemaOrRef(std, files, current_file_name, item, context_name, fields, index);
     }
 
     inline for (schema.properties) |property| {
         const field_name = zigIdentifier(property.name);
         ensureUniquePropertyFieldName(fields[0..index.*], field_name, context_name, property.name);
 
-        const field_type = optionalPropertyFieldType(files, current_file_name, property);
+        const field_type = optionalPropertyFieldType(std, files, current_file_name, property);
         fields[index.*] = .{
             .name = field_name,
             .type = field_type,
@@ -472,7 +530,7 @@ fn appendOptionalBranchFields(
     }
 
     if (schema.properties.len == 0 and schema.all_of.len == 0 and schema.any_of.len == 0 and !isObjectSchema(schema)) {
-        @compileError(std.fmt.comptimePrint(
+        @compileError(glib.std.fmt.comptimePrint(
             "Schema '{s}' uses anyOf with a non-object branch, which models.make does not support yet.",
             .{context_name},
         ));
@@ -480,16 +538,17 @@ fn appendOptionalBranchFields(
 }
 
 fn lowerAllOfSchema(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema: Spec.Schema,
     comptime context_name: []const u8,
 ) type {
-    const field_count = countFlattenedFields(files, current_file_name, schema, context_name, .preserve_required);
+    const field_count = countFlattenedFields(std, files, current_file_name, schema, context_name, .preserve_required);
     comptime var fields: [field_count]Type.StructField = undefined;
     comptime var index: usize = 0;
 
-    appendFlattenedFields(files, current_file_name, schema, context_name, .preserve_required, fields[0..], &index);
+    appendFlattenedFields(std, files, current_file_name, schema, context_name, .preserve_required, fields[0..], &index);
 
     return @Type(.{ .@"struct" = .{
         .layout = .auto,
@@ -500,28 +559,30 @@ fn lowerAllOfSchema(
 }
 
 fn countFlattenedFields(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema: Spec.Schema,
     comptime context_name: []const u8,
     comptime mode: FlattenMode,
 ) usize {
-    comptime var total: usize = schema.properties.len + @intFromBool(additionalPropertiesFieldType(files, current_file_name, schema, context_name) != null);
+    comptime var total: usize = schema.properties.len + @intFromBool(additionalPropertiesFieldType(std, files, current_file_name, schema, context_name) != null);
 
     inline for (schema.all_of) |item| {
-        total += countFlattenedFieldsFromSchemaOrRef(files, current_file_name, item, context_name, mode);
+        total += countFlattenedFieldsFromSchemaOrRef(std, files, current_file_name, item, context_name, mode);
     }
     inline for (schema.any_of) |item| {
-        total += countFlattenedFieldsFromSchemaOrRef(files, current_file_name, item, context_name, .force_optional);
+        total += countFlattenedFieldsFromSchemaOrRef(std, files, current_file_name, item, context_name, .force_optional);
     }
     inline for (schema.one_of) |item| {
-        total += countFlattenedFieldsFromSchemaOrRef(files, current_file_name, item, context_name, .force_optional);
+        total += countFlattenedFieldsFromSchemaOrRef(std, files, current_file_name, item, context_name, .force_optional);
     }
 
     return total;
 }
 
 fn countFlattenedFieldsFromSchemaOrRef(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema_or_ref: Spec.SchemaOrRef,
@@ -529,18 +590,19 @@ fn countFlattenedFieldsFromSchemaOrRef(
     comptime mode: FlattenMode,
 ) usize {
     return switch (schema_or_ref) {
-        .schema => |schema| countFlattenedFields(files, current_file_name, schema, context_name, mode),
+        .schema => |schema| countFlattenedFields(std, files, current_file_name, schema, context_name, mode),
         .reference => |reference| blk: {
-            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Unsupported schema reference '{s}' for '{s}' in file '{s}'.",
                 .{ reference.ref_path, context_name, current_file_name },
             ));
-            break :blk countFlattenedFieldsFromSchemaOrRef(files, resolved.file_name, resolved.schema, resolved.schema_name, mode);
+            break :blk countFlattenedFieldsFromSchemaOrRef(std, files, resolved.file_name, resolved.schema, resolved.schema_name, mode);
         },
     };
 }
 
 fn appendFlattenedFields(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema: Spec.Schema,
@@ -550,31 +612,32 @@ fn appendFlattenedFields(
     comptime index: *usize,
 ) void {
     inline for (schema.all_of) |item| {
-        appendFlattenedFieldsFromSchemaOrRef(files, current_file_name, item, context_name, mode, fields, index);
+        appendFlattenedFieldsFromSchemaOrRef(std, files, current_file_name, item, context_name, mode, fields, index);
     }
     inline for (schema.any_of) |item| {
-        appendFlattenedFieldsFromSchemaOrRef(files, current_file_name, item, context_name, .force_optional, fields, index);
+        appendFlattenedFieldsFromSchemaOrRef(std, files, current_file_name, item, context_name, .force_optional, fields, index);
     }
     inline for (schema.one_of) |item| {
-        appendFlattenedFieldsFromSchemaOrRef(files, current_file_name, item, context_name, .force_optional, fields, index);
+        appendFlattenedFieldsFromSchemaOrRef(std, files, current_file_name, item, context_name, .force_optional, fields, index);
     }
 
     inline for (schema.properties) |property| {
         const field_name = zigIdentifier(property.name);
-        const field_type = flattenPropertyFieldType(files, current_file_name, property, schema.required, mode);
-        appendOrMergePropertyField(fields, index, field_name, field_type, context_name, property.name);
+        const field_type = flattenPropertyFieldType(std, files, current_file_name, property, schema.required, mode);
+        appendOrMergePropertyField(std, fields, index, field_name, field_type, context_name, property.name);
     }
 
-    if (additionalPropertiesFieldType(files, current_file_name, schema, context_name)) |field_type| {
+    if (additionalPropertiesFieldType(std, files, current_file_name, schema, context_name)) |field_type| {
         const merged_type = switch (mode) {
             .preserve_required => field_type,
             .force_optional => optionalizeType(field_type),
         };
-        appendOrMergePropertyField(fields, index, additional_properties_field_name, merged_type, context_name, "additionalProperties");
+        appendOrMergePropertyField(std, fields, index, additional_properties_field_name, merged_type, context_name, "additionalProperties");
     }
 }
 
 fn appendFlattenedFieldsFromSchemaOrRef(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema_or_ref: Spec.SchemaOrRef,
@@ -584,15 +647,15 @@ fn appendFlattenedFieldsFromSchemaOrRef(
     comptime index: *usize,
 ) void {
     switch (schema_or_ref) {
-        .schema => |schema| appendFlattenedFields(files, current_file_name, schema, context_name, mode, fields, index),
+        .schema => |schema| appendFlattenedFields(std, files, current_file_name, schema, context_name, mode, fields, index),
         .reference => |reference| {
-            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Unsupported schema reference '{s}' for '{s}' in file '{s}'.",
                 .{ reference.ref_path, context_name, current_file_name },
             ));
             switch (resolved.schema) {
-                .schema => |schema| appendFlattenedFields(files, resolved.file_name, schema, resolved.schema_name, mode, fields, index),
-                .reference => |nested| appendFlattenedFieldsFromSchemaOrRef(files, resolved.file_name, .{ .reference = nested }, resolved.schema_name, mode, fields, index),
+                .schema => |schema| appendFlattenedFields(std, files, resolved.file_name, schema, resolved.schema_name, mode, fields, index),
+                .reference => |nested| appendFlattenedFieldsFromSchemaOrRef(std, files, resolved.file_name, .{ .reference = nested }, resolved.schema_name, mode, fields, index),
             }
         },
     }
@@ -622,7 +685,7 @@ fn countAllOfFieldsFromSchemaOrRef(
     return switch (schema_or_ref) {
         .schema => |schema| countAllOfFields(files, current_file_name, schema, context_name),
         .reference => |reference| blk: {
-            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Unsupported schema reference '{s}' for '{s}' in file '{s}'.",
                 .{ reference.ref_path, context_name, current_file_name },
             ));
@@ -632,6 +695,7 @@ fn countAllOfFieldsFromSchemaOrRef(
 }
 
 fn appendAllOfFields(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema: Spec.Schema,
@@ -640,28 +704,28 @@ fn appendAllOfFields(
     comptime index: *usize,
 ) void {
     if (schema.additional_properties != null) {
-        @compileError(std.fmt.comptimePrint(
+        @compileError(glib.std.fmt.comptimePrint(
             "Schema '{s}' uses additionalProperties, which models.make does not support yet.",
             .{context_name},
         ));
     }
 
     if (schema.one_of.len != 0 or schema.any_of.len != 0) {
-        @compileError(std.fmt.comptimePrint(
+        @compileError(glib.std.fmt.comptimePrint(
             "Schema '{s}' uses oneOf/anyOf, which models.make does not support yet.",
             .{context_name},
         ));
     }
 
     inline for (schema.all_of) |item| {
-        appendAllOfFieldsFromSchemaOrRef(files, current_file_name, item, context_name, fields, index);
+        appendAllOfFieldsFromSchemaOrRef(std, files, current_file_name, item, context_name, fields, index);
     }
 
     inline for (schema.properties) |property| {
         const field_name = zigIdentifier(property.name);
         ensureUniquePropertyFieldName(fields[0..index.*], field_name, context_name, property.name);
 
-        const field_type = propertyFieldType(files, current_file_name, property, schema.required);
+        const field_type = propertyFieldType(std, files, current_file_name, property, schema.required);
         const field_is_optional = isOptionalType(field_type);
 
         fields[index.*] = .{
@@ -675,7 +739,7 @@ fn appendAllOfFields(
     }
 
     if (schema.properties.len == 0 and schema.all_of.len == 0 and !isObjectSchema(schema)) {
-        @compileError(std.fmt.comptimePrint(
+        @compileError(glib.std.fmt.comptimePrint(
             "Schema '{s}' uses allOf with a non-object branch, which models.make does not support yet.",
             .{context_name},
         ));
@@ -683,6 +747,7 @@ fn appendAllOfFields(
 }
 
 fn appendAllOfFieldsFromSchemaOrRef(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema_or_ref: Spec.SchemaOrRef,
@@ -691,31 +756,32 @@ fn appendAllOfFieldsFromSchemaOrRef(
     comptime index: *usize,
 ) void {
     switch (schema_or_ref) {
-        .schema => |schema| appendAllOfFields(files, current_file_name, schema, context_name, fields, index),
+        .schema => |schema| appendAllOfFields(std, files, current_file_name, schema, context_name, fields, index),
         .reference => |reference| {
-            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(std.fmt.comptimePrint(
+            const resolved = files.resolveSchemaRef(current_file_name, reference.ref_path) orelse @compileError(glib.std.fmt.comptimePrint(
                 "Unsupported schema reference '{s}' for '{s}' in file '{s}'.",
                 .{ reference.ref_path, context_name, current_file_name },
             ));
             switch (resolved.schema) {
-                .schema => |schema| appendAllOfFields(files, resolved.file_name, schema, resolved.schema_name, fields, index),
-                .reference => |nested| appendAllOfFieldsFromSchemaOrRef(files, resolved.file_name, .{ .reference = nested }, resolved.schema_name, fields, index),
+                .schema => |schema| appendAllOfFields(std, files, resolved.file_name, schema, resolved.schema_name, fields, index),
+                .reference => |nested| appendAllOfFieldsFromSchemaOrRef(std, files, resolved.file_name, .{ .reference = nested }, resolved.schema_name, fields, index),
             }
         },
     }
 }
 
 fn lowerObjectSchema(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema: Spec.Schema,
     comptime context_name: []const u8,
 ) type {
-    const additional_field_type = additionalPropertiesFieldType(files, current_file_name, schema, context_name);
+    const additional_field_type = additionalPropertiesFieldType(std, files, current_file_name, schema, context_name);
     comptime var fields: [schema.properties.len + @intFromBool(additional_field_type != null)]Type.StructField = undefined;
 
     inline for (schema.properties, 0..) |property, i| {
-        const field_type = propertyFieldType(files, current_file_name, property, schema.required);
+        const field_type = propertyFieldType(std, files, current_file_name, property, schema.required);
         const field_is_optional = isOptionalType(field_type);
 
         fields[i] = .{
@@ -752,8 +818,8 @@ fn ensureUniquePropertyFieldName(
     comptime property_name: []const u8,
 ) void {
     inline for (existing_fields) |existing| {
-        if (std.mem.eql(u8, existing.name, field_name)) {
-            @compileError(std.fmt.comptimePrint(
+        if (glib.std.mem.eql(u8, existing.name, field_name)) {
+            @compileError(glib.std.fmt.comptimePrint(
                 "Duplicate property field '{s}' from property '{s}' while lowering schema '{s}'.",
                 .{ field_name, property_name, schema_name },
             ));
@@ -762,6 +828,7 @@ fn ensureUniquePropertyFieldName(
 }
 
 fn appendOrMergePropertyField(
+    comptime std: type,
     comptime fields: []Type.StructField,
     comptime index: *usize,
     comptime field_name: [:0]const u8,
@@ -770,7 +837,7 @@ fn appendOrMergePropertyField(
     comptime property_name: []const u8,
 ) void {
     if (findStructFieldIndex(fields[0..index.*], field_name)) |existing_index| {
-        const merged_type = mergeStructFieldTypes(fields[existing_index].type, field_type, field_name, schema_name, property_name);
+        const merged_type = mergeStructFieldTypes(std, fields[existing_index].type, field_type, field_name, schema_name, property_name);
         fields[existing_index] = makeStructField(field_name, merged_type);
         return;
     }
@@ -784,12 +851,13 @@ fn findStructFieldIndex(
     comptime field_name: [:0]const u8,
 ) ?usize {
     inline for (fields, 0..) |field, i| {
-        if (std.mem.eql(u8, field.name, field_name)) return i;
+        if (glib.std.mem.eql(u8, field.name, field_name)) return i;
     }
     return null;
 }
 
 fn mergeStructFieldTypes(
+    comptime std: type,
     comptime existing_type: type,
     comptime incoming_type: type,
     comptime field_name: [:0]const u8,
@@ -798,14 +866,14 @@ fn mergeStructFieldTypes(
 ) type {
     if (existing_type == incoming_type) return existing_type;
 
-    if (std.mem.eql(u8, field_name, additional_properties_field_name)) {
-        return mergeAdditionalPropertiesFieldTypes(existing_type, incoming_type);
+    if (glib.std.mem.eql(u8, field_name, additional_properties_field_name)) {
+        return mergeAdditionalPropertiesFieldTypes(std, existing_type, incoming_type);
     }
 
     if (isOptionalType(existing_type) and optionalChildType(existing_type) == incoming_type) return existing_type;
     if (isOptionalType(incoming_type) and optionalChildType(incoming_type) == existing_type) return incoming_type;
 
-    @compileError(std.fmt.comptimePrint(
+    @compileError(glib.std.fmt.comptimePrint(
         "Incompatible duplicate property field '{s}' from property '{s}' while lowering schema '{s}'.",
         .{ field_name, property_name, schema_name },
     ));
@@ -817,7 +885,7 @@ fn makeStructField(comptime field_name: [:0]const u8, comptime field_type: type)
         .type = field_type,
         .default_value_ptr = if (isOptionalType(field_type))
             &@as(field_type, null)
-        else if (std.mem.eql(u8, field_name, additional_properties_field_name))
+        else if (glib.std.mem.eql(u8, field_name, additional_properties_field_name))
             defaultValuePtr(field_type, .{})
         else
             null,
@@ -827,6 +895,7 @@ fn makeStructField(comptime field_name: [:0]const u8, comptime field_type: type)
 }
 
 fn additionalPropertiesFieldType(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime schema: Spec.Schema,
@@ -838,19 +907,20 @@ fn additionalPropertiesFieldType(
         switch (additional_properties) {
             .boolean => |enabled| if (enabled) std.json.Value else return null,
             .schema => |value_schema| lowerSchemaOrRef(
+                std,
                 files,
                 current_file_name,
                 value_schema.*,
-                std.fmt.comptimePrint("{s}AdditionalProperty", .{context_name}),
+                glib.std.fmt.comptimePrint("{s}AdditionalProperty", .{context_name}),
             ),
         }
     else
         std.json.Value;
 
-    return AdditionalPropertiesMap(value_type);
+    return AdditionalPropertiesMap(std, value_type);
 }
 
-fn AdditionalPropertiesMap(comptime ValueType: type) type {
+fn AdditionalPropertiesMap(comptime std: type, comptime ValueType: type) type {
     const Inner = std.json.ArrayHashMap(ValueType);
     return struct {
         storage: Inner = .{},
@@ -887,8 +957,246 @@ fn AdditionalPropertiesMap(comptime ValueType: type) type {
     };
 }
 
+fn writeJsonValue(comptime std: type, writer: *std.Io.Writer, value: anytype) !void {
+    const T = @TypeOf(value);
+    switch (@typeInfo(T)) {
+        .optional => {
+            if (value) |payload| {
+                try writeJsonValue(std, writer, payload);
+            } else {
+                try writer.writeAll("null");
+            }
+        },
+        .pointer => |pointer| switch (pointer.size) {
+            .slice => {
+                if (pointer.child == u8) {
+                    try std.json.Stringify.value(value, .{}, writer);
+                    return;
+                }
+                try writer.writeAll("[");
+                for (value, 0..) |item, index| {
+                    if (index != 0) try writer.writeAll(",");
+                    try writeJsonValue(std, writer, item);
+                }
+                try writer.writeAll("]");
+            },
+            .one => {
+                if (comptime isStringArrayType(pointer.child)) {
+                    try std.json.Stringify.value(value.*[0..], .{}, writer);
+                    return;
+                }
+                try writeJsonValue(std, writer, value.*);
+            },
+            else => try std.json.Stringify.value(value, .{}, writer),
+        },
+        .array => {
+            try writer.writeAll("[");
+            for (value, 0..) |item, index| {
+                if (index != 0) try writer.writeAll(",");
+                try writeJsonValue(std, writer, item);
+            }
+            try writer.writeAll("]");
+        },
+        .@"struct" => {
+            if (isAdditionalPropertiesMapType(T)) {
+                try std.json.Stringify.value(value, .{}, writer);
+                return;
+            }
+            try writeJsonObject(std, writer, value);
+        },
+        else => try std.json.Stringify.value(value, .{}, writer),
+    }
+}
+
+fn writeJsonObject(comptime std: type, writer: *std.Io.Writer, value: anytype) !void {
+    const T = @TypeOf(value);
+    try writer.writeAll("{");
+    var first = true;
+    inline for (@typeInfo(T).@"struct".fields) |field| {
+        const field_value = @field(value, field.name);
+        if (comptime glib.std.mem.eql(u8, field.name, additional_properties_field_name) and isAdditionalPropertiesFieldType(field.type)) {
+            try writeAdditionalPropertiesFields(std, writer, &first, field_value);
+            continue;
+        }
+        if (comptime isOptionalType(field.type)) {
+            if (field_value != null) {
+                try writeJsonFieldPrefix(std, writer, &first, field.name);
+                try writeJsonValue(std, writer, field_value);
+            }
+        } else {
+            try writeJsonFieldPrefix(std, writer, &first, field.name);
+            try writeJsonValue(std, writer, field_value);
+        }
+    }
+    try writer.writeAll("}");
+}
+
+fn writeAdditionalPropertiesFields(comptime std: type, writer: *std.Io.Writer, first: *bool, additional_properties: anytype) !void {
+    switch (@typeInfo(@TypeOf(additional_properties))) {
+        .optional => {
+            if (additional_properties) |payload| {
+                try writeAdditionalPropertiesFields(std, writer, first, payload);
+            }
+            return;
+        },
+        else => {},
+    }
+
+    var it = additional_properties.storage.map.iterator();
+    while (it.next()) |entry| {
+        try writeJsonFieldPrefix(std, writer, first, entry.key_ptr.*);
+        try writeJsonValue(std, writer, entry.value_ptr.*);
+    }
+}
+
+fn writeJsonFieldPrefix(comptime std: type, writer: *std.Io.Writer, first: *bool, name: []const u8) !void {
+    if (first.*) {
+        first.* = false;
+    } else {
+        try writer.writeAll(",");
+    }
+    try std.json.Stringify.value(name, .{}, writer);
+    try writer.writeAll(":");
+}
+
+fn isStringArrayType(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .array => |array| array.child == u8,
+        else => false,
+    };
+}
+
+fn parseJsonValue(comptime std: type, comptime T: type, allocator: std.mem.Allocator, source: std.json.Value) !T {
+    switch (@typeInfo(T)) {
+        .optional => |optional| {
+            if (source == .null) return null;
+            return try parseJsonValue(std, optional.child, allocator, source);
+        },
+        .pointer => |pointer| switch (pointer.size) {
+            .slice => {
+                if (pointer.child == u8) return try std.json.parseFromValueLeaky(T, allocator, source, .{ .ignore_unknown_fields = true });
+                if (source != .array) return error.UnexpectedToken;
+                const items = source.array.items;
+                const result = if (pointer.sentinel()) |sentinel|
+                    try allocator.allocSentinel(pointer.child, items.len, sentinel)
+                else
+                    try allocator.alloc(pointer.child, items.len);
+                for (items, result) |item, *dest| {
+                    dest.* = try parseJsonValue(std, pointer.child, allocator, item);
+                }
+                return result;
+            },
+            .one => {
+                const result = try allocator.create(pointer.child);
+                result.* = try parseJsonValue(std, pointer.child, allocator, source);
+                return result;
+            },
+            else => return try std.json.parseFromValueLeaky(T, allocator, source, .{ .ignore_unknown_fields = true }),
+        },
+        .array => |array| {
+            if (source != .array) return error.UnexpectedToken;
+            if (source.array.items.len != array.len) return error.LengthMismatch;
+            var result: T = undefined;
+            for (source.array.items, 0..) |item, i| {
+                result[i] = try parseJsonValue(std, array.child, allocator, item);
+            }
+            return result;
+        },
+        .@"struct" => |struct_info| {
+            if (struct_info.is_tuple or glib.std.meta.hasFn(T, "jsonParseFromValue")) {
+                return try std.json.parseFromValueLeaky(T, allocator, source, .{ .ignore_unknown_fields = true });
+            }
+            return try parseJsonObject(std, T, allocator, source);
+        },
+        else => return try std.json.parseFromValueLeaky(T, allocator, source, .{ .ignore_unknown_fields = true }),
+    }
+}
+
+fn parseJsonObject(comptime std: type, comptime T: type, allocator: std.mem.Allocator, source: std.json.Value) !T {
+    if (source != .object) return error.UnexpectedToken;
+
+    const fields = @typeInfo(T).@"struct".fields;
+    var result: T = undefined;
+    var fields_seen = [_]bool{false} ** fields.len;
+
+    var it = source.object.iterator();
+    while (it.next()) |entry| {
+        const field_name = entry.key_ptr.*;
+        inline for (fields, 0..) |field, i| {
+            if (field.is_comptime) @compileError("comptime fields are not supported: " ++ @typeName(T) ++ "." ++ field.name);
+            if (comptime glib.std.mem.eql(u8, field.name, additional_properties_field_name) and isAdditionalPropertiesFieldType(field.type)) continue;
+            if (glib.std.mem.eql(u8, field.name, field_name)) {
+                @field(result, field.name) = try parseJsonValue(std, field.type, allocator, entry.value_ptr.*);
+                fields_seen[i] = true;
+                break;
+            }
+        } else if (comptime additionalPropertiesFieldIndex(T)) |additional_index| {
+            if (!fields_seen[additional_index]) {
+                @field(result, additional_properties_field_name) = defaultAdditionalPropertiesValue(fields[additional_index].type);
+                fields_seen[additional_index] = true;
+            }
+            try addAdditionalProperty(std, allocator, &@field(result, additional_properties_field_name), field_name, entry.value_ptr.*);
+        }
+    }
+
+    try fillDefaultJsonStructValues(T, &result, &fields_seen);
+    return result;
+}
+
+fn additionalPropertiesFieldIndex(comptime T: type) ?usize {
+    inline for (@typeInfo(T).@"struct".fields, 0..) |field, i| {
+        if (comptime glib.std.mem.eql(u8, field.name, additional_properties_field_name) and isAdditionalPropertiesFieldType(field.type)) return i;
+    }
+    return null;
+}
+
+fn defaultAdditionalPropertiesValue(comptime T: type) T {
+    return switch (@typeInfo(T)) {
+        .optional => null,
+        else => .{},
+    };
+}
+
+fn addAdditionalProperty(comptime std: type, allocator: std.mem.Allocator, additional_properties: anytype, key: []const u8, source: std.json.Value) !void {
+    const FieldType = @typeInfo(@TypeOf(additional_properties)).pointer.child;
+    switch (@typeInfo(FieldType)) {
+        .optional => |optional| {
+            if (additional_properties.* == null) additional_properties.* = .{};
+            try addAdditionalPropertyToMap(std, optional.child, allocator, &additional_properties.*.?, key, source);
+        },
+        else => try addAdditionalPropertyToMap(std, FieldType, allocator, additional_properties, key, source),
+    }
+}
+
+fn addAdditionalPropertyToMap(comptime std: type, comptime MapType: type, allocator: std.mem.Allocator, map: *MapType, key: []const u8, source: std.json.Value) !void {
+    const ValueType = additionalPropertiesValueType(MapType);
+    try map.storage.map.put(allocator, key, try parseJsonValue(std, ValueType, allocator, source));
+}
+
+fn fillDefaultJsonStructValues(comptime T: type, result: *T, fields_seen: *[@typeInfo(T).@"struct".fields.len]bool) !void {
+    inline for (@typeInfo(T).@"struct".fields, 0..) |field, i| {
+        if (!fields_seen[i]) {
+            if (field.defaultValue()) |default| {
+                @field(result, field.name) = default;
+            } else {
+                return error.MissingField;
+            }
+        }
+    }
+}
+
 fn isAdditionalPropertiesMapType(comptime T: type) bool {
-    return @hasDecl(T, "additional_properties_value_type");
+    return switch (@typeInfo(T)) {
+        .@"struct", .@"union", .@"enum", .@"opaque" => @hasDecl(T, "additional_properties_value_type"),
+        else => false,
+    };
+}
+
+fn isAdditionalPropertiesFieldType(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .optional => |optional| isAdditionalPropertiesMapType(optional.child),
+        else => isAdditionalPropertiesMapType(T),
+    };
 }
 
 fn additionalPropertiesValueType(comptime T: type) type {
@@ -898,7 +1206,7 @@ fn additionalPropertiesValueType(comptime T: type) type {
     return T.additional_properties_value_type;
 }
 
-fn mergeAdditionalPropertiesFieldTypes(comptime existing_type: type, comptime incoming_type: type) type {
+fn mergeAdditionalPropertiesFieldTypes(comptime std: type, comptime existing_type: type, comptime incoming_type: type) type {
     const existing_optional = isOptionalType(existing_type);
     const incoming_optional = isOptionalType(incoming_type);
     const existing_base = if (existing_optional) optionalChildType(existing_type) else existing_type;
@@ -917,7 +1225,7 @@ fn mergeAdditionalPropertiesFieldTypes(comptime existing_type: type, comptime in
     else
         std.json.Value;
 
-    const merged_base = AdditionalPropertiesMap(merged_value);
+    const merged_base = AdditionalPropertiesMap(std, merged_value);
     if (existing_optional or incoming_optional) return optionalizeType(merged_base);
     return merged_base;
 }
@@ -935,8 +1243,8 @@ fn ensureUniqueUnionFieldName(
     comptime schema_name: []const u8,
 ) void {
     inline for (existing_fields) |existing| {
-        if (std.mem.eql(u8, existing.name, field_name)) {
-            @compileError(std.fmt.comptimePrint(
+        if (glib.std.mem.eql(u8, existing.name, field_name)) {
+            @compileError(glib.std.fmt.comptimePrint(
                 "Duplicate oneOf variant '{s}' while lowering schema '{s}'.",
                 .{ field_name, schema_name },
             ));
@@ -945,12 +1253,13 @@ fn ensureUniqueUnionFieldName(
 }
 
 fn propertyFieldType(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime property: NamedProperty,
     comptime required: []const []const u8,
 ) type {
-    const base_type = lowerSchemaOrRef(files, current_file_name, property.value, property.name);
+    const base_type = lowerSchemaOrRef(std, files, current_file_name, property.value, property.name);
     const is_required = isRequired(required, property.name);
     const is_nullable = schemaOrRefNullable(files, current_file_name, property.value);
 
@@ -959,6 +1268,7 @@ fn propertyFieldType(
 }
 
 fn flattenPropertyFieldType(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime property: NamedProperty,
@@ -966,17 +1276,18 @@ fn flattenPropertyFieldType(
     comptime mode: FlattenMode,
 ) type {
     return switch (mode) {
-        .preserve_required => propertyFieldType(files, current_file_name, property, required),
-        .force_optional => optionalPropertyFieldType(files, current_file_name, property),
+        .preserve_required => propertyFieldType(std, files, current_file_name, property, required),
+        .force_optional => optionalPropertyFieldType(std, files, current_file_name, property),
     };
 }
 
 fn optionalPropertyFieldType(
+    comptime std: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime property: NamedProperty,
 ) type {
-    return optionalizeType(lowerSchemaOrRef(files, current_file_name, property.value, property.name));
+    return optionalizeType(lowerSchemaOrRef(std, files, current_file_name, property.value, property.name));
 }
 
 fn schemaOrRefNullable(
@@ -996,26 +1307,26 @@ fn schemaOrRefNullable(
 fn isObjectSchema(comptime schema: Spec.Schema) bool {
     if (schema.properties.len != 0) return true;
     const schema_type = schema.schema_type orelse return false;
-    return std.mem.eql(u8, schema_type, "object");
+    return glib.std.mem.eql(u8, schema_type, "object");
 }
 
 fn integerType(format: ?[]const u8) type {
     const actual = format orelse return i64;
-    if (std.mem.eql(u8, actual, "int32")) return i32;
-    if (std.mem.eql(u8, actual, "int64")) return i64;
+    if (glib.std.mem.eql(u8, actual, "int32")) return i32;
+    if (glib.std.mem.eql(u8, actual, "int64")) return i64;
     return i64;
 }
 
 fn numberType(format: ?[]const u8) type {
     const actual = format orelse return f64;
-    if (std.mem.eql(u8, actual, "float")) return f32;
-    if (std.mem.eql(u8, actual, "double")) return f64;
+    if (glib.std.mem.eql(u8, actual, "float")) return f32;
+    if (glib.std.mem.eql(u8, actual, "double")) return f64;
     return f64;
 }
 
 fn isRequired(comptime required: []const []const u8, comptime name: []const u8) bool {
     inline for (required) |required_name| {
-        if (std.mem.eql(u8, required_name, name)) return true;
+        if (glib.std.mem.eql(u8, required_name, name)) return true;
     }
     return false;
 }
@@ -1065,11 +1376,11 @@ fn zigIdentifier(comptime raw: []const u8) [:0]const u8 {
 }
 
 fn isIdentifierStart(ch: u8) bool {
-    return ch == '_' or std.ascii.isAlphabetic(ch);
+    return ch == '_' or glib.std.ascii.isAlphabetic(ch);
 }
 
 fn isIdentifierContinue(ch: u8) bool {
-    return ch == '_' or std.ascii.isAlphanumeric(ch);
+    return ch == '_' or glib.std.ascii.isAlphanumeric(ch);
 }
 
 fn isKeyword(comptime name: []const u8) bool {
@@ -1126,7 +1437,7 @@ fn isKeyword(comptime name: []const u8) bool {
     };
 
     inline for (keywords) |keyword| {
-        if (std.mem.eql(u8, name, keyword)) return true;
+        if (glib.std.mem.eql(u8, name, keyword)) return true;
     }
     return false;
 }

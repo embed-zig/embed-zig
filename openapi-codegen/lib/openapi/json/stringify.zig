@@ -1,11 +1,12 @@
-const std = @import("std");
+const glib = @import("glib");
+const std = glib.std;
 const Spec = @import("../Spec.zig");
 
 const Allocator = std.mem.Allocator;
 const IoWriter = std.Io.Writer;
 
 pub fn stringifyAlloc(allocator: Allocator, spec: Spec) ![]u8 {
-    var out: std.io.Writer.Allocating = .init(allocator);
+    var out: std.Io.Writer.Allocating = .init(allocator);
     defer out.deinit();
 
     var ctx = StringifyContext{

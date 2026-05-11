@@ -1,4 +1,5 @@
-const std = @import("std");
+const glib = @import("glib");
+const std = glib.std;
 const Self = @This();
 
 openapi: []const u8 = "",
