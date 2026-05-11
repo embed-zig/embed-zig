@@ -6,6 +6,7 @@ const lib_context = @import("build/lib/context.zig");
 const lib_time = @import("build/lib/time.zig");
 const lib_sync = @import("build/lib/sync.zig");
 const lib_io = @import("build/lib/io.zig");
+const lib_encoding = @import("build/lib/encoding.zig");
 const lib_mime = @import("build/lib/mime.zig");
 const lib_net = @import("build/lib/net.zig");
 const lib_crypto = @import("build/lib/crypto.zig");
@@ -21,6 +22,7 @@ pub fn build(b: *std.Build) void {
     const time_mod = lib_time.create(b, target, optimize);
     const sync_mod = lib_sync.create(b, target, optimize);
     const io_mod = lib_io.create(b, target, optimize);
+    const encoding_mod = lib_encoding.create(b, target, optimize);
     const mime_mod = lib_mime.create(b, target, optimize);
     const net_mod = lib_net.create(b, target, optimize);
     const crypto_mod = lib_crypto.create(b, target, optimize);
@@ -48,6 +50,10 @@ pub fn build(b: *std.Build) void {
         .stdz = stdz_mod,
         .testing = testing_mod,
     });
+    lib_encoding.link(encoding_mod, .{
+        .stdz = stdz_mod,
+        .testing = testing_mod,
+    });
     lib_mime.link(mime_mod, .{
         .stdz = stdz_mod,
         .testing = testing_mod,
@@ -69,6 +75,7 @@ pub fn build(b: *std.Build) void {
     b.modules.put("time", time_mod) catch @panic("OOM");
     b.modules.put("sync", sync_mod) catch @panic("OOM");
     b.modules.put("io", io_mod) catch @panic("OOM");
+    b.modules.put("encoding", encoding_mod) catch @panic("OOM");
     b.modules.put("mime", mime_mod) catch @panic("OOM");
     b.modules.put("net", net_mod) catch @panic("OOM");
     b.modules.put("crypto", crypto_mod) catch @panic("OOM");
@@ -81,6 +88,7 @@ pub fn build(b: *std.Build) void {
         .time = time_mod,
         .sync = sync_mod,
         .io = io_mod,
+        .encoding = encoding_mod,
         .mime = mime_mod,
         .net = net_mod,
         .crypto = crypto_mod,

@@ -125,6 +125,7 @@ pub const time = struct {
 };
 pub const sync = @import("sync");
 pub const io = @import("io");
+pub const encoding = @import("encoding");
 pub const mime = @import("mime");
 pub const net = @import("net");
 pub const crypto = @import("crypto");
