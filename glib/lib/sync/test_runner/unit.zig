@@ -1,6 +1,7 @@
 const builtin = @import("builtin");
 const testing_api = @import("testing");
 
+const Arc = @import("../Arc.zig");
 const Channel = @import("../Channel.zig");
 const Pool = @import("../Pool.zig");
 const Racer = @import("../Racer.zig");
@@ -19,6 +20,7 @@ pub fn make(comptime std: type, comptime time: type) testing_api.TestRunner {
             _ = allocator;
 
             t.parallel();
+            t.run("Arc", Arc.TestRunner(std));
             t.run("Channel", Channel.TestRunner(std));
             t.run("Pool", Pool.TestRunner(std));
             t.run("Racer", Racer.TestRunner(std, time));

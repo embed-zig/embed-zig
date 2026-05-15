@@ -152,6 +152,7 @@ pub const runtime = struct {
             pub const time = runtime_time;
             pub const context = @import("context").make(runtime_std, runtime_time);
             pub const sync = struct {
+                pub const Arc = @import("sync").Arc;
                 pub const ChannelFactory = channel_factory;
                 pub const Channel = @import("sync").Channel(runtime_std, channel_factory);
 

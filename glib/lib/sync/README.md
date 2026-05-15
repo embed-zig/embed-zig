@@ -5,6 +5,7 @@ runtime layer.
 
 Today it has a few main pieces:
 
+- `Arc.make(std, T)` for atomically reference-counted ownership of heap values
 - `Channel(std, factory)` for typed channels with close semantics
 - `Pool.make(std, T)` for thread-safe object reuse
 - `Racer(std, time, T)` for "first result wins" task coordination
@@ -16,6 +17,7 @@ Today it has a few main pieces:
 ```zig
 const sync = @import("sync");
 
+const SharedBytes = sync.Arc.make(std, Bytes);
 const Channel = sync.Channel(std, platform.ChannelFactory);
 const IntChan = Channel(u32);
 const BytesPool = sync.Pool.make(std, [256]u8);
@@ -39,6 +41,7 @@ interrupting blocking waits from another thread or cancellation path.
 
 ```text
 lib/sync/
+  Arc.zig
   Channel.zig
   Pool.zig
   Racer.zig
@@ -56,7 +59,7 @@ lib/sync/
 
 `lib/sync` follows the shared runner layout:
 
-- unit tests live next to `Channel.zig`, `Pool.zig`, `Racer.zig`, `Timer.zig`, and `WakeFd.zig`
+- unit tests live next to `Arc.zig`, `Channel.zig`, `Pool.zig`, `Racer.zig`, `Timer.zig`, and `WakeFd.zig`
 - aggregate runners live under `sync/test_runner/`
 - integration cases live under `sync/test_runner/integration/`
 - integration or compatibility entrypoints call those runners from the shared
