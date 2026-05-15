@@ -31,6 +31,7 @@ pub fn link(
     mod.addImport("embed", embed_dep.module("embed"));
 
     if (target.result.os.tag == .macos) {
+        mod.linkFramework("CoreLocation", .{});
         mod.linkFramework("CoreWLAN", .{});
         mod.linkFramework("Foundation", .{});
         mod.linkSystemLibrary("objc", .{});

@@ -11,7 +11,20 @@ const drivers = embed.drivers;
 const wifi = drivers.wifi;
 const Sta = wifi.Sta;
 const objc = @import("objc.zig");
+const location = @import("Location.zig");
 const Allocator = glib.std.mem.Allocator;
+const IfAddrs = extern struct {
+    ifa_next: ?*IfAddrs,
+    ifa_name: [*:0]const u8,
+    ifa_flags: c_uint,
+    ifa_addr: ?*std.c.sockaddr,
+    ifa_netmask: ?*std.c.sockaddr,
+    ifa_dstaddr: ?*std.c.sockaddr,
+    ifa_data: ?*anyopaque,
+};
+
+extern "c" fn getifaddrs(ifap: *?*IfAddrs) c_int;
+extern "c" fn freeifaddrs(ifa: ?*IfAddrs) void;
 
 const CWSta = @This();
 
@@ -44,12 +57,20 @@ const kCWTimeoutErr: objc.NSInteger = -3905;
 const kCWAssociationDeniedErr: objc.NSInteger = -3909;
 const kCWChallengeFailureErr: objc.NSInteger = -3912;
 const kCWSupplicantTimeoutErr: objc.NSInteger = -3925;
+const kPosixBusyErr: objc.NSInteger = 16;
 
 pub const Config = struct {
     interface_name: ?[]const u8 = null,
+    request_location_authorization: bool = false,
+    location_authorization_timeout: glib.time.duration.Duration = 8 * glib.time.duration.Second,
 };
 
 pub fn init(allocator: Allocator, config: Config) CWSta {
+    if (config.request_location_authorization) {
+        const status = location.requestWhenInUseAuthorization(config.location_authorization_timeout);
+        std.log.info("core_wlan location authorization status={s}", .{@tagName(status)});
+    }
+
     return .{
         .allocator = allocator,
         .interface_name = config.interface_name,
@@ -85,6 +106,10 @@ pub fn startScan(self: *CWSta, config: Sta.ScanConfig) Sta.ScanError!void {
     const interface = self.getInterface() orelse return error.Unexpected;
     const filter_name: ?objc.Id = if (config.ssid) |ssid| objc.nsString(ssid) else null;
     var ns_error: ?objc.Id = null;
+    std.log.info("core_wlan scan start ssid={s} hidden={}", .{
+        config.ssid orelse "",
+        config.show_hidden,
+    });
     const networks = objc.msgSend(?objc.Id, interface, objc.sel("scanForNetworksWithName:includeHidden:error:"), .{
         @as(?*anyopaque, if (filter_name) |value| @ptrCast(value) else null),
         @as(objc.BOOL, if (config.show_hidden) objc.YES else objc.NO),
@@ -94,6 +119,7 @@ pub fn startScan(self: *CWSta, config: Sta.ScanConfig) Sta.ScanError!void {
 
     const array = objc.msgSend(objc.Id, networks, objc.sel("allObjects"), .{});
     const count: objc.NSUInteger = objc.msgSend(objc.NSUInteger, array, objc.sel("count"), .{});
+    std.log.info("core_wlan scan result count={d}", .{count});
     var index: objc.NSUInteger = 0;
     while (index < count) : (index += 1) {
         const network = objc.msgSend(objc.Id, array, objc.sel("objectAtIndex:"), .{index});
@@ -128,7 +154,25 @@ pub fn connect(self: *CWSta, config: Sta.ConnectConfig) Sta.ConnectError!void {
     defer pool.deinit();
 
     const interface = self.getInterface() orelse return error.Unexpected;
+    std.log.info("core_wlan connect start ssid={s} channel={d}", .{ config.ssid, config.channel });
+    var current_ssid_buf: [Sta.max_ssid_len]u8 = [_]u8{0} ** Sta.max_ssid_len;
+    if (self.currentLinkInfo(interface, &current_ssid_buf)) |info| {
+        std.log.info("core_wlan current link ssid={s} has_ip={}", .{ info.ssid, self.getIpInfo() != null });
+        if (currentLinkMatches(info, config)) {
+            self.mutex.lock();
+            self.state = .connected;
+            self.mutex.unlock();
+
+            self.fireEvent(.{ .connected = info });
+            if (self.getIpInfo()) |ip_info| {
+                self.fireEvent(.{ .got_ip = ip_info });
+            }
+            return;
+        }
+    }
+
     const network = try self.findNetwork(interface, config);
+    std.log.info("core_wlan connect found network ssid={s}", .{config.ssid});
 
     const password_obj: ?objc.Id = if (config.password.len > 0) objc.nsString(config.password) else null;
     var ns_error: ?objc.Id = null;
@@ -202,8 +246,28 @@ pub fn getMacAddr(self: *CWSta) ?Sta.MacAddr {
 }
 
 pub fn getIpInfo(self: *CWSta) ?Sta.IpInfo {
-    _ = self;
-    return null;
+    var pool = objc.AutoreleasePool.init();
+    defer pool.deinit();
+
+    const interface = self.getInterface() orelse return null;
+    var ssid_buf: [Sta.max_ssid_len]u8 = undefined;
+    _ = self.currentLinkInfo(interface, &ssid_buf) orelse return null;
+
+    const name_obj = objc.msgSend(?objc.Id, interface, objc.sel("interfaceName"), .{}) orelse return null;
+    var interface_name_buf: [32]u8 = undefined;
+    const interface_name = objc.nsStringGetBytes(name_obj, &interface_name_buf);
+    if (interface_name.len == 0) return null;
+
+    return self.ipInfoForInterface(interface_name);
+}
+
+pub fn getCurrentSsid(self: *CWSta, out: *[Sta.max_ssid_len]u8) ?[]const u8 {
+    var pool = objc.AutoreleasePool.init();
+    defer pool.deinit();
+
+    const interface = self.getInterface() orelse return null;
+    const info = self.currentLinkInfo(interface, out) orelse return null;
+    return info.ssid;
 }
 
 fn getInterface(self: *CWSta) ?objc.Id {
@@ -216,39 +280,44 @@ fn getInterface(self: *CWSta) ?objc.Id {
 }
 
 fn findNetwork(self: *CWSta, interface: objc.Id, config: Sta.ConnectConfig) Sta.ConnectError!objc.Id {
-    const scan_config: Sta.ScanConfig = .{
-        .ssid = config.ssid,
-        .channel = config.channel,
-    };
-    self.startScan(scan_config) catch |err| switch (err) {
-        error.Busy => {},
-        error.Unexpected => return error.Unexpected,
-    };
-
+    _ = self;
     var ns_error: ?objc.Id = null;
     const name_obj = objc.nsString(config.ssid);
     const networks = objc.msgSend(?objc.Id, interface, objc.sel("scanForNetworksWithName:includeHidden:error:"), .{
         @as(?*anyopaque, @ptrCast(name_obj)),
-        @as(objc.BOOL, objc.NO),
+        @as(objc.BOOL, objc.YES),
         @as(*?objc.Id, &ns_error),
     }) orelse return error.Unexpected;
     if (ns_error != null) return mapConnectError(ns_error.?);
 
     const array = objc.msgSend(objc.Id, networks, objc.sel("allObjects"), .{});
     const count: objc.NSUInteger = objc.msgSend(objc.NSUInteger, array, objc.sel("count"), .{});
+    std.log.info("core_wlan find network scan ssid={s} count={d}", .{ config.ssid, count });
     var index: objc.NSUInteger = 0;
     while (index < count) : (index += 1) {
         const network = objc.msgSend(objc.Id, array, objc.sel("objectAtIndex:"), .{index});
-        if (!networkMatches(network, config)) continue;
+        if (!networkMatches(network, config)) {
+            logNetworkCandidate(network);
+            continue;
+        }
         return network;
     }
+    std.log.warn("core_wlan find network no match ssid={s}", .{config.ssid});
     return error.Unexpected;
+}
+
+fn logNetworkCandidate(network: objc.Id) void {
+    var ssid_buf: [Sta.max_ssid_len]u8 = [_]u8{0} ** Sta.max_ssid_len;
+    const ssid = ssidFromObject(network, &ssid_buf) orelse {
+        std.log.info("core_wlan candidate ssid=<null>", .{});
+        return;
+    };
+    std.log.info("core_wlan candidate ssid={s}", .{ssid});
 }
 
 fn networkMatches(network: objc.Id, config: Sta.ConnectConfig) bool {
     var ssid_buf: [Sta.max_ssid_len]u8 = [_]u8{0} ** Sta.max_ssid_len;
-    const ssid_obj = objc.msgSend(?objc.Id, network, objc.sel("ssid"), .{}) orelse return false;
-    const ssid = objc.nsStringGetBytes(ssid_obj, &ssid_buf);
+    const ssid = ssidFromObject(network, &ssid_buf) orelse return false;
     if (!glib.std.mem.eql(u8, ssid, config.ssid)) return false;
 
     if (config.channel != 0) {
@@ -267,10 +336,19 @@ fn networkMatches(network: objc.Id, config: Sta.ConnectConfig) bool {
     return true;
 }
 
+fn currentLinkMatches(info: Sta.LinkInfo, config: Sta.ConnectConfig) bool {
+    if (!glib.std.mem.eql(u8, info.ssid, config.ssid)) return false;
+    if (config.channel != 0 and info.channel != config.channel) return false;
+    if (config.bssid) |expected| {
+        const actual = info.bssid orelse return false;
+        if (!glib.std.mem.eql(u8, actual[0..], expected[0..])) return false;
+    }
+    return true;
+}
+
 fn currentLinkInfo(self: *CWSta, interface: objc.Id, ssid_buf: *[Sta.max_ssid_len]u8) ?Sta.LinkInfo {
     _ = self;
-    const ssid_obj = objc.msgSend(?objc.Id, interface, objc.sel("ssid"), .{}) orelse return null;
-    const ssid = objc.nsStringGetBytes(ssid_obj, ssid_buf);
+    const ssid = ssidFromObject(interface, ssid_buf) orelse return null;
 
     const bssid_obj = objc.msgSend(?objc.Id, interface, objc.sel("bssid"), .{});
     var bssid_buf: [17]u8 = undefined;
@@ -286,19 +364,56 @@ fn currentLinkInfo(self: *CWSta, interface: objc.Id, ssid_buf: *[Sta.max_ssid_le
         0;
 
     const rssi = @as(i16, @intCast(objc.msgSend(objc.NSInteger, interface, objc.sel("rssiValue"), .{})));
-    const security_raw = objc.msgSend(objc.NSInteger, interface, objc.sel("security"), .{});
     return .{
         .ssid = ssid,
         .bssid = bssid,
         .channel = channel,
         .rssi = rssi,
-        .security = mapSecurity(security_raw),
+        .security = securityFromObject(interface),
     };
 }
 
+fn ipInfoForInterface(self: *CWSta, interface_name: []const u8) ?Sta.IpInfo {
+    _ = self;
+
+    var addrs: ?*IfAddrs = null;
+    if (getifaddrs(&addrs) != 0) return null;
+    defer freeifaddrs(addrs);
+
+    var current = addrs;
+    while (current) |entry| : (current = entry.ifa_next) {
+        if (!glib.std.mem.eql(u8, std.mem.span(entry.ifa_name), interface_name)) continue;
+        const addr = ipv4FromSockaddr(entry.ifa_addr) orelse continue;
+        if (!isUsableIpv4(addr)) continue;
+
+        return .{
+            .address = glib.net.netip.Addr.from4(addr),
+            .netmask = if (ipv4FromSockaddr(entry.ifa_netmask)) |netmask|
+                glib.net.netip.Addr.from4(netmask)
+            else
+                null,
+        };
+    }
+
+    return null;
+}
+
+fn ipv4FromSockaddr(sockaddr: ?*std.c.sockaddr) ?[4]u8 {
+    const addr = sockaddr orelse return null;
+    if (addr.family != std.c.AF.INET) return null;
+    const in_addr: *const std.c.sockaddr.in = @ptrCast(@alignCast(addr));
+    return @bitCast(in_addr.addr);
+}
+
+fn isUsableIpv4(addr: [4]u8) bool {
+    if (addr[0] == 0) return false;
+    if (addr[0] == 127) return false;
+    if (addr[0] == 169 and addr[1] == 254) return false;
+    return true;
+}
+
 fn scanResultFromNetwork(network: objc.Id, ssid_buf: *[Sta.max_ssid_len]u8) ?Sta.ScanResult {
-    const ssid_obj = objc.msgSend(?objc.Id, network, objc.sel("ssid"), .{}) orelse return null;
-    const ssid = objc.nsStringGetBytes(ssid_obj, ssid_buf);
+    const ssid = ssidFromObject(network, ssid_buf) orelse return null;
 
     const bssid_obj = objc.msgSend(?objc.Id, network, objc.sel("bssid"), .{}) orelse return null;
     var bssid_buf: [17]u8 = undefined;
@@ -311,14 +426,33 @@ fn scanResultFromNetwork(network: objc.Id, ssid_buf: *[Sta.max_ssid_len]u8) ?Sta
         0;
 
     const rssi = @as(i16, @intCast(objc.msgSend(objc.NSInteger, network, objc.sel("rssiValue"), .{})));
-    const security_raw = objc.msgSend(objc.NSInteger, network, objc.sel("security"), .{});
     return .{
         .ssid = ssid,
         .bssid = bssid,
         .channel = channel,
         .rssi = rssi,
-        .security = mapSecurity(security_raw),
+        .security = securityFromObject(network),
     };
+}
+
+fn ssidFromObject(obj: objc.Id, buf: *[Sta.max_ssid_len]u8) ?[]const u8 {
+    const ssid_data_sel = objc.sel("ssidData");
+    if (objc.respondsToSelector(obj, ssid_data_sel)) {
+        if (objc.msgSend(?objc.Id, obj, ssid_data_sel, .{})) |data| {
+            const len = objc.msgSend(objc.NSUInteger, data, objc.sel("length"), .{});
+            if (len != 0) {
+                const bytes = objc.msgSend(?[*]const u8, data, objc.sel("bytes"), .{}) orelse return null;
+                const copy_len = @min(len, buf.len);
+                @memcpy(buf[0..copy_len], bytes[0..copy_len]);
+                return buf[0..copy_len];
+            }
+        }
+    }
+
+    const ssid_obj = objc.msgSend(?objc.Id, obj, objc.sel("ssid"), .{}) orelse return null;
+    const ssid = objc.nsStringGetBytes(ssid_obj, buf);
+    if (ssid.len == 0) return null;
+    return ssid;
 }
 
 fn fireEvent(self: *CWSta, event: Sta.Event) void {
@@ -346,18 +480,38 @@ fn mapSecurity(raw: objc.NSInteger) Sta.Security {
     };
 }
 
+fn securityFromObject(obj: objc.Id) Sta.Security {
+    const security_sel = objc.sel("security");
+    if (!objc.respondsToSelector(obj, security_sel)) return .unknown;
+    return mapSecurity(objc.msgSend(objc.NSInteger, obj, security_sel, .{}));
+}
+
 fn mapScanError(err_obj: objc.Id) Sta.ScanError {
-    _ = err_obj;
+    logNSError("core_wlan scan error", err_obj);
     return error.Unexpected;
 }
 
 fn mapConnectError(err_obj: objc.Id) Sta.ConnectError {
     const code = objc.msgSend(objc.NSInteger, err_obj, objc.sel("code"), .{});
+    logNSError("core_wlan connect error", err_obj);
     return switch (code) {
+        kPosixBusyErr => error.Busy,
         kCWTimeoutErr, kCWSupplicantTimeoutErr => error.Timeout,
         kCWAssociationDeniedErr, kCWChallengeFailureErr => error.InvalidCredentials,
         else => error.Unexpected,
     };
+}
+
+fn logNSError(prefix: []const u8, err_obj: objc.Id) void {
+    const code = objc.msgSend(objc.NSInteger, err_obj, objc.sel("code"), .{});
+    const domain_obj = objc.msgSend(?objc.Id, err_obj, objc.sel("domain"), .{});
+    const desc_obj = objc.msgSend(?objc.Id, err_obj, objc.sel("localizedDescription"), .{});
+
+    var domain_buf: [128]u8 = undefined;
+    var desc_buf: [256]u8 = undefined;
+    const domain = if (domain_obj) |value| objc.nsStringGetBytes(value, &domain_buf) else "";
+    const desc = if (desc_obj) |value| objc.nsStringGetBytes(value, &desc_buf) else "";
+    std.log.warn("{s} code={d} domain={s} description={s}", .{ prefix, code, domain, desc });
 }
 
 fn parseMacAddress(value: []const u8) ?Sta.MacAddr {
@@ -381,6 +535,39 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 parseMacAddress("10:20:30:40:50:60").?,
             );
         }
+
+        fn ipv4FromSockaddrReadsDarwinSockaddrInBytes() !void {
+            var sock_addr = std.c.sockaddr.in{
+                .port = 0,
+                .addr = @bitCast([4]u8{ 192, 168, 1, 23 }),
+            };
+            const addr: *std.c.sockaddr = @ptrCast(&sock_addr);
+            try grt.std.testing.expectEqual([4]u8{ 192, 168, 1, 23 }, ipv4FromSockaddr(addr).?);
+        }
+
+        fn isUsableIpv4RejectsNonRoutableAddresses() !void {
+            try grt.std.testing.expect(!isUsableIpv4(.{ 0, 0, 0, 0 }));
+            try grt.std.testing.expect(!isUsableIpv4(.{ 127, 0, 0, 1 }));
+            try grt.std.testing.expect(!isUsableIpv4(.{ 169, 254, 1, 2 }));
+            try grt.std.testing.expect(isUsableIpv4(.{ 192, 168, 1, 23 }));
+        }
+
+        fn currentLinkMatchesHonorsOptionalConstraints() !void {
+            const bssid: Sta.MacAddr = .{ 1, 2, 3, 4, 5, 6 };
+            const other_bssid: Sta.MacAddr = .{ 6, 5, 4, 3, 2, 1 };
+            const info: Sta.LinkInfo = .{
+                .ssid = "test-wifi",
+                .bssid = bssid,
+                .channel = 6,
+            };
+
+            try grt.std.testing.expect(currentLinkMatches(info, .{ .ssid = "test-wifi" }));
+            try grt.std.testing.expect(currentLinkMatches(info, .{ .ssid = "test-wifi", .channel = 6 }));
+            try grt.std.testing.expect(currentLinkMatches(info, .{ .ssid = "test-wifi", .bssid = bssid }));
+            try grt.std.testing.expect(!currentLinkMatches(info, .{ .ssid = "other-wifi" }));
+            try grt.std.testing.expect(!currentLinkMatches(info, .{ .ssid = "test-wifi", .channel = 11 }));
+            try grt.std.testing.expect(!currentLinkMatches(info, .{ .ssid = "test-wifi", .bssid = other_bssid }));
+        }
     };
 
     const Runner = struct {
@@ -394,6 +581,18 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             _ = allocator;
 
             TestCase.parseMacAddressParsesColonSeparatedHexBytes() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.ipv4FromSockaddrReadsDarwinSockaddrInBytes() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.isUsableIpv4RejectsNonRoutableAddresses() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.currentLinkMatchesHonorsOptionalConstraints() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

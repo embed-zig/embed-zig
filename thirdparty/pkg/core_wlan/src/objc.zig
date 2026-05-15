@@ -22,6 +22,10 @@ pub fn sel(name: [*:0]const u8) SEL {
     return sel_registerName(name);
 }
 
+pub fn respondsToSelector(obj: Id, selector: SEL) bool {
+    return msgSend(BOOL, obj, sel("respondsToSelector:"), .{selector}) != NO;
+}
+
 pub fn alloc(cls: Class) Id {
     return msgSend(Id, cls, sel("alloc"), .{});
 }

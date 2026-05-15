@@ -2,6 +2,7 @@ const glib = @import("glib");
 const core_wlan = @import("../../core_wlan.zig");
 const CWApUnsupported = @import("../../core_wlan/src/CWApUnsupported.zig");
 const CWSta = @import("../../core_wlan/src/CWSta.zig");
+const Location = @import("../../core_wlan/src/Location.zig");
 
 pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
@@ -17,6 +18,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("core_wlan", core_wlan.TestRunner(grt));
             t.run("src/CWSta", CWSta.TestRunner(grt));
             t.run("src/CWApUnsupported", CWApUnsupported.TestRunner(grt));
+            t.run("src/Location", Location.TestRunner(grt));
             return t.wait();
         }
 

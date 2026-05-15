@@ -12,10 +12,22 @@ const glib = @import("glib");
 const drivers = @import("embed").drivers;
 const CWSta = @import("core_wlan/src/CWSta.zig");
 const CWApUnsupported = @import("core_wlan/src/CWApUnsupported.zig");
+pub const location = @import("core_wlan/src/Location.zig");
 const wifi = drivers.wifi;
 
 pub const Sta = CWSta;
 pub const Ap = CWApUnsupported;
+
+pub const LocationAuthorizationStatus = location.AuthorizationStatus;
+
+pub fn locationAuthorizationStatus() LocationAuthorizationStatus {
+    return location.authorizationStatus();
+}
+
+pub fn requestLocationAuthorization(timeout: glib.time.duration.Duration) LocationAuthorizationStatus {
+    return location.requestWhenInUseAuthorization(timeout);
+}
+
 pub const test_runner = struct {
     pub const unit = @import("core_wlan/test_runner/unit.zig");
     pub const integration = @import("core_wlan/test_runner/integration.zig");

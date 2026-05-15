@@ -10,7 +10,7 @@ backend, so `drivers.wifi.Ap.start(...)` returns `error.Unsupported`.
 
 This module lives under `embed-zig/pkg` and is exported by the top-level
 `embed_zig` package as `core_wlan`. It links `CoreWLAN.framework`,
-`Foundation.framework`, and `libobjc`.
+`CoreLocation.framework`, `Foundation.framework`, and `libobjc`.
 **macOS / Apple targets only** (framework linking is gated on the OS tag).
 
 ## Developing
@@ -61,6 +61,7 @@ core_wlan.zig Root module; pkg-level test blocks only
 src/
   objc.zig
   CWSta.zig
+  Location.zig
   CWApUnsupported.zig
 test_runner/
   unit.zig
@@ -79,6 +80,7 @@ test_runner/
 | `connect` | `-[CWInterface associateToNetwork:password:error:]` |
 | `disconnect` | `-[CWInterface disassociate]` |
 | `getMacAddr` | `-[CWInterface hardwareAddress]` |
+| `getIpInfo` | `getifaddrs(3)` filtered by `-[CWInterface interfaceName]` |
 
 ### `drivers.wifi.Ap`
 
@@ -91,6 +93,7 @@ test_runner/
   against CoreWLAN in one `zig build test`.
 - CoreWLAN scanning is synchronous and snapshot-based, so `startScan` performs a
   single scan and emits `scan_result` callbacks immediately.
-- `getIpInfo()` is currently best-effort and returns `null`.
+- `getIpInfo()` is best-effort and returns IPv4 address/netmask information
+  from the currently associated interface when available.
 - Event hooks currently reflect operations initiated through this adapter; this
   package does not yet subscribe to broader system Wi-Fi notifications.
