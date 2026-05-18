@@ -9,6 +9,8 @@ const re_export = struct {
     pub const maxInt = std.math.maxInt;
     pub const nan = std.math.nan;
     pub const order = std.math.order;
+    pub const pi = std.math.pi;
+    pub const sin = std.math.sin;
 };
 
 pub const IntFittingRange = re_export.IntFittingRange;
@@ -17,3 +19,5 @@ pub const atan2 = re_export.atan2;
 pub const maxInt = re_export.maxInt;
 pub const nan = re_export.nan;
 pub const order = re_export.order;
+pub const pi = re_export.pi;
+pub const sin = re_export.sin;
