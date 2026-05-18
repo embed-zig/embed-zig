@@ -1,12 +1,21 @@
+# Local workspaces
 openteam/
+
+# Zig build outputs
 .*zig-*/
 zig-out/
 *.o
 .build*/
+
+# Tool state and reports
 .tmp/
 .claude/
-AGENTS.md
-!/AGENTS.md
-.DS_Store
 test-results/
 playwright-report/
+
+# Local machine files
+.DS_Store
+
+# Keep the checked-in repository instructions.
+AGENTS.md
+!/AGENTS.md
