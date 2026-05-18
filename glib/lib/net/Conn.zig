@@ -1,8 +1,12 @@
-//! Conn — type-erased bidirectional byte stream (like Go's net.Conn).
+//! Conn — type-erased bidirectional connection (like Go's net.Conn).
 //!
 //! Uses a VTable for runtime dispatch, same pattern as std.mem.Allocator.
 //! Any concrete type with read/write/close/deinit plus deadline setter methods
 //! can be wrapped into a Conn.
+//!
+//! The shared contract is intentionally just read/write over a connected peer.
+//! Transports that preserve packet boundaries should document their own adapter
+//! semantics when exposed as Conn.
 //!
 //!   var conn = try net.dial(allocator, .tcp, addr);
 //!   defer conn.deinit();

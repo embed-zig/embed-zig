@@ -31,10 +31,11 @@ networking primitives.
    (the sealed stdz namespace) and builds types from `std.posix`,
    `lib.Thread`, `std.posix`, etc. No global state, no runtime dispatch.
 
-2. **Contract-based composition.** `Conn` is the universal byte stream
-   contract (like Go's `net.Conn`). TLS wraps a Conn and produces a Conn.
-   HTTP and WebSocket consume a Conn. Any transport satisfying `Conn`
-   composes with any protocol layer.
+2. **Contract-based composition.** `Conn` is the universal connected
+   read/write contract (like Go's `net.Conn`). TLS wraps a Conn and produces a
+   Conn. HTTP and WebSocket consume a Conn. Any transport satisfying `Conn`
+   composes with any protocol layer, provided its adapter documents any packet
+   boundary semantics it preserves or hides.
 
 3. **Zero-allocation parsing.** URL, HTTP request/response, DNS packets
    — parsers return slices into the input buffer.
@@ -67,7 +68,7 @@ const net = @import("net").make(stdz, time, runtime_posix.make(stdz));
 lib/
   net.zig              Root; make(lib, time, impl) entry point, Conn, Listener, PacketConn, Dial, Listen
   net/
-    Conn.zig           Type-erased byte stream interface (Go's net.Conn)
+    Conn.zig           Type-erased connected read/write interface (Go's net.Conn)
     Listener.zig       Type-erased stream listener interface (Go's net.Listener)
     Cmux.zig           CMUX session facade over one bearer Conn
     PacketConn.zig     Type-erased datagram interface (Go's net.PacketConn)
@@ -168,9 +169,11 @@ mirroring Go's `net` package.
 
 ### Conn
 
-Type-erased bidirectional byte stream (Go's `net.Conn`). VTable-based,
-same pattern as `std.mem.Allocator`. Any concrete type with
+Type-erased bidirectional connected read/write interface (Go's `net.Conn`).
+VTable-based, same pattern as `std.mem.Allocator`. Any concrete type with
 read/write/close/deinit plus deadline setters can be wrapped into a Conn.
+Adapters for packet-oriented bearers should document whether packet boundaries
+are preserved, split, or hidden.
 
 ```zig
 const time = @import("time");
