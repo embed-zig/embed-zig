@@ -215,8 +215,12 @@ pub fn addEventCallbackRaw(
     callback: binding.EventCallback,
     filter: binding.EventCode,
     user_data: ?*anyopaque,
-) void {
-    _ = binding.lv_obj_add_event_cb(self.handle, callback, filter, user_data);
+) ?*binding.EventDsc {
+    return binding.lv_obj_add_event_cb(self.handle, callback, filter, user_data);
+}
+
+pub fn removeEventDescriptor(self: *const Self, descriptor: *binding.EventDsc) void {
+    _ = binding.lv_obj_remove_event_dsc(self.handle, descriptor);
 }
 
 pub fn eventCount(self: *const Self) u32 {
@@ -337,7 +341,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     var payload: u32 = 0xBEEF;
                     const custom_event = Event.codeFromInt(Event.registerId());
 
-                    obj.addEventCallbackRaw(CallbackCtx.callback, custom_event, &ctx);
+                    _ = obj.addEventCallbackRaw(CallbackCtx.callback, custom_event, &ctx);
                     try grt.std.testing.expectEqual(@as(u32, 1), obj.eventCount());
 
                     _ = obj.sendEvent(custom_event, &payload);

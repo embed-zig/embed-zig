@@ -27,6 +27,7 @@ pub const Event = @import("lvgl/src/Event.zig");
 pub const Anim = @import("lvgl/src/Anim.zig");
 pub const Subject = @import("lvgl/src/Subject.zig");
 pub const Observer = @import("lvgl/src/Observer.zig");
+pub const embed = @import("lvgl/src/embed.zig");
 pub const object = @import("lvgl/src/object.zig");
 pub const Obj = object.Obj;
 pub const widget = @import("lvgl/src/widget.zig");

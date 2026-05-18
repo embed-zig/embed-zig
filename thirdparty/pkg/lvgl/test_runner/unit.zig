@@ -16,6 +16,7 @@ const Event = @import("../src/Event.zig");
 const Anim = @import("../src/Anim.zig");
 const Subject = @import("../src/Subject.zig");
 const Observer = @import("../src/Observer.zig");
+const lvgl_embed = @import("../src/embed.zig");
 const Obj = @import("../src/object/Obj.zig");
 const Tree = @import("../src/object/Tree.zig");
 const Flags = @import("../src/object/Flags.zig");
@@ -49,6 +50,8 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("Anim", Anim.TestRunner(grt));
             t.run("Subject", Subject.TestRunner(grt));
             t.run("Observer", Observer.TestRunner(grt));
+            t.run("embed/LvglDisplay", lvgl_embed.LvglDisplay.TestRunner(grt));
+            t.run("embed/LvglZuxRuntime", lvgl_embed.LvglZuxRuntime.TestRunner(grt));
             t.run("object/Obj", Obj.TestRunner(grt));
             t.run("object/Tree", Tree.TestRunner(grt));
             t.run("object/Flags", Flags.TestRunner(grt));

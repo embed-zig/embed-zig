@@ -20,6 +20,7 @@ const rgb888_bytes_per_pixel = 3;
 const max_draw_bytes = max_draw_pixels * rgb888_bytes_per_pixel;
 const title_buffer_len = 64;
 const volume_text_buffer_len = 16;
+const control_button_count = 5;
 const selector_main = lvgl.binding.LV_PART_MAIN;
 const selector_indicator = lvgl.binding.LV_PART_INDICATOR;
 const selector_pressed = lvgl.binding.LV_PART_MAIN | lvgl.binding.LV_STATE_PRESSED;
@@ -64,8 +65,13 @@ const UiObjects = struct {
     volume_text: lvgl.Label,
 };
 
+const ButtonParts = struct {
+    button: lvgl.Button,
+    label: lvgl.Label,
+};
+
 const ButtonBinding = struct {
-    ctrl: ?*Ctrl = null,
+    ctrl: *Ctrl,
     action: Action,
 };
 
@@ -134,10 +140,9 @@ const IntSubject = struct {
     }
 };
 
-display: DisplayApi = undefined,
 touch: ?TouchApi = null,
-display_ready: bool = false,
-lv_display: ?lvgl.Display = null,
+lvgl_display: lvgl.embed.LvglDisplay = .{},
+button_bindings: [control_button_count]ButtonBinding = undefined,
 lv_indev: ?lvgl.Indev = null,
 ui_ready: bool = false,
 ui_objects: ?UiObjects = null,
@@ -163,12 +168,6 @@ pending_action: Action = .none,
 render_thread: ?Thread = null,
 render_stop: AtomicBool = AtomicBool.init(false),
 
-volume_down_binding: ButtonBinding = .{ .action = .volume_down },
-previous_binding: ButtonBinding = .{ .action = .previous },
-play_pause_binding: ButtonBinding = .{ .action = .play_pause },
-next_binding: ButtonBinding = .{ .action = .next },
-volume_up_binding: ButtonBinding = .{ .action = .volume_up },
-
 var default_ctrl = Ctrl{};
 var active_ctrl: ?*Ctrl = null;
 
@@ -178,6 +177,11 @@ pub fn init() Ctrl {
 
 pub fn deinit(self: *Ctrl) void {
     self.stopRenderThread();
+    if (self.lv_indev) |*indev| {
+        indev.delete();
+        self.lv_indev = null;
+    }
+    self.lvgl_display.deinit();
     self.deinitSubjects();
     if (self.event_channel) |*channel| {
         channel.close();
@@ -202,32 +206,31 @@ pub fn ensure(self: *Ctrl, display: DisplayApi, touch: TouchApi) !void {
 
 fn ensureLocked(self: *Ctrl, display: DisplayApi, touch: TouchApi) !void {
     active_ctrl = self;
-    self.display = display;
     self.touch = touch;
-    self.display_ready = true;
 
     self.ensureSubjects();
-    if (self.ui_ready) return;
+    if (self.ui_ready) {
+        self.lvgl_display.setDisplay(display);
+        return;
+    }
 
-    var created_display = lvgl.Display.create(width_px, height_px) orelse return error.OutOfMemory;
-    created_display.setColorFormat(lvgl.binding.LV_COLOR_FORMAT_RGB888);
-    created_display.setBuffers(
-        @ptrCast(self.draw_buffer[0..].ptr),
-        null,
-        @intCast(self.draw_buffer.len),
-        lvgl.binding.LV_DISPLAY_RENDER_MODE_PARTIAL,
-    );
-    created_display.setFlushCb(flushCb);
-    created_display.setDefault();
-    self.lv_display = created_display;
+    try self.lvgl_display.init(.{
+        .display = display,
+        .draw_buffer = self.draw_buffer[0..],
+        .flush_buffer = self.flush_buffer[0..],
+        .rgb888_byte_order = .bgr,
+    });
+    errdefer self.lvgl_display.deinit();
+    const created_display = self.lvgl_display.handle();
 
     var created_indev = lvgl.Indev.create() orelse return error.OutOfMemory;
+    errdefer created_indev.delete();
     created_indev.setDisplay(&created_display);
     created_indev.setType(.pointer);
     created_indev.setReadCb(touchReadCb);
-    self.lv_indev = created_indev;
 
     try self.createObjects(&created_display);
+    self.lv_indev = created_indev;
     self.renderState();
     self.ui_ready = true;
 }
@@ -441,32 +444,38 @@ fn createObjects(self: *Ctrl, display: *const lvgl.Display) !void {
     volume_text.asObj().alignTo(.top_left, 216, 140);
     volume_text.asObj().setStyleTextColor(lvgl.Color.fromHex(0x101830), selector_main);
 
-    self.bindButtons();
-    _ = try self.createButton(&card, 30, "-", false, &self.volume_down_binding);
-    _ = try self.createButton(&card, 82, "<<", false, &self.previous_binding);
-    const play_label = try self.createButton(&card, 134, ">", true, &self.play_pause_binding);
-    _ = try self.createButton(&card, 186, ">>", false, &self.next_binding);
-    _ = try self.createButton(&card, 238, "+", false, &self.volume_up_binding);
+    const volume_down_button = try self.createButton(&card, 30, "-", false);
+    const previous_button = try self.createButton(&card, 82, "<<", false);
+    const play_button = try self.createButton(&card, 134, ">", true);
+    const next_button = try self.createButton(&card, 186, ">>", false);
+    const volume_up_button = try self.createButton(&card, 238, "+", false);
+
+    try self.bindButton(0, volume_down_button.button, .volume_down);
+    try self.bindButton(1, previous_button.button, .previous);
+    try self.bindButton(2, play_button.button, .play_pause);
+    try self.bindButton(3, next_button.button, .next);
+    try self.bindButton(4, volume_up_button.button, .volume_up);
 
     self.ui_objects = .{
         .title = title,
         .status = status,
-        .play_label = play_label,
+        .play_label = play_button.label,
         .mic_badge = mic_badge,
         .volume = volume,
         .volume_text = volume_text,
     };
 }
 
-fn bindButtons(self: *Ctrl) void {
-    self.volume_down_binding.ctrl = self;
-    self.previous_binding.ctrl = self;
-    self.play_pause_binding.ctrl = self;
-    self.next_binding.ctrl = self;
-    self.volume_up_binding.ctrl = self;
+fn bindButton(self: *Ctrl, comptime index: usize, button: lvgl.Button, action: Action) !void {
+    self.button_bindings[index] = .{
+        .ctrl = self,
+        .action = action,
+    };
+    _ = button.asObj().addEventCallbackRaw(buttonEventCb, lvgl.Event.clicked, &self.button_bindings[index]) orelse
+        return error.OutOfMemory;
 }
 
-fn createButton(self: *Ctrl, parent: *const lvgl.Obj, x: i32, text: [:0]const u8, primary: bool, binding: *ButtonBinding) !lvgl.Label {
+fn createButton(self: *Ctrl, parent: *const lvgl.Obj, x: i32, text: [:0]const u8, primary: bool) !ButtonParts {
     _ = self;
     var button = lvgl.Button.create(parent) orelse return error.OutOfMemory;
     var button_obj = button.asObj();
@@ -491,7 +500,6 @@ fn createButton(self: *Ctrl, parent: *const lvgl.Obj, x: i32, text: [:0]const u8
         selector_pressed,
     );
     button_obj.setStyleBgOpa(lvgl.opa.cover, selector_pressed);
-    button_obj.addEventCallbackRaw(buttonEventCb, lvgl.Event.clicked, binding);
 
     var label = button.createLabel() orelse return error.OutOfMemory;
     label.setTextStatic(text);
@@ -501,7 +509,10 @@ fn createButton(self: *Ctrl, parent: *const lvgl.Obj, x: i32, text: [:0]const u8
         if (primary) lvgl.Color.white() else lvgl.Color.fromHex(0x101830),
         selector_main,
     );
-    return label;
+    return .{
+        .button = button,
+        .label = label,
+    };
 }
 
 fn renderState(self: *Ctrl) void {
@@ -540,11 +551,9 @@ fn renderLoop(self: *Ctrl) void {
 fn buttonEventCb(event: ?*lvgl.binding.Event) callconv(.c) void {
     const raw_event = event orelse return;
     var wrapped = lvgl.Event.fromRaw(raw_event);
-    if (wrapped.code() != lvgl.Event.clicked) return;
     const user_data = wrapped.userData() orelse return;
     const binding: *ButtonBinding = @ptrCast(@alignCast(user_data));
-    const ctrl = binding.ctrl orelse return;
-    ctrl.emitAction(binding.action);
+    binding.ctrl.emitAction(binding.action);
 }
 
 fn touchReadCb(_: ?*lvgl.binding.Indev, data: ?*lvgl.binding.IndevData) callconv(.c) void {
@@ -571,38 +580,6 @@ fn touchReadCb(_: ?*lvgl.binding.Indev, data: ?*lvgl.binding.IndevData) callconv
     out.point.x = @intCast(ctrl.last_touch.x);
     out.point.y = @intCast(ctrl.last_touch.y);
     out.state = @as(lvgl.binding.IndevState, @intCast(@intFromEnum(lvgl.Indev.State.released)));
-}
-
-fn flushCb(
-    display: ?*lvgl.binding.Display,
-    area: ?*const lvgl.binding.Area,
-    px_map: ?*u8,
-) callconv(.c) void {
-    defer if (display) |handle| lvgl.binding.lv_display_flush_ready(handle);
-    const ctrl = active_ctrl orelse return;
-    if (!ctrl.display_ready) return;
-
-    const draw_area = area orelse return;
-    const pixels = px_map orelse return;
-    if (draw_area.x1 < 0 or draw_area.y1 < 0) return;
-    const x: u16 = @intCast(draw_area.x1);
-    const y: u16 = @intCast(draw_area.y1);
-    const w: u16 = @intCast(draw_area.x2 - draw_area.x1 + 1);
-    const h: u16 = @intCast(draw_area.y2 - draw_area.y1 + 1);
-    const count = @as(usize, w) * @as(usize, h);
-    const byte_count = count * rgb888_bytes_per_pixel;
-    if (count > ctrl.flush_buffer.len or byte_count > ctrl.draw_buffer.len) return;
-
-    const bytes: [*]const u8 = @ptrCast(pixels);
-    for (0..count) |index| {
-        const base = index * rgb888_bytes_per_pixel;
-        ctrl.flush_buffer[index] = DisplayApi.rgb(
-            bytes[base + 2],
-            bytes[base + 1],
-            bytes[base + 0],
-        );
-    }
-    ctrl.display.drawBitmap(x, y, w, h, ctrl.flush_buffer[0..count]) catch {};
 }
 
 fn trackTitle(track: Track) [:0]const u8 {

@@ -66,7 +66,8 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                     var payload: u32 = 0xCAFE;
                     const custom_event = lvgl.Event.codeFromInt(lvgl.Event.registerId());
 
-                    obj.addEventCallbackRaw(CallbackState.callback, custom_event, &state);
+                    _ = obj.addEventCallbackRaw(CallbackState.callback, custom_event, &state) orelse
+                        return error.OutOfMemory;
                     try grt.std.testing.expectEqual(@as(u32, 1), obj.eventCount());
 
                     const result = obj.sendEvent(custom_event, &payload);

@@ -23,6 +23,9 @@ Implemented so far:
   - `src/Anim.zig`
   - `src/Subject.zig`
   - `src/Observer.zig`
+- embed adapter layer has the first usable slice:
+  - `src/embed/LvglDisplay.zig`
+  - `src/embed/LvglZuxRuntime.zig`
 - object layer has the first usable slice:
   - `src/object/Obj.zig`
   - `src/object/Tree.zig`
@@ -38,7 +41,7 @@ Not implemented yet:
 - the rest of the object submodules (`Class`, `Scroll`, `Property`)
 - broader widget layer beyond the first tranche
 - broader input/layout/theme/draw wrappers
-- optional integrations and drivers
+- broader optional integrations and drivers beyond the current embed adapters
 
 So the package is no longer "binding only". It now has a real base,
 runtime, object, and first-widget slice, and is ready to move into the
