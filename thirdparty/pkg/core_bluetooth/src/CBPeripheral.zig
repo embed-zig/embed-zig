@@ -5,12 +5,15 @@
 //! Mutex+Condition to present a blocking API.
 
 const std = @import("std");
+const glib = @import("glib");
 const bt = @import("embed").bt;
 const Peripheral = bt.Peripheral;
 const objc = @import("objc.zig");
 const Allocator = std.mem.Allocator;
 
 const CBPeripheral = @This();
+
+const pseudo_conn_handle: u16 = 1;
 
 allocator: Allocator,
 queue_label: [*:0]const u8,
@@ -24,6 +27,8 @@ started: bool = false,
 mutex: std.Thread.Mutex = .{},
 cond: std.Thread.Condition = .{},
 operation_done: bool = false,
+notify_ready: bool = true,
+active_subscription_count: usize = 0,
 op_error: ?OpError = null,
 request_ctx: ?*anyopaque = null,
 request_handler: ?Peripheral.RequestHandlerFn = null,
@@ -31,6 +36,7 @@ services: std.ArrayListUnmanaged(ServiceEntry) = .{},
 chars: std.ArrayListUnmanaged(CharEntry) = .{},
 
 hooks: std.ArrayListUnmanaged(EventHook) = .{},
+subscription_hooks: std.ArrayListUnmanaged(SubscriptionHook) = .{},
 
 const OpError = enum { invalid_config, already_advertising, unexpected };
 
@@ -45,12 +51,21 @@ const CharEntry = struct {
     char_uuid: u16 = 0,
     config: Peripheral.CharConfig = .{},
     cb_char: ?objc.Id = null,
+    subscription_count: usize = 0,
 };
 
 const EventHook = struct {
     ctx: ?*anyopaque,
     cb: *const fn (?*anyopaque, Peripheral.Event) void,
 };
+
+const SubscriptionHook = struct {
+    ctx: ?*anyopaque,
+    cb: *const fn (?*anyopaque, Peripheral.SubscriptionInfo) void,
+};
+
+extern const CBAdvertisementDataLocalNameKey: objc.Id;
+extern const CBAdvertisementDataServiceUUIDsKey: objc.Id;
 
 // ---- lifecycle ----
 
@@ -98,7 +113,10 @@ pub fn stop(self: *CBPeripheral) void {
     self.powered_on = false;
     self.state_known = false;
     self.state = .idle;
+    self.clearSubscriptionsLocked();
+    self.notify_ready = true;
     self.clearMaterializedServicesLocked();
+    self.cond.broadcast();
     self.mutex.unlock();
     objc.release(self.manager.?);
     objc.release(self.delegate.?);
@@ -113,6 +131,7 @@ pub fn deinit(self: *CBPeripheral) void {
     self.services.deinit(self.allocator);
     self.chars.deinit(self.allocator);
     self.hooks.deinit(self.allocator);
+    self.subscription_hooks.deinit(self.allocator);
     const alloc = self.allocator;
     self.* = undefined;
     alloc.destroy(self);
@@ -127,6 +146,7 @@ pub fn setConfig(self: *CBPeripheral, config: Peripheral.GattConfig) void {
     self.clearMaterializedServicesLocked();
     self.services.clearRetainingCapacity();
     self.chars.clearRetainingCapacity();
+    self.active_subscription_count = 0;
 
     for (config.services) |svc| {
         const char_start = self.chars.items.len;
@@ -169,7 +189,7 @@ pub fn startAdvertising(self: *CBPeripheral, config: Peripheral.AdvConfig) Perip
     var count: objc.NSUInteger = 0;
 
     if (config.device_name.len > 0) {
-        keys[count] = objc.nsString("CBAdvertisementDataLocalNameKey");
+        keys[count] = CBAdvertisementDataLocalNameKey;
         vals[count] = objc.nsString(config.device_name);
         count += 1;
     }
@@ -178,7 +198,7 @@ pub fn startAdvertising(self: *CBPeripheral, config: Peripheral.AdvConfig) Perip
         const uuid_objs = self.allocator.alloc(objc.Id, config.service_uuids.len) catch return error.Unexpected;
         defer self.allocator.free(uuid_objs);
         for (config.service_uuids, 0..) |uuid, i| uuid_objs[i] = objc.cbuuid(uuid);
-        keys[count] = objc.nsString("CBAdvertisementDataServiceUUIDsKey");
+        keys[count] = CBAdvertisementDataServiceUUIDsKey;
         vals[count] = objc.nsArray(uuid_objs, uuid_objs.len);
         count += 1;
     }
@@ -220,13 +240,36 @@ pub fn stopAdvertising(self: *CBPeripheral) void {
 
 pub fn notify(self: *CBPeripheral, _: u16, char_uuid: u16, data: []const u8) Peripheral.GattError!void {
     const cb_char = self.findCBChar(char_uuid) orelse return error.InvalidHandle;
-    const ns_data = objc.nsData(data);
-    const ok: objc.BOOL = objc.msgSend(objc.BOOL, self.manager.?, objc.sel("updateValue:forCharacteristic:onSubscribedCentrals:"), .{
-        ns_data,
-        cb_char,
-        @as(?*anyopaque, null),
-    });
-    if (ok != objc.YES) return error.Unexpected;
+    while (true) {
+        self.mutex.lock();
+        if (!self.isCharSubscribedLocked(char_uuid)) {
+            self.mutex.unlock();
+            return error.NotSubscribed;
+        }
+        self.notify_ready = false;
+        self.mutex.unlock();
+
+        const ns_data = objc.nsData(data);
+        const ok: objc.BOOL = objc.msgSend(objc.BOOL, self.manager.?, objc.sel("updateValue:forCharacteristic:onSubscribedCentrals:"), .{
+            ns_data,
+            cb_char,
+            @as(?*anyopaque, null),
+        });
+        if (ok == objc.YES) {
+            self.mutex.lock();
+            self.notify_ready = true;
+            self.mutex.unlock();
+            return;
+        }
+
+        self.mutex.lock();
+        while (!self.notify_ready and self.isCharSubscribedLocked(char_uuid)) {
+            self.cond.wait(&self.mutex);
+        }
+        const still_subscribed = self.isCharSubscribedLocked(char_uuid);
+        self.mutex.unlock();
+        if (!still_subscribed) return error.NotSubscribed;
+    }
 }
 
 pub fn indicate(self: *CBPeripheral, conn_handle: u16, char_uuid: u16, data: []const u8) Peripheral.GattError!void {
@@ -268,6 +311,27 @@ pub fn removeEventHook(self: *CBPeripheral, ctx: ?*anyopaque, cb: *const fn (?*a
     }
 }
 
+pub fn addSubscriptionHook(self: *CBPeripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Peripheral.SubscriptionInfo) void) void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+    self.subscription_hooks.append(self.allocator, .{ .ctx = ctx, .cb = cb }) catch return;
+}
+
+pub fn removeSubscriptionHook(self: *CBPeripheral, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Peripheral.SubscriptionInfo) void) void {
+    self.mutex.lock();
+    defer self.mutex.unlock();
+
+    var i: usize = 0;
+    while (i < self.subscription_hooks.items.len) {
+        const hook = self.subscription_hooks.items[i];
+        if (hook.ctx == ctx and hook.cb == cb) {
+            _ = self.subscription_hooks.orderedRemove(i);
+            continue;
+        }
+        i += 1;
+    }
+}
+
 // ---- internal helpers ----
 
 fn findCBChar(self: *CBPeripheral, char_uuid: u16) ?objc.Id {
@@ -282,6 +346,36 @@ fn findChar(self: *CBPeripheral, svc_uuid: u16, char_uuid: u16) ?*CharEntry {
         if (entry.svc_uuid == svc_uuid and entry.char_uuid == char_uuid) return entry;
     }
     return null;
+}
+
+fn isCharSubscribedLocked(self: *CBPeripheral, char_uuid: u16) bool {
+    for (self.chars.items) |entry| {
+        if (entry.char_uuid == char_uuid and entry.subscription_count > 0) return true;
+    }
+    return false;
+}
+
+fn recordSubscribeLocked(self: *CBPeripheral, svc_uuid: u16, char_uuid: u16) bool {
+    const was_connected = self.active_subscription_count > 0;
+    const entry = self.findChar(svc_uuid, char_uuid) orelse return was_connected;
+    entry.subscription_count += 1;
+    self.active_subscription_count += 1;
+    return was_connected;
+}
+
+fn recordUnsubscribeLocked(self: *CBPeripheral, svc_uuid: u16, char_uuid: u16) bool {
+    const entry = self.findChar(svc_uuid, char_uuid) orelse return self.active_subscription_count > 0;
+    if (entry.subscription_count == 0) return self.active_subscription_count > 0;
+    entry.subscription_count -= 1;
+    self.active_subscription_count -= 1;
+    return self.active_subscription_count > 0;
+}
+
+fn clearSubscriptionsLocked(self: *CBPeripheral) void {
+    self.active_subscription_count = 0;
+    for (self.chars.items) |*entry| {
+        entry.subscription_count = 0;
+    }
 }
 
 fn clearMaterializedServicesLocked(self: *CBPeripheral) void {
@@ -371,6 +465,17 @@ fn fireEvent(self: *CBPeripheral, event: Peripheral.Event) void {
     for (snapshot) |hook| hook.cb(hook.ctx, event);
 }
 
+fn fireSubscription(self: *CBPeripheral, info: Peripheral.SubscriptionInfo) void {
+    self.mutex.lock();
+    const snapshot = self.allocator.dupe(SubscriptionHook, self.subscription_hooks.items) catch {
+        self.mutex.unlock();
+        return;
+    };
+    self.mutex.unlock();
+    defer self.allocator.free(snapshot);
+    for (snapshot) |hook| hook.cb(hook.ctx, info);
+}
+
 fn signalDone(self: *CBPeripheral) void {
     self.operation_done = true;
     self.cond.signal();
@@ -399,6 +504,7 @@ fn initDelegateClass() void {
     builder.addMethod("peripheralManager:didReceiveWriteRequests:", @ptrCast(&pmDidReceiveWrite), "v@:@@");
     builder.addMethod("peripheralManager:central:didSubscribeToCharacteristic:", @ptrCast(&pmDidSubscribe), "v@:@@@");
     builder.addMethod("peripheralManager:central:didUnsubscribeFromCharacteristic:", @ptrCast(&pmDidUnsubscribe), "v@:@@@");
+    builder.addMethod("peripheralManagerIsReadyToUpdateSubscribers:", @ptrCast(&pmIsReadyToUpdateSubscribers), "v@:@");
 
     delegate_class = builder.register();
 }
@@ -478,7 +584,7 @@ fn pmDidReceiveRead(delegate: objc.Id, _: objc.SEL, manager: objc.Id, request: o
 
     var req = Peripheral.Request{
         .op = .read,
-        .conn_handle = 0,
+        .conn_handle = pseudo_conn_handle,
         .service_uuid = svc_uuid,
         .char_uuid = char_uuid,
         .data = &.{},
@@ -536,7 +642,7 @@ fn pmDidReceiveWrite(delegate: objc.Id, _: objc.SEL, manager: objc.Id, requests:
 
         var req = Peripheral.Request{
             .op = .write,
-            .conn_handle = 0,
+            .conn_handle = pseudo_conn_handle,
             .service_uuid = svc_uuid,
             .char_uuid = char_uuid,
             .data = data_slice,
@@ -546,21 +652,80 @@ fn pmDidReceiveWrite(delegate: objc.Id, _: objc.SEL, manager: objc.Id, requests:
     }
 }
 
-fn pmDidSubscribe(delegate: objc.Id, _: objc.SEL, _: objc.Id, _: objc.Id, _: objc.Id) callconv(.c) void {
+fn pmDidSubscribe(delegate: objc.Id, _: objc.SEL, _: objc.Id, central: objc.Id, characteristic: objc.Id) callconv(.c) void {
     const self = getSelf(delegate) orelse return;
-    self.fireEvent(.{ .connected = .{
-        .conn_handle = 0,
-        .peer_addr = .{0} ** 6,
-        .peer_addr_type = .random,
-        .interval = 0,
-        .latency = 0,
-        .supervision_timeout = 0,
-    } });
+    const service: objc.Id = objc.msgSend(objc.Id, characteristic, objc.sel("service"), .{});
+    const service_uuid_obj: objc.Id = objc.msgSend(objc.Id, service, objc.sel("UUID"), .{});
+    const uuid_obj: objc.Id = objc.msgSend(objc.Id, characteristic, objc.sel("UUID"), .{});
+    const svc_uuid = objc.cbuuidToU16(service_uuid_obj);
+    const char_uuid = objc.cbuuidToU16(uuid_obj);
+    const char_entry = self.findChar(svc_uuid, char_uuid);
+    const cccd_value: u16 = if (char_entry) |entry|
+        if (entry.config.indicate and !entry.config.notify) 0x0002 else 0x0001
+    else
+        0x0001;
+    const max_update_value_len: objc.NSUInteger = objc.msgSend(objc.NSUInteger, central, objc.sel("maximumUpdateValueLength"), .{});
+    const att_mtu: u16 = @intCast(@min(max_update_value_len + bt.Central.ATT_VALUE_OVERHEAD, bt.Central.MAX_ATT_MTU));
+
+    self.mutex.lock();
+    const was_connected = self.recordSubscribeLocked(svc_uuid, char_uuid);
+    self.notify_ready = true;
+    self.cond.broadcast();
+    self.mutex.unlock();
+
+    if (!was_connected) {
+        self.fireEvent(.{ .connected = .{
+            .conn_handle = pseudo_conn_handle,
+            .peer_addr = .{0} ** 6,
+            .peer_addr_type = .random,
+            .interval = 0,
+            .latency = 0,
+            .supervision_timeout = 0,
+        } });
+        self.fireEvent(.{ .mtu_changed = .{
+            .conn_handle = pseudo_conn_handle,
+            .mtu = att_mtu,
+        } });
+    }
+    self.fireSubscription(.{
+        .conn_handle = pseudo_conn_handle,
+        .service_uuid = svc_uuid,
+        .char_uuid = char_uuid,
+        .cccd_value = cccd_value,
+    });
 }
 
-fn pmDidUnsubscribe(delegate: objc.Id, _: objc.SEL, _: objc.Id, _: objc.Id, _: objc.Id) callconv(.c) void {
+fn pmDidUnsubscribe(delegate: objc.Id, _: objc.SEL, _: objc.Id, _: objc.Id, characteristic: objc.Id) callconv(.c) void {
     const self = getSelf(delegate) orelse return;
-    self.fireEvent(.{ .disconnected = 0 });
+    const service: objc.Id = objc.msgSend(objc.Id, characteristic, objc.sel("service"), .{});
+    const service_uuid_obj: objc.Id = objc.msgSend(objc.Id, service, objc.sel("UUID"), .{});
+    const uuid_obj: objc.Id = objc.msgSend(objc.Id, characteristic, objc.sel("UUID"), .{});
+    const svc_uuid = objc.cbuuidToU16(service_uuid_obj);
+    const char_uuid = objc.cbuuidToU16(uuid_obj);
+
+    self.mutex.lock();
+    const still_connected = self.recordUnsubscribeLocked(svc_uuid, char_uuid);
+    self.notify_ready = true;
+    self.cond.broadcast();
+    self.mutex.unlock();
+
+    self.fireSubscription(.{
+        .conn_handle = pseudo_conn_handle,
+        .service_uuid = svc_uuid,
+        .char_uuid = char_uuid,
+        .cccd_value = 0,
+    });
+    if (!still_connected) {
+        self.fireEvent(.{ .disconnected = pseudo_conn_handle });
+    }
+}
+
+fn pmIsReadyToUpdateSubscribers(delegate: objc.Id, _: objc.SEL, _: objc.Id) callconv(.c) void {
+    const self = getSelf(delegate) orelse return;
+    self.mutex.lock();
+    self.notify_ready = true;
+    self.cond.broadcast();
+    self.mutex.unlock();
 }
 
 // ---- ResponseWriter implementation ----
@@ -595,3 +760,71 @@ const ResponseWriterImpl = struct {
         });
     }
 };
+
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const Cases = struct {
+        fn subscriptionStateTracksCharacteristics(_: *glib.testing.T, _: glib.std.mem.Allocator) !void {
+            const chars = [_]Peripheral.CharDef{
+                Peripheral.Char(0x2a37, .{ .notify = true }),
+                Peripheral.Char(0x2a38, .{ .notify = true }),
+            };
+            const services = [_]Peripheral.ServiceDef{
+                Peripheral.Service(0x180d, &chars),
+            };
+
+            var peripheral = CBPeripheral.init(grt.std.testing.allocator, .{});
+            defer {
+                peripheral.services.deinit(peripheral.allocator);
+                peripheral.chars.deinit(peripheral.allocator);
+            }
+            peripheral.setConfig(.{ .services = &services });
+
+            peripheral.mutex.lock();
+            defer peripheral.mutex.unlock();
+
+            try grt.std.testing.expect(!peripheral.recordSubscribeLocked(0x180d, 0x2a37));
+            try grt.std.testing.expect(peripheral.isCharSubscribedLocked(0x2a37));
+            try grt.std.testing.expect(!peripheral.isCharSubscribedLocked(0x2a38));
+
+            try grt.std.testing.expect(peripheral.recordSubscribeLocked(0x180d, 0x2a38));
+            try grt.std.testing.expect(peripheral.isCharSubscribedLocked(0x2a37));
+            try grt.std.testing.expect(peripheral.isCharSubscribedLocked(0x2a38));
+
+            try grt.std.testing.expect(peripheral.recordUnsubscribeLocked(0x180d, 0x2a37));
+            try grt.std.testing.expect(!peripheral.isCharSubscribedLocked(0x2a37));
+            try grt.std.testing.expect(peripheral.isCharSubscribedLocked(0x2a38));
+
+            try grt.std.testing.expect(!peripheral.recordUnsubscribeLocked(0x180d, 0x2a38));
+            try grt.std.testing.expect(!peripheral.isCharSubscribedLocked(0x2a37));
+            try grt.std.testing.expect(!peripheral.isCharSubscribedLocked(0x2a38));
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
+            _ = self;
+            _ = allocator;
+
+            t.run(
+                "subscription_state_tracks_characteristics",
+                glib.testing.TestRunner.fromFn(grt.std, 64 * 1024, Cases.subscriptionStateTracksCharacteristics),
+            );
+            return t.wait();
+        }
+
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
+}

@@ -11,6 +11,7 @@ const bt = @import("embed").bt;
 const Central = bt.Central;
 const objc = @import("objc.zig");
 const Allocator = std.mem.Allocator;
+const log = std.log.scoped(.core_bluetooth_central);
 
 const CBCentral = @This();
 
@@ -35,8 +36,10 @@ svc_out: ?[]Central.DiscoveredService = null,
 svc_count: usize = 0,
 char_out: ?[]Central.DiscoveredChar = null,
 char_count: usize = 0,
+char_base_handle: u16 = 1,
 read_buf: ?[]u8 = null,
 read_len: usize = 0,
+write_ready: bool = false,
 
 hooks: std.ArrayListUnmanaged(EventHook) = .{},
 
@@ -52,6 +55,8 @@ const PeripheralSlot = struct {
     peripheral: ?objc.Id = null,
     addr: Central.BdAddr = .{0} ** 6,
 };
+
+const connect_timeout_ns = 5 * std.time.ns_per_s;
 
 // ---- lifecycle ----
 
@@ -179,11 +184,19 @@ pub fn connect(self: *CBCentral, addr: Central.BdAddr, _: Central.AddrType, _: C
     });
 
     while (!self.operation_done) {
-        self.cond.wait(&self.mutex);
+        self.cond.timedWait(&self.mutex, connect_timeout_ns) catch |wait_err| switch (wait_err) {
+            error.Timeout => {
+                self.op_error = .timeout;
+                break;
+            },
+        };
     }
     const err = self.op_error;
     self.mutex.unlock();
 
+    if (err == .timeout) {
+        objc.msgSend(void, self.manager.?, objc.sel("cancelPeripheralConnection:"), .{peripheral.?});
+    }
     if (err) |e| return switch (e) {
         .timeout => error.Timeout,
         .unexpected => error.Unexpected,
@@ -278,6 +291,7 @@ pub fn discoverChars(self: *CBCentral, conn_handle: u16, start_handle: u16, _: u
     self.op_error = null;
     self.char_out = out;
     self.char_count = 0;
+    self.char_base_handle = start_handle + 1;
 
     objc.msgSend(void, peripheral, objc.sel("discoverCharacteristics:forService:"), .{
         @as(?*anyopaque, null),
@@ -345,6 +359,43 @@ pub fn gattWrite(self: *CBCentral, conn_handle: u16, attr_handle: u16, data: []c
     self.mutex.unlock();
 
     if (err) |e| return opErrorToGatt(e);
+}
+
+pub fn gattWriteNoResp(self: *CBCentral, conn_handle: u16, attr_handle: u16, data: []const u8) Central.GattError!void {
+    const peripheral = self.getPeripheral(conn_handle) orelse return error.Disconnected;
+    const char_obj = self.findCharByHandle(peripheral, attr_handle) orelse return error.AttError;
+
+    const ns_data = objc.nsData(data);
+    while (objc.msgSend(objc.BOOL, peripheral, objc.sel("canSendWriteWithoutResponse"), .{}) == objc.NO) {
+        self.mutex.lock();
+        while (!self.write_ready and self.getPeripheralLocked(conn_handle) != null) {
+            self.cond.wait(&self.mutex);
+        }
+        const disconnected = self.getPeripheralLocked(conn_handle) == null;
+        self.write_ready = false;
+        self.mutex.unlock();
+        if (disconnected) return error.Disconnected;
+    }
+
+    objc.msgSend(void, peripheral, objc.sel("writeValue:forCharacteristic:type:"), .{
+        ns_data,
+        char_obj,
+        @as(objc.NSInteger, 1), // CBCharacteristicWriteWithoutResponse
+    });
+}
+
+pub fn exchangeMtu(self: *CBCentral, conn_handle: u16, _: u16) Central.GattError!u16 {
+    return self.getAttMtu(conn_handle);
+}
+
+pub fn getAttMtu(self: *CBCentral, conn_handle: u16) u16 {
+    const peripheral = self.getPeripheral(conn_handle) orelse return Central.DEFAULT_ATT_MTU;
+    const max_write: objc.NSUInteger = objc.msgSend(objc.NSUInteger, peripheral, objc.sel("maximumWriteValueLengthForType:"), .{
+        @as(objc.NSInteger, 1), // CBCharacteristicWriteWithoutResponse
+    });
+    const att_mtu = @min(max_write + Central.ATT_VALUE_OVERHEAD, Central.MAX_ATT_MTU);
+    log.info("CoreBluetooth write-no-response max value len={} att_mtu_estimate={}", .{ max_write, att_mtu });
+    return @intCast(att_mtu);
 }
 
 // ---- subscribe/unsubscribe ----
@@ -440,6 +491,15 @@ fn allocHandle(self: *CBCentral) u16 {
 }
 
 fn storePeripheral(self: *CBCentral, peripheral: objc.Id, addr: Central.BdAddr) u16 {
+    for (self.peripherals.items) |*slot| {
+        if (!std.mem.eql(u8, &slot.addr, &addr)) continue;
+        if (slot.peripheral != peripheral) {
+            if (slot.peripheral) |old| objc.release(old);
+            slot.peripheral = objc.retain(peripheral);
+        }
+        return slot.handle;
+    }
+
     const h = self.allocHandle();
     self.peripherals.append(self.allocator, .{
         .handle = h,
@@ -525,6 +585,7 @@ fn initDelegateClass() void {
     builder.addMethod("peripheral:didUpdateValueForCharacteristic:error:", @ptrCast(&cbDidUpdateValue), "v@:@@@");
     builder.addMethod("peripheral:didWriteValueForCharacteristic:error:", @ptrCast(&cbDidWriteValue), "v@:@@@");
     builder.addMethod("peripheral:didUpdateNotificationStateForCharacteristic:error:", @ptrCast(&cbDidUpdateNotify), "v@:@@@");
+    builder.addMethod("peripheralIsReadyToSendWriteWithoutResponse:", @ptrCast(&cbReadyToWriteNoResp), "v@:@");
 
     delegate_class = builder.register();
 }
@@ -564,6 +625,7 @@ fn cbDidDiscover(delegate: objc.Id, _: objc.SEL, _: objc.Id, peripheral: objc.Id
         const name_slice = objc.nsStringGetBytes(name, &report.name);
         report.name_len = @truncate(name_slice.len);
     }
+    copyAdvertisedServiceUuids(adv_data, &report);
 
     const uuid_obj: objc.Id = objc.msgSend(objc.Id, peripheral, objc.sel("identifier"), .{});
     const uuid_str: objc.Id = objc.msgSend(objc.Id, uuid_obj, objc.sel("UUIDString"), .{});
@@ -578,6 +640,32 @@ fn cbDidDiscover(delegate: objc.Id, _: objc.SEL, _: objc.Id, peripheral: objc.Id
     self.mutex.unlock();
 
     self.fireEvent(.{ .device_found = report });
+}
+
+fn copyAdvertisedServiceUuids(adv_data: objc.Id, report: *Central.AdvReport) void {
+    const services_key = objc.nsString("kCBAdvDataServiceUUIDs");
+    const services_obj: ?objc.Id = objc.msgSend(?objc.Id, adv_data, objc.sel("objectForKey:"), .{services_key});
+    const services = services_obj orelse return;
+    const count: objc.NSUInteger = objc.msgSend(objc.NSUInteger, services, objc.sel("count"), .{});
+    if (count == 0) return;
+
+    var uuid_count: usize = 0;
+    var cursor: usize = 2;
+    for (0..count) |i| {
+        if (cursor + 2 > report.data.len) break;
+        const uuid_obj: objc.Id = objc.msgSend(objc.Id, services, objc.sel("objectAtIndex:"), .{@as(objc.NSUInteger, i)});
+        const uuid = objc.cbuuidToU16(uuid_obj);
+        if (uuid == 0) continue;
+        report.data[cursor] = @truncate(uuid);
+        report.data[cursor + 1] = @truncate(uuid >> 8);
+        cursor += 2;
+        uuid_count += 1;
+    }
+    if (uuid_count == 0) return;
+
+    report.data[0] = @intCast(1 + uuid_count * 2);
+    report.data[1] = 0x03;
+    report.data_len = @intCast(2 + uuid_count * 2);
 }
 
 fn cbDidConnect(delegate: objc.Id, _: objc.SEL, _: objc.Id, _: objc.Id) callconv(.c) void {
@@ -611,7 +699,9 @@ fn cbDidDisconnect(delegate: objc.Id, _: objc.SEL, _: objc.Id, peripheral: objc.
     }
     if (self.peripherals.items.len == 0) self.state = .idle;
     self.op_error = .disconnected;
+    self.write_ready = true;
     self.signalDone();
+    self.cond.broadcast();
     self.mutex.unlock();
 
     objc.release(peripheral);
@@ -669,7 +759,7 @@ fn cbDidDiscoverChars(delegate: objc.Id, _: objc.SEL, _: objc.Id, service: objc.
     const chars: objc.Id = objc.msgSend(objc.Id, service, objc.sel("characteristics"), .{});
     const count: objc.NSUInteger = objc.msgSend(objc.NSUInteger, chars, objc.sel("count"), .{});
 
-    var handle_idx: u16 = 1;
+    var handle_idx: u16 = self.char_base_handle;
     var written: usize = 0;
     for (0..count) |i| {
         if (written >= out.len) break;
@@ -733,5 +823,13 @@ fn cbDidUpdateNotify(delegate: objc.Id, _: objc.SEL, _: objc.Id, _: objc.Id, err
     self.mutex.lock();
     if (err != null) self.op_error = .att;
     self.signalDone();
+    self.mutex.unlock();
+}
+
+fn cbReadyToWriteNoResp(delegate: objc.Id, _: objc.SEL, _: objc.Id) callconv(.c) void {
+    const self = getSelf(delegate) orelse return;
+    self.mutex.lock();
+    self.write_ready = true;
+    self.cond.broadcast();
     self.mutex.unlock();
 }

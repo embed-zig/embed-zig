@@ -1,7 +1,7 @@
 const glib = @import("glib");
-pub fn make(comptime grt: type) glib.testing.TestRunner {
-    _ = grt;
+const CBPeripheral = @import("../src/CBPeripheral.zig");
 
+pub fn make(comptime grt: type) glib.testing.TestRunner {
     const Runner = struct {
         pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
             _ = self;
@@ -10,9 +10,10 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
         pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
             _ = self;
-            _ = t;
             _ = allocator;
-            return true;
+
+            t.run("CBPeripheral", CBPeripheral.TestRunner(grt));
+            return t.wait();
         }
 
         pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
