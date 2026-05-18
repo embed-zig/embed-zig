@@ -109,7 +109,7 @@ pub fn make(comptime std: type, comptime T: type) type {
             defer self.mutex.unlock();
 
             if (self.free_entries.popFirst()) |node| {
-                const entry: *Entry = @fieldParentPtr("free_node", node);
+                const entry: *Entry = @alignCast(@fieldParentPtr("free_node", node));
                 entry.in_pool = false;
                 self.free_count -= 1;
                 return &entry.item;
@@ -153,7 +153,7 @@ pub fn make(comptime std: type, comptime T: type) type {
             }
 
             while (self.free_entries.popFirst()) |node| {
-                const entry: *Entry = @fieldParentPtr("free_node", node);
+                const entry: *Entry = @alignCast(@fieldParentPtr("free_node", node));
                 self.allocator.destroy(entry);
             }
             self.free_entries = .{};
