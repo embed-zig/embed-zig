@@ -140,8 +140,6 @@ pub const Config = struct {
 
 i2c: I2c,
 config: Config,
-callback_ctx: ?*const anyopaque = null,
-callback_fn: ?Touch.CallbackFn = null,
 
 pub fn init(i2c: I2c, config: Config) ft5x06 {
     return .{
@@ -200,29 +198,6 @@ pub fn read(self: *ft5x06, points: []Touch.Point) !usize {
         points[index] = try self.readPoint(index);
     }
     return count;
-}
-
-pub fn pollAndEmit(self: *ft5x06) !void {
-    const callback = self.callback_fn orelse return;
-    const ctx = self.callback_ctx orelse return;
-
-    var points: [max_points]Touch.Point = undefined;
-    const count = try self.read(points[0..]);
-    callback(ctx, .{
-        .pressed = count != 0,
-        .point_count = count,
-        .primary = if (count == 0) null else points[0],
-    });
-}
-
-pub fn setEventCallback(self: *ft5x06, ctx: *const anyopaque, emit_fn: Touch.CallbackFn) void {
-    self.callback_ctx = ctx;
-    self.callback_fn = emit_fn;
-}
-
-pub fn clearEventCallback(self: *ft5x06) void {
-    self.callback_ctx = null;
-    self.callback_fn = null;
 }
 
 pub fn asTouch(self: *ft5x06) Touch {

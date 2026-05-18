@@ -112,6 +112,8 @@ than being promoted into `lib/io`.
 - `drivers.audio.Es7210`: ES7210 4-channel ADC control driver over I2C
 - `drivers.audio.Es8311`: ES8311 mono codec control driver over I2C
 - `drivers.Display`: type-erased display drawing driver surface
+- `drivers.Switch`: type-erased active / inactive output surface
+- `drivers.Pwm`: type-erased PWM output surface with frequency and active-duty
 - `drivers.imu.Qmi8658`: QMI8658 IMU driver over I2C plus delay hook
 - `drivers.gpio.Pca9557`: PCA9557 GPIO expander driver over I2C
 - `drivers.gpio.Tca9554`: TCA9554 GPIO expander driver over I2C

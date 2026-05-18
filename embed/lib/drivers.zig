@@ -8,6 +8,7 @@ pub const Gpio = @import("drivers/Gpio.zig");
 pub const imu = @import("drivers/Imu.zig");
 pub const I2c = @import("drivers/I2c.zig");
 pub const Modem = @import("drivers/Modem.zig");
+const switch_mod = @import("drivers/switch.zig");
 pub const Uart = @import("drivers/Uart.zig");
 pub const gpio = Gpio;
 pub const nfc = @import("drivers/Nfc.zig");
@@ -25,6 +26,8 @@ pub const Fm175xx = nfc.Fm175xx;
 pub const AdcButton = button.AdcButton;
 pub const GpioButton = button.GpioButton;
 pub const Ft5x06 = Touch.Ft5x06;
+pub const Switch = switch_mod.Switch;
+pub const Pwm = switch_mod.Pwm;
 pub const test_runner = struct {
     pub const unit = @import("drivers/test_runner/unit.zig");
 };

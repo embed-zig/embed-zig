@@ -20,6 +20,10 @@ pub const VTable = struct {
     deinit: *const fn (ptr: *anyopaque) void,
     width: *const fn (ptr: *anyopaque) u16,
     height: *const fn (ptr: *anyopaque) u16,
+    setEnabled: ?*const fn (ptr: *anyopaque, is_enabled: bool) Error!void = null,
+    enabled: ?*const fn (ptr: *anyopaque) Error!bool = null,
+    setBrightness: ?*const fn (ptr: *anyopaque, level: u8) Error!void = null,
+    brightness: ?*const fn (ptr: *anyopaque) Error!u8 = null,
     drawBitmap: *const fn (
         ptr: *anyopaque,
         x: u16,
@@ -44,6 +48,26 @@ pub fn width(self: root) u16 {
 
 pub fn height(self: root) u16 {
     return self.vtable.height(self.ptr);
+}
+
+pub fn setEnabled(self: root, is_enabled: bool) Error!void {
+    const set_enabled = self.vtable.setEnabled orelse return error.DisplayError;
+    try set_enabled(self.ptr, is_enabled);
+}
+
+pub fn enabled(self: root) Error!bool {
+    const enabled_fn = self.vtable.enabled orelse return error.DisplayError;
+    return enabled_fn(self.ptr);
+}
+
+pub fn setBrightness(self: root, level: u8) Error!void {
+    const set_brightness = self.vtable.setBrightness orelse return error.DisplayError;
+    try set_brightness(self.ptr, level);
+}
+
+pub fn brightness(self: root) Error!u8 {
+    const brightness_fn = self.vtable.brightness orelse return error.DisplayError;
+    return brightness_fn(self.ptr);
 }
 
 /// `pixels` is a contiguous row-major RGB buffer with at least `w * h` entries.
@@ -119,6 +143,34 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
                 else => error.DisplayError,
             };
         }
+
+        pub fn setEnabled(self: *@This(), is_enabled: bool) Error!void {
+            if (comptime @hasDecl(Impl, "setEnabled")) {
+                return self.impl.setEnabled(is_enabled) catch error.DisplayError;
+            }
+            return error.DisplayError;
+        }
+
+        pub fn enabled(self: *@This()) Error!bool {
+            if (comptime @hasDecl(Impl, "enabled")) {
+                return self.impl.enabled() catch error.DisplayError;
+            }
+            return error.DisplayError;
+        }
+
+        pub fn setBrightness(self: *@This(), level: u8) Error!void {
+            if (comptime @hasDecl(Impl, "setBrightness")) {
+                return self.impl.setBrightness(level) catch error.DisplayError;
+            }
+            return error.DisplayError;
+        }
+
+        pub fn brightness(self: *@This()) Error!u8 {
+            if (comptime @hasDecl(Impl, "brightness")) {
+                return self.impl.brightness() catch error.DisplayError;
+            }
+            return error.DisplayError;
+        }
     };
     const VTableGen = struct {
         fn deinitFn(ptr: *anyopaque) void {
@@ -134,6 +186,26 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
         fn heightFn(ptr: *anyopaque) u16 {
             const self: *Ctx = @ptrCast(@alignCast(ptr));
             return self.height();
+        }
+
+        fn setEnabledFn(ptr: *anyopaque, is_enabled: bool) Error!void {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            return self.setEnabled(is_enabled);
+        }
+
+        fn enabledFn(ptr: *anyopaque) Error!bool {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            return self.enabled();
+        }
+
+        fn setBrightnessFn(ptr: *anyopaque, level: u8) Error!void {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            return self.setBrightness(level);
+        }
+
+        fn brightnessFn(ptr: *anyopaque) Error!u8 {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            return self.brightness();
         }
 
         fn drawBitmapFn(
@@ -152,6 +224,10 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             .deinit = deinitFn,
             .width = widthFn,
             .height = heightFn,
+            .setEnabled = setEnabledFn,
+            .enabled = enabledFn,
+            .setBrightness = setBrightnessFn,
+            .brightness = brightnessFn,
             .drawBitmap = drawBitmapFn,
         };
     };
@@ -183,6 +259,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const State = struct {
                 deinit_calls: usize = 0,
                 draws: usize = 0,
+                enabled: bool = false,
+                brightness: u8 = 0,
                 last_x: u16 = 0,
                 last_y: u16 = 0,
                 last_w: u16 = 0,
@@ -222,6 +300,22 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return self.height_px;
                 }
 
+                pub fn setEnabled(self: *@This(), is_enabled: bool) Error!void {
+                    self.state.enabled = is_enabled;
+                }
+
+                pub fn enabled(self: *@This()) Error!bool {
+                    return self.state.enabled;
+                }
+
+                pub fn setBrightness(self: *@This(), level: u8) Error!void {
+                    self.state.brightness = level;
+                }
+
+                pub fn brightness(self: *@This()) Error!u8 {
+                    return self.state.brightness;
+                }
+
                 pub fn drawBitmap(
                     self: *@This(),
                     x: u16,
@@ -255,6 +349,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expectEqual(@as(u16, 8), display.width());
             try grt.std.testing.expectEqual(@as(u16, 4), display.height());
+            try display.setEnabled(true);
+            try grt.std.testing.expect(try display.enabled());
+            try display.setBrightness(91);
+            try grt.std.testing.expectEqual(@as(u8, 91), try display.brightness());
             try display.drawBitmap(1, 1, 2, 2, &pixels);
             try grt.std.testing.expectEqual(@as(usize, 1), state.draws);
             try grt.std.testing.expectEqual(@as(u16, 1), state.last_x);
@@ -267,6 +365,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 _ = root.deinit;
                 _ = root.width;
                 _ = root.height;
+                _ = root.setEnabled;
+                _ = root.enabled;
+                _ = root.setBrightness;
+                _ = root.brightness;
                 _ = root.drawBitmap;
                 _ = root.rgb;
                 _ = root.make;

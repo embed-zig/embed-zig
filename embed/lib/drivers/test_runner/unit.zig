@@ -14,6 +14,7 @@ const GpioButton = @import("../button/GpioButton.zig");
 const Es7210 = @import("../audio/es7210.zig");
 const Es8311 = @import("../audio/es8311.zig");
 const Modem = @import("../Modem.zig");
+const switch_mod = @import("../switch.zig");
 const wifi = @import("../wifi.zig");
 const Qmi8658 = @import("../imu/qmi8658.zig");
 const Nfc = @import("../Nfc.zig");
@@ -52,6 +53,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("Es7210", Es7210.TestRunner(grt));
             t.run("Es8311", Es8311.TestRunner(grt));
             t.run("Modem", Modem.TestRunner(grt));
+            t.run("switch", switch_mod.TestRunner(grt));
             t.run("wifi", wifi.test_runner.unit.make(grt));
             t.run("Qmi8658", Qmi8658.TestRunner(grt));
             t.run("Nfc", Nfc.TestRunner(grt));
