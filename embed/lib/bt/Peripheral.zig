@@ -170,6 +170,7 @@ pub const SubscriptionInfo = struct {
 
 pub const Event = union(enum) {
     connected: ConnectionInfo,
+    connection_updated: ConnectionInfo,
     disconnected: u16,
     advertising_started: void,
     advertising_stopped: void,

@@ -106,6 +106,7 @@ pub const NotificationData = struct {
 pub const Event = union(enum) {
     device_found: AdvReport,
     connected: ConnectionInfo,
+    connection_updated: ConnectionInfo,
     disconnected: u16,
     notification: NotificationData,
 };

@@ -93,6 +93,7 @@ pub fn make(comptime grt: type) type {
             self.hci.setPeripheralListener(.{
                 .ctx = self,
                 .on_connected = onConnected,
+                .on_connection_updated = onConnectionUpdated,
                 .on_disconnected = onDisconnected,
                 .on_att_request = onAttRequest,
             });
@@ -393,6 +394,15 @@ pub fn make(comptime grt: type) type {
             self.mtu = att.DEFAULT_MTU;
             self.mutex.unlock();
             self.fireEvent(.{ .connected = linkToConnectionInfo(link) });
+        }
+
+        fn onConnectionUpdated(ctx: ?*anyopaque, link: root.Hci.Link) void {
+            const self: *Self = @ptrCast(@alignCast(ctx.?));
+            self.mutex.lock();
+            const active = link.conn_handle == self.conn_handle;
+            self.mutex.unlock();
+            if (!active) return;
+            self.fireEvent(.{ .connection_updated = linkToConnectionInfo(link) });
         }
 
         fn onDisconnected(ctx: ?*anyopaque, conn_handle: u16, _: u8) void {

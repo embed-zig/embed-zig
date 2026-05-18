@@ -78,6 +78,7 @@ pub const Error = error{
 
 pub const AdvReportFn = *const fn (?*anyopaque, []const u8) void;
 pub const ConnectedFn = *const fn (?*anyopaque, Link) void;
+pub const ConnectionUpdatedFn = *const fn (?*anyopaque, Link) void;
 pub const DisconnectedFn = *const fn (?*anyopaque, u16, u8) void;
 pub const NotificationFn = *const fn (?*anyopaque, u16, u16, []const u8) void;
 /// Handle one inbound ATT request and return the number of response bytes written into `out`.
@@ -88,6 +89,7 @@ pub const CentralListener = struct {
     ctx: ?*anyopaque = null,
     on_adv_report: ?AdvReportFn = null,
     on_connected: ?ConnectedFn = null,
+    on_connection_updated: ?ConnectionUpdatedFn = null,
     on_disconnected: ?DisconnectedFn = null,
     on_notification: ?NotificationFn = null,
 };
@@ -95,6 +97,7 @@ pub const CentralListener = struct {
 pub const PeripheralListener = struct {
     ctx: ?*anyopaque = null,
     on_connected: ?ConnectedFn = null,
+    on_connection_updated: ?ConnectionUpdatedFn = null,
     on_disconnected: ?DisconnectedFn = null,
     on_att_request: ?AttRequestFn = null,
 };

@@ -134,6 +134,9 @@ fn runCentralRole(comptime grt: type, c: Central) !void {
                     state.conn_handle = info.conn_handle;
                     state.disconnected = false;
                 },
+                .connection_updated => |info| {
+                    state.conn_handle = info.conn_handle;
+                },
                 .disconnected => |_| {
                     state.disconnected = true;
                     state.conn_handle = 0;

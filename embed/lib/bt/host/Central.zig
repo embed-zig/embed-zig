@@ -107,6 +107,7 @@ pub fn make(comptime grt: type) type {
                 .ctx = self,
                 .on_adv_report = onAdvReport,
                 .on_connected = onConnected,
+                .on_connection_updated = onConnectionUpdated,
                 .on_disconnected = onDisconnected,
                 .on_notification = onNotification,
             });
@@ -231,49 +232,80 @@ pub fn make(comptime grt: type) type {
         pub fn discoverServices(self: *Self, conn_handle: u16, out: []bt.Central.DiscoveredService) bt.Central.GattError!usize {
             var req_buf: [att.MAX_PDU_LEN]u8 = undefined;
             var resp_buf: [att.MAX_PDU_LEN]u8 = undefined;
-            const req = gatt_client.encodeDiscoverServices(&req_buf, 0x0001);
-            const resp = try self.sendAttRequest(conn_handle, req, &resp_buf);
+            var tmp: [96]gatt_client.DiscoveredService = undefined;
+            var start_handle: u16 = 0x0001;
+            var out_count: usize = 0;
 
-            if (gatt_client.isErrorFor(resp, att.READ_BY_GROUP_TYPE_REQUEST)) |_| return error.AttError;
+            while (start_handle != 0 and out_count < out.len) {
+                const req = gatt_client.encodeDiscoverServices(&req_buf, start_handle);
+                const resp = try self.sendAttRequest(conn_handle, req, &resp_buf);
 
-            var tmp: [16]gatt_client.DiscoveredService = undefined;
-            const count = gatt_client.parseDiscoverServicesResponse(resp, &tmp);
-            const n = @min(count, out.len);
-            for (0..n) |i| {
-                out[i] = .{
-                    .start_handle = tmp[i].start_handle,
-                    .end_handle = tmp[i].end_handle,
-                    .uuid = tmp[i].uuid,
-                };
+                if (gatt_client.isErrorFor(resp, att.READ_BY_GROUP_TYPE_REQUEST)) |_| {
+                    if (out_count > 0) return out_count;
+                    return error.AttError;
+                }
+
+                const count = gatt_client.parseDiscoverServicesResponse(resp, &tmp);
+                if (count == 0) break;
+
+                const copy_count = @min(count, out.len - out_count);
+                for (0..copy_count) |i| {
+                    out[out_count + i] = .{
+                        .start_handle = tmp[i].start_handle,
+                        .end_handle = tmp[i].end_handle,
+                        .uuid = tmp[i].uuid,
+                    };
+                }
+                out_count += copy_count;
+
+                const last = tmp[count - 1];
+                if (last.end_handle == 0xFFFF or last.end_handle < start_handle) break;
+                start_handle = last.end_handle + 1;
             }
-            return n;
+
+            return out_count;
         }
 
         pub fn discoverChars(self: *Self, conn_handle: u16, start_handle: u16, end_handle: u16, out: []bt.Central.DiscoveredChar) bt.Central.GattError!usize {
             var req_buf: [att.MAX_PDU_LEN]u8 = undefined;
             var resp_buf: [att.MAX_PDU_LEN]u8 = undefined;
-            const req = gatt_client.encodeDiscoverChars(&req_buf, start_handle, end_handle);
-            const resp = try self.sendAttRequest(conn_handle, req, &resp_buf);
+            var tmp: [96]gatt_client.DiscoveredChar = undefined;
+            var next_handle = start_handle;
+            var out_count: usize = 0;
 
-            if (gatt_client.isErrorFor(resp, att.READ_BY_TYPE_REQUEST)) |_| return error.AttError;
+            while (next_handle != 0 and next_handle <= end_handle and out_count < out.len) {
+                const req = gatt_client.encodeDiscoverChars(&req_buf, next_handle, end_handle);
+                const resp = try self.sendAttRequest(conn_handle, req, &resp_buf);
 
-            var tmp: [16]gatt_client.DiscoveredChar = undefined;
-            const count = gatt_client.parseDiscoverCharsResponse(resp, &tmp);
-            const n = @min(count, out.len);
-            for (0..n) |i| {
-                out[i] = .{
-                    .decl_handle = tmp[i].decl_handle,
-                    .value_handle = tmp[i].value_handle,
-                    .cccd_handle = 0,
-                    .properties = tmp[i].properties,
-                    .uuid = tmp[i].uuid,
-                };
+                if (gatt_client.isErrorFor(resp, att.READ_BY_TYPE_REQUEST)) |_| {
+                    if (out_count > 0) break;
+                    return error.AttError;
+                }
+
+                const count = gatt_client.parseDiscoverCharsResponse(resp, &tmp);
+                if (count == 0) break;
+
+                const copy_count = @min(count, out.len - out_count);
+                for (0..copy_count) |i| {
+                    out[out_count + i] = .{
+                        .decl_handle = tmp[i].decl_handle,
+                        .value_handle = tmp[i].value_handle,
+                        .cccd_handle = 0,
+                        .properties = tmp[i].properties,
+                        .uuid = tmp[i].uuid,
+                    };
+                }
+                out_count += copy_count;
+
+                const last = tmp[count - 1];
+                if (last.value_handle >= end_handle or last.value_handle < next_handle) break;
+                next_handle = last.value_handle + 1;
             }
 
-            for (0..n) |i| {
+            for (0..out_count) |i| {
                 if (out[i].properties & 0x30 != 0) {
                     const cccd_start = out[i].value_handle + 1;
-                    const cccd_end = if (i + 1 < n) out[i + 1].decl_handle - 1 else end_handle;
+                    const cccd_end = if (i + 1 < out_count) out[i + 1].decl_handle - 1 else end_handle;
                     if (cccd_start <= cccd_end) {
                         if (try self.discoverCccd(conn_handle, cccd_start, cccd_end, &req_buf, &resp_buf)) |cccd_handle| {
                             out[i].cccd_handle = cccd_handle;
@@ -282,7 +314,7 @@ pub fn make(comptime grt: type) type {
                 }
             }
 
-            return n;
+            return out_count;
         }
 
         pub fn gattRead(self: *Self, conn_handle: u16, attr_handle: u16, out: []u8) bt.Central.GattError!usize {
@@ -576,6 +608,11 @@ pub fn make(comptime grt: type) type {
             self.fireEvent(.{ .connected = linkToConnectionInfo(link) });
         }
 
+        fn onConnectionUpdated(ctx: ?*anyopaque, link: bt.Hci.Link) void {
+            const self: *Self = @ptrCast(@alignCast(ctx.?));
+            self.fireEvent(.{ .connection_updated = linkToConnectionInfo(link) });
+        }
+
         fn onDisconnected(ctx: ?*anyopaque, conn_handle: u16, _: u8) void {
             const self: *Self = @ptrCast(@alignCast(ctx.?));
             self.state = .idle;
@@ -726,6 +763,97 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expectError(error.Rejected, central.connect(.{ 1, 2, 3, 4, 5, 6 }, .public, .{}));
             try grt.std.testing.expectEqual(bt.Central.State.idle, central.getState());
+
+            const PaginatedDiscoveryHci = struct {
+                service_requests: u32 = 0,
+                char_requests: u32 = 0,
+
+                pub fn retain(_: *@This()) bt.Hci.Error!void {}
+                pub fn release(_: *@This()) void {}
+                pub fn setCentralListener(_: *@This(), _: bt.Hci.CentralListener) void {}
+                pub fn setPeripheralListener(_: *@This(), _: bt.Hci.PeripheralListener) void {}
+                pub fn startScanning(_: *@This(), _: bt.Hci.ScanConfig) bt.Hci.Error!void {}
+                pub fn stopScanning(_: *@This()) void {}
+                pub fn startAdvertising(_: *@This(), _: bt.Hci.AdvConfig) bt.Hci.Error!void {}
+                pub fn stopAdvertising(_: *@This()) void {}
+                pub fn connect(_: *@This(), _: bt.Hci.BdAddr, _: bt.Hci.AddrType, _: bt.Hci.ConnConfig) bt.Hci.Error!void {}
+                pub fn cancelConnect(_: *@This()) void {}
+                pub fn disconnect(_: *@This(), _: u16, _: u8) void {}
+                pub fn sendAcl(_: *@This(), _: u16, _: []const u8) bt.Hci.Error!void {}
+                pub fn getAddr(_: *@This()) ?bt.Hci.BdAddr {
+                    return null;
+                }
+                pub fn getLink(_: *@This(), _: bt.Hci.Role) ?bt.Hci.Link {
+                    return .{
+                        .role = .central,
+                        .conn_handle = 0x0040,
+                        .peer_addr = .{ 1, 2, 3, 4, 5, 6 },
+                        .peer_addr_type = .public,
+                        .interval = 0,
+                        .latency = 0,
+                        .supervision_timeout = 0,
+                    };
+                }
+                pub fn getLinkByHandle(_: *@This(), _: u16) ?bt.Hci.Link {
+                    return null;
+                }
+                pub fn isScanning(_: *@This()) bool {
+                    return false;
+                }
+                pub fn isAdvertising(_: *@This()) bool {
+                    return false;
+                }
+                pub fn isConnectingCentral(_: *@This()) bool {
+                    return false;
+                }
+                pub fn deinit(_: *@This()) void {}
+
+                pub fn sendAttRequest(self: *@This(), _: u16, req: []const u8, out: []u8) bt.Hci.Error!usize {
+                    switch (req[0]) {
+                        att.READ_BY_GROUP_TYPE_REQUEST => {
+                            self.service_requests += 1;
+                            const start = grt.std.mem.readInt(u16, req[1..3], .little);
+                            const resp = switch (start) {
+                                0x0001 => &[_]u8{ att.READ_BY_GROUP_TYPE_RESPONSE, 6, 0x01, 0x00, 0x05, 0x00, 0x0D, 0x18 },
+                                0x0006 => &[_]u8{ att.READ_BY_GROUP_TYPE_RESPONSE, 6, 0x06, 0x00, 0x09, 0x00, 0x0F, 0x18 },
+                                else => return error.Unexpected,
+                            };
+                            @memcpy(out[0..resp.len], resp);
+                            return resp.len;
+                        },
+                        att.READ_BY_TYPE_REQUEST => {
+                            self.char_requests += 1;
+                            const start = grt.std.mem.readInt(u16, req[1..3], .little);
+                            const resp = switch (start) {
+                                0x0001 => &[_]u8{ att.READ_BY_TYPE_RESPONSE, 7, 0x01, 0x00, 0x02, 0x02, 0x00, 0x00, 0x2A },
+                                0x0003 => &[_]u8{ att.READ_BY_TYPE_RESPONSE, 7, 0x03, 0x00, 0x02, 0x04, 0x00, 0x01, 0x2A },
+                                else => return error.Unexpected,
+                            };
+                            @memcpy(out[0..resp.len], resp);
+                            return resp.len;
+                        },
+                        else => return error.Unexpected,
+                    }
+                }
+            };
+
+            var paginated_hci = PaginatedDiscoveryHci{};
+            var paginated_central = Impl.init(bt.Hci.make(&paginated_hci), grt.std.testing.allocator);
+            defer paginated_central.deinit();
+
+            var services: [2]bt.Central.DiscoveredService = undefined;
+            const service_count = try paginated_central.discoverServices(0x0040, &services);
+            try grt.std.testing.expectEqual(@as(usize, 2), service_count);
+            try grt.std.testing.expectEqual(@as(u16, 0x0001), services[0].start_handle);
+            try grt.std.testing.expectEqual(@as(u16, 0x0006), services[1].start_handle);
+            try grt.std.testing.expectEqual(@as(u32, 2), paginated_hci.service_requests);
+
+            var paginated_chars: [2]bt.Central.DiscoveredChar = undefined;
+            const paginated_char_count = try paginated_central.discoverChars(0x0040, 0x0001, 0x0005, &paginated_chars);
+            try grt.std.testing.expectEqual(@as(usize, 2), paginated_char_count);
+            try grt.std.testing.expectEqual(@as(u16, 0x0001), paginated_chars[0].decl_handle);
+            try grt.std.testing.expectEqual(@as(u16, 0x0003), paginated_chars[1].decl_handle);
+            try grt.std.testing.expectEqual(@as(u32, 2), paginated_hci.char_requests);
 
             const RetryCccdHci = struct {
                 cccd_attempts: u32 = 0,

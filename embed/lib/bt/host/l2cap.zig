@@ -22,6 +22,22 @@ pub const CID_ATT: u16 = 0x0004;
 pub const CID_LE_SIGNALING: u16 = 0x0005;
 pub const CID_SMP: u16 = 0x0006;
 
+pub const LE_SIGNALING_HEADER_LEN: usize = 4;
+pub const LE_CONN_PARAM_UPDATE_REQUEST: u8 = 0x12;
+pub const LE_CONN_PARAM_UPDATE_RESPONSE: u8 = 0x13;
+
+pub const ConnParamUpdateRequest = struct {
+    interval_min: u16,
+    interval_max: u16,
+    latency: u16,
+    timeout: u16,
+};
+
+pub const ConnParamUpdateResponse = struct {
+    ident: u8,
+    result: u16,
+};
+
 pub const Header = struct {
     length: u16,
     cid: u16,
@@ -52,6 +68,31 @@ pub fn encode(buf: []u8, cid: u16, payload: []const u8) []const u8 {
         @memcpy(buf[HEADER_LEN..][0..payload.len], payload);
     }
     return buf[0..total];
+}
+
+pub fn encodeConnParamUpdateRequest(buf: []u8, ident: u8, request: ConnParamUpdateRequest) []const u8 {
+    const payload_len: u16 = 8;
+    const total = LE_SIGNALING_HEADER_LEN + payload_len;
+    glib.std.debug.assert(buf.len >= total);
+    buf[0] = LE_CONN_PARAM_UPDATE_REQUEST;
+    buf[1] = ident;
+    glib.std.mem.writeInt(u16, buf[2..4], payload_len, .little);
+    glib.std.mem.writeInt(u16, buf[4..6], request.interval_min, .little);
+    glib.std.mem.writeInt(u16, buf[6..8], request.interval_max, .little);
+    glib.std.mem.writeInt(u16, buf[8..10], request.latency, .little);
+    glib.std.mem.writeInt(u16, buf[10..12], request.timeout, .little);
+    return buf[0..total];
+}
+
+pub fn decodeConnParamUpdateResponse(data: []const u8) ?ConnParamUpdateResponse {
+    if (data.len < LE_SIGNALING_HEADER_LEN) return null;
+    if (data[0] != LE_CONN_PARAM_UPDATE_RESPONSE) return null;
+    const payload_len = glib.std.mem.readInt(u16, data[2..4], .little);
+    if (payload_len != 2 or data.len < LE_SIGNALING_HEADER_LEN + payload_len) return null;
+    return .{
+        .ident = data[1],
+        .result = glib.std.mem.readInt(u16, data[4..6], .little),
+    };
 }
 
 /// Reassembles ACL fragments into complete L2CAP SDUs.
@@ -140,6 +181,7 @@ pub const Reassembler = struct {
 /// Splits an L2CAP SDU into ACL-sized fragments.
 pub const FragmentIterator = struct {
     buf: []u8,
+    cid: u16,
     l2cap_data: []const u8,
     conn_handle: u16,
     max_data_len: u16,
@@ -154,7 +196,7 @@ pub const FragmentIterator = struct {
             const first_chunk = @min(l2cap_total, max_payload);
 
             glib.std.mem.writeInt(u16, self.buf[0..2], @truncate(self.l2cap_data.len), .little);
-            glib.std.mem.writeInt(u16, self.buf[2..4], CID_ATT, .little);
+            glib.std.mem.writeInt(u16, self.buf[2..4], self.cid, .little);
             const data_in_first = first_chunk - HEADER_LEN;
             if (data_in_first > 0) {
                 @memcpy(self.buf[HEADER_LEN..][0..data_in_first], self.l2cap_data[0..data_in_first]);
@@ -184,15 +226,21 @@ pub const FragmentIterator = struct {
     }
 };
 
-/// Create a FragmentIterator for an ATT payload.
-pub fn fragmentIterator(buf: []u8, att_payload: []const u8, conn_handle: u16, max_data_len: u16) FragmentIterator {
+/// Create a FragmentIterator for an L2CAP fixed-channel payload.
+pub fn fragmentIteratorForCid(buf: []u8, cid: u16, payload: []const u8, conn_handle: u16, max_data_len: u16) FragmentIterator {
     glib.std.debug.assert(buf.len >= Reassembler.MAX_SDU_LEN + acl.MAX_PACKET_LEN);
     return .{
         .buf = buf,
-        .l2cap_data = att_payload,
+        .cid = cid,
+        .l2cap_data = payload,
         .conn_handle = conn_handle,
         .max_data_len = max_data_len,
     };
+}
+
+/// Create a FragmentIterator for an ATT payload.
+pub fn fragmentIterator(buf: []u8, att_payload: []const u8, conn_handle: u16, max_data_len: u16) FragmentIterator {
+    return fragmentIteratorForCid(buf, CID_ATT, att_payload, conn_handle, max_data_len);
 }
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
@@ -266,6 +314,33 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const third = it.next() orelse return error.MissingThirdFragment;
             const third_payload = acl.getPayload(third) orelse return error.BadThirdPayload;
             try grt.std.testing.expectEqualSlices(u8, iter_payload[8..14], third_payload);
+
+            var sig_buf: [16]u8 = undefined;
+            const sig = encodeConnParamUpdateRequest(&sig_buf, 7, .{
+                .interval_min = 0x0006,
+                .interval_max = 0x000C,
+                .latency = 0,
+                .timeout = 0x00C8,
+            });
+            try grt.std.testing.expectEqualSlices(u8, &.{
+                LE_CONN_PARAM_UPDATE_REQUEST, 7, 8,    0,
+                6,                            0, 12,   0,
+                0,                            0, 0xC8, 0,
+            }, sig);
+
+            const response = decodeConnParamUpdateResponse(&.{
+                LE_CONN_PARAM_UPDATE_RESPONSE, 7, 2, 0, 0, 0,
+            }) orelse return error.BadConnParamResponse;
+            try grt.std.testing.expectEqual(@as(u8, 7), response.ident);
+            try grt.std.testing.expectEqual(@as(u16, 0), response.result);
+
+            var sig_fragment_buf: [Reassembler.MAX_SDU_LEN + acl.MAX_PACKET_LEN]u8 = undefined;
+            var sig_it = fragmentIteratorForCid(&sig_fragment_buf, CID_LE_SIGNALING, sig, 0x0040, 27);
+            const sig_first = sig_it.next() orelse return error.MissingSignalFragment;
+            const sig_payload = acl.getPayload(sig_first) orelse return error.BadSignalPayload;
+            const sig_l2cap = parseHeader(sig_payload) orelse return error.BadSignalHeader;
+            try grt.std.testing.expectEqual(CID_LE_SIGNALING, sig_l2cap.cid);
+            try grt.std.testing.expectEqual(@as(u16, @intCast(sig.len)), sig_l2cap.length);
         }
     };
     const Runner = struct {

@@ -21,7 +21,18 @@ pub fn make(comptime grt: type) type {
     return struct {
         const Self = @This();
         const Role = Gap.Role;
+        const log = grt.std.log.scoped(.bt_host_hci);
         const supervision_timeout_unit: glib.time.duration.Duration = 10 * glib.time.duration.MilliSecond;
+        const max_tx_octets: u16 = acl_mod.LE_MAX_DATA_LEN;
+        const max_tx_time_us: u16 = 2120;
+        const le_event_mask: u64 = 0x0000000000000C5F;
+        const LinkTuningStep = enum {
+            idle,
+            send_data_length,
+            wait_data_length,
+            send_phy,
+            wait_phy,
+        };
         const AttResponseState = struct {
             data: [att.MAX_PDU_LEN]u8 = undefined,
             len: usize = 0,
@@ -38,6 +49,11 @@ pub fn make(comptime grt: type) type {
             transport_write_timeout: glib.time.duration.Duration = 200 * glib.time.duration.MilliSecond,
             command_timeout: glib.time.duration.Duration = glib.time.duration.Second,
             att_response_timeout: glib.time.duration.Duration = 5 * glib.time.duration.Second,
+            auto_request_peripheral_conn_params: bool = true,
+            peripheral_conn_interval_min: u16 = 0x0006,
+            peripheral_conn_interval_max: u16 = 0x000C,
+            peripheral_conn_latency: u16 = 0,
+            peripheral_supervision_timeout_units: u16 = 0x00C8,
         };
 
         transport: Transport,
@@ -53,6 +69,12 @@ pub fn make(comptime grt: type) type {
         active_roles: u8 = 0,
         async_error: ?Api.Error = null,
         dispatching_peripheral_att: bool = false,
+        acl_tx_data_len: u16 = acl_mod.LE_DEFAULT_DATA_LEN,
+        acl_tx_total_packets: u16 = 1,
+        acl_tx_credits: u16 = 1,
+        link_tuning_conn_handle: u16 = 0,
+        link_tuning_step: LinkTuningStep = .idle,
+        le_signal_identifier: u8 = 1,
 
         // command flow control
         cmd_credits: u8 = 1,
@@ -154,8 +176,24 @@ pub fn make(comptime grt: type) type {
             try self.sendCommandSync(commands.SET_EVENT_MASK, &mask_buf);
 
             var le_mask_buf: [8]u8 = undefined;
-            grt.std.mem.writeInt(u64, &le_mask_buf, 0x000000000000001F, .little);
+            grt.std.mem.writeInt(u64, &le_mask_buf, le_event_mask, .little);
             try self.sendCommandSync(commands.LE_SET_EVENT_MASK, &le_mask_buf);
+
+            try self.sendCommandSync(commands.LE_READ_BUFFER_SIZE, &.{});
+            if (self.cmd_status.isSuccess() and self.cmd_return_len >= 3) {
+                const acl_len = grt.std.mem.readInt(u16, self.cmd_return_params[0..2], .little);
+                const acl_packets: u16 = self.cmd_return_params[2];
+                self.mutex.lock();
+                if (acl_len >= acl_mod.LE_DEFAULT_DATA_LEN) {
+                    self.acl_tx_data_len = @min(acl_len, acl_mod.LE_MAX_DATA_LEN);
+                }
+                if (acl_packets > 0) {
+                    self.acl_tx_total_packets = acl_packets;
+                    self.acl_tx_credits = acl_packets;
+                }
+                self.mutex.unlock();
+                log.info("LE ACL buffers len={} packets={}", .{ acl_len, acl_packets });
+            }
 
             self.initialized = true;
         }
@@ -213,9 +251,14 @@ pub fn make(comptime grt: type) type {
         /// Send an ACL data packet (L2CAP over ATT).
         pub fn sendAcl(self: *Self, conn_handle: u16, att_data: []const u8) Api.Error!void {
             var buf: [l2cap.Reassembler.MAX_SDU_LEN + acl_mod.MAX_PACKET_LEN]u8 = undefined;
-            var iter = l2cap.fragmentIterator(&buf, att_data, conn_handle, acl_mod.LE_DEFAULT_DATA_LEN);
+            const acl_data_len = self.currentAclDataLen();
+            var iter = l2cap.fragmentIterator(&buf, att_data, conn_handle, acl_data_len);
             while (iter.next()) |fragment| {
-                _ = self.transportWrite(fragment) catch |err| return mapError(err);
+                try self.acquireAclCredit();
+                _ = self.transportWrite(fragment) catch |err| {
+                    self.releaseAclCredits(1);
+                    return mapError(err);
+                };
             }
         }
 
@@ -296,11 +339,15 @@ pub fn make(comptime grt: type) type {
         fn handleHciEvent(self: *Self, raw: []const u8) void {
             const evt = events.decode(raw) orelse return;
             var disconnect_role: ?Role = null;
+            var updated_link: ?Api.Link = null;
             self.mutex.lock();
             if (evt == .disconnection_complete) {
                 disconnect_role = self.gap.getRoleForHandle(evt.disconnection_complete.conn_handle);
             }
             self.gap.handleEvent(evt);
+            if (evt == .le_connection_update_complete and evt.le_connection_update_complete.status.isSuccess()) {
+                updated_link = gapLinkToApi(self.gap.getLinkByHandle(evt.le_connection_update_complete.conn_handle));
+            }
             const central_callbacks = self.central_callbacks;
             const peripheral_callbacks = self.peripheral_callbacks;
             self.mutex.unlock();
@@ -318,6 +365,7 @@ pub fn make(comptime grt: type) type {
                     self.cmd_credits = cc.num_cmd_packets;
                     self.cond.broadcast();
                     self.mutex.unlock();
+                    self.onCommandResult(cc.opcode, cc.status);
                 },
                 .command_status => |cs| {
                     self.mutex.lock();
@@ -328,6 +376,7 @@ pub fn make(comptime grt: type) type {
                     self.cmd_credits = cs.num_cmd_packets;
                     self.cond.broadcast();
                     self.mutex.unlock();
+                    self.onCommandResult(cs.opcode, cs.status);
                 },
                 .le_connection_complete => |lc| {
                     self.mutex.lock();
@@ -335,13 +384,33 @@ pub fn make(comptime grt: type) type {
                     self.mutex.unlock();
                     if (!lc.status.isSuccess()) return;
                     const link = eventLinkToApi(lc);
+                    self.scheduleLinkTuning(link.conn_handle);
                     switch (if (lc.role == 0x00) Role.central else Role.peripheral) {
                         .central => if (central_callbacks.on_connected) |cb| cb(central_callbacks.ctx, link),
-                        .peripheral => if (peripheral_callbacks.on_connected) |cb| cb(peripheral_callbacks.ctx, link),
+                        .peripheral => {
+                            self.requestPeripheralConnectionParams(link.conn_handle);
+                            if (peripheral_callbacks.on_connected) |cb| cb(peripheral_callbacks.ctx, link);
+                        },
+                    }
+                },
+                .le_connection_update_complete => |uc| {
+                    log.info("LE connection update conn={} status=0x{x} interval={} latency={} timeout={}", .{
+                        uc.conn_handle,
+                        @intFromEnum(uc.status),
+                        uc.conn_interval,
+                        uc.conn_latency,
+                        uc.supervision_timeout,
+                    });
+                    if (updated_link) |link| {
+                        switch (link.role) {
+                            .central => if (central_callbacks.on_connection_updated) |cb| cb(central_callbacks.ctx, link),
+                            .peripheral => if (peripheral_callbacks.on_connection_updated) |cb| cb(peripheral_callbacks.ctx, link),
+                        }
                     }
                 },
                 .disconnection_complete => |dc| {
                     self.mutex.lock();
+                    self.acl_tx_credits = self.acl_tx_total_packets;
                     self.cond.broadcast();
                     self.mutex.unlock();
                     if (disconnect_role) |resolved_role| {
@@ -353,6 +422,36 @@ pub fn make(comptime grt: type) type {
                 },
                 .le_advertising_report => |report| {
                     if (central_callbacks.on_adv_report) |cb| cb(central_callbacks.ctx, report.data);
+                },
+                .le_data_length_change => |dl| {
+                    self.mutex.lock();
+                    if (dl.max_tx_octets >= acl_mod.LE_DEFAULT_DATA_LEN) {
+                        self.acl_tx_data_len = @min(dl.max_tx_octets, acl_mod.LE_MAX_DATA_LEN);
+                    }
+                    self.mutex.unlock();
+                    log.info("LE data length conn={} tx_octets={} tx_time={} rx_octets={} rx_time={}", .{
+                        dl.conn_handle,
+                        dl.max_tx_octets,
+                        dl.max_tx_time,
+                        dl.max_rx_octets,
+                        dl.max_rx_time,
+                    });
+                },
+                .le_phy_update_complete => |phy| {
+                    log.info("LE PHY update conn={} status=0x{x} tx_phy=0x{x} rx_phy=0x{x}", .{
+                        phy.conn_handle,
+                        @intFromEnum(phy.status),
+                        phy.tx_phy,
+                        phy.rx_phy,
+                    });
+                },
+                .num_completed_packets => |ncp| {
+                    var completed: u16 = 0;
+                    var i: usize = 0;
+                    while (i < ncp.num_handles) : (i += 1) {
+                        completed +|= ncp.getCount(i) orelse 0;
+                    }
+                    if (completed > 0) self.releaseAclCredits(completed);
                 },
                 else => {},
             }
@@ -377,6 +476,24 @@ pub fn make(comptime grt: type) type {
             const resolved_sdu = sdu orelse return;
             if (resolved_sdu.cid == l2cap.CID_ATT) {
                 self.handleAttPdu(resolved_sdu.conn_handle, resolved_sdu.data);
+            } else if (resolved_sdu.cid == l2cap.CID_LE_SIGNALING) {
+                handleLeSignalingPdu(resolved_sdu.conn_handle, resolved_sdu.data);
+            }
+        }
+
+        fn handleLeSignalingPdu(conn_handle: u16, data: []const u8) void {
+            if (data.len < l2cap.LE_SIGNALING_HEADER_LEN) return;
+            const code = data[0];
+            const ident = data[1];
+            const payload_len = grt.std.mem.readInt(u16, data[2..4], .little);
+            if (data.len < l2cap.LE_SIGNALING_HEADER_LEN + payload_len) return;
+
+            switch (code) {
+                l2cap.LE_CONN_PARAM_UPDATE_RESPONSE => {
+                    const rsp = l2cap.decodeConnParamUpdateResponse(data) orelse return;
+                    log.info("LE conn param update response conn={} ident={} result={}", .{ conn_handle, rsp.ident, rsp.result });
+                },
+                else => log.debug("ignored LE signaling code=0x{x} ident={}", .{ code, ident }),
             }
         }
 
@@ -682,6 +799,171 @@ pub fn make(comptime grt: type) type {
             return self.gap.getRoleForHandle(conn_handle);
         }
 
+        fn currentAclDataLen(self: *Self) u16 {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            return self.acl_tx_data_len;
+        }
+
+        fn requestPeripheralConnectionParams(self: *Self, conn_handle: u16) void {
+            if (!self.config.auto_request_peripheral_conn_params) return;
+
+            var sig_buf: [16]u8 = undefined;
+            const ident = self.nextLeSignalIdentifier();
+            const sig = l2cap.encodeConnParamUpdateRequest(&sig_buf, ident, .{
+                .interval_min = self.config.peripheral_conn_interval_min,
+                .interval_max = self.config.peripheral_conn_interval_max,
+                .latency = self.config.peripheral_conn_latency,
+                .timeout = self.config.peripheral_supervision_timeout_units,
+            });
+
+            if (self.trySendL2capFixedNoWait(conn_handle, l2cap.CID_LE_SIGNALING, sig)) {
+                log.info("requested LE conn params conn={} ident={} min={} max={} latency={} timeout={}", .{
+                    conn_handle,
+                    ident,
+                    self.config.peripheral_conn_interval_min,
+                    self.config.peripheral_conn_interval_max,
+                    self.config.peripheral_conn_latency,
+                    self.config.peripheral_supervision_timeout_units,
+                });
+            } else {
+                log.debug("deferred LE conn param request conn={} ident={}", .{ conn_handle, ident });
+            }
+        }
+
+        fn nextLeSignalIdentifier(self: *Self) u8 {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            const ident = self.le_signal_identifier;
+            self.le_signal_identifier +%= 1;
+            if (self.le_signal_identifier == 0) self.le_signal_identifier = 1;
+            return ident;
+        }
+
+        fn trySendL2capFixedNoWait(self: *Self, conn_handle: u16, cid: u16, data: []const u8) bool {
+            var buf: [l2cap.Reassembler.MAX_SDU_LEN + acl_mod.MAX_PACKET_LEN]u8 = undefined;
+            const acl_data_len = self.currentAclDataLen();
+            var iter = l2cap.fragmentIteratorForCid(&buf, cid, data, conn_handle, acl_data_len);
+
+            while (iter.next()) |fragment| {
+                self.mutex.lock();
+                if (!self.running or self.acl_tx_credits == 0) {
+                    self.mutex.unlock();
+                    return false;
+                }
+                self.acl_tx_credits -= 1;
+                self.mutex.unlock();
+
+                _ = self.transportWrite(fragment) catch |err| {
+                    self.releaseAclCredits(1);
+                    self.mutex.lock();
+                    self.async_error = mapError(err);
+                    self.cond.broadcast();
+                    self.mutex.unlock();
+                    return false;
+                };
+            }
+            return true;
+        }
+
+        fn acquireAclCredit(self: *Self) Api.Error!void {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            while (self.acl_tx_credits == 0) {
+                if (self.async_error) |err| return err;
+                if (!self.running) return error.Disconnected;
+                self.cond.timedWait(&self.mutex, try durationToTimedWaitNs(self.config.command_timeout)) catch |err| switch (err) {
+                    error.Timeout => return error.Timeout,
+                };
+            }
+            self.acl_tx_credits -= 1;
+        }
+
+        fn releaseAclCredits(self: *Self, count: u16) void {
+            self.mutex.lock();
+            self.acl_tx_credits = @min(self.acl_tx_total_packets, self.acl_tx_credits +| count);
+            self.cond.broadcast();
+            self.mutex.unlock();
+        }
+
+        fn scheduleLinkTuning(self: *Self, conn_handle: u16) void {
+            self.mutex.lock();
+            self.link_tuning_conn_handle = conn_handle;
+            self.link_tuning_step = .send_data_length;
+            self.mutex.unlock();
+            self.advanceLinkTuning();
+        }
+
+        fn onCommandResult(self: *Self, opcode: u16, status: Status) void {
+            self.mutex.lock();
+            const step = self.link_tuning_step;
+            if (opcode == commands.LE_SET_DATA_LENGTH and step == .wait_data_length) {
+                self.link_tuning_step = .send_phy;
+            } else if (opcode == commands.LE_SET_PHY and step == .wait_phy) {
+                self.link_tuning_step = .idle;
+            }
+            self.mutex.unlock();
+
+            if (!status.isSuccess()) {
+                log.debug("link tuning command 0x{x} completed with status=0x{x}", .{ opcode, @intFromEnum(status) });
+            }
+            self.advanceLinkTuning();
+        }
+
+        fn advanceLinkTuning(self: *Self) void {
+            while (true) {
+                self.mutex.lock();
+                const conn_handle = self.link_tuning_conn_handle;
+                const step = self.link_tuning_step;
+                self.mutex.unlock();
+
+                switch (step) {
+                    .idle, .wait_data_length, .wait_phy => return,
+                    .send_data_length => {
+                        var params: [commands.MAX_CMD_LEN]u8 = undefined;
+                        const cmd = commands.leSetDataLength(&params, conn_handle, max_tx_octets, max_tx_time_us);
+                        if (!self.trySendCommandNoWait(commands.LE_SET_DATA_LENGTH, cmd[commands.HEADER_LEN..])) return;
+                        self.mutex.lock();
+                        if (self.link_tuning_step == .send_data_length) self.link_tuning_step = .wait_data_length;
+                        self.mutex.unlock();
+                        log.debug("requested LE data length conn={} tx_octets={} tx_time={}", .{ conn_handle, max_tx_octets, max_tx_time_us });
+                    },
+                    .send_phy => {
+                        var params: [commands.MAX_CMD_LEN]u8 = undefined;
+                        const phy_2m = @intFromEnum(commands.Phy.le_2m);
+                        const cmd = commands.leSetPhy(&params, conn_handle, phy_2m, phy_2m);
+                        if (!self.trySendCommandNoWait(commands.LE_SET_PHY, cmd[commands.HEADER_LEN..])) return;
+                        self.mutex.lock();
+                        if (self.link_tuning_step == .send_phy) self.link_tuning_step = .wait_phy;
+                        self.mutex.unlock();
+                        log.info("requested LE 2M PHY conn={}", .{conn_handle});
+                    },
+                }
+            }
+        }
+
+        fn trySendCommandNoWait(self: *Self, opcode: u16, params: []const u8) bool {
+            var buf: [commands.MAX_CMD_LEN]u8 = undefined;
+            const pkt = commands.encode(&buf, opcode, params);
+
+            self.mutex.lock();
+            if (!self.running or self.cmd_credits == 0) {
+                self.mutex.unlock();
+                return false;
+            }
+            self.cmd_credits -= 1;
+            self.mutex.unlock();
+
+            _ = self.transportWrite(pkt) catch |err| {
+                self.mutex.lock();
+                self.async_error = mapError(err);
+                self.cond.broadcast();
+                self.mutex.unlock();
+                return false;
+            };
+            return true;
+        }
+
         fn acquireCommandCredit(self: *Self) Api.Error!void {
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -815,6 +1097,42 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 hci.handleHciEvent(&.{ 0x04, 0x3E, 0x13, 0x01, 0x08, 0x40, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x18, 0x00, 0x00, 0x00, 0xC8, 0x00 });
 
                 try grt.std.testing.expectEqual(@as(u32, 0), connected_count);
+            }
+
+            {
+                const Impl = make(grt);
+
+                const UpdateState = struct {
+                    count: u32 = 0,
+                    interval: u16 = 0,
+
+                    fn onConnectionUpdated(ctx: ?*anyopaque, link: Api.Link) void {
+                        const state: *@This() = @ptrCast(@alignCast(ctx.?));
+                        state.count += 1;
+                        state.interval = link.interval;
+                    }
+                };
+
+                var update_state = UpdateState{};
+                var hci = Impl.init(undefined, .{});
+                hci.central_callbacks = .{
+                    .ctx = &update_state,
+                    .on_connection_updated = UpdateState.onConnectionUpdated,
+                };
+                hci.gap.central_link = .{
+                    .role = .central,
+                    .conn_handle = 0x0040,
+                    .peer_addr = .{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF },
+                    .peer_addr_type = 0x00,
+                    .conn_interval = 0x0018,
+                    .conn_latency = 0,
+                    .supervision_timeout_units = 0x00C8,
+                };
+
+                hci.handleHciEvent(&.{ 0x04, 0x3E, 0x0A, 0x03, 0x00, 0x40, 0x00, 0x20, 0x00, 0x01, 0x00, 0xC8, 0x00 });
+
+                try grt.std.testing.expectEqual(@as(u32, 1), update_state.count);
+                try grt.std.testing.expectEqual(@as(u16, 0x0020), update_state.interval);
             }
 
             {

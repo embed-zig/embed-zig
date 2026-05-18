@@ -44,6 +44,7 @@ pub const LE_CONNECTION_UPDATE: u16 = 0x2013;
 pub const LE_READ_LOCAL_P256_KEY: u16 = 0x2025;
 pub const LE_SET_DATA_LENGTH: u16 = 0x2022;
 pub const LE_READ_MAX_DATA_LENGTH: u16 = 0x202F;
+pub const LE_SET_PHY: u16 = 0x2032;
 
 /// Generic encoder: writes any HCI command with raw parameter bytes.
 pub fn encode(buf: []u8, opcode: u16, params: []const u8) []const u8 {
@@ -191,6 +192,32 @@ pub fn disconnect(buf: []u8, conn_handle: u16, reason: u8) []const u8 {
     return encode(buf, DISCONNECT, &params);
 }
 
+/// HCI_LE_Set_Data_Length (Vol 4 Part E 7.8.33)
+pub fn leSetDataLength(buf: []u8, conn_handle: u16, tx_octets: u16, tx_time: u16) []const u8 {
+    var params: [6]u8 = undefined;
+    glib.std.mem.writeInt(u16, params[0..2], conn_handle, .little);
+    glib.std.mem.writeInt(u16, params[2..4], tx_octets, .little);
+    glib.std.mem.writeInt(u16, params[4..6], tx_time, .little);
+    return encode(buf, LE_SET_DATA_LENGTH, &params);
+}
+
+pub const Phy = enum(u8) {
+    le_1m = 0x01,
+    le_2m = 0x02,
+    le_coded = 0x04,
+};
+
+/// HCI_LE_Set_PHY (Vol 4 Part E 7.8.49)
+pub fn leSetPhy(buf: []u8, conn_handle: u16, tx_phys: u8, rx_phys: u8) []const u8 {
+    var params: [7]u8 = undefined;
+    glib.std.mem.writeInt(u16, params[0..2], conn_handle, .little);
+    params[2] = 0x00;
+    params[3] = tx_phys;
+    params[4] = rx_phys;
+    glib.std.mem.writeInt(u16, params[5..7], 0x0000, .little);
+    return encode(buf, LE_SET_PHY, &params);
+}
+
 // --- Parameter types ---
 
 pub const AdvType = enum(u8) {
@@ -296,6 +323,17 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(u8, 0x40), disconnect_cmd[4]);
             try grt.std.testing.expectEqual(@as(u8, 0x00), disconnect_cmd[5]);
             try grt.std.testing.expectEqual(@as(u8, 0x13), disconnect_cmd[6]);
+
+            const data_len = leSetDataLength(&buf, 0x0040, 251, 2120);
+            try grt.std.testing.expectEqual(LE_SET_DATA_LENGTH, grt.std.mem.readInt(u16, data_len[1..3], .little));
+            try grt.std.testing.expectEqual(@as(u8, 6), data_len[3]);
+            try grt.std.testing.expectEqual(@as(u16, 251), grt.std.mem.readInt(u16, data_len[6..8], .little));
+
+            const phy = leSetPhy(&buf, 0x0040, @intFromEnum(Phy.le_2m), @intFromEnum(Phy.le_2m));
+            try grt.std.testing.expectEqual(LE_SET_PHY, grt.std.mem.readInt(u16, phy[1..3], .little));
+            try grt.std.testing.expectEqual(@as(u8, 7), phy[3]);
+            try grt.std.testing.expectEqual(@as(u8, 0x02), phy[7]);
+            try grt.std.testing.expectEqual(@as(u8, 0x02), phy[8]);
 
             const generic = encode(&buf, READ_BD_ADDR, &.{});
             try grt.std.testing.expectEqual(@as(usize, 4), generic.len);

@@ -269,7 +269,10 @@ pub fn handleEvent(self: *Gap, evt: events.Event) void {
                 };
                 switch (link.role) {
                     .central => self.central_link = link,
-                    .peripheral => self.peripheral_link = link,
+                    .peripheral => {
+                        self.peripheral_link = link;
+                        self.advertising = false;
+                    },
                 }
             }
             self.updateState();
@@ -449,6 +452,30 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     .reason = .remote_user_terminated,
                 } });
                 try grt.std.testing.expectEqual(State.idle, gap.state);
+            }
+
+            {
+                var gap = init();
+                gap.startAdvertising(.{ .adv_data = &[_]u8{ 0x02, 0x01, 0x06 } });
+                _ = gap.nextCommand();
+                _ = gap.nextCommand();
+                _ = gap.nextCommand();
+
+                gap.handleEvent(.{ .le_connection_complete = .{
+                    .status = .success,
+                    .conn_handle = 0x0040,
+                    .role = 0x01,
+                    .peer_addr_type = 0x00,
+                    .peer_addr = .{ 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF },
+                    .conn_interval = 0x0018,
+                    .conn_latency = 0,
+                    .supervision_timeout = 0x00C8,
+                } });
+
+                try grt.std.testing.expectEqual(State.connected, gap.state);
+                try grt.std.testing.expect(!gap.isAdvertising());
+                const link = gap.getLink(.peripheral) orelse return error.NoLink;
+                try grt.std.testing.expectEqual(@as(u16, 0x0040), link.conn_handle);
             }
 
             {

@@ -27,6 +27,7 @@ pub const LE_CONNECTION_UPDATE_COMPLETE: u8 = 0x03;
 pub const LE_LONG_TERM_KEY_REQUEST: u8 = 0x05;
 pub const LE_DATA_LENGTH_CHANGE: u8 = 0x07;
 pub const LE_ENHANCED_CONNECTION_COMPLETE: u8 = 0x0A;
+pub const LE_PHY_UPDATE_COMPLETE: u8 = 0x0C;
 
 pub const Event = union(enum) {
     command_complete: CommandComplete,
@@ -36,6 +37,8 @@ pub const Event = union(enum) {
     le_connection_complete: LeConnectionComplete,
     le_advertising_report: LeAdvertisingReport,
     le_connection_update_complete: LeConnectionUpdateComplete,
+    le_data_length_change: LeDataLengthChange,
+    le_phy_update_complete: LePhyUpdateComplete,
     unknown: Unknown,
 };
 
@@ -97,6 +100,21 @@ pub const LeConnectionUpdateComplete = struct {
     conn_interval: u16,
     conn_latency: u16,
     supervision_timeout: u16,
+};
+
+pub const LeDataLengthChange = struct {
+    conn_handle: u16,
+    max_tx_octets: u16,
+    max_tx_time: u16,
+    max_rx_octets: u16,
+    max_rx_time: u16,
+};
+
+pub const LePhyUpdateComplete = struct {
+    status: Status,
+    conn_handle: u16,
+    tx_phy: u8,
+    rx_phy: u8,
 };
 
 pub const Unknown = struct {
@@ -194,6 +212,8 @@ fn decodeLeMetaEvent(params: []const u8) Event {
             .data = sub_params,
         } },
         LE_CONNECTION_UPDATE_COMPLETE => decodeLeConnectionUpdateComplete(sub_params),
+        LE_DATA_LENGTH_CHANGE => decodeLeDataLengthChange(sub_params),
+        LE_PHY_UPDATE_COMPLETE => decodeLePhyUpdateComplete(sub_params),
         else => .{ .unknown = .{ .event_code = LE_META, .data = params } },
     };
 }
@@ -234,6 +254,27 @@ fn decodeLeConnectionUpdateComplete(params: []const u8) Event {
         .conn_interval = glib.std.mem.readInt(u16, params[3..5], .little),
         .conn_latency = glib.std.mem.readInt(u16, params[5..7], .little),
         .supervision_timeout = glib.std.mem.readInt(u16, params[7..9], .little),
+    } };
+}
+
+fn decodeLeDataLengthChange(params: []const u8) Event {
+    if (params.len < 10) return .{ .unknown = .{ .event_code = LE_META, .data = params } };
+    return .{ .le_data_length_change = .{
+        .conn_handle = glib.std.mem.readInt(u16, params[0..2], .little) & 0x0FFF,
+        .max_tx_octets = glib.std.mem.readInt(u16, params[2..4], .little),
+        .max_tx_time = glib.std.mem.readInt(u16, params[4..6], .little),
+        .max_rx_octets = glib.std.mem.readInt(u16, params[6..8], .little),
+        .max_rx_time = glib.std.mem.readInt(u16, params[8..10], .little),
+    } };
+}
+
+fn decodeLePhyUpdateComplete(params: []const u8) Event {
+    if (params.len < 5) return .{ .unknown = .{ .event_code = LE_META, .data = params } };
+    return .{ .le_phy_update_complete = .{
+        .status = Status.fromByte(params[0]),
+        .conn_handle = glib.std.mem.readInt(u16, params[1..3], .little) & 0x0FFF,
+        .tx_phy = params[3],
+        .rx_phy = params[4],
     } };
 }
 
@@ -286,6 +327,35 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         try grt.std.testing.expectEqual(@as(u8, 1), ncp.num_handles);
                         try grt.std.testing.expectEqual(@as(?u16, 0x0040), ncp.getHandle(0));
                         try grt.std.testing.expectEqual(@as(?u16, 2), ncp.getCount(0));
+                    },
+                    else => return error.WrongEvent,
+                }
+            }
+
+            {
+                const raw = [_]u8{ 0x04, 0x3E, 0x0B, 0x07, 0x40, 0x00, 0xFB, 0x00, 0x48, 0x08, 0xFB, 0x00, 0x48, 0x08 };
+                const evt = decode(&raw) orelse return error.DecodeFailed;
+                switch (evt) {
+                    .le_data_length_change => |dl| {
+                        try grt.std.testing.expectEqual(@as(u16, 0x0040), dl.conn_handle);
+                        try grt.std.testing.expectEqual(@as(u16, 251), dl.max_tx_octets);
+                        try grt.std.testing.expectEqual(@as(u16, 2120), dl.max_tx_time);
+                        try grt.std.testing.expectEqual(@as(u16, 251), dl.max_rx_octets);
+                        try grt.std.testing.expectEqual(@as(u16, 2120), dl.max_rx_time);
+                    },
+                    else => return error.WrongEvent,
+                }
+            }
+
+            {
+                const raw = [_]u8{ 0x04, 0x3E, 0x06, 0x0C, 0x00, 0x40, 0x00, 0x02, 0x02 };
+                const evt = decode(&raw) orelse return error.DecodeFailed;
+                switch (evt) {
+                    .le_phy_update_complete => |phy| {
+                        try grt.std.testing.expect(phy.status.isSuccess());
+                        try grt.std.testing.expectEqual(@as(u16, 0x0040), phy.conn_handle);
+                        try grt.std.testing.expectEqual(@as(u8, 0x02), phy.tx_phy);
+                        try grt.std.testing.expectEqual(@as(u8, 0x02), phy.rx_phy);
                     },
                     else => return error.WrongEvent,
                 }
