@@ -1,7 +1,8 @@
 openteam/
 .*zig-*/
 zig-out/
-.build/
+*.o
+.build*/
 .tmp/
 .claude/
 AGENTS.md
