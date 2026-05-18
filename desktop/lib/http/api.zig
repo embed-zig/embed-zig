@@ -16,5 +16,5 @@ pub fn files() openapi.Files {
 }
 
 pub const Models = codegen.models.make(gstd.runtime.std, files());
-pub const ServerApi = codegen.server.make(gstd.runtime.std, files());
-pub const ClientApi = codegen.client.make(gstd.runtime.std, files());
+pub const ServerApi = codegen.server.make(gstd.runtime, files());
+pub const ClientApi = codegen.client.make(gstd.runtime, files());

@@ -8,12 +8,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const glib_mod = glib_dep.module("glib");
-    const gstd_dep = b.dependency("gstd", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const gstd_mod = gstd_dep.module("gstd");
-
     const openapi_mod = b.addModule("openapi", .{
         .root_source_file = b.path("lib/openapi.zig"),
         .target = target,
@@ -30,7 +24,6 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "glib", .module = glib_mod },
-            .{ .name = "gstd", .module = gstd_mod },
         },
     });
 }

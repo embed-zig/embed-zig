@@ -15,7 +15,7 @@ const ClientApi = blk: {
             .{ .name = "spec.json", .spec = spec },
         },
     };
-    break :blk codegen.client.make(lib, files);
+    break :blk codegen.client.make(gstd.runtime, files);
 };
 
 const ServerApi = blk: {
@@ -25,7 +25,7 @@ const ServerApi = blk: {
             .{ .name = "spec.json", .spec = spec },
         },
     };
-    break :blk codegen.server.make(lib, files);
+    break :blk codegen.server.make(gstd.runtime, files);
 };
 
 pub const Phase = enum {

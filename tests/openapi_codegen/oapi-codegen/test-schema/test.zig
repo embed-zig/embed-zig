@@ -18,7 +18,7 @@ const ClientApi = blk: {
             },
         },
     };
-    break :blk codegen.client.make(lib, files);
+    break :blk codegen.client.make(gstd.runtime, files);
 };
 
 const ServerApi = blk: {
@@ -31,7 +31,7 @@ const ServerApi = blk: {
             },
         },
     };
-    break :blk codegen.server.make(lib, files);
+    break :blk codegen.server.make(gstd.runtime, files);
 };
 
 pub const Phase = enum {

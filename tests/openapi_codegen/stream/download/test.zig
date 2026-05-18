@@ -16,8 +16,8 @@ fn files() openapi.Files {
     };
 }
 
-const ClientApi = codegen.client.make(lib, files());
-const ServerApi = codegen.server.make(lib, files());
+const ClientApi = codegen.client.make(gstd.runtime, files());
+const ServerApi = codegen.server.make(gstd.runtime, files());
 
 fn runStreamDownloadTest(t: *glib.testing.T, alloc: lib.mem.Allocator) !void {
     var app = AppContext{};

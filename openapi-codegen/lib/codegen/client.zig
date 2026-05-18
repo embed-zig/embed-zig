@@ -1,7 +1,6 @@
 const glib = @import("glib");
 const openapi = @import("openapi");
 const models_mod = @import("models.zig");
-const gstd = @import("gstd");
 
 const Files = openapi.Files;
 const Spec = openapi.Spec;
@@ -84,11 +83,12 @@ const ResponseVariant = struct {
     payload_type: type,
 };
 
-pub fn make(comptime std: type, comptime files: Files) type {
+pub fn make(comptime grt: type, comptime files: Files) type {
     @setEvalBranchQuota(300_000);
 
+    const std = grt.std;
     const root = rootFile(files);
-    const net = gstd.runtime.net;
+    const net = grt.net;
     const Http = net.http;
     const Models = models_mod.make(std, files);
     const default_base_url = copyString(defaultBaseUrl(root.spec));
@@ -101,7 +101,7 @@ pub fn make(comptime std: type, comptime files: Files) type {
         base_url: []const u8,
     };
 
-    const Operations = makeOperations(std, files, root, State);
+    const Operations = makeOperations(grt, files, root, State);
 
     return struct {
         state: *State,
@@ -154,7 +154,7 @@ pub fn make(comptime std: type, comptime files: Files) type {
 }
 
 fn makeOperations(
-    comptime std: type,
+    comptime grt: type,
     comptime files: Files,
     comptime root: RootFile,
     comptime State: type,
@@ -163,7 +163,7 @@ fn makeOperations(
     var fields: [operations.len]Type.StructField = undefined;
 
     for (operations, 0..) |operation_ref, i| {
-        const Operation = OperationHandle(std, files, operation_ref, State);
+        const Operation = OperationHandle(grt, files, operation_ref, State);
         ensureUniqueFieldName(fields[0..i], operation_ref.field_name, "operation");
         fields[i] = .{
             .name = operation_ref.field_name,
@@ -183,12 +183,13 @@ fn makeOperations(
 }
 
 fn OperationHandle(
-    comptime std: type,
+    comptime grt: type,
     comptime files: Files,
     comptime operation_ref: OperationRef,
     comptime State: type,
 ) type {
-    const net = gstd.runtime.net;
+    const std = grt.std;
+    const net = grt.net;
     const Http = net.http;
     const parameters_slice = collectEffectiveParameters(std, files, operation_ref.file_name, operation_ref.path_item, operation_ref.operation, operation_ref.field_name);
     const parameters = blk: {
@@ -208,7 +209,7 @@ fn OperationHandle(
         }
         break :blk items;
     };
-    const request_body = selectRequestBody(std, files, operation_ref.file_name, operation_ref.operation.request_body, operation_ref.field_name);
+    const request_body = selectRequestBody(grt, files, operation_ref.file_name, operation_ref.operation.request_body, operation_ref.field_name);
     const ArgsType = makeArgsType(parameters, request_body);
     const response_variants_slice = collectResponseVariants(std, files, operation_ref.file_name, operation_ref.operation.responses, operation_ref.field_name);
     const response_variants = blk: {
@@ -216,8 +217,8 @@ fn OperationHandle(
         for (response_variants_slice, 0..) |variant, i| items[i] = variant;
         break :blk items;
     };
-    const ResponsePayload = makeResponseType(std, response_variants);
-    const ResponseType = makeOwnedResponseType(std, ResponsePayload, response_variants);
+    const ResponsePayload = makeResponseType(grt, response_variants);
+    const ResponseType = makeOwnedResponseType(grt, ResponsePayload, response_variants);
     const method = copyString(operation_ref.method);
     const path = copyString(operation_ref.path);
 
@@ -335,7 +336,7 @@ fn OperationHandle(
             inline for (response_variants) |variant| {
                 if (variant.status_code) |status_code| {
                     if (response_ptr.status_code == status_code) {
-                        const out = try decodeResponseVariant(std, ResponseType, allocator, response_ptr, variant);
+                        const out = try decodeResponseVariant(grt, ResponseType, allocator, response_ptr, variant);
                         dispose_http_response = false;
                         return out;
                     }
@@ -344,7 +345,7 @@ fn OperationHandle(
 
             inline for (response_variants) |variant| {
                 if (variant.status_code == null) {
-                    const out = try decodeResponseVariant(std, ResponseType, allocator, response_ptr, variant);
+                    const out = try decodeResponseVariant(grt, ResponseType, allocator, response_ptr, variant);
                     dispose_http_response = false;
                     return out;
                 }
@@ -363,13 +364,14 @@ fn OperationHandle(
     };
 }
 
-fn makeOwnedResponseType(comptime std: type, comptime ResponsePayload: type, comptime variants: anytype) type {
+fn makeOwnedResponseType(comptime grt: type, comptime ResponsePayload: type, comptime variants: anytype) type {
     if (ResponsePayload == void) return void;
 
+    const std = grt.std;
     return struct {
         allocator: std.mem.Allocator,
         /// Heap `Response` from `Client.do`; kept alive until caller-owned stream teardown finishes.
-        http_response: *gstd.runtime.net.http.Response,
+        http_response: *grt.net.http.Response,
         value: ResponsePayload,
         /// If a raw or SSE response has no body reader, the caller-owned stream points here.
         raw_empty_body: FixedBufferBody = .{ .bytes = "" },
@@ -795,13 +797,14 @@ fn selectParameterSchema(comptime parameter: Spec.Parameter) ?struct {
 }
 
 fn selectRequestBody(
-    comptime std: type,
+    comptime grt: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime request_body_or_ref: ?Spec.RequestBodyOrRef,
     comptime context_name: []const u8,
 ) ?SelectedRequestBody {
-    const Http = gstd.runtime.net.http;
+    const std = grt.std;
+    const Http = grt.net.http;
     const request_body = request_body_or_ref orelse return null;
     const resolved = resolveRequestBodyOrRef(files, current_file_name, request_body);
 
@@ -910,11 +913,12 @@ fn responseVariant(
     };
 }
 
-fn makeResponseType(comptime std: type, comptime variants: anytype) type {
+fn makeResponseType(comptime grt: type, comptime variants: anytype) type {
     if (variants.len == 0) return void;
 
-    const Http = gstd.runtime.net.http;
-    const Sse = @import("../sse.zig").make(std);
+    const std = grt.std;
+    const Http = grt.net.http;
+    const Sse = @import("../sse.zig").make(grt);
 
     var enum_fields: [variants.len]Type.EnumField = undefined;
     var union_fields: [variants.len]Type.UnionField = undefined;
@@ -1242,7 +1246,8 @@ fn readReadCloser(comptime std: type, allocator: std.mem.Allocator, reader: anyt
     return try list.toOwnedSlice(allocator);
 }
 
-fn readResponseBody(comptime std: type, allocator: std.mem.Allocator, response: *const gstd.runtime.net.http.Response) ![]u8 {
+fn readResponseBody(comptime grt: type, allocator: grt.std.mem.Allocator, response: *const grt.net.http.Response) ![]u8 {
+    const std = grt.std;
     var body = response.body() orelse return try allocator.alloc(u8, 0);
     var list = try std.ArrayList(u8).initCapacity(allocator, 0);
     defer list.deinit(allocator);
@@ -1258,16 +1263,17 @@ fn readResponseBody(comptime std: type, allocator: std.mem.Allocator, response: 
 }
 
 fn decodeResponseVariant(
-    comptime std: type,
+    comptime grt: type,
     comptime ResponseType: type,
-    allocator: std.mem.Allocator,
-    response: *gstd.runtime.net.http.Response,
+    allocator: grt.std.mem.Allocator,
+    response: *grt.net.http.Response,
     comptime variant: ResponseVariant,
 ) !if (ResponseType == void) void else *ResponseType {
     if (ResponseType == void) return;
 
-    const Http = gstd.runtime.net.http;
-    const Sse = @import("../sse.zig").make(std);
+    const std = grt.std;
+    const Http = grt.net.http;
+    const Sse = @import("../sse.zig").make(grt);
     const PayloadType = @FieldType(ResponseType, "value");
 
     switch (variant.payload_kind) {
@@ -1306,7 +1312,7 @@ fn decodeResponseVariant(
             return owned;
         },
         .json => {
-            const response_bytes = try readResponseBody(std, allocator, response);
+            const response_bytes = try readResponseBody(grt, allocator, response);
             defer allocator.free(response_bytes);
 
             const parsed = try std.json.parseFromSlice(variant.payload_type, allocator, response_bytes, .{

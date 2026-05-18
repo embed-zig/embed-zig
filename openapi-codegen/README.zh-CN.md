@@ -7,7 +7,7 @@
 ## 环境要求
 
 - **Zig** ≥ `0.15.2`（见 `build.zig.zon`）
-- **[embed-zig](https://github.com/embed-zig/embed-zig)**：提供生成 client/server 所需的运行时。本仓库使用 `glib` 作为共享模块命名空间，并使用 `gstd.runtime` 作为生成 client/server 的 HTTP/time 运行时。
+- **[embed-zig](https://github.com/embed-zig/embed-zig)**：提供生成 client/server 所需的运行时。生成的 client/server 接收 `gstd.runtime` 这类 runtime namespace；`codegen` 模块本身只 import `openapi` 和 `glib`。
 
 ## 能力概览
 
@@ -15,12 +15,12 @@
 | 模块                               | 作用                                                                                           |
 | -------------------------------- | -------------------------------------------------------------------------------------------- |
 | `openapi`（`lib/openapi.zig`） | JSON → `Spec`；`Files` 挂载多文档，支持跨文件 `$ref`                                             |
-| `codegen.models`             | `codegen.models.make(files)` → schema 对应 model 类型                                        |
-| `codegen.client`             | `codegen.client.make(lib, files)` → `ClientApi`，操作为 `operations.<operationId>`   |
-| `codegen.server`             | `codegen.server.make(lib, files)` → 严格 handler 注册                                        |
+| `codegen.models`             | `codegen.models.make(lib, files)` → schema 对应 model 类型                                        |
+| `codegen.client`             | `codegen.client.make(grt, files)` → `ClientApi`，操作为 `operations.<operationId>`   |
+| `codegen.server`             | `codegen.server.make(grt, files)` → 严格 handler 注册                                        |
 
 
-示例里统一写 `const gstd = @import("gstd");` 获取运行时网络/时间，`const glib = @import("glib");` 获取 context/testing 辅助能力，`const lib = @import("std");` 作为传给 `codegen.*.make` 的 comptime std-like namespace。
+示例里统一写 `const gstd = @import("gstd");` 和 `const grt = gstd.runtime;` 获取运行时网络/时间。模型仍然只需要 comptime std-like namespace（例如 `const lib = grt.std` 或 `@import("std")`）。
 
 ## 克隆后自测
 
@@ -32,7 +32,7 @@ zig build test-integration-openapi-codegen
 
 ## 在你自己的工程里依赖
 
-在 `build.zig.zon` 声明 `openapi_codegen`、`glib` 与 `gstd`；远端包用 `zig fetch --save` 写入 `.hash`。接线时先创建 `openapi` 模块，再把 `glib_dep.module("glib")` 和 `gstd_dep.module("gstd")` 传给 `codegen`。
+在 `build.zig.zon` 声明 `openapi_codegen` 与 `glib`；如果应用选择 `gstd.runtime`，应用自己再声明 `gstd`。远端包用 `zig fetch --save` 写入 `.hash`。接线时先创建 `openapi` 模块，再把 `glib_dep.module("glib")` 传给 `codegen`。
 
 ```zig
 const std = @import("std");
@@ -44,15 +44,17 @@ pub fn build(b: *std.Build) void {
     const glib_dep = b.dependency("glib", .{ .target = target, .optimize = optimize });
     const gstd_dep = b.dependency("gstd", .{ .target = target, .optimize = optimize });
     const og = b.dependency("openapi_codegen", .{ .target = target, .optimize = optimize });
+    const glib_mod = glib_dep.module("glib");
+    const gstd_mod = gstd_dep.module("gstd");
 
     const openapi_mod = b.addModule("openapi", .{
         .root_source_file = og.path("lib/openapi.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{ .name = "glib", .module = glib_mod },
+        },
     });
-
-    const glib_mod = glib_dep.module("glib");
-    const gstd_mod = gstd_dep.module("gstd");
 
     const codegen_mod = b.addModule("codegen", .{
         .root_source_file = og.path("lib/codegen.zig"),
@@ -61,7 +63,6 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "glib", .module = glib_mod },
-            .{ .name = "gstd", .module = gstd_mod },
         },
     });
 
@@ -91,7 +92,8 @@ const codegen = @import("codegen");
 
 const glib = @import("glib");
 const gstd = @import("gstd");
-const lib = @import("std");
+const grt = gstd.runtime;
+const lib = grt.std;
 
 const raw_service = @embedFile("service.json");
 const raw_structure = @embedFile("structure.json");
@@ -107,7 +109,7 @@ fn files() openapi.Files {
     };
 }
 
-const ClientApi = codegen.client.make(lib, files());
+const ClientApi = codegen.client.make(grt, files());
 const net = gstd.runtime.net;
 ```
 

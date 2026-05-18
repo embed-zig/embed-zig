@@ -14,7 +14,7 @@ fn files() openapi.Files {
     };
 }
 
-const ClientApi = codegen.client.make(lib, files());
+const ClientApi = codegen.client.make(gstd.runtime, files());
 
 const CountingBody = struct {
     bytes: []const u8,

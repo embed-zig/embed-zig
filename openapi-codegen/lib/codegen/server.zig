@@ -1,7 +1,6 @@
 const glib = @import("glib");
 const openapi = @import("openapi");
 const models_mod = @import("models.zig");
-const gstd = @import("gstd");
 
 const Files = openapi.Files;
 const Spec = openapi.Spec;
@@ -85,13 +84,14 @@ const ResponseVariant = struct {
     content_type: ?[]const u8,
 };
 
-pub fn make(comptime std: type, comptime files: Files) type {
+pub fn make(comptime grt: type, comptime files: Files) type {
     @setEvalBranchQuota(300_000);
 
+    const std = grt.std;
     const root = rootFile(files);
-    const net = gstd.runtime.net;
+    const net = grt.net;
     const Http = net.http;
-    const ContextNs = glib.context.make(std, gstd.runtime.time);
+    const ContextNs = grt.context;
     const Models = models_mod.make(std, files);
     const spec_title = copyString(root.spec.info.title);
     const spec_version = copyString(root.spec.info.version);
@@ -101,7 +101,7 @@ pub fn make(comptime std: type, comptime files: Files) type {
         for (operation_refs, 0..) |operation_ref, i| items[i] = operation_ref.field_name;
         break :blk items;
     };
-    const Operations = makeOperationNamespace(std, files, operation_refs);
+    const Operations = makeOperationNamespace(grt, files, operation_refs);
     const ConfigType = makeConfigType(Operations, operation_names);
 
     const Shared = struct {
@@ -194,14 +194,14 @@ pub fn make(comptime std: type, comptime files: Files) type {
 }
 
 fn makeOperationNamespace(
-    comptime std: type,
+    comptime grt: type,
     comptime files: Files,
     comptime operation_refs: []const OperationRef,
 ) type {
     var fields: [operation_refs.len]Type.StructField = undefined;
 
     inline for (operation_refs, 0..) |operation_ref, index| {
-        const Operation = OperationType(std, files, operation_ref);
+        const Operation = OperationType(grt, files, operation_ref);
         fields[index] = .{
             .name = operation_ref.field_name,
             .type = type,
@@ -243,11 +243,12 @@ fn makeConfigType(comptime Operations: type, comptime operation_names: anytype) 
 }
 
 fn OperationType(
-    comptime std: type,
+    comptime grt: type,
     comptime files: Files,
     comptime operation_ref: OperationRef,
 ) type {
-    const net = gstd.runtime.net;
+    const std = grt.std;
+    const net = grt.net;
     const Http = net.http;
     const Context = glib.context.Context;
     const parameters_slice = collectEffectiveParameters(std, files, operation_ref.file_name, operation_ref.path_item, operation_ref.operation, operation_ref.field_name);
@@ -268,7 +269,7 @@ fn OperationType(
         }
         break :blk items;
     };
-    const request_body = selectRequestBody(std, files, operation_ref.file_name, operation_ref.operation.request_body, operation_ref.field_name);
+    const request_body = selectRequestBody(grt, files, operation_ref.file_name, operation_ref.operation.request_body, operation_ref.field_name);
     const response_variants_slice = collectResponseVariants(std, files, operation_ref.file_name, operation_ref.operation.responses, operation_ref.field_name);
     const response_variants = blk: {
         var items: [response_variants_slice.len]ResponseVariant = undefined;
@@ -276,7 +277,7 @@ fn OperationType(
         break :blk items;
     };
     const ArgsType = makeArgsType(parameters, request_body);
-    const ResponseType = makeServerResponseType(std, response_variants);
+    const ResponseType = makeServerResponseType(grt, response_variants);
     const method = copyString(operation_ref.method);
     const path = copyString(operation_ref.path);
     const handler_field_name = operation_ref.field_name;
@@ -412,7 +413,7 @@ fn OperationType(
         }
 
         fn writeResponse(allocator: std.mem.Allocator, rw: *Http.ResponseWriter, response_value: ResponseType) !void {
-            const Sse = @import("../sse.zig").make(std);
+            const Sse = @import("../sse.zig").make(grt);
             switch (response_value) {
                 inline else => |payload, tag| {
                     const variant = comptime responseVariantByName(response_variants, @tagName(tag));
@@ -814,13 +815,14 @@ fn selectParameterSchema(comptime parameter: Spec.Parameter) ?struct {
 }
 
 fn selectRequestBody(
-    comptime std: type,
+    comptime grt: type,
     comptime files: Files,
     comptime current_file_name: []const u8,
     comptime request_body_or_ref: ?Spec.RequestBodyOrRef,
     comptime context_name: []const u8,
 ) ?SelectedRequestBody {
-    const Http = gstd.runtime.net.http;
+    const std = grt.std;
+    const Http = grt.net.http;
     const request_body = request_body_or_ref orelse return null;
     const resolved = resolveRequestBodyOrRef(files, current_file_name, request_body);
 
@@ -934,10 +936,10 @@ fn responseVariant(
     };
 }
 
-fn makeServerResponseType(comptime std: type, comptime variants: anytype) type {
+fn makeServerResponseType(comptime grt: type, comptime variants: anytype) type {
     if (variants.len == 0) return void;
 
-    const Sse = @import("../sse.zig").make(std);
+    const Sse = @import("../sse.zig").make(grt);
     var enum_fields: [variants.len]Type.EnumField = undefined;
     var union_fields: [variants.len]Type.UnionField = undefined;
 

@@ -5,7 +5,7 @@ const codegen = @import("codegen");
 const glib = @import("glib");
 const gstd = @import("gstd");
 const lib = std;
-const sse = codegen.sse.make(lib);
+const sse = codegen.sse.make(gstd.runtime);
 const net = gstd.runtime.net;
 
 const raw_spec = @embedFile("spec.json");
@@ -17,8 +17,8 @@ fn files() openapi.Files {
     };
 }
 
-const ClientApi = codegen.client.make(lib, files());
-const ServerApi = codegen.server.make(lib, files());
+const ClientApi = codegen.client.make(gstd.runtime, files());
+const ServerApi = codegen.server.make(gstd.runtime, files());
 
 fn runSseRoundtripTest(t: *glib.testing.T, alloc: lib.mem.Allocator) !void {
     var app = AppContext{};

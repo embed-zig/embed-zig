@@ -40,8 +40,23 @@ pub fn build(b: *std.Build) void {
     const glib = glib_dep.module("glib");
     const gstd = gstd_dep.module("gstd");
     const embed = embed_dep.module("embed");
-    const openapi = openapi_codegen_dep.module("openapi");
-    const codegen = openapi_codegen_dep.module("codegen");
+    const openapi = b.createModule(.{
+        .root_source_file = openapi_codegen_dep.path("lib/openapi.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "glib", .module = glib },
+        },
+    });
+    const codegen = b.createModule(.{
+        .root_source_file = openapi_codegen_dep.path("lib/codegen.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "openapi", .module = openapi },
+            .{ .name = "glib", .module = glib },
+        },
+    });
     const desktop = desktop_dep.module("desktop");
     const esp = esp_dep.module("esp");
 

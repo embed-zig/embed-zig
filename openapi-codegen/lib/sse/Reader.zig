@@ -1,8 +1,8 @@
 const glib = @import("glib");
-const gstd = @import("gstd");
 
-pub fn make(comptime std: type, comptime Event: type) type {
-    const Http = gstd.runtime.net.http;
+pub fn make(comptime grt: type, comptime Event: type) type {
+    const std = grt.std;
+    const Http = grt.net.http;
 
     return struct {
         allocator: std.mem.Allocator,
@@ -154,10 +154,12 @@ fn trimTrailingCarriageReturn(line: []u8) []u8 {
     return line;
 }
 
-pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const std = grt.std;
+
     return glib.testing.TestRunner.fromFn(std, 1024 * 1024, struct {
         fn run(_: *glib.testing.T, allocator: std.mem.Allocator) !void {
-            const Http = gstd.runtime.net.http;
+            const Http = grt.net.http;
             const Event = struct {
                 event: ?[]const u8 = null,
                 id: ?[]const u8 = null,
@@ -171,7 +173,7 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                     self.* = .{};
                 }
             };
-            const Reader = make(std, Event);
+            const Reader = make(grt, Event);
 
             const ChunkedBody = struct {
                 parts: []const []const u8,

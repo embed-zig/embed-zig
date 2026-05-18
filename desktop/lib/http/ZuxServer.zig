@@ -7,7 +7,7 @@ const api = @import("api.zig");
 const device = @import("../device.zig");
 const ui_assets = @import("desktop_ui_assets");
 
-const Sse = codegen.sse.make(gstd.runtime.std);
+const Sse = codegen.sse.make(gstd.runtime);
 
 pub fn make(comptime Launcher: type) type {
     comptime validateLauncher(Launcher);

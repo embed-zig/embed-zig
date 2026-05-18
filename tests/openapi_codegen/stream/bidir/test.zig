@@ -15,8 +15,8 @@ fn files() openapi.Files {
     };
 }
 
-const ClientApi = codegen.client.make(lib, files());
-const ServerApi = codegen.server.make(lib, files());
+const ClientApi = codegen.client.make(gstd.runtime, files());
+const ServerApi = codegen.server.make(gstd.runtime, files());
 
 fn readAllReadCloser(allocator: lib.mem.Allocator, reader: net.http.ReadCloser) ![]u8 {
     defer reader.close();

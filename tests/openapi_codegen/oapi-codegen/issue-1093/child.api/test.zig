@@ -2,6 +2,7 @@ const std = @import("std");
 const codegen_helpers = @import("../../codegen_helpers.zig");
 const openapi = @import("openapi");
 const glib = @import("glib");
+const gstd = @import("gstd");
 const lib = std;
 
 pub const Phase = enum {
@@ -67,7 +68,7 @@ pub fn TestRunner(comptime phase: Phase) glib.testing.TestRunner {
                         },
                     };
 
-                    codegen_helpers.assertClientServerCompile(lib, files);
+                    codegen_helpers.assertClientServerCompile(gstd.runtime, files);
                 }
             }
         }.run),

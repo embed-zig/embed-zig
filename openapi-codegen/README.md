@@ -7,7 +7,7 @@ Comptime-first OpenAPI 3.x tooling for Zig: parse specs, then `codegen.models`, 
 ## Requirements
 
 - **Zig** ≥ `0.15.2` (see `build.zig.zon`)
-- **[embed-zig](https://github.com/embed-zig/embed-zig)** as the runtime surface for generated client/server code. This repo wires `glib` for shared module namespaces and `gstd.runtime` for the HTTP/time runtime used by generated clients and servers.
+- **[embed-zig](https://github.com/embed-zig/embed-zig)** as the runtime surface for generated client/server code. Generated clients and servers accept a runtime namespace such as `gstd.runtime`; the `codegen` module itself only imports `openapi` and `glib`.
 
 ## What you get
 
@@ -15,12 +15,12 @@ Comptime-first OpenAPI 3.x tooling for Zig: parse specs, then `codegen.models`, 
 | Piece                             | Role                                                                                 |
 | --------------------------------- | ------------------------------------------------------------------------------------ |
 | `openapi` (`lib/openapi.zig`) | JSON parse → `Spec`; `Files` bundles one or more documents for `$ref` across layouts |
-| `codegen.models`             | `codegen.models.make(files)` → schema-backed model types                             |
-| `codegen.client`             | `codegen.client.make(lib, files)` → `ClientApi` with `operations.<operationId>`      |
-| `codegen.server`             | `codegen.server.make(lib, files)` → strict handler registration                      |
+| `codegen.models`             | `codegen.models.make(lib, files)` → schema-backed model types                        |
+| `codegen.client`             | `codegen.client.make(grt, files)` → `ClientApi` with `operations.<operationId>`      |
+| `codegen.server`             | `codegen.server.make(grt, files)` → strict handler registration                      |
 
 
-Examples in this repo use `const gstd = @import("gstd");` for runtime networking/time, `const glib = @import("glib");` for context/testing helpers, and `const lib = @import("std");` for the comptime std-like namespace passed into `codegen.*.make`.
+Examples in this repo use `const gstd = @import("gstd");` and `const grt = gstd.runtime;` for runtime networking/time. Models still take a comptime std-like namespace (`const lib = grt.std` or `@import("std")`).
 
 ## Clone and verify
 
@@ -32,9 +32,9 @@ zig build test-integration-openapi-codegen
 
 ## Depend on the package
 
-Your `build.zig.zon` should list `openapi_codegen`, `glib`, and `gstd`. Use `zig fetch --save` (or a `path` dependency) so tar URLs get a correct `.hash`.
+Your `build.zig.zon` should list `openapi_codegen` and `glib`; applications using `gstd.runtime` should also list `gstd`. Use `zig fetch --save` (or a `path` dependency) so tar URLs get a correct `.hash`.
 
-Wire modules like this repository’s `build.zig`: create an `openapi` module rooted at `lib/openapi.zig`, then pass through `glib_dep.module("glib")` and `gstd_dep.module("gstd")` to `codegen`.
+Wire modules like this repository’s `build.zig`: create an `openapi` module rooted at `lib/openapi.zig`, then pass through `glib_dep.module("glib")` to `codegen`. Import `gstd` into your app module only if your app chooses `gstd.runtime`.
 
 ```zig
 const std = @import("std");
@@ -65,7 +65,6 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "openapi", .module = openapi_mod },
             .{ .name = "glib", .module = glib_mod },
-            .{ .name = "gstd", .module = gstd_mod },
         },
     });
 
@@ -95,7 +94,8 @@ const codegen = @import("codegen");
 
 const glib = @import("glib");
 const gstd = @import("gstd");
-const lib = @import("std");
+const grt = gstd.runtime;
+const lib = grt.std;
 
 const raw_service = @embedFile("service.json");
 const raw_structure = @embedFile("structure.json");
@@ -111,7 +111,7 @@ fn files() openapi.Files {
     };
 }
 
-const ClientApi = codegen.client.make(lib, files());
+const ClientApi = codegen.client.make(grt, files());
 const net = gstd.runtime.net;
 ```
 
