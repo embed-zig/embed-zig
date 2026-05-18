@@ -9,10 +9,16 @@ fn sourceFile() []const u8 {
     return @src().file;
 }
 
-const mbedtls = @import("mbedtls");
-
 test "thirdparty/mbedtls/unit" {
     const std = @import("std");
+    const mbedtls = @import("mbedtls");
+    const mbedtls_osal = @import("mbedtls_osal");
+    const mbedtls_exports = mbedtls_osal.make(@import("gstd").runtime);
+    comptime {
+        _ = mbedtls_exports.mbedtls_ms_time;
+        _ = mbedtls_exports.mbedtls_psa_external_get_random;
+    }
+
     const crypto = mbedtls.crypto;
 
     var digest: [crypto.Sha256.digest_length]u8 = undefined;

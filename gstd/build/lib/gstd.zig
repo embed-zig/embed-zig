@@ -15,4 +15,5 @@ pub fn create(
 pub fn link(mod: *std.Build.Module, deps: anytype) void {
     mod.addImport("glib", deps.glib);
     mod.addImport("mbedtls", deps.mbedtls);
+    mod.addImport("mbedtls_osal", deps.mbedtls_osal);
 }

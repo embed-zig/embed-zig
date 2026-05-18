@@ -20,6 +20,7 @@ pub const thirdparty_modules = [_]ModuleSpec{
     module2("thirdparty", "lvgl"),
     module2("thirdparty", "lvgl_osal"),
     module2("thirdparty", "mbedtls"),
+    module2("thirdparty", "mbedtls_osal"),
     module2("thirdparty", "opus"),
     module2("thirdparty", "opus_osal"),
     module2("thirdparty", "portaudio"),

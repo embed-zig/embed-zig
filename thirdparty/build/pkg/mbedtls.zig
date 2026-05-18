@@ -191,6 +191,17 @@ pub fn create(
         .link_libc = true,
     });
     addCommonInputs(b, mod, upstream, crypto_upstream);
+
+    const osal_mod = b.createModule(.{
+        .root_source_file = b.path("pkg/mbedtls_osal.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    addCommonInputs(b, osal_mod, upstream, crypto_upstream);
+    osal_mod.addImport("glib", b.dependency("glib", .{ .target = target, .optimize = optimize }).module("glib"));
+    b.modules.put("mbedtls_osal", osal_mod) catch @panic("OOM");
+
     library = lib;
 }
 
@@ -215,6 +226,11 @@ fn addCommonInputs(
     upstream: ReleaseArchive,
     crypto_upstream: ReleaseArchive,
 ) void {
+    if (b.sysroot) |sysroot| {
+        mod.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "include" }) });
+    }
+    mod.addCMacro("MBEDTLS_USER_CONFIG_FILE", "\"embed_mbedtls_config.h\"");
+    mod.addCMacro("TF_PSA_CRYPTO_USER_CONFIG_FILE", "\"embed_tf_psa_crypto_config.h\"");
     mod.addCMacro("MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS", "");
     mod.addIncludePath(b.path("pkg/mbedtls/src"));
     for (upstream_include_dirs) |dir| {

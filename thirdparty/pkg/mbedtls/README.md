@@ -8,6 +8,23 @@ The package is exported as the independent top-level module `mbedtls`; if user
 code does not import that module, the library is not pulled into the final
 artifact.
 
+The package also exports `mbedtls_osal`, a Zig OSAL module for Mbed TLS
+platform hooks. `mbedtls` is built with external millisecond-time and PSA random
+hooks on every target; direct consumers should instantiate the OSAL with their
+runtime namespace:
+
+```zig
+const mbedtls_osal = @import("mbedtls_osal");
+const Exports = mbedtls_osal.make(grt);
+comptime {
+    _ = Exports.mbedtls_ms_time;
+    _ = Exports.mbedtls_psa_external_get_random;
+}
+```
+
+The std-backed `gstd` package instantiates these hooks for `gstd.runtime`
+itself.
+
 License note: upstream Mbed TLS is dual licensed under Apache-2.0 OR
 GPL-2.0-or-later. The source is fetched from upstream rather than vendored here.
 
