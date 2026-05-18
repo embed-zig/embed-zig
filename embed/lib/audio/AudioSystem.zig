@@ -72,6 +72,11 @@ pub fn Builder(comptime grt: type) type {
                 pub const Speaker = SpeakerType;
                 pub const Frame = FrameType;
                 pub const MicGains = MicType.Gains;
+                pub const Format = Mixer.Format;
+                pub const Track = Mixer.Track;
+                pub const TrackCtrl = Mixer.TrackCtrl;
+                pub const TrackHandle = Mixer.TrackHandle;
+                pub const CreateTrackError = Mixer.CreateTrackError;
                 pub const frame_mic_count: usize = mic_count;
                 pub const frame_samples_per_channel: usize = samples_per_channel;
 
@@ -182,7 +187,7 @@ pub fn Builder(comptime grt: type) type {
 
                 /// Creates one playback track on the audio system's internal speaker mix
                 /// path.
-                pub fn createTrack(self: *AudioSystem, config: Track.Config) CreateTrackError!TrackHandle {
+                pub fn createTrack(self: *AudioSystem, config: Mixer.Track.Config) Mixer.CreateTrackError!Mixer.TrackHandle {
                     const playback = self.playback orelse return error.InvalidState;
                     const handle = try playback.createTrack(config);
                     self.playback_config_locked = true;
