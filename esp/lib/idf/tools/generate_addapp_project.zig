@@ -611,6 +611,9 @@ fn writeSourceComponent(
         }
     }
     try writer.writeAll(")\n");
+    if (std.mem.eql(u8, component.name, "lvgl")) {
+        try writer.writeAll("target_compile_definitions(${COMPONENT_LIB} PRIVATE LV_CONF_INCLUDE_SIMPLE=1)\n");
+    }
 
     for (component.archives, 0..) |archive, archive_idx| {
         const local_path = try componentLocalPath(allocator, component.name, archive.idf_project_path);

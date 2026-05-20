@@ -1,6 +1,6 @@
 const std = @import("std");
 
-// Re-export build helpers for downstream `@import("esp").idf`.
+// Re-export build helpers for downstream `@import("esp").idf` users.
 pub const idf = @import("lib/idf.zig");
 
 pub fn build(b: *std.Build) void {
@@ -25,10 +25,10 @@ pub fn build(b: *std.Build) void {
     const idf_module = b.createModule(.{
         .root_source_file = b.path("lib/idf.zig"),
     });
-    const embed_adapter_module = b.createModule(.{
+    const embed_adapter_module = b.addModule("esp_embed", .{
         .root_source_file = b.path("lib/embed.zig"),
         .imports = &.{
-            .{ .name = "embed", .module = embed_module },
+            .{ .name = "embed_core", .module = embed_module },
         },
     });
     const grt_module = b.createModule(.{
@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "esp_heap", .module = heap_module },
         },
     });
-    _ = b.addModule("esp", .{
+    const esp_module = b.addModule("esp", .{
         .root_source_file = b.path("lib/esp.zig"),
         .imports = &.{
             .{ .name = "glib", .module = glib_module },
@@ -48,6 +48,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "esp_embed", .module = embed_adapter_module },
         },
     });
+    embed_adapter_module.addImport("esp", esp_module);
 
     const idf_tests = b.addTest(.{
         .root_module = b.createModule(.{

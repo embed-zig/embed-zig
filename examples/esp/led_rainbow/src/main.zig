@@ -1,9 +1,8 @@
 const embed = @import("embed");
 const esp = @import("esp");
-const selected_board = @import("selected_board");
 
 const grt = esp.grt;
-const Board = selected_board.Board;
+const Board = embed.boards.devkit.Board;
 
 const log = grt.std.log.scoped(.led_rainbow);
 

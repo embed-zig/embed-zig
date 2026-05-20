@@ -7,19 +7,21 @@
         .esp = .{
             .path = "../../../esp",
         },
-        .embed = .{
-            .path = "../../../embed",
-        },
         .apps = .{
             .path = "../../../apps",
         },
-        .esp_boards = .{
-            .path = "../boards",
+        .thirdparty = .{
+            .path = "../../../thirdparty",
+        },
+        .buildtools = .{
+            .url = "https://codeload.github.com/embed-zig/build/tar.gz/v0.1.0",
+            .hash = "build-0.1.0-s0EoNJ5CAADLrbOnbZUNoh20EsVjvnDm3yfsb6-2yul7",
         },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
+        "components",
         "src",
     },
 }

@@ -40,9 +40,15 @@ const grt_source_files = [_][]const u8{
 };
 const embed_idf_requires = [_][]const u8{
     "esp_driver_i2c",
+    "esp_event",
+    "esp_netif",
+    "esp_wifi",
+    "log",
+    "nvs_flash",
 };
 const embed_source_files = [_][]const u8{
     "i2c/binding.c",
+    "wifi/sta_binding.c",
 };
 
 owner: *std.Build,

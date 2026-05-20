@@ -1,10 +1,9 @@
 const app_options = @import("app_options");
 const embed = @import("embed");
 const esp = @import("esp");
-const selected_board = @import("selected_board");
 
 const grt = esp.grt;
-const Board = selected_board.Board;
+const Board = embed.boards.devkit.Board;
 
 const log = grt.std.log.scoped(.wifi_led_threads);
 const LedStateAtomic = grt.std.atomic.Value(u8);

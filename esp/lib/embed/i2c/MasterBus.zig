@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const embed = @import("embed_core");
 const binding = @import("binding.zig");
 const Device = @import("Device.zig");
 

@@ -1,8 +1,8 @@
+const embed = @import("embed");
 const esp = @import("esp");
-const selected_board = @import("selected_board");
 const player_ui = @import("ui/Ctrl.zig");
 
-const Board = selected_board.Board;
+const Board = embed.boards.szp.Board;
 const audio_allocator = esp.heap.Allocator(.{ .caps = .spiram_8bit, .alignment = .align_u32 });
 const thread_allocator = esp.heap.Allocator(.{ .caps = .internal_8bit, .alignment = .align_u32 });
 const audio_read_thread_stack_size = 16 * 1024;

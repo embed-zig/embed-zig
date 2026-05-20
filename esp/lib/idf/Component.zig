@@ -519,6 +519,9 @@ fn writeComponentCmakeLists(extracted: Extracted, target_dir: []const u8) !void 
         }
     }
     try writer.writeAll(")\n");
+    if (std.mem.eql(u8, extracted.name, "lvgl")) {
+        try writer.writeAll("target_compile_definitions(${COMPONENT_LIB} PRIVATE LV_CONF_INCLUDE_SIMPLE=1)\n");
+    }
 
     for (extracted.archives, 0..) |archive, idx| {
         try writer.print(

@@ -1,4 +1,4 @@
-const embed = @import("embed");
+const embed = @import("embed_core");
 
 pub const Handle = ?*anyopaque;
 pub const default_timeout_ms: i32 = 1000;

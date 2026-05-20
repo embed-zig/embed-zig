@@ -33,9 +33,12 @@ pub fn make(
             const board_impl = try allocator.create(Board);
             errdefer allocator.destroy(board_impl);
 
-            board_impl.* = try Board.init(.{});
+            board_impl.* = try Board.init(makeBoardInitConfig(Board, allocator));
             errdefer board_impl.deinit();
 
+            if (@hasDecl(Board, "initNvs")) {
+                try board_impl.initNvs();
+            }
             try board_impl.powerOn();
             try board_impl.start();
 
@@ -78,8 +81,9 @@ pub fn make(
                 init_config.custom_pipeline_node = null;
             }
 
-            inline for (0..registries.gpio_button.len) |i| {
-                const periph = registries.gpio_button.periphs[i];
+            inline for (0..registries.single_button.len) |i| {
+                const periph = registries.single_button.periphs[i];
+                if (@hasField(@TypeOf(periph), "input_type") and periph.input_type == .virtual) continue;
                 const label_name = comptime labelText(periph.label);
                 @field(init_config, label_name) = board.singleButton(label_name) catch |err| {
                     log.err("board missing single button component '{s}': {s}", .{ label_name, @errorName(err) });
@@ -96,6 +100,51 @@ pub fn make(
                 };
             }
 
+            inline for (0..registries.wifi_sta.len) |i| {
+                const periph = registries.wifi_sta.periphs[i];
+                const label_name = comptime labelText(periph.label);
+                @field(init_config, label_name) = board.wifiSta(label_name) catch |err| {
+                    log.err("board missing wifi sta component '{s}': {s}", .{ label_name, @errorName(err) });
+                    return err;
+                };
+            }
+
+            inline for (0..registries.audio_system.len) |i| {
+                const periph = registries.audio_system.periphs[i];
+                const label_name = comptime labelText(periph.label);
+                @field(init_config, label_name) = board.audioSystem(label_name) catch |err| {
+                    log.err("board missing audio system component '{s}': {s}", .{ label_name, @errorName(err) });
+                    return err;
+                };
+            }
+
+            inline for (0..registries.display.len) |i| {
+                const periph = registries.display.periphs[i];
+                const label_name = comptime labelText(periph.label);
+                @field(init_config, label_name) = board.display(label_name) catch |err| {
+                    log.err("board missing display component '{s}': {s}", .{ label_name, @errorName(err) });
+                    return err;
+                };
+            }
+
+            inline for (0..registries.touch.len) |i| {
+                const periph = registries.touch.periphs[i];
+                const label_name = comptime labelText(periph.label);
+                @field(init_config, label_name) = board.touch(label_name) catch |err| {
+                    log.err("board missing touch component '{s}': {s}", .{ label_name, @errorName(err) });
+                    return err;
+                };
+            }
+
+            inline for (0..registries.bt.len) |i| {
+                const periph = registries.bt.periphs[i];
+                const label_name = comptime labelText(periph.label);
+                @field(init_config, label_name) = board.btHost(label_name) catch |err| {
+                    log.err("board missing bt host component '{s}': {s}", .{ label_name, @errorName(err) });
+                    return err;
+                };
+            }
+
             return init_config;
         }
     };
@@ -106,8 +155,14 @@ fn validateSupportedRegistries(comptime registries: anytype) void {
     if (registries.imu.len != 0) @compileError("ESP launcher does not support imu yet");
     if (registries.modem.len != 0) @compileError("ESP launcher does not support modem yet");
     if (registries.nfc.len != 0) @compileError("ESP launcher does not support nfc yet");
-    if (registries.wifi_sta.len != 0) @compileError("ESP launcher does not support wifi sta yet");
     if (registries.wifi_ap.len != 0) @compileError("ESP launcher does not support wifi ap yet");
+}
+
+fn makeBoardInitConfig(comptime Board: type, allocator: grt.std.mem.Allocator) Board.InitConfig {
+    var config: Board.InitConfig = .{};
+    if (@hasField(Board.InitConfig, "audio_allocator")) config.audio_allocator = allocator;
+    if (@hasField(Board.InitConfig, "bt_allocator")) config.bt_allocator = allocator;
+    return config;
 }
 
 fn appTitle(comptime AppHost: type) []const u8 {

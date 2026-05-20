@@ -12,11 +12,5 @@
         .esp = .{
             .path = "../../../esp",
         },
-        .embed = .{
-            .path = "../../../embed",
-        },
-        .esp_boards = .{
-            .path = "../boards",
-        },
     },
 }
