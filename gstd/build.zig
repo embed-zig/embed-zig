@@ -4,8 +4,6 @@ const lib_gstd = @import("build/lib/gstd.zig");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const sysroot = b.option([]const u8, "sysroot", "C sysroot path for cross-target libc headers") orelse "";
-    if (sysroot.len != 0) b.sysroot = sysroot;
 
     const glib_dep = b.dependency("glib", .{
         .target = target,
@@ -14,7 +12,6 @@ pub fn build(b: *std.Build) void {
     const thirdparty_dep = b.dependency("thirdparty", .{
         .target = target,
         .optimize = optimize,
-        .sysroot = sysroot,
     });
 
     const gstd_mod = lib_gstd.create(b, target, optimize);
