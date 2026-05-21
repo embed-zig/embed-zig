@@ -14,34 +14,31 @@ type RuntimeState = {
 };
 
 test('Power button emits press and release events through the desktop UI', async ({ page }) => {
-  const logs = collectConsoleLogs(page);
   await page.goto('/?pw=button');
 
-  await expect.poll(() => logs.some((line) => line.includes('initial state'))).toBe(true);
+  await expect(buttonLocator(page)).toBeVisible();
 
   const press = page.waitForResponse((response) =>
     response.url().includes('/emit/button/press') && response.status() === 200
   );
-  await page.locator('#power-btn').dispatchEvent('pointerdown');
+  await buttonLocator(page).dispatchEvent('pointerdown');
   await press;
 
-  await expect.poll(() => logs.some((line) => line.includes('emit') && line.includes('press'))).toBe(true);
   await expect.poll(() => buttonPressed(page)).toBe(true);
 
   const release = page.waitForResponse((response) =>
     response.url().includes('/emit/button/release') && response.status() === 200
   );
-  await page.locator('#power-btn').dispatchEvent('pointerup');
+  await buttonLocator(page).dispatchEvent('pointerup');
   await release;
 
-  await expect.poll(() => logs.some((line) => line.includes('emit') && line.includes('release'))).toBe(true);
   await expect.poll(() => buttonPressed(page)).toBe(false);
 });
 
 test('button-ledstrip user story drives the strip away from black', async ({ page }) => {
   await page.goto('/?pw=user-story');
 
-  await page.locator('#power-btn').click();
+  await longPressPower(page, 3_100);
 
   await expect.poll(() => stripHasNonBlackPixel(page), {
     message: 'Expected the desktop example to behave like the app user story and render a non-black strip.',
@@ -58,22 +55,20 @@ test('LED strip state is rendered into visible pixel colors', async ({ page }) =
   const pixels = await firstStripPixels(page);
   await expect(page.locator('#strip .pixel')).toHaveCount(pixels.length);
 
-  await longPressPower(page, 3_100);
-  await expect.poll(() => firstStripPixels(page), {
-    message: 'Expected a 3s hold to change the LED strip pixels.',
-  }).not.toEqual(pixels);
-
-  const updatedPixels = await firstStripPixels(page);
   await expect.poll(() => firstRenderedPixelColor(page), {
     message: 'Expected the rendered pixel color to follow the runtime LED strip state.',
-  }).toEqual(rgbText(updatedPixels[0]));
+  }).toEqual(rgbText(pixels[0]));
 });
 
 async function longPressPower(page: Page, durationMs: number): Promise<void> {
-  const button = page.locator('#power-btn');
+  const button = buttonLocator(page);
   await button.dispatchEvent('pointerdown');
   await page.waitForTimeout(durationMs);
   await button.dispatchEvent('pointerup');
+}
+
+function buttonLocator(page: Page) {
+  return page.getByRole('button', { name: 'Button' });
 }
 
 async function buttonPressed(page: Page): Promise<boolean> {
@@ -102,17 +97,7 @@ async function stripHasNonBlackPixel(page: Page): Promise<boolean> {
 }
 
 async function runtimeState(page: Page): Promise<RuntimeState> {
-  const response = await page.request.get('/state');
+  const response = await page.request.get(new URL('/state', page.url()).toString());
   expect(response.ok()).toBe(true);
   return response.json() as Promise<RuntimeState>;
-}
-
-function collectConsoleLogs(page: Page): string[] {
-  const logs: string[] = [];
-  page.on('console', (message) => {
-    if (message.type() === 'log') {
-      logs.push(message.text());
-    }
-  });
-  return logs;
 }

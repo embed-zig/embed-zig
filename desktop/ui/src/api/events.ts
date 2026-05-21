@@ -1,5 +1,6 @@
 import { client } from './generated/client.gen';
 import type {
+  DisplayUpdatedEvent,
   LedStripRefreshedEvent,
   ServerEvent,
   StateResponse,
@@ -10,6 +11,7 @@ export type RuntimeEvent =
       event: 'state.snapshot';
       data: StateResponse;
     }
+  | DisplayUpdatedEvent
   | LedStripRefreshedEvent;
 
 export function openEvents(onEvent: (event: RuntimeEvent) => void): AbortController {
@@ -22,7 +24,11 @@ export function openEvents(onEvent: (event: RuntimeEvent) => void): AbortControl
         url: '/events',
         onSseEvent(event) {
           if (!event.event) return;
-          if (event.event !== 'state.snapshot' && event.event !== 'ledstrip.refreshed') return;
+          if (
+            event.event !== 'state.snapshot' &&
+            event.event !== 'display.updated' &&
+            event.event !== 'ledstrip.refreshed'
+          ) return;
 
           onEvent({
             data: event.data as RuntimeEvent['data'],

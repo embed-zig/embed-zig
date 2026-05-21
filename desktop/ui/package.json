@@ -7,8 +7,8 @@
     "build:watch": "sh -c \"mkdir -p ./dist && cp ./src/index.html ./dist/index.html && cp ./src/styles.css ./dist/styles.css && bun run generate:api && bun build ./src/main.ts ./src/desktop-core.ts --outdir ./dist --target browser --entry-naming='[name].[ext]' --chunk-naming='[name].[ext]' --asset-naming='[name].[ext]' --watch\"",
     "generate:api": "openapi-ts",
     "mock:server": "bun run ./mock/server.ts",
-    "test": "bun test",
-    "test:e2e": "playwright test",
+    "test": "bun test ./mock",
+    "test:e2e": "bun run ./scripts/e2e.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

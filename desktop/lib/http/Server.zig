@@ -216,7 +216,7 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
 
             const main = lookupAsset(&assets, "/main.js") orelse return error.MissingAsset;
             try std.testing.expectEqualStrings("main.js", main.file_name);
-            try std.testing.expect(std.mem.indexOf(u8, main.body, "power-btn") != null);
+            try std.testing.expect(std.mem.indexOf(u8, main.body, "buildGearUi") != null);
 
             const core = lookupAsset(&assets, "/desktop-core.js") orelse return error.MissingAsset;
             try std.testing.expectEqualStrings("desktop-core.js", core.file_name);

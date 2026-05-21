@@ -24,5 +24,8 @@
         .openapi_codegen = .{
             .path = "../openapi-codegen",
         },
+        .thirdparty = .{
+            .path = "../thirdparty",
+        },
     },
 }

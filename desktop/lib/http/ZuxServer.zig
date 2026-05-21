@@ -5,9 +5,31 @@ const codegen = @import("codegen");
 
 const api = @import("api.zig");
 const device = @import("../device.zig");
+const desktop_log = @import("../log.zig");
 const ui_assets = @import("desktop_ui_assets");
 
 const Sse = codegen.sse.make(gstd.runtime);
+const display_event_ring_size = 128;
+const log_stream_heartbeat_ticks = 25;
+const event_stream_heartbeat_ticks = 250;
+
+const TouchPointQuery = struct {
+    x: u16,
+    y: u16,
+};
+
+const DisplayEvent = struct {
+    seq: u64 = 0,
+    label: []const u8 = &.{},
+    ts_ms: i64 = 0,
+    x: u16 = 0,
+    y: u16 = 0,
+    w: u16 = 0,
+    h: u16 = 0,
+    pixel_format: []const u8 = "rgb888",
+    pixels: []u8 = &.{},
+    refresh_count: u64 = 0,
+};
 
 pub fn make(comptime Launcher: type) type {
     comptime validateLauncher(Launcher);
@@ -15,9 +37,16 @@ pub fn make(comptime Launcher: type) type {
     const AppHost = Launcher.AppHost;
     const ZuxApp = Launcher.ZuxApp;
     const registries = ZuxApp.registries;
-    const gpio_count = registries.gpio_button.len;
+    const audio_system_count = registries.audio_system.len;
+    const display_count = registries.display.len;
+    const single_button_count = registries.single_button.len;
+    const exposed_single_button_count = exposedButtonCount(registries.single_button);
     const ledstrip_count = registries.ledstrip.len;
-    const total_gears = gpio_count + ledstrip_count;
+    const touch_count = registries.touch.len;
+    const wifi_sta_count = registries.wifi_sta.len;
+    const has_bt_host = @hasField(ZuxApp.InitConfig, "bt");
+    const topology_gear_count = exposed_single_button_count + ledstrip_count + display_count + touch_count + wifi_sta_count;
+    const state_gear_count = exposed_single_button_count + ledstrip_count + display_count + wifi_sta_count;
 
     return struct {
         const Server = @This();
@@ -28,6 +57,7 @@ pub fn make(comptime Launcher: type) type {
         allocator: gstd.runtime.std.mem.Allocator,
         inner: gstd.runtime.net.http.Server,
         api_handler: *ApiHandler,
+        log_handler: *LogHandler,
         ui: *UiHandler,
 
         pub const Options = struct {
@@ -50,9 +80,14 @@ pub fn make(comptime Launcher: type) type {
             ui.* = try UiHandler.init(allocator, options.assets_dir);
             errdefer ui.deinit(allocator);
 
+            const log_handler = try allocator.create(LogHandler);
+            errdefer allocator.destroy(log_handler);
+            log_handler.* = .{};
+
             try inner.handle("/topology", api_handler.handler());
             try inner.handle("/state", api_handler.handler());
             try inner.handle("/events", api_handler.handler());
+            try inner.handle("/logs", gstd.runtime.net.http.Handler.init(log_handler));
             try inner.handle("/emit/", api_handler.handler());
             try inner.handle("/", gstd.runtime.net.http.Handler.init(ui));
 
@@ -60,6 +95,7 @@ pub fn make(comptime Launcher: type) type {
                 .allocator = allocator,
                 .inner = inner,
                 .api_handler = api_handler,
+                .log_handler = log_handler,
                 .ui = ui,
             };
         }
@@ -68,6 +104,7 @@ pub fn make(comptime Launcher: type) type {
             self.inner.deinit();
             self.api_handler.deinit(self.allocator);
             self.allocator.destroy(self.api_handler);
+            self.allocator.destroy(self.log_handler);
             self.ui.deinit(self.allocator);
             self.allocator.destroy(self.ui);
             self.* = undefined;
@@ -98,6 +135,7 @@ pub fn make(comptime Launcher: type) type {
                 try runtime.init(allocator, start_config);
                 errdefer runtime.deinit();
                 runtime.attachStripRefreshHooks();
+                runtime.attachDisplayRefreshHooks();
 
                 const server = try api.ServerApi.init(allocator, runtime, .{
                     .getTopology = RuntimeState.handleGetTopology,
@@ -129,13 +167,67 @@ pub fn make(comptime Launcher: type) type {
             }
         };
 
+        const LogHandler = struct {
+            pub fn serveHTTP(
+                self: *@This(),
+                rw: *gstd.runtime.net.http.ResponseWriter,
+                req: *gstd.runtime.net.http.Request,
+            ) void {
+                _ = self;
+                _ = req;
+
+                var writer = Sse.Writer.init(rw);
+                writer.begin(gstd.runtime.net.http.status.ok) catch return;
+                writer.flush() catch return;
+
+                var last_seq: u64 = 0;
+                var heartbeat_ticks: usize = 0;
+                while (true) {
+                    var copied: [32]desktop_log.CopiedEntry = [_]desktop_log.CopiedEntry{.{}} ** 32;
+                    const count = desktop_log.copySince(last_seq, copied[0..]);
+                    var wrote = false;
+                    for (copied[0..count]) |*entry| {
+                        var id_buf: [32]u8 = undefined;
+                        const id = gstd.runtime.std.fmt.bufPrint(&id_buf, "{d}", .{entry.seq}) catch return;
+                        writer.event(.{
+                            .event = "log",
+                            .id = id,
+                            .data = entry.bytes(),
+                        }) catch return;
+                        writer.flush() catch return;
+                        last_seq = entry.seq;
+                        wrote = true;
+                    }
+
+                    if (wrote) {
+                        heartbeat_ticks = 0;
+                    } else {
+                        heartbeat_ticks += 1;
+                        if (heartbeat_ticks >= log_stream_heartbeat_ticks) {
+                            if (!writeSseHeartbeat(&writer)) return;
+                            heartbeat_ticks = 0;
+                        }
+                    }
+
+                    gstd.runtime.std.Thread.sleep(200 * std.time.ns_per_ms);
+                }
+            }
+        };
+
         const RuntimeState = struct {
             allocator: gstd.runtime.std.mem.Allocator,
             launcher: Launcher,
             mutex: gstd.runtime.std.Thread.Mutex = .{},
-            buttons: [gpio_count]device.single_button.SingleButton,
+            audio_systems: [audio_system_count]device.audio_system.AudioSystem,
+            buttons: [single_button_count]device.single_button.SingleButton,
+            displays: [display_count]device.display.Display,
             strips: [ledstrip_count]device.ledstrip.LedStrip,
+            touches: [touch_count]device.touch.Touch,
+            wifi_stas: [wifi_sta_count]device.wifi_sta.WifiSta,
+            bt_host: if (has_bt_host) device.bt_host.BtHost else void,
             revision: gstd.runtime.std.atomic.Value(u64) = gstd.runtime.std.atomic.Value(u64).init(1),
+            display_events: [display_event_ring_size]DisplayEvent = [_]DisplayEvent{.{}} ** display_event_ring_size,
+            next_display_event_seq: u64 = 1,
 
             const Self = @This();
             const Models = api.Models;
@@ -149,6 +241,7 @@ pub fn make(comptime Launcher: type) type {
                 allocator: gstd.runtime.std.mem.Allocator,
                 runtime: *RuntimeState,
                 last_revision: u64 = 0,
+                last_display_event_seq: u64 = 0,
 
                 fn send(ptr: *anyopaque, writer: *Sse.Writer) anyerror!void {
                     const self: *@This() = @ptrCast(@alignCast(ptr));
@@ -159,14 +252,34 @@ pub fn make(comptime Launcher: type) type {
                 fn run(self: *@This(), writer: *Sse.Writer) !void {
                     if (!(try self.runtime.writeSnapshotEvent(self.allocator, writer, nowMs()))) return;
                     self.last_revision = self.runtime.currentRevision();
+                    var heartbeat_ticks: usize = 0;
 
                     while (true) {
                         gstd.runtime.std.Thread.sleep(20 * std.time.ns_per_ms);
+
+                        const previous_display_event_seq = self.last_display_event_seq;
+                        self.last_display_event_seq = try self.runtime.writeDisplayEventsSince(
+                            self.allocator,
+                            writer,
+                            self.last_display_event_seq,
+                        );
+                        var wrote = self.last_display_event_seq != previous_display_event_seq;
 
                         const revision = self.runtime.currentRevision();
                         if (revision != self.last_revision) {
                             if (!(try self.runtime.writeSnapshotEvent(self.allocator, writer, nowMs()))) return;
                             self.last_revision = revision;
+                            wrote = true;
+                        }
+
+                        if (wrote) {
+                            heartbeat_ticks = 0;
+                        } else {
+                            heartbeat_ticks += 1;
+                            if (heartbeat_ticks >= event_stream_heartbeat_ticks) {
+                                if (!writeSseHeartbeat(writer)) return;
+                                heartbeat_ticks = 0;
+                            }
                         }
                     }
                 }
@@ -175,12 +288,32 @@ pub fn make(comptime Launcher: type) type {
             fn init(self: *Self, allocator: gstd.runtime.std.mem.Allocator, start_config: ZuxApp.StartConfig) !void {
                 self.allocator = allocator;
                 self.mutex = .{};
-                self.buttons = [_]device.single_button.SingleButton{.{}} ** gpio_count;
+                self.audio_systems = try initAudioSystemDevices(allocator);
+                errdefer deinitAudioSystemDevices(&self.audio_systems);
+                self.buttons = [_]device.single_button.SingleButton{.{}} ** single_button_count;
+                self.displays = try initDisplayDevices(allocator);
+                errdefer deinitDisplayDevices(&self.displays);
                 self.strips = try initStripDevices(allocator);
                 errdefer deinitStripDevices(&self.strips);
+                self.touches = [_]device.touch.Touch{.{}} ** touch_count;
+                self.wifi_stas = try initWifiStaDevices(allocator);
+                errdefer deinitWifiStaDevices(&self.wifi_stas);
+                self.bt_host = if (has_bt_host) try device.bt_host.BtHost.init(allocator, .{ .allocator = allocator }) else {};
+                errdefer if (has_bt_host) self.bt_host.deinit();
                 self.revision = gstd.runtime.std.atomic.Value(u64).init(1);
+                self.display_events = [_]DisplayEvent{.{}} ** display_event_ring_size;
+                self.next_display_event_seq = 1;
 
-                self.launcher = try Launcher.init(allocator, makeInitConfig(allocator, &self.buttons, &self.strips));
+                self.launcher = try Launcher.init(allocator, makeInitConfig(
+                    allocator,
+                    &self.audio_systems,
+                    &self.buttons,
+                    &self.displays,
+                    &self.strips,
+                    &self.touches,
+                    &self.wifi_stas,
+                    &self.bt_host,
+                ));
                 errdefer self.launcher.deinit();
 
                 try self.launcher.zux().start(start_config);
@@ -190,8 +323,22 @@ pub fn make(comptime Launcher: type) type {
             fn deinit(self: *Self) void {
                 self.launcher.zux().stop() catch {};
                 self.launcher.deinit();
+                self.deinitDisplayEvents();
+                if (has_bt_host) self.bt_host.deinit();
+                deinitWifiStaDevices(&self.wifi_stas);
+                deinitAudioSystemDevices(&self.audio_systems);
+                deinitDisplayDevices(&self.displays);
                 deinitStripDevices(&self.strips);
                 self.* = undefined;
+            }
+
+            fn deinitDisplayEvents(self: *Self) void {
+                for (&self.display_events) |*event| {
+                    if (event.pixels.len != 0) {
+                        self.allocator.free(event.pixels);
+                    }
+                    event.* = .{};
+                }
             }
 
             fn attachStripRefreshHooks(self: *Self) void {
@@ -206,16 +353,36 @@ pub fn make(comptime Launcher: type) type {
                 self.bumpRevision();
             }
 
+            fn attachDisplayRefreshHooks(self: *Self) void {
+                inline for (0..display_count) |i| {
+                    self.displays[i].setRefreshHook(self, onDisplayRefresh);
+                }
+            }
+
+            fn onDisplayRefresh(ctx: *anyopaque, display: *device.display.Display, update: device.display.Display.Update) void {
+                const self: *Self = @ptrCast(@alignCast(ctx));
+                inline for (0..display_count) |i| {
+                    if (display == &self.displays[i]) {
+                        self.pushDisplayEvent(comptime labelText(registries.display.periphs[i].label), update) catch {};
+                        return;
+                    }
+                }
+            }
+
             fn makeTopologyResponse(_: *Self, allocator: gstd.runtime.std.mem.Allocator) !Models.TopologyResponse {
-                const gears = try allocator.alloc(Models.GearTopology, total_gears);
+                const gears = try allocator.alloc(Models.GearTopology, topology_gear_count);
                 var index: usize = 0;
 
-                inline for (0..gpio_count) |i| {
-                    const periph = registries.gpio_button.periphs[i];
+                inline for (0..single_button_count) |i| {
+                    const periph = registries.single_button.periphs[i];
+                    if (comptime isVirtualButton(periph)) continue;
                     gears[index] = .{
                         .kind = "single_button",
                         .label = comptime labelText(periph.label),
                         .pixel_count = null,
+                        .width = null,
+                        .height = null,
+                        .target = null,
                     };
                     index += 1;
                 }
@@ -226,6 +393,48 @@ pub fn make(comptime Launcher: type) type {
                         .kind = "ledstrip",
                         .label = comptime labelText(periph.label),
                         .pixel_count = @intCast(periph.pixel_count),
+                        .width = null,
+                        .height = null,
+                        .target = null,
+                    };
+                    index += 1;
+                }
+
+                inline for (0..display_count) |i| {
+                    const periph = registries.display.periphs[i];
+                    gears[index] = .{
+                        .kind = "display",
+                        .label = comptime labelText(periph.label),
+                        .pixel_count = null,
+                        .width = device.display.Display.width_px,
+                        .height = device.display.Display.height_px,
+                        .target = null,
+                    };
+                    index += 1;
+                }
+
+                inline for (0..touch_count) |i| {
+                    const periph = registries.touch.periphs[i];
+                    gears[index] = .{
+                        .kind = "touch",
+                        .label = comptime labelText(periph.label),
+                        .pixel_count = null,
+                        .width = null,
+                        .height = null,
+                        .target = periph.target,
+                    };
+                    index += 1;
+                }
+
+                inline for (0..wifi_sta_count) |i| {
+                    const periph = registries.wifi_sta.periphs[i];
+                    gears[index] = .{
+                        .kind = "wifi_sta",
+                        .label = comptime labelText(periph.label),
+                        .pixel_count = null,
+                        .width = null,
+                        .height = null,
+                        .target = null,
                     };
                     index += 1;
                 }
@@ -244,20 +453,23 @@ pub fn make(comptime Launcher: type) type {
             }
 
             fn makeStateResponseLocked(self: *Self, allocator: gstd.runtime.std.mem.Allocator, ts_ms: i64) !Models.StateResponse {
-                const gears = try allocator.alloc(Models.GearState, total_gears);
+                const gears = try allocator.alloc(Models.GearState, state_gear_count);
                 var index: usize = 0;
                 errdefer {
                     for (gears[0..index]) |*gear| {
                         switch (gear.*) {
                             .LedStripState => |*strip_state| allocator.free(strip_state.pixels),
+                            .DisplayState => |*display_state| allocator.free(display_state.pixels),
+                            .WifiStaState => |*wifi_state| if (wifi_state.current_ssid) |ssid| allocator.free(ssid),
                             else => {},
                         }
                     }
                     allocator.free(gears);
                 }
 
-                inline for (0..gpio_count) |i| {
-                    const periph = registries.gpio_button.periphs[i];
+                inline for (0..single_button_count) |i| {
+                    const periph = registries.single_button.periphs[i];
+                    if (comptime isVirtualButton(periph)) continue;
                     gears[index] = @unionInit(Models.GearState, "SingleButtonState", .{
                         .kind = "single_button",
                         .label = comptime labelText(periph.label),
@@ -278,6 +490,40 @@ pub fn make(comptime Launcher: type) type {
                     index += 1;
                 }
 
+                inline for (0..display_count) |i| {
+                    const periph = registries.display.periphs[i];
+                    const snapshot = try self.displays[i].snapshot(allocator);
+                    defer allocator.free(snapshot.pixels);
+                    gears[index] = @unionInit(Models.GearState, "DisplayState", .{
+                        .kind = "display",
+                        .label = comptime labelText(periph.label),
+                        .width = snapshot.width,
+                        .height = snapshot.height,
+                        .pixel_format = "rgb888",
+                        .pixels = try encodeDisplayPixelsBase64(allocator, snapshot.pixels),
+                        .refresh_count = @intCast(snapshot.refresh_count),
+                    });
+                    index += 1;
+                }
+
+                inline for (0..wifi_sta_count) |i| {
+                    const periph = registries.wifi_sta.periphs[i];
+                    var ssid_buf: [embed.drivers.wifi.Sta.max_ssid_len]u8 = undefined;
+                    const current_ssid = if (self.wifi_stas[i].getCurrentSsid(&ssid_buf)) |ssid|
+                        try allocator.dupe(u8, ssid)
+                    else
+                        null;
+                    gears[index] = @unionInit(Models.GearState, "WifiStaState", .{
+                        .kind = "wifi_sta",
+                        .label = comptime labelText(periph.label),
+                        .state = wifiStaStateText(self.wifi_stas[i].getState()),
+                        .has_ip = self.wifi_stas[i].getIpInfo() != null,
+                        .current_ssid = current_ssid,
+                        .last_error = self.wifi_stas[i].getLastConnectError(),
+                    });
+                    index += 1;
+                }
+
                 return .{
                     .gears = gears,
                     .ts_ms = ts_ms,
@@ -288,6 +534,8 @@ pub fn make(comptime Launcher: type) type {
                 for (response.gears) |*gear| {
                     switch (gear.*) {
                         .LedStripState => |*strip_state| allocator.free(strip_state.pixels),
+                        .DisplayState => |*display_state| allocator.free(display_state.pixels),
+                        .WifiStaState => |*wifi_state| if (wifi_state.current_ssid) |ssid| allocator.free(ssid),
                         else => {},
                     }
                 }
@@ -295,15 +543,16 @@ pub fn make(comptime Launcher: type) type {
                 response.* = undefined;
             }
 
-            fn emit(self: *Self, gear_label: []const u8, event_name: []const u8, ts_ms: i64, metadata: ?[]const u8) EmitError!Models.EmitAck {
+            fn emit(self: *Self, gear_label: []const u8, event_name: []const u8, ts_ms: i64, metadata: ?[]const u8, touch_point: ?TouchPointQuery) EmitError!Models.EmitAck {
                 self.mutex.lock();
                 defer self.mutex.unlock();
-                return self.emitLocked(gear_label, event_name, ts_ms, metadata);
+                return self.emitLocked(gear_label, event_name, ts_ms, metadata, touch_point);
             }
 
-            fn emitLocked(self: *Self, gear_label: []const u8, event_name: []const u8, ts_ms: i64, metadata: ?[]const u8) EmitError!Models.EmitAck {
-                inline for (0..gpio_count) |i| {
-                    const periph = registries.gpio_button.periphs[i];
+            fn emitLocked(self: *Self, gear_label: []const u8, event_name: []const u8, ts_ms: i64, metadata: ?[]const u8, touch_point: ?TouchPointQuery) EmitError!Models.EmitAck {
+                inline for (0..single_button_count) |i| {
+                    const periph = registries.single_button.periphs[i];
+                    if (comptime isVirtualButton(periph)) continue;
                     const label_name = comptime labelText(periph.label);
                     if (gstd.runtime.std.mem.eql(u8, gear_label, label_name)) {
                         if (gstd.runtime.std.mem.eql(u8, event_name, "press")) {
@@ -332,6 +581,50 @@ pub fn make(comptime Launcher: type) type {
                     }
                 }
 
+                inline for (0..display_count) |i| {
+                    const periph = registries.display.periphs[i];
+                    if (gstd.runtime.std.mem.eql(u8, gear_label, comptime labelText(periph.label))) {
+                        return error.InvalidEvent;
+                    }
+                }
+
+                inline for (0..touch_count) |i| {
+                    const periph = registries.touch.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    if (gstd.runtime.std.mem.eql(u8, gear_label, label_name)) {
+                        if (gstd.runtime.std.mem.eql(u8, event_name, "down")) {
+                            const point = touch_point orelse return error.InvalidEvent;
+                            self.launcher.zux().touch_down(@field(ZuxApp.PeriphLabel, label_name), .{
+                                .id = 0,
+                                .x = point.x,
+                                .y = point.y,
+                                .pressure = 1,
+                            }) catch return error.InvalidEvent;
+                        } else if (gstd.runtime.std.mem.eql(u8, event_name, "move")) {
+                            const point = touch_point orelse return error.InvalidEvent;
+                            self.launcher.zux().touch_move(@field(ZuxApp.PeriphLabel, label_name), .{
+                                .id = 0,
+                                .x = point.x,
+                                .y = point.y,
+                                .pressure = 1,
+                            }) catch return error.InvalidEvent;
+                        } else if (gstd.runtime.std.mem.eql(u8, event_name, "up")) {
+                            self.launcher.zux().touch_up(@field(ZuxApp.PeriphLabel, label_name)) catch return error.InvalidEvent;
+                        } else {
+                            return error.InvalidEvent;
+                        }
+
+                        self.bumpRevision();
+                        return .{
+                            .accepted = true,
+                            .event = event_name,
+                            .gear_label = gear_label,
+                            .metadata = metadata,
+                            .ts = ts_ms,
+                        };
+                    }
+                }
+
                 return error.UnknownGear;
             }
 
@@ -341,6 +634,74 @@ pub fn make(comptime Launcher: type) type {
 
             fn bumpRevision(self: *Self) void {
                 _ = self.revision.fetchAdd(1, .acq_rel);
+            }
+
+            fn currentDisplayEventSeq(self: *Self) u64 {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                return self.next_display_event_seq -| 1;
+            }
+
+            fn pushDisplayEvent(self: *Self, comptime label: []const u8, update: device.display.Display.Update) !void {
+                const encoded = try encodeDisplayPixelsBase64(self.allocator, update.pixels);
+                errdefer self.allocator.free(encoded);
+
+                self.mutex.lock();
+                defer self.mutex.unlock();
+
+                const seq = self.next_display_event_seq;
+                self.next_display_event_seq += 1;
+                const index = (seq - 1) % display_event_ring_size;
+                if (self.display_events[index].pixels.len != 0) {
+                    self.allocator.free(self.display_events[index].pixels);
+                }
+                self.display_events[index] = .{
+                    .seq = seq,
+                    .label = label,
+                    .ts_ms = nowMs(),
+                    .x = update.x,
+                    .y = update.y,
+                    .w = update.w,
+                    .h = update.h,
+                    .pixel_format = "rgb888",
+                    .pixels = encoded,
+                    .refresh_count = @intCast(update.refresh_count),
+                };
+            }
+
+            fn writeDisplayEventsSince(
+                self: *Self,
+                allocator: gstd.runtime.std.mem.Allocator,
+                writer: *Sse.Writer,
+                last_seq: u64,
+            ) !u64 {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+
+                const newest_seq = self.next_display_event_seq -| 1;
+                if (newest_seq <= last_seq) return last_seq;
+
+                const oldest_seq = if (newest_seq >= display_event_ring_size)
+                    newest_seq - display_event_ring_size + 1
+                else
+                    1;
+                var seq = @max(last_seq + 1, oldest_seq);
+                while (seq <= newest_seq) : (seq += 1) {
+                    const event = self.display_events[(seq - 1) % display_event_ring_size];
+                    if (event.seq != seq) continue;
+                    if (!(try writeJsonEvent(allocator, writer, "display.updated", .{
+                        .label = event.label,
+                        .ts_ms = event.ts_ms,
+                        .x = event.x,
+                        .y = event.y,
+                        .w = event.w,
+                        .h = event.h,
+                        .pixel_format = event.pixel_format,
+                        .pixels = event.pixels,
+                        .refresh_count = event.refresh_count,
+                    }))) return error.StreamClosed;
+                }
+                return newest_seq;
             }
 
             fn writeSnapshotEvent(self: *Self, allocator: gstd.runtime.std.mem.Allocator, writer: *Sse.Writer, ts_ms: i64) !bool {
@@ -377,7 +738,8 @@ pub fn make(comptime Launcher: type) type {
             ) anyerror!api.ServerApi.operations.emitInputEvent.Response {
                 const self: *Self = @ptrCast(@alignCast(ptr));
                 const metadata = if (@hasField(@TypeOf(args.query), "metadata")) args.query.metadata else null;
-                const result = self.emit(args.path.gear_label, args.path.event, args.query.ts, metadata) catch |err| {
+                const touch_point = touchPointFromQuery(args.query);
+                const result = self.emit(args.path.gear_label, args.path.event, args.query.ts, metadata, touch_point) catch |err| {
                     return switch (err) {
                         error.InvalidEvent => .{ .status_400 = makeErrorResponse("INVALID_EVENT", "Unsupported event.") },
                         error.UnknownGear => .{ .status_404 = makeErrorResponse("UNKNOWN_GEAR", "Unknown gear label.") },
@@ -398,6 +760,7 @@ pub fn make(comptime Launcher: type) type {
                     .allocator = self.allocator,
                     .runtime = self,
                     .last_revision = self.currentRevision(),
+                    .last_display_event_seq = self.currentDisplayEventSeq(),
                 };
                 return .{
                     .status_200 = .{
@@ -428,29 +791,147 @@ pub fn make(comptime Launcher: type) type {
                 }
             }
 
+            fn initAudioSystemDevices(allocator: gstd.runtime.std.mem.Allocator) ![audio_system_count]device.audio_system.AudioSystem {
+                var systems: [audio_system_count]device.audio_system.AudioSystem = undefined;
+                var initialized: usize = 0;
+                errdefer {
+                    for (0..initialized) |i| systems[i].deinit();
+                }
+
+                inline for (0..audio_system_count) |i| {
+                    systems[i] = try device.audio_system.AudioSystem.init(allocator);
+                    initialized += 1;
+                }
+                return systems;
+            }
+
+            fn deinitAudioSystemDevices(systems: *[audio_system_count]device.audio_system.AudioSystem) void {
+                inline for (0..audio_system_count) |i| {
+                    systems[i].deinit();
+                }
+            }
+
+            fn initDisplayDevices(allocator: gstd.runtime.std.mem.Allocator) ![display_count]device.display.Display {
+                var displays: [display_count]device.display.Display = undefined;
+                var initialized: usize = 0;
+                errdefer {
+                    for (0..initialized) |i| displays[i].deinit();
+                }
+
+                inline for (0..display_count) |i| {
+                    displays[i] = try device.display.Display.init(allocator);
+                    initialized += 1;
+                }
+                return displays;
+            }
+
+            fn deinitDisplayDevices(displays: *[display_count]device.display.Display) void {
+                inline for (0..display_count) |i| {
+                    displays[i].deinit();
+                }
+            }
+
+            fn initWifiStaDevices(allocator: gstd.runtime.std.mem.Allocator) ![wifi_sta_count]device.wifi_sta.WifiSta {
+                var wifi_stas: [wifi_sta_count]device.wifi_sta.WifiSta = undefined;
+                var initialized: usize = 0;
+                errdefer {
+                    for (0..initialized) |i| wifi_stas[i].deinit();
+                }
+
+                inline for (0..wifi_sta_count) |i| {
+                    wifi_stas[i] = try device.wifi_sta.WifiSta.init(allocator, defaultWifiStaConfig());
+                    initialized += 1;
+                }
+                return wifi_stas;
+            }
+
+            fn deinitWifiStaDevices(wifi_stas: *[wifi_sta_count]device.wifi_sta.WifiSta) void {
+                inline for (0..wifi_sta_count) |i| {
+                    wifi_stas[i].deinit();
+                }
+            }
+
             fn makeInitConfig(
                 allocator: gstd.runtime.std.mem.Allocator,
-                buttons: *[gpio_count]device.single_button.SingleButton,
+                audio_systems: *[audio_system_count]device.audio_system.AudioSystem,
+                buttons: *[single_button_count]device.single_button.SingleButton,
+                displays: *[display_count]device.display.Display,
                 strips: *[ledstrip_count]device.ledstrip.LedStrip,
+                touches: *[touch_count]device.touch.Touch,
+                wifi_stas: *[wifi_sta_count]device.wifi_sta.WifiSta,
+                bt_host: *if (has_bt_host) device.bt_host.BtHost else void,
             ) ZuxApp.InitConfig {
                 var init_config: ZuxApp.InitConfig = undefined;
                 if (@hasField(ZuxApp.InitConfig, "custom_pipeline_node")) {
                     init_config.custom_pipeline_node = null;
                 }
                 init_config.allocator = allocator;
-                init_config.pipeline_config = .{};
-                init_config.poller_config = .{};
+                if (@hasField(ZuxApp.InitConfig, "pipeline_config")) {
+                    init_config.pipeline_config = .{};
+                }
+                if (@hasField(ZuxApp.InitConfig, "poller_config")) {
+                    init_config.poller_config = .{};
+                }
+                if (comptime has_bt_host) {
+                    const BtHostType = @FieldType(ZuxApp.InitConfig, "bt");
+                    if (BtHostType == embed.bt.Host) {
+                        init_config.bt = bt_host.handle();
+                    } else {
+                        @compileError("desktop ZuxServer bt field must use bt.Host");
+                    }
+                }
 
-                inline for (0..gpio_count) |i| {
-                    const periph = registries.gpio_button.periphs[i];
+                inline for (0..single_button_count) |i| {
+                    const periph = registries.single_button.periphs[i];
                     const label_name = comptime labelText(periph.label);
-                    @field(init_config, label_name) = embed.drivers.button.Single.init(device.single_button.SingleButton, &buttons[i]);
+                    if (@hasField(ZuxApp.InitConfig, label_name)) {
+                        const ButtonType = @FieldType(ZuxApp.InitConfig, label_name);
+                        if (ButtonType == embed.drivers.button.Single) {
+                            @field(init_config, label_name) = embed.drivers.button.Single.init(device.single_button.SingleButton, &buttons[i]);
+                        } else {
+                            @compileError("desktop ZuxServer button/single field must use drivers.button.Single");
+                        }
+                    }
                 }
 
                 inline for (0..ledstrip_count) |i| {
                     const periph = registries.ledstrip.periphs[i];
                     const label_name = comptime labelText(periph.label);
                     @field(init_config, label_name) = strips[i].handle();
+                }
+
+                inline for (0..display_count) |i| {
+                    const periph = registries.display.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    @field(init_config, label_name) = displays[i].handle();
+                }
+
+                inline for (0..touch_count) |i| {
+                    const periph = registries.touch.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    @field(init_config, label_name) = touches[i].handle();
+                }
+
+                inline for (0..audio_system_count) |i| {
+                    const periph = registries.audio_system.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    const AudioSystemType = @FieldType(ZuxApp.InitConfig, label_name);
+                    if (AudioSystemType == *device.audio_system.AudioSystem) {
+                        @field(init_config, label_name) = &audio_systems[i];
+                    } else {
+                        @compileError("desktop ZuxServer audio_system field must use *desktop.device.audio_system.AudioSystem");
+                    }
+                }
+
+                inline for (0..wifi_sta_count) |i| {
+                    const periph = registries.wifi_sta.periphs[i];
+                    const label_name = comptime labelText(periph.label);
+                    const WifiStaType = @FieldType(ZuxApp.InitConfig, label_name);
+                    if (WifiStaType == embed.drivers.wifi.Sta) {
+                        @field(init_config, label_name) = wifi_stas[i].handle();
+                    } else {
+                        @compileError("desktop ZuxServer wifi_sta field must use drivers.wifi.Sta");
+                    }
                 }
 
                 return init_config;
@@ -638,7 +1119,6 @@ fn validateLauncher(comptime Launcher: type) void {
     if (registries.imu.len != 0) @compileError("desktop ZuxServer does not support imu yet");
     if (registries.modem.len != 0) @compileError("desktop ZuxServer does not support modem yet");
     if (registries.nfc.len != 0) @compileError("desktop ZuxServer does not support nfc yet");
-    if (registries.wifi_sta.len != 0) @compileError("desktop ZuxServer does not support wifi sta yet");
     if (registries.wifi_ap.len != 0) @compileError("desktop ZuxServer does not support wifi ap yet");
 }
 
@@ -654,6 +1134,24 @@ fn appDescription(comptime ZuxAppHost: type) []const u8 {
         return ZuxAppHost.description;
     }
     return "Local input and output runtime over GET and SSE.";
+}
+
+fn isVirtualButton(comptime periph: anytype) bool {
+    const PeriphType = @TypeOf(periph);
+    if (@hasField(PeriphType, "input_type")) {
+        return periph.input_type == .virtual;
+    }
+    return false;
+}
+
+fn exposedButtonCount(comptime registry: anytype) usize {
+    comptime var count: usize = 0;
+    inline for (0..registry.len) |i| {
+        if (!isVirtualButton(registry.periphs[i])) {
+            count += 1;
+        }
+    }
+    return count;
 }
 
 fn labelText(comptime label: anytype) []const u8 {
@@ -689,6 +1187,51 @@ fn writeJsonEvent(allocator: gstd.runtime.std.mem.Allocator, writer: *Sse.Writer
     return true;
 }
 
+fn writeSseHeartbeat(writer: *Sse.Writer) bool {
+    writer.event(.{
+        .event = "ping",
+        .data = "",
+    }) catch return false;
+    writer.flush() catch return false;
+    return true;
+}
+
+fn touchPointFromQuery(query: anytype) ?TouchPointQuery {
+    if (comptime !@hasField(@TypeOf(query), "x") or !@hasField(@TypeOf(query), "y")) {
+        return null;
+    }
+
+    const x = query.x orelse return null;
+    const y = query.y orelse return null;
+    return .{
+        .x = intToU16Saturated(x),
+        .y = intToU16Saturated(y),
+    };
+}
+
+fn intToU16Saturated(value: anytype) u16 {
+    if (value <= 0) return 0;
+    if (value > std.math.maxInt(u16)) return std.math.maxInt(u16);
+    return @intCast(value);
+}
+
+fn defaultWifiStaConfig() device.wifi_sta.Config {
+    var config: device.wifi_sta.Config = .{};
+    if (@hasField(device.wifi_sta.Config, "request_location_authorization")) {
+        config.request_location_authorization = true;
+    }
+    return config;
+}
+
+fn wifiStaStateText(state: embed.drivers.wifi.Sta.State) []const u8 {
+    return switch (state) {
+        .idle => "idle",
+        .scanning => "scanning",
+        .connecting => "connecting",
+        .connected => "connected",
+    };
+}
+
 fn copyPixels(allocator: gstd.runtime.std.mem.Allocator, source: []const embed.ledstrip.Color) ![]api.Models.Color {
     const pixels = try allocator.alloc(api.Models.Color, source.len);
     for (source, 0..) |pixel, index| {
@@ -699,6 +1242,22 @@ fn copyPixels(allocator: gstd.runtime.std.mem.Allocator, source: []const embed.l
         };
     }
     return pixels;
+}
+
+fn encodeDisplayPixelsBase64(allocator: gstd.runtime.std.mem.Allocator, source: []const embed.drivers.Display.Rgb) ![]u8 {
+    const raw = try allocator.alloc(u8, source.len * 3);
+    defer allocator.free(raw);
+
+    for (source, 0..) |pixel, index| {
+        const base = index * 3;
+        raw[base] = pixel.r;
+        raw[base + 1] = pixel.g;
+        raw[base + 2] = pixel.b;
+    }
+
+    const encoded = try allocator.alloc(u8, gstd.runtime.std.base64.standard.Encoder.calcSize(raw.len));
+    _ = gstd.runtime.std.base64.standard.Encoder.encode(encoded, raw);
+    return encoded;
 }
 
 fn makeErrorResponse(code: []const u8, message: []const u8) api.Models.ErrorResponse {

@@ -1,10 +1,19 @@
 const std = @import("std");
 const desktop = @import("desktop");
 const gstd = @import("gstd");
+const lvgl_osal = @import("lvgl_osal");
 const selected_app = @import("selected_app");
 const config = @import("desktop_launcher_config");
 
-const PlatformCtx = struct {};
+pub const std_options: std.Options = .{
+    .logFn = desktop.log.logFn,
+};
+
+comptime {
+    _ = lvgl_osal.make(gstd.runtime, std.heap.page_allocator);
+}
+
+const PlatformCtx = desktop.PlatformCtx;
 
 pub fn main() void {
     run() catch |err| {

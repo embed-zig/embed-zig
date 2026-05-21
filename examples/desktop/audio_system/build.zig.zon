@@ -1,17 +1,11 @@
 .{
-    .name = .desktop_launcher,
+    .name = .desktop_audio_system,
     .version = "0.1.0",
-    .fingerprint = 0xae3abb68332c1b00,
+    .fingerprint = 0xb75863d2b6aa2241,
     .minimum_zig_version = "0.15.2",
     .dependencies = .{
-        .apps = .{
-            .path = "../../../apps",
-        },
-        .desktop = .{
-            .path = "../../../desktop",
-        },
-        .gstd = .{
-            .path = "../../../gstd",
+        .embed = .{
+            .path = "../../../embed",
         },
         .glib = .{
             .path = "../../../glib",

@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+pub const macos = @import("build/macos.zig");
+
 const lib_desktop = @import("build/lib/desktop.zig");
 
 const Libraries = struct {
@@ -48,12 +50,20 @@ fn createDependencyModules(
         .target = target,
         .optimize = optimize,
     });
+    const thirdparty_dep = b.dependency("thirdparty", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
     b.modules.put("embed", embed_dep.module("embed")) catch @panic("OOM");
     b.modules.put("glib", glib_dep.module("glib")) catch @panic("OOM");
     b.modules.put("gstd", gstd_dep.module("gstd")) catch @panic("OOM");
     b.modules.put("openapi", openapi_codegen_dep.module("openapi")) catch @panic("OOM");
     b.modules.put("codegen", openapi_codegen_dep.module("codegen")) catch @panic("OOM");
+    b.modules.put("core_bluetooth", thirdparty_dep.module("core_bluetooth")) catch @panic("OOM");
+    b.modules.put("core_wlan", thirdparty_dep.module("core_wlan")) catch @panic("OOM");
+    b.modules.put("portaudio", thirdparty_dep.module("portaudio")) catch @panic("OOM");
+    b.modules.put("speexdsp", thirdparty_dep.module("speexdsp")) catch @panic("OOM");
 }
 
 const UiBundle = struct {

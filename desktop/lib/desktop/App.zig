@@ -66,7 +66,7 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 len: usize = 0,
             };
             const FakeZuxApp = struct {
-                pub const PeriphLabel = enum { button, strip };
+                pub const PeriphLabel = enum { button, strip, wifi };
                 pub const StartConfig = struct {
                     ticker: ?union(enum) {
                         manual,
@@ -74,12 +74,16 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                 };
                 pub const InitConfig = struct {
                     allocator: std.mem.Allocator,
+                    bt: embed.bt.Host,
                     button: embed.drivers.button.Single,
                     strip: embed.ledstrip.LedStrip,
+                    wifi: embed.drivers.wifi.Sta,
                 };
                 pub const registries = .{
                     .adc_button = EmptyRegistry{},
-                    .gpio_button = struct {
+                    .audio_system = EmptyRegistry{},
+                    .display = EmptyRegistry{},
+                    .single_button = struct {
                         pub const Periph = struct {
                             label: @Type(.enum_literal),
                             id: u32,
@@ -107,7 +111,19 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
                     }{},
                     .modem = EmptyRegistry{},
                     .nfc = EmptyRegistry{},
-                    .wifi_sta = EmptyRegistry{},
+                    .touch = EmptyRegistry{},
+                    .wifi_sta = struct {
+                        pub const Periph = struct {
+                            label: @Type(.enum_literal),
+                            id: u32,
+                            control_type: type,
+                        };
+
+                        periphs: [1]Periph = .{
+                            .{ .label = .wifi, .id = 3, .control_type = embed.drivers.wifi.Sta },
+                        },
+                        len: usize = 1,
+                    }{},
                     .wifi_ap = EmptyRegistry{},
                     .flow = EmptyRegistry{},
                     .overlay = EmptyRegistry{},
@@ -119,7 +135,9 @@ pub fn TestRunner(comptime std: type) glib.testing.TestRunner {
 
                 pub fn init(config: InitConfig) !@This() {
                     _ = config.allocator;
+                    _ = config.bt;
                     _ = config.button;
+                    _ = config.wifi;
                     return .{
                         .strip = config.strip,
                     };

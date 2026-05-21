@@ -101,7 +101,10 @@
               "type": "string",
               "enum": [
                 "press",
-                "release"
+                "release",
+                "down",
+                "move",
+                "up"
               ]
             }
           },
@@ -122,6 +125,26 @@
             "description": "Optional runtime-defined metadata payload encoded as a base64url string. This can be used to attach extra context to an emitted input event.",
             "schema": {
               "$ref": "#/components/schemas/MetadataValue"
+            }
+          },
+          {
+            "name": "x",
+            "in": "query",
+            "required": false,
+            "description": "Touch x coordinate for touch down/move events.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "y",
+            "in": "query",
+            "required": false,
+            "description": "Touch y coordinate for touch down/move events.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
             }
           }
         ],
@@ -232,12 +255,26 @@
             "type": "string",
             "enum": [
               "single_button",
-              "ledstrip"
+              "ledstrip",
+              "display",
+              "touch",
+              "wifi_sta"
             ]
           },
           "pixel_count": {
             "type": "integer",
             "minimum": 0
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "target": {
+            "type": "string"
           }
         }
       },
@@ -267,6 +304,12 @@
           },
           {
             "$ref": "#/components/schemas/LedStripState"
+          },
+          {
+            "$ref": "#/components/schemas/DisplayState"
+          },
+          {
+            "$ref": "#/components/schemas/WifiStaState"
           }
         ]
       },
@@ -315,6 +358,84 @@
           "refresh_count": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "DisplayState": {
+        "type": "object",
+        "required": [
+          "label",
+          "kind",
+          "width",
+          "height",
+          "pixel_format",
+          "pixels",
+          "refresh_count"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "const": "display"
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pixel_format": {
+            "type": "string",
+            "const": "rgb888"
+          },
+          "pixels": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "description": "Base64-encoded row-major RGB888 framebuffer bytes."
+          },
+          "refresh_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "WifiStaState": {
+        "type": "object",
+        "required": [
+          "label",
+          "kind",
+          "state",
+          "has_ip"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "const": "wifi_sta"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "scanning",
+              "connecting",
+              "connected"
+            ]
+          },
+          "has_ip": {
+            "type": "boolean"
+          },
+          "current_ssid": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": "string"
           }
         }
       },
@@ -384,6 +505,9 @@
             "$ref": "#/components/schemas/StateSnapshotEvent"
           },
           {
+            "$ref": "#/components/schemas/DisplayUpdatedEvent"
+          },
+          {
             "$ref": "#/components/schemas/LedStripRefreshedEvent"
           }
         ]
@@ -401,6 +525,71 @@
           },
           "data": {
             "$ref": "#/components/schemas/StateResponse"
+          }
+        }
+      },
+      "DisplayUpdatedEvent": {
+        "type": "object",
+        "required": [
+          "event",
+          "data"
+        ],
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "display.updated"
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "label",
+              "ts_ms",
+              "x",
+              "y",
+              "w",
+              "h",
+              "pixel_format",
+              "pixels",
+              "refresh_count"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "ts_ms": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "x": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "y": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "w": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "h": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "pixel_format": {
+                "type": "string",
+                "const": "rgb888"
+              },
+              "pixels": {
+                "type": "string",
+                "contentEncoding": "base64",
+                "description": "Base64-encoded row-major RGB888 bytes for the drawBitmap rectangle."
+              },
+              "refresh_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
           }
         }
       },

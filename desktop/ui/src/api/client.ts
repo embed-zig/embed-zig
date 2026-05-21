@@ -24,8 +24,10 @@ export async function getState(): Promise<StateResponse> {
 
 export async function emitInputEvent(options: {
   gearLabel: string;
-  event: 'press' | 'release';
+  event: 'press' | 'release' | 'down' | 'move' | 'up';
   ts: number;
+  x?: number;
+  y?: number;
   metadata?: MetadataValue;
 }): Promise<EmitAck> {
   const result = await client.get({
@@ -36,6 +38,8 @@ export async function emitInputEvent(options: {
     query: {
       metadata: options.metadata,
       ts: options.ts,
+      x: options.x,
+      y: options.y,
     },
     url: '/emit/{gear-label}/{event}',
   });
