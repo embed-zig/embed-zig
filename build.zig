@@ -2,6 +2,10 @@ const std = @import("std");
 const build_modules = @import("build/modules.zig");
 const build_tests = @import("tests/build.zig");
 
+pub const desktop = struct {
+    pub const macos = @import("build/desktop/macos.zig");
+};
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -57,7 +61,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "glib", .module = glib },
         },
     });
-    const desktop = desktop_dep.module("desktop");
+    const desktop_module = desktop_dep.module("desktop");
     const esp = esp_dep.module("esp");
 
     b.modules.put("glib", glib) catch @panic("OOM");
@@ -66,7 +70,7 @@ pub fn build(b: *std.Build) void {
     b.modules.put("openapi", openapi) catch @panic("OOM");
     b.modules.put("codegen", codegen) catch @panic("OOM");
     b.modules.put("openapi-codegen", codegen) catch @panic("OOM");
-    b.modules.put("desktop", desktop) catch @panic("OOM");
+    b.modules.put("desktop", desktop_module) catch @panic("OOM");
     b.modules.put("esp", esp) catch @panic("OOM");
     for (build_modules.thirdparty_modules) |module_spec| {
         b.modules.put(module_spec.export_name, thirdparty_dep.module(module_spec.dependency_module_name)) catch @panic("OOM");
