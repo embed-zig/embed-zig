@@ -1,0 +1,20 @@
+.{
+    .name = .thirdparty_archive_smoke,
+    .version = "0.0.0",
+    .fingerprint = 0xc08ce6dcfb6636b1,
+    .minimum_zig_version = "0.15.2",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "build_config.zig",
+        "src",
+    },
+    .dependencies = .{
+        .esp = .{
+            .path = "../../../esp",
+        },
+        .thirdparty = .{
+            .path = "../../../thirdparty",
+        },
+    },
+}

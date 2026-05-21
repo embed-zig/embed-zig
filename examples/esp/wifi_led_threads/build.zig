@@ -17,10 +17,6 @@ pub fn build(b: *std.Build) void {
         .esp_dep = esp_build_dep,
     });
 
-    if (context.toolchain_sysroot) |sysroot| {
-        b.sysroot = sysroot.root;
-    }
-
     const esp_dep = b.dependency("esp", .{
         .target = context.target,
         .optimize = optimize,

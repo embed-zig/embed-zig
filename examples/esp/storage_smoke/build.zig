@@ -15,10 +15,6 @@ pub fn build(b: *std.Build) void {
         .esp_dep = esp_dep,
     });
 
-    if (context.toolchain_sysroot) |sysroot| {
-        b.sysroot = sysroot.root;
-    }
-
     const entry_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = context.target,

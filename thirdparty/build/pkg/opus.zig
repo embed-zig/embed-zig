@@ -182,6 +182,7 @@ pub fn create(
     });
     lib.root_module.addConfigHeader(config_header);
     lib.root_module.addCMacro("HAVE_CONFIG_H", "1");
+    addSysrootInclude(b, lib.root_module);
     if (optimize == .Debug) {
         lib.root_module.addCMacro("OPUS_WILL_BE_SLOW", "1");
     }
@@ -227,7 +228,7 @@ pub fn link(
     const mod = b.modules.get("opus") orelse @panic("opus module missing");
     const lib = library orelse @panic("opus library missing");
     mod.addImport("glib", glib_dep.module("glib"));
-    mod.linkLibrary(lib);
+    mod.addObjectFile(lib.getEmittedBin());
     _ = osal_module orelse @panic("opus_osal module missing");
 }
 
@@ -246,10 +247,17 @@ fn createOpusModule(
     });
     mod.addConfigHeader(config_header);
     mod.addCMacro("HAVE_CONFIG_H", "1");
+    addSysrootInclude(b, mod);
     for (include_dirs) |dir| {
         mod.addIncludePath(upstream.includePath(dir));
     }
     return mod;
+}
+
+fn addSysrootInclude(b: *std.Build, mod: *std.Build.Module) void {
+    if (b.sysroot) |sysroot| {
+        mod.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sysroot, "include" }) });
+    }
 }
 
 fn createConfigHeader(

@@ -551,9 +551,7 @@ pub fn link(
     const lib = library orelse @panic("lvgl library missing");
     mod.addImport("glib", b.dependency("glib", .{ .target = target, .optimize = optimize }).module("glib"));
     mod.addImport("embed", b.dependency("embed", .{ .target = target, .optimize = optimize }).module("embed"));
-    if (target.result.os.tag != .freestanding) {
-        mod.addObjectFile(lib.getEmittedBin());
-    }
+    mod.addObjectFile(lib.getEmittedBin());
 }
 
 fn getUpstreamArchive(b: *std.Build) buildtools.Archive {

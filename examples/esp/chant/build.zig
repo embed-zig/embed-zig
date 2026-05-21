@@ -1,9 +1,6 @@
 const std = @import("std");
-const buildtools = @import("buildtools");
 const esp = @import("esp");
-const thirdparty_build = @import("thirdparty");
 
-const lvgl_pkg = thirdparty_build.lvgl;
 const board_root = "lib/boards/szp";
 
 pub fn build(b: *std.Build) void {
@@ -14,10 +11,6 @@ pub fn build(b: *std.Build) void {
         .build_config = build_config_module,
         .esp_dep = esp_build_dep,
     });
-
-    if (context.toolchain_sysroot) |sysroot| {
-        b.sysroot = sysroot.root;
-    }
 
     const esp_dep = b.dependency("esp", .{
         .target = context.target,
@@ -41,15 +34,6 @@ pub fn build(b: *std.Build) void {
     const opus_osal_module = thirdparty_dep.module("opus_osal");
     const lvgl_module = thirdparty_dep.module("lvgl");
     const lvgl_osal_module = thirdparty_dep.module("lvgl_osal");
-    if (context.toolchain_sysroot) |sysroot| {
-        opus_module.addSystemIncludePath(sysroot.include_dir);
-        for (opus_module.link_objects.items) |link_object| {
-            switch (link_object) {
-                .other_step => |compile| compile.root_module.addSystemIncludePath(sysroot.include_dir),
-                else => {},
-            }
-        }
-    }
 
     const entry_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -67,31 +51,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
 
-    const lvgl_archive = buildtools.addFetchArchive(b, .{
-        .url = lvgl_pkg.upstream_tarball_url,
-        .version_key = lvgl_pkg.upstream_version_key,
-        .cache_namespace = "lvgl-upstream",
-        .step_name = "chant.lvgl.fetch-archive.ensure",
-    });
-    const lvgl_component = esp.idf.Component.create(b, .{ .name = "lvgl" });
-    lvgl_component.addFile(.{ .relative_path = "lvgl.h", .file = lvgl_archive.path("lvgl.h") });
-    lvgl_component.addFile(.{ .relative_path = "lvgl_private.h", .file = lvgl_archive.path("lvgl_private.h") });
-    lvgl_component.addFile(.{ .relative_path = "src/lvgl.h", .file = lvgl_archive.path("lvgl.h") });
-    lvgl_component.addFile(.{ .relative_path = "src/lvgl_private.h", .file = lvgl_archive.path("lvgl_private.h") });
-    lvgl_component.addIncludePath(lvgl_archive.includePath("."));
-    lvgl_component.addIncludePath(b.path("components/lvgl_local/include"));
-    lvgl_component.addIncludePath(b.path("../../../thirdparty/pkg/lvgl/include"));
-    const lvgl_sources = filterLvglSources(b, lvgl_pkg.c_sources);
-    for (lvgl_sources) |source_file| {
-        if (std.fs.path.dirname(source_file)) |source_dir| {
-            lvgl_component.addIncludePath(lvgl_archive.includePath(source_dir));
-        }
-    }
-    lvgl_component.addCSourceFiles(.{
-        .root = lvgl_archive.root(),
-        .files = lvgl_sources,
-        .flags = &.{"-DLV_CONF_INCLUDE_SIMPLE=1"},
-    });
+    const lvgl_component = addLvglComponent(b, lvgl_module);
     lvgl_component.addCSourceFiles(.{
         .root = b.path("components/lvgl_local"),
         .files = &.{"chant_lvgl_binding.c"},
@@ -173,37 +133,29 @@ fn addBoardComponent(b: *std.Build, esp_dep: *std.Build.Dependency) *esp.idf.Com
     return component;
 }
 
-fn filterLvglSources(b: *std.Build, sources: []const []const u8) []const []const u8 {
-    var filtered = std.ArrayList([]const u8).empty;
-    for (sources) |source| {
-        if (!useLvglSource(source)) continue;
-        filtered.append(b.allocator, source) catch @panic("OOM");
+fn addLvglComponent(b: *std.Build, lvgl_module: *std.Build.Module) *esp.idf.Component {
+    const component = esp.idf.Component.create(b, .{ .name = "lvgl" });
+    var added_artifact = false;
+    for (lvgl_module.link_objects.items) |link_object| {
+        switch (link_object) {
+            .other_step => |artifact| {
+                if (artifact.kind == .lib and artifact.linkage == .static) {
+                    component.addArtifact(artifact);
+                    added_artifact = true;
+                }
+            },
+            .static_path => |file| {
+                component.addArchiveFile(.{
+                    .relative_path = "lvgl.a",
+                    .file = file,
+                });
+                added_artifact = true;
+            },
+            else => {},
+        }
     }
-    return filtered.toOwnedSlice(b.allocator) catch @panic("OOM");
-}
-
-fn useLvglSource(source: []const u8) bool {
-    if (std.mem.startsWith(u8, source, "src/core/")) return true;
-    if (std.mem.startsWith(u8, source, "src/display/")) return true;
-    if (std.mem.startsWith(u8, source, "src/draw/convert/lv_draw_buf_convert")) return true;
-    if (std.mem.startsWith(u8, source, "src/draw/lv_draw")) return true;
-    if (std.mem.eql(u8, source, "src/draw/lv_image_decoder.c")) return true;
-    if (std.mem.startsWith(u8, source, "src/draw/sw/")) return true;
-    if (std.mem.eql(u8, source, "src/font/lv_font.c")) return true;
-    if (std.mem.eql(u8, source, "src/font/fmt_txt/lv_font_fmt_txt.c")) return true;
-    if (std.mem.eql(u8, source, "src/font/lv_font_montserrat_14.c")) return true;
-    if (std.mem.startsWith(u8, source, "src/indev/")) return true;
-    if (std.mem.eql(u8, source, "src/layouts/lv_layout.c")) return true;
-    if (std.mem.eql(u8, source, "src/libs/bin_decoder/lv_bin_decoder.c")) return true;
-    if (std.mem.startsWith(u8, source, "src/misc/")) return true;
-    if (std.mem.eql(u8, source, "src/osal/lv_os.c")) return true;
-    if (std.mem.eql(u8, source, "src/osal/lv_os_none.c")) return true;
-    if (std.mem.startsWith(u8, source, "src/stdlib/")) return true;
-    if (std.mem.startsWith(u8, source, "src/themes/")) return true;
-    if (std.mem.startsWith(u8, source, "src/tick/")) return true;
-    if (std.mem.eql(u8, source, "src/lv_init.c")) return true;
-    if (std.mem.eql(u8, source, "src/widgets/bar/lv_bar.c")) return true;
-    if (std.mem.eql(u8, source, "src/widgets/button/lv_button.c")) return true;
-    if (std.mem.eql(u8, source, "src/widgets/label/lv_label.c")) return true;
-    return false;
+    if (!added_artifact) {
+        std.debug.panic("lvgl module does not expose a static library artifact", .{});
+    }
+    return component;
 }

@@ -122,6 +122,7 @@ pub const Extracted = struct {
 pub const ResolveOptions = struct {
     build_config: *std.Build.Module,
     esp_dep: ?*std.Build.Dependency = null,
+    esp_root: ?std.Build.LazyPath = null,
     app_root: []const u8 = ".",
     build_dir: []const u8 = ".build",
 };
@@ -162,7 +163,7 @@ pub fn resolve(
         getEnvOrNull(b, "IDF_PATH") orelse
         getEnvOrNull(b, "idf");
     const idf_path = maybe_idf_path orelse "";
-    const esp_root = esp_dep.path("");
+    const esp_root = opts.esp_root orelse esp_dep.path("");
     const idf_py_executable_path = if (idf_path.len == 0)
         ""
     else
@@ -184,6 +185,9 @@ pub fn resolve(
         idf_path,
         resolved_idf_env.variables,
     );
+    if (toolchain_sysroot) |sysroot| {
+        b.sysroot = sysroot.root;
+    }
     return .{
         .build_config_module = opts.build_config,
         .esp_idf_module = esp_idf_module,
