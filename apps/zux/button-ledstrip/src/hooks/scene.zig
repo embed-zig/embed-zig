@@ -25,7 +25,7 @@ pub const Scene = struct {
         stores: anytype,
         message: anytype,
         emit: anytype,
-    ) !usize {
+    ) !void {
         _ = emit;
         const timestamp_ns: i64 = @intCast(message.timestamp);
         const SceneState = @TypeOf(stores.scene.running);
@@ -54,7 +54,6 @@ pub const Scene = struct {
                 ctx.changed.* = !sceneEqual(before, scene.*);
             }
         }.apply);
-        return if (changed) 1 else 0;
     }
 
     pub fn render(self: *@This(), app: anytype) !void {

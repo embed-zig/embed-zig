@@ -14,7 +14,7 @@ pub fn make(comptime platform_grt: type) type {
         pub const PeriphLabel = enum { none };
         pub const registries = .{
             .adc_button = EmptyRegistry{},
-            .gpio_button = EmptyRegistry{},
+            .single_button = EmptyRegistry{},
             .imu = EmptyRegistry{},
             .ledstrip = EmptyRegistry{},
             .modem = EmptyRegistry{},

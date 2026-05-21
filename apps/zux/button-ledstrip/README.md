@@ -20,7 +20,7 @@
 - Given the LED strip has just looped from the yellow marquee stage to the blue marquee stage, the next 10ms tick interpolates through an intermediate color instead of jumping directly to blue.
 - Given the LED strip has just looped from the blue marquee stage to the red marquee stage, the next 10ms tick interpolates through a purple midpoint instead of jumping directly to red.
 
-## Converage User Stoires
+## Coverage User Stories
 
 - `red_click_targets_blue`: Positive: Given the LED strip's current target color is red, when the user clicks `Power` once, the LED strip target color switches to blue.
 - `red_idle_keeps_target_red`: Negative: Given the LED strip's current target color is red, when the user does not click `Power`, the LED strip target color does not switch to blue.

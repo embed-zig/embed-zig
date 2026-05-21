@@ -1,6 +1,6 @@
 # button-ledstrip User Story
 
-## Golden User Stories
+## 基准用户故事
 
 - 在 LED 灯带当前目标颜色为红色的情况下，用户按一下 `Power`，LED 灯带目标颜色切换为蓝色。
 - 在 LED 灯带当前目标颜色为蓝色的情况下，用户按一下 `Power`，LED 灯带目标颜色切换为绿色。
@@ -20,7 +20,7 @@
 - 在 LED 灯带刚从黄色跑马灯阶段循环到蓝色跑马灯阶段后，下一次 10ms 节拍会经过中间值，而不是直接跳到蓝色。
 - 在 LED 灯带刚从蓝色跑马灯阶段循环到红色跑马灯阶段后，下一次 10ms 节拍会经过紫色中间值，而不是直接跳到红色。
 
-## Converage User Stoires
+## 覆盖用户故事
 
 - `red_click_targets_blue`：正向：在 LED 灯带当前目标颜色为红色的情况下，用户按一下 `Power`，LED 灯带目标颜色切换为蓝色。
 - `red_idle_keeps_target_red`：负向：在 LED 灯带当前目标颜色为红色的情况下，用户不按 `Power`，LED 灯带目标颜色不会切换为蓝色。
