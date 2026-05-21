@@ -65,43 +65,6 @@
         "label": "cell",
         "id": 51
       }
-    },
-    {
-      "kind": "Component/ui/flow",
-      "spec": {
-        "label": "pairing",
-        "id": 61,
-        "flow": {
-          "nodes": ["idle", "searching", "confirming", "done"],
-          "edges": [
-            { "from": "idle", "to": "searching", "event": "start" },
-            { "from": "idle", "to": "confirming", "event": "reenter" },
-            { "from": "searching", "to": "done", "event": "found" },
-            { "from": "confirming", "to": "done", "event": "confirm" }
-          ]
-        }
-      }
-    },
-    {
-      "kind": "Component/ui/overlay",
-      "spec": {
-        "label": "loading",
-        "id": 71
-      }
-    },
-    {
-      "kind": "Component/ui/selection",
-      "spec": {
-        "label": "menu",
-        "id": 81
-      }
-    },
-    {
-      "kind": "Component/ui/route",
-      "spec": {
-        "label": "route",
-        "id": 91
-      }
     }
   ]
 }

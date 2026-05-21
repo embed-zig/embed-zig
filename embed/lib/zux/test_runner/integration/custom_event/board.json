@@ -1,0 +1,45 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Store",
+      "spec": {
+        "label": "progress",
+        "state": {
+          "seen": "bool",
+          "source_id": "u32",
+          "value": "u32",
+          "updates": "u32",
+          "reset_count": "u32",
+          "last_kind": {
+            "enum": {
+              "type": "u8",
+              "values": [
+                "none",
+                "set",
+                "delta",
+                "reset"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "kind": "StatePath",
+      "spec": {
+        "path": "app/state",
+        "labels": [
+          "progress"
+        ]
+      }
+    },
+    {
+      "kind": "Reducer",
+      "spec": {
+        "label": "progress_reducer",
+        "fn_name": "ProgressReducer.reduce"
+      }
+    }
+  ]
+}

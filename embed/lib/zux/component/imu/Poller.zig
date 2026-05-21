@@ -1,7 +1,6 @@
 const glib = @import("glib");
 const drivers = @import("drivers");
 
-const Context = @import("../../event/Context.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 
 pub fn make(comptime grt: type) type {
@@ -19,14 +18,12 @@ pub fn make(comptime grt: type) type {
             source_id: u32,
             poll_interval: glib.time.duration.Duration = default_poll_interval,
             spawn_config: grt.std.Thread.SpawnConfig = .{},
-            ctx: Context.Type = null,
         };
 
         imu: drivers.imu,
         source_id: u32,
         poll_interval: glib.time.duration.Duration = default_poll_interval,
         spawn_config: grt.std.Thread.SpawnConfig = .{},
-        ctx: Context.Type = null,
         out: ?Emitter = null,
         state_mu: grt.std.Thread.Mutex = .{},
         running: bool = false,
@@ -39,7 +36,6 @@ pub fn make(comptime grt: type) type {
                 .source_id = config.source_id,
                 .poll_interval = config.poll_interval,
                 .spawn_config = config.spawn_config,
-                .ctx = config.ctx,
             };
         }
 
@@ -114,11 +110,10 @@ pub fn make(comptime grt: type) type {
                         },
                         .source_id = self.source_id,
                         .poll_interval = self.poll_interval,
-                        .ctx = self.ctx,
                     };
                 };
 
-                self.pollOnce(snapshot.out, snapshot.source_id, snapshot.ctx) catch {
+                self.pollOnce(snapshot.out, snapshot.source_id) catch {
                     self.failAsync();
                 };
 
@@ -128,7 +123,7 @@ pub fn make(comptime grt: type) type {
             }
         }
 
-        fn pollOnce(self: *Self, out: Emitter, source_id: u32, ctx: Context.Type) !void {
+        fn pollOnce(self: *Self, out: Emitter, source_id: u32) !void {
             const sample = try self.imu.read();
             const timestamp = grt.time.instant.now();
 
@@ -142,7 +137,6 @@ pub fn make(comptime grt: type) type {
                             .x = accel.x,
                             .y = accel.y,
                             .z = accel.z,
-                            .ctx = ctx,
                         },
                     },
                 });
@@ -158,7 +152,6 @@ pub fn make(comptime grt: type) type {
                             .x = gyro.x,
                             .y = gyro.y,
                             .z = gyro.z,
-                            .ctx = ctx,
                         },
                     },
                 });

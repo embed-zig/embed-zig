@@ -17,8 +17,8 @@ pub const netstack = @import("unit/netstack.zig");
 pub const nfc = @import("unit/nfc.zig");
 pub const pipeline = @import("unit/pipeline.zig");
 pub const store = @import("unit/store.zig");
+pub const switch_pwm = @import("unit/switch_pwm.zig");
 pub const touch = @import("unit/touch.zig");
-pub const ui = @import("unit/ui.zig");
 pub const wifi = @import("unit/wifi.zig");
 
 pub fn make(comptime grt: type) glib.testing.TestRunner {
@@ -53,8 +53,8 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("nfc", nfc.make(grt));
             t.run("pipeline", pipeline.make(grt));
             t.run("store", store.make(grt));
+            t.run("switch_pwm", switch_pwm.make(grt));
             t.run("touch", touch.make(grt));
-            t.run("ui", ui.make(grt));
             t.run("wifi", wifi.make(grt));
             return t.wait();
         }

@@ -9,6 +9,7 @@ pub fn make(comptime max_touch: usize) type {
             label: []const u8,
             id: u32,
             control_type: type,
+            target: ?[]const u8,
         };
 
         periphs: [max_touch]Periph = undefined,
@@ -22,6 +23,7 @@ pub fn make(comptime max_touch: usize) type {
             self: *Self,
             comptime label: anytype,
             comptime id: u32,
+            comptime target: ?[]const u8,
         ) void {
             if (self.len >= max_touch) {
                 @compileError("zux.Assembler exceeded max_touch");
@@ -40,6 +42,7 @@ pub fn make(comptime max_touch: usize) type {
                 .label = label_name,
                 .id = id,
                 .control_type = drivers.Touch,
+                .target = target,
             };
             self.len += 1;
         }

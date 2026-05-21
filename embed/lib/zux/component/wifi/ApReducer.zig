@@ -22,7 +22,7 @@ pub fn init(allocator: glib.std.mem.Allocator) ApReducer {
     };
 }
 
-pub fn reduce(self: *ApReducer, store: anytype, message: Message, emit: Emitter) !usize {
+pub fn reduce(self: *ApReducer, store: anytype, message: Message, emit: Emitter) !void {
     _ = emit;
 
     switch (message.body) {
@@ -153,9 +153,8 @@ pub fn reduce(self: *ApReducer, store: anytype, message: Message, emit: Emitter)
                 }
             }.apply);
         },
-        else => return 0,
+        else => return,
     }
-    return 0;
 }
 
 pub fn deinit(self: *ApReducer) void {
@@ -184,7 +183,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var sink = NoopSink{};
             const emit = Emitter.init(&sink);
 
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .wifi_ap_started = .{
@@ -200,7 +199,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .wifi_ap_client_joined = .{
@@ -211,7 +210,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .wifi_ap_lease_granted = .{
@@ -221,7 +220,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .wifi_ap_client_joined = .{
@@ -242,7 +241,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(u16, 4), active.last_client_aid);
             try grt.std.testing.expectEqual(Addr.from4(.{ 192, 168, 4, 11 }), active.last_client_ip.?);
 
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .wifi_ap_client_left = .{
@@ -253,7 +252,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .wifi_ap_stopped = .{

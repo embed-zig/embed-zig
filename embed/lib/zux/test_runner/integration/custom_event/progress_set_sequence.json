@@ -1,0 +1,60 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "custom progress set sequence",
+    "description": "decodes a registered progress set event and applies it through a reducer.",
+    "initial_state": {
+      "progress": {
+        "seen": false,
+        "source_id": 0,
+        "value": 0,
+        "updates": 0,
+        "reset_count": 0,
+        "last_kind": "none"
+      }
+    },
+    "steps": [
+      {
+        "outputs": [
+          {
+            "label": "progress",
+            "state": {
+              "seen": false,
+              "source_id": 0,
+              "value": 0,
+              "updates": 0,
+              "reset_count": 0,
+              "last_kind": "none"
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "custom": {
+              "type": "test.progress.set",
+              "source_id": 101,
+              "payload": {
+                "value": 42
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "progress",
+            "state": {
+              "seen": true,
+              "source_id": 101,
+              "value": 42,
+              "updates": 1,
+              "reset_count": 0,
+              "last_kind": "set"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -10,7 +10,7 @@ pub fn init() Reducer {
     return .{};
 }
 
-pub fn reduce(self: *Reducer, store: anytype, message: Message, emit: Emitter) !usize {
+pub fn reduce(self: *Reducer, store: anytype, message: Message, emit: Emitter) !void {
     _ = self;
     _ = emit;
 
@@ -147,9 +147,8 @@ pub fn reduce(self: *Reducer, store: anytype, message: Message, emit: Emitter) !
                 }
             }.apply);
         },
-        else => return 0,
+        else => return,
     }
-    return 0;
 }
 
 pub fn deinit(self: *Reducer) void {
@@ -173,7 +172,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var sink = NoopSink{};
             const emit = Emitter.init(&sink);
 
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .modem_sim_state_changed = .{
@@ -182,7 +181,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .modem_network_registration_changed = .{
@@ -191,7 +190,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .modem_data_packet_state_changed = .{
@@ -200,7 +199,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .modem_network_signal_changed = .{
@@ -213,7 +212,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .modem_data_apn_changed = .{
@@ -227,7 +226,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .modem_call_incoming = .{
@@ -243,7 +242,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .modem_call_state_changed = .{
@@ -260,7 +259,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .modem_call_ended = .{
@@ -270,7 +269,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .modem_sms_received = .{
@@ -293,7 +292,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .modem_gnss_state_changed = .{
@@ -302,7 +301,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .modem_gnss_fix_changed = .{

@@ -5,7 +5,7 @@ const Message = @import("../../pipeline/Message.zig");
 const State = @import("state.zig");
 const touch_event = @import("event.zig");
 
-pub fn reduce(store: anytype, message: Message, emit: Emitter) !usize {
+pub fn reduce(store: anytype, message: Message, emit: Emitter) !void {
     _ = emit;
 
     switch (message.body) {
@@ -19,9 +19,8 @@ pub fn reduce(store: anytype, message: Message, emit: Emitter) !usize {
                 .primary = primary,
                 .last_primary = primary orelse current.last_primary,
             });
-            return 0;
         },
-        else => return 0,
+        else => return,
     }
 }
 
@@ -58,7 +57,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var sink = Sink{};
             const emit = Emitter.init(&sink);
 
-            _ = try reduce(&store, .{
+            try reduce(&store, .{
                 .body = .{
                     .raw_touch = .{
                         .source_id = 101,
@@ -77,7 +76,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(u16, 10), store.state.primary.?.x);
             try grt.std.testing.expectEqual(@as(u16, 20), store.state.last_primary.?.y);
 
-            _ = try reduce(&store, .{
+            try reduce(&store, .{
                 .body = .{
                     .raw_touch = .{
                         .source_id = 101,
@@ -93,7 +92,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(u16, 30), store.state.primary.?.x);
             try grt.std.testing.expectEqual(@as(u16, 40), store.state.last_primary.?.y);
 
-            _ = try reduce(&store, .{
+            try reduce(&store, .{
                 .body = .{
                     .raw_touch = .{
                         .source_id = 101,

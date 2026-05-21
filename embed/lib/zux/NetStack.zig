@@ -1,6 +1,5 @@
 const glib = @import("glib");
 
-const Context = @import("event/Context.zig");
 const event = @import("event.zig");
 
 const EventReceiver = event.EventReceiver;
@@ -73,7 +72,6 @@ pub const NetifCreatedEvent = struct {
     netif_type: NetifType,
     name_end: u8,
     name_buf: [max_netif_name_len]u8,
-    ctx: Context.Type = null,
 
     pub fn name(self: *const @This()) []const u8 {
         return self.name_buf[0..self.name_end];
@@ -88,7 +86,6 @@ pub const NetifDestroyedEvent = struct {
     netif_type: NetifType,
     name_end: u8,
     name_buf: [max_netif_name_len]u8,
-    ctx: Context.Type = null,
 
     pub fn name(self: *const @This()) []const u8 {
         return self.name_buf[0..self.name_end];
@@ -100,7 +97,6 @@ pub const NetifUpEvent = struct {
 
     source_id: u32,
     netif_id: u32,
-    ctx: Context.Type = null,
 };
 
 pub const NetifDownEvent = struct {
@@ -109,7 +105,6 @@ pub const NetifDownEvent = struct {
     source_id: u32,
     netif_id: u32,
     reason: NetifDownReason,
-    ctx: Context.Type = null,
 };
 
 pub const AddrAddedEvent = struct {
@@ -120,7 +115,6 @@ pub const AddrAddedEvent = struct {
     addr: glib.net.netip.Addr,
     prefix_len: u8,
     source: AddrSource,
-    ctx: Context.Type = null,
 };
 
 pub const AddrRemovedEvent = struct {
@@ -131,7 +125,6 @@ pub const AddrRemovedEvent = struct {
     addr: glib.net.netip.Addr,
     prefix_len: u8,
     source: AddrSource,
-    ctx: Context.Type = null,
 };
 
 pub const DhcpLeaseAcquiredEvent = struct {
@@ -145,7 +138,6 @@ pub const DhcpLeaseAcquiredEvent = struct {
     dns_count: u8,
     dns_buf: [max_dns_server_count]glib.net.netip.Addr,
     lease_time_s: u32,
-    ctx: Context.Type = null,
 
     pub fn dnsServers(self: *const @This()) []const glib.net.netip.Addr {
         return self.dns_buf[0..self.dns_count];
@@ -157,7 +149,6 @@ pub const DhcpLeaseLostEvent = struct {
 
     source_id: u32,
     netif_id: u32,
-    ctx: Context.Type = null,
 };
 
 pub const DefaultRouteChangedEvent = struct {
@@ -166,7 +157,6 @@ pub const DefaultRouteChangedEvent = struct {
     source_id: u32,
     netif_id: u32,
     gateway: glib.net.netip.Addr,
-    ctx: Context.Type = null,
 };
 
 pub const RouterDiscoveredEvent = struct {
@@ -175,7 +165,6 @@ pub const RouterDiscoveredEvent = struct {
     source_id: u32,
     netif_id: u32,
     router: glib.net.netip.Addr,
-    ctx: Context.Type = null,
 };
 
 pub const RouterLostEvent = struct {
@@ -184,7 +173,6 @@ pub const RouterLostEvent = struct {
     source_id: u32,
     netif_id: u32,
     router: glib.net.netip.Addr,
-    ctx: Context.Type = null,
 };
 
 pub const DnsServersChangedEvent = struct {
@@ -194,7 +182,6 @@ pub const DnsServersChangedEvent = struct {
     netif_id: u32,
     dns_count: u8,
     dns_buf: [max_dns_server_count]glib.net.netip.Addr,
-    ctx: Context.Type = null,
 
     pub fn dnsServers(self: *const @This()) []const glib.net.netip.Addr {
         return self.dns_buf[0..self.dns_count];
@@ -207,7 +194,6 @@ pub const PppPhaseChangedEvent = struct {
     source_id: u32,
     netif_id: u32,
     phase: PppPhase,
-    ctx: Context.Type = null,
 };
 
 pub const PppAuthSucceededEvent = struct {
@@ -216,7 +202,6 @@ pub const PppAuthSucceededEvent = struct {
     source_id: u32,
     netif_id: u32,
     protocol: PppAuthProtocol,
-    ctx: Context.Type = null,
 };
 
 pub const PppAuthFailedEvent = struct {
@@ -225,7 +210,6 @@ pub const PppAuthFailedEvent = struct {
     source_id: u32,
     netif_id: u32,
     protocol: PppAuthProtocol,
-    ctx: Context.Type = null,
 };
 
 pub const PppUpEvent = struct {
@@ -235,7 +219,6 @@ pub const PppUpEvent = struct {
     netif_id: u32,
     local_addr: glib.net.netip.Addr,
     peer_addr: glib.net.netip.Addr,
-    ctx: Context.Type = null,
 };
 
 pub const PppDownEvent = struct {
@@ -244,7 +227,6 @@ pub const PppDownEvent = struct {
     source_id: u32,
     netif_id: u32,
     reason: PppDownReason,
-    ctx: Context.Type = null,
 };
 
 pub const NetifCreated = struct {
@@ -252,7 +234,6 @@ pub const NetifCreated = struct {
     netif_id: u32,
     netif_type: NetifType = .unknown,
     name: ?[]const u8 = null,
-    ctx: Context.Type = null,
 };
 
 pub const NetifDestroyed = struct {
@@ -260,20 +241,17 @@ pub const NetifDestroyed = struct {
     netif_id: u32,
     netif_type: NetifType = .unknown,
     name: ?[]const u8 = null,
-    ctx: Context.Type = null,
 };
 
 pub const NetifUp = struct {
     source_id: u32,
     netif_id: u32,
-    ctx: Context.Type = null,
 };
 
 pub const NetifDown = struct {
     source_id: u32,
     netif_id: u32,
     reason: NetifDownReason,
-    ctx: Context.Type = null,
 };
 
 pub const AddrAdded = struct {
@@ -282,7 +260,6 @@ pub const AddrAdded = struct {
     addr: glib.net.netip.Addr,
     prefix_len: u8,
     source: AddrSource,
-    ctx: Context.Type = null,
 };
 
 pub const AddrRemoved = struct {
@@ -291,7 +268,6 @@ pub const AddrRemoved = struct {
     addr: glib.net.netip.Addr,
     prefix_len: u8,
     source: AddrSource,
-    ctx: Context.Type = null,
 };
 
 pub const DhcpLeaseAcquired = struct {
@@ -302,62 +278,53 @@ pub const DhcpLeaseAcquired = struct {
     netmask: glib.net.netip.Addr,
     dns_servers: []const glib.net.netip.Addr = &.{},
     lease_time_s: u32 = 0,
-    ctx: Context.Type = null,
 };
 
 pub const DhcpLeaseLost = struct {
     source_id: u32,
     netif_id: u32,
-    ctx: Context.Type = null,
 };
 
 pub const DefaultRouteChanged = struct {
     source_id: u32,
     netif_id: u32,
     gateway: glib.net.netip.Addr,
-    ctx: Context.Type = null,
 };
 
 pub const RouterDiscovered = struct {
     source_id: u32,
     netif_id: u32,
     router: glib.net.netip.Addr,
-    ctx: Context.Type = null,
 };
 
 pub const RouterLost = struct {
     source_id: u32,
     netif_id: u32,
     router: glib.net.netip.Addr,
-    ctx: Context.Type = null,
 };
 
 pub const DnsServersChanged = struct {
     source_id: u32,
     netif_id: u32,
     dns_servers: []const glib.net.netip.Addr,
-    ctx: Context.Type = null,
 };
 
 pub const PppPhaseChanged = struct {
     source_id: u32,
     netif_id: u32,
     phase: PppPhase,
-    ctx: Context.Type = null,
 };
 
 pub const PppAuthSucceeded = struct {
     source_id: u32,
     netif_id: u32,
     protocol: PppAuthProtocol,
-    ctx: Context.Type = null,
 };
 
 pub const PppAuthFailed = struct {
     source_id: u32,
     netif_id: u32,
     protocol: PppAuthProtocol,
-    ctx: Context.Type = null,
 };
 
 pub const PppUp = struct {
@@ -365,14 +332,12 @@ pub const PppUp = struct {
     netif_id: u32,
     local_addr: glib.net.netip.Addr,
     peer_addr: glib.net.netip.Addr,
-    ctx: Context.Type = null,
 };
 
 pub const PppDown = struct {
     source_id: u32,
     netif_id: u32,
     reason: PppDownReason,
-    ctx: Context.Type = null,
 };
 
 pub const Update = union(enum) {
@@ -411,7 +376,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .netif_type = value.netif_type,
                 .name_end = try copyNetifNameLen(value.name),
                 .name_buf = try copyNetifNameBuf(value.name),
-                .ctx = value.ctx,
             },
         },
         .netif_destroyed => |value| .{
@@ -421,14 +385,12 @@ pub fn makeEvent(update: Update) !event.Event {
                 .netif_type = value.netif_type,
                 .name_end = try copyNetifNameLen(value.name),
                 .name_buf = try copyNetifNameBuf(value.name),
-                .ctx = value.ctx,
             },
         },
         .netif_up => |value| .{
             .netstack_netif_up = .{
                 .source_id = value.source_id,
                 .netif_id = value.netif_id,
-                .ctx = value.ctx,
             },
         },
         .netif_down => |value| .{
@@ -436,7 +398,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .source_id = value.source_id,
                 .netif_id = value.netif_id,
                 .reason = value.reason,
-                .ctx = value.ctx,
             },
         },
         .addr_added => |value| .{
@@ -446,7 +407,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .addr = value.addr,
                 .prefix_len = value.prefix_len,
                 .source = value.source,
-                .ctx = value.ctx,
             },
         },
         .addr_removed => |value| .{
@@ -456,7 +416,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .addr = value.addr,
                 .prefix_len = value.prefix_len,
                 .source = value.source,
-                .ctx = value.ctx,
             },
         },
         .dhcp_lease_acquired => |value| .{
@@ -469,14 +428,12 @@ pub fn makeEvent(update: Update) !event.Event {
                 .dns_count = try copyDnsCount(value.dns_servers),
                 .dns_buf = try copyDnsBuf(value.dns_servers),
                 .lease_time_s = value.lease_time_s,
-                .ctx = value.ctx,
             },
         },
         .dhcp_lease_lost => |value| .{
             .netstack_dhcp_lease_lost = .{
                 .source_id = value.source_id,
                 .netif_id = value.netif_id,
-                .ctx = value.ctx,
             },
         },
         .default_route_changed => |value| .{
@@ -484,7 +441,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .source_id = value.source_id,
                 .netif_id = value.netif_id,
                 .gateway = value.gateway,
-                .ctx = value.ctx,
             },
         },
         .router_discovered => |value| .{
@@ -492,7 +448,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .source_id = value.source_id,
                 .netif_id = value.netif_id,
                 .router = value.router,
-                .ctx = value.ctx,
             },
         },
         .router_lost => |value| .{
@@ -500,7 +455,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .source_id = value.source_id,
                 .netif_id = value.netif_id,
                 .router = value.router,
-                .ctx = value.ctx,
             },
         },
         .dns_servers_changed => |value| .{
@@ -509,7 +463,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .netif_id = value.netif_id,
                 .dns_count = try copyDnsCount(value.dns_servers),
                 .dns_buf = try copyDnsBuf(value.dns_servers),
-                .ctx = value.ctx,
             },
         },
         .ppp_phase_changed => |value| .{
@@ -517,7 +470,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .source_id = value.source_id,
                 .netif_id = value.netif_id,
                 .phase = value.phase,
-                .ctx = value.ctx,
             },
         },
         .ppp_auth_succeeded => |value| .{
@@ -525,7 +477,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .source_id = value.source_id,
                 .netif_id = value.netif_id,
                 .protocol = value.protocol,
-                .ctx = value.ctx,
             },
         },
         .ppp_auth_failed => |value| .{
@@ -533,7 +484,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .source_id = value.source_id,
                 .netif_id = value.netif_id,
                 .protocol = value.protocol,
-                .ctx = value.ctx,
             },
         },
         .ppp_up => |value| .{
@@ -542,7 +492,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .netif_id = value.netif_id,
                 .local_addr = value.local_addr,
                 .peer_addr = value.peer_addr,
-                .ctx = value.ctx,
             },
         },
         .ppp_down => |value| .{
@@ -550,7 +499,6 @@ pub fn makeEvent(update: Update) !event.Event {
                 .source_id = value.source_id,
                 .netif_id = value.netif_id,
                 .reason = value.reason,
-                .ctx = value.ctx,
             },
         },
     };
@@ -838,7 +786,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                                 .netif_id = v.netif_id,
                                 .netif_type = v.netif_type,
                                 .name = v.name(),
-                                .ctx = v.ctx,
                             },
                         },
                         .netstack_netif_destroyed => |v| Update{
@@ -847,16 +794,14 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                                 .netif_id = v.netif_id,
                                 .netif_type = v.netif_type,
                                 .name = v.name(),
-                                .ctx = v.ctx,
                             },
                         },
-                        .netstack_netif_up => |v| Update{ .netif_up = .{ .source_id = v.source_id, .netif_id = v.netif_id, .ctx = v.ctx } },
+                        .netstack_netif_up => |v| Update{ .netif_up = .{ .source_id = v.source_id, .netif_id = v.netif_id } },
                         .netstack_dns_servers_changed => |v| Update{
                             .dns_servers_changed = .{
                                 .source_id = v.source_id,
                                 .netif_id = v.netif_id,
                                 .dns_servers = v.dnsServers(),
-                                .ctx = v.ctx,
                             },
                         },
                         .netstack_ppp_phase_changed => |v| Update{
@@ -864,7 +809,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                                 .source_id = v.source_id,
                                 .netif_id = v.netif_id,
                                 .phase = v.phase,
-                                .ctx = v.ctx,
                             },
                         },
                         .netstack_ppp_down => |v| Update{
@@ -872,7 +816,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                                 .source_id = v.source_id,
                                 .netif_id = v.netif_id,
                                 .reason = v.reason,
-                                .ctx = v.ctx,
                             },
                         },
                         else => return,

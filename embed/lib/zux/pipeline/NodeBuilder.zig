@@ -113,12 +113,10 @@ pub fn Builder(comptime options: BuilderOptions) type {
                         node_impl.out = out;
                     }
 
-                    pub fn process(node_impl: *@This(), message: Message) !usize {
+                    pub fn process(node_impl: *@This(), message: Message) !void {
                         if (node_impl.out) |out| {
                             try out.emit(message);
-                            return 1;
                         }
-                        return 0;
                     }
                 };
 
@@ -592,14 +590,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     self.out = out;
                 }
 
-                pub fn process(self: *@This(), message: Message) !usize {
+                pub fn process(self: *@This(), message: Message) !void {
                     self.called += 1;
                     var next = message;
                     next.timestamp = glib.time.instant.add(next.timestamp, self.delta);
                     if (self.out) |out| {
                         try out.emit(next);
                     }
-                    return 1;
                 }
             };
 
@@ -631,7 +628,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var root = Built.build(&config);
             config.e.bindOutput(Emitter.init(&collector));
 
-            const emitted_button = try root.process(.{
+            try root.process(.{
                 .origin = .source,
                 .timestamp = 10,
                 .body = .{
@@ -641,7 +638,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             });
-            try grt.std.testing.expectEqual(@as(usize, 1), emitted_button);
             try grt.std.testing.expectEqual(@as(usize, 1), a_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 1), b_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 1), c_impl.called);
@@ -649,7 +645,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 1), e_impl.called);
             try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 33), collector.last_timestamp);
 
-            const emitted_raw = try root.process(.{
+            try root.process(.{
                 .origin = .source,
                 .timestamp = 15,
                 .body = .{
@@ -659,7 +655,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             });
-            try grt.std.testing.expectEqual(@as(usize, 1), emitted_raw);
             try grt.std.testing.expectEqual(@as(usize, 2), a_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 1), b_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 1), c_impl.called);
@@ -667,14 +662,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 2), e_impl.called);
             try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 40), collector.last_timestamp);
 
-            const emitted_tick = try root.process(.{
+            try root.process(.{
                 .origin = .timer,
                 .timestamp = 20,
                 .body = .{
                     .tick = .{},
                 },
             });
-            try grt.std.testing.expectEqual(@as(usize, 1), emitted_tick);
             try grt.std.testing.expectEqual(@as(usize, 3), a_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 2), b_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 2), c_impl.called);
@@ -705,14 +699,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var collector = Collector{};
             root.bindOutput(Emitter.init(&collector));
 
-            const emitted = try root.process(.{
+            try root.process(.{
                 .origin = .manual,
                 .body = .{
                     .tick = .{},
                 },
             });
 
-            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
             try grt.std.testing.expect(collector.called);
             try grt.std.testing.expectEqual(Message.Kind.tick, collector.last_kind.?);
         }
@@ -784,12 +777,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     self.out = out;
                 }
 
-                pub fn process(self: *@This(), message: Message) !usize {
+                pub fn process(self: *@This(), message: Message) !void {
                     self.trace.append(self.id);
                     if (self.out) |out| {
                         try out.emit(message);
                     }
-                    return 1;
                 }
             };
 
@@ -809,7 +801,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var root = Built.build(&config);
 
             trace.reset();
-            _ = try root.process(.{
+            try root.process(.{
                 .origin = .source,
                 .body = .{
                     .button_gesture = .{
@@ -824,7 +816,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(u8, 5), trace.ids[2]);
 
             trace.reset();
-            _ = try root.process(.{
+            try root.process(.{
                 .origin = .source,
                 .body = .{
                     .raw_single_button = .{

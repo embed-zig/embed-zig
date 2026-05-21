@@ -1,5 +1,4 @@
 const glib = @import("glib");
-const Context = @import("../../event/Context.zig");
 const ledstrip = @import("ledstrip");
 
 pub const Pixels = []const ledstrip.Color;
@@ -11,7 +10,6 @@ pub const Set = struct {
     pixels: Pixels,
     brightness: u8 = 255,
     duration: u32 = 0,
-    ctx: Context.Type = null,
 };
 
 pub const SetPixels = struct {
@@ -20,7 +18,6 @@ pub const SetPixels = struct {
     source_id: u32,
     pixels: Pixels,
     brightness: u8 = 255,
-    ctx: Context.Type = null,
 };
 
 pub const Flash = struct {
@@ -31,7 +28,6 @@ pub const Flash = struct {
     brightness: u8 = 255,
     duration: glib.time.duration.Duration,
     interval: glib.time.duration.Duration,
-    ctx: Context.Type = null,
 };
 
 pub const Pingpong = struct {
@@ -43,7 +39,6 @@ pub const Pingpong = struct {
     brightness: u8 = 255,
     duration: glib.time.duration.Duration,
     interval: glib.time.duration.Duration,
-    ctx: Context.Type = null,
 };
 
 pub const Rotate = struct {
@@ -54,5 +49,4 @@ pub const Rotate = struct {
     brightness: u8 = 255,
     duration: glib.time.duration.Duration,
     interval: glib.time.duration.Duration,
-    ctx: Context.Type = null,
 };

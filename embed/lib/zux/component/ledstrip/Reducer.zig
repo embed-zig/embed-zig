@@ -23,12 +23,11 @@ pub fn make(comptime n: usize, comptime max_frames: usize) type {
         pub const FrameType = Frame;
         pub const State = state_type;
 
-        pub fn reduce(store: anytype, message: Message, emit: Emitter) !usize {
+        pub fn reduce(store: anytype, message: Message, emit: Emitter) !void {
             _ = emit;
             var next = currentState(store);
-            const changed = reduceState(&next, message);
+            _ = reduceState(&next, message);
             store.set(next);
-            return if (changed) 1 else 0;
         }
 
         pub fn reduceState(state: *State, message: Message) bool {

@@ -2,8 +2,8 @@ const glib = @import("glib");
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
 const modem_api = @import("drivers");
-const flow_event = @import("component/ui/flow/event.zig");
-const route = @import("component/ui/route.zig");
+const component_audio_system = @import("component/audio_system.zig");
+const component_display = @import("component/display.zig");
 const event_mod = @import("event.zig");
 const EmitterType = @import("pipeline/Emitter.zig");
 const MessageType = @import("pipeline/Message.zig");
@@ -34,30 +34,6 @@ pub fn make(comptime Impl: type) type {
         }
         break :blk @as(type, Impl.InitConfig);
     };
-    const impl_router_label = blk: {
-        if (!@hasDecl(Impl, "RouterLabel")) {
-            @compileError("zux.App.make requires Impl.RouterLabel");
-        }
-        break :blk @as(type, Impl.RouterLabel);
-    };
-    const impl_flow_label = blk: {
-        if (!@hasDecl(Impl, "FlowLabel")) {
-            @compileError("zux.App.make requires Impl.FlowLabel");
-        }
-        break :blk @as(type, Impl.FlowLabel);
-    };
-    const impl_overlay_label = blk: {
-        if (!@hasDecl(Impl, "OverlayLabel")) {
-            @compileError("zux.App.make requires Impl.OverlayLabel");
-        }
-        break :blk @as(type, Impl.OverlayLabel);
-    };
-    const impl_selection_label = blk: {
-        if (!@hasDecl(Impl, "SelectionLabel")) {
-            @compileError("zux.App.make requires Impl.SelectionLabel");
-        }
-        break :blk @as(type, Impl.SelectionLabel);
-    };
     const impl_pixel_count = blk: {
         if (!@hasDecl(Impl, "pixel_count")) {
             @compileError("zux.App.make requires Impl.pixel_count");
@@ -81,19 +57,6 @@ pub fn make(comptime Impl: type) type {
         if (@typeInfo(impl_periph_label) != .@"enum") {
             @compileError("zux.App.make requires Impl.PeriphLabel to be an enum type");
         }
-        if (@typeInfo(impl_router_label) != .@"enum") {
-            @compileError("zux.App.make requires Impl.RouterLabel to be an enum type");
-        }
-        if (@typeInfo(impl_flow_label) != .@"enum") {
-            @compileError("zux.App.make requires Impl.FlowLabel to be an enum type");
-        }
-        if (@typeInfo(impl_overlay_label) != .@"enum") {
-            @compileError("zux.App.make requires Impl.OverlayLabel to be an enum type");
-        }
-        if (@typeInfo(impl_selection_label) != .@"enum") {
-            @compileError("zux.App.make requires Impl.SelectionLabel to be an enum type");
-        }
-
         if (!@hasDecl(Impl, "deinit")) {
             @compileError("zux.App.make requires Impl.deinit");
         }
@@ -175,6 +138,18 @@ pub fn make(comptime Impl: type) type {
         if (!@hasDecl(Impl, "set_led_strip_rotate")) {
             @compileError("zux.App.make requires Impl.set_led_strip_rotate");
         }
+        if (!@hasDecl(Impl, "set_switch")) {
+            @compileError("zux.App.make requires Impl.set_switch");
+        }
+        if (!@hasDecl(Impl, "set_pwm")) {
+            @compileError("zux.App.make requires Impl.set_pwm");
+        }
+        if (!@hasDecl(Impl, "set_audio_system")) {
+            @compileError("zux.App.make requires Impl.set_audio_system");
+        }
+        if (!@hasDecl(Impl, "set_display")) {
+            @compileError("zux.App.make requires Impl.set_display");
+        }
         if (!@hasDecl(Impl, "nfc_found")) {
             @compileError("zux.App.make requires Impl.nfc_found");
         }
@@ -214,73 +189,9 @@ pub fn make(comptime Impl: type) type {
         if (!@hasDecl(Impl, "wifi_ap_lease_released")) {
             @compileError("zux.App.make requires Impl.wifi_ap_lease_released");
         }
-        if (!@hasDecl(Impl, "router")) {
-            @compileError("zux.App.make requires Impl.router");
+        if (!@hasDecl(Impl, "CustomEventRegistar")) {
+            @compileError("zux.App.make requires Impl.CustomEventRegistar");
         }
-        if (!@hasDecl(Impl, "push_route")) {
-            @compileError("zux.App.make requires Impl.push_route");
-        }
-        if (!@hasDecl(Impl, "replace_route")) {
-            @compileError("zux.App.make requires Impl.replace_route");
-        }
-        if (!@hasDecl(Impl, "reset_route")) {
-            @compileError("zux.App.make requires Impl.reset_route");
-        }
-        if (!@hasDecl(Impl, "pop_route")) {
-            @compileError("zux.App.make requires Impl.pop_route");
-        }
-        if (!@hasDecl(Impl, "pop_route_to_root")) {
-            @compileError("zux.App.make requires Impl.pop_route_to_root");
-        }
-        if (!@hasDecl(Impl, "set_route_transitioning")) {
-            @compileError("zux.App.make requires Impl.set_route_transitioning");
-        }
-        if (!@hasDecl(Impl, "FlowEdgeLabel")) {
-            @compileError("zux.App.make requires Impl.FlowEdgeLabel");
-        }
-        if (!@hasDecl(Impl, "FlowMove")) {
-            @compileError("zux.App.make requires Impl.FlowMove");
-        }
-        if (!@hasDecl(Impl, "move_flow")) {
-            @compileError("zux.App.make requires Impl.move_flow");
-        }
-        if (!@hasDecl(Impl, "available_moves")) {
-            @compileError("zux.App.make requires Impl.available_moves");
-        }
-        if (!@hasDecl(Impl, "reset_flow")) {
-            @compileError("zux.App.make requires Impl.reset_flow");
-        }
-        if (!@hasDecl(Impl, "show_overlay")) {
-            @compileError("zux.App.make requires Impl.show_overlay");
-        }
-        if (!@hasDecl(Impl, "hide_overlay")) {
-            @compileError("zux.App.make requires Impl.hide_overlay");
-        }
-        if (!@hasDecl(Impl, "set_overlay_name")) {
-            @compileError("zux.App.make requires Impl.set_overlay_name");
-        }
-        if (!@hasDecl(Impl, "set_overlay_blocking")) {
-            @compileError("zux.App.make requires Impl.set_overlay_blocking");
-        }
-        if (!@hasDecl(Impl, "next_selection")) {
-            @compileError("zux.App.make requires Impl.next_selection");
-        }
-        if (!@hasDecl(Impl, "prev_selection")) {
-            @compileError("zux.App.make requires Impl.prev_selection");
-        }
-        if (!@hasDecl(Impl, "set_selection")) {
-            @compileError("zux.App.make requires Impl.set_selection");
-        }
-        if (!@hasDecl(Impl, "reset_selection")) {
-            @compileError("zux.App.make requires Impl.reset_selection");
-        }
-        if (!@hasDecl(Impl, "set_selection_count")) {
-            @compileError("zux.App.make requires Impl.set_selection_count");
-        }
-        if (!@hasDecl(Impl, "set_selection_loop")) {
-            @compileError("zux.App.make requires Impl.set_selection_loop");
-        }
-
         if (impl_store_type != void and !@hasDecl(Impl, "store")) {
             @compileError("zux.App.make requires Impl.store when Impl.Store is present");
         }
@@ -312,6 +223,10 @@ pub fn make(comptime Impl: type) type {
         _ = @as(*const fn (*Impl, impl_periph_label, impl_frame_type, u8, glib.time.duration.Duration, glib.time.duration.Duration) anyerror!void, &Impl.set_led_strip_flash);
         _ = @as(*const fn (*Impl, impl_periph_label, impl_frame_type, impl_frame_type, u8, glib.time.duration.Duration, glib.time.duration.Duration) anyerror!void, &Impl.set_led_strip_pingpong);
         _ = @as(*const fn (*Impl, impl_periph_label, impl_frame_type, u8, glib.time.duration.Duration, glib.time.duration.Duration) anyerror!void, &Impl.set_led_strip_rotate);
+        _ = @as(*const fn (*Impl, impl_periph_label, bool) anyerror!void, &Impl.set_switch);
+        _ = @as(*const fn (*Impl, impl_periph_label, bool, u32, drivers.Pwm.Duty) anyerror!void, &Impl.set_pwm);
+        _ = @as(*const fn (*Impl, impl_periph_label, component_audio_system.State) anyerror!void, &Impl.set_audio_system);
+        _ = @as(*const fn (*Impl, impl_periph_label, component_display.State) anyerror!void, &Impl.set_display);
         _ = @as(*const fn (*Impl, impl_periph_label, []const u8, drivers.nfc.CardType) anyerror!void, &Impl.nfc_found);
         _ = @as(*const fn (*Impl, impl_periph_label, []const u8, []const u8, drivers.nfc.CardType) anyerror!void, &Impl.nfc_read);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Sta.ScanResult) anyerror!void, &Impl.wifi_sta_scan_result);
@@ -325,46 +240,6 @@ pub fn make(comptime Impl: type) type {
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Ap.ClientInfo) anyerror!void, &Impl.wifi_ap_client_left);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Ap.LeaseInfo) anyerror!void, &Impl.wifi_ap_lease_granted);
         _ = @as(*const fn (*Impl, impl_periph_label, drivers.wifi.Ap.LeaseInfo) anyerror!void, &Impl.wifi_ap_lease_released);
-        _ = @as(*const fn (*Impl, impl_router_label) route.Router, &Impl.router);
-        _ = @as(*const fn (*Impl, impl_router_label, route.Router.Item) anyerror!void, &Impl.push_route);
-        _ = @as(*const fn (*Impl, impl_router_label, route.Router.Item) anyerror!void, &Impl.replace_route);
-        _ = @as(*const fn (*Impl, impl_router_label, route.Router.Item) anyerror!void, &Impl.reset_route);
-        _ = @as(*const fn (*Impl, impl_router_label) anyerror!void, &Impl.pop_route);
-        _ = @as(*const fn (*Impl, impl_router_label) anyerror!void, &Impl.pop_route_to_root);
-        _ = @as(*const fn (*Impl, impl_router_label, bool) anyerror!void, &Impl.set_route_transitioning);
-        _ = @as(*const fn (*Impl, impl_overlay_label, []const u8, bool) anyerror!void, &Impl.show_overlay);
-        _ = @as(*const fn (*Impl, impl_overlay_label) anyerror!void, &Impl.hide_overlay);
-        _ = @as(*const fn (*Impl, impl_overlay_label, []const u8) anyerror!void, &Impl.set_overlay_name);
-        _ = @as(*const fn (*Impl, impl_overlay_label, bool) anyerror!void, &Impl.set_overlay_blocking);
-        _ = @as(*const fn (*Impl, impl_selection_label) anyerror!void, &Impl.next_selection);
-        _ = @as(*const fn (*Impl, impl_selection_label) anyerror!void, &Impl.prev_selection);
-        _ = @as(*const fn (*Impl, impl_selection_label, usize) anyerror!void, &Impl.set_selection);
-        _ = @as(*const fn (*Impl, impl_selection_label) anyerror!void, &Impl.reset_selection);
-        _ = @as(*const fn (*Impl, impl_selection_label, usize) anyerror!void, &Impl.set_selection_count);
-        _ = @as(*const fn (*Impl, impl_selection_label, bool) anyerror!void, &Impl.set_selection_loop);
-        for (@typeInfo(impl_flow_label).@"enum".fields) |field| {
-            const sample_label = @field(impl_flow_label, field.name);
-            const SampleEdgeLabel = Impl.FlowEdgeLabel(sample_label);
-            const SampleMove = Impl.FlowMove(sample_label);
-
-            const FlowSignatureCheck = struct {
-                fn move(impl: *Impl, edge: SampleEdgeLabel) anyerror!void {
-                    try impl.move_flow(sample_label, .forward, edge);
-                }
-
-                fn available(impl: *Impl, allocator: glib.std.mem.Allocator) anyerror![]SampleMove {
-                    return try impl.available_moves(sample_label, allocator);
-                }
-
-                fn reset(impl: *Impl) anyerror!void {
-                    try impl.reset_flow(sample_label);
-                }
-            };
-
-            _ = &FlowSignatureCheck.move;
-            _ = &FlowSignatureCheck.available;
-            _ = &FlowSignatureCheck.reset;
-        }
         if (impl_store_type != void) {
             _ = @as(*const fn (*Impl) *impl_store_type, &Impl.store);
         }
@@ -375,6 +250,7 @@ pub fn make(comptime Impl: type) type {
 
         impl: Impl,
         store: if (impl_store_type == void) void else *impl_store_type,
+        custom_event_registar: CustomEventRegistar,
 
         pub const ImplType = Impl;
         pub const InitConfig = impl_init_config;
@@ -389,21 +265,18 @@ pub fn make(comptime Impl: type) type {
         pub const Root = if (@hasDecl(Impl, "Root")) Impl.Root else void;
         pub const ReducerHook = if (@hasDecl(Impl, "ReducerHook")) Impl.ReducerHook else void;
         pub const RenderHook = if (@hasDecl(Impl, "RenderHook")) Impl.RenderHook else void;
+        pub const Display = drivers.Display;
         pub const Imu = drivers.imu;
         pub const Modem = modem_api.Modem;
         pub const Nfc = drivers.nfc;
         pub const Wifi = drivers.wifi;
         pub const Label = if (@hasDecl(Impl, "Label")) Impl.Label else impl_periph_label;
         pub const PeriphLabel = impl_periph_label;
-        pub const RouterLabel = impl_router_label;
-        pub const FlowLabel = impl_flow_label;
-        pub const OverlayLabel = impl_overlay_label;
-        pub const SelectionLabel = impl_selection_label;
-        pub const FlowDirection = flow_event.Direction;
         pub const poller_count = if (@hasDecl(Impl, "poller_count")) Impl.poller_count else 0;
         pub const pixel_count = impl_pixel_count;
         pub const FrameType = impl_frame_type;
         pub const Event = if (@hasDecl(Impl, "Event")) Impl.Event else event_mod.Event;
+        pub const CustomEventRegistar = Impl.CustomEventRegistar;
         pub const Message = if (@hasDecl(Impl, "Message")) Impl.Message else MessageType;
         pub const Emitter = if (@hasDecl(Impl, "Emitter")) Impl.Emitter else EmitterType;
         pub const Node = if (@hasDecl(Impl, "Node")) Impl.Node else NodeType;
@@ -413,12 +286,8 @@ pub fn make(comptime Impl: type) type {
             return Impl.LedStrip(label);
         }
 
-        pub fn FlowEdgeLabel(comptime label: FlowLabel) type {
-            return Impl.FlowEdgeLabel(label);
-        }
-
-        pub fn FlowMove(comptime label: FlowLabel) type {
-            return Impl.FlowMove(label);
+        pub fn AudioSystem(comptime label: PeriphLabel) type {
+            return Impl.AudioSystem(label);
         }
 
         pub fn init(init_config: InitConfig) !Self {
@@ -426,6 +295,7 @@ pub fn make(comptime Impl: type) type {
             return .{
                 .impl = impl,
                 .store = if (impl_store_type == void) {} else impl.store(),
+                .custom_event_registar = CustomEventRegistar.init(),
             };
         }
 
@@ -445,12 +315,48 @@ pub fn make(comptime Impl: type) type {
             try self.impl.dispatch(message);
         }
 
+        pub fn initCustomEvent(self: *Self, comptime T: type, source_id: u32, payload: *T) event_mod.Custom {
+            return self.custom_event_registar.initEvent(T, source_id, payload);
+        }
+
+        pub fn audioSystem(self: *Self, comptime label: PeriphLabel) AudioSystem(label) {
+            return self.impl.audioSystem(label);
+        }
+
+        pub fn display(self: *Self, label: PeriphLabel) Display {
+            return self.impl.display(label);
+        }
+
+        pub fn outputSwitch(self: *Self, label: PeriphLabel) drivers.Switch {
+            return self.impl.outputSwitch(label);
+        }
+
+        pub fn pwm(self: *Self, label: PeriphLabel) drivers.Pwm {
+            return self.impl.pwm(label);
+        }
+
+        pub fn touch(self: *Self, label: PeriphLabel) drivers.Touch {
+            return self.impl.touch(label);
+        }
+
         pub fn press_single_button(self: *Self, label: PeriphLabel) !void {
             try self.impl.press_single_button(label);
         }
 
         pub fn release_single_button(self: *Self, label: PeriphLabel) !void {
             try self.impl.release_single_button(label);
+        }
+
+        pub fn touch_down(self: *Self, label: PeriphLabel, point: drivers.Touch.Point) !void {
+            try self.impl.touch_down(label, point);
+        }
+
+        pub fn touch_move(self: *Self, label: PeriphLabel, point: drivers.Touch.Point) !void {
+            try self.impl.touch_move(label, point);
+        }
+
+        pub fn touch_up(self: *Self, label: PeriphLabel) !void {
+            try self.impl.touch_up(label);
         }
 
         pub fn press_grouped_button(self: *Self, label: PeriphLabel, button_id: u32) !void {
@@ -561,6 +467,22 @@ pub fn make(comptime Impl: type) type {
             try self.impl.set_led_strip_rotate(label, frame, brightness, duration, interval);
         }
 
+        pub fn set_switch(self: *Self, label: PeriphLabel, enabled: bool) !void {
+            try self.impl.set_switch(label, enabled);
+        }
+
+        pub fn set_pwm(self: *Self, label: PeriphLabel, enabled: bool, frequency_hz: u32, duty: drivers.Pwm.Duty) !void {
+            try self.impl.set_pwm(label, enabled, frequency_hz, duty);
+        }
+
+        pub fn set_audio_system(self: *Self, label: PeriphLabel, state: component_audio_system.State) !void {
+            try self.impl.set_audio_system(label, state);
+        }
+
+        pub fn set_display(self: *Self, label: PeriphLabel, state: component_display.State) !void {
+            try self.impl.set_display(label, state);
+        }
+
         pub fn nfc_found(self: *Self, label: PeriphLabel, uid: []const u8, card_type: Nfc.CardType) !void {
             try self.impl.nfc_found(label, uid, card_type);
         }
@@ -611,95 +533,6 @@ pub fn make(comptime Impl: type) type {
 
         pub fn wifi_ap_lease_released(self: *Self, label: PeriphLabel, info: Wifi.Ap.LeaseInfo) !void {
             try self.impl.wifi_ap_lease_released(label, info);
-        }
-
-        pub fn router(self: *Self, label: RouterLabel) route.Router {
-            return self.impl.router(label);
-        }
-
-        pub fn push_route(self: *Self, label: RouterLabel, item: route.Router.Item) !void {
-            try self.impl.push_route(label, item);
-        }
-
-        pub fn replace_route(self: *Self, label: RouterLabel, item: route.Router.Item) !void {
-            try self.impl.replace_route(label, item);
-        }
-
-        pub fn reset_route(self: *Self, label: RouterLabel, item: route.Router.Item) !void {
-            try self.impl.reset_route(label, item);
-        }
-
-        pub fn pop_route(self: *Self, label: RouterLabel) !void {
-            try self.impl.pop_route(label);
-        }
-
-        pub fn pop_route_to_root(self: *Self, label: RouterLabel) !void {
-            try self.impl.pop_route_to_root(label);
-        }
-
-        pub fn set_route_transitioning(self: *Self, label: RouterLabel, value: bool) !void {
-            try self.impl.set_route_transitioning(label, value);
-        }
-
-        pub fn move_flow(
-            self: *Self,
-            comptime label: FlowLabel,
-            direction: FlowDirection,
-            edge: FlowEdgeLabel(label),
-        ) !void {
-            try self.impl.move_flow(label, direction, edge);
-        }
-
-        pub fn available_moves(
-            self: *Self,
-            comptime label: FlowLabel,
-            allocator: glib.std.mem.Allocator,
-        ) ![]FlowMove(label) {
-            return try self.impl.available_moves(label, allocator);
-        }
-
-        pub fn reset_flow(self: *Self, comptime label: FlowLabel) !void {
-            try self.impl.reset_flow(label);
-        }
-
-        pub fn show_overlay(self: *Self, label: OverlayLabel, name: []const u8, blocking: bool) !void {
-            try self.impl.show_overlay(label, name, blocking);
-        }
-
-        pub fn hide_overlay(self: *Self, label: OverlayLabel) !void {
-            try self.impl.hide_overlay(label);
-        }
-
-        pub fn set_overlay_name(self: *Self, label: OverlayLabel, name: []const u8) !void {
-            try self.impl.set_overlay_name(label, name);
-        }
-
-        pub fn set_overlay_blocking(self: *Self, label: OverlayLabel, value: bool) !void {
-            try self.impl.set_overlay_blocking(label, value);
-        }
-
-        pub fn next_selection(self: *Self, label: SelectionLabel) !void {
-            try self.impl.next_selection(label);
-        }
-
-        pub fn prev_selection(self: *Self, label: SelectionLabel) !void {
-            try self.impl.prev_selection(label);
-        }
-
-        pub fn set_selection(self: *Self, label: SelectionLabel, index: usize) !void {
-            try self.impl.set_selection(label, index);
-        }
-
-        pub fn reset_selection(self: *Self, label: SelectionLabel) !void {
-            try self.impl.reset_selection(label);
-        }
-
-        pub fn set_selection_count(self: *Self, label: SelectionLabel, count: usize) !void {
-            try self.impl.set_selection_count(label, count);
-        }
-
-        pub fn set_selection_loop(self: *Self, label: SelectionLabel, value: bool) !void {
-            try self.impl.set_selection_loop(label, value);
         }
     };
 

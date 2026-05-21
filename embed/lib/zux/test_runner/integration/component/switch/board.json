@@ -1,0 +1,45 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Component/switch",
+      "spec": {
+        "label": "status",
+        "id": 121
+      }
+    },
+    {
+      "kind": "Component/pwm",
+      "spec": {
+        "label": "dimmer",
+        "id": 122
+      }
+    },
+    {
+      "kind": "StatePath",
+      "spec": {
+        "path": "app/output",
+        "labels": [
+          "status",
+          "dimmer"
+        ]
+      }
+    },
+    {
+      "kind": "Render",
+      "spec": {
+        "label": "status_render",
+        "state_path": "app/output",
+        "fn_name": "SwitchRender.render"
+      }
+    },
+    {
+      "kind": "Render",
+      "spec": {
+        "label": "dimmer_render",
+        "state_path": "app/output",
+        "fn_name": "PwmRender.render"
+      }
+    }
+  ]
+}

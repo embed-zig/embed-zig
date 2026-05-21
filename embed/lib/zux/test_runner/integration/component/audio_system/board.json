@@ -1,0 +1,29 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Component/audio_system",
+      "spec": {
+        "label": "audio",
+        "id": 101
+      }
+    },
+    {
+      "kind": "StatePath",
+      "spec": {
+        "path": "app/audio",
+        "labels": [
+          "audio"
+        ]
+      }
+    },
+    {
+      "kind": "Render",
+      "spec": {
+        "label": "audio_render",
+        "state_path": "app/audio",
+        "fn_name": "AudioRender.render"
+      }
+    }
+  ]
+}

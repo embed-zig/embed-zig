@@ -13,6 +13,7 @@ pub fn make(comptime AppType: type) type {
 
             pub const InstanceVTable = struct {
                 config: *const fn (ptr: *anyopaque) InitConfig,
+                start: *const fn (ptr: *anyopaque, app: *AppType) anyerror!void,
                 deinit: *const fn (ptr: *anyopaque) void,
             };
 
@@ -35,6 +36,13 @@ pub fn make(comptime AppType: type) type {
                         return self.config();
                     }
 
+                    fn startFn(ptr: *anyopaque, app: *AppType) !void {
+                        if (@hasDecl(Impl, "start")) {
+                            const self: *Impl = @ptrCast(@alignCast(ptr));
+                            try self.start(app);
+                        }
+                    }
+
                     fn deinitFn(ptr: *anyopaque) void {
                         const self: *Impl = @ptrCast(@alignCast(ptr));
                         self.deinit();
@@ -42,6 +50,7 @@ pub fn make(comptime AppType: type) type {
 
                     const vtable = InstanceVTable{
                         .config = configFn,
+                        .start = startFn,
                         .deinit = deinitFn,
                     };
                 };
@@ -54,6 +63,10 @@ pub fn make(comptime AppType: type) type {
 
             pub fn config(self: Instance) InitConfig {
                 return self.vtable.config(self.ptr);
+            }
+
+            pub fn start(self: Instance, app: *AppType) !void {
+                try self.vtable.start(self.ptr, app);
             }
 
             pub fn deinit(self: Instance) void {

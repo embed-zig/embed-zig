@@ -35,7 +35,7 @@ pub fn clearEventReceiver(self: root) void {
 
 fn eventReceiverEmitUpdate(ctx: *const anyopaque, update: drivers.nfc.Update) void {
     const receiver: *const EventReceiver = @ptrCast(@alignCast(ctx));
-    const value = event.make(zux_event.Event, update, null) catch @panic("zux.component.nfc received invalid adapter event");
+    const value = event.make(zux_event.Event, update) catch @panic("zux.component.nfc received invalid adapter event");
     receiver.emit(value);
 }
 

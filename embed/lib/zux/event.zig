@@ -1,16 +1,16 @@
 const glib = @import("glib");
 
-pub const Context = @import("event/Context.zig");
+pub const Custom = @import("event/Custom.zig");
+pub const CustomRegistar = @import("event/CustomRegistar.zig");
 pub const EventReceiver = @import("event/EventReceiver.zig");
 const bt_event = @import("component/bt/event.zig");
 const button_event = @import("component/button/event.zig");
+const audio_system_event = @import("component/audio_system/event.zig");
+const display_event = @import("component/display/event.zig");
 const modem_event = @import("component/modem/event.zig");
 const nfc_event = @import("component/nfc/event.zig");
+const switch_event = @import("component/switch/event.zig");
 const touch_event = @import("component/touch/event.zig");
-const ui_flow_event = @import("component/ui/flow/event.zig");
-const ui_overlay_event = @import("component/ui/overlay/event.zig");
-const ui_route_event = @import("component/ui/route/event.zig");
-const ui_selection_event = @import("component/ui/selection/event.zig");
 const wifi_event = @import("component/wifi/event.zig");
 
 pub fn make(comptime Events: anytype) type {
@@ -56,14 +56,24 @@ pub fn make(comptime Events: anytype) type {
 
 pub const Event = make(.{
     @import("pipeline/Tick.zig"),
+    Custom,
     button_event.Single,
     button_event.Grouped,
     button_event.Detected,
+    audio_system_event.Start,
+    audio_system_event.Stop,
+    audio_system_event.SetGain,
+    audio_system_event.IncGain,
+    audio_system_event.DecGain,
+    audio_system_event.SetMicGains,
+    display_event.Set,
     @import("component/ledstrip/event.zig").Set,
     @import("component/ledstrip/event.zig").SetPixels,
     @import("component/ledstrip/event.zig").Flash,
     @import("component/ledstrip/event.zig").Pingpong,
     @import("component/ledstrip/event.zig").Rotate,
+    switch_event.Set,
+    switch_event.PwmSet,
     @import("component/imu/event.zig").Accel,
     @import("component/imu/event.zig").Gyro,
     @import("component/imu/event.zig").Motion,
@@ -96,29 +106,13 @@ pub const Event = make(.{
     bt_event.PeriphAdvertisingStopped,
     bt_event.CentralFound,
     bt_event.CentralConnected,
+    bt_event.CentralConnectionUpdated,
     bt_event.CentralDisconnected,
     bt_event.CentralNotification,
     bt_event.PeriphConnected,
+    bt_event.PeriphConnectionUpdated,
     bt_event.PeriphDisconnected,
     bt_event.PeriphMtuChanged,
-    ui_flow_event.Move,
-    ui_flow_event.Reset,
-    ui_overlay_event.Show,
-    ui_overlay_event.Hide,
-    ui_overlay_event.SetName,
-    ui_overlay_event.SetBlocking,
-    ui_selection_event.Next,
-    ui_selection_event.Prev,
-    ui_selection_event.Set,
-    ui_selection_event.Reset,
-    ui_selection_event.SetCount,
-    ui_selection_event.SetLoop,
-    ui_route_event.Push,
-    ui_route_event.Replace,
-    ui_route_event.Reset,
-    ui_route_event.Pop,
-    ui_route_event.PopToRoot,
-    ui_route_event.SetTransitioning,
     @import("NetStack.zig").NetifCreatedEvent,
     @import("NetStack.zig").NetifDestroyedEvent,
     @import("NetStack.zig").NetifUpEvent,

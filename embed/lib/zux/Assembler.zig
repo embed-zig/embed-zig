@@ -2,27 +2,22 @@ const Config = @import("assembler/Config.zig");
 const assembler_builder = @import("assembler/Builder.zig");
 const BuildContext = @import("assembler/BuildContext.zig");
 const assembler_build_config = @import("assembler/BuildConfig.zig");
+const registry_bt = @import("assembler/registry/bt.zig");
+const registry_audio_system = @import("assembler/registry/audio_system.zig");
 const registry_adc_button = @import("assembler/registry/adc_button.zig");
-const registry_flow = @import("assembler/registry/flow.zig");
-const registry_gpio_button = @import("assembler/registry/gpio_button.zig");
+const registry_custom_event = @import("assembler/registry/custom_event.zig");
+const registry_display = @import("assembler/registry/display.zig");
+const registry_single_button = @import("assembler/registry/single_button.zig");
 const registry_imu = @import("assembler/registry/imu.zig");
 const registry_ledstrip = @import("assembler/registry/ledstrip.zig");
 const registry_modem = @import("assembler/registry/modem.zig");
 const registry_nfc = @import("assembler/registry/nfc.zig");
+const registry_switch = @import("assembler/registry/switch.zig");
 const registry_touch = @import("assembler/registry/touch.zig");
 const registry_wifi_ap = @import("assembler/registry/wifi_ap.zig");
 const registry_wifi_sta = @import("assembler/registry/wifi_sta.zig");
-const registry_overlay = @import("assembler/registry/overlay.zig");
-const registry_router = @import("assembler/registry/router.zig");
-const registry_selection = @import("assembler/registry/selection.zig");
 const registry_unique = @import("assembler/registry/unique.zig");
 const Store = @import("Store.zig");
-
-pub const FlowTypeFactory = @TypeOf(struct {
-    fn factory() type {
-        unreachable;
-    }
-}.factory);
 
 pub fn make(
     comptime grt: type,
@@ -39,37 +34,41 @@ pub fn make(
         label: []const u8,
         name: []const u8,
     };
+    const BtRegistryType = registry_bt.make(config.max_bt_hosts);
     const AdcButtonRegistryType = registry_adc_button.make(config.max_adc_buttons);
-    const FlowRegistryType = registry_flow.make(config.max_flows);
-    const GpioButtonRegistryType = registry_gpio_button.make(config.max_gpio_buttons);
+    const AudioSystemRegistryType = registry_audio_system.make(config.max_audio_systems);
+    const DisplayRegistryType = registry_display.make(config.max_displays);
+    const SingleButtonRegistryType = registry_single_button.make(config.max_single_buttons);
     const ImuRegistryType = registry_imu.make(config.max_imu);
     const LedStripRegistryType = registry_ledstrip.make(config.max_led_strips);
     const ModemRegistryType = registry_modem.make(config.max_modem);
     const NfcRegistryType = registry_nfc.make(config.max_nfc);
+    const SwitchRegistryType = registry_switch.makeSwitch(config.max_switches);
+    const PwmRegistryType = registry_switch.makePwm(config.max_pwms);
     const TouchRegistryType = registry_touch.make(config.max_touch);
     const WifiStaRegistryType = registry_wifi_sta.make(config.max_wifi_sta);
     const WifiApRegistryType = registry_wifi_ap.make(config.max_wifi_ap);
-    const OverlayRegistryType = registry_overlay.make(config.max_overlays);
-    const RouterRegistryType = registry_router.make(config.max_routers);
-    const SelectionRegistryType = registry_selection.make(config.max_selections);
+    const CustomEventRegistryType = registry_custom_event.make(config.max_custom_events);
 
     return struct {
         const Self = @This();
 
         store_builder: StoreBuilderType,
+        bt_registry: BtRegistryType,
         adc_button_registry: AdcButtonRegistryType,
-        flow_registry: FlowRegistryType,
-        gpio_button_registry: GpioButtonRegistryType,
+        audio_system_registry: AudioSystemRegistryType,
+        display_registry: DisplayRegistryType,
+        single_button_registry: SingleButtonRegistryType,
         imu_registry: ImuRegistryType,
         ledstrip_registry: LedStripRegistryType,
         modem_registry: ModemRegistryType,
         nfc_registry: NfcRegistryType,
+        switch_registry: SwitchRegistryType,
+        pwm_registry: PwmRegistryType,
         touch_registry: TouchRegistryType,
         wifi_sta_registry: WifiStaRegistryType,
         wifi_ap_registry: WifiApRegistryType,
-        overlay_registry: OverlayRegistryType,
-        router_registry: RouterRegistryType,
-        selection_registry: SelectionRegistryType,
+        custom_event_registry: CustomEventRegistryType,
         render_bindings: [max_render_bindings]RenderBinding = undefined,
         render_count: usize = 0,
         reducer_bindings: [config.max_reducers]ReducerBinding = undefined,
@@ -82,19 +81,21 @@ pub fn make(
         pub fn init() Self {
             return .{
                 .store_builder = StoreBuilderType.init(),
+                .bt_registry = BtRegistryType.init(),
                 .adc_button_registry = AdcButtonRegistryType.init(),
-                .flow_registry = FlowRegistryType.init(),
-                .gpio_button_registry = GpioButtonRegistryType.init(),
+                .audio_system_registry = AudioSystemRegistryType.init(),
+                .display_registry = DisplayRegistryType.init(),
+                .single_button_registry = SingleButtonRegistryType.init(),
                 .imu_registry = ImuRegistryType.init(),
                 .ledstrip_registry = LedStripRegistryType.init(),
                 .modem_registry = ModemRegistryType.init(),
                 .nfc_registry = NfcRegistryType.init(),
+                .switch_registry = SwitchRegistryType.init(),
+                .pwm_registry = PwmRegistryType.init(),
                 .touch_registry = TouchRegistryType.init(),
                 .wifi_sta_registry = WifiStaRegistryType.init(),
                 .wifi_ap_registry = WifiApRegistryType.init(),
-                .overlay_registry = OverlayRegistryType.init(),
-                .router_registry = RouterRegistryType.init(),
-                .selection_registry = SelectionRegistryType.init(),
+                .custom_event_registry = CustomEventRegistryType.init(),
             };
         }
 
@@ -161,7 +162,43 @@ pub fn make(
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
-            self.gpio_button_registry.add(label, id);
+            self.single_button_registry.add(label, id);
+        }
+
+        pub fn addVirtualSingleButton(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.single_button_registry.addVirtual(label, id);
+        }
+
+        pub fn addAudioSystem(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.audio_system_registry.add(label, id);
+        }
+
+        pub fn addBt(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.bt_registry.add(label, id);
+        }
+
+        pub fn addDisplay(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.display_registry.add(label, id);
         }
 
         pub fn addImu(
@@ -201,13 +238,32 @@ pub fn make(
             self.nfc_registry.add(label, id);
         }
 
-        pub fn addTouch(
+        pub fn addSwitch(
             self: *Self,
             comptime label: []const u8,
             comptime id: u32,
         ) void {
             ensureComponentUnique(self, label, id);
-            self.touch_registry.add(label, id);
+            self.switch_registry.add(label, id);
+        }
+
+        pub fn addPwm(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.pwm_registry.add(label, id);
+        }
+
+        pub fn addTouch(
+            self: *Self,
+            comptime label: []const u8,
+            comptime id: u32,
+            comptime target: ?[]const u8,
+        ) void {
+            ensureComponentUnique(self, label, id);
+            self.touch_registry.add(label, id, target);
         }
 
         pub fn addWifiSta(
@@ -228,85 +284,59 @@ pub fn make(
             self.wifi_ap_registry.add(label, id);
         }
 
-        pub fn addRouter(
-            self: *Self,
-            comptime label: []const u8,
-            comptime id: u32,
-        ) void {
-            ensureComponentUnique(self, label, id);
-            self.router_registry.add(label, id);
-            self.store_builder.setStore(label, assembler_builder.makeRouterStoreType(grt));
-        }
-
-        pub fn addFlow(
-            self: *Self,
-            comptime label: []const u8,
-            comptime id: u32,
-            comptime FlowType: type,
-        ) void {
-            ensureComponentUnique(self, label, id);
-            self.flow_registry.add(label, id, FlowType);
-        }
-
-        pub fn addOverlay(
-            self: *Self,
-            comptime label: []const u8,
-            comptime id: u32,
-        ) void {
-            ensureComponentUnique(self, label, id);
-            self.overlay_registry.add(label, id);
-            self.store_builder.setStore(label, assembler_builder.makeOverlayStoreType(grt));
-        }
-
-        pub fn addSelection(
-            self: *Self,
-            comptime label: []const u8,
-            comptime id: u32,
-        ) void {
-            ensureComponentUnique(self, label, id);
-            self.selection_registry.add(label, id);
-            self.store_builder.setStore(label, assembler_builder.makeSelectionStoreType(grt));
+        pub fn registerCustomEvent(self: *Self, comptime EventType: type) void {
+            self.custom_event_registry.add(EventType);
         }
 
         pub fn BuildConfig(comptime self: Self) type {
             return assembler_build_config.make(.{
+                .bt = self.bt_registry,
                 .adc_button = self.adc_button_registry,
-                .gpio_button = self.gpio_button_registry,
+                .audio_system = self.audio_system_registry,
+                .display = self.display_registry,
+                .single_button = self.single_button_registry,
                 .imu = self.imu_registry,
                 .ledstrip = self.ledstrip_registry,
                 .modem = self.modem_registry,
                 .nfc = self.nfc_registry,
+                .switch_output = self.switch_registry,
+                .pwm = self.pwm_registry,
                 .touch = self.touch_registry,
                 .wifi_sta = self.wifi_sta_registry,
                 .wifi_ap = self.wifi_ap_registry,
             });
         }
 
-        pub fn build(comptime self: Self, comptime build_config: self.BuildConfig()) type {
+        pub fn build(
+            comptime self: Self,
+            comptime build_config: self.BuildConfig(),
+        ) type {
             return assembler_builder.init().build(BuildContext.make(.{
                 .grt = grt,
                 .assembler_config = config,
                 .build_config = build_config,
                 .registries = .{
+                    .bt = self.bt_registry,
                     .adc_button = self.adc_button_registry,
-                    .gpio_button = self.gpio_button_registry,
+                    .audio_system = self.audio_system_registry,
+                    .display = self.display_registry,
+                    .single_button = self.single_button_registry,
                     .imu = self.imu_registry,
                     .ledstrip = self.ledstrip_registry,
                     .modem = self.modem_registry,
                     .nfc = self.nfc_registry,
+                    .switch_output = self.switch_registry,
+                    .pwm = self.pwm_registry,
                     .touch = self.touch_registry,
                     .wifi_sta = self.wifi_sta_registry,
                     .wifi_ap = self.wifi_ap_registry,
                 },
-                .flow_registry = self.flow_registry,
-                .overlay_registry = self.overlay_registry,
-                .router_registry = self.router_registry,
-                .selection_registry = self.selection_registry,
                 .store_builder = self.store_builder,
                 .render_bindings = self.render_bindings,
                 .render_count = self.render_count,
                 .reducer_bindings = self.reducer_bindings,
                 .reducer_count = self.reducer_count,
+                .custom_event_registar = self.custom_event_registry.Registar(),
             }));
         }
 
@@ -319,18 +349,19 @@ pub fn make(
             registry_unique.ensureUniqueAcross(
                 .{
                     self.adc_button_registry,
-                    self.gpio_button_registry,
+                    self.bt_registry,
+                    self.audio_system_registry,
+                    self.display_registry,
+                    self.single_button_registry,
                     self.imu_registry,
                     self.ledstrip_registry,
                     self.modem_registry,
                     self.nfc_registry,
+                    self.switch_registry,
+                    self.pwm_registry,
                     self.touch_registry,
                     self.wifi_sta_registry,
                     self.wifi_ap_registry,
-                    self.flow_registry,
-                    self.overlay_registry,
-                    self.router_registry,
-                    self.selection_registry,
                 },
                 label_name,
                 id,
@@ -364,6 +395,9 @@ pub fn make(
             if (path.len == 0) {
                 @compileError("zux.Assembler.addRender paths must not be empty");
             }
+            if (storePathLabel(path)) |_| {
+                return path;
+            }
             if (path[0] == '/' or path[path.len - 1] == '/') {
                 @compileError("zux.Assembler.addRender paths must not start or end with '/'");
             }
@@ -385,6 +419,24 @@ pub fn make(
                 @compileError("zux.Assembler.addRender paths must not contain empty segments");
             }
             return path;
+        }
+
+        fn storePathLabel(comptime path: []const u8) ?[]const u8 {
+            const prefix = "$store/";
+            if (path.len <= prefix.len) return null;
+            inline for (prefix, 0..) |ch, idx| {
+                if (path[idx] != ch) return null;
+            }
+            const label = path[prefix.len..];
+            inline for (label) |ch| {
+                if (ch == '/') {
+                    @compileError("zux.Assembler.addRender $store paths must be exactly $store/{store_label}");
+                }
+                if (ch == '.') {
+                    @compileError("zux.Assembler.addRender $store labels must not contain dots");
+                }
+            }
+            return label;
         }
 
         fn comptimeEql(comptime a: []const u8, comptime b: []const u8) bool {

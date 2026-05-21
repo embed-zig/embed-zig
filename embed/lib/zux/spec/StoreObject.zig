@@ -296,6 +296,11 @@ fn typeFromName(comptime name: []const u8) type {
     if (comptimeEql(name, "f64")) return f64;
     if (comptimeEql(name, "[]const u8")) return []const u8;
     if (comptimeEql(name, "string")) return []const u8;
+    if (comptimeEql(name, "[32]u8")) return [32]u8;
+    if (comptimeEql(name, "[48]u8")) return [48]u8;
+    if (comptimeEql(name, "[64]u8")) return [64]u8;
+    if (comptimeEql(name, "[80]u8")) return [80]u8;
+    if (comptimeEql(name, "[96]u8")) return [96]u8;
 
     @compileError("zux.spec.StoreObject encountered an unsupported type name in JSON");
 }

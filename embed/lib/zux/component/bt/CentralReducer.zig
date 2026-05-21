@@ -11,7 +11,7 @@ pub fn init() CentralReducer {
     return .{};
 }
 
-pub fn reduce(self: *CentralReducer, store: anytype, message: Message, emit: Emitter) !usize {
+pub fn reduce(self: *CentralReducer, store: anytype, message: Message, emit: Emitter) !void {
     _ = self;
     _ = emit;
 
@@ -32,6 +32,20 @@ pub fn reduce(self: *CentralReducer, store: anytype, message: Message, emit: Emi
         .ble_central_connected => |value| {
             store.invoke(value, struct {
                 fn apply(state: *CentralState, event_value: bt_event.CentralConnected) void {
+                    state.source_id = event_value.source_id;
+                    state.connected = true;
+                    state.conn_handle = event_value.conn_handle;
+                    state.peer_addr = event_value.peer_addr;
+                    state.peer_addr_type = event_value.peer_addr_type;
+                    state.interval = event_value.interval;
+                    state.latency = event_value.latency;
+                    state.supervision_timeout = event_value.supervision_timeout;
+                }
+            }.apply);
+        },
+        .ble_central_connection_updated => |value| {
+            store.invoke(value, struct {
+                fn apply(state: *CentralState, event_value: bt_event.CentralConnectionUpdated) void {
                     state.source_id = event_value.source_id;
                     state.connected = true;
                     state.conn_handle = event_value.conn_handle;
@@ -67,9 +81,8 @@ pub fn reduce(self: *CentralReducer, store: anytype, message: Message, emit: Emi
                 }
             }.apply);
         },
-        else => return 0,
+        else => return,
     }
-    return 0;
 }
 
 pub fn deinit(self: *CentralReducer) void {
@@ -93,7 +106,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var sink = NoopSink{};
             const emit = Emitter.init(&sink);
 
-            try grt.std.testing.expectEqual(@as(usize, 0), try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_central_found = .{
@@ -116,8 +129,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         },
                     },
                 },
-            }, emit));
-            try grt.std.testing.expectEqual(@as(usize, 0), try reducer.reduce(&store, .{
+            }, emit);
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_central_connected = .{
@@ -130,8 +143,22 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .supervision_timeout = 2 * glib.time.duration.Second,
                     },
                 },
-            }, emit));
-            try grt.std.testing.expectEqual(@as(usize, 0), try reducer.reduce(&store, .{
+            }, emit);
+            try reducer.reduce(&store, .{
+                .origin = .source,
+                .body = .{
+                    .ble_central_connection_updated = .{
+                        .source_id = 9,
+                        .conn_handle = 0x0040,
+                        .peer_addr = .{ 1, 2, 3, 4, 5, 6 },
+                        .peer_addr_type = .random,
+                        .interval = 12,
+                        .latency = 0,
+                        .supervision_timeout = 2 * glib.time.duration.Second,
+                    },
+                },
+            }, emit);
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_central_notification = .{
@@ -146,20 +173,22 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         },
                     },
                 },
-            }, emit));
+            }, emit);
 
             store.tick();
             const state = store.get();
             try grt.std.testing.expectEqual(@as(u32, 9), state.source_id);
             try grt.std.testing.expect(state.connected);
             try grt.std.testing.expectEqual(@as(?u16, 0x0040), state.conn_handle);
+            try grt.std.testing.expectEqual(@as(u16, 12), state.interval);
+            try grt.std.testing.expectEqual(@as(u16, 0), state.latency);
             try grt.std.testing.expectEqual(@as(?i8, -48), state.last_rssi);
             try grt.std.testing.expectEqualStrings("peer", state.name());
             try grt.std.testing.expectEqualSlices(u8, &.{ 0x01, 0x02, 0x03 }, state.advData());
             try grt.std.testing.expectEqual(@as(?u16, 0x0025), state.last_notification_attr_handle);
             try grt.std.testing.expectEqualStrings("abc", state.lastNotification());
 
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_central_disconnected = .{

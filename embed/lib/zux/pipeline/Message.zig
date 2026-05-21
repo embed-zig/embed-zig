@@ -23,6 +23,13 @@ pub fn kind(self: Message) Kind {
     };
 }
 
+pub fn deinit(self: Message) void {
+    switch (self.body) {
+        .custom => |custom| custom.deinit(),
+        else => {},
+    }
+}
+
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const TestCase = struct {
         fn tagTracksBodyVariant() !void {

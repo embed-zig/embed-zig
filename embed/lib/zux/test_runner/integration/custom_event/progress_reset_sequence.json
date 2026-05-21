@@ -1,0 +1,43 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "custom progress reset sequence",
+    "description": "applies a registered reset event with an empty payload object.",
+    "initial_state": {
+      "progress": {
+        "seen": true,
+        "source_id": 77,
+        "value": 99,
+        "updates": 4,
+        "reset_count": 1,
+        "last_kind": "delta"
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "custom": {
+              "type": "test.progress.reset",
+              "source_id": 303,
+              "payload": {}
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "progress",
+            "state": {
+              "seen": false,
+              "source_id": 303,
+              "value": 0,
+              "updates": 5,
+              "reset_count": 2,
+              "last_kind": "reset"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

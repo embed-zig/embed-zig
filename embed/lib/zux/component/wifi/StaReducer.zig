@@ -12,7 +12,7 @@ pub fn init() StaReducer {
     return .{};
 }
 
-pub fn reduce(self: *StaReducer, store: anytype, message: Message, emit: Emitter) !usize {
+pub fn reduce(self: *StaReducer, store: anytype, message: Message, emit: Emitter) !void {
     _ = self;
     _ = emit;
 
@@ -95,9 +95,8 @@ pub fn reduce(self: *StaReducer, store: anytype, message: Message, emit: Emitter
                 }
             }.apply);
         },
-        else => return 0,
+        else => return,
     }
-    return 0;
 }
 
 pub fn deinit(self: *StaReducer) void {
@@ -121,7 +120,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var sink = NoopSink{};
             const emit = Emitter.init(&sink);
 
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .wifi_sta_scan_result = .{
@@ -139,7 +138,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .wifi_sta_connected = .{
@@ -157,7 +156,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .wifi_sta_got_ip = .{
@@ -181,7 +180,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(Addr.from4(.{ 192, 168, 4, 2 }), connected.address.?);
             try grt.std.testing.expectEqual(Addr.from4(.{ 1, 1, 1, 1 }), connected.dns1.?);
 
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .wifi_sta_lost_ip = .{
@@ -189,7 +188,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .wifi_sta_disconnected = .{

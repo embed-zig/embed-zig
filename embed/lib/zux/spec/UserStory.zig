@@ -1,5 +1,8 @@
 const glib = @import("glib");
 const JsonParser = @import("JsonParser.zig");
+const TestAudioSystem = @import("TestAudioSystem.zig");
+const TestDisplay = @import("TestDisplay.zig");
+const TestSwitch = @import("TestSwitch.zig");
 const UserStory = @This();
 
 pub const Step = struct {
@@ -135,8 +138,8 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                     .{},
                 );
                 defer event_value.deinit();
-                var event = try decodeJsonValue(ZuxApp.Event, allocator, event_value.value);
-                defer freeDecodedValue(ZuxApp.Event, allocator, &event);
+                var event = try decodeEventJsonValue(ZuxApp, allocator, event_value.value);
+                defer freeEventDecodedValue(ZuxApp, allocator, &event);
 
                 try runner.dispatchInput(event, timestamp.*);
                 runner.app.store.tick();
@@ -173,6 +176,10 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
             }
 
             if (try runner.checkLedStripOutput(allocator, output)) return;
+            if (try runner.checkAudioSystemOutput(allocator, output)) return;
+            if (try runner.checkDisplayOutput(allocator, output)) return;
+            if (try runner.checkSwitchOutput(allocator, output)) return;
+            if (try runner.checkPwmOutput(allocator, output)) return;
             return error.UnknownStoreLabel;
         }
 
@@ -203,6 +210,118 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
             return false;
         }
 
+        fn checkAudioSystemOutput(runner: *@This(), allocator: glib.std.mem.Allocator, output: Output) !bool {
+            inline for (0..ZuxApp.registries.audio_system.len) |i| {
+                const periph = ZuxApp.registries.audio_system.periphs[i];
+                const audio_label = comptime periph.label ++ "_driver";
+                if (glib.std.mem.eql(u8, output.label, audio_label)) {
+                    var state_value = try glib.std.json.parseFromSlice(
+                        glib.std.json.Value,
+                        allocator,
+                        output.state,
+                        .{},
+                    );
+                    defer state_value.deinit();
+                    const audio_system = runner.app.audioSystem(@field(ZuxApp.PeriphLabel, periph.label));
+                    const test_audio_system: *TestAudioSystem = @ptrCast(@alignCast(audio_system));
+                    if (!try jsonValueMatches(TestAudioSystem.State, state_value.value, test_audio_system.state)) {
+                        glib.std.debug.print(
+                            "zux UserStory mismatch label={s} expected={s} actual={any}\n",
+                            .{ output.label, output.state, test_audio_system.state },
+                        );
+                        return error.StateMismatch;
+                    }
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        fn checkDisplayOutput(runner: *@This(), allocator: glib.std.mem.Allocator, output: Output) !bool {
+            inline for (0..ZuxApp.registries.display.len) |i| {
+                const periph = ZuxApp.registries.display.periphs[i];
+                const display_label = comptime periph.label ++ "_driver";
+                if (glib.std.mem.eql(u8, output.label, display_label)) {
+                    var state_value = try glib.std.json.parseFromSlice(
+                        glib.std.json.Value,
+                        allocator,
+                        output.state,
+                        .{},
+                    );
+                    defer state_value.deinit();
+                    const display_api = runner.app.display(@field(ZuxApp.PeriphLabel, periph.label));
+                    const test_display: *TestDisplay = @ptrCast(@alignCast(display_api.ptr));
+                    if (!try jsonValueMatches(TestDisplay.State, state_value.value, test_display.state)) {
+                        glib.std.debug.print(
+                            "zux UserStory mismatch label={s} expected={s} actual={any}\n",
+                            .{ output.label, output.state, test_display.state },
+                        );
+                        return error.StateMismatch;
+                    }
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        fn checkSwitchOutput(runner: *@This(), allocator: glib.std.mem.Allocator, output: Output) !bool {
+            inline for (0..ZuxApp.registries.switch_output.len) |i| {
+                const periph = ZuxApp.registries.switch_output.periphs[i];
+                const switch_label = comptime periph.label ++ "_driver";
+                if (glib.std.mem.eql(u8, output.label, switch_label)) {
+                    var state_value = try glib.std.json.parseFromSlice(
+                        glib.std.json.Value,
+                        allocator,
+                        output.state,
+                        .{},
+                    );
+                    defer state_value.deinit();
+                    const switch_api = runner.app.outputSwitch(@field(ZuxApp.PeriphLabel, periph.label));
+                    const test_switch: *TestSwitch.Switch = @ptrCast(@alignCast(switch_api.ptr));
+                    if (!try jsonValueMatches(TestSwitch.Switch.State, state_value.value, test_switch.state)) {
+                        glib.std.debug.print(
+                            "zux UserStory mismatch label={s} expected={s} actual={any}\n",
+                            .{ output.label, output.state, test_switch.state },
+                        );
+                        return error.StateMismatch;
+                    }
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        fn checkPwmOutput(runner: *@This(), allocator: glib.std.mem.Allocator, output: Output) !bool {
+            inline for (0..ZuxApp.registries.pwm.len) |i| {
+                const periph = ZuxApp.registries.pwm.periphs[i];
+                const pwm_label = comptime periph.label ++ "_driver";
+                if (glib.std.mem.eql(u8, output.label, pwm_label)) {
+                    var state_value = try glib.std.json.parseFromSlice(
+                        glib.std.json.Value,
+                        allocator,
+                        output.state,
+                        .{},
+                    );
+                    defer state_value.deinit();
+                    const pwm_api = runner.app.pwm(@field(ZuxApp.PeriphLabel, periph.label));
+                    const test_pwm: *TestSwitch.Pwm = @ptrCast(@alignCast(pwm_api.ptr));
+                    if (!try jsonValueMatches(TestSwitch.Pwm.State, state_value.value, test_pwm.state)) {
+                        glib.std.debug.print(
+                            "zux UserStory mismatch label={s} expected={s} actual={any}\n",
+                            .{ output.label, output.state, test_pwm.state },
+                        );
+                        return error.StateMismatch;
+                    }
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         fn dispatchInput(
             runner: *@This(),
             event: ZuxApp.Event,
@@ -220,6 +339,15 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                         .timestamp = timestamp,
                         .body = event,
                     });
+                },
+                .display_set => |value| {
+                    try runner.app.set_display(
+                        try displayLabelForSourceId(value.source_id),
+                        .{
+                            .enabled = value.enabled,
+                            .brightness = value.brightness,
+                        },
+                    );
                 },
                 .ledstrip_set => |value| {
                     try runner.app.set_led_strip_animated(
@@ -257,6 +385,20 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
                         value.interval,
                     );
                 },
+                .switch_set => |value| {
+                    try runner.app.set_switch(
+                        try switchLabelForSourceId(value.source_id),
+                        value.enabled,
+                    );
+                },
+                .pwm_set => |value| {
+                    try runner.app.set_pwm(
+                        try pwmLabelForSourceId(value.source_id),
+                        value.enabled,
+                        value.frequency_hz,
+                        value.duty,
+                    );
+                },
                 else => {
                     runner.app.dispatch(.{
                         .origin = .manual,
@@ -276,6 +418,50 @@ pub fn createTestRunner(self: *const UserStory, comptime ZuxApp: type, app: *Zux
             }
 
             return error.UnknownLedStripSourceId;
+        }
+
+        fn audioSystemLabelForSourceId(source_id: u32) !ZuxApp.PeriphLabel {
+            inline for (0..ZuxApp.registries.audio_system.len) |i| {
+                const periph = ZuxApp.registries.audio_system.periphs[i];
+                if (source_id == periph.id) {
+                    return @field(ZuxApp.PeriphLabel, periph.label);
+                }
+            }
+
+            return error.UnknownAudioSystemSourceId;
+        }
+
+        fn displayLabelForSourceId(source_id: u32) !ZuxApp.PeriphLabel {
+            inline for (0..ZuxApp.registries.display.len) |i| {
+                const periph = ZuxApp.registries.display.periphs[i];
+                if (source_id == periph.id) {
+                    return @field(ZuxApp.PeriphLabel, periph.label);
+                }
+            }
+
+            return error.UnknownDisplaySourceId;
+        }
+
+        fn switchLabelForSourceId(source_id: u32) !ZuxApp.PeriphLabel {
+            inline for (0..ZuxApp.registries.switch_output.len) |i| {
+                const periph = ZuxApp.registries.switch_output.periphs[i];
+                if (source_id == periph.id) {
+                    return @field(ZuxApp.PeriphLabel, periph.label);
+                }
+            }
+
+            return error.UnknownSwitchSourceId;
+        }
+
+        fn pwmLabelForSourceId(source_id: u32) !ZuxApp.PeriphLabel {
+            inline for (0..ZuxApp.registries.pwm.len) |i| {
+                const periph = ZuxApp.registries.pwm.periphs[i];
+                if (source_id == periph.id) {
+                    return @field(ZuxApp.PeriphLabel, periph.label);
+                }
+            }
+
+            return error.UnknownPwmSourceId;
         }
 
         fn ledStripFrame(pixels: anytype) ZuxApp.FrameType {
@@ -745,6 +931,29 @@ fn decodeJsonValue(
     };
 }
 
+fn decodeEventJsonValue(
+    comptime ZuxApp: type,
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
+) !ZuxApp.Event {
+    const object = switch (value) {
+        .object => |object| object,
+        else => return error.ExpectedUnionObject,
+    };
+
+    var iterator = object.iterator();
+    const entry = iterator.next() orelse return error.ExpectedUnionObject;
+    if (iterator.next() != null) return error.InvalidUnionObject;
+
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "custom")) {
+        return .{
+            .custom = try ZuxApp.CustomEventRegistar.init().decodeJson(allocator, entry.value_ptr.*),
+        };
+    }
+
+    return try decodeJsonValue(ZuxApp.Event, allocator, value);
+}
+
 fn castJsonInteger(comptime T: type, int_value: i64) !T {
     const info = @typeInfo(T).int;
     if (info.signedness == .signed) {
@@ -936,6 +1145,17 @@ fn freeDecodedValue(
         },
 
         else => {},
+    }
+}
+
+fn freeEventDecodedValue(
+    comptime ZuxApp: type,
+    allocator: glib.std.mem.Allocator,
+    value: *const ZuxApp.Event,
+) void {
+    switch (value.*) {
+        .custom => {},
+        else => freeDecodedValue(ZuxApp.Event, allocator, value),
     }
 }
 

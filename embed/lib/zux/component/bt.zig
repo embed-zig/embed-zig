@@ -42,9 +42,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 stopped_count: usize = 0,
                 found_count: usize = 0,
                 central_connected_count: usize = 0,
+                central_connection_updated_count: usize = 0,
                 central_disconnected_count: usize = 0,
                 central_notification_count: usize = 0,
                 periph_connected_count: usize = 0,
+                periph_connection_updated_count: usize = 0,
                 periph_disconnected_count: usize = 0,
                 periph_mtu_changed_count: usize = 0,
                 last_source_id: u32 = 0,
@@ -80,6 +82,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                             self.last_source_id = report.source_id;
                             self.last_central_conn_handle = report.conn_handle;
                         },
+                        .ble_central_connection_updated => |report| {
+                            self.central_connection_updated_count += 1;
+                            self.last_source_id = report.source_id;
+                            self.last_central_conn_handle = report.conn_handle;
+                        },
                         .ble_central_disconnected => |report| {
                             self.central_disconnected_count += 1;
                             self.last_source_id = report.source_id;
@@ -94,6 +101,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         },
                         .ble_periph_connected => |report| {
                             self.periph_connected_count += 1;
+                            self.last_source_id = report.source_id;
+                            self.last_periph_conn_handle = report.conn_handle;
+                        },
+                        .ble_periph_connection_updated => |report| {
+                            self.periph_connection_updated_count += 1;
                             self.last_source_id = report.source_id;
                             self.last_periph_conn_handle = report.conn_handle;
                         },
@@ -129,9 +141,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 1), sink.stopped_count);
             try grt.std.testing.expectEqual(@as(usize, 1), sink.found_count);
             try grt.std.testing.expectEqual(@as(usize, 1), sink.central_connected_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.central_connection_updated_count);
             try grt.std.testing.expectEqual(@as(usize, 1), sink.central_disconnected_count);
             try grt.std.testing.expectEqual(@as(usize, 1), sink.central_notification_count);
             try grt.std.testing.expectEqual(@as(usize, 1), sink.periph_connected_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), sink.periph_connection_updated_count);
             try grt.std.testing.expectEqual(@as(usize, 1), sink.periph_disconnected_count);
             try grt.std.testing.expectEqual(@as(usize, 1), sink.periph_mtu_changed_count);
             try grt.std.testing.expectEqual(@as(u32, 41), sink.last_source_id);
@@ -344,6 +358,18 @@ const TestCaseHost = struct {
         });
         emit_fn(receiver_ctx, 41, .{
             .central = .{
+                .connection_updated = .{
+                    .conn_handle = 0x0040,
+                    .peer_addr = .{ 1, 2, 3, 4, 5, 6 },
+                    .peer_addr_type = .random,
+                    .interval = 12,
+                    .latency = 0,
+                    .supervision_timeout = 2 * glib.time.duration.Second,
+                },
+            },
+        });
+        emit_fn(receiver_ctx, 41, .{
+            .central = .{
                 .notification = blk: {
                     var notif = bt.Central.NotificationData{
                         .conn_handle = 0x0040,
@@ -367,6 +393,18 @@ const TestCaseHost = struct {
                     .peer_addr = .{ 6, 5, 4, 3, 2, 1 },
                     .peer_addr_type = .public,
                     .interval = 30,
+                    .latency = 0,
+                    .supervision_timeout = 3 * glib.time.duration.Second,
+                },
+            },
+        });
+        emit_fn(receiver_ctx, 41, .{
+            .peripheral = .{
+                .connection_updated = .{
+                    .conn_handle = 0x0041,
+                    .peer_addr = .{ 6, 5, 4, 3, 2, 1 },
+                    .peer_addr_type = .public,
+                    .interval = 12,
                     .latency = 0,
                     .supervision_timeout = 3 * glib.time.duration.Second,
                 },

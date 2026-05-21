@@ -1,5 +1,4 @@
 const modem_api = @import("drivers");
-const Context = @import("../../event/Context.zig");
 
 pub const max_apn_len = modem_api.Modem.max_apn_len;
 pub const max_phone_number_len = modem_api.Modem.max_phone_number_len;
@@ -28,7 +27,6 @@ pub const SimStateChanged = struct {
 
     source_id: u32,
     sim: SimState,
-    ctx: Context.Type = null,
 };
 
 pub const NetworkRegistrationChanged = struct {
@@ -36,7 +34,6 @@ pub const NetworkRegistrationChanged = struct {
 
     source_id: u32,
     registration: RegistrationState,
-    ctx: Context.Type = null,
 };
 
 pub const NetworkSignalChanged = struct {
@@ -44,7 +41,6 @@ pub const NetworkSignalChanged = struct {
 
     source_id: u32,
     signal: SignalInfo,
-    ctx: Context.Type = null,
 };
 
 pub const DataPacketStateChanged = struct {
@@ -52,7 +48,6 @@ pub const DataPacketStateChanged = struct {
 
     source_id: u32,
     packet: PacketState,
-    ctx: Context.Type = null,
 };
 
 pub const DataApnChanged = struct {
@@ -61,7 +56,6 @@ pub const DataApnChanged = struct {
     source_id: u32,
     apn_end: u8,
     apn_buf: [max_apn_len]u8,
-    ctx: Context.Type = null,
 
     pub fn apn(self: *const @This()) []const u8 {
         return self.apn_buf[0..self.apn_end];
@@ -76,7 +70,6 @@ pub const CallIncoming = struct {
     direction: CallDirection,
     number_end: u8,
     number_buf: [max_phone_number_len]u8,
-    ctx: Context.Type = null,
 
     pub fn number(self: *const @This()) []const u8 {
         return self.number_buf[0..self.number_end];
@@ -92,7 +85,6 @@ pub const CallStateChanged = struct {
     state: CallState,
     number_end: u8,
     number_buf: [max_phone_number_len]u8,
-    ctx: Context.Type = null,
 
     pub fn number(self: *const @This()) []const u8 {
         return self.number_buf[0..self.number_end];
@@ -105,7 +97,6 @@ pub const CallEnded = struct {
     source_id: u32,
     call_id: u8,
     reason: CallEndReason,
-    ctx: Context.Type = null,
 };
 
 pub const SmsReceived = struct {
@@ -119,7 +110,6 @@ pub const SmsReceived = struct {
     text_end: u16,
     text_buf: [max_sms_text_len]u8,
     encoding: SmsEncoding,
-    ctx: Context.Type = null,
 
     pub fn sender(self: *const @This()) []const u8 {
         return self.sender_buf[0..self.sender_end];
@@ -135,7 +125,6 @@ pub const GnssStateChanged = struct {
 
     source_id: u32,
     state: GnssState,
-    ctx: Context.Type = null,
 };
 
 pub const GnssFixChanged = struct {
@@ -143,7 +132,6 @@ pub const GnssFixChanged = struct {
 
     source_id: u32,
     fix: GnssFix,
-    ctx: Context.Type = null,
 };
 
 pub const Event = modem_api.Modem.Event;
@@ -156,7 +144,6 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                 .modem_sim_state_changed = .{
                     .source_id = source_id,
                     .sim = sim,
-                    .ctx = null,
                 },
             },
         },
@@ -165,14 +152,12 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                 .modem_network_registration_changed = .{
                     .source_id = source_id,
                     .registration = registration,
-                    .ctx = null,
                 },
             },
             .signal_changed => |signal| .{
                 .modem_network_signal_changed = .{
                     .source_id = source_id,
                     .signal = signal,
-                    .ctx = null,
                 },
             },
         },
@@ -181,7 +166,6 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                 .modem_data_packet_state_changed = .{
                     .source_id = source_id,
                     .packet = packet,
-                    .ctx = null,
                 },
             },
             .apn_changed => |apn| .{
@@ -189,7 +173,6 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .source_id = source_id,
                     .apn_end = try copyApnLen(apn),
                     .apn_buf = try copyApnBuf(apn),
-                    .ctx = null,
                 },
             },
         },
@@ -201,7 +184,6 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .direction = call.direction,
                     .number_end = try copyPhoneLen(sliceOrEmpty(call.number)),
                     .number_buf = try copyPhoneBuf(sliceOrEmpty(call.number)),
-                    .ctx = null,
                 },
             },
             .state_changed => |call| .{
@@ -212,7 +194,6 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .state = call.state,
                     .number_end = try copyPhoneLen(sliceOrEmpty(call.number)),
                     .number_buf = try copyPhoneBuf(sliceOrEmpty(call.number)),
-                    .ctx = null,
                 },
             },
             .ended => |call| .{
@@ -220,7 +201,6 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .source_id = source_id,
                     .call_id = call.call_id,
                     .reason = call.reason,
-                    .ctx = null,
                 },
             },
         },
@@ -235,7 +215,6 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .text_end = try copySmsTextLen(sms.text),
                     .text_buf = try copySmsTextBuf(sms.text),
                     .encoding = sms.encoding,
-                    .ctx = null,
                 },
             },
         },
@@ -244,14 +223,12 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                 .modem_gnss_state_changed = .{
                     .source_id = source_id,
                     .state = state,
-                    .ctx = null,
                 },
             },
             .fix_changed => |fix| .{
                 .modem_gnss_fix_changed = .{
                     .source_id = source_id,
                     .fix = fix,
-                    .ctx = null,
                 },
             },
         },

@@ -22,7 +22,7 @@ fn typeId(comptime T: type) *const anyopaque {
 }
 
 pub const VTable = struct {
-    process: *const fn (node: *Node, message: Message) anyerror!usize,
+    process: *const fn (node: *Node, message: Message) anyerror!void,
     bindOutput: *const fn (node: *Node, out: Emitter) void,
 };
 
@@ -31,12 +31,12 @@ pub fn as(self: Node, comptime T: type) error{TypeMismatch}!*T {
     return error.TypeMismatch;
 }
 
-pub fn process(self: *Node, message: Message) !usize {
-    return self.vtable.process(self, message);
+pub fn process(self: *Node, message: Message) !void {
+    try self.vtable.process(self, message);
 }
 
 pub fn emit(self: *Node, message: Message) !void {
-    _ = try self.process(message);
+    try self.process(message);
 }
 
 pub fn bindOutput(self: *Node, out: Emitter) void {
@@ -46,22 +46,22 @@ pub fn bindOutput(self: *Node, out: Emitter) void {
 
 pub fn init(comptime T: type, impl: *T) Node {
     comptime {
-        _ = @as(*const fn (*T, Message) anyerror!usize, &T.process);
+        _ = @as(*const fn (*T, Message) anyerror!void, &T.process);
         _ = @as(*const fn (*T, Emitter) void, &T.bindOutput);
     }
 
     const gen = struct {
-        fn processImpl(ctx: *anyopaque, message: Message) anyerror!usize {
+        fn processImpl(ctx: *anyopaque, message: Message) anyerror!void {
             const self: *T = @ptrCast(@alignCast(ctx));
-            return self.process(message);
+            try self.process(message);
         }
 
         fn emitNode(ctx: *anyopaque, message: Message) anyerror!void {
-            _ = try processImpl(ctx, message);
+            try processImpl(ctx, message);
         }
 
-        fn processFn(node: *Node, message: Message) anyerror!usize {
-            return processImpl(node.impl, message);
+        fn processFn(node: *Node, message: Message) anyerror!void {
+            try processImpl(node.impl, message);
         }
 
         const emitter_vtable = Emitter.VTable{
@@ -101,9 +101,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
                 pub fn bindOutput(_: *@This(), _: Emitter) void {}
 
-                pub fn process(self: *@This(), _: Message) !usize {
+                pub fn process(self: *@This(), _: Message) !void {
                     self.called = true;
-                    return 1;
                 }
             };
 
@@ -112,7 +111,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var node = Node.init(Impl, &impl);
             try grt.std.testing.expect((try node.as(Impl)) == &impl);
             try grt.std.testing.expectError(error.TypeMismatch, node.as(struct { x: u8 }));
-            const emitted = try node.process(.{
+            try node.process(.{
                 .origin = .source,
                 .body = .{
                     .raw_single_button = .{
@@ -123,7 +122,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             });
 
             try grt.std.testing.expect(impl.called);
-            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
 
         fn cascadeThroughBoundOutputs() !void {
@@ -136,12 +134,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     self.out = out;
                 }
 
-                pub fn process(self: *@This(), message: Message) !usize {
+                pub fn process(self: *@This(), message: Message) !void {
                     self.called = true;
                     var next = message;
                     next.timestamp = glib.time.instant.add(next.timestamp, self.delta);
                     try self.out.?.emit(next);
-                    return 1;
                 }
             };
 
@@ -165,7 +162,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             first.bindOutput(Emitter.init(&second));
             second.bindOutput(Emitter.init(&collector));
 
-            const emitted = try first.process(.{
+            try first.process(.{
                 .origin = .source,
                 .timestamp = 5,
                 .body = .{
@@ -180,7 +177,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(second_impl.called);
             try grt.std.testing.expect(collector.called);
             try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), collector.last_timestamp);
-            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
     };
 

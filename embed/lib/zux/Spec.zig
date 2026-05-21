@@ -1,4 +1,5 @@
 const glib = @import("glib");
+const bt = @import("bt");
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
 
@@ -12,6 +13,9 @@ const ReducerSpec = @import("spec/Reducer.zig");
 const RenderSpec = @import("spec/Render.zig");
 const StatePathSpec = @import("spec/StatePath.zig");
 const StoreObjectSpecType = @import("spec/StoreObject.zig");
+const TestDisplay = @import("spec/TestDisplay.zig");
+const TestAudioSystem = @import("spec/TestAudioSystem.zig");
+const TestSwitch = @import("spec/TestSwitch.zig");
 const UserStorySpec = @import("spec/UserStory.zig");
 const JsonParser = @import("spec/JsonParser.zig");
 const StoreObjectSpec = type;
@@ -182,8 +186,20 @@ pub fn make(comptime spec_doc: anytype) type {
                         .grouped_button => |grouped_button| {
                             next.addGroupedButton(label, component.id, grouped_button.button_count);
                         },
-                        .single_button => {
-                            next.addSingleButton(label, component.id);
+                        .single_button => |button_spec| {
+                            switch (button_spec.input_type) {
+                                .poll => next.addSingleButton(label, component.id),
+                                .virtual => next.addVirtualSingleButton(label, component.id),
+                            }
+                        },
+                        .audio_system => {
+                            next.addAudioSystem(label, component.id);
+                        },
+                        .bt => {
+                            next.addBt(label, component.id);
+                        },
+                        .display => {
+                            next.addDisplay(label, component.id);
                         },
                         .imu => {
                             next.addImu(label, component.id);
@@ -197,26 +213,20 @@ pub fn make(comptime spec_doc: anytype) type {
                         .nfc => {
                             next.addNfc(label, component.id);
                         },
-                        .touch => {
-                            next.addTouch(label, component.id);
+                        .switch_output => {
+                            next.addSwitch(label, component.id);
+                        },
+                        .pwm => {
+                            next.addPwm(label, component.id);
+                        },
+                        .touch => |touch| {
+                            next.addTouch(label, component.id, touch.target);
                         },
                         .wifi_sta => {
                             next.addWifiSta(label, component.id);
                         },
                         .wifi_ap => {
                             next.addWifiAp(label, component.id);
-                        },
-                        .router => {
-                            next.addRouter(label, component.id);
-                        },
-                        .flow => |flow_component| {
-                            next.addFlow(label, component.id, flow_component.makeType());
-                        },
-                        .overlay => {
-                            next.addOverlay(label, component.id);
-                        },
-                        .selection => {
-                            next.addSelection(label, component.id);
                         },
                     }
                 }
@@ -240,6 +250,14 @@ pub fn make(comptime spec_doc: anytype) type {
         ) type {
             const assembled = self.assembler(grt, config);
             return assembled.build(makeDefaultBuildConfig(assembled.BuildConfig()));
+        }
+
+        pub fn defaultBuildConfig(
+            self: *Self,
+            comptime BuildConfig: type,
+        ) BuildConfig {
+            _ = self;
+            return makeDefaultBuildConfig(BuildConfig);
         }
 
         pub fn testRunner(
@@ -282,16 +300,51 @@ pub fn make(comptime spec_doc: anytype) type {
                             t.logFatal(@errorName(err));
                             return false;
                         };
-                        defer user_story_config_instance.deinit();
 
                         const app_init_config = user_story_config_instance.config();
                         var app = AppType.init(app_init_config) catch |err| {
+                            user_story_config_instance.deinit();
                             t.logFatal(@errorName(err));
                             return false;
                         };
                         defer app.deinit();
+                        defer user_story_config_instance.deinit();
 
-                        t.run(story.name, story.createTestRunner(AppType, &app));
+                        const StoryRunner = struct {
+                            story_ref: *const @TypeOf(story),
+                            app_ref: *AppType,
+                            config_instance: UserStoryConfigFactoryType.Instance,
+
+                            pub fn init(self_story_runner: *@This(), runner_allocator: glib.std.mem.Allocator) !void {
+                                _ = self_story_runner;
+                                _ = runner_allocator;
+                            }
+
+                            pub fn run(self_story_runner: *@This(), story_t: *glib.testing.T, runner_allocator: glib.std.mem.Allocator) bool {
+                                self_story_runner.config_instance.start(self_story_runner.app_ref) catch |err| {
+                                    story_t.logFatal(@errorName(err));
+                                    return false;
+                                };
+                                defer self_story_runner.config_instance.deinit();
+
+                                var story_runner = self_story_runner.story_ref.createTestRunner(AppType, self_story_runner.app_ref);
+                                defer story_runner.deinit(runner_allocator);
+                                return story_runner.run(story_t, runner_allocator);
+                            }
+
+                            pub fn deinit(self_story_runner: *@This(), runner_allocator: glib.std.mem.Allocator) void {
+                                _ = self_story_runner;
+                                _ = runner_allocator;
+                            }
+                        };
+
+                        var story_runner = StoryRunner{
+                            .story_ref = &story,
+                            .app_ref = &app,
+                            .config_instance = user_story_config_instance,
+                        };
+
+                        t.run(story.name, glib.testing.TestRunner.make(StoryRunner).new(&story_runner));
                         if (!t.wait()) return false;
                     }
 
@@ -353,20 +406,20 @@ pub fn make(comptime spec_doc: anytype) type {
         fn componentControlType(comptime label: []const u8) type {
             const component = componentForLabel(label);
             return switch (component.kind) {
+                .display => drivers.Display,
+                .bt => bt.Host,
+                .audio_system => *TestAudioSystem,
                 .single_button => drivers.button.Single,
                 .grouped_button => drivers.button.Grouped,
                 .imu => drivers.imu,
                 .led_strip => ledstrip.LedStrip,
                 .modem => drivers.Modem,
                 .nfc => drivers.nfc.Reader,
+                .switch_output => drivers.Switch,
+                .pwm => drivers.Pwm,
                 .touch => drivers.Touch,
                 .wifi_sta => drivers.wifi.Sta,
                 .wifi_ap => drivers.wifi.Ap,
-                else => @compileError(
-                    "zux.Spec.testRunner cannot synthesize a test control for component '" ++
-                        label ++
-                        "'",
-                ),
             };
         }
 
@@ -379,8 +432,17 @@ pub fn make(comptime spec_doc: anytype) type {
         }
 
         fn makeTestPeriphValue(comptime label: []const u8, comptime PeriphType: type) PeriphType {
+            if (comptime isAudioSystemPointer(PeriphType)) {
+                return makeTestAudioSystem(PeriphType);
+            }
             if (PeriphType == drivers.button.Single) {
                 return makeTestSingleButton();
+            }
+            if (PeriphType == drivers.Display) {
+                return makeTestDisplay();
+            }
+            if (PeriphType == bt.Host) {
+                return makeTestBtHost();
             }
             if (PeriphType == drivers.button.Grouped) {
                 return makeTestGroupedButton();
@@ -397,6 +459,12 @@ pub fn make(comptime spec_doc: anytype) type {
             if (PeriphType == drivers.nfc.Reader) {
                 return makeTestNfcReader();
             }
+            if (PeriphType == drivers.Switch) {
+                return makeTestSwitch();
+            }
+            if (PeriphType == drivers.Pwm) {
+                return makeTestPwm();
+            }
             if (PeriphType == drivers.Touch) {
                 return makeTestTouch();
             }
@@ -407,7 +475,19 @@ pub fn make(comptime spec_doc: anytype) type {
                 return makeTestWifiAp();
             }
 
-            @compileError("zux.Spec.testRunner does not know how to initialize a test periph for this field type");
+            @compileError("zux.Spec.testRunner does not know how to initialize test periph '" ++ label ++ "' of type " ++ @typeName(PeriphType));
+        }
+
+        fn isAudioSystemPointer(comptime PeriphType: type) bool {
+            const info = @typeInfo(PeriphType);
+            if (info != .pointer or info.pointer.size != .one) return false;
+            const AudioSystemType = info.pointer.child;
+            return @hasDecl(AudioSystemType, "start") and
+                @hasDecl(AudioSystemType, "stop") and
+                @hasDecl(AudioSystemType, "createTrack") and
+                @hasDecl(AudioSystemType, "read") and
+                @hasDecl(AudioSystemType, "setSpkGain") and
+                @hasDecl(AudioSystemType, "spkSampleRate");
         }
 
         fn ledStripPixelCount(comptime label: []const u8) usize {
@@ -443,6 +523,173 @@ pub fn make(comptime spec_doc: anytype) type {
                 var impl = Impl{};
             };
             return drivers.button.Grouped.init(Impl, &Holder.impl);
+        }
+
+        fn makeTestDisplay() drivers.Display {
+            const Holder = struct {
+                var impl = TestDisplay{};
+            };
+            Holder.impl.reset();
+            return Holder.impl.api();
+        }
+
+        fn makeTestBtHost() bt.Host {
+            const Impl = struct {
+                fn hostDeinit(_: *anyopaque) void {}
+                fn hostCentral(_: *anyopaque) bt.Central {
+                    return .{ .ptr = undefined, .vtable = &central_vtable };
+                }
+                fn hostPeripheral(_: *anyopaque) bt.Peripheral {
+                    return .{ .ptr = undefined, .vtable = &peripheral_vtable };
+                }
+                fn hostSetEventCallback(_: *anyopaque, _: *const anyopaque, _: bt.Host.CallbackFn) void {}
+                fn hostClearEventCallback(_: *anyopaque) void {}
+
+                fn centralStart(_: *anyopaque) bt.Central.StartError!void {}
+                fn centralStop(_: *anyopaque) void {}
+                fn centralStartScanning(_: *anyopaque, _: bt.Central.ScanConfig) bt.Central.ScanError!void {}
+                fn centralStopScanning(_: *anyopaque) void {}
+                fn centralConnect(_: *anyopaque, _: bt.Central.BdAddr, _: bt.Central.AddrType, _: bt.Central.ConnParams) bt.Central.ConnectError!bt.Central.ConnectionInfo {
+                    return error.Unexpected;
+                }
+                fn centralDisconnect(_: *anyopaque, _: u16) void {}
+                fn centralDiscoverServices(_: *anyopaque, _: u16, _: []bt.Central.DiscoveredService) bt.Central.GattError!usize {
+                    return 0;
+                }
+                fn centralDiscoverChars(_: *anyopaque, _: u16, _: u16, _: u16, _: []bt.Central.DiscoveredChar) bt.Central.GattError!usize {
+                    return 0;
+                }
+                fn centralGattRead(_: *anyopaque, _: u16, _: u16, _: []u8) bt.Central.GattError!usize {
+                    return 0;
+                }
+                fn centralGattWrite(_: *anyopaque, _: u16, _: u16, _: []const u8) bt.Central.GattError!void {}
+                fn centralGattWriteNoResp(_: *anyopaque, _: u16, _: u16, _: []const u8) bt.Central.GattError!void {}
+                fn centralExchangeMtu(_: *anyopaque, _: u16, mtu: u16) bt.Central.GattError!u16 {
+                    return mtu;
+                }
+                fn centralSubscribe(_: *anyopaque, _: u16, _: u16) bt.Central.GattError!void {}
+                fn centralSubscribeIndications(_: *anyopaque, _: u16, _: u16) bt.Central.GattError!void {}
+                fn centralUnsubscribe(_: *anyopaque, _: u16, _: u16) bt.Central.GattError!void {}
+                fn centralGetAttMtu(_: *anyopaque, _: u16) u16 {
+                    return bt.Central.DEFAULT_ATT_MTU;
+                }
+                fn centralGetState(_: *anyopaque) bt.Central.State {
+                    return .idle;
+                }
+                fn centralAddEventHook(_: *anyopaque, _: ?*anyopaque, _: *const fn (?*anyopaque, bt.Central.Event) void) void {}
+                fn centralRemoveEventHook(_: *anyopaque, _: ?*anyopaque, _: *const fn (?*anyopaque, bt.Central.Event) void) void {}
+                fn centralGetAddr(_: *anyopaque) ?bt.Central.BdAddr {
+                    return null;
+                }
+                fn centralDeinit(_: *anyopaque) void {}
+
+                fn periphStart(_: *anyopaque) bt.Peripheral.StartError!void {}
+                fn periphStop(_: *anyopaque) void {}
+                fn periphStartAdvertising(_: *anyopaque, _: bt.Peripheral.AdvConfig) bt.Peripheral.AdvError!void {}
+                fn periphStopAdvertising(_: *anyopaque) void {}
+                fn periphSetConfig(_: *anyopaque, _: bt.Peripheral.GattConfig) void {}
+                fn periphSetRequestHandler(_: *anyopaque, _: ?*anyopaque, _: bt.Peripheral.RequestHandlerFn) void {}
+                fn periphClearRequestHandler(_: *anyopaque) void {}
+                fn periphNotify(_: *anyopaque, _: u16, _: u16, _: []const u8) bt.Peripheral.GattError!void {}
+                fn periphIndicate(_: *anyopaque, _: u16, _: u16, _: []const u8) bt.Peripheral.GattError!void {}
+                fn periphDisconnect(_: *anyopaque, _: u16) void {}
+                fn periphGetState(_: *anyopaque) bt.Peripheral.State {
+                    return .idle;
+                }
+                fn periphAddEventHook(_: *anyopaque, _: ?*anyopaque, _: *const fn (?*anyopaque, bt.Peripheral.Event) void) void {}
+                fn periphRemoveEventHook(_: *anyopaque, _: ?*anyopaque, _: *const fn (?*anyopaque, bt.Peripheral.Event) void) void {}
+                fn periphAddSubscriptionHook(_: *anyopaque, _: ?*anyopaque, _: *const fn (?*anyopaque, bt.Peripheral.SubscriptionInfo) void) void {}
+                fn periphRemoveSubscriptionHook(_: *anyopaque, _: ?*anyopaque, _: *const fn (?*anyopaque, bt.Peripheral.SubscriptionInfo) void) void {}
+                fn periphGetAddr(_: *anyopaque) ?bt.Peripheral.BdAddr {
+                    return null;
+                }
+                fn periphDeinit(_: *anyopaque) void {}
+
+                const central_vtable = bt.Central.VTable{
+                    .start = centralStart,
+                    .stop = centralStop,
+                    .startScanning = centralStartScanning,
+                    .stopScanning = centralStopScanning,
+                    .connect = centralConnect,
+                    .disconnect = centralDisconnect,
+                    .discoverServices = centralDiscoverServices,
+                    .discoverChars = centralDiscoverChars,
+                    .gattRead = centralGattRead,
+                    .gattWrite = centralGattWrite,
+                    .gattWriteNoResp = centralGattWriteNoResp,
+                    .exchangeMtu = centralExchangeMtu,
+                    .subscribe = centralSubscribe,
+                    .subscribeIndications = centralSubscribeIndications,
+                    .unsubscribe = centralUnsubscribe,
+                    .getAttMtu = centralGetAttMtu,
+                    .getState = centralGetState,
+                    .addEventHook = centralAddEventHook,
+                    .removeEventHook = centralRemoveEventHook,
+                    .getAddr = centralGetAddr,
+                    .deinit = centralDeinit,
+                };
+                const peripheral_vtable = bt.Peripheral.VTable{
+                    .start = periphStart,
+                    .stop = periphStop,
+                    .startAdvertising = periphStartAdvertising,
+                    .stopAdvertising = periphStopAdvertising,
+                    .setConfig = periphSetConfig,
+                    .setRequestHandler = periphSetRequestHandler,
+                    .clearRequestHandler = periphClearRequestHandler,
+                    .notify = periphNotify,
+                    .indicate = periphIndicate,
+                    .disconnect = periphDisconnect,
+                    .getState = periphGetState,
+                    .addEventHook = periphAddEventHook,
+                    .removeEventHook = periphRemoveEventHook,
+                    .addSubscriptionHook = periphAddSubscriptionHook,
+                    .removeSubscriptionHook = periphRemoveSubscriptionHook,
+                    .getAddr = periphGetAddr,
+                    .deinit = periphDeinit,
+                };
+                const host_vtable = bt.Host.VTable{
+                    .deinit = hostDeinit,
+                    .central = hostCentral,
+                    .peripheral = hostPeripheral,
+                    .setEventCallback = hostSetEventCallback,
+                    .clearEventCallback = hostClearEventCallback,
+                };
+            };
+            const Holder = struct {
+                var token: u8 = 0;
+            };
+            return .{ .ptr = @ptrCast(&Holder.token), .vtable = &Impl.host_vtable };
+        }
+
+        fn makeTestSwitch() drivers.Switch {
+            const Holder = struct {
+                var impl = TestSwitch.Switch{};
+            };
+            Holder.impl.reset();
+            return Holder.impl.api();
+        }
+
+        fn makeTestPwm() drivers.Pwm {
+            const Holder = struct {
+                var impl = TestSwitch.Pwm{};
+            };
+            Holder.impl.reset();
+            return Holder.impl.api();
+        }
+
+        fn makeTestAudioSystem(comptime PeriphType: type) PeriphType {
+            const info = @typeInfo(PeriphType);
+            if (info != .pointer or info.pointer.size != .one) {
+                @compileError("zux.Spec.testRunner audio_system test periph type must be a single-item pointer, got " ++ @typeName(PeriphType));
+            }
+            const AudioSystemType = info.pointer.child;
+            const Holder = struct {
+                var impl = AudioSystemType{};
+            };
+            if (@hasDecl(AudioSystemType, "reset")) {
+                Holder.impl.reset();
+            }
+            return &Holder.impl;
         }
 
         fn makeTestImu() drivers.imu {
@@ -693,10 +940,6 @@ pub fn make(comptime spec_doc: anytype) type {
                 pub fn read(_: *@This(), _: []drivers.Touch.Point) !usize {
                     return 0;
                 }
-
-                pub fn setEventCallback(_: *@This(), _: *const anyopaque, _: drivers.Touch.CallbackFn) void {}
-
-                pub fn clearEventCallback(_: *@This()) void {}
             };
             const Holder = struct {
                 var impl = Impl{};
@@ -974,46 +1217,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 1), assembled.render_count);
         }
 
-        fn assembler_wires_flow_components(_: glib.std.mem.Allocator) !void {
-            const SpecType = make(.{
-                .components = &.{
-                    ComponentSpec{
-                        .label = "pairing",
-                        .id = 31,
-                        .kind = .{
-                            .flow = .{
-                                .nodes = &.{ "idle", "searching" },
-                                .edges = &.{
-                                    .{
-                                        .from = "idle",
-                                        .to = "searching",
-                                        .event = "start",
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            });
-
-            const assembled = comptime blk: {
-                var spec = SpecType.init();
-                break :blk spec.assembler(grt, .{
-                    .max_flows = 1,
-                    .store = .{
-                        .max_stores = 1,
-                        .max_state_nodes = 4,
-                        .max_store_refs = 4,
-                        .max_depth = 4,
-                    },
-                });
-            };
-
-            try grt.std.testing.expectEqual(@as(usize, 1), assembled.flow_registry.len);
-            try grt.std.testing.expectEqual(@as(u32, 31), assembled.flow_registry.periphs[0].id);
-            try grt.std.testing.expect(@hasDecl(assembled.flow_registry.periphs[0].FlowType, "Reducer"));
-        }
-
         fn test_runner_executes_user_stories(t: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
             _ = allocator;
 
@@ -1080,7 +1283,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     stores_value: *AppType.Store.Stores,
                     message: AppType.Message,
                     emit: AppType.Emitter,
-                ) !usize {
+                ) !void {
                     _ = self_reducer;
                     _ = emit;
                     switch (message.body) {
@@ -1090,9 +1293,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                                     state.ticks += 1;
                                 }
                             }.apply);
-                            return 1;
                         },
-                        else => return 0,
+                        else => return,
                     }
                 }
             };
@@ -1154,10 +1356,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.assembler_wires_declared_metadata(allocator) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-            TestCase.assembler_wires_flow_components(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

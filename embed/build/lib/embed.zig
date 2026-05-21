@@ -33,6 +33,7 @@ pub fn create(
     lib_ledstrip.link(b, target, optimize, ledstrip);
     lib_motion.link(b, target, optimize, motion);
     lib_zux.link(b, target, optimize, zux, .{
+        .audio = audio,
         .motion = motion,
         .bt = bt,
         .drivers = drivers,

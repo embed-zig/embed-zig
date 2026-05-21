@@ -31,7 +31,7 @@ pub fn detach(_: *const EventHook, reader: drivers.nfc.Reader) void {
 pub fn emitFn(ctx: *const anyopaque, update: drivers.nfc.Update) void {
     const self: *const EventHook = @ptrCast(@alignCast(ctx));
     const out = self.out orelse return;
-    const value = nfc_event.make(zux_event.Event, update, null) catch @panic("zux.component.nfc.EventHook received invalid nfc update");
+    const value = nfc_event.make(zux_event.Event, update) catch @panic("zux.component.nfc.EventHook received invalid nfc update");
 
     out.emit(.{
         .origin = .source,

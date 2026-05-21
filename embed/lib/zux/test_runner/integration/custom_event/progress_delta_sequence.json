@@ -1,0 +1,45 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "custom progress delta sequence",
+    "description": "applies a registered progress delta event without replacing the existing value.",
+    "initial_state": {
+      "progress": {
+        "seen": true,
+        "source_id": 11,
+        "value": 30,
+        "updates": 2,
+        "reset_count": 0,
+        "last_kind": "set"
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "custom": {
+              "type": "test.progress.delta",
+              "source_id": 202,
+              "payload": {
+                "amount": 7
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "progress",
+            "state": {
+              "seen": true,
+              "source_id": 202,
+              "value": 37,
+              "updates": 3,
+              "reset_count": 0,
+              "last_kind": "delta"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

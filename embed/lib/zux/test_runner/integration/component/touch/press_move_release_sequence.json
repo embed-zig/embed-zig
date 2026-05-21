@@ -12,18 +12,7 @@
       "reader": {},
       "touch": {},
       "sta": {},
-      "ap": {},
-      "pairing": {
-        "node": "idle"
-      },
-      "loading": {},
-      "menu": {
-        "count": 3,
-        "loop": true
-      },
-      "route": {
-        "current_page": 1
-      }
+      "ap": {}
     },
     "steps": [
       {

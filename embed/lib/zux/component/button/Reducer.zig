@@ -1,6 +1,5 @@
 const glib = @import("glib");
 const motion = @import("motion");
-const Context = @import("../../event/Context.zig");
 const button_event = @import("event.zig");
 const button_state = @import("state.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
@@ -49,59 +48,65 @@ pub fn bindOutput(self: *Reducer, out: Emitter) void {
     self.out = out;
 }
 
-pub fn process(self: *Reducer, message: Message) !usize {
-    return switch (message.body) {
-        .tick => blk: {
-            const emitted = try self.flushAllDue(message.timestamp);
-            break :blk emitted + try self.forward(message);
+pub fn process(self: *Reducer, message: Message) !void {
+    switch (message.body) {
+        .tick => {
+            try self.flushAllDue(message.timestamp);
+            try self.forward(message);
         },
-        .raw_single_button => |button| self.processRaw(
-            message.timestamp,
-            button.source_id,
-            null,
-            button.pressed,
-            button.ctx,
-        ),
-        .raw_grouped_button => |button| self.processRaw(
-            message.timestamp,
-            button.source_id,
-            button.button_id,
-            button.pressed,
-            button.ctx,
-        ),
-        else => self.forward(message),
-    };
+        .raw_single_button => |button| {
+            try self.processRaw(
+                message.timestamp,
+                button.source_id,
+                null,
+                button.pressed,
+            );
+            try self.forward(message);
+        },
+        .raw_grouped_button => |button| {
+            try self.processRaw(
+                message.timestamp,
+                button.source_id,
+                button.button_id,
+                button.pressed,
+            );
+            try self.forward(message);
+        },
+        else => try self.forward(message),
+    }
 }
 
-pub fn reduce(store: anytype, message: Message, emit: Emitter) !usize {
+pub fn reduce(store: anytype, message: Message, emit: Emitter) !void {
     _ = emit;
 
     switch (message.body) {
         .button_gesture => |button| {
-            const next_state: State = switch (button.gesture) {
-                .click => |count| .{
-                    .source_id = button.source_id,
-                    .button_id = button.button_id,
-                    .gesture_kind = .click,
-                    .click_count = count,
-                    .long_press = 0,
-                },
-                .long_press => |held| .{
-                    .source_id = button.source_id,
-                    .button_id = button.button_id,
-                    .gesture_kind = .long_press,
-                    .click_count = 0,
-                    .long_press = held,
-                },
-            };
-            store.set(next_state);
-            return 0;
+            store.invoke(button, struct {
+                fn apply(state: *State, event: @TypeOf(button)) void {
+                    state.seq +%= 1;
+                    state.source_id = event.source_id;
+                    state.button_id = event.button_id;
+                    state.pressed_at = event.pressed_at;
+                    switch (event.gesture) {
+                        .click => |count| {
+                            state.gesture_kind = .click;
+                            state.click_count = count;
+                            state.long_press = 0;
+                        },
+                        .long_press => |held| {
+                            state.gesture_kind = .long_press;
+                            state.click_count = 0;
+                            state.long_press = held;
+                        },
+                    }
+                }
+            }.apply);
         },
-        else => return 0,
+        else => return,
     }
 }
 
-pub fn reduceGrouped(store: anytype, message: Message, emit: Emitter) !usize {
+pub fn reduceGrouped(store: anytype, message: Message, emit: Emitter) !void {
     _ = emit;
 
     switch (message.body) {
@@ -111,13 +116,12 @@ pub fn reduceGrouped(store: anytype, message: Message, emit: Emitter) !usize {
                 .button_id = button.button_id,
                 .pressed = button.pressed,
             });
-            return 0;
         },
-        else => return 0,
+        else => return,
     }
 }
 
-pub fn reduceSingle(store: anytype, message: Message, emit: Emitter) !usize {
+pub fn reduceSingle(store: anytype, message: Message, emit: Emitter) !void {
     _ = emit;
 
     switch (message.body) {
@@ -126,19 +130,16 @@ pub fn reduceSingle(store: anytype, message: Message, emit: Emitter) !usize {
                 .source_id = button.source_id,
                 .pressed = button.pressed,
             });
-            return 0;
         },
-        else => return 0,
+        else => return,
     }
 }
 
-fn flushAllDue(self: *Reducer, timestamp: glib.time.instant.Time) !usize {
-    var emitted: usize = 0;
+fn flushAllDue(self: *Reducer, timestamp: glib.time.instant.Time) !void {
     var iter = self.states.iterator();
     while (iter.next()) |entry| {
-        emitted += try self.flushDue(timestamp, entry.key_ptr.*, entry.value_ptr);
+        try self.flushDue(timestamp, entry.key_ptr.*, entry.value_ptr);
     }
-    return emitted;
 }
 
 fn processRaw(
@@ -147,8 +148,7 @@ fn processRaw(
     source_id: u32,
     button_id: ?u32,
     pressed: bool,
-    ctx: Context.Type,
-) !usize {
+) !void {
     const key: Key = .{
         .source_id = source_id,
         .button_id = button_id,
@@ -162,29 +162,29 @@ fn processRaw(
     }
 
     const detector = gop.value_ptr;
-    var emitted = try self.flushDue(timestamp, key, detector);
+    try self.flushDue(timestamp, key, detector);
 
     if (detector.update(.{
         .timestamp = timestamp,
         .pressed = pressed,
-        .ctx = ctx,
     })) |action| {
-        emitted += try self.emitGesture(
+        try self.emitGesture(
+            timestamp,
             source_id,
             button_id,
+            action.pressed_at,
             gestureValue(action.gesture),
-            action.ctx,
         );
     }
     while (detector.nextAction()) |action| {
-        emitted += try self.emitGesture(
+        try self.emitGesture(
+            timestamp,
             source_id,
             button_id,
+            action.pressed_at,
             gestureValue(action.gesture),
-            action.ctx,
         );
     }
-    return emitted;
 }
 
 fn flushDue(
@@ -192,28 +192,27 @@ fn flushDue(
     timestamp: glib.time.instant.Time,
     key: Key,
     detector: *ClickDetector,
-) !usize {
-    var emitted: usize = 0;
+) !void {
     self.syncDetectorConfig(detector);
 
     if (detector.flush(timestamp)) |action| {
-        emitted += try self.emitGesture(
+        try self.emitGesture(
+            timestamp,
             key.source_id,
             key.button_id,
+            action.pressed_at,
             gestureValue(action.gesture),
-            action.ctx,
         );
     }
     while (detector.nextAction()) |action| {
-        emitted += try self.emitGesture(
+        try self.emitGesture(
+            timestamp,
             key.source_id,
             key.button_id,
+            action.pressed_at,
             gestureValue(action.gesture),
-            action.ctx,
         );
     }
-
-    return emitted;
 }
 
 fn syncDetectorConfig(self: *const Reducer, detector: *ClickDetector) void {
@@ -230,35 +229,32 @@ fn gestureValue(gesture: ClickDetector.Gesture) button_event.Detected.Value {
 
 fn emitGesture(
     self: *Reducer,
+    timestamp: glib.time.instant.Time,
     source_id: u32,
     button_id: ?u32,
+    pressed_at: glib.time.instant.Time,
     gesture: button_event.Detected.Value,
-    ctx: Context.Type,
-) !usize {
+) !void {
     if (self.out) |out| {
         try out.emit(.{
             .origin = .node,
+            .timestamp = timestamp,
             .body = .{
                 .button_gesture = .{
                     .source_id = source_id,
                     .button_id = button_id,
+                    .pressed_at = pressed_at,
                     .gesture = gesture,
-                    .ctx = ctx,
                 },
             },
         });
-        return 1;
     }
-
-    return 0;
 }
 
-fn forward(self: *Reducer, message: Message) !usize {
+fn forward(self: *Reducer, message: Message) !void {
     if (self.out) |out| {
         try out.emit(message);
-        return 1;
     }
-    return 0;
 }
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
@@ -269,17 +265,22 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 last_click_count: u16 = 0,
                 last_long_press: glib.time.duration.Duration = 0,
                 last_button_id: ?u32 = 123,
+                last_pressed_at: glib.time.instant.Time = 0,
+                last_timestamp: glib.time.instant.Time = 0,
 
                 pub fn emit(self: *@This(), message: Message) !void {
                     switch (message.body) {
                         .button_gesture => |button| {
                             self.last_button_id = button.button_id;
+                            self.last_pressed_at = button.pressed_at;
+                            self.last_timestamp = message.timestamp;
                             switch (button.gesture) {
                                 .click => |click_count| self.last_click_count = click_count,
                                 .long_press => |held| self.last_long_press = held,
                             }
                             self.count += 1;
                         },
+                        .raw_single_button => {},
                         .tick => {},
                         else => return error.UnexpectedMessage,
                     }
@@ -292,7 +293,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
-            try grt.std.testing.expectEqual(@as(usize, 0), try detector.process(.{
+            try detector.process(.{
                 .origin = .source,
                 .timestamp = 10,
                 .body = .{
@@ -301,8 +302,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .pressed = true,
                     },
                 },
-            }));
-            try grt.std.testing.expectEqual(@as(usize, 0), try detector.process(.{
+            });
+            try detector.process(.{
                 .origin = .source,
                 .timestamp = 20,
                 .body = .{
@@ -311,28 +312,31 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .pressed = false,
                     },
                 },
-            }));
-            try grt.std.testing.expectEqual(
-                @as(usize, 2),
-                try detector.process(.{
-                    .origin = .timer,
-                    .timestamp = glib.time.instant.add(20, default_multi_click_window),
-                    .body = .{
-                        .tick = .{},
-                    },
-                }),
-            );
+            });
+            try detector.process(.{
+                .origin = .timer,
+                .timestamp = glib.time.instant.add(20, default_multi_click_window),
+                .body = .{
+                    .tick = .{},
+                },
+            });
 
             try grt.std.testing.expectEqual(@as(usize, 1), collector.count);
             try grt.std.testing.expectEqual(@as(u16, 1), collector.last_click_count);
             try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 0), collector.last_long_press);
             try grt.std.testing.expectEqual(@as(?u32, null), collector.last_button_id);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), collector.last_pressed_at);
+            try grt.std.testing.expectEqual(
+                glib.time.instant.add(20, default_multi_click_window),
+                collector.last_timestamp,
+            );
         }
 
         fn rawGroupedButtonFourClicksEmitClickCount() !void {
             const Collector = struct {
                 last_click_count: u16 = 0,
                 last_button_id: ?u32 = null,
+                last_pressed_at: glib.time.instant.Time = 0,
                 count: usize = 0,
 
                 pub fn emit(self: *@This(), message: Message) !void {
@@ -343,8 +347,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                                 .long_press => return error.UnexpectedGesture,
                             }
                             self.last_button_id = button.button_id;
+                            self.last_pressed_at = button.pressed_at;
                             self.count += 1;
                         },
+                        .raw_grouped_button => {},
                         .tick => {},
                         else => return error.UnexpectedMessage,
                     }
@@ -358,7 +364,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             detector.bindOutput(Emitter.init(&collector));
 
             inline for ([_]glib.time.instant.Time{ 10, 30, 50, 70 }) |start| {
-                _ = try detector.process(.{
+                try detector.process(.{
                     .origin = .source,
                     .timestamp = start,
                     .body = .{
@@ -369,7 +375,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         },
                     },
                 });
-                _ = try detector.process(.{
+                try detector.process(.{
                     .origin = .source,
                     .timestamp = glib.time.instant.add(start, 10),
                     .body = .{
@@ -381,19 +387,17 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 });
             }
-            try grt.std.testing.expectEqual(
-                @as(usize, 2),
-                try detector.process(.{
-                    .origin = .timer,
-                    .timestamp = glib.time.instant.add(80, default_multi_click_window),
-                    .body = .{
-                        .tick = .{},
-                    },
-                }),
-            );
+            try detector.process(.{
+                .origin = .timer,
+                .timestamp = glib.time.instant.add(80, default_multi_click_window),
+                .body = .{
+                    .tick = .{},
+                },
+            });
 
             try grt.std.testing.expectEqual(@as(u16, 4), collector.last_click_count);
             try grt.std.testing.expectEqual(@as(?u32, 3), collector.last_button_id);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), collector.last_pressed_at);
             try grt.std.testing.expectEqual(@as(usize, 1), collector.count);
         }
 
@@ -401,6 +405,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const Collector = struct {
                 count: usize = 0,
                 last_long_press: glib.time.duration.Duration = 0,
+                last_pressed_at: glib.time.instant.Time = 0,
 
                 pub fn emit(self: *@This(), message: Message) !void {
                     switch (message.body) {
@@ -408,9 +413,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                             .click => return error.UnexpectedGesture,
                             .long_press => |held| {
                                 self.last_long_press = held;
+                                self.last_pressed_at = button.pressed_at;
                                 self.count += 1;
                             },
                         },
+                        .raw_single_button => {},
                         .tick => {},
                         else => return error.UnexpectedMessage,
                     }
@@ -423,7 +430,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
-            _ = try detector.process(.{
+            try detector.process(.{
                 .origin = .source,
                 .timestamp = 10,
                 .body = .{
@@ -433,33 +440,29 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             });
-            try grt.std.testing.expectEqual(
-                @as(usize, 2),
-                try detector.process(.{
-                    .origin = .timer,
-                    .timestamp = glib.time.instant.add(10, default_long_press + 25),
-                    .body = .{
-                        .tick = .{},
-                    },
-                }),
-            );
+            try detector.process(.{
+                .origin = .timer,
+                .timestamp = glib.time.instant.add(10, default_long_press + 25),
+                .body = .{
+                    .tick = .{},
+                },
+            });
             try grt.std.testing.expectEqual(default_long_press + 25, collector.last_long_press);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), collector.last_pressed_at);
             try grt.std.testing.expectEqual(@as(usize, 1), collector.count);
 
-            try grt.std.testing.expectEqual(
-                @as(usize, 2),
-                try detector.process(.{
-                    .origin = .timer,
-                    .timestamp = glib.time.instant.add(10, default_long_press + 75),
-                    .body = .{
-                        .tick = .{},
-                    },
-                }),
-            );
+            try detector.process(.{
+                .origin = .timer,
+                .timestamp = glib.time.instant.add(10, default_long_press + 75),
+                .body = .{
+                    .tick = .{},
+                },
+            });
             try grt.std.testing.expectEqual(default_long_press + 75, collector.last_long_press);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), collector.last_pressed_at);
             try grt.std.testing.expectEqual(@as(usize, 2), collector.count);
 
-            try grt.std.testing.expectEqual(@as(usize, 1), try detector.process(.{
+            try detector.process(.{
                 .origin = .source,
                 .timestamp = glib.time.instant.add(10, default_long_press + 100),
                 .body = .{
@@ -468,14 +471,16 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .pressed = false,
                     },
                 },
-            }));
+            });
             try grt.std.testing.expectEqual(default_long_press + 100, collector.last_long_press);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), collector.last_pressed_at);
             try grt.std.testing.expectEqual(@as(usize, 3), collector.count);
         }
 
         fn updatedLongPressThresholdAppliesToExistingKey() !void {
             const Collector = struct {
                 long_press: glib.time.duration.Duration = 0,
+                pressed_at: glib.time.instant.Time = 0,
                 count: usize = 0,
 
                 pub fn emit(self: *@This(), message: Message) !void {
@@ -485,8 +490,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                                 .click => return error.UnexpectedGesture,
                                 .long_press => |held| self.long_press = held,
                             }
+                            self.pressed_at = button.pressed_at;
                             self.count += 1;
                         },
+                        .raw_single_button => {},
                         .tick => {},
                         else => return error.UnexpectedMessage,
                     }
@@ -499,7 +506,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
-            _ = try detector.process(.{
+            try detector.process(.{
                 .origin = .source,
                 .timestamp = 10,
                 .body = .{
@@ -511,23 +518,22 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             });
 
             detector_impl.long_press = 100;
-            try grt.std.testing.expectEqual(
-                @as(usize, 2),
-                try detector.process(.{
-                    .origin = .timer,
-                    .timestamp = 110,
-                    .body = .{
-                        .tick = .{},
-                    },
-                }),
-            );
+            try detector.process(.{
+                .origin = .timer,
+                .timestamp = 110,
+                .body = .{
+                    .tick = .{},
+                },
+            });
             try grt.std.testing.expectEqual(@as(glib.time.duration.Duration, 100), collector.long_press);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 10), collector.pressed_at);
             try grt.std.testing.expectEqual(@as(usize, 1), collector.count);
         }
 
         fn updatedMultiClickWindowAppliesToExistingKey() !void {
             const Collector = struct {
                 click_count: u16 = 0,
+                pressed_at: glib.time.instant.Time = 0,
                 count: usize = 0,
 
                 pub fn emit(self: *@This(), message: Message) !void {
@@ -537,8 +543,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                                 .click => |count| self.click_count = count,
                                 .long_press => return error.UnexpectedGesture,
                             }
+                            self.pressed_at = button.pressed_at;
                             self.count += 1;
                         },
+                        .raw_single_button => {},
                         .tick => {},
                         else => return error.UnexpectedMessage,
                     }
@@ -551,7 +559,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
-            _ = try detector.process(.{
+            try detector.process(.{
                 .origin = .source,
                 .timestamp = 1_000,
                 .body = .{
@@ -561,7 +569,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             });
-            _ = try detector.process(.{
+            try detector.process(.{
                 .origin = .source,
                 .timestamp = 1_010,
                 .body = .{
@@ -573,17 +581,15 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             });
 
             detector_impl.multi_click_window = 50;
-            try grt.std.testing.expectEqual(
-                @as(usize, 2),
-                try detector.process(.{
-                    .origin = .timer,
-                    .timestamp = 1_060,
-                    .body = .{
-                        .tick = .{},
-                    },
-                }),
-            );
+            try detector.process(.{
+                .origin = .timer,
+                .timestamp = 1_060,
+                .body = .{
+                    .tick = .{},
+                },
+            });
             try grt.std.testing.expectEqual(@as(u16, 1), collector.click_count);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 1_000), collector.pressed_at);
             try grt.std.testing.expectEqual(@as(usize, 1), collector.count);
         }
 
@@ -599,7 +605,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
             var sink = NoopSink{};
 
-            try grt.std.testing.expectEqual(@as(usize, 0), try reduceGrouped(&store, .{
+            try reduceGrouped(&store, .{
                 .origin = .source,
                 .body = .{
                     .raw_grouped_button = .{
@@ -608,7 +614,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .pressed = true,
                     },
                 },
-            }, Emitter.init(&sink)));
+            }, Emitter.init(&sink));
 
             store.tick();
             const next = store.get();
@@ -629,7 +635,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
             var sink = NoopSink{};
 
-            try grt.std.testing.expectEqual(@as(usize, 0), try reduceSingle(&store, .{
+            try reduceSingle(&store, .{
                 .origin = .source,
                 .body = .{
                     .raw_single_button = .{
@@ -637,7 +643,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .pressed = true,
                     },
                 },
-            }, Emitter.init(&sink)));
+            }, Emitter.init(&sink));
 
             store.tick();
             const next = store.get();
@@ -657,21 +663,23 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
             var sink = NoopSink{};
 
-            try grt.std.testing.expectEqual(@as(usize, 0), try reduce(&store, .{
+            try reduce(&store, .{
                 .origin = .node,
                 .body = .{
                     .button_gesture = .{
                         .source_id = 5,
                         .button_id = 2,
+                        .pressed_at = 1234,
                         .gesture = .{ .click = 3 },
                     },
                 },
-            }, Emitter.init(&sink)));
+            }, Emitter.init(&sink));
 
             store.tick();
             const next = store.get();
             try grt.std.testing.expectEqual(@as(u32, 5), next.source_id);
             try grt.std.testing.expectEqual(@as(?u32, 2), next.button_id);
+            try grt.std.testing.expectEqual(@as(glib.time.instant.Time, 1234), next.pressed_at);
             try grt.std.testing.expect(next.gesture_kind != null);
             try grt.std.testing.expectEqual(@as(@TypeOf(next.gesture_kind.?), .click), next.gesture_kind.?);
             try grt.std.testing.expectEqual(@as(u16, 3), next.click_count);

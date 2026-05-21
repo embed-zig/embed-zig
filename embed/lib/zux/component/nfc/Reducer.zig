@@ -3,7 +3,7 @@ const Message = @import("../../pipeline/Message.zig");
 const NfcState = @import("State.zig");
 const glib = @import("glib");
 
-pub fn reduceFound(store: anytype, message: Message, emit: Emitter) !usize {
+pub fn reduceFound(store: anytype, message: Message, emit: Emitter) !void {
     _ = emit;
 
     switch (message.body) {
@@ -18,13 +18,12 @@ pub fn reduceFound(store: anytype, message: Message, emit: Emitter) !usize {
                     state.card_type = event_value.card_type;
                 }
             }.apply);
-            return 0;
         },
-        else => return 0,
+        else => return,
     }
 }
 
-pub fn reduceRead(store: anytype, message: Message, emit: Emitter) !usize {
+pub fn reduceRead(store: anytype, message: Message, emit: Emitter) !void {
     _ = emit;
 
     switch (message.body) {
@@ -38,18 +37,17 @@ pub fn reduceRead(store: anytype, message: Message, emit: Emitter) !usize {
                     state.card_type = event_value.card_type;
                 }
             }.apply);
-            return 0;
         },
-        else => return 0,
+        else => return,
     }
 }
 
-pub fn reduce(store: anytype, message: Message, emit: Emitter) !usize {
-    return switch (message.body) {
-        .nfc_found => reduceFound(store, message, emit),
-        .nfc_read => reduceRead(store, message, emit),
-        else => 0,
-    };
+pub fn reduce(store: anytype, message: Message, emit: Emitter) !void {
+    switch (message.body) {
+        .nfc_found => try reduceFound(store, message, emit),
+        .nfc_read => try reduceRead(store, message, emit),
+        else => return,
+    }
 }
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
@@ -66,7 +64,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
             var sink = NoopSink{};
 
-            try grt.std.testing.expectEqual(@as(usize, 0), try reduceFound(&store, .{
+            try reduceFound(&store, .{
                 .origin = .source,
                 .body = .{
                     .nfc_found = .{
@@ -83,7 +81,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .card_type = .ndef,
                     },
                 },
-            }, Emitter.init(&sink)));
+            }, Emitter.init(&sink));
 
             store.tick();
             const next = store.get();
@@ -105,7 +103,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
             var sink = NoopSink{};
 
-            try grt.std.testing.expectEqual(@as(usize, 0), try reduceRead(&store, .{
+            try reduceRead(&store, .{
                 .origin = .source,
                 .body = .{
                     .nfc_read = .{
@@ -127,7 +125,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .card_type = .ndef,
                     },
                 },
-            }, Emitter.init(&sink)));
+            }, Emitter.init(&sink));
 
             store.tick();
             const next = store.get();
@@ -149,7 +147,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
             var sink = NoopSink{};
 
-            try grt.std.testing.expectEqual(@as(usize, 0), try reduce(&store, .{
+            try reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .nfc_found = .{
@@ -166,8 +164,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .card_type = .ndef,
                     },
                 },
-            }, Emitter.init(&sink)));
-            try grt.std.testing.expectEqual(@as(usize, 0), try reduce(&store, .{
+            }, Emitter.init(&sink));
+            try reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .nfc_read = .{
@@ -189,7 +187,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                         .card_type = .ndef,
                     },
                 },
-            }, Emitter.init(&sink)));
+            }, Emitter.init(&sink));
 
             store.tick();
             const next = store.get();

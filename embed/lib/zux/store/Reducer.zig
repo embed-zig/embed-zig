@@ -4,7 +4,7 @@ const Message = @import("../pipeline/Message.zig");
 const Node = @import("../pipeline/Node.zig");
 
 pub fn ReducerFnType(comptime Stores: type, comptime MessageType: type, comptime EmitterType: type) type {
-    return *const fn (stores: *Stores, message: MessageType, emit: EmitterType) anyerror!usize;
+    return *const fn (stores: *Stores, message: MessageType, emit: EmitterType) anyerror!void;
 }
 
 pub const ReducerFnFactory = @TypeOf(struct {
@@ -45,21 +45,19 @@ pub fn make(comptime Store: type) type {
             self.out = out;
         }
 
-        pub fn process(self: *Self, message: Message) !usize {
+        pub fn process(self: *Self, message: Message) !void {
             const NoopSink = struct {
                 pub fn emit(_: *@This(), _: Message) !void {}
             };
 
             var noop = NoopSink{};
             const emit = self.out orelse Emitter.init(&noop);
-            const reduced = try self.reducer(self.stores, message, emit);
+            try self.reducer(self.stores, message, emit);
             if (message.body == .tick) {
                 if (self.out) |out| {
                     try out.emit(message);
-                    return reduced + 1;
                 }
             }
-            return reduced;
         }
     };
 }
@@ -100,7 +98,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             };
 
             const ButtonReducer = struct {
-                fn reduce(stores: *AppStore.Stores, message: Message, emit: Emitter) !usize {
+                fn reduce(stores: *AppStore.Stores, message: Message, emit: Emitter) !void {
                     switch (message.body) {
                         .raw_single_button => |button| {
                             stores.button.pressed = button.pressed;
@@ -116,12 +114,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                                         },
                                     },
                                 });
-                                return 1;
+                                return;
                             }
 
-                            return 0;
+                            return;
                         },
-                        else => return 0,
+                        else => return,
                     }
                 }
             };
@@ -135,7 +133,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var node = reducer_impl.node();
             node.bindOutput(Emitter.init(&sink));
 
-            const emitted = try node.process(.{
+            try node.process(.{
                 .origin = .source,
                 .body = .{
                     .raw_single_button = .{
@@ -149,7 +147,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(sink.called);
             try grt.std.testing.expectEqual(@as(?u32, 0), sink.last_button_id);
             try grt.std.testing.expect(sink.last_pressed);
-            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
     };
 

@@ -1,12 +1,10 @@
 const glib = @import("glib");
-const Context = @import("../../event/Context.zig");
 
 pub const Single = struct {
     pub const kind = .raw_single_button;
 
     source_id: u32,
     pressed: bool,
-    ctx: Context.Type = null,
 };
 
 pub const Grouped = struct {
@@ -15,7 +13,6 @@ pub const Grouped = struct {
     source_id: u32,
     button_id: ?u32,
     pressed: bool,
-    ctx: Context.Type = null,
 };
 
 pub const Detected = struct {
@@ -28,6 +25,6 @@ pub const Detected = struct {
 
     source_id: u32,
     button_id: ?u32 = null,
+    pressed_at: glib.time.instant.Time = 0,
     gesture: Value,
-    ctx: Context.Type = null,
 };

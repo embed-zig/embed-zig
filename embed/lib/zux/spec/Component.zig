@@ -1,48 +1,39 @@
 const glib = @import("glib");
-const ui_flow = @import("../component/ui/flow.zig");
 const JsonParser = @import("JsonParser.zig");
 const Component = @This();
-
-pub const FlowEdge = struct {
-    from: []const u8,
-    to: []const u8,
-    event: []const u8,
-};
-
-pub const FlowSpec = struct {
-    nodes: []const []const u8,
-    edges: []const FlowEdge,
-
-    pub fn makeType(comptime self: FlowSpec) type {
-        var builder = ui_flow.Builder.init();
-        inline for (self.nodes) |node_name| {
-            builder.addNode(node_name);
-        }
-        inline for (self.edges) |edge| {
-            builder.addEdge(edge.from, edge.to, edge.event);
-        }
-        return builder.build();
-    }
-};
 
 pub const Kind = union(enum) {
     grouped_button: struct {
         button_count: usize,
     },
-    single_button: void,
+    bt: void,
+    audio_system: void,
+    display: void,
+    single_button: ButtonSpec,
     imu: void,
     led_strip: struct {
         pixel_count: usize,
     },
     modem: void,
     nfc: void,
-    touch: void,
+    switch_output: void,
+    pwm: void,
+    touch: TouchSpec,
     wifi_sta: void,
     wifi_ap: void,
-    router: void,
-    flow: FlowSpec,
-    overlay: void,
-    selection: void,
+};
+
+pub const ButtonInputType = enum {
+    poll,
+    virtual,
+};
+
+pub const ButtonSpec = struct {
+    input_type: ButtonInputType = .poll,
+};
+
+pub const TouchSpec = struct {
+    target: ?[]const u8 = null,
 };
 
 label: []const u8,
@@ -276,14 +267,11 @@ pub fn parseJsonValueWithKindPath(
 
 fn freeRuntimeKind(kind: Kind, allocator: glib.std.mem.Allocator) void {
     switch (kind) {
-        .flow => |flow| freeRuntimeFlow(flow, allocator),
+        .touch => |touch| {
+            if (touch.target) |target| allocator.free(target);
+        },
         else => {},
     }
-}
-
-fn freeRuntimeFlow(flow: FlowSpec, allocator: glib.std.mem.Allocator) void {
-    freeRuntimeFlowNodes(flow.nodes, allocator);
-    freeRuntimeFlowEdges(flow.edges, allocator);
 }
 
 fn parseKindValue(
@@ -314,8 +302,19 @@ fn parseKindValue(
         };
     }
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "single_button")) {
+        return .{ .single_button = try parseButtonSpecValue(entry.value_ptr.*) };
+    }
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "audio_system")) {
         try expectEmptyPayload(entry.value_ptr.*);
-        return .{ .single_button = {} };
+        return .{ .audio_system = {} };
+    }
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "bt")) {
+        try expectEmptyPayload(entry.value_ptr.*);
+        return .{ .bt = {} };
+    }
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "display")) {
+        try expectEmptyPayload(entry.value_ptr.*);
+        return .{ .display = {} };
     }
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "imu")) {
         try expectEmptyPayload(entry.value_ptr.*);
@@ -343,9 +342,16 @@ fn parseKindValue(
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .nfc = {} };
     }
-    if (glib.std.mem.eql(u8, entry.key_ptr.*, "touch")) {
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "switch")) {
         try expectEmptyPayload(entry.value_ptr.*);
-        return .{ .touch = {} };
+        return .{ .switch_output = {} };
+    }
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "pwm")) {
+        try expectEmptyPayload(entry.value_ptr.*);
+        return .{ .pwm = {} };
+    }
+    if (glib.std.mem.eql(u8, entry.key_ptr.*, "touch")) {
+        return .{ .touch = try parseTouchSpecValue(allocator, entry.value_ptr.*) };
     }
     if (glib.std.mem.eql(u8, entry.key_ptr.*, "wifi_sta")) {
         try expectEmptyPayload(entry.value_ptr.*);
@@ -355,215 +361,8 @@ fn parseKindValue(
         try expectEmptyPayload(entry.value_ptr.*);
         return .{ .wifi_ap = {} };
     }
-    if (glib.std.mem.eql(u8, entry.key_ptr.*, "router")) {
-        try expectEmptyPayload(entry.value_ptr.*);
-        return .{ .router = {} };
-    }
-    if (glib.std.mem.eql(u8, entry.key_ptr.*, "flow")) {
-        return .{
-            .flow = try parseFlowPayloadValue(
-                allocator,
-                entry.value_ptr.*,
-                "zux.spec.Component.parseJsonValue flow payload",
-            ),
-        };
-    }
-    if (glib.std.mem.eql(u8, entry.key_ptr.*, "overlay")) {
-        try expectEmptyPayload(entry.value_ptr.*);
-        return .{ .overlay = {} };
-    }
-    if (glib.std.mem.eql(u8, entry.key_ptr.*, "selection")) {
-        try expectEmptyPayload(entry.value_ptr.*);
-        return .{ .selection = {} };
-    }
 
     return error.UnknownComponentKind;
-}
-
-fn parseFlowPayloadValue(
-    allocator: glib.std.mem.Allocator,
-    value: glib.std.json.Value,
-    comptime context: []const u8,
-) !FlowSpec {
-    const object = switch (value) {
-        .object => |object| object,
-        else => return error.ExpectedFlowSpecObject,
-    };
-    var iterator = object.iterator();
-    while (iterator.next()) |entry| {
-        if (!glib.std.mem.eql(u8, entry.key_ptr.*, "nodes") and
-            !glib.std.mem.eql(u8, entry.key_ptr.*, "edges"))
-        {
-            return error.UnknownFlowField;
-        }
-    }
-
-    const nodes = try parseFlowNodesValue(
-        allocator,
-        object.get("nodes") orelse return error.MissingFlowNodes,
-    );
-    errdefer freeRuntimeFlowNodes(nodes, allocator);
-
-    const edges = try parseFlowEdgesValue(
-        allocator,
-        object.get("edges") orelse return error.MissingFlowEdges,
-    );
-    errdefer freeRuntimeFlowEdges(edges, allocator);
-
-    try validateRuntimeFlow(nodes, edges, context);
-    return .{
-        .nodes = nodes,
-        .edges = edges,
-    };
-}
-
-fn parseFlowNodesValue(
-    allocator: glib.std.mem.Allocator,
-    value: glib.std.json.Value,
-) ![]const []const u8 {
-    const array = switch (value) {
-        .array => |array| array,
-        else => return error.ExpectedFlowNodesArray,
-    };
-
-    const nodes = try allocator.alloc([]const u8, array.items.len);
-    errdefer allocator.free(nodes);
-    for (array.items, 0..) |item, i| {
-        nodes[i] = switch (item) {
-            .string => |text| blk: {
-                if (text.len == 0) return error.EmptyFlowNode;
-                break :blk try allocator.dupe(u8, text);
-            },
-            else => return error.ExpectedFlowNodeString,
-        };
-        errdefer for (nodes[0 .. i + 1]) |node_name| allocator.free(node_name);
-    }
-
-    return nodes;
-}
-
-fn parseFlowEdgesValue(
-    allocator: glib.std.mem.Allocator,
-    value: glib.std.json.Value,
-) ![]const FlowEdge {
-    const array = switch (value) {
-        .array => |array| array,
-        else => return error.ExpectedFlowEdgesArray,
-    };
-
-    const edges = try allocator.alloc(FlowEdge, array.items.len);
-    errdefer allocator.free(edges);
-    for (array.items, 0..) |item, i| {
-        edges[i] = try parseFlowEdgeValue(allocator, item);
-        errdefer for (edges[0 .. i + 1]) |edge| {
-            allocator.free(edge.from);
-            allocator.free(edge.to);
-            allocator.free(edge.event);
-        };
-    }
-
-    return edges;
-}
-
-fn parseFlowEdgeValue(
-    allocator: glib.std.mem.Allocator,
-    value: glib.std.json.Value,
-) !FlowEdge {
-    const object = switch (value) {
-        .object => |object| object,
-        else => return error.ExpectedFlowEdgeObject,
-    };
-    var iterator = object.iterator();
-    while (iterator.next()) |entry| {
-        if (!glib.std.mem.eql(u8, entry.key_ptr.*, "from") and
-            !glib.std.mem.eql(u8, entry.key_ptr.*, "to") and
-            !glib.std.mem.eql(u8, entry.key_ptr.*, "event"))
-        {
-            return error.UnknownFlowEdgeField;
-        }
-    }
-
-    const from = try parseRequiredNonEmptyStringFieldValue(
-        allocator,
-        object,
-        "from",
-        error.MissingFlowEdgeFrom,
-        error.ExpectedFlowEdgeFromString,
-        error.EmptyFlowEdgeFrom,
-    );
-    errdefer allocator.free(from);
-
-    const to = try parseRequiredNonEmptyStringFieldValue(
-        allocator,
-        object,
-        "to",
-        error.MissingFlowEdgeTo,
-        error.ExpectedFlowEdgeToString,
-        error.EmptyFlowEdgeTo,
-    );
-    errdefer allocator.free(to);
-
-    const event = try parseRequiredNonEmptyStringFieldValue(
-        allocator,
-        object,
-        "event",
-        error.MissingFlowEdgeEvent,
-        error.ExpectedFlowEdgeEventString,
-        error.EmptyFlowEdgeEvent,
-    );
-    errdefer allocator.free(event);
-
-    return .{
-        .from = from,
-        .to = to,
-        .event = event,
-    };
-}
-
-fn parseFlowPayloadSlice(
-    comptime source: []const u8,
-    comptime context: []const u8,
-) FlowSpec {
-    var parser = JsonParser.init(source);
-    parser.expectByte('{');
-
-    var nodes: ?[]const []const u8 = null;
-    var edges: ?[]const FlowEdge = null;
-
-    if (parser.consumeByte('}')) {
-        @compileError(context ++ " requires `nodes` and `edges` fields");
-    }
-
-    while (true) {
-        const key = parser.parseString();
-        parser.expectByte(':');
-        const value_source = parser.parseValueSlice();
-        if (comptimeEql(key, "nodes")) {
-            if (nodes != null) {
-                @compileError(context ++ " contains duplicate `nodes` field");
-            }
-            nodes = parseFlowNodesSlice(value_source, context ++ " `nodes`");
-        } else if (comptimeEql(key, "edges")) {
-            if (edges != null) {
-                @compileError(context ++ " contains duplicate `edges` field");
-            }
-            edges = parseFlowEdgesSlice(value_source, context ++ " `edges`");
-        } else {
-            @compileError(context ++ " only supports `nodes` and `edges` fields");
-        }
-
-        if (parser.consumeByte(',')) continue;
-        parser.expectByte('}');
-        break;
-    }
-    parser.finish();
-
-    const flow = FlowSpec{
-        .nodes = nodes orelse @compileError(context ++ " requires `nodes`"),
-        .edges = edges orelse @compileError(context ++ " requires `edges`"),
-    };
-    validateFlowComptime(flow, context);
-    return flow;
 }
 
 fn parseRequiredStringValueSlice(
@@ -577,286 +376,6 @@ fn parseRequiredStringValueSlice(
         @compileError(context ++ " must not be empty");
     }
     return result;
-}
-
-fn parseFlowNodesSlice(
-    comptime source: []const u8,
-    comptime context: []const u8,
-) []const []const u8 {
-    var parser = JsonParser.init(source);
-    parser.expectByte('[');
-
-    var nodes: []const []const u8 = &.{};
-    if (!parser.consumeByte(']')) {
-        while (true) {
-            const node_name = parser.parseString();
-            if (node_name.len == 0) {
-                @compileError(context ++ " entries must not be empty");
-            }
-            nodes = nodes ++ &[_][]const u8{node_name};
-            if (parser.consumeByte(',')) continue;
-            parser.expectByte(']');
-            break;
-        }
-    }
-    parser.finish();
-    return nodes;
-}
-
-fn parseFlowEdgesSlice(
-    comptime source: []const u8,
-    comptime context: []const u8,
-) []const FlowEdge {
-    var parser = JsonParser.init(source);
-    parser.expectByte('[');
-
-    var edges: []const FlowEdge = &.{};
-    if (!parser.consumeByte(']')) {
-        while (true) {
-            edges = edges ++ &[_]FlowEdge{parseFlowEdgeSlice(
-                parser.parseValueSlice(),
-                context ++ " entry",
-            )};
-            if (parser.consumeByte(',')) continue;
-            parser.expectByte(']');
-            break;
-        }
-    }
-    parser.finish();
-    return edges;
-}
-
-fn parseFlowEdgeSlice(
-    comptime source: []const u8,
-    comptime context: []const u8,
-) FlowEdge {
-    var parser = JsonParser.init(source);
-    parser.expectByte('{');
-
-    var from: ?[]const u8 = null;
-    var to: ?[]const u8 = null;
-    var event: ?[]const u8 = null;
-
-    if (parser.consumeByte('}')) {
-        @compileError(context ++ " requires `from`, `to`, and `event` fields");
-    }
-
-    while (true) {
-        const key = parser.parseString();
-        parser.expectByte(':');
-        if (comptimeEql(key, "from")) {
-            if (from != null) {
-                @compileError(context ++ " contains duplicate `from` field");
-            }
-            from = parser.parseString();
-            if (from.?.len == 0) {
-                @compileError(context ++ " `from` must not be empty");
-            }
-        } else if (comptimeEql(key, "to")) {
-            if (to != null) {
-                @compileError(context ++ " contains duplicate `to` field");
-            }
-            to = parser.parseString();
-            if (to.?.len == 0) {
-                @compileError(context ++ " `to` must not be empty");
-            }
-        } else if (comptimeEql(key, "event")) {
-            if (event != null) {
-                @compileError(context ++ " contains duplicate `event` field");
-            }
-            event = parser.parseString();
-            if (event.?.len == 0) {
-                @compileError(context ++ " `event` must not be empty");
-            }
-        } else {
-            _ = parser.parseValueSlice();
-            @compileError(context ++ " only supports `from`, `to`, and `event` fields");
-        }
-
-        if (parser.consumeByte(',')) continue;
-        parser.expectByte('}');
-        break;
-    }
-    parser.finish();
-
-    return .{
-        .from = from orelse @compileError(context ++ " requires `from`"),
-        .to = to orelse @compileError(context ++ " requires `to`"),
-        .event = event orelse @compileError(context ++ " requires `event`"),
-    };
-}
-
-fn parseFlowPayloadComptime(
-    comptime value: glib.std.json.Value,
-    comptime context: []const u8,
-) FlowSpec {
-    const object = expectObjectComptime(value, context);
-    var iterator = object.iterator();
-    while (iterator.next()) |entry| {
-        const field_name = entry.key_ptr.*;
-        if (!comptimeEql(field_name, "nodes") and
-            !comptimeEql(field_name, "edges"))
-        {
-            @compileError(context ++ " only supports `nodes` and `edges` fields");
-        }
-    }
-
-    const flow = FlowSpec{
-        .nodes = parseFlowNodesComptime(
-            object.get("nodes") orelse
-                @compileError(context ++ " requires a `nodes` field"),
-            context ++ " `nodes`",
-        ),
-        .edges = parseFlowEdgesComptime(
-            object.get("edges") orelse
-                @compileError(context ++ " requires an `edges` field"),
-            context ++ " `edges`",
-        ),
-    };
-    validateFlowComptime(flow, context);
-    return flow;
-}
-
-fn parseFlowNodesComptime(
-    comptime value: glib.std.json.Value,
-    comptime context: []const u8,
-) []const []const u8 {
-    const array = switch (value) {
-        .array => |array| array,
-        else => @compileError(context ++ " must be a JSON array"),
-    };
-
-    var nodes: [array.items.len][]const u8 = undefined;
-    inline for (array.items, 0..) |item, i| {
-        nodes[i] = parseNonEmptyStringValueComptime(item, context ++ " entry");
-    }
-    return nodes[0..];
-}
-
-fn parseFlowEdgesComptime(
-    comptime value: glib.std.json.Value,
-    comptime context: []const u8,
-) []const FlowEdge {
-    const array = switch (value) {
-        .array => |array| array,
-        else => @compileError(context ++ " must be a JSON array"),
-    };
-
-    var edges: [array.items.len]FlowEdge = undefined;
-    inline for (array.items, 0..) |item, i| {
-        edges[i] = parseFlowEdgeComptime(item, context ++ " entry");
-    }
-    return edges[0..];
-}
-
-fn parseFlowEdgeComptime(
-    comptime value: glib.std.json.Value,
-    comptime context: []const u8,
-) FlowEdge {
-    const object = expectObjectComptime(value, context);
-    var iterator = object.iterator();
-    while (iterator.next()) |entry| {
-        const field_name = entry.key_ptr.*;
-        if (!comptimeEql(field_name, "from") and
-            !comptimeEql(field_name, "to") and
-            !comptimeEql(field_name, "event"))
-        {
-            @compileError(context ++ " only supports `from`, `to`, and `event` fields");
-        }
-    }
-
-    return .{
-        .from = parseNonEmptyStringValueComptime(
-            object.get("from") orelse
-                @compileError(context ++ " requires a `from` field"),
-            context ++ " `from`",
-        ),
-        .to = parseNonEmptyStringValueComptime(
-            object.get("to") orelse
-                @compileError(context ++ " requires a `to` field"),
-            context ++ " `to`",
-        ),
-        .event = parseNonEmptyStringValueComptime(
-            object.get("event") orelse
-                @compileError(context ++ " requires an `event` field"),
-            context ++ " `event`",
-        ),
-    };
-}
-
-fn validateRuntimeFlow(
-    nodes: []const []const u8,
-    edges: []const FlowEdge,
-    comptime _: []const u8,
-) !void {
-    if (nodes.len == 0) return error.EmptyFlowNodes;
-    if (hasDuplicateText(nodes)) return error.DuplicateFlowNode;
-    if (!allFlowEdgeFromKnown(nodes, edges)) return error.FlowEdgeUnknownFrom;
-    if (!allFlowEdgeToKnown(nodes, edges)) return error.FlowEdgeUnknownTo;
-}
-
-fn validateFlowComptime(
-    comptime flow: FlowSpec,
-    comptime context: []const u8,
-) void {
-    if (flow.nodes.len == 0) {
-        @compileError(context ++ " `nodes` must not be empty");
-    }
-    if (hasDuplicateText(flow.nodes)) {
-        @compileError(context ++ " contains duplicate node labels");
-    }
-    if (!allFlowEdgeFromKnown(flow.nodes, flow.edges)) {
-        @compileError(context ++ " edge `from` must exist in `nodes`");
-    }
-    if (!allFlowEdgeToKnown(flow.nodes, flow.edges)) {
-        @compileError(context ++ " edge `to` must exist in `nodes`");
-    }
-}
-
-fn freeRuntimeFlowNodes(nodes: []const []const u8, allocator: glib.std.mem.Allocator) void {
-    for (nodes) |node_name| {
-        allocator.free(node_name);
-    }
-    allocator.free(nodes);
-}
-
-fn freeRuntimeFlowEdges(edges: []const FlowEdge, allocator: glib.std.mem.Allocator) void {
-    for (edges) |edge| {
-        allocator.free(edge.from);
-        allocator.free(edge.to);
-        allocator.free(edge.event);
-    }
-    allocator.free(edges);
-}
-
-fn containsText(haystack: []const []const u8, needle: []const u8) bool {
-    for (haystack) |candidate| {
-        if (glib.std.mem.eql(u8, candidate, needle)) return true;
-    }
-    return false;
-}
-
-fn hasDuplicateText(haystack: []const []const u8) bool {
-    for (haystack, 0..) |candidate, i| {
-        for (haystack[0..i]) |existing| {
-            if (glib.std.mem.eql(u8, candidate, existing)) return true;
-        }
-    }
-    return false;
-}
-
-fn allFlowEdgeFromKnown(nodes: []const []const u8, edges: []const FlowEdge) bool {
-    for (edges) |edge| {
-        if (!containsText(nodes, edge.from)) return false;
-    }
-    return true;
-}
-
-fn allFlowEdgeToKnown(nodes: []const []const u8, edges: []const FlowEdge) bool {
-    for (edges) |edge| {
-        if (!containsText(nodes, edge.to)) return false;
-    }
-    return true;
 }
 
 fn expectEmptyPayload(value: glib.std.json.Value) !void {
@@ -899,11 +418,28 @@ fn parseKindSlice(comptime source: []const u8) Kind {
         };
     }
     if (comptimeEql(kind_name, "single_button")) {
+        return .{ .single_button = parseButtonSpecSlice(payload_source) };
+    }
+    if (comptimeEql(kind_name, "audio_system")) {
         expectEmptyPayloadSlice(
             payload_source,
-            "zux.spec.Component.parseSlice single_button payload",
+            "zux.spec.Component.parseSlice audio_system payload",
         );
-        return .{ .single_button = {} };
+        return .{ .audio_system = {} };
+    }
+    if (comptimeEql(kind_name, "bt")) {
+        expectEmptyPayloadSlice(
+            payload_source,
+            "zux.spec.Component.parseSlice bt payload",
+        );
+        return .{ .bt = {} };
+    }
+    if (comptimeEql(kind_name, "display")) {
+        expectEmptyPayloadSlice(
+            payload_source,
+            "zux.spec.Component.parseSlice display payload",
+        );
+        return .{ .display = {} };
     }
     if (comptimeEql(kind_name, "imu")) {
         expectEmptyPayloadSlice(
@@ -937,12 +473,22 @@ fn parseKindSlice(comptime source: []const u8) Kind {
         );
         return .{ .nfc = {} };
     }
-    if (comptimeEql(kind_name, "touch")) {
+    if (comptimeEql(kind_name, "switch")) {
         expectEmptyPayloadSlice(
             payload_source,
-            "zux.spec.Component.parseSlice touch payload",
+            "zux.spec.Component.parseSlice switch payload",
         );
-        return .{ .touch = {} };
+        return .{ .switch_output = {} };
+    }
+    if (comptimeEql(kind_name, "pwm")) {
+        expectEmptyPayloadSlice(
+            payload_source,
+            "zux.spec.Component.parseSlice pwm payload",
+        );
+        return .{ .pwm = {} };
+    }
+    if (comptimeEql(kind_name, "touch")) {
+        return .{ .touch = parseTouchSpecSlice(payload_source) };
     }
     if (comptimeEql(kind_name, "wifi_sta")) {
         expectEmptyPayloadSlice(
@@ -958,31 +504,6 @@ fn parseKindSlice(comptime source: []const u8) Kind {
         );
         return .{ .wifi_ap = {} };
     }
-    if (comptimeEql(kind_name, "router")) {
-        expectEmptyPayloadSlice(
-            payload_source,
-            "zux.spec.Component.parseSlice router payload",
-        );
-        return .{ .router = {} };
-    }
-    if (comptimeEql(kind_name, "flow")) {
-        return .{ .flow = parseFlowPayloadSlice(payload_source, "zux.spec.Component.parseSlice flow payload") };
-    }
-    if (comptimeEql(kind_name, "overlay")) {
-        expectEmptyPayloadSlice(
-            payload_source,
-            "zux.spec.Component.parseSlice overlay payload",
-        );
-        return .{ .overlay = {} };
-    }
-    if (comptimeEql(kind_name, "selection")) {
-        expectEmptyPayloadSlice(
-            payload_source,
-            "zux.spec.Component.parseSlice selection payload",
-        );
-        return .{ .selection = {} };
-    }
-
     @compileError("zux.spec.Component.parseSlice encountered an unknown component kind");
 }
 
@@ -999,7 +520,16 @@ fn parsePathKindSlice(comptime kind_path: []const u8, comptime source: []const u
         };
     }
     if (comptimeEql(kind_path, "button/single")) {
-        return .{ .single_button = {} };
+        return .{ .single_button = parseButtonSpecSlice(source) };
+    }
+    if (comptimeEql(kind_path, "audio_system")) {
+        return .{ .audio_system = {} };
+    }
+    if (comptimeEql(kind_path, "bt")) {
+        return .{ .bt = {} };
+    }
+    if (comptimeEql(kind_path, "display")) {
+        return .{ .display = {} };
     }
     if (comptimeEql(kind_path, "imu")) {
         return .{ .imu = {} };
@@ -1021,8 +551,14 @@ fn parsePathKindSlice(comptime kind_path: []const u8, comptime source: []const u
     if (comptimeEql(kind_path, "nfc")) {
         return .{ .nfc = {} };
     }
+    if (comptimeEql(kind_path, "switch")) {
+        return .{ .switch_output = {} };
+    }
+    if (comptimeEql(kind_path, "pwm")) {
+        return .{ .pwm = {} };
+    }
     if (comptimeEql(kind_path, "touch")) {
-        return .{ .touch = {} };
+        return .{ .touch = parseTouchSpecSlice(source) };
     }
     if (comptimeEql(kind_path, "wifi/sta")) {
         return .{ .wifi_sta = {} };
@@ -1030,28 +566,6 @@ fn parsePathKindSlice(comptime kind_path: []const u8, comptime source: []const u
     if (comptimeEql(kind_path, "wifi/ap")) {
         return .{ .wifi_ap = {} };
     }
-    if (comptimeEql(kind_path, "ui/route")) {
-        return .{ .router = {} };
-    }
-    if (comptimeEql(kind_path, "ui/flow")) {
-        return .{
-            .flow = parseFlowPayloadSlice(
-                parseRequiredValueFieldFromObjectSlice(
-                    source,
-                    "flow",
-                    "zux.spec.Component.parseSlice Component/ui/flow",
-                ),
-                "zux.spec.Component.parseSlice Component/ui/flow `flow`",
-            ),
-        };
-    }
-    if (comptimeEql(kind_path, "ui/overlay")) {
-        return .{ .overlay = {} };
-    }
-    if (comptimeEql(kind_path, "ui/selection")) {
-        return .{ .selection = {} };
-    }
-
     @compileError("zux.spec.Component.parseSlice encountered an unknown component kind path");
 }
 
@@ -1073,7 +587,16 @@ fn parsePathKindValue(
         };
     }
     if (glib.std.mem.eql(u8, kind_path, "button/single")) {
-        return .{ .single_button = {} };
+        return .{ .single_button = try parseButtonSpecJsonObject(object) };
+    }
+    if (glib.std.mem.eql(u8, kind_path, "audio_system")) {
+        return .{ .audio_system = {} };
+    }
+    if (glib.std.mem.eql(u8, kind_path, "bt")) {
+        return .{ .bt = {} };
+    }
+    if (glib.std.mem.eql(u8, kind_path, "display")) {
+        return .{ .display = {} };
     }
     if (glib.std.mem.eql(u8, kind_path, "imu")) {
         return .{ .imu = {} };
@@ -1096,8 +619,14 @@ fn parsePathKindValue(
     if (glib.std.mem.eql(u8, kind_path, "nfc")) {
         return .{ .nfc = {} };
     }
+    if (glib.std.mem.eql(u8, kind_path, "switch")) {
+        return .{ .switch_output = {} };
+    }
+    if (glib.std.mem.eql(u8, kind_path, "pwm")) {
+        return .{ .pwm = {} };
+    }
     if (glib.std.mem.eql(u8, kind_path, "touch")) {
-        return .{ .touch = {} };
+        return .{ .touch = try parseTouchSpecJsonObject(allocator, object) };
     }
     if (glib.std.mem.eql(u8, kind_path, "wifi/sta")) {
         return .{ .wifi_sta = {} };
@@ -1105,25 +634,6 @@ fn parsePathKindValue(
     if (glib.std.mem.eql(u8, kind_path, "wifi/ap")) {
         return .{ .wifi_ap = {} };
     }
-    if (glib.std.mem.eql(u8, kind_path, "ui/route")) {
-        return .{ .router = {} };
-    }
-    if (glib.std.mem.eql(u8, kind_path, "ui/flow")) {
-        return .{
-            .flow = try parseFlowPayloadValue(
-                allocator,
-                object.get("flow") orelse return error.MissingFlowSpec,
-                "zux.spec.Component.parseJsonValue Component/ui/flow `flow`",
-            ),
-        };
-    }
-    if (glib.std.mem.eql(u8, kind_path, "ui/overlay")) {
-        return .{ .overlay = {} };
-    }
-    if (glib.std.mem.eql(u8, kind_path, "ui/selection")) {
-        return .{ .selection = {} };
-    }
-
     return error.UnknownComponentKind;
 }
 
@@ -1257,6 +767,182 @@ fn parseRequiredNonEmptyStringFieldValue(
         },
         else => expected_err,
     };
+}
+
+fn parseOptionalNonEmptyStringFieldValue(
+    allocator: glib.std.mem.Allocator,
+    value: glib.std.json.Value,
+    expected_err: anyerror,
+    empty_err: anyerror,
+) ![]const u8 {
+    return switch (value) {
+        .string => |text| blk: {
+            if (text.len == 0) return empty_err;
+            break :blk try allocator.dupe(u8, text);
+        },
+        else => expected_err,
+    };
+}
+
+fn parseButtonSpecValue(value: glib.std.json.Value) !ButtonSpec {
+    return switch (value) {
+        .null => .{},
+        .object => |object| try parseButtonSpecJsonObject(object),
+        else => error.ExpectedObject,
+    };
+}
+
+fn parseButtonSpecJsonObject(object: glib.std.json.ObjectMap) !ButtonSpec {
+    const input_type = if (object.get("type")) |value|
+        try parseButtonInputTypeValue(value)
+    else
+        ButtonInputType.poll;
+    return .{ .input_type = input_type };
+}
+
+fn parseButtonInputTypeValue(value: glib.std.json.Value) !ButtonInputType {
+    const text = switch (value) {
+        .string => |text| text,
+        else => return error.ExpectedString,
+    };
+    if (glib.std.mem.eql(u8, text, "poll")) return .poll;
+    if (glib.std.mem.eql(u8, text, "virtual")) return .virtual;
+    return error.UnknownButtonInputType;
+}
+
+fn parseButtonSpecSlice(comptime source: []const u8) ButtonSpec {
+    return .{
+        .input_type = parseButtonInputTypeSlice(source),
+    };
+}
+
+fn parseButtonInputTypeSlice(comptime source: []const u8) ButtonInputType {
+    var parser = JsonParser.init(source);
+    switch (parser.peekByte()) {
+        'n' => {
+            parser.expectNull();
+            parser.finish();
+            return .poll;
+        },
+        '{' => {},
+        else => @compileError("zux.spec.Component.parseSlice single_button payload must be null or an object"),
+    }
+
+    parser.expectByte('{');
+    if (parser.consumeByte('}')) {
+        parser.finish();
+        return .poll;
+    }
+
+    var result: ButtonInputType = .poll;
+    while (true) {
+        const key = parser.parseString();
+        parser.expectByte(':');
+        if (comptimeEql(key, "type")) {
+            const value = parser.parseString();
+            result = parseButtonInputTypeName(value);
+        } else {
+            _ = parser.parseValueSlice();
+        }
+        if (parser.consumeByte(',')) continue;
+        parser.expectByte('}');
+        break;
+    }
+    parser.finish();
+    return result;
+}
+
+fn parseButtonSpecComptime(comptime value: glib.std.json.Value) ButtonSpec {
+    return switch (value) {
+        .null => .{},
+        .object => |object| .{ .input_type = parseButtonInputTypeComptime(object) },
+        else => @compileError("zux.spec.Component.parseJsonValue single_button payload must be null or an object"),
+    };
+}
+
+fn parseButtonInputTypeComptime(comptime object: glib.std.json.ObjectMap) ButtonInputType {
+    if (object.get("type")) |value| {
+        return switch (value) {
+            .string => |text| parseButtonInputTypeName(text),
+            else => @compileError("zux.spec.Component button/single `type` must be a string"),
+        };
+    }
+    return .poll;
+}
+
+fn parseButtonInputTypeName(comptime text: []const u8) ButtonInputType {
+    if (comptimeEql(text, "poll")) return .poll;
+    if (comptimeEql(text, "virtual")) return .virtual;
+    @compileError("zux.spec.Component button/single `type` must be `poll` or `virtual`");
+}
+
+fn parseTouchSpecValue(allocator: glib.std.mem.Allocator, value: glib.std.json.Value) !TouchSpec {
+    return switch (value) {
+        .null => .{},
+        .object => |object| try parseTouchSpecJsonObject(allocator, object),
+        else => error.ExpectedObject,
+    };
+}
+
+fn parseTouchSpecJsonObject(allocator: glib.std.mem.Allocator, object: glib.std.json.ObjectMap) !TouchSpec {
+    const target = if (object.get("target")) |value|
+        try parseOptionalNonEmptyStringFieldValue(allocator, value, error.ExpectedComponentTargetString, error.EmptyComponentTarget)
+    else
+        null;
+    return .{ .target = target };
+}
+
+fn parseTouchSpecSlice(comptime source: []const u8) TouchSpec {
+    var parser = JsonParser.init(source);
+    switch (parser.peekByte()) {
+        'n' => {
+            parser.expectNull();
+            parser.finish();
+            return .{};
+        },
+        '{' => {},
+        else => @compileError("zux.spec.Component touch payload must be null or an object"),
+    }
+
+    parser.expectByte('{');
+    if (parser.consumeByte('}')) {
+        parser.finish();
+        return .{};
+    }
+
+    var target: ?[]const u8 = null;
+    while (true) {
+        const key = parser.parseString();
+        parser.expectByte(':');
+        if (comptimeEql(key, "target")) {
+            target = parser.parseString();
+            if (target.?.len == 0) {
+                @compileError("zux.spec.Component touch `target` must not be empty");
+            }
+        } else {
+            _ = parser.parseValueSlice();
+        }
+        if (parser.consumeByte(',')) continue;
+        parser.expectByte('}');
+        break;
+    }
+    parser.finish();
+    return .{ .target = target };
+}
+
+fn parseTouchSpecComptime(comptime value: glib.std.json.Value) TouchSpec {
+    return switch (value) {
+        .null => .{},
+        .object => |object| .{ .target = parseOptionalTouchTargetComptime(object) },
+        else => @compileError("zux.spec.Component touch payload must be null or an object"),
+    };
+}
+
+fn parseOptionalTouchTargetComptime(comptime object: glib.std.json.ObjectMap) ?[]const u8 {
+    if (object.get("target")) |value| {
+        return parseNonEmptyStringValueComptime(value, "zux.spec.Component touch `target`");
+    }
+    return null;
 }
 
 fn parseRequiredU32FieldValue(
@@ -1393,11 +1079,21 @@ fn parseKindValueComptime(comptime value: glib.std.json.Value) Kind {
         };
     }
     if (comptimeEql(kind_name, "single_button")) {
+        return .{ .single_button = parseButtonSpecComptime(payload) };
+    }
+    if (comptimeEql(kind_name, "audio_system")) {
         expectEmptyPayloadComptime(
             payload,
-            "zux.spec.Component.parseJsonValue single_button payload",
+            "zux.spec.Component.parseJsonValue audio_system payload",
         );
-        return .{ .single_button = {} };
+        return .{ .audio_system = {} };
+    }
+    if (comptimeEql(kind_name, "display")) {
+        expectEmptyPayloadComptime(
+            payload,
+            "zux.spec.Component.parseJsonValue display payload",
+        );
+        return .{ .display = {} };
     }
     if (comptimeEql(kind_name, "imu")) {
         expectEmptyPayloadComptime(
@@ -1435,12 +1131,22 @@ fn parseKindValueComptime(comptime value: glib.std.json.Value) Kind {
         );
         return .{ .nfc = {} };
     }
-    if (comptimeEql(kind_name, "touch")) {
+    if (comptimeEql(kind_name, "switch")) {
         expectEmptyPayloadComptime(
             payload,
-            "zux.spec.Component.parseJsonValue touch payload",
+            "zux.spec.Component.parseJsonValue switch payload",
         );
-        return .{ .touch = {} };
+        return .{ .switch_output = {} };
+    }
+    if (comptimeEql(kind_name, "pwm")) {
+        expectEmptyPayloadComptime(
+            payload,
+            "zux.spec.Component.parseJsonValue pwm payload",
+        );
+        return .{ .pwm = {} };
+    }
+    if (comptimeEql(kind_name, "touch")) {
+        return .{ .touch = parseTouchSpecComptime(payload) };
     }
     if (comptimeEql(kind_name, "wifi_sta")) {
         expectEmptyPayloadComptime(
@@ -1456,36 +1162,6 @@ fn parseKindValueComptime(comptime value: glib.std.json.Value) Kind {
         );
         return .{ .wifi_ap = {} };
     }
-    if (comptimeEql(kind_name, "router")) {
-        expectEmptyPayloadComptime(
-            payload,
-            "zux.spec.Component.parseJsonValue router payload",
-        );
-        return .{ .router = {} };
-    }
-    if (comptimeEql(kind_name, "flow")) {
-        return .{
-            .flow = parseFlowPayloadComptime(
-                payload,
-                "zux.spec.Component.parseJsonValue flow payload",
-            ),
-        };
-    }
-    if (comptimeEql(kind_name, "overlay")) {
-        expectEmptyPayloadComptime(
-            payload,
-            "zux.spec.Component.parseJsonValue overlay payload",
-        );
-        return .{ .overlay = {} };
-    }
-    if (comptimeEql(kind_name, "selection")) {
-        expectEmptyPayloadComptime(
-            payload,
-            "zux.spec.Component.parseJsonValue selection payload",
-        );
-        return .{ .selection = {} };
-    }
-
     @compileError("zux.spec.Component.parseJsonValue encountered an unknown component kind");
 }
 
@@ -1634,40 +1310,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 else => return error.ExpectedSingleButtonComponent,
             }
         }
-
-        fn parses_component_flow_json_slice(allocator: glib.std.mem.Allocator) !void {
-            const source =
-                \\{
-                \\  "label": "pairing",
-                \\  "id": 31,
-                \\  "flow": {
-                \\    "nodes": ["idle", "searching", "confirming", "done"],
-                \\    "edges": [
-                \\      { "from": "idle", "to": "searching", "event": "start" },
-                \\      { "from": "idle", "to": "confirming", "event": "reenter" },
-                \\      { "from": "searching", "to": "done", "event": "found" },
-                \\      { "from": "confirming", "to": "done", "event": "confirm" }
-                \\    ]
-                \\  }
-                \\}
-            ;
-
-            var parsed = try parseAllocSliceWithKindPath(allocator, "ui/flow", source);
-            defer parsed.deinit(allocator);
-
-            try grt.std.testing.expectEqualStrings("pairing", parsed.label);
-            try grt.std.testing.expectEqual(@as(u32, 31), parsed.id);
-            switch (parsed.kind) {
-                .flow => |flow_component| {
-                    try grt.std.testing.expectEqual(@as(usize, 4), flow_component.nodes.len);
-                    try grt.std.testing.expectEqual(@as(usize, 4), flow_component.edges.len);
-                    try grt.std.testing.expectEqualStrings("confirming", flow_component.nodes[2]);
-                    try grt.std.testing.expectEqualStrings("searching", flow_component.edges[0].to);
-                    try grt.std.testing.expectEqualStrings("reenter", flow_component.edges[1].event);
-                },
-                else => return error.ExpectedFlowComponent,
-            }
-        }
     };
 
     const Runner = struct {
@@ -1683,11 +1325,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 t.logFatal(@errorName(err));
                 return false;
             };
-            TestCase.parses_component_flow_json_slice(allocator) catch |err| {
-                t.logFatal(@errorName(err));
-                return false;
-            };
-
             return true;
         }
 

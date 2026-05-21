@@ -7,6 +7,7 @@ const glib = @import("glib");
 const EventHook = @This();
 
 out: ?Emitter = null,
+source_id: u32 = 0,
 
 pub fn init() EventHook {
     return .{};
@@ -28,6 +29,15 @@ pub fn detach(_: *const EventHook, adapter: drivers.wifi.Wifi) void {
     adapter.clearEventCallback();
 }
 
+pub fn attachSta(self: *EventHook, source_id: u32, sta: drivers.wifi.Sta) void {
+    self.source_id = source_id;
+    sta.addEventHook(self, emitStaFn);
+}
+
+pub fn detachSta(self: *EventHook, sta: drivers.wifi.Sta) void {
+    sta.removeEventHook(self, emitStaFn);
+}
+
 pub fn emitFn(ctx: *const anyopaque, source_id: u32, adapter_event: drivers.wifi.Wifi.Event) void {
     const self: *const EventHook = @ptrCast(@alignCast(ctx));
     const out = self.out orelse return;
@@ -38,6 +48,11 @@ pub fn emitFn(ctx: *const anyopaque, source_id: u32, adapter_event: drivers.wifi
         .timestamp = 0,
         .body = value,
     }) catch @panic("zux.component.wifi.EventHook failed to forward event");
+}
+
+fn emitStaFn(ctx: ?*anyopaque, sta_event: drivers.wifi.Sta.Event) void {
+    const self: *const EventHook = @ptrCast(@alignCast(ctx orelse return));
+    emitFn(@ptrCast(self), self.source_id, .{ .sta = sta_event });
 }
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {

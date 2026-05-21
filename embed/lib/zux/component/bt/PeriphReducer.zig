@@ -25,7 +25,7 @@ pub fn init(allocator: glib.std.mem.Allocator) PeriphReducer {
     };
 }
 
-pub fn reduce(self: *PeriphReducer, store: anytype, message: Message, emit: Emitter) !usize {
+pub fn reduce(self: *PeriphReducer, store: anytype, message: Message, emit: Emitter) !void {
     _ = emit;
 
     switch (message.body) {
@@ -87,6 +87,33 @@ pub fn reduce(self: *PeriphReducer, store: anytype, message: Message, emit: Emit
                 }
             }.apply);
         },
+        .ble_periph_connection_updated => |value| {
+            if (self.connections.getPtr(value.conn_handle)) |connection| {
+                connection.peer_addr = value.peer_addr;
+                connection.peer_addr_type = value.peer_addr_type;
+                connection.interval = value.interval;
+                connection.latency = value.latency;
+                connection.supervision_timeout = value.supervision_timeout;
+            }
+
+            const Ctx = struct {
+                reducer: *PeriphReducer,
+                event_value: bt_event.PeriphConnectionUpdated,
+            };
+            const payload: Ctx = .{ .reducer = self, .event_value = value };
+            store.invoke(payload, struct {
+                fn apply(state: *PeriphState, arg: Ctx) void {
+                    state.source_id = arg.event_value.source_id;
+                    state.last_connected_conn_handle = arg.event_value.conn_handle;
+                    state.last_peer_addr = arg.event_value.peer_addr;
+                    state.last_peer_addr_type = arg.event_value.peer_addr_type;
+                    state.last_interval = arg.event_value.interval;
+                    state.last_latency = arg.event_value.latency;
+                    state.last_supervision_timeout = arg.event_value.supervision_timeout;
+                    syncConnectionSummary(state, arg.reducer);
+                }
+            }.apply);
+        },
         .ble_periph_disconnected => |value| {
             _ = self.connections.remove(value.conn_handle);
 
@@ -122,9 +149,8 @@ pub fn reduce(self: *PeriphReducer, store: anytype, message: Message, emit: Emit
                 }
             }.apply);
         },
-        else => return 0,
+        else => return,
     }
-    return 0;
 }
 
 pub fn deinit(self: *PeriphReducer) void {
@@ -153,7 +179,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var sink = NoopSink{};
             const emit = Emitter.init(&sink);
 
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_periph_advertising_started = .{
@@ -161,7 +187,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_periph_connected = .{
@@ -175,7 +201,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_periph_connected = .{
@@ -189,7 +215,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_periph_connected = .{
@@ -203,7 +229,21 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
+                .origin = .source,
+                .body = .{
+                    .ble_periph_connection_updated = .{
+                        .source_id = 21,
+                        .conn_handle = 0x0042,
+                        .peer_addr = .{ 1, 2, 3, 4, 5, 6 },
+                        .peer_addr_type = .random,
+                        .interval = 12,
+                        .latency = 0,
+                        .supervision_timeout = 2 * glib.time.duration.Second,
+                    },
+                },
+            }, emit);
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_periph_mtu_changed = .{
@@ -221,10 +261,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(state.advertising);
             try grt.std.testing.expectEqual(@as(u16, 2), state.connected_count);
             try grt.std.testing.expectEqual(@as(?u16, 0x0042), state.last_connected_conn_handle);
+            try grt.std.testing.expectEqual(@as(u16, 12), state.last_interval);
+            try grt.std.testing.expectEqual(@as(u16, 0), state.last_latency);
             try grt.std.testing.expectEqual(@as(?u16, 0x0042), state.last_mtu_conn_handle);
             try grt.std.testing.expectEqual(@as(?u16, 247), state.last_mtu);
 
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_periph_disconnected = .{
@@ -233,7 +275,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_periph_disconnected = .{
@@ -242,7 +284,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_periph_disconnected = .{
@@ -257,7 +299,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(u16, 1), partially_connected.connected_count);
             try grt.std.testing.expectEqual(@as(?u16, 0x0041), partially_connected.last_disconnected_conn_handle);
 
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_periph_advertising_stopped = .{
@@ -265,7 +307,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             }, emit);
-            _ = try reducer.reduce(&store, .{
+            try reducer.reduce(&store, .{
                 .origin = .source,
                 .body = .{
                     .ble_periph_disconnected = .{

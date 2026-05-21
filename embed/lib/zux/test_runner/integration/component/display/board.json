@@ -1,0 +1,29 @@
+{
+  "kind": "Doc",
+  "spec": [
+    {
+      "kind": "Component/display",
+      "spec": {
+        "label": "display",
+        "id": 111
+      }
+    },
+    {
+      "kind": "StatePath",
+      "spec": {
+        "path": "app/display",
+        "labels": [
+          "display"
+        ]
+      }
+    },
+    {
+      "kind": "Render",
+      "spec": {
+        "label": "display_render",
+        "state_path": "app/display",
+        "fn_name": "DisplayRender.render"
+      }
+    }
+  ]
+}

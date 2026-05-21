@@ -1,7 +1,10 @@
 const glib = @import("glib");
 const AssemblerConfig = @import("../../assembler/Config.zig");
 const Builder = @import("../../spec/Builder.zig");
+const audio_system = @import("component/audio_system.zig");
 const bt = @import("component/bt.zig");
+const display = @import("component/display.zig");
+const switch_component = @import("component/switch.zig");
 
 pub fn make(comptime grt: type) glib.testing.TestRunner {
     const SpecType = comptime blk: {
@@ -33,10 +36,6 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             @embedFile("component/touch/press_move_release_sequence.json"),
             @embedFile("component/wifi/sta_sequence.json"),
             @embedFile("component/wifi/ap_sequence.json"),
-            @embedFile("component/ui/flow/pairing_flow_sequence.json"),
-            @embedFile("component/ui/overlay/loading_overlay_sequence.json"),
-            @embedFile("component/ui/selection/menu_selection_sequence.json"),
-            @embedFile("component/ui/route/route_sequence.json"),
         });
         break :blk builder.build();
     };
@@ -83,6 +82,9 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             const story_runner = spec.testRunner(AppType, UserStoryConfigFactoryImpl);
 
             t.run("bt", bt.make(grt));
+            t.run("audio system", audio_system.make(grt));
+            t.run("display", display.make(grt));
+            t.run("switch", switch_component.make(grt));
             t.run("stories", story_runner);
             return t.wait();
         }

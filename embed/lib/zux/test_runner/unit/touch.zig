@@ -13,7 +13,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             _ = self;
             _ = allocator;
 
-            t.run("touch.EventHook", touch.EventHook.TestRunner(grt));
+            t.run("touch.Poller", touch.Poller.TestRunner(grt));
             t.run("touch.Reducer", touch.Reducer.TestRunner(grt));
             return t.wait();
         }

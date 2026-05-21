@@ -28,9 +28,11 @@ pub fn bindOutput(self: *BranchNode, out: Emitter) void {
     self.out = out;
 }
 
-pub fn process(self: *BranchNode, message: Message) !usize {
+pub fn process(self: *BranchNode, message: Message) !void {
+    var route_len: usize = 0;
     for (&self.routes) |*route| {
         if (route.*) |*route_node| {
+            route_len += 1;
             route_node.out = null;
             if (self.out) |out| {
                 route_node.bindOutput(out);
@@ -40,31 +42,28 @@ pub fn process(self: *BranchNode, message: Message) !usize {
 
     const kind = message.kind();
     if (kind == .tick) {
-        var emitted: usize = 0;
         for (&self.routes) |*route| {
             if (route.*) |*route_node| {
-                emitted += try route_node.process(message);
+                try route_node.process(message);
             }
         }
 
-        if (emitted > 0) return emitted;
-        if (self.out) |dst| {
-            try dst.emit(message);
-            return 1;
+        if (route_len == 0) {
+            if (self.out) |dst| {
+                try dst.emit(message);
+            }
         }
-        return 0;
+        return;
     }
 
     if (self.routes[@intFromEnum(kind)]) |*route_node| {
-        return route_node.process(message);
+        try route_node.process(message);
+        return;
     }
 
     if (self.out) |dst| {
         try dst.emit(message);
-        return 1;
     }
-
-    return 0;
 }
 
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
@@ -78,12 +77,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     self.out = out;
                 }
 
-                pub fn process(self: *@This(), message: Message) !usize {
+                pub fn process(self: *@This(), message: Message) !void {
                     self.called = true;
                     var next = message;
                     next.origin = .node;
                     try self.out.?.emit(next);
-                    return 1;
                 }
             };
 
@@ -106,7 +104,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var branch = branch_impl.init(routes);
             branch.bindOutput(Emitter.init(&collector));
 
-            const emitted = try branch.process(.{
+            try branch.process(.{
                 .origin = .source,
                 .body = .{
                     .button_gesture = .{
@@ -119,7 +117,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(forward_impl.called);
             try grt.std.testing.expect(collector.called);
             try grt.std.testing.expectEqual(Message.Origin.node, collector.last_origin);
-            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
 
         fn passthroughWhenRouteMapIsEmpty() !void {
@@ -141,7 +138,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var branch = branch_impl.init(BranchNode.emptyRoutes());
             branch.bindOutput(Emitter.init(&collector));
 
-            const emitted = try branch.process(.{
+            try branch.process(.{
                 .origin = .source,
                 .body = .{
                     .raw_grouped_button = .{
@@ -154,7 +151,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expect(collector.called);
             try grt.std.testing.expectEqual(@as(?u32, 3), collector.last_button_id);
-            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
 
         fn passthroughWhenMessageTagIsUnmapped() !void {
@@ -174,9 +170,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const Noop = struct {
                 pub fn bindOutput(_: *@This(), _: Emitter) void {}
 
-                pub fn process(_: *@This(), _: Message) !usize {
-                    return 0;
-                }
+                pub fn process(_: *@This(), _: Message) !void {}
             };
 
             var noop_impl = Noop{};
@@ -188,7 +182,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var branch = branch_impl.init(routes);
             branch.bindOutput(Emitter.init(&collector));
 
-            const emitted = try branch.process(.{
+            try branch.process(.{
                 .origin = .source,
                 .body = .{
                     .raw_grouped_button = .{
@@ -201,7 +195,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expect(collector.called);
             try grt.std.testing.expectEqual(@as(?u32, 3), collector.last_button_id);
-            try grt.std.testing.expectEqual(@as(usize, 1), emitted);
         }
 
         fn tickBroadcastsToAllRoutes() !void {
@@ -213,12 +206,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     self.out = out;
                 }
 
-                pub fn process(self: *@This(), message: Message) !usize {
+                pub fn process(self: *@This(), message: Message) !void {
                     self.called += 1;
                     if (self.out) |out| {
                         try out.emit(message);
                     }
-                    return 1;
                 }
             };
 
@@ -241,7 +233,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var branch = branch_impl.init(routes);
             branch.bindOutput(Emitter.init(&collector));
 
-            const emitted = try branch.process(.{
+            try branch.process(.{
                 .origin = .timer,
                 .timestamp = 1,
                 .body = .{
@@ -252,7 +244,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 1), first_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 1), second_impl.called);
             try grt.std.testing.expectEqual(@as(usize, 2), collector.count);
-            try grt.std.testing.expectEqual(@as(usize, 2), emitted);
         }
     };
 

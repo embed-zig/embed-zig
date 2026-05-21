@@ -196,6 +196,7 @@ pub fn parseJsonValue(
 
 fn validateStatePath(path: []const u8) !void {
     if (path.len == 0) return error.EmptyRenderStatePath;
+    if (storePathLabel(path)) |_| return;
     if (path[0] == '/' or path[path.len - 1] == '/') return error.InvalidRenderStatePathBoundary;
 
     var segment_start: usize = 0;
@@ -211,6 +212,7 @@ fn validateStatePath(path: []const u8) !void {
 
 fn validateStatePathComptime(comptime path: []const u8) void {
     if (path.len == 0) @compileError("zux.spec.Render.parseJsonValue `state_path` must not be empty");
+    if (storePathLabelComptime(path)) |_| return;
     if (path[0] == '/' or path[path.len - 1] == '/') {
         @compileError("zux.spec.Render.parseJsonValue `state_path` must not start or end with '/'");
     }
@@ -230,6 +232,36 @@ fn validateStatePathComptime(comptime path: []const u8) void {
     if (segment_start == path.len) {
         @compileError("zux.spec.Render.parseJsonValue `state_path` must not contain empty path segments");
     }
+}
+
+fn storePathLabel(path: []const u8) ?[]const u8 {
+    const prefix = "$store/";
+    if (path.len <= prefix.len) return null;
+    if (!glib.std.mem.eql(u8, path[0..prefix.len], prefix)) return null;
+    const label = path[prefix.len..];
+    for (label) |ch| {
+        if (ch == '/') return null;
+        if (ch == '.') return null;
+    }
+    return label;
+}
+
+fn storePathLabelComptime(comptime path: []const u8) ?[]const u8 {
+    const prefix = "$store/";
+    if (path.len <= prefix.len) return null;
+    inline for (prefix, 0..) |ch, idx| {
+        if (path[idx] != ch) return null;
+    }
+    const label = path[prefix.len..];
+    inline for (label) |ch| {
+        if (ch == '/') {
+            @compileError("zux.spec.Render.parseJsonValue $store paths must be exactly $store/{store_label}");
+        }
+        if (ch == '.') {
+            @compileError("zux.spec.Render.parseJsonValue $store labels must not contain dots");
+        }
+    }
+    return label;
 }
 
 fn comptimeEql(comptime a: []const u8, comptime b: []const u8) bool {

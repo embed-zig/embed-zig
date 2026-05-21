@@ -1,5 +1,4 @@
 const drivers = @import("drivers");
-const Context = @import("../../event/Context.zig");
 
 pub const max_ssid_len: usize = drivers.wifi.Wifi.max_ssid_len;
 pub const MacAddr = drivers.wifi.Wifi.MacAddr;
@@ -16,7 +15,6 @@ pub const StaScanResult = struct {
     channel: u8,
     rssi: i16,
     security: Security,
-    ctx: Context.Type = null,
 
     pub fn ssid(self: *const @This()) []const u8 {
         return self.ssid_buf[0..self.ssid_end];
@@ -33,7 +31,6 @@ pub const StaConnected = struct {
     channel: u8,
     rssi: i16,
     security: Security,
-    ctx: Context.Type = null,
 
     pub fn ssid(self: *const @This()) []const u8 {
         return self.ssid_buf[0..self.ssid_end];
@@ -45,7 +42,6 @@ pub const StaDisconnected = struct {
 
     source_id: u32,
     reason: u16,
-    ctx: Context.Type = null,
 };
 
 pub const StaGotIp = struct {
@@ -57,14 +53,12 @@ pub const StaGotIp = struct {
     netmask: ?Addr = null,
     dns1: ?Addr = null,
     dns2: ?Addr = null,
-    ctx: Context.Type = null,
 };
 
 pub const StaLostIp = struct {
     pub const kind = .wifi_sta_lost_ip;
 
     source_id: u32,
-    ctx: Context.Type = null,
 };
 
 pub const ApStarted = struct {
@@ -75,7 +69,6 @@ pub const ApStarted = struct {
     ssid_buf: [max_ssid_len]u8,
     channel: u8,
     security: Security,
-    ctx: Context.Type = null,
 
     pub fn ssid(self: *const @This()) []const u8 {
         return self.ssid_buf[0..self.ssid_end];
@@ -86,7 +79,6 @@ pub const ApStopped = struct {
     pub const kind = .wifi_ap_stopped;
 
     source_id: u32,
-    ctx: Context.Type = null,
 };
 
 pub const ApClientJoined = struct {
@@ -96,7 +88,6 @@ pub const ApClientJoined = struct {
     client_mac: MacAddr,
     client_ip: ?Addr = null,
     aid: u16,
-    ctx: Context.Type = null,
 };
 
 pub const ApClientLeft = struct {
@@ -106,7 +97,6 @@ pub const ApClientLeft = struct {
     client_mac: MacAddr,
     client_ip: ?Addr = null,
     aid: u16,
-    ctx: Context.Type = null,
 };
 
 pub const ApLeaseGranted = struct {
@@ -115,7 +105,6 @@ pub const ApLeaseGranted = struct {
     source_id: u32,
     client_mac: MacAddr,
     client_ip: Addr,
-    ctx: Context.Type = null,
 };
 
 pub const ApLeaseReleased = struct {
@@ -124,7 +113,6 @@ pub const ApLeaseReleased = struct {
     source_id: u32,
     client_mac: MacAddr,
     client_ip: Addr,
-    ctx: Context.Type = null,
 };
 
 pub const Event = drivers.wifi.Wifi.Event;
@@ -142,7 +130,6 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .channel = report.channel,
                     .rssi = report.rssi,
                     .security = report.security,
-                    .ctx = null,
                 },
             },
             .connected => |info| .{
@@ -154,14 +141,12 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .channel = info.channel,
                     .rssi = info.rssi,
                     .security = info.security,
-                    .ctx = null,
                 },
             },
             .disconnected => |info| .{
                 .wifi_sta_disconnected = .{
                     .source_id = source_id,
                     .reason = info.reason,
-                    .ctx = null,
                 },
             },
             .got_ip => |info| .{
@@ -172,13 +157,11 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .netmask = info.netmask,
                     .dns1 = info.dns1,
                     .dns2 = info.dns2,
-                    .ctx = null,
                 },
             },
             .lost_ip => .{
                 .wifi_sta_lost_ip = .{
                     .source_id = source_id,
-                    .ctx = null,
                 },
             },
         },
@@ -190,13 +173,11 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .ssid_buf = try copySsidBuf(info.ssid),
                     .channel = info.channel,
                     .security = info.security,
-                    .ctx = null,
                 },
             },
             .stopped => .{
                 .wifi_ap_stopped = .{
                     .source_id = source_id,
-                    .ctx = null,
                 },
             },
             .client_joined => |info| .{
@@ -205,7 +186,6 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .client_mac = info.mac,
                     .client_ip = info.ip,
                     .aid = info.aid,
-                    .ctx = null,
                 },
             },
             .client_left => |info| .{
@@ -214,7 +194,6 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .client_mac = info.mac,
                     .client_ip = info.ip,
                     .aid = info.aid,
-                    .ctx = null,
                 },
             },
             .lease_granted => |info| .{
@@ -222,7 +201,6 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .source_id = source_id,
                     .client_mac = info.client_mac,
                     .client_ip = info.client_ip,
-                    .ctx = null,
                 },
             },
             .lease_released => |info| .{
@@ -230,7 +208,6 @@ pub fn make(comptime EventType: type, source_id: u32, adapter_event: Event) !Eve
                     .source_id = source_id,
                     .client_mac = info.client_mac,
                     .client_ip = info.client_ip,
-                    .ctx = null,
                 },
             },
         },

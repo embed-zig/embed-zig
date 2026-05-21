@@ -18,6 +18,7 @@ pub fn link(
     optimize: std.builtin.OptimizeMode,
     mod: *std.Build.Module,
     deps: struct {
+        audio: *std.Build.Module,
         motion: *std.Build.Module,
         bt: *std.Build.Module,
         drivers: *std.Build.Module,
@@ -29,6 +30,7 @@ pub fn link(
         .optimize = optimize,
     });
     mod.addImport("glib", glib_dep.module("glib"));
+    mod.addImport("audio", deps.audio);
     mod.addImport("motion", deps.motion);
     mod.addImport("bt", deps.bt);
     mod.addImport("drivers", deps.drivers);

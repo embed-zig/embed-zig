@@ -12,8 +12,10 @@ pub const Grouped = struct {
 };
 
 pub const Detected = struct {
+    seq: u64 = 0,
     source_id: u32 = 0,
     button_id: ?u32 = null,
+    pressed_at: glib.time.instant.Time = 0,
     gesture_kind: ?enum {
         click,
         long_press,

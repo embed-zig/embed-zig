@@ -1,6 +1,5 @@
 const glib = @import("glib");
 const bt = @import("bt");
-const Context = @import("../../event/Context.zig");
 
 pub const addr_len: usize = bt.Host.addr_len;
 pub const max_name_len: usize = bt.Host.max_name_len;
@@ -11,14 +10,12 @@ pub const PeriphAdvertisingStarted = struct {
     pub const kind = .ble_periph_advertising_started;
 
     source_id: u32,
-    ctx: Context.Type = null,
 };
 
 pub const PeriphAdvertisingStopped = struct {
     pub const kind = .ble_periph_advertising_stopped;
 
     source_id: u32,
-    ctx: Context.Type = null,
 };
 
 pub const CentralFound = struct {
@@ -31,7 +28,6 @@ pub const CentralFound = struct {
     name_buf: [max_name_len]u8,
     adv_data_end: u8,
     adv_data_buf: [max_adv_data_len]u8,
-    ctx: Context.Type = null,
 
     pub fn name(self: *const @This()) []const u8 {
         return self.name_buf[0..self.name_end];
@@ -52,7 +48,18 @@ pub const CentralConnected = struct {
     interval: u16,
     latency: u16,
     supervision_timeout: glib.time.duration.Duration,
-    ctx: Context.Type = null,
+};
+
+pub const CentralConnectionUpdated = struct {
+    pub const kind = .ble_central_connection_updated;
+
+    source_id: u32,
+    conn_handle: u16,
+    peer_addr: [addr_len]u8,
+    peer_addr_type: bt.Central.AddrType,
+    interval: u16,
+    latency: u16,
+    supervision_timeout: glib.time.duration.Duration,
 };
 
 pub const CentralDisconnected = struct {
@@ -60,7 +67,6 @@ pub const CentralDisconnected = struct {
 
     source_id: u32,
     conn_handle: u16,
-    ctx: Context.Type = null,
 };
 
 pub const CentralNotification = struct {
@@ -71,7 +77,6 @@ pub const CentralNotification = struct {
     attr_handle: u16,
     data_len: u16,
     data_buf: [max_notification_len]u8,
-    ctx: Context.Type = null,
 
     pub fn payload(self: *const @This()) []const u8 {
         return self.data_buf[0..self.data_len];
@@ -88,7 +93,18 @@ pub const PeriphConnected = struct {
     interval: u16,
     latency: u16,
     supervision_timeout: glib.time.duration.Duration,
-    ctx: Context.Type = null,
+};
+
+pub const PeriphConnectionUpdated = struct {
+    pub const kind = .ble_periph_connection_updated;
+
+    source_id: u32,
+    conn_handle: u16,
+    peer_addr: [addr_len]u8,
+    peer_addr_type: bt.Peripheral.AddrType,
+    interval: u16,
+    latency: u16,
+    supervision_timeout: glib.time.duration.Duration,
 };
 
 pub const PeriphDisconnected = struct {
@@ -96,7 +112,6 @@ pub const PeriphDisconnected = struct {
 
     source_id: u32,
     conn_handle: u16,
-    ctx: Context.Type = null,
 };
 
 pub const PeriphMtuChanged = struct {
@@ -105,7 +120,6 @@ pub const PeriphMtuChanged = struct {
     source_id: u32,
     conn_handle: u16,
     mtu: u16,
-    ctx: Context.Type = null,
 };
 
 pub const Event = bt.Host.Event;
@@ -123,7 +137,6 @@ pub fn make(comptime EventType: type, source_id: u32, host_event: Event) !EventT
                     .name_buf = try copyNameBuf(if (report.name_len == 0) null else report.getName()),
                     .adv_data_end = try copyAdvDataLen(if (report.data_len == 0) null else report.getData()),
                     .adv_data_buf = try copyAdvDataBuf(if (report.data_len == 0) null else report.getData()),
-                    .ctx = null,
                 },
             },
             .connected => |info| .{
@@ -135,14 +148,23 @@ pub fn make(comptime EventType: type, source_id: u32, host_event: Event) !EventT
                     .interval = info.interval,
                     .latency = info.latency,
                     .supervision_timeout = info.supervision_timeout,
-                    .ctx = null,
+                },
+            },
+            .connection_updated => |info| .{
+                .ble_central_connection_updated = .{
+                    .source_id = source_id,
+                    .conn_handle = info.conn_handle,
+                    .peer_addr = info.peer_addr,
+                    .peer_addr_type = info.peer_addr_type,
+                    .interval = info.interval,
+                    .latency = info.latency,
+                    .supervision_timeout = info.supervision_timeout,
                 },
             },
             .disconnected => |conn_handle| .{
                 .ble_central_disconnected = .{
                     .source_id = source_id,
                     .conn_handle = conn_handle,
-                    .ctx = null,
                 },
             },
             .notification => |notif| .{
@@ -152,7 +174,6 @@ pub fn make(comptime EventType: type, source_id: u32, host_event: Event) !EventT
                     .attr_handle = notif.attr_handle,
                     .data_len = notif.len,
                     .data_buf = copyNotificationBuf(notif.payload()),
-                    .ctx = null,
                 },
             },
         },
@@ -160,13 +181,11 @@ pub fn make(comptime EventType: type, source_id: u32, host_event: Event) !EventT
             .advertising_started => .{
                 .ble_periph_advertising_started = .{
                     .source_id = source_id,
-                    .ctx = null,
                 },
             },
             .advertising_stopped => .{
                 .ble_periph_advertising_stopped = .{
                     .source_id = source_id,
-                    .ctx = null,
                 },
             },
             .connected => |info| .{
@@ -178,14 +197,23 @@ pub fn make(comptime EventType: type, source_id: u32, host_event: Event) !EventT
                     .interval = info.interval,
                     .latency = info.latency,
                     .supervision_timeout = info.supervision_timeout,
-                    .ctx = null,
+                },
+            },
+            .connection_updated => |info| .{
+                .ble_periph_connection_updated = .{
+                    .source_id = source_id,
+                    .conn_handle = info.conn_handle,
+                    .peer_addr = info.peer_addr,
+                    .peer_addr_type = info.peer_addr_type,
+                    .interval = info.interval,
+                    .latency = info.latency,
+                    .supervision_timeout = info.supervision_timeout,
                 },
             },
             .disconnected => |conn_handle| .{
                 .ble_periph_disconnected = .{
                     .source_id = source_id,
                     .conn_handle = conn_handle,
-                    .ctx = null,
                 },
             },
             .mtu_changed => |info| .{
@@ -193,7 +221,6 @@ pub fn make(comptime EventType: type, source_id: u32, host_event: Event) !EventT
                     .source_id = source_id,
                     .conn_handle = info.conn_handle,
                     .mtu = info.mtu,
-                    .ctx = null,
                 },
             },
         },

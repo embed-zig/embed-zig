@@ -1,5 +1,3 @@
-const Context = @import("../../event/Context.zig");
-
 pub const Raw = struct {
     pub const kind = .raw_touch;
 
@@ -10,5 +8,4 @@ pub const Raw = struct {
     x: u16 = 0,
     y: u16 = 0,
     pressure: ?u16 = null,
-    ctx: Context.Type = null,
 };

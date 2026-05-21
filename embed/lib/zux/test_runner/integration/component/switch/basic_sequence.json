@@ -1,0 +1,133 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "switch and pwm output sequence",
+    "description": "switch and pwm components reduce output state and render to test drivers.",
+    "initial_state": {
+      "status": {},
+      "dimmer": {}
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "switch_set": {
+              "source_id": 121,
+              "enabled": true
+            }
+          },
+          {
+            "pwm_set": {
+              "source_id": 122,
+              "enabled": true,
+              "frequency_hz": 1000,
+              "duty": {
+                "numerator": 1,
+                "denominator": 4
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "status",
+            "state": {
+              "enabled": true
+            }
+          },
+          {
+            "label": "dimmer",
+            "state": {
+              "enabled": true,
+              "frequency_hz": 1000,
+              "duty": {
+                "numerator": 1,
+                "denominator": 4
+              }
+            }
+          },
+          {
+            "label": "status_driver",
+            "state": {
+              "set_count": 2,
+              "enabled": true
+            }
+          },
+          {
+            "label": "dimmer_driver",
+            "state": {
+              "frequency_hz": 1000,
+              "duty_numerator": 1,
+              "duty_denominator": 4,
+              "enabled": true,
+              "set_frequency_count": 2,
+              "set_duty_count": 2,
+              "enable_count": 1,
+              "disable_count": 1
+            }
+          }
+        ]
+      },
+      {
+        "inputs": [
+          {
+            "switch_set": {
+              "source_id": 121,
+              "enabled": false
+            }
+          },
+          {
+            "pwm_set": {
+              "source_id": 122,
+              "enabled": false,
+              "frequency_hz": 2000,
+              "duty": {
+                "numerator": 3,
+                "denominator": 4
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "status",
+            "state": {
+              "enabled": false
+            }
+          },
+          {
+            "label": "dimmer",
+            "state": {
+              "enabled": false,
+              "frequency_hz": 2000,
+              "duty": {
+                "numerator": 3,
+                "denominator": 4
+              }
+            }
+          },
+          {
+            "label": "status_driver",
+            "state": {
+              "set_count": 4,
+              "enabled": false
+            }
+          },
+          {
+            "label": "dimmer_driver",
+            "state": {
+              "frequency_hz": 2000,
+              "duty_numerator": 3,
+              "duty_denominator": 4,
+              "enabled": false,
+              "set_frequency_count": 4,
+              "set_duty_count": 4,
+              "enable_count": 2,
+              "disable_count": 2
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

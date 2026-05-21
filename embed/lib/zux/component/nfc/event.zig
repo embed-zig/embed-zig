@@ -1,5 +1,4 @@
 const drivers = @import("drivers");
-const Context = @import("../../event/Context.zig");
 
 pub const max_uid_len = drivers.nfc.max_uid_len;
 pub const max_payload_len = drivers.nfc.max_payload_len;
@@ -13,7 +12,6 @@ pub const Found = struct {
     uid_end: u16,
     buf: [max_uid_len]u8,
     card_type: CardType,
-    ctx: Context.Type = null,
 
     pub fn uid(self: *const @This()) []const u8 {
         return self.buf[0..self.uid_end];
@@ -28,7 +26,6 @@ pub const Read = struct {
     payload_end: u16,
     buf: [max_buf_len]u8,
     card_type: CardType,
-    ctx: Context.Type = null,
 
     pub fn uid(self: *const @This()) []const u8 {
         return self.buf[0..self.uid_end];
@@ -44,16 +41,14 @@ pub const Update = struct {
     uid: []const u8,
     payload: ?[]const u8 = null,
     card_type: CardType,
-    ctx: Context.Type = null,
 };
 
-pub fn make(comptime EventType: type, driver_update: drivers.nfc.Update, ctx: Context.Type) !EventType {
+pub fn make(comptime EventType: type, driver_update: drivers.nfc.Update) !EventType {
     const update: Update = .{
         .source_id = driver_update.source_id,
         .uid = driver_update.uid,
         .payload = driver_update.payload,
         .card_type = driver_update.card_type,
-        .ctx = ctx,
     };
 
     if (update.uid.len > max_uid_len) return error.InvalidUidLength;
@@ -67,7 +62,6 @@ pub fn make(comptime EventType: type, driver_update: drivers.nfc.Update, ctx: Co
                 .uid_end = @intCast(update.uid.len),
                 .buf = uid_buf,
                 .card_type = update.card_type,
-                .ctx = update.ctx,
             },
         };
     };
@@ -85,7 +79,6 @@ pub fn make(comptime EventType: type, driver_update: drivers.nfc.Update, ctx: Co
             .payload_end = @intCast(update.uid.len + payload.len),
             .buf = buf,
             .card_type = update.card_type,
-            .ctx = update.ctx,
         },
     };
 }

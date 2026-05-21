@@ -1,7 +1,6 @@
 const glib = @import("glib");
 const drivers = @import("drivers");
 
-const Context = @import("../../event/Context.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const Poller = @import("../../pipeline/Poller.zig");
 
@@ -16,14 +15,12 @@ pub fn make(comptime grt: type) type {
 
         pub const Config = struct {
             source_id: u32,
-            ctx: Context.Type = null,
         };
 
         button: drivers.button.Single,
         source_id: u32,
         poll_interval: glib.time.duration.Duration = Poller.default_poll_interval,
         spawn_config: grt.std.Thread.SpawnConfig = .{},
-        ctx: Context.Type = null,
         out: ?Emitter = null,
         state_mu: grt.std.Thread.Mutex = .{},
         running: bool = false,
@@ -35,7 +32,6 @@ pub fn make(comptime grt: type) type {
             self.* = .{
                 .button = button,
                 .source_id = config.source_id,
-                .ctx = config.ctx,
             };
             return Poller.init(Self, self);
         }
@@ -114,11 +110,10 @@ pub fn make(comptime grt: type) type {
                         },
                         .source_id = self.source_id,
                         .poll_interval = self.poll_interval,
-                        .ctx = self.ctx,
                     };
                 };
 
-                self.pollOnce(snapshot.out, snapshot.source_id, snapshot.ctx) catch {
+                self.pollOnce(snapshot.out, snapshot.source_id) catch {
                     self.failAsync();
                 };
 
@@ -128,7 +123,7 @@ pub fn make(comptime grt: type) type {
             }
         }
 
-        fn pollOnce(self: *Self, out: Emitter, source_id: u32, ctx: Context.Type) !void {
+        fn pollOnce(self: *Self, out: Emitter, source_id: u32) !void {
             const pressed = try self.button.isPressed();
             self.state_mu.lock();
             const last_pressed = self.last_pressed;
@@ -146,7 +141,6 @@ pub fn make(comptime grt: type) type {
                     .raw_single_button = .{
                         .source_id = source_id,
                         .pressed = pressed,
-                        .ctx = ctx,
                     },
                 },
             });

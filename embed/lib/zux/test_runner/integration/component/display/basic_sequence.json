@@ -1,0 +1,41 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "display basic sequence",
+    "description": "Spec.testRunner drives a Display test component from an input event.",
+    "initial_state": {
+      "display": {}
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "display_set": {
+              "source_id": 111,
+              "enabled": true,
+              "brightness": 64
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "display",
+            "state": {
+              "enabled": true,
+              "brightness": 64
+            }
+          },
+          {
+            "label": "display_driver",
+            "state": {
+              "enabled": true,
+              "brightness": 64,
+              "set_enabled_count": 1,
+              "set_brightness_count": 1
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,9 +1,11 @@
 const glib = @import("glib");
+const bt = @import("bt");
 const drivers = @import("drivers");
 const ledstrip = @import("ledstrip");
 const modem_api = @import("drivers");
 
 pub fn make(comptime config: anytype) type {
+    @setEvalBranchQuota(10_000);
     const info = configStructInfo(config);
     const total_len = totalPeriphLen(config);
     var fields: [total_len]glib.std.builtin.Type.StructField = undefined;
@@ -13,6 +15,7 @@ pub fn make(comptime config: anytype) type {
         const registry = @field(config, field.name);
         inline for (0..registryPeriphLen(registry)) |i| {
             const periph = registry.periphs[i];
+            if (!periphRequiresBuildConfig(periph)) continue;
             fields[field_index] = .{
                 .name = sentinelName(periphLabel(periph)),
                 .type = type,
@@ -35,6 +38,7 @@ pub fn make(comptime config: anytype) type {
 }
 
 pub fn build(comptime config: anytype) make(config) {
+    @setEvalBranchQuota(10_000);
     const info = configStructInfo(config);
     var out: make(config) = undefined;
 
@@ -42,6 +46,7 @@ pub fn build(comptime config: anytype) make(config) {
         const registry = @field(config, field.name);
         inline for (0..registryPeriphLen(registry)) |i| {
             const periph = registry.periphs[i];
+            if (!periphRequiresBuildConfig(periph)) continue;
             @field(out, periphLabel(periph)) = periphBuildType(periph);
         }
     }
@@ -58,11 +63,17 @@ fn configStructInfo(comptime config: anytype) glib.std.builtin.Type.Struct {
 }
 
 fn totalPeriphLen(comptime config: anytype) usize {
+    @setEvalBranchQuota(10_000);
     const info = configStructInfo(config);
     comptime var total: usize = 0;
 
     inline for (info.fields) |field| {
-        total += registryPeriphLen(@field(config, field.name));
+        const registry = @field(config, field.name);
+        inline for (0..registryPeriphLen(registry)) |i| {
+            if (periphRequiresBuildConfig(registry.periphs[i])) {
+                total += 1;
+            }
+        }
     }
 
     return total;
@@ -93,16 +104,29 @@ fn periphBuildType(comptime periph: anytype) type {
         @compileError("zux.assembler.BuildConfig.make periph must expose `control_type`");
     }
     const ControlType = @field(periph, "control_type");
+    if (ControlType == type) return type;
+    if (ControlType == bt.Host) return bt.Host;
+    if (ControlType == drivers.Display) return drivers.Display;
     if (ControlType == drivers.button.Single) return drivers.button.Single;
     if (ControlType == drivers.button.Grouped) return drivers.button.Grouped;
     if (ControlType == drivers.imu) return drivers.imu;
     if (ControlType == modem_api.Modem) return modem_api.Modem;
     if (ControlType == drivers.nfc.Reader) return drivers.nfc.Reader;
+    if (ControlType == drivers.Switch) return drivers.Switch;
+    if (ControlType == drivers.Pwm) return drivers.Pwm;
     if (ControlType == drivers.Touch) return drivers.Touch;
     if (ControlType == drivers.wifi.Sta) return drivers.wifi.Sta;
     if (ControlType == drivers.wifi.Ap) return drivers.wifi.Ap;
     if (ControlType == ledstrip.LedStrip) return ledstrip.LedStrip;
     @compileError("zux.assembler.BuildConfig.make encountered unsupported periph control_type");
+}
+
+fn periphRequiresBuildConfig(comptime periph: anytype) bool {
+    const PeriphType = @TypeOf(periph);
+    if (@hasField(PeriphType, "input_type") and @field(periph, "input_type") == .virtual) {
+        return false;
+    }
+    return true;
 }
 
 fn labelText(comptime raw_label: anytype) []const u8 {

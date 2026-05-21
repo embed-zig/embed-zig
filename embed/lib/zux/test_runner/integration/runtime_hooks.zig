@@ -143,7 +143,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                         stores: *AppType.Store.Stores,
                         message: AppType.Message,
                         emit: AppType.Emitter,
-                    ) !usize {
+                    ) !void {
                         _ = emit;
                         switch (message.body) {
                             .tick => {
@@ -153,9 +153,8 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
                                         state.ticks += amount;
                                     }
                                 }.apply);
-                                return 1;
                             },
-                            else => return 0,
+                            else => return,
                         }
                     }
                 };

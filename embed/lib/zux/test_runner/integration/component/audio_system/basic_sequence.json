@@ -1,0 +1,88 @@
+{
+  "kind": "UserStory",
+  "spec": {
+    "name": "audio system basic sequence",
+    "description": "Spec.testRunner drives an audio system test component from an input event.",
+    "initial_state": {
+      "audio": {
+        "min_gain_db": -60,
+        "max_gain_db": 6,
+        "gain_step_db": 1
+      }
+    },
+    "steps": [
+      {
+        "inputs": [
+          {
+            "audio_system_start": {
+              "source_id": 101
+            }
+          },
+          {
+            "audio_system_set_gain": {
+              "source_id": 101,
+              "gain_db": 3
+            }
+          },
+          {
+            "audio_system_set_mic_gains": {
+              "source_id": 101,
+              "mic_gain_count": 2,
+              "mic_gains": [
+                1,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "label": "audio",
+            "state": {
+              "started": true,
+              "gain_db": 3,
+              "mic_gain_count": 2,
+              "mic_gains": [
+                1,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              "min_gain_db": -60,
+              "max_gain_db": 6,
+              "gain_step_db": 1
+            }
+          },
+          {
+            "label": "audio_driver",
+            "state": {
+              "started": true,
+              "gain_db": 3,
+              "mic_gain_count": 2,
+              "mic_gains": [
+                1,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

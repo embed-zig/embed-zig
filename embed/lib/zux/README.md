@@ -242,24 +242,18 @@ The staged integration fixtures currently model board specs as tagged entries:
 
 ```json
 {
-  "kind": "Component/ui/flow",
+  "kind": "Component/display",
   "spec": {
-    "label": "pairing",
-    "id": 61,
-    "flow": {
-      "nodes": ["idle", "searching", "confirming", "done"],
-      "edges": [
-        { "from": "idle", "to": "searching", "event": "start" }
-      ]
-    }
+    "label": "screen",
+    "id": 61
   }
 }
 ```
 
-For `Component/ui/flow`, the `spec` object now carries a nested `flow` object.
-That `flow` object requires `nodes` and `edges`; every edge `from` / `to` must
-reference a known node. Runtime initial state is provided by app init, not by
-the component spec.
+Component specs describe typed device-facing state and input surfaces such as
+buttons, displays, switches, PWM outputs, audio systems, touch inputs, Bluetooth,
+and WiFi. Runtime initial state is provided by app init, not by the component
+spec.
 
 ## Naming
 

@@ -1,6 +1,7 @@
 const glib = @import("glib");
 
 pub const component = @import("integration/component.zig");
+pub const custom_event = @import("integration/custom_event.zig");
 pub const runtime_hooks = @import("integration/runtime_hooks.zig");
 
 pub fn make(comptime grt: type) glib.testing.TestRunner {
@@ -15,6 +16,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             _ = allocator;
 
             t.run("component", component.make(grt));
+            t.run("custom event", custom_event.make(grt));
             t.run("runtime hooks", runtime_hooks.make(grt));
             return t.wait();
         }

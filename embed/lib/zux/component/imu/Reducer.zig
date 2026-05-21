@@ -1,7 +1,6 @@
 const glib = @import("glib");
 const motion = @import("motion");
 
-const Context = @import("../../event/Context.zig");
 const imu_event = @import("event.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const Message = @import("../../pipeline/Message.zig");
@@ -43,15 +42,15 @@ pub fn bindOutput(self: *Reducer, out: Emitter) void {
     self.out = out;
 }
 
-pub fn process(self: *Reducer, message: Message) !usize {
-    return switch (message.body) {
-        .raw_imu_accel => |accel| self.processAccel(message, accel),
-        .raw_imu_gyro => |gyro| self.processGyro(message, gyro),
-        else => self.forward(message),
-    };
+pub fn process(self: *Reducer, message: Message) !void {
+    switch (message.body) {
+        .raw_imu_accel => |accel| try self.processAccel(message, accel),
+        .raw_imu_gyro => |gyro| try self.processGyro(message, gyro),
+        else => try self.forward(message),
+    }
 }
 
-pub fn reduce(store: anytype, message: Message, emit: Emitter) !usize {
+pub fn reduce(store: anytype, message: Message, emit: Emitter) !void {
     _ = emit;
 
     switch (message.body) {
@@ -65,16 +64,14 @@ pub fn reduce(store: anytype, message: Message, emit: Emitter) !usize {
                     .motion = null,
                 });
             }
-            return 0;
         },
         .imu_motion => |imu_motion| {
             store.set(State{
                 .source_id = imu_motion.source_id,
                 .motion = motionKind(imu_motion.motion),
             });
-            return 0;
         },
-        else => return 0,
+        else => return,
     }
 }
 
@@ -82,8 +79,8 @@ fn processAccel(
     self: *Reducer,
     message: Message,
     accel: imu_event.Accel,
-) !usize {
-    var emitted = try self.forward(message);
+) !void {
+    try self.forward(message);
 
     const gop = try self.detectors.getOrPut(accel.source_id);
     if (!gop.found_existing) {
@@ -100,21 +97,19 @@ fn processAccel(
     };
 
     if (gop.value_ptr.update(sample)) |action| {
-        emitted += try self.emitMotion(message.timestamp, accel.source_id, action, accel.ctx);
+        try self.emitMotion(message.timestamp, accel.source_id, action);
     }
     while (gop.value_ptr.nextAction()) |action| {
-        emitted += try self.emitMotion(message.timestamp, accel.source_id, action, accel.ctx);
+        try self.emitMotion(message.timestamp, accel.source_id, action);
     }
-
-    return emitted;
 }
 
 fn processGyro(
     self: *Reducer,
     message: Message,
     gyro: imu_event.Gyro,
-) !usize {
-    var emitted = try self.forward(message);
+) !void {
+    try self.forward(message);
 
     const gop = try self.detectors.getOrPut(gyro.source_id);
     if (!gop.found_existing) {
@@ -131,13 +126,11 @@ fn processGyro(
     };
 
     if (gop.value_ptr.updateGyro(sample)) |action| {
-        emitted += try self.emitMotion(message.timestamp, gyro.source_id, action, gyro.ctx);
+        try self.emitMotion(message.timestamp, gyro.source_id, action);
     }
     while (gop.value_ptr.nextAction()) |action| {
-        emitted += try self.emitMotion(message.timestamp, gyro.source_id, action, gyro.ctx);
+        try self.emitMotion(message.timestamp, gyro.source_id, action);
     }
-
-    return emitted;
 }
 
 fn emitMotion(
@@ -145,8 +138,7 @@ fn emitMotion(
     timestamp: glib.time.instant.Time,
     source_id: u32,
     action: motion.Action,
-    ctx: Context.Type,
-) !usize {
+) !void {
     if (self.out) |out| {
         try out.emit(.{
             .origin = .node,
@@ -155,21 +147,16 @@ fn emitMotion(
                 .imu_motion = .{
                     .source_id = source_id,
                     .motion = action,
-                    .ctx = ctx,
                 },
             },
         });
-        return 1;
     }
-    return 0;
 }
 
-fn forward(self: *Reducer, message: Message) !usize {
+fn forward(self: *Reducer, message: Message) !void {
     if (self.out) |out| {
         try out.emit(message);
-        return 1;
     }
-    return 0;
 }
 
 fn motionKind(action: motion.Action) State.Motion {
@@ -225,7 +212,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 .{ .timestamp = timestampMs(30), .x = 2.0, .y = 0, .z = 1.0 },
                 .{ .timestamp = timestampMs(80), .x = 0, .y = 0, .z = 1.0 },
             }) |sample| {
-                _ = try detector.process(.{
+                try detector.process(.{
                     .origin = .source,
                     .timestamp = sample.timestamp,
                     .body = .{
@@ -242,7 +229,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 5), collector.raw_count);
             try grt.std.testing.expectEqual(@as(usize, 0), collector.motion_count);
 
-            _ = try detector.process(.{
+            try detector.process(.{
                 .origin = .source,
                 .timestamp = timestampMs(140),
                 .body = .{
@@ -282,11 +269,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
-            try grt.std.testing.expectEqual(@as(usize, 1), try detector.process(.{
+            try detector.process(.{
                 .origin = .timer,
                 .timestamp = timestampMs(99),
                 .body = .{ .tick = .{} },
-            }));
+            });
             try grt.std.testing.expect(collector.saw_tick);
         }
 
@@ -328,7 +315,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 .{ .source_id = 2, .timestamp = timestampMs(80), .x = 0 },
                 .{ .source_id = 1, .timestamp = timestampMs(140), .x = 0 },
             }) |sample| {
-                _ = try detector.process(.{
+                try detector.process(.{
                     .origin = .source,
                     .timestamp = sample.timestamp,
                     .body = .{
@@ -382,7 +369,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 .{ .timestamp = timestampMs(120), .x = 0.00 },
                 .{ .timestamp = timestampMs(180), .x = 0.00 },
             }) |sample| {
-                _ = try detector.process(.{
+                try detector.process(.{
                     .origin = .source,
                     .timestamp = sample.timestamp,
                     .body = .{
@@ -431,7 +418,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var detector = detector_impl.node();
             detector.bindOutput(Emitter.init(&collector));
 
-            _ = try detector.process(.{
+            try detector.process(.{
                 .origin = .source,
                 .timestamp = timestampMs(0),
                 .body = .{
@@ -443,7 +430,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             });
-            _ = try detector.process(.{
+            try detector.process(.{
                 .origin = .source,
                 .timestamp = timestampMs(220),
                 .body = .{
@@ -455,7 +442,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 },
             });
-            _ = try detector.process(.{
+            try detector.process(.{
                 .origin = .source,
                 .timestamp = timestampMs(260),
                 .body = .{
@@ -500,7 +487,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     },
                 };
 
-                _ = try Reducer.reduce(&store, .{
+                try Reducer.reduce(&store, .{
                     .origin = .source,
                     .timestamp = timestampMs(0),
                     .body = .{

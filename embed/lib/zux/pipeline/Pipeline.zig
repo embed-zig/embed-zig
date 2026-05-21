@@ -1,5 +1,6 @@
 const glib = @import("glib");
 const EventReceiver = @import("../event.zig").EventReceiver;
+const event = @import("../event.zig");
 const Emitter = @import("Emitter.zig");
 const Message = @import("Message.zig");
 const Node = @import("Node.zig");
@@ -13,11 +14,12 @@ pub fn Config(comptime grt: type) type {
     };
 }
 
-pub fn make(comptime grt: type) type {
+pub fn make(comptime grt: type, comptime CustomEventRegistarType: type) type {
     return struct {
         const Self = @This();
 
         pub const Config = pipeline_mod.Config(grt);
+        pub const CustomEventRegistar = CustomEventRegistarType;
         pub const MessageChannel = grt.sync.Channel(Message);
         pub const Allocator = glib.std.mem.Allocator;
         pub const Worker = grt.std.Thread;
@@ -52,6 +54,7 @@ pub fn make(comptime grt: type) type {
 
         allocator: Allocator,
         config: Self.Config,
+        custom_event_registar: CustomEventRegistar,
         outbound: ?Emitter = null,
         inbox: MessageChannel,
         driver_thread: ?Worker = null,
@@ -71,15 +74,26 @@ pub fn make(comptime grt: type) type {
             return .{
                 .allocator = allocator,
                 .config = config,
+                .custom_event_registar = CustomEventRegistar.init(),
                 .outbound = null,
                 .inbox = try MessageChannel.make(allocator, default_capacity),
                 .tick_interval = config.tick_interval,
             };
         }
 
+        pub fn customEventRegistar(self: *Self) CustomEventRegistar {
+            return self.custom_event_registar;
+        }
+
         pub fn inject(self: *Self, message: Message) !void {
-            const sent = try self.inbox.send(message);
-            if (!sent.ok) return error.PipelineStopped;
+            const sent = self.inbox.send(message) catch |err| {
+                message.deinit();
+                return err;
+            };
+            if (!sent.ok) {
+                message.deinit();
+                return error.PipelineStopped;
+            }
         }
 
         pub fn emit(self: *Self, body: Message.Event) !void {
@@ -232,12 +246,14 @@ pub fn make(comptime grt: type) type {
         }
 
         fn driveLoop(self: *Self) !void {
-            while (!self.stopping.load(.acquire)) {
+            while (true) {
                 const recv = try self.inbox.recv();
                 if (!recv.ok) return;
-                if (self.stopping.load(.acquire)) return;
+                const message = recv.value;
+                defer message.deinit();
+                if (self.stopping.load(.acquire)) continue;
                 const out = self.outbound orelse return error.OutputNotBound;
-                try out.emit(recv.value);
+                try out.emit(message);
             }
         }
 
@@ -284,7 +300,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
     const TestCase = struct {
         fn pollFromDrivesRootAndStopsCleanly(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt);
+            const TestPipeline = make(grt, event.CustomRegistar.Empty);
             const AtomicU32 = HarnessLib.atomic.Value(u32);
 
             const RootImpl = struct {
@@ -293,14 +309,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
                 pub fn bindOutput(_: *@This(), _: Emitter) void {}
 
-                pub fn process(self: *@This(), message: Message) !usize {
+                pub fn process(self: *@This(), message: Message) !void {
                     switch (message.body) {
                         .raw_single_button => |button| {
                             _ = self.seen_count.fetchAdd(1, .acq_rel);
                             self.last_source_id.store(button.source_id, .release);
-                            return 1;
                         },
-                        else => return 0,
+                        else => {},
                     }
                 }
             };
@@ -368,7 +383,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn startRequiresBoundOutput(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt);
+            const TestPipeline = make(grt, event.CustomRegistar.Empty);
 
             var pipeline = try TestPipeline.init(allocator, .{});
             defer pipeline.deinit();
@@ -377,7 +392,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn initRejectsNonPositiveTickInterval(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt);
+            const TestPipeline = make(grt, event.CustomRegistar.Empty);
 
             try grt.std.testing.expectError(error.InvalidConfig, TestPipeline.init(allocator, .{
                 .tick_interval = 0,
@@ -385,7 +400,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn startEmitsTickMessages(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt);
+            const TestPipeline = make(grt, event.CustomRegistar.Empty);
             const AtomicU32 = HarnessLib.atomic.Value(u32);
             const AtomicU8 = HarnessLib.atomic.Value(u8);
 
@@ -395,14 +410,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
                 pub fn bindOutput(_: *@This(), _: Emitter) void {}
 
-                pub fn process(self: *@This(), message: Message) !usize {
+                pub fn process(self: *@This(), message: Message) !void {
                     switch (message.body) {
                         .tick => {
                             _ = self.tick_count.fetchAdd(1, .acq_rel);
                             self.last_origin.store(@intFromEnum(message.origin), .release);
-                            return 1;
                         },
-                        else => return 0,
+                        else => {},
                     }
                 }
             };
@@ -430,7 +444,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn manualTickInjectsTickMessage(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt);
+            const TestPipeline = make(grt, event.CustomRegistar.Empty);
             const AtomicU32 = HarnessLib.atomic.Value(u32);
 
             const RootImpl = struct {
@@ -438,13 +452,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
                 pub fn bindOutput(_: *@This(), _: Emitter) void {}
 
-                pub fn process(self: *@This(), message: Message) !usize {
+                pub fn process(self: *@This(), message: Message) !void {
                     switch (message.body) {
                         .tick => {
                             _ = self.tick_count.fetchAdd(1, .acq_rel);
-                            return 1;
                         },
-                        else => return 0,
+                        else => {},
                     }
                 }
             };
@@ -472,7 +485,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn manualEmitWrapsBodyWithManualOrigin(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt);
+            const TestPipeline = make(grt, event.CustomRegistar.Empty);
             const AtomicU8 = HarnessLib.atomic.Value(u8);
             const AtomicU32 = HarnessLib.atomic.Value(u32);
 
@@ -482,14 +495,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
                 pub fn bindOutput(_: *@This(), _: Emitter) void {}
 
-                pub fn process(self: *@This(), message: Message) !usize {
+                pub fn process(self: *@This(), message: Message) !void {
                     switch (message.body) {
                         .raw_single_button => |button| {
                             self.last_origin.store(@intFromEnum(message.origin), .release);
                             self.last_source_id.store(button.source_id, .release);
-                            return 1;
                         },
-                        else => return 0,
+                        else => {},
                     }
                 }
             };
@@ -523,7 +535,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         }
 
         fn hookOnForwardsCallbackBodiesAndUnsetsReceiverOnStop(allocator: glib.std.mem.Allocator) !void {
-            const TestPipeline = make(grt);
+            const TestPipeline = make(grt, event.CustomRegistar.Empty);
             const AtomicU8 = HarnessLib.atomic.Value(u8);
             const AtomicU32 = HarnessLib.atomic.Value(u32);
 
@@ -534,15 +546,14 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
                 pub fn bindOutput(_: *@This(), _: Emitter) void {}
 
-                pub fn process(self: *@This(), message: Message) !usize {
+                pub fn process(self: *@This(), message: Message) !void {
                     switch (message.body) {
                         .raw_single_button => |button| {
                             _ = self.count.fetchAdd(1, .acq_rel);
                             self.last_source_id.store(button.source_id, .release);
                             self.last_origin.store(@intFromEnum(message.origin), .release);
-                            return 1;
                         },
-                        else => return 0,
+                        else => {},
                     }
                 }
             };
@@ -595,6 +606,86 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(source.receiver == null);
             pipeline.wait();
         }
+
+        fn customEventPayloadIsDestroyedAfterDispatch(allocator: glib.std.mem.Allocator) !void {
+            const CustomRegistar = @import("../event.zig").CustomRegistar;
+            const AtomicU32 = HarnessLib.atomic.Value(u32);
+
+            const Payload = struct {
+                pub const event_name = "pipeline.payload";
+
+                allocator: glib.std.mem.Allocator,
+                deinit_count: *AtomicU32,
+                value: u32,
+
+                pub fn decodeJson(mem_allocator: glib.std.mem.Allocator, value: glib.std.json.Value) !*@This() {
+                    _ = mem_allocator;
+                    _ = value;
+                    unreachable;
+                }
+
+                pub fn deinit(self: *@This()) void {
+                    _ = self.deinit_count.fetchAdd(1, .acq_rel);
+                    self.allocator.destroy(self);
+                }
+            };
+            const Registar = CustomRegistar.make(.{Payload});
+            const TestPipeline = make(grt, Registar);
+
+            const RootImpl = struct {
+                seen_count: AtomicU32 = AtomicU32.init(0),
+                last_source_id: AtomicU32 = AtomicU32.init(0),
+                last_value: AtomicU32 = AtomicU32.init(0),
+
+                pub fn bindOutput(_: *@This(), _: Emitter) void {}
+
+                pub fn process(self: *@This(), message: Message) !void {
+                    switch (message.body) {
+                        .custom => |custom| {
+                            const payload = try custom.as(Payload);
+                            _ = self.seen_count.fetchAdd(1, .acq_rel);
+                            self.last_source_id.store(custom.source_id, .release);
+                            self.last_value.store(payload.value, .release);
+                        },
+                        else => {},
+                    }
+                }
+            };
+
+            var deinit_count = AtomicU32.init(0);
+            const payload = try allocator.create(Payload);
+            payload.* = .{
+                .allocator = allocator,
+                .deinit_count = &deinit_count,
+                .value = 123,
+            };
+
+            var root_impl = RootImpl{};
+            const root_node = Node.init(RootImpl, &root_impl);
+            var pipeline = try TestPipeline.init(allocator, .{
+                .tick_interval = 100 * grt.time.duration.MilliSecond,
+            });
+            defer pipeline.deinit();
+            pipeline.bindOutput(root_node.in);
+
+            try pipeline.start();
+            try pipeline.emit(.{
+                .custom = Registar.init().initEvent(Payload, 91, payload),
+            });
+
+            var attempts: usize = 0;
+            while (attempts < 200 and (root_impl.seen_count.load(.acquire) == 0 or deinit_count.load(.acquire) == 0)) : (attempts += 1) {
+                HarnessLib.Thread.sleep(@as(u64, @intCast(grt.time.duration.MilliSecond)));
+            }
+
+            try grt.std.testing.expectEqual(@as(u32, 1), root_impl.seen_count.load(.acquire));
+            try grt.std.testing.expectEqual(@as(u32, 91), root_impl.last_source_id.load(.acquire));
+            try grt.std.testing.expectEqual(@as(u32, 123), root_impl.last_value.load(.acquire));
+            try grt.std.testing.expectEqual(@as(u32, 1), deinit_count.load(.acquire));
+
+            pipeline.stop();
+            pipeline.wait();
+        }
     };
 
     const Runner = struct {
@@ -614,6 +705,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 TestCase.manualTickInjectsTickMessage,
                 TestCase.manualEmitWrapsBodyWithManualOrigin,
                 TestCase.hookOnForwardsCallbackBodiesAndUnsetsReceiverOnStop,
+                TestCase.customEventPayloadIsDestroyedAfterDispatch,
             }) |case| {
                 case(allocator) catch |err| {
                     t.logFatal(@errorName(err));

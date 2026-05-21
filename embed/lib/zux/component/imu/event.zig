@@ -1,4 +1,3 @@
-const Context = @import("../../event/Context.zig");
 const motion = @import("motion");
 
 pub const Accel = struct {
@@ -8,7 +7,6 @@ pub const Accel = struct {
     x: f32,
     y: f32,
     z: f32,
-    ctx: Context.Type = null,
 };
 
 pub const Gyro = struct {
@@ -18,7 +16,6 @@ pub const Gyro = struct {
     x: f32,
     y: f32,
     z: f32,
-    ctx: Context.Type = null,
 };
 
 pub const Motion = struct {
@@ -26,5 +23,4 @@ pub const Motion = struct {
 
     source_id: u32,
     motion: motion.Action,
-    ctx: Context.Type = null,
 };
