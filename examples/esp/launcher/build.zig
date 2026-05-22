@@ -34,7 +34,6 @@ pub fn build(b: *std.Build) void {
         .target = context.target,
         .optimize = optimize,
     });
-    const lvgl_module = thirdparty_dep.module("lvgl");
     const selected_app = apps_dep.module(app_name);
 
     const entry_module = b.createModule(.{
@@ -53,7 +52,6 @@ pub fn build(b: *std.Build) void {
     entry_module.addOptions("esp_launcher_config", launcher_config);
 
     const board_component = addBoardComponent(b, esp_build_dep, board_name, board_root);
-    const lvgl_component = addLvglComponent(b, lvgl_module);
     const json_compat = addJsonCompatComponent(b);
     const app = esp.idf.addApp(b, "launcher", .{
         .context = context,
@@ -61,7 +59,7 @@ pub fn build(b: *std.Build) void {
             .symbol = "zig_esp_main",
             .module = entry_module,
         },
-        .components = if (std.mem.eql(u8, board_name, "szp")) &.{ board_component, lvgl_component, json_compat } else &.{ board_component, lvgl_component },
+        .components = if (std.mem.eql(u8, board_name, "szp")) &.{ board_component, json_compat } else &.{board_component},
     });
 
     const build_step = b.step("build", "Build the ESP launcher example");
@@ -209,33 +207,6 @@ fn addJsonCompatComponent(b: *std.Build) *esp.idf.Component {
         .file = b.path("components/json_compat/idf_component.yml"),
     });
     component.addRequire("espressif__cjson");
-    return component;
-}
-
-fn addLvglComponent(b: *std.Build, lvgl_module: *std.Build.Module) *esp.idf.Component {
-    const component = esp.idf.Component.create(b, .{ .name = "lvgl" });
-    var added_artifact = false;
-    for (lvgl_module.link_objects.items) |link_object| {
-        switch (link_object) {
-            .other_step => |artifact| {
-                if (artifact.kind == .lib and artifact.linkage == .static) {
-                    component.addArtifact(artifact);
-                    added_artifact = true;
-                }
-            },
-            .static_path => |file| {
-                component.addArchiveFile(.{
-                    .relative_path = "lvgl.a",
-                    .file = file,
-                });
-                added_artifact = true;
-            },
-            else => {},
-        }
-    }
-    if (!added_artifact) {
-        std.debug.panic("lvgl module does not expose a static library artifact", .{});
-    }
     return component;
 }
 

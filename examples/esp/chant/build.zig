@@ -4,7 +4,11 @@ const esp = @import("esp");
 const board_root = "lib/boards/szp";
 
 pub fn build(b: *std.Build) void {
-    const optimize = b.standardOptimizeOption(.{});
+    const optimize = b.option(
+        std.builtin.OptimizeMode,
+        "optimize",
+        "Prioritize performance, safety, or binary size",
+    ) orelse .ReleaseSmall;
     const esp_build_dep = b.dependency("esp", .{});
     const build_config_module = createBoardBuildConfigModule(b, esp_build_dep, esp_build_dep.module("esp"));
     const context = esp.idf.resolveBuildContext(b, .{
@@ -26,9 +30,15 @@ pub fn build(b: *std.Build) void {
     esp_grt_module.addImport("build_config", runtime_build_config_module);
 
     const esp_embed_module = esp_dep.module("esp_embed");
+    const lvgl_config_header = b.option(
+        std.Build.LazyPath,
+        "lvgl_config_header",
+        "Optional path to a complete LVGL config header; otherwise use thirdparty/pkg/lvgl/config.default.h",
+    ) orelse b.path("../../../thirdparty/pkg/lvgl/config.default.h");
     const thirdparty_dep = b.dependency("thirdparty", .{
         .target = context.target,
         .optimize = optimize,
+        .lvgl_config_header = lvgl_config_header,
     });
     const opus_module = thirdparty_dep.module("opus");
     const opus_osal_module = thirdparty_dep.module("opus_osal");
@@ -51,12 +61,6 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
 
-    const lvgl_component = addLvglComponent(b, lvgl_module);
-    lvgl_component.addCSourceFiles(.{
-        .root = b.path("components/lvgl_local"),
-        .files = &.{"chant_lvgl_binding.c"},
-        .flags = &.{"-DLV_CONF_INCLUDE_SIMPLE=1"},
-    });
     const szp_board = addBoardComponent(b, esp_build_dep);
     const json_compat = esp.idf.Component.create(b, .{ .name = "json" });
     json_compat.addFile(.{
@@ -71,7 +75,7 @@ pub fn build(b: *std.Build) void {
             .symbol = "zig_esp_main",
             .module = entry_module,
         },
-        .components = &.{ szp_board, lvgl_component, json_compat },
+        .components = &.{ szp_board, json_compat },
     });
 
     const build_step = b.step("build", "Build the chant example");
@@ -130,32 +134,5 @@ fn addBoardComponent(b: *std.Build, esp_dep: *std.Build.Dependency) *esp.idf.Com
     component.addRequire("log");
     component.addRequire("nvs_flash");
     component.addRequire("spiffs");
-    return component;
-}
-
-fn addLvglComponent(b: *std.Build, lvgl_module: *std.Build.Module) *esp.idf.Component {
-    const component = esp.idf.Component.create(b, .{ .name = "lvgl" });
-    var added_artifact = false;
-    for (lvgl_module.link_objects.items) |link_object| {
-        switch (link_object) {
-            .other_step => |artifact| {
-                if (artifact.kind == .lib and artifact.linkage == .static) {
-                    component.addArtifact(artifact);
-                    added_artifact = true;
-                }
-            },
-            .static_path => |file| {
-                component.addArchiveFile(.{
-                    .relative_path = "lvgl.a",
-                    .file = file,
-                });
-                added_artifact = true;
-            },
-            else => {},
-        }
-    }
-    if (!added_artifact) {
-        std.debug.panic("lvgl module does not expose a static library artifact", .{});
-    }
     return component;
 }
