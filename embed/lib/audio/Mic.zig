@@ -1,14 +1,13 @@
 //! audio.Mic — type-erased microphone role surface.
 
+const drivers = @import("drivers");
+const glib = @import("glib");
 const AudioSystem = @import("AudioSystem.zig");
-
-const root = @This();
+const I2sMicAdapter = @import("i2s/Mic.zig");
 
 pub const Error = AudioSystem.Error;
 
 pub fn make(comptime grt: type, comptime mic_count: usize, comptime samples_per_channel: usize) type {
-    _ = grt;
-
     return struct {
         const Self = @This();
 
@@ -19,6 +18,9 @@ pub fn make(comptime grt: type, comptime mic_count: usize, comptime samples_per_
         pub const Gains = [mic_count]?i8;
         pub const frame_mic_count: usize = mic_count;
         pub const frame_samples_per_channel: usize = samples_per_channel;
+
+        pub const I2s = I2sMicAdapter.make(grt, mic_count, samples_per_channel, Self);
+        pub const I2sConfig = I2s.Config;
 
         ptr: *anyopaque,
         vtable: *const VTable,
@@ -43,6 +45,10 @@ pub fn make(comptime grt: type, comptime mic_count: usize, comptime samples_per_
                 .ptr = ptr,
                 .vtable = vtable,
             };
+        }
+
+        pub fn i2s(config: I2sConfig) I2s {
+            return I2s.init(config);
         }
 
         pub fn deinit(self: Self) void {
@@ -77,4 +83,170 @@ pub fn make(comptime grt: type, comptime mic_count: usize, comptime samples_per_
             return self.vtable.disable(self.ptr);
         }
     };
+}
+
+pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
+    const TestCase = struct {
+        fn i2sAdapterSplitsRawFramesIntoMicFrame(allocator: glib.std.mem.Allocator) !void {
+            const TestMic = make(grt, 2, 2);
+            const FakeI2s = struct {
+                read_fill: [16]u8 = .{
+                    1, 0, 10, 0, 20, 0, 30, 0,
+                    2, 0, 11, 0, 21, 0, 31, 0,
+                },
+
+                pub fn write(_: *@This(), data: []const u8) drivers.I2s.Error!usize {
+                    return data.len;
+                }
+
+                pub fn read(self: *@This(), buf: []u8) drivers.I2s.Error!usize {
+                    @memcpy(buf, self.read_fill[0..buf.len]);
+                    return buf.len;
+                }
+            };
+
+            var fake_i2s = FakeI2s{};
+            var stream = try drivers.I2s.init(allocator, &fake_i2s, .{
+                .slots_per_frame = 4,
+                .bytes_per_slot = 2,
+                .buffer_frame_count = 2,
+            });
+            defer stream.deinit();
+
+            var capture = TestMic.i2s(.{
+                .stream = &stream,
+                .sample_rate = 16_000,
+                .mic_channels = .{
+                    .{ .slot = 1 },
+                    .{ .slot = 3 },
+                },
+                .ref_channel = .{ .slot = 0 },
+            });
+            const mic = capture.mic();
+
+            try grt.std.testing.expectEqual(@as(u32, 16_000), mic.sampleRate());
+            try grt.std.testing.expectEqual(@as(u8, 2), mic.micCount());
+            try mic.enable();
+
+            var frame: TestMic.Frame = undefined;
+            try mic.read(&frame);
+
+            try grt.std.testing.expectEqualSlices(i16, &.{ 10, 11 }, frame.mic[0][0..]);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 30, 31 }, frame.mic[1][0..]);
+            const ref = frame.ref.?;
+            try grt.std.testing.expectEqualSlices(i16, &.{ 1, 2 }, ref[0..]);
+        }
+
+        fn i2sAdapterRejectsReadBeforeEnable(allocator: glib.std.mem.Allocator) !void {
+            const TestMic = make(grt, 1, 1);
+            const FakeI2s = struct {
+                pub fn write(_: *@This(), data: []const u8) drivers.I2s.Error!usize {
+                    return data.len;
+                }
+
+                pub fn read(_: *@This(), buf: []u8) drivers.I2s.Error!usize {
+                    return buf.len;
+                }
+            };
+
+            var fake_i2s = FakeI2s{};
+            var stream = try drivers.I2s.init(allocator, &fake_i2s, .{
+                .slots_per_frame = 1,
+                .bytes_per_slot = 2,
+                .buffer_frame_count = 1,
+            });
+            defer stream.deinit();
+
+            var capture = TestMic.i2s(.{
+                .stream = &stream,
+                .sample_rate = 16_000,
+                .mic_channels = .{
+                    .{ .slot = 0 },
+                },
+            });
+            const mic = capture.mic();
+            var frame: TestMic.Frame = undefined;
+
+            try grt.std.testing.expectError(error.InvalidState, mic.read(&frame));
+        }
+
+        fn i2sAdapterExtractsWideSlotSamples(allocator: glib.std.mem.Allocator) !void {
+            const TestMic = make(grt, 1, 2);
+            const FakeI2s = struct {
+                read_fill: [16]u8 = .{
+                    0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xFE, 0xFF,
+                    0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x34, 0x12,
+                },
+
+                pub fn write(_: *@This(), data: []const u8) drivers.I2s.Error!usize {
+                    return data.len;
+                }
+
+                pub fn read(self: *@This(), buf: []u8) drivers.I2s.Error!usize {
+                    @memcpy(buf, self.read_fill[0..buf.len]);
+                    return buf.len;
+                }
+            };
+
+            var fake_i2s = FakeI2s{};
+            var stream = try drivers.I2s.init(allocator, &fake_i2s, .{
+                .slots_per_frame = 2,
+                .bytes_per_slot = 4,
+                .buffer_frame_count = 2,
+            });
+            defer stream.deinit();
+
+            var capture = TestMic.i2s(.{
+                .stream = &stream,
+                .sample_rate = 16_000,
+                .mic_channels = .{
+                    .{ .slot = 1, .sample_align = .msb },
+                },
+                .ref_channel = .{ .slot = 0, .sample_align = .msb },
+            });
+            const mic = capture.mic();
+
+            try mic.enable();
+            var frame: TestMic.Frame = undefined;
+            try mic.read(&frame);
+
+            try grt.std.testing.expectEqualSlices(i16, &.{ -2, 0x1234 }, frame.mic[0][0..]);
+            const ref = frame.ref.?;
+            try grt.std.testing.expectEqualSlices(i16, &.{ 1, 2 }, ref[0..]);
+        }
+    };
+
+    const Runner = struct {
+        pub fn init(self: *@This(), allocator: glib.std.mem.Allocator) !void {
+            _ = self;
+            _ = allocator;
+        }
+
+        pub fn run(self: *@This(), t: *glib.testing.T, allocator: glib.std.mem.Allocator) bool {
+            _ = self;
+            TestCase.i2sAdapterSplitsRawFramesIntoMicFrame(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.i2sAdapterRejectsReadBeforeEnable(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.i2sAdapterExtractsWideSlotSamples(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            return true;
+        }
+
+        pub fn deinit(self: *@This(), allocator: glib.std.mem.Allocator) void {
+            _ = self;
+            _ = allocator;
+        }
+    };
+
+    const Holder = struct {
+        var runner: Runner = .{};
+    };
+    return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
 }

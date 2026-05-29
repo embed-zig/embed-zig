@@ -5,6 +5,7 @@ const Button = @import("../button.zig");
 const Delay = @import("../Delay.zig");
 const Gpio = @import("../Gpio.zig");
 const I2c = @import("../I2c.zig");
+const I2s = @import("../I2s.zig");
 const Spi = @import("../Spi.zig");
 const Touch = @import("../Touch.zig");
 const Uart = @import("../Uart.zig");
@@ -43,6 +44,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("Button", Button.TestRunner(grt));
             t.run("Gpio", Gpio.TestRunner(grt));
             t.run("I2c", I2c.TestRunner(grt));
+            t.run("I2s", I2s.TestRunner(grt));
             t.run("Delay", Delay.TestRunner(grt));
             t.run("Spi", Spi.TestRunner(grt));
             t.run("Touch", Touch.TestRunner(grt));

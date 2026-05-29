@@ -21,7 +21,9 @@ pub fn create(
     const motion = lib_motion.create(b, target, optimize);
     const zux = lib_zux.create(b, target, optimize);
 
-    lib_audio.link(b, target, optimize, audio);
+    lib_audio.link(b, target, optimize, audio, .{
+        .drivers = drivers,
+    });
     lib_board.link(b, board, .{
         .audio = audio,
         .bt = bt,

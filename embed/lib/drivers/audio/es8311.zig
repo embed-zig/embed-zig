@@ -310,10 +310,10 @@ pub const Config = struct {
     codec_mode: CodecMode = .both,
     /// MCLK/LRCK ratio (default 256)
     mclk_div: u16 = 256,
-    /// When recording 2-channel data:
-    /// false: right channel filled with DAC output (for AEC reference)
-    /// true: right channel is empty
-    no_dac_ref: bool = false,
+    /// Disable the ES8311 DAC reference path.
+    /// When false, ADC right channel carries DAC output for AEC reference.
+    /// When true, ADC right channel does not carry the DAC reference.
+    disable_dac_ref: bool = false,
 };
 
 /// ES8311 Audio Codec Driver using `drivers.I2c`.
@@ -405,7 +405,7 @@ pub fn open(self: *Self) !void {
     try self.writeRegister(.adc_1b, AdcDefaults.ADC_1B_INIT);
     try self.writeRegister(.adc_1c, AdcDefaults.ADC_1C_INIT);
 
-    if (!self.config.no_dac_ref) {
+    if (!self.config.disable_dac_ref) {
         try self.writeRegister(.gpio_44, Gpio44.DAC_REF_ENABLED);
     } else {
         try self.writeRegister(.gpio_44, Gpio44.DAC_REF_DISABLED);

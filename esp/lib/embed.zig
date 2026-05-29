@@ -8,6 +8,7 @@ pub const drivers = embed_core.drivers;
 pub const ledstrip = embed_core.ledstrip;
 pub const motion = embed_core.motion;
 pub const zux = embed_core.zux;
+pub const audio_adapter = @import("embed/audio.zig");
 pub const BtHost = @import("embed/BtHost.zig");
 pub const I2c = @import("embed/I2c.zig");
 pub const Wifi = @import("embed/Wifi.zig");

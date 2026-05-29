@@ -1,6 +1,8 @@
 const glib = @import("glib");
 
 const AudioSystem = @import("../AudioSystem.zig");
+const Mic = @import("../Mic.zig");
+const Speaker = @import("../Speaker.zig");
 pub const mixer = @import("unit/mixer.zig");
 pub const ogg = @import("unit/ogg.zig");
 
@@ -17,6 +19,8 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
 
             t.parallel();
             t.run("AudioSystem", AudioSystem.TestRunner(grt));
+            t.run("Mic", Mic.TestRunner(grt));
+            t.run("Speaker", Speaker.TestRunner(grt));
             t.run("mixer", mixer.make(grt));
             t.run("ogg", ogg.make(grt));
             return t.wait();

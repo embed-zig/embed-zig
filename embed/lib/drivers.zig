@@ -7,6 +7,7 @@ pub const Display = @import("drivers/Display.zig");
 pub const Gpio = @import("drivers/Gpio.zig");
 pub const imu = @import("drivers/Imu.zig");
 pub const I2c = @import("drivers/I2c.zig");
+pub const I2s = @import("drivers/I2s.zig");
 pub const Modem = @import("drivers/Modem.zig");
 const switch_mod = @import("drivers/switch.zig");
 pub const Uart = @import("drivers/Uart.zig");

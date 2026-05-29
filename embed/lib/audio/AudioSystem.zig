@@ -65,6 +65,7 @@ pub fn Builder(comptime grt: type) type {
                 const AudioSystem = @This();
                 const DefaultMixer = Mixer.make(grt);
                 const SampleRingBuffer = RingBufferMod.make(grt);
+                const log = grt.std.log.scoped(.audio_system);
                 const capture_buffer_capacity = samples_per_channel * 16;
                 const ref_buffer_capacity = samples_per_channel * 16;
 
@@ -83,6 +84,7 @@ pub fn Builder(comptime grt: type) type {
                 pub const Config = struct {
                     read_thread: grt.std.Thread.SpawnConfig = .{},
                     write_thread: grt.std.Thread.SpawnConfig = .{},
+                    soft_ref_delay_samples: usize = 0,
                 };
 
                 allocator: glib.std.mem.Allocator,
@@ -100,6 +102,7 @@ pub fn Builder(comptime grt: type) type {
                 write_thread: ?grt.std.Thread = null,
                 read_thread_config: grt.std.Thread.SpawnConfig = .{},
                 write_thread_config: grt.std.Thread.SpawnConfig = .{},
+                soft_ref_delay_samples: usize = 0,
 
                 pub fn init(allocator: glib.std.mem.Allocator, config: Config) !AudioSystem {
                     const capture_rb = try SampleRingBuffer.init(allocator, capture_buffer_capacity);
@@ -121,6 +124,7 @@ pub fn Builder(comptime grt: type) type {
                         .ref_write_scratch = &[_]i16{},
                         .read_thread_config = config.read_thread,
                         .write_thread_config = config.write_thread,
+                        .soft_ref_delay_samples = config.soft_ref_delay_samples,
                     };
                 }
 
@@ -290,7 +294,8 @@ pub fn Builder(comptime grt: type) type {
                     }
 
                     const read_thread = if (read_enabled)
-                        grt.std.Thread.spawn(self.read_thread_config, AudioSystem.readLoop, .{self}) catch {
+                        grt.std.Thread.spawn(self.read_thread_config, AudioSystem.readLoop, .{self}) catch |err| {
+                            log.err("spawn read loop failed: {s}", .{@errorName(err)});
                             self.state_mu.lock();
                             self.running = false;
                             self.state_mu.unlock();
@@ -300,7 +305,8 @@ pub fn Builder(comptime grt: type) type {
                         null;
 
                     const write_thread = if (write_enabled)
-                        grt.std.Thread.spawn(self.write_thread_config, AudioSystem.writeLoop, .{self}) catch {
+                        grt.std.Thread.spawn(self.write_thread_config, AudioSystem.writeLoop, .{self}) catch |err| {
+                            log.err("spawn write loop failed: {s}", .{@errorName(err)});
                             self.state_mu.lock();
                             self.running = false;
                             self.state_mu.unlock();
@@ -352,6 +358,7 @@ pub fn Builder(comptime grt: type) type {
                 }
 
                 fn failAsync(self: *AudioSystem) void {
+                    log.err("async failure; disabling devices", .{});
                     self.state_mu.lock();
                     self.running = false;
                     self.async_failed = true;
@@ -364,6 +371,7 @@ pub fn Builder(comptime grt: type) type {
                 fn prepareLoopBuffers(self: *AudioSystem, mic_rate: u32, speaker_rate: u32) Error!void {
                     discardBuffered(&self.capture_rb);
                     discardBuffered(&self.ref_rb);
+                    try self.seedSoftRefDelay();
 
                     const needed = referenceChunkLen(Speaker.frame_samples_per_channel, speaker_rate, mic_rate) catch |err| switch (err) {
                         error.Overflow => return error.Overflow,
@@ -373,6 +381,19 @@ pub fn Builder(comptime grt: type) type {
                     if (self.ref_write_scratch.len == needed) return;
                     if (self.ref_write_scratch.len > 0) self.allocator.free(self.ref_write_scratch);
                     self.ref_write_scratch = self.allocator.alloc(i16, needed) catch return error.Unexpected;
+                }
+
+                fn seedSoftRefDelay(self: *AudioSystem) Error!void {
+                    if (self.soft_ref_delay_samples == 0) return;
+                    if (self.soft_ref_delay_samples >= ref_buffer_capacity) return error.InvalidState;
+
+                    var zeros: [samples_per_channel]i16 = @splat(0);
+                    var remaining = self.soft_ref_delay_samples;
+                    while (remaining > 0) {
+                        const n = @min(remaining, zeros.len);
+                        self.ref_rb.writeDroppingOldest(zeros[0..n]);
+                        remaining -= n;
+                    }
                 }
 
                 fn readLoop(self: *AudioSystem) void {
@@ -387,8 +408,9 @@ pub fn Builder(comptime grt: type) type {
 
                     while (self.isRunning()) {
                         frame.ref = null;
-                        mic_impl.read(&frame) catch {
+                        mic_impl.read(&frame) catch |err| {
                             if (!self.isRunning()) return;
+                            log.err("mic read failed: {s}", .{@errorName(err)});
                             self.failAsync();
                             return;
                         };
@@ -399,8 +421,9 @@ pub fn Builder(comptime grt: type) type {
                             frame.ref = ref_chunk;
                         }
 
-                        const n = ProcessorType.process(frame, processed[0..]) catch {
+                        const n = ProcessorType.process(frame, processed[0..]) catch |err| {
                             if (!self.isRunning()) return;
+                            log.err("processor failed: {s}", .{@errorName(err)});
                             self.failAsync();
                             return;
                         };
@@ -441,8 +464,9 @@ pub fn Builder(comptime grt: type) type {
                                 speaker_rate,
                                 self.ref_write_scratch,
                                 mic_rate,
-                            ) catch {
+                            ) catch |err| {
                                 if (!self.isRunning()) return;
+                                log.err("convert speaker ref failed: {s}", .{@errorName(err)});
                                 self.failAsync();
                                 return;
                             };
@@ -451,8 +475,9 @@ pub fn Builder(comptime grt: type) type {
                             }
                         }
 
-                        writeSpeakerFrame(speaker_impl, mix_chunk[0..mixed_n]) catch {
+                        writeSpeakerFrame(speaker_impl, mix_chunk[0..mixed_n]) catch |err| {
                             if (!self.isRunning()) return;
+                            log.err("speaker write failed: {s}", .{@errorName(err)});
                             self.failAsync();
                             return;
                         };
