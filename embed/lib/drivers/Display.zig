@@ -12,6 +12,12 @@ pub const Error = error{
 };
 
 pub const Rgb = @import("display/Rgb.zig");
+pub const Delay = @import("Delay.zig");
+pub const Dbi = @import("display/Dbi.zig");
+pub const Flush = @import("display/Flush.zig");
+pub const St7701 = @import("display/st7701.zig");
+pub const St7789 = @import("display/st7789.zig");
+pub const Sh8601 = @import("display/sh8601.zig");
 
 ptr: *anyopaque,
 vtable: *const VTable,
@@ -24,7 +30,8 @@ pub const VTable = struct {
     enabled: ?*const fn (ptr: *anyopaque) Error!bool = null,
     setBrightness: ?*const fn (ptr: *anyopaque, level: u8) Error!void = null,
     brightness: ?*const fn (ptr: *anyopaque) Error!u8 = null,
-    drawBitmap: *const fn (
+    maxFlushPixels: *const fn (ptr: *anyopaque) Error!usize,
+    flush: *const fn (
         ptr: *anyopaque,
         x: u16,
         y: u16,
@@ -86,7 +93,21 @@ pub fn drawBitmap(
     if (pixels.len < @as(usize, w) * @as(usize, h)) {
         return error.OutOfBounds;
     }
-    return self.vtable.drawBitmap(self.ptr, x, y, w, h, pixels);
+
+    const max_flush_pixels = try self.vtable.maxFlushPixels(self.ptr);
+    if (max_flush_pixels == 0 or max_flush_pixels < w) return error.DisplayError;
+
+    var row: u16 = 0;
+    var offset: usize = 0;
+    while (row < h) {
+        const remaining_rows = h - row;
+        const capacity_rows: u16 = @intCast(max_flush_pixels / @as(usize, w));
+        const rows = if (remaining_rows > capacity_rows) capacity_rows else remaining_rows;
+        const count = @as(usize, w) * @as(usize, rows);
+        try self.vtable.flush(self.ptr, x, y + row, w, rows, pixels[offset..][0..count]);
+        row += rows;
+        offset += count;
+    }
 }
 
 pub fn make(comptime grt: type, comptime Impl: type) type {
@@ -97,16 +118,18 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
         if (!@hasDecl(Impl, "deinit")) @compileError("Display impl must define deinit");
         if (!@hasDecl(Impl, "width")) @compileError("Display impl must define width");
         if (!@hasDecl(Impl, "height")) @compileError("Display impl must define height");
-        if (!@hasDecl(Impl, "drawBitmap")) @compileError("Display impl must define drawBitmap");
+        if (!@hasDecl(Impl, "maxFlushPixels")) @compileError("Display impl must define maxFlushPixels");
+        if (!@hasDecl(Impl, "flush")) @compileError("Display impl must define flush");
         if (!@hasField(Impl.Config, "allocator")) @compileError("Display impl Config must define allocator");
 
         _ = @as(*const fn (Impl.Config) anyerror!Impl, &Impl.init);
         _ = @as(*const fn (*Impl) void, &Impl.deinit);
         _ = @as(*const fn (*Impl) u16, &Impl.width);
         _ = @as(*const fn (*Impl) u16, &Impl.height);
+        _ = @as(*const fn (*Impl) anyerror!usize, &Impl.maxFlushPixels);
         _ = @as(
             *const fn (*Impl, u16, u16, u16, u16, []const Rgb) anyerror!void,
-            &Impl.drawBitmap,
+            &Impl.flush,
         );
     }
 
@@ -128,7 +151,11 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             return self.impl.height();
         }
 
-        pub fn drawBitmap(
+        pub fn maxFlushPixels(self: *@This()) Error!usize {
+            return self.impl.maxFlushPixels() catch error.DisplayError;
+        }
+
+        pub fn flush(
             self: *@This(),
             x: u16,
             y: u16,
@@ -136,7 +163,7 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             h: u16,
             pixels: []const Rgb,
         ) Error!void {
-            return self.impl.drawBitmap(x, y, w, h, pixels) catch |err| switch (err) {
+            return self.impl.flush(x, y, w, h, pixels) catch |err| switch (err) {
                 error.OutOfBounds => error.OutOfBounds,
                 error.Busy => error.Busy,
                 error.Timeout => error.Timeout,
@@ -208,7 +235,12 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             return self.brightness();
         }
 
-        fn drawBitmapFn(
+        fn maxFlushPixelsFn(ptr: *anyopaque) Error!usize {
+            const self: *Ctx = @ptrCast(@alignCast(ptr));
+            return self.maxFlushPixels();
+        }
+
+        fn flushFn(
             ptr: *anyopaque,
             x: u16,
             y: u16,
@@ -217,7 +249,7 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             pixels: []const Rgb,
         ) Error!void {
             const self: *Ctx = @ptrCast(@alignCast(ptr));
-            return self.drawBitmap(x, y, w, h, pixels);
+            return self.flush(x, y, w, h, pixels);
         }
 
         const vtable = VTable{
@@ -228,7 +260,8 @@ pub fn make(comptime grt: type, comptime Impl: type) type {
             .enabled = enabledFn,
             .setBrightness = setBrightnessFn,
             .brightness = brightnessFn,
-            .drawBitmap = drawBitmapFn,
+            .maxFlushPixels = maxFlushPixelsFn,
+            .flush = flushFn,
         };
     };
 
@@ -258,7 +291,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         fn exposesGeometryAndDrawVtableSurface(allocator: glib.std.mem.Allocator) !void {
             const State = struct {
                 deinit_calls: usize = 0,
-                draws: usize = 0,
+                flushes: usize = 0,
                 enabled: bool = false,
                 brightness: u8 = 0,
                 last_x: u16 = 0,
@@ -300,6 +333,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return self.height_px;
                 }
 
+                pub fn maxFlushPixels(_: *@This()) Error!usize {
+                    return 4;
+                }
+
                 pub fn setEnabled(self: *@This(), is_enabled: bool) Error!void {
                     self.state.enabled = is_enabled;
                 }
@@ -316,7 +353,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return self.state.brightness;
                 }
 
-                pub fn drawBitmap(
+                pub fn flush(
                     self: *@This(),
                     x: u16,
                     y: u16,
@@ -324,7 +361,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     h: u16,
                     pixels: []const Rgb,
                 ) Error!void {
-                    self.state.draws += 1;
+                    self.state.flushes += 1;
                     self.state.last_x = x;
                     self.state.last_y = y;
                     self.state.last_w = w;
@@ -354,7 +391,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try display.setBrightness(91);
             try grt.std.testing.expectEqual(@as(u8, 91), try display.brightness());
             try display.drawBitmap(1, 1, 2, 2, &pixels);
-            try grt.std.testing.expectEqual(@as(usize, 1), state.draws);
+            try grt.std.testing.expectEqual(@as(usize, 1), state.flushes);
             try grt.std.testing.expectEqual(@as(u16, 1), state.last_x);
             try grt.std.testing.expectEqual(@as(u16, 1), state.last_y);
             try grt.std.testing.expectEqual(@as(u16, 2), state.last_w);
@@ -408,7 +445,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return 4;
                 }
 
-                pub fn drawBitmap(
+                pub fn maxFlushPixels(_: *@This()) Error!usize {
+                    return 4;
+                }
+
+                pub fn flush(
                     self: *@This(),
                     _: u16,
                     _: u16,
@@ -433,6 +474,71 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectError(error.OutOfBounds, display.drawBitmap(0, 0, 2, 2, pixels[0..3]));
             try grt.std.testing.expectEqual(@as(usize, 0), state.draws);
         }
+
+        fn chunksDrawsByBackendCapacity(allocator: glib.std.mem.Allocator) !void {
+            const State = struct {
+                flushes: usize = 0,
+                heights: [4]u16 = .{ 0, 0, 0, 0 },
+                y: [4]u16 = .{ 0, 0, 0, 0 },
+            };
+
+            const Impl = struct {
+                pub const Config = struct {
+                    allocator: glib.std.mem.Allocator,
+                    state: *State,
+                };
+
+                state: *State,
+
+                pub fn init(config: Config) !@This() {
+                    return .{ .state = config.state };
+                }
+
+                pub fn deinit(_: *@This()) void {}
+
+                pub fn width(_: *@This()) u16 {
+                    return 8;
+                }
+
+                pub fn height(_: *@This()) u16 {
+                    return 8;
+                }
+
+                pub fn maxFlushPixels(_: *@This()) Error!usize {
+                    return 4;
+                }
+
+                pub fn flush(
+                    self: *@This(),
+                    _: u16,
+                    y: u16,
+                    _: u16,
+                    h: u16,
+                    _: []const Rgb,
+                ) Error!void {
+                    const index = self.state.flushes;
+                    self.state.y[index] = y;
+                    self.state.heights[index] = h;
+                    self.state.flushes += 1;
+                }
+            };
+
+            var state = State{};
+            var display = try make(grt, Impl).init(.{
+                .allocator = allocator,
+                .state = &state,
+            });
+            defer display.deinit();
+
+            const pixels = [_]Rgb{rgb(255, 0, 0)} ** 8;
+            try display.drawBitmap(0, 1, 2, 4, &pixels);
+
+            try grt.std.testing.expectEqual(@as(usize, 2), state.flushes);
+            try grt.std.testing.expectEqual(@as(u16, 1), state.y[0]);
+            try grt.std.testing.expectEqual(@as(u16, 3), state.y[1]);
+            try grt.std.testing.expectEqual(@as(u16, 2), state.heights[0]);
+            try grt.std.testing.expectEqual(@as(u16, 2), state.heights[1]);
+        }
     };
 
     const Runner = struct {
@@ -449,6 +555,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.validatesBoundsBeforeCallingBackend(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.chunksDrawsByBackendCapacity(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

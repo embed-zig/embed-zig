@@ -124,12 +124,14 @@ const embed_unit_macos_modules = .{};
 const embed_integration_base_modules = .{
     @import("embed_integration/audio_gstd.zig"),
     @import("embed_integration/bt_gstd.zig"),
+    @import("embed_integration/drivers_gstd.zig"),
     @import("embed_integration/zux_gstd.zig"),
 };
 
 const embed_integration_non_linux_modules = .{
     @import("embed_integration/audio_std.zig"),
     @import("embed_integration/bt_std.zig"),
+    @import("embed_integration/drivers_std.zig"),
     @import("embed_integration/zux_std.zig"),
 };
 

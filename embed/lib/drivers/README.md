@@ -6,14 +6,14 @@ depend on.
 This module is the replacement for the old `main`-branch HAL-era driver
 layout. The goal is to keep useful register/control logic while avoiding a
 global `hal` namespace. Drivers consume subsystem-local runtime contracts under
-`lib/drivers/io` instead.
+`lib/drivers` instead.
 
 ## Imports
 
 ```zig
 const drivers = @import("drivers");
 
-const io = drivers.io;
+const Dbi = drivers.Dbi;
 const Display = drivers.Display;
 const Es7210 = drivers.audio.Es7210;
 const Es8311 = drivers.audio.Es8311;
@@ -21,6 +21,7 @@ const Qmi8658 = drivers.imu.Qmi8658;
 const Pca9557 = drivers.gpio.Pca9557;
 const Tca9554 = drivers.gpio.Tca9554;
 const Ft5x06 = drivers.Touch.Ft5x06;
+const Gt911 = drivers.Touch.Gt911;
 const Fm175xx = drivers.nfc.Fm175xx;
 ```
 
@@ -33,6 +34,7 @@ The root module also re-exports the first-wave driver types directly:
 - `drivers.Pca9557`
 - `drivers.Tca9554`
 - `drivers.Ft5x06`
+- `drivers.Gt911`
 - `drivers.Fm175xx`
 
 ## Package Shape
@@ -42,11 +44,10 @@ lib/
   drivers.zig
   drivers/
     README.md
-    io.zig
-    io/
-      I2c.zig
-      Delay.zig
-      Spi.zig
+    Delay.zig
+    I2c.zig
+    I2s.zig
+    Spi.zig
     audio.zig
     audio/
       es7210.zig
@@ -57,12 +58,27 @@ lib/
       es8311.pdf
     Display.zig
     display/
+      Dbi.zig
       Rgb.zig
+      dbi/
+        Spi.zig
+      st7789.zig
+      st7789.md
+      st7789.pdf
+      sh8601.zig
+      sh8601.md
+      sh8601.pdf
+      st7701.zig
+      st7701.md
+      st7701.pdf
     Touch.zig
     touch/
       ft5x06.zig
       ft5x06.md
       ft5x06.pdf
+      gt911.zig
+      gt911.md
+      gt911.pdf
     Imu.zig
     imu/
       qmi8658.zig
@@ -95,31 +111,49 @@ directly.
 
 ## I/O Contracts
 
-`lib/drivers/io` owns the runtime contracts required by drivers.
+`lib/drivers` owns the runtime contracts required by drivers.
 
 Current phase-1 contracts:
 
-- `drivers.io.I2c`: non-owning type-erased register/control bus
-- `drivers.io.Delay`: non-owning type-erased duration sleep hook
-- `drivers.io.Spi`: non-owning type-erased synchronous SPI bus
+- `drivers.I2c`: non-owning type-erased register/control bus
+- `drivers.I2s`: non-owning type-erased I2S frame/slot byte transport with
+  internal read/write view buffers
+- `drivers.Delay`: non-owning type-erased duration sleep hook
+- `drivers.Spi`: non-owning type-erased synchronous SPI bus
+- `drivers.Dbi`: non-owning type-erased DBI-style command/data bus for display
+  controller drivers
 
 These wrappers are intentionally narrow. They should expose only the operations
-that drivers actually need, and they should stay in `lib/drivers/io` rather
-than being promoted into `lib/io`.
+that drivers actually need, and they should stay in `lib/drivers` rather than
+being promoted into `lib/io`.
 
 ## Current Drivers
 
 - `drivers.audio.Es7210`: ES7210 4-channel ADC control driver over I2C
 - `drivers.audio.Es8311`: ES8311 mono codec control driver over I2C
 - `drivers.Display`: type-erased display drawing driver surface
+- `drivers.Display.St7789`: ST7789 SPI TFT controller command driver
+- `drivers.Display.Sh8601`: SH8601 QSPI AMOLED controller command driver and
+  panel init presets
+- `drivers.Display.St7701`: ST7701 RGB/MIPI TFT controller command driver and
+  panel init presets
 - `drivers.Switch`: type-erased active / inactive output surface
 - `drivers.Pwm`: type-erased PWM output surface with frequency and active-duty
 - `drivers.imu.Qmi8658`: QMI8658 IMU driver over I2C plus delay hook
 - `drivers.gpio.Pca9557`: PCA9557 GPIO expander driver over I2C
 - `drivers.gpio.Tca9554`: TCA9554 GPIO expander driver over I2C
 - `drivers.Touch.Ft5x06`: FocalTech FT5x06 capacitive touch controller over I2C
+- `drivers.Touch.Gt911`: Goodix GT911 capacitive touch controller over I2C
 - `drivers.nfc.Fm175xx`: FM175xx NFC reader driver over I2C or SPI, with
 `ISO14443A` activation and raw `NTAG` reads
+
+Display controller drivers keep register/command names, command encoding, and
+panel init presets in Zig. Board/platform code keeps physical bus setup,
+framebuffer/DMA policy, reset/backlight GPIOs, and vendor SDK handle ownership:
+
+- ST7789 SPI TFT LCD controller
+- SH8601 QSPI AMOLED controller
+- ST7701 RGB/MIPI TFT LCD controller
 
 Drivers keep local reference material next to the implementation:
 
@@ -136,8 +170,8 @@ var my_i2c = MyI2c{};
 var my_delay = MyDelay{};
 
 var imu = drivers.imu.Qmi8658.init(
-    drivers.io.I2c.init(&my_i2c),
-    drivers.io.Delay.init(&my_delay),
+    drivers.I2c.init(&my_i2c),
+    drivers.Delay.init(&my_delay),
     .{ .address = 0x6A },
 );
 
@@ -147,8 +181,8 @@ _ = raw;
 
 var my_spi = MySpi{};
 var nfc = drivers.nfc.Fm175xx.initSpi(
-    drivers.io.Spi.init(&my_spi),
-    drivers.io.Delay.init(&my_delay),
+    drivers.Spi.init(&my_spi),
+    drivers.Delay.init(&my_delay),
     .{},
 );
 
@@ -158,14 +192,14 @@ const card = try nfc.activateTypeA();
 _ = card;
 ```
 
-Ownership remains with the caller. `drivers.io.I2c`, `drivers.io.Spi`, and
-`drivers.io.Delay` do not allocate and do not manage teardown of the wrapped
+Ownership remains with the caller. `drivers.I2c`, `drivers.Spi`, and
+`drivers.Delay` do not allocate and do not manage teardown of the wrapped
 implementation.
 
 ## Design Rules
 
 - Non-test library code in `lib/drivers` should not import `std` directly.
-- Add new contracts to `lib/drivers/io` only when a real driver needs them.
+- Add new contracts to `lib/drivers` only when a real driver needs them.
 - Prefer small explicit capability boundaries over broad HAL-style interfaces.
 - Keep board policy, synchronization, pinmux, and power-tree setup outside
 `lib/drivers` unless a chip driver explicitly requires a hook for it.

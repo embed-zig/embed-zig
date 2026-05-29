@@ -14,6 +14,12 @@ pub fn cmp(self: Self, other: Self) bool {
     return self.r == other.r and self.g == other.g and self.b == other.b;
 }
 
+pub fn encode565(self: Self) u16 {
+    return (@as(u16, self.r & 0xf8) << 8) |
+        (@as(u16, self.g & 0xfc) << 3) |
+        (@as(u16, self.b) >> 3);
+}
+
 pub fn from565(pixel: u16) Self {
     const red5: u8 = @intCast((pixel >> 11) & 0x1F);
     const green6: u8 = @intCast((pixel >> 5) & 0x3F);
@@ -40,6 +46,14 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(init(0, 0, 255).cmp(from565(0x001F)));
         }
 
+        fn encode565EncodesCommonColors() !void {
+            try grt.std.testing.expectEqual(@as(u16, 0x0000), init(0, 0, 0).encode565());
+            try grt.std.testing.expectEqual(@as(u16, 0xffff), init(255, 255, 255).encode565());
+            try grt.std.testing.expectEqual(@as(u16, 0xf800), init(255, 0, 0).encode565());
+            try grt.std.testing.expectEqual(@as(u16, 0x07e0), init(0, 255, 0).encode565());
+            try grt.std.testing.expectEqual(@as(u16, 0x001f), init(0, 0, 255).encode565());
+        }
+
         fn from565ExpandsPartialChannels() !void {
             const decoded = from565(0x8410);
             try grt.std.testing.expectEqual(@as(u8, 132), decoded.r);
@@ -63,6 +77,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.from565DecodesCommonColors() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.encode565EncodesCommonColors() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

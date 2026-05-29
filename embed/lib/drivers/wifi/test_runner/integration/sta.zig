@@ -63,6 +63,9 @@ pub fn runSurface(comptime grt: type, device: anytype, options: Options) !void {
 
     const sta = device.sta();
     try expectValidState(sta.getState());
+    const power_save = try sta.getPowerSave();
+    try expectValidPowerSave(power_save);
+    try sta.setPowerSave(power_save);
     _ = sta.getMacAddr();
     _ = sta.getIpInfo();
 
@@ -95,6 +98,15 @@ fn expectValidState(state: wifi.Sta.State) !void {
     }
 }
 
+fn expectValidPowerSave(mode: wifi.Sta.PowerSave) !void {
+    switch (mode) {
+        .none, .default => {},
+        .listen_interval => |listen_interval| {
+            if (listen_interval == 0) return error.InvalidPowerSaveListenInterval;
+        },
+    }
+}
+
 fn requireDevicePointer(comptime T: type) void {
     if (@typeInfo(T) != .pointer) {
         @compileError("sta runner expects *Wifi-like instance");
@@ -106,6 +118,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
         fn runnerObservesScanEventsWhenRequired() !void {
             const Impl = struct {
                 state: wifi.Sta.State = .idle,
+                power_save: wifi.Sta.PowerSave = .default,
                 hook_ctx: ?*anyopaque = null,
                 hook_cb: ?*const fn (?*anyopaque, wifi.Sta.Event) void = null,
 
@@ -136,6 +149,14 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
                 pub fn getState(self: *@This()) wifi.Sta.State {
                     return self.state;
+                }
+
+                pub fn setPowerSave(self: *@This(), mode: wifi.Sta.PowerSave) wifi.Sta.PowerSaveError!void {
+                    self.power_save = mode;
+                }
+
+                pub fn getPowerSave(self: *@This()) wifi.Sta.PowerSaveError!wifi.Sta.PowerSave {
+                    return self.power_save;
                 }
 
                 pub fn addEventHook(self: *@This(), ctx: ?*anyopaque, cb: *const fn (?*anyopaque, wifi.Sta.Event) void) void {

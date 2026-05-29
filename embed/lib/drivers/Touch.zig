@@ -5,6 +5,7 @@ const glib = @import("glib");
 const Touch = @This();
 
 pub const Ft5x06 = @import("touch/ft5x06.zig");
+pub const Gt911 = @import("touch/gt911.zig");
 
 pub const max_points: usize = 5;
 

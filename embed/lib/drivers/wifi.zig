@@ -266,6 +266,12 @@ pub const Sta = struct {
         connected,
     };
 
+    pub const PowerSave = union(enum) {
+        none,
+        default,
+        listen_interval: u16,
+    };
+
     pub const ScanConfig = struct {
         active: bool = true,
         ssid: ?[]const u8 = null,
@@ -330,12 +336,21 @@ pub const Sta = struct {
         Unexpected,
     };
 
+    pub const PowerSaveError = error{
+        Busy,
+        InvalidConfig,
+        Unsupported,
+        Unexpected,
+    };
+
     pub const VTable = struct {
         startScan: *const fn (ptr: *anyopaque, config: ScanConfig) ScanError!void,
         stopScan: *const fn (ptr: *anyopaque) void,
         connect: *const fn (ptr: *anyopaque, config: ConnectConfig) ConnectError!void,
         disconnect: *const fn (ptr: *anyopaque) void,
         getState: *const fn (ptr: *anyopaque) State,
+        setPowerSave: *const fn (ptr: *anyopaque, mode: PowerSave) PowerSaveError!void,
+        getPowerSave: *const fn (ptr: *anyopaque) PowerSaveError!PowerSave,
         addEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void,
         removeEventHook: *const fn (ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void,
         getMacAddr: *const fn (ptr: *anyopaque) ?Self.MacAddr,
@@ -361,6 +376,18 @@ pub const Sta = struct {
 
     pub fn getState(self: Self) State {
         return self.vtable.getState(self.ptr);
+    }
+
+    pub fn setPowerSave(self: Self, mode: PowerSave) PowerSaveError!void {
+        switch (mode) {
+            .listen_interval => |listen_interval| if (listen_interval == 0) return error.InvalidConfig,
+            else => {},
+        }
+        return self.vtable.setPowerSave(self.ptr, mode);
+    }
+
+    pub fn getPowerSave(self: Self) PowerSaveError!PowerSave {
+        return self.vtable.getPowerSave(self.ptr);
     }
 
     pub fn addEventHook(self: Self, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void {
@@ -417,6 +444,22 @@ pub const Sta = struct {
                 return self.getState();
             }
 
+            fn setPowerSaveFn(ptr: *anyopaque, mode: PowerSave) PowerSaveError!void {
+                const self: *Impl = @ptrCast(@alignCast(ptr));
+                if (@hasDecl(Impl, "setPowerSave")) {
+                    return self.setPowerSave(mode);
+                }
+                return error.Unsupported;
+            }
+
+            fn getPowerSaveFn(ptr: *anyopaque) PowerSaveError!PowerSave {
+                const self: *Impl = @ptrCast(@alignCast(ptr));
+                if (@hasDecl(Impl, "getPowerSave")) {
+                    return self.getPowerSave();
+                }
+                return error.Unsupported;
+            }
+
             fn addEventHookFn(ptr: *anyopaque, ctx: ?*anyopaque, cb: *const fn (?*anyopaque, Event) void) void {
                 const self: *Impl = @ptrCast(@alignCast(ptr));
                 self.addEventHook(ctx, cb);
@@ -456,6 +499,8 @@ pub const Sta = struct {
                 .connect = connectFn,
                 .disconnect = disconnectFn,
                 .getState = getStateFn,
+                .setPowerSave = setPowerSaveFn,
+                .getPowerSave = getPowerSaveFn,
                 .addEventHook = addEventHookFn,
                 .removeEventHook = removeEventHookFn,
                 .getMacAddr = getMacAddrFn,
@@ -493,6 +538,40 @@ pub const Sta = struct {
                 }.onEvent);
                 try grt.std.testing.expect(sta.getMacAddr() == null);
                 try grt.std.testing.expect(sta.getIpInfo() == null);
+                try grt.std.testing.expectError(error.Unsupported, sta.getPowerSave());
+                try grt.std.testing.expectError(error.Unsupported, sta.setPowerSave(.none));
+            }
+
+            fn makeForwardsPowerSaveMethods() !void {
+                const Impl = struct {
+                    mode: PowerSave = .default,
+
+                    pub fn startScan(_: *@This(), _: ScanConfig) ScanError!void {}
+                    pub fn stopScan(_: *@This()) void {}
+                    pub fn connect(_: *@This(), _: ConnectConfig) ConnectError!void {}
+                    pub fn disconnect(_: *@This()) void {}
+                    pub fn getState(_: *@This()) State {
+                        return .idle;
+                    }
+                    pub fn setPowerSave(self: *@This(), mode: PowerSave) PowerSaveError!void {
+                        self.mode = mode;
+                    }
+                    pub fn getPowerSave(self: *@This()) PowerSaveError!PowerSave {
+                        return self.mode;
+                    }
+                    pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Event) void) void {}
+                    pub fn deinit(_: *@This()) void {}
+                };
+
+                var impl = Impl{};
+                const sta = Self.make(&impl);
+
+                try expectPowerSaveEqual(grt, PowerSave.default, try sta.getPowerSave());
+                try sta.setPowerSave(.none);
+                try expectPowerSaveEqual(grt, PowerSave.none, try sta.getPowerSave());
+                try sta.setPowerSave(.{ .listen_interval = 7 });
+                try expectPowerSaveEqual(grt, .{ .listen_interval = 7 }, try sta.getPowerSave());
+                try grt.std.testing.expectError(error.InvalidConfig, sta.setPowerSave(.{ .listen_interval = 0 }));
             }
         };
 
@@ -507,6 +586,10 @@ pub const Sta = struct {
                 _ = allocator;
 
                 TestCase.makeAllowsMissingOptionalIntrospection() catch |err| {
+                    t.logFatal(@errorName(err));
+                    return false;
+                };
+                TestCase.makeForwardsPowerSaveMethods() catch |err| {
                     t.logFatal(@errorName(err));
                     return false;
                 };
@@ -685,6 +768,10 @@ pub const Wifi = struct {
                     pub fn getState(_: *@This()) Sta.State {
                         return .idle;
                     }
+                    pub fn setPowerSave(_: *@This(), _: Sta.PowerSave) Sta.PowerSaveError!void {}
+                    pub fn getPowerSave(_: *@This()) Sta.PowerSaveError!Sta.PowerSave {
+                        return .default;
+                    }
                     pub fn addEventHook(_: *@This(), _: ?*anyopaque, _: *const fn (?*anyopaque, Sta.Event) void) void {}
                     pub fn deinit(_: *@This()) void {}
                 };
@@ -782,6 +869,17 @@ pub const Wifi = struct {
         return glib.testing.TestRunner.make(Runner).new(&Holder.runner);
     }
 };
+
+fn expectPowerSaveEqual(comptime grt: type, expected: Sta.PowerSave, actual: Sta.PowerSave) !void {
+    switch (expected) {
+        .none => try grt.std.testing.expect(actual == .none),
+        .default => try grt.std.testing.expect(actual == .default),
+        .listen_interval => |expected_interval| switch (actual) {
+            .listen_interval => |actual_interval| try grt.std.testing.expectEqual(expected_interval, actual_interval),
+            else => return error.TestExpectedEqual,
+        },
+    }
+}
 
 pub fn make(comptime grt: type) type {
     return struct {
