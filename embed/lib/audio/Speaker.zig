@@ -14,12 +14,14 @@ pub fn make(comptime grt: type, comptime samples_per_channel: usize) type {
         pub const Error = AudioSystem.Error;
         pub const Frame = [samples_per_channel]i16;
         pub const frame_samples_per_channel: usize = samples_per_channel;
+        pub const GainTableFunc = *const fn (gain_db: i8) i8;
 
         pub const I2s = I2sSpeakerAdapter.make(grt, samples_per_channel, Self);
         pub const I2sConfig = I2s.Config;
 
         ptr: *anyopaque,
         vtable: *const VTable,
+        gain_table_func: ?GainTableFunc = null,
 
         pub const VTable = struct {
             deinit: *const fn (ptr: *anyopaque) void,
@@ -40,6 +42,10 @@ pub fn make(comptime grt: type, comptime samples_per_channel: usize) type {
                 .ptr = ptr,
                 .vtable = vtable,
             };
+        }
+
+        pub fn setGainTableFunc(self: *Self, gain_table_func: ?GainTableFunc) void {
+            self.gain_table_func = gain_table_func;
         }
 
         pub fn i2s(config: I2sConfig) I2s {
@@ -63,7 +69,8 @@ pub fn make(comptime grt: type, comptime samples_per_channel: usize) type {
         }
 
         pub fn setGain(self: Self, gain_db: i8) AudioSystem.Error!void {
-            return self.vtable.setGain(self.ptr, gain_db);
+            const mapped_gain_db = if (self.gain_table_func) |mapGain| mapGain(gain_db) else gain_db;
+            return self.vtable.setGain(self.ptr, mapped_gain_db);
         }
 
         pub fn enable(self: Self) AudioSystem.Error!void {
@@ -165,6 +172,54 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectError(error.InvalidState, speaker.write(&.{1}));
         }
 
+        fn i2sAdapterMapsGainWithTableFunc(allocator: glib.std.mem.Allocator) !void {
+            const TestSpeaker = make(grt, 1);
+            const FakeI2s = struct {
+                pub fn write(_: *@This(), data: []const u8) drivers.I2s.Error!usize {
+                    return data.len;
+                }
+
+                pub fn read(_: *@This(), buf: []u8) drivers.I2s.Error!usize {
+                    return buf.len;
+                }
+            };
+            const GainTable = struct {
+                fn lower(gain_db: i8) i8 {
+                    return gain_db - 12;
+                }
+            };
+
+            const slots = [_]TestSpeaker.I2s.Slot{
+                .{ .index = 0 },
+            };
+            const channels = [_]TestSpeaker.I2s.Channel{
+                .{ .slots = &slots },
+            };
+
+            var fake_i2s = FakeI2s{};
+            var stream = try drivers.I2s.init(allocator, &fake_i2s, .{
+                .slots_per_frame = 1,
+                .bytes_per_slot = 2,
+                .buffer_frame_count = 1,
+            });
+            defer stream.deinit();
+
+            var output = TestSpeaker.i2s(.{
+                .stream = &stream,
+                .sample_rate = 16_000,
+                .channels = &channels,
+            });
+            var speaker = output.speaker();
+
+            speaker.setGainTableFunc(&GainTable.lower);
+            try speaker.setGain(3);
+            try grt.std.testing.expectEqual(@as(?i8, -9), speaker.gain());
+
+            speaker.setGainTableFunc(null);
+            try speaker.setGain(3);
+            try grt.std.testing.expectEqual(@as(?i8, 3), speaker.gain());
+        }
+
         fn i2sAdapterExpandsMonoSamplesToWideSlots(allocator: glib.std.mem.Allocator) !void {
             const TestSpeaker = make(grt, 3);
             const FakeI2s = struct {
@@ -231,6 +286,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.i2sAdapterRejectsWriteBeforeEnable(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.i2sAdapterMapsGainWithTableFunc(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

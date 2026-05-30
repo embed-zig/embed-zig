@@ -18,12 +18,14 @@ pub fn make(comptime grt: type, comptime mic_count: usize, comptime samples_per_
         pub const Gains = [mic_count]?i8;
         pub const frame_mic_count: usize = mic_count;
         pub const frame_samples_per_channel: usize = samples_per_channel;
+        pub const GainTableFunc = *const fn (gain_db: i8) i8;
 
         pub const I2s = I2sMicAdapter.make(grt, mic_count, samples_per_channel, Self);
         pub const I2sConfig = I2s.Config;
 
         ptr: *anyopaque,
         vtable: *const VTable,
+        gain_table_func: ?GainTableFunc = null,
 
         pub const VTable = struct {
             deinit: *const fn (ptr: *anyopaque) void,
@@ -45,6 +47,10 @@ pub fn make(comptime grt: type, comptime mic_count: usize, comptime samples_per_
                 .ptr = ptr,
                 .vtable = vtable,
             };
+        }
+
+        pub fn setGainTableFunc(self: *Self, gain_table_func: ?GainTableFunc) void {
+            self.gain_table_func = gain_table_func;
         }
 
         pub fn i2s(config: I2sConfig) I2s {
@@ -72,7 +78,16 @@ pub fn make(comptime grt: type, comptime mic_count: usize, comptime samples_per_
         }
 
         pub fn setGains(self: Self, gains_db: []const ?i8) Error!void {
-            return self.vtable.setGains(self.ptr, gains_db);
+            const gain_table_func = self.gain_table_func orelse {
+                return self.vtable.setGains(self.ptr, gains_db);
+            };
+            if (gains_db.len > mic_count) return error.Unsupported;
+
+            var mapped_gains: Gains = [_]?i8{null} ** mic_count;
+            for (gains_db, 0..) |gain_db, index| {
+                mapped_gains[index] = if (gain_db) |value| gain_table_func(value) else null;
+            }
+            return self.vtable.setGains(self.ptr, mapped_gains[0..gains_db.len]);
         }
 
         pub fn enable(self: Self) Error!void {
@@ -170,6 +185,53 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectError(error.InvalidState, mic.read(&frame));
         }
 
+        fn i2sAdapterMapsGainsWithTableFunc(allocator: glib.std.mem.Allocator) !void {
+            const TestMic = make(grt, 2, 1);
+            const FakeI2s = struct {
+                pub fn write(_: *@This(), data: []const u8) drivers.I2s.Error!usize {
+                    return data.len;
+                }
+
+                pub fn read(_: *@This(), buf: []u8) drivers.I2s.Error!usize {
+                    return buf.len;
+                }
+            };
+            const GainTable = struct {
+                fn lower(gain_db: i8) i8 {
+                    return gain_db - 6;
+                }
+            };
+
+            var fake_i2s = FakeI2s{};
+            var stream = try drivers.I2s.init(allocator, &fake_i2s, .{
+                .slots_per_frame = 2,
+                .bytes_per_slot = 2,
+                .buffer_frame_count = 1,
+            });
+            defer stream.deinit();
+
+            var capture = TestMic.i2s(.{
+                .stream = &stream,
+                .sample_rate = 16_000,
+                .mic_channels = .{
+                    .{ .slot = 0 },
+                    .{ .slot = 1 },
+                },
+            });
+            var mic = capture.mic();
+
+            mic.setGainTableFunc(&GainTable.lower);
+            try mic.setGains(&.{ 10, null });
+            try grt.std.testing.expectEqual(TestMic.Gains{ 4, null }, mic.gains());
+
+            try mic.setGains(&.{ null, 8 });
+            try grt.std.testing.expectEqual(TestMic.Gains{ 4, 2 }, mic.gains());
+
+            mic.setGainTableFunc(null);
+            try mic.setGains(&.{ 12, null });
+            try grt.std.testing.expectEqual(TestMic.Gains{ 12, 2 }, mic.gains());
+        }
+
         fn i2sAdapterExtractsWideSlotSamples(allocator: glib.std.mem.Allocator) !void {
             const TestMic = make(grt, 1, 2);
             const FakeI2s = struct {
@@ -229,6 +291,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.i2sAdapterRejectsReadBeforeEnable(allocator) catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.i2sAdapterMapsGainsWithTableFunc(allocator) catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

@@ -8,6 +8,8 @@ const Es7210 = embed.drivers.audio.Es7210;
 const Es8311 = embed.drivers.audio.Es8311;
 const I2c = esp.embed.I2c;
 
+pub const GainTableFunc = *const fn (gain_db: i8) i8;
+
 pub const I2sConfig = struct {
     port: i32,
     mclk_gpio: i32,
@@ -106,6 +108,8 @@ pub const Options = struct {
     capture: CaptureConfig,
     default_volume: u8 = 0xb0,
     default_mic_gain_db: i8 = 24,
+    speaker_gain_table_func: ?GainTableFunc = null,
+    mic_gain_table_func: ?GainTableFunc = null,
     esp_sr: EspSrAfe.Options = .{},
     use_i2s_adapters: bool = false,
     i2s_adapters: I2sAdapterConfig = .{},
@@ -209,11 +213,19 @@ pub fn make(comptime options: Options) type {
             try state.ensureInitialized();
             if (options.use_i2s_adapters) {
                 try state.ensureI2sAdapters(allocator);
-                try core.setMic(state.i2s_mic.?.mic());
-                try core.setSpeaker(state.i2s_speaker.?.speaker());
+                var mic = state.i2s_mic.?.mic();
+                mic.setGainTableFunc(options.mic_gain_table_func);
+                try core.setMic(mic);
+                var speaker = state.speaker_device.driver();
+                speaker.setGainTableFunc(options.speaker_gain_table_func);
+                try core.setSpeaker(speaker);
             } else {
-                try core.setMic(state.mic_device.driver());
-                try core.setSpeaker(state.speaker_device.driver());
+                var mic = state.mic_device.driver();
+                mic.setGainTableFunc(options.mic_gain_table_func);
+                try core.setMic(mic);
+                var speaker = state.speaker_device.driver();
+                speaker.setGainTableFunc(options.speaker_gain_table_func);
+                try core.setSpeaker(speaker);
             }
 
             return .{
@@ -474,13 +486,21 @@ pub fn make(comptime options: Options) type {
 
             fn deinit(_: *SpeakerDevice) void {}
 
-            fn sampleRate(_: *SpeakerDevice) u32 {
+            fn sampleRate(self: *SpeakerDevice) u32 {
+                const state = ownerState(self);
+                if (state.i2s_speaker) |*i2s_speaker| {
+                    return i2s_speaker.speaker().sampleRate();
+                }
                 return sample_rate;
             }
 
             fn write(self: *SpeakerDevice, frame: []const i16) embed.audio.AudioSystem.Error!usize {
                 if (frame.len == 0) return 0;
-                try ownerState(self).writePcm(frame);
+                const state = ownerState(self);
+                if (state.i2s_speaker) |*i2s_speaker| {
+                    return i2s_speaker.speaker().write(frame);
+                }
+                try state.writePcm(frame);
                 return frame.len;
             }
 
@@ -494,10 +514,19 @@ pub fn make(comptime options: Options) type {
             }
 
             fn enable(self: *SpeakerDevice) embed.audio.AudioSystem.Error!void {
-                try ownerState(self).ensureInitialized();
+                const state = ownerState(self);
+                if (state.i2s_speaker) |*i2s_speaker| {
+                    return i2s_speaker.speaker().enable();
+                }
+                try state.ensureInitialized();
             }
 
-            fn disable(_: *SpeakerDevice) embed.audio.AudioSystem.Error!void {}
+            fn disable(self: *SpeakerDevice) embed.audio.AudioSystem.Error!void {
+                const state = ownerState(self);
+                if (state.i2s_speaker) |*i2s_speaker| {
+                    return i2s_speaker.speaker().disable();
+                }
+            }
         };
 
         const mic_vtable = Mic.VTable{
@@ -592,7 +621,7 @@ pub fn make(comptime options: Options) type {
         fn ownerState(device: anytype) *State {
             const Device = @TypeOf(device.*);
             const field_name = if (Device == MicDevice) "mic_device" else "speaker_device";
-            return @fieldParentPtr(field_name, device);
+            return @alignCast(@fieldParentPtr(field_name, device));
         }
 
         fn micDeinit(ptr: *anyopaque) void {

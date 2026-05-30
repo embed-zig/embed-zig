@@ -1,5 +1,6 @@
 //! audio.AudioSystem — type-erased audio-system surface.
 
+const drivers = @import("drivers");
 const Mixer = @import("Mixer.zig");
 const MicMod = @import("Mic.zig");
 const SpeakerMod = @import("Speaker.zig");
@@ -607,6 +608,88 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 Thread.sleep(@intCast(grt.time.duration.MilliSecond));
             }
             return false;
+        }
+
+        fn gainTableFuncAppliesThroughAudioSystem(alloc: glib.std.mem.Allocator) !void {
+            const TestMic = MicMod.make(grt, 2, 1);
+            const TestSpeaker = SpeakerMod.make(grt, 1);
+            const ProcessorBackend = struct {
+                fn process(_: TestMic.Frame, _: []i16) Error!usize {
+                    return 0;
+                }
+            };
+            const GainTable = struct {
+                fn lower(gain_db: i8) i8 {
+                    return gain_db - 12;
+                }
+            };
+            const FakeI2s = struct {
+                pub fn write(_: *@This(), data: []const u8) drivers.I2s.Error!usize {
+                    return data.len;
+                }
+
+                pub fn read(_: *@This(), buf: []u8) drivers.I2s.Error!usize {
+                    return buf.len;
+                }
+            };
+
+            const Built = comptime blk: {
+                var builder = Builder(grt).init();
+                builder.configMic(2, 1);
+                builder.configSpeaker(1);
+                builder.setProcessor(&ProcessorBackend.process);
+                break :blk builder.build();
+            };
+
+            var mic_i2s = FakeI2s{};
+            var mic_stream = try drivers.I2s.init(alloc, &mic_i2s, .{
+                .slots_per_frame = 2,
+                .bytes_per_slot = 2,
+                .buffer_frame_count = 1,
+            });
+            defer mic_stream.deinit();
+            var mic_output = TestMic.i2s(.{
+                .stream = &mic_stream,
+                .sample_rate = 16_000,
+                .mic_channels = .{
+                    .{ .slot = 0 },
+                    .{ .slot = 1 },
+                },
+            });
+            var mic = mic_output.mic();
+            mic.setGainTableFunc(&GainTable.lower);
+
+            var speaker_i2s = FakeI2s{};
+            var speaker_stream = try drivers.I2s.init(alloc, &speaker_i2s, .{
+                .slots_per_frame = 1,
+                .bytes_per_slot = 2,
+                .buffer_frame_count = 1,
+            });
+            defer speaker_stream.deinit();
+            const slots = [_]TestSpeaker.I2s.Slot{
+                .{ .index = 0 },
+            };
+            const channels = [_]TestSpeaker.I2s.Channel{
+                .{ .slots = &slots },
+            };
+            var speaker_output = TestSpeaker.i2s(.{
+                .stream = &speaker_stream,
+                .sample_rate = 16_000,
+                .channels = &channels,
+            });
+            var speaker = speaker_output.speaker();
+            speaker.setGainTableFunc(&GainTable.lower);
+
+            var system = try Built.init(alloc, .{});
+            defer system.deinit();
+            try system.setMic(mic);
+            try system.setSpeaker(speaker);
+
+            try system.setMicGains(&.{ 10, null });
+            try grt.std.testing.expectEqual(TestMic.Gains{ -2, null }, try system.micGains());
+
+            try system.setSpkGain(3);
+            try grt.std.testing.expectEqual(@as(?i8, -9), try system.spkGain());
         }
 
         fn startFailureResetsState(alloc: glib.std.mem.Allocator) !void {
@@ -1353,6 +1436,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             _ = self;
             _ = allocator;
 
+            t.run("gain_table_func_applies_through_audio_system", glib.testing.TestRunner.fromFn(grt.std, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: glib.std.mem.Allocator) !void {
+                    try TestCase.gainTableFuncAppliesThroughAudioSystem(case_allocator);
+                }
+            }.run));
+            if (!t.wait()) return false;
             t.run("start_failure_resets_state", glib.testing.TestRunner.fromFn(grt.std, 256 * 1024, struct {
                 fn run(_: *glib.testing.T, case_allocator: glib.std.mem.Allocator) !void {
                     try TestCase.startFailureResetsState(case_allocator);

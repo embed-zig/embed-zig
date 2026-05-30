@@ -1,10 +1,13 @@
 const embed = @import("embed_core");
 const esp = @import("esp");
+const EspAudio = @import("../audio.zig");
 const EspSrAfe = @import("EspSrAfe.zig");
 const native = @import("es8311_binding.zig");
 
 const Es8311 = embed.drivers.audio.Es8311;
 const I2c = esp.embed.I2c;
+
+pub const GainTableFunc = *const fn (gain_db: i8) i8;
 
 pub const I2sConfig = struct {
     port: i32,
@@ -77,6 +80,8 @@ pub const Options = struct {
     capture: CaptureConfig = .{},
     default_volume: u8 = 0xb0,
     default_mic_gain_db: i8 = 24,
+    speaker_gain_table_func: ?GainTableFunc = null,
+    mic_gain_table_func: ?GainTableFunc = null,
     esp_sr: EspSrAfe.Options = .{},
     i2s_adapters: I2sAdapterConfig = .{},
 };
@@ -166,8 +171,12 @@ pub fn make(comptime options: Options) type {
 
             try state.ensureInitialized();
             try state.ensureI2sAdapters(allocator);
-            try core.setMic(state.i2s_mic.?.mic());
-            try core.setSpeaker(state.i2s_speaker.?.speaker());
+            var mic = state.i2s_mic.?.mic();
+            mic.setGainTableFunc(options.mic_gain_table_func);
+            try core.setMic(mic);
+            var speaker = state.speaker.?.driver();
+            speaker.setGainTableFunc(options.speaker_gain_table_func);
+            try core.setSpeaker(speaker);
 
             return .{
                 .allocator = allocator,
@@ -196,6 +205,7 @@ pub fn make(comptime options: Options) type {
             tx_stream: ?embed.drivers.I2s = null,
             i2s_mic: ?Mic.I2s = null,
             i2s_speaker: ?Speaker.I2s = null,
+            speaker: ?SpeakerDevice = null,
 
             fn init() State {
                 return .{
@@ -285,6 +295,7 @@ pub fn make(comptime options: Options) type {
                     .sample_rate = sample_rate,
                     .channels = &tx_channels,
                 });
+                self.speaker = .{ .state = self };
             }
 
             fn setVolume(self: *State, volume: u8) embed.audio.AudioSystem.Error!void {
@@ -304,6 +315,56 @@ pub fn make(comptime options: Options) type {
                 }
                 return error.InvalidState;
             }
+        };
+
+        const SpeakerDevice = struct {
+            state: *State,
+            gain_db: ?i8 = null,
+
+            fn driver(self: *SpeakerDevice) Speaker {
+                return Speaker.init(self, &speaker_vtable);
+            }
+
+            fn deinit(_: *SpeakerDevice) void {}
+
+            fn sampleRate(self: *SpeakerDevice) u32 {
+                const speaker = self.state.i2s_speaker.?.speaker();
+                return speaker.sampleRate();
+            }
+
+            fn write(self: *SpeakerDevice, frame: []const i16) embed.audio.AudioSystem.Error!usize {
+                const speaker = self.state.i2s_speaker.?.speaker();
+                return speaker.write(frame);
+            }
+
+            fn gain(self: *SpeakerDevice) ?i8 {
+                return self.gain_db;
+            }
+
+            fn setGain(self: *SpeakerDevice, gain_db: i8) embed.audio.AudioSystem.Error!void {
+                try self.state.setVolume(EspAudio.gainDbToVolume(gain_db));
+                self.gain_db = gain_db;
+            }
+
+            fn enable(self: *SpeakerDevice) embed.audio.AudioSystem.Error!void {
+                const speaker = self.state.i2s_speaker.?.speaker();
+                return speaker.enable();
+            }
+
+            fn disable(self: *SpeakerDevice) embed.audio.AudioSystem.Error!void {
+                const speaker = self.state.i2s_speaker.?.speaker();
+                return speaker.disable();
+            }
+        };
+
+        const speaker_vtable = Speaker.VTable{
+            .deinit = speakerDeinit,
+            .sampleRate = speakerSampleRate,
+            .write = speakerWrite,
+            .gain = speakerGain,
+            .setGain = speakerSetGain,
+            .enable = speakerEnable,
+            .disable = speakerDisable,
         };
 
         const NativeI2s = struct {
@@ -368,6 +429,41 @@ pub fn make(comptime options: Options) type {
                 .lsb => .lsb,
                 .msb => .msb,
             };
+        }
+
+        fn speakerDeinit(ptr: *anyopaque) void {
+            const self: *SpeakerDevice = @ptrCast(@alignCast(ptr));
+            self.deinit();
+        }
+
+        fn speakerSampleRate(ptr: *anyopaque) u32 {
+            const self: *SpeakerDevice = @ptrCast(@alignCast(ptr));
+            return self.sampleRate();
+        }
+
+        fn speakerWrite(ptr: *anyopaque, frame: []const i16) embed.audio.AudioSystem.Error!usize {
+            const self: *SpeakerDevice = @ptrCast(@alignCast(ptr));
+            return self.write(frame);
+        }
+
+        fn speakerGain(ptr: *anyopaque) ?i8 {
+            const self: *SpeakerDevice = @ptrCast(@alignCast(ptr));
+            return self.gain();
+        }
+
+        fn speakerSetGain(ptr: *anyopaque, gain_db: i8) embed.audio.AudioSystem.Error!void {
+            const self: *SpeakerDevice = @ptrCast(@alignCast(ptr));
+            return self.setGain(gain_db);
+        }
+
+        fn speakerEnable(ptr: *anyopaque) embed.audio.AudioSystem.Error!void {
+            const self: *SpeakerDevice = @ptrCast(@alignCast(ptr));
+            return self.enable();
+        }
+
+        fn speakerDisable(ptr: *anyopaque) embed.audio.AudioSystem.Error!void {
+            const self: *SpeakerDevice = @ptrCast(@alignCast(ptr));
+            return self.disable();
         }
 
         fn checkNative(name: []const u8, rc: c_int) embed.audio.AudioSystem.Error!void {
