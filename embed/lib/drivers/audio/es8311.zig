@@ -310,10 +310,9 @@ pub const Config = struct {
     codec_mode: CodecMode = .both,
     /// MCLK/LRCK ratio (default 256)
     mclk_div: u16 = 256,
-    /// Disable the ES8311 DAC reference path.
-    /// When false, ADC right channel carries DAC output for AEC reference.
-    /// When true, ADC right channel does not carry the DAC reference.
-    disable_dac_ref: bool = false,
+    /// Enable the ES8311 DAC reference path.
+    /// When enabled, ADC right channel carries DAC output for AEC reference.
+    enable_dac_ref: bool = true,
 };
 
 /// ES8311 Audio Codec Driver using `drivers.I2c`.
@@ -405,7 +404,7 @@ pub fn open(self: *Self) !void {
     try self.writeRegister(.adc_1b, AdcDefaults.ADC_1B_INIT);
     try self.writeRegister(.adc_1c, AdcDefaults.ADC_1C_INIT);
 
-    if (!self.config.disable_dac_ref) {
+    if (self.config.enable_dac_ref) {
         try self.writeRegister(.gpio_44, Gpio44.DAC_REF_ENABLED);
     } else {
         try self.writeRegister(.gpio_44, Gpio44.DAC_REF_DISABLED);
@@ -706,6 +705,41 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 1), fake.write_count);
             try grt.std.testing.expectEqual([2]u8{ @intFromEnum(Register.adc_16), @intFromEnum(MicGain.@"24dB") }, fake.writes[0]);
         }
+
+        fn openAppliesDacReferenceConfig() !void {
+            const FakeI2c = struct {
+                regs: [256]u8 = [_]u8{0} ** 256,
+
+                pub fn write(self: *@This(), _: I2c.Address, data: []const u8) I2c.Error!void {
+                    self.regs[data[0]] = data[1];
+                }
+
+                pub fn read(self: *@This(), _: I2c.Address, buf: []u8) I2c.Error!void {
+                    _ = self;
+                    @memset(buf, 0);
+                }
+
+                pub fn writeRead(self: *@This(), _: I2c.Address, tx: []const u8, rx: []u8) I2c.Error!void {
+                    rx[0] = self.regs[tx[0]];
+                }
+            };
+
+            var enabled_fake = FakeI2c{};
+            var enabled_codec = es8311.init(I2c.init(&enabled_fake), .{
+                .address = @intFromEnum(Address.ad0_low),
+                .enable_dac_ref = true,
+            });
+            try enabled_codec.open();
+            try grt.std.testing.expectEqual(Gpio44.DAC_REF_ENABLED, enabled_fake.regs[@intFromEnum(Register.gpio_44)]);
+
+            var disabled_fake = FakeI2c{};
+            var disabled_codec = es8311.init(I2c.init(&disabled_fake), .{
+                .address = @intFromEnum(Address.ad0_low),
+                .enable_dac_ref = false,
+            });
+            try disabled_codec.open();
+            try grt.std.testing.expectEqual(Gpio44.DAC_REF_DISABLED, disabled_fake.regs[@intFromEnum(Register.gpio_44)]);
+        }
     };
 
     const Runner = struct {
@@ -719,6 +753,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             _ = allocator;
 
             TestCase.setMicGainDbAndReadChipIdUseI2cWrapper() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.openAppliesDacReferenceConfig() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

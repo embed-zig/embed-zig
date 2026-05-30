@@ -20,6 +20,7 @@ pub const I2sConfig = struct {
 
 pub const CodecConfig = struct {
     address: u7 = @intFromEnum(Es8311.Address.ad0_low),
+    enable_dac_ref: bool = true,
 };
 
 pub const CaptureConfig = struct {
@@ -244,7 +245,7 @@ pub fn make(comptime options: Options) type {
                 var codec = Es8311.init(codec_i2c, .{
                     .address = options.es8311.address,
                     .codec_mode = .both,
-                    .disable_dac_ref = false,
+                    .enable_dac_ref = options.es8311.enable_dac_ref,
                 });
                 codec.open() catch |err| return fail("es8311 open", err);
                 const chip_id = codec.readChipId() catch |err| return fail("es8311 read chip id", err);
