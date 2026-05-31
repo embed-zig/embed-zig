@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "esp_check.h"
+#include "esp_log.h"
 #include "led_strip.h"
 
 #define DEVKIT_LED_STRIP_GPIO 48
@@ -51,6 +52,13 @@ int devkit_led_strip_set_rgb(uint8_t r, uint8_t g, uint8_t b)
     uint8_t mapped_g = 0;
     uint8_t mapped_b = 0;
     devkit_led_strip_map_rgb(r, g, b, &mapped_r, &mapped_g, &mapped_b);
+    ESP_LOGI(TAG, "set rgb logical=(%u,%u,%u) mapped=(%u,%u,%u)",
+             (unsigned)r,
+             (unsigned)g,
+             (unsigned)b,
+             (unsigned)mapped_r,
+             (unsigned)mapped_g,
+             (unsigned)mapped_b);
     ESP_RETURN_ON_ERROR(led_strip_set_pixel(s_led_strip, 0, mapped_r, mapped_g, mapped_b), TAG, "set led pixel");
     return led_strip_refresh(s_led_strip);
 }

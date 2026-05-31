@@ -1,16 +1,64 @@
 const embed = @import("embed_core");
 const esp = @import("esp");
 const binding = @import("bindings/common.zig");
-const Audio = @import("Audio.zig").make(Self);
-const BtHost = esp.embed.BtHost;
+const BtHost = esp.embed.bt.Local;
 const Display = @import("Display.zig");
 const PowerButton = @import("PowerButton.zig");
 const Touch = @import("Touch.zig");
-const WifiSta = @import("WifiSta.zig");
+const Wifi = esp.embed.wifi.Local;
 
 const Self = @This();
 const Es8311 = embed.drivers.audio.Es8311;
 const log = esp.grt.std.log.scoped(.wv_board);
+const default_soft_ref_delay_samples: usize = 0;
+const Audio = esp.embed.audio_adapter.Es8311System.make(.{
+    .sample_rate = 16_000,
+    .frame_samples_per_channel = 256,
+    .i2c = .{
+        .port = 0,
+        .sda_io_num = 15,
+        .scl_io_num = 14,
+        .scl_speed_hz = 200_000,
+    },
+    .i2s = .{
+        .port = 0,
+        .mclk_gpio = 16,
+        .bclk_gpio = 9,
+        .ws_gpio = 45,
+        .dout_gpio = 8,
+        .din_gpio = 10,
+    },
+    .es8311 = .{
+        .address = @intFromEnum(Es8311.Address.ad0_low),
+        .enable_dac_ref = true,
+    },
+    .capture = .{
+        .raw_channel_count = 2,
+        .mic_lane = 0,
+        .ref_lane = 1,
+    },
+    .i2s_adapters = .{
+        .rx = .{
+            .slots_per_frame = 2,
+            .bytes_per_slot = @sizeOf(i16),
+            .mic_channel = .{ .slot = 0 },
+            .ref_channel = .{ .slot = 1 },
+        },
+        .tx = .{
+            .slots_per_frame = 2,
+            .bytes_per_slot = @sizeOf(i16),
+            .speaker_slots = &.{
+                .{ .index = 0 },
+                .{ .index = 1 },
+            },
+        },
+    },
+    .default_volume = 0xb0,
+    .default_mic_gain_db = 18,
+    .esp_sr = .{
+        .monitor_gain = 3,
+    },
+});
 
 pub const Board = Self;
 pub const metadata = embed.board.Metadata{
@@ -35,29 +83,26 @@ pub const InitConfig = struct {
 pub const audio_sample_rate = Audio.sample_rate;
 pub const AudioSystem = Audio.Type;
 
-const es8311_address = @intFromEnum(Es8311.Address.ad0_low);
-const default_volume: u8 = 0xb0;
-const default_mic_gain_db: i8 = 24;
-
 power_button: PowerButton = .{},
 display_device: Display = .{},
 touch_device: Touch = .{},
-wifi_sta: WifiSta = .{},
+wifi_sta: Wifi.Sta = .{},
 bt_host: ?BtHost = null,
-audio_codec: ?Es8311 = null,
-audio_mic: Audio.MicDevice = .{},
-audio_speaker: Audio.SpeakerDevice = .{},
-audio_system: ?Audio.Type = null,
+audio: ?Audio = null,
 audio_allocator: ?esp.grt.std.mem.Allocator = null,
 audio_system_config: Audio.Type.Config = .{},
 bt_allocator: ?esp.grt.std.mem.Allocator = null,
-audio_ready: bool = false,
 state_value: embed.board.State = .uninitialized,
 
 pub fn init(config: InitConfig) !Self {
+    var audio_system_config = config.audio_system_config;
+    if (audio_system_config.soft_ref_delay_samples == 0) {
+        audio_system_config.soft_ref_delay_samples = default_soft_ref_delay_samples;
+    }
+
     return .{
         .audio_allocator = config.audio_allocator,
-        .audio_system_config = config.audio_system_config,
+        .audio_system_config = audio_system_config,
         .bt_allocator = config.bt_allocator,
     };
 }
@@ -66,8 +111,8 @@ pub fn deinit(self: *Self) void {
     if (self.bt_host) |*bt_host| {
         bt_host.deinit();
     }
-    if (self.audio_system) |*audio_system| {
-        audio_system.deinit();
+    if (self.audio) |*audio| {
+        audio.deinit();
     }
     self.wifi_sta.deinit();
     self.display_device.deinit();
@@ -88,6 +133,7 @@ pub fn powerOn(self: *Self) !void {
         return error.BoardCallFailed;
     };
     try check("wv_power_button_init", binding.wv_power_button_init());
+    try check("wv_audio_set_pa", binding.wv_audio_set_pa(true));
     self.state_value = .powered_on;
 }
 
@@ -117,7 +163,7 @@ pub fn display(self: *Self, label: []const u8) !embed.drivers.Display {
 }
 
 pub fn singleButton(self: *Self, label: []const u8) !embed.drivers.button.Single {
-    if (!esp.grt.std.mem.eql(u8, label, "button")) return error.NotFound;
+    if (!esp.grt.std.mem.eql(u8, label, "boot")) return error.NotFound;
     switch (self.state_value) {
         .powered_on, .started => {},
         else => return error.InvalidState,
@@ -167,97 +213,13 @@ pub fn audioSystem(self: *Self, label: []const u8) !*Audio.Type {
     return self.ensureAudioSystem();
 }
 
-pub fn initAudio(self: *Self) !void {
-    if (self.audio_ready) return;
-
-    try check("wv_audio_init", binding.wv_audio_init());
-
-    const i2c = try binding.i2cDevice(es8311_address);
-    var codec = Es8311.init(i2c, .{
-        .address = es8311_address,
-        .codec_mode = .both,
-        .no_dac_ref = true,
-    });
-
-    try codec.open();
-    const chip_id = try codec.readChipId();
-    log.info("es8311 chip_id=0x{x}", .{chip_id});
-    try codec.setSampleRate(audio_sample_rate);
-    try codec.setBitsPerSample(.@"16bit");
-    try codec.setFormat(.i2s);
-    try codec.setMicGainDb(default_mic_gain_db);
-    try codec.enable(true);
-    try codec.setVolume(default_volume);
-    try codec.setMute(false);
-
-    self.audio_codec = codec;
-    try check("wv_audio_set_pa", binding.wv_audio_set_pa(true));
-    self.audio_ready = true;
-}
-
-pub fn writePcm(self: *Self, samples: []const i16) !void {
-    if (samples.len == 0) return;
-    try self.initAudio();
-    try check("wv_audio_write_i16", binding.wv_audio_write_i16(samples.ptr, samples.len));
-}
-
-pub fn startMicrophoneCapture(self: *Self) !void {
-    try self.initAudio();
-    try check("wv_audio_mic_capture_start", binding.wv_audio_mic_capture_start());
-}
-
-pub fn readMicrophoneFrame(self: *Self, mic0: []i16) !usize {
-    _ = self;
-    if (mic0.len == 0) return 0;
-    var sample_count: usize = 0;
-    try check("wv_audio_mic_read_i16", binding.wv_audio_mic_read_i16(mic0.ptr, mic0.len, &sample_count));
-    return sample_count;
-}
-
-pub fn stopMicrophoneCapture(self: *Self) void {
-    _ = self;
-    check("wv_audio_mic_capture_stop", binding.wv_audio_mic_capture_stop()) catch |err| {
-        log.warn("mic capture stop failed: {s}", .{@errorName(err)});
-    };
-}
-
-pub fn setVolume(self: *Self, volume: u8) !void {
-    if (self.audio_codec == null) try self.initAudio();
-    if (self.audio_codec) |*codec| {
-        try codec.setVolume(volume);
-        return;
-    }
-    return error.BoardCallFailed;
-}
-
-pub fn setSpeakerEnabled(self: *Self, enabled: bool) !void {
-    if (enabled) try self.initAudio();
-    if (!self.audio_ready and !enabled) return;
-    try check("wv_audio_set_pa", binding.wv_audio_set_pa(enabled));
-}
-
-pub fn setMicrophoneGain(self: *Self, gain_db: i8) !void {
-    if (self.audio_codec == null) try self.initAudio();
-    if (self.audio_codec) |*codec| {
-        try codec.setMicGainDb(gain_db);
-        return;
-    }
-    return error.BoardCallFailed;
-}
-
 fn ensureAudioSystem(self: *Self) !*Audio.Type {
-    if (self.audio_system == null) {
+    if (self.audio == null) {
         const allocator = self.audio_allocator orelse return error.InvalidState;
-        var audio_system = try Audio.Type.init(allocator, self.audio_system_config);
-        errdefer audio_system.deinit();
-
-        self.audio_mic.bind(self);
-        self.audio_speaker.bind(self);
-        try audio_system.setMic(self.audio_mic.driver());
-        try audio_system.setSpeaker(self.audio_speaker.driver());
-        self.audio_system = audio_system;
+        self.audio = try Audio.init(allocator, self.audio_system_config);
     }
-    return &(self.audio_system orelse unreachable);
+    if (self.audio) |*audio| return audio.system();
+    return error.InvalidState;
 }
 
 fn check(name: []const u8, rc: c_int) !void {

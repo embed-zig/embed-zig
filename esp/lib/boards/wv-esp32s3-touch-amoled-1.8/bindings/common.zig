@@ -30,29 +30,24 @@ pub extern fn wv_power_button_pressed() bool;
 pub extern fn wv_storage_init_nvs() c_int;
 
 pub extern fn wv_display_native_init() c_int;
-pub extern fn wv_display_native_set_enabled(enabled: bool) c_int;
-pub extern fn wv_display_native_set_brightness(brightness: u8) c_int;
-pub extern fn wv_display_native_draw_rgb565(
-    x: u16,
-    y: u16,
-    w: u16,
-    h: u16,
-    pixels: [*]const u16,
-    len: usize,
-) c_int;
+pub extern fn wv_display_native_panel_io() ?*anyopaque;
 
-pub extern fn wv_audio_init() c_int;
 pub extern fn wv_audio_set_pa(enabled: bool) c_int;
-pub extern fn wv_audio_write_i16(pcm: [*]const i16, sample_count: usize) c_int;
-pub extern fn wv_audio_mic_capture_start() c_int;
-pub extern fn wv_audio_mic_read_i16(mic0: [*]i16, sample_capacity: usize, sample_count: *usize) c_int;
-pub extern fn wv_audio_mic_capture_stop() c_int;
 
 pub fn boardInit() !void {
     if (board_initialized) return;
-    try board_i2c_bus.open();
-    try initExpander();
-    try powerOnPeripherals();
+    board_i2c_bus.open() catch |err| {
+        log.err("board init: open i2c bus failed: {s}", .{@errorName(err)});
+        return err;
+    };
+    initExpander() catch |err| {
+        log.err("board init: init expander failed: {s}", .{@errorName(err)});
+        return err;
+    };
+    powerOnPeripherals() catch |err| {
+        log.err("board init: power on peripherals failed: {s}", .{@errorName(err)});
+        return err;
+    };
     board_initialized = true;
 }
 
@@ -66,9 +61,14 @@ fn initExpander() !void {
 
     const i2c = try board_i2c_bus.device(tca9554_address);
     var driver = Tca9554.init(i2c, tca9554_address);
-    try driver.syncFromDevice();
-    try driver.writeMask(power_mask, 0);
-    try driver.setDirectionMask(power_mask);
+    driver.writeMask(power_mask, 0) catch |err| {
+        log.err("board init: write tca9554 output failed: {s}", .{@errorName(err)});
+        return err;
+    };
+    driver.setDirectionMask(power_mask) catch |err| {
+        log.err("board init: set tca9554 direction failed: {s}", .{@errorName(err)});
+        return err;
+    };
     expander = driver;
 }
 

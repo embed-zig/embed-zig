@@ -41,12 +41,14 @@ const grt_source_files = [_][]const u8{
 const embed_idf_requires = [_][]const u8{
     "esp_driver_i2c",
     "esp_event",
+    "esp_lcd",
     "esp_netif",
     "esp_wifi",
     "log",
     "nvs_flash",
 };
 const embed_source_files = [_][]const u8{
+    "display/native_dbi.c",
     "i2c/binding.c",
     "wifi/sta_binding.c",
 };
@@ -172,7 +174,7 @@ fn createEntryComponent(project: *Self) *Component {
     });
     component.addArtifact(entry_object);
 
-    if (bctx.target.result.cpu.arch == .xtensa and
+    if ((bctx.target.result.cpu.arch == .xtensa or bctx.target.result.cpu.arch == .riscv32) and
         bctx.target.result.os.tag == .freestanding)
     {
         const shim_object = project.owner.addObject(.{

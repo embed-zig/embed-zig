@@ -205,6 +205,31 @@ pub fn addFlashCombinedImageTool(
     return &run.step;
 }
 
+pub fn addOpenOcdFlashCombinedImageTool(
+    b: *std.Build,
+    context: BuildContext.BuildContext,
+    adapter_serial: ?[]const u8,
+) *std.Build.Step {
+    const run = b.addSystemCommand(&.{resolveOpenOcdExecutable(b, context)});
+    context.applyIdfEnvironment(run);
+    run.setCwd(b.path(context.app_root));
+
+    if (idfEnvValue(context, "OPENOCD_SCRIPTS")) |scripts| {
+        run.addArgs(&.{ "-s", scripts });
+    }
+    if (adapter_serial) |serial| {
+        run.addArgs(&.{ "-c", b.fmt("adapter serial {s}", .{serial}) });
+    }
+    run.addArgs(&.{ "-f", openOcdBoardConfig(context.chip) });
+    run.addArgs(&.{
+        "-c",
+        b.fmt("init; reset halt; program_esp {s} 0x0 verify; reset run; shutdown", .{
+            context.combined_binary_output_path,
+        }),
+    });
+    return &run.step;
+}
+
 pub fn addExportFlashOutputsTool(
     b: *std.Build,
     context: BuildContext.BuildContext,
@@ -246,6 +271,7 @@ pub fn addMonitorTool(
         run.addArgs(&.{ "-p", resolved_port });
     }
     run.addArg("monitor");
+    run.addArg("--no-reset");
     return &run.step;
 }
 
@@ -329,6 +355,49 @@ fn addBuiltinHostTool(
     run.step.dependOn(&compile.step);
     run.setName(name);
     return run;
+}
+
+fn idfEnvValue(context: BuildContext.BuildContext, name: []const u8) ?[]const u8 {
+    for (context.idf_env) |entry| {
+        if (std.mem.eql(u8, entry.name, name)) return entry.value;
+    }
+    return null;
+}
+
+fn resolveOpenOcdExecutable(b: *std.Build, context: BuildContext.BuildContext) []const u8 {
+    if (idfEnvValue(context, "PATH")) |path_value| {
+        var iter = std.mem.splitScalar(u8, path_value, pathDelimiter());
+        while (iter.next()) |dir| {
+            if (dir.len == 0) continue;
+            const candidate = b.pathJoin(&.{ dir, openOcdExecutableName() });
+            if (fileExists(candidate)) return candidate;
+        }
+    }
+
+    if (idfEnvValue(context, "OPENOCD_SCRIPTS")) |scripts| {
+        const candidate = b.pathJoin(&.{ scripts, "..", "..", "..", "bin", openOcdExecutableName() });
+        if (fileExists(candidate)) return candidate;
+    }
+
+    return openOcdExecutableName();
+}
+
+fn pathDelimiter() u8 {
+    return if (@import("builtin").os.tag == .windows) ';' else ':';
+}
+
+fn openOcdExecutableName() []const u8 {
+    return if (@import("builtin").os.tag == .windows) "openocd.exe" else "openocd";
+}
+
+fn fileExists(path: []const u8) bool {
+    std.fs.cwd().access(path, .{}) catch return false;
+    return true;
+}
+
+fn openOcdBoardConfig(chip: []const u8) []const u8 {
+    if (std.mem.eql(u8, chip, "esp32s3")) return "board/esp32s3-builtin.cfg";
+    std.debug.panic("OpenOCD flash is not configured for chip '{s}'", .{chip});
 }
 
 const EmittedToolModule = struct {

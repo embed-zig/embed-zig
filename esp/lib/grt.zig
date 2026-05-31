@@ -2,6 +2,7 @@ const glib = @import("glib");
 
 pub const std = @import("grt/std.zig");
 pub const sync = @import("grt/sync.zig");
+pub const task = @import("grt/task.zig");
 pub const time = @import("grt/time.zig");
 pub const net = @import("grt/net.zig");
 
@@ -20,4 +21,5 @@ pub const runtime: glib.runtime.Options = .{
     .time_impl = time,
     .channel_factory = sync.ChannelFactory,
     .net_impl = net.Runtime,
+    .task_impl = task.impl,
 };

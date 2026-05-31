@@ -1,6 +1,9 @@
 const glib = @import("glib");
+const Mutex = @import("thread/Mutex.zig");
 
 extern fn ets_printf(fmt: [*:0]const u8, ...) callconv(.c) c_int;
+
+var write_mu: Mutex = .{};
 
 pub fn write(
     comptime level: anytype,
@@ -22,10 +25,14 @@ pub fn write(
             "[{s}] [{s}] <log message truncated>\n",
             .{ level_text, scope_text },
         ) catch return;
+        write_mu.lock();
+        defer write_mu.unlock();
         _ = ets_printf("%s", fallback.ptr);
         return;
     };
 
+    write_mu.lock();
+    defer write_mu.unlock();
     _ = ets_printf("%s", line.ptr);
 }
 

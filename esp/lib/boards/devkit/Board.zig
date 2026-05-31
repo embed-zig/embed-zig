@@ -3,9 +3,10 @@ const esp = @import("esp");
 const binding_common = @import("bindings/common.zig");
 const led_strip_binding = @import("bindings/led_strip.zig");
 const power_button_binding = @import("bindings/power_button.zig");
+const BtHost = esp.embed.bt.Local;
 const LedStrip = @import("LedStrip.zig");
 const PowerButton = @import("PowerButton.zig");
-const Wifi = esp.embed.Wifi;
+const Wifi = esp.embed.wifi.Local;
 
 const Self = @This();
 
@@ -19,19 +20,27 @@ pub const metadata = embed.board.Metadata{
 };
 pub const Spec = embed.board.Spec{};
 pub const Type = embed.board.Board.make(esp.grt, Spec);
-pub const InitConfig = struct {};
+pub const InitConfig = struct {
+    bt_allocator: ?esp.grt.std.mem.Allocator = null,
+};
 
 power_button: PowerButton = .{},
 led_strip: LedStrip = .{},
 wifi_sta: Wifi.Sta = .{},
+bt_host: ?BtHost = null,
+bt_allocator: ?esp.grt.std.mem.Allocator = null,
 state_value: embed.board.State = .uninitialized,
 
 pub fn init(config: InitConfig) !Self {
-    _ = config;
-    return .{};
+    return .{
+        .bt_allocator = config.bt_allocator,
+    };
 }
 
 pub fn deinit(self: *Self) void {
+    if (self.bt_host) |*bt_host| {
+        bt_host.deinit();
+    }
     self.wifi_sta.deinit();
     self.* = undefined;
 }
@@ -57,7 +66,7 @@ pub fn start(self: *Self) !void {
 }
 
 pub fn singleButton(self: *Self, label: []const u8) !embed.drivers.button.Single {
-    if (!esp.grt.std.mem.eql(u8, label, "button")) return error.NotFound;
+    if (!esp.grt.std.mem.eql(u8, label, "boot")) return error.NotFound;
     switch (self.state_value) {
         .powered_on, .started => {},
         else => return error.InvalidState,
@@ -82,6 +91,19 @@ pub fn wifiSta(self: *Self, label: []const u8) !embed.drivers.wifi.Sta {
     }
     try self.wifi_sta.init();
     return self.wifi_sta.handle();
+}
+
+pub fn btHost(self: *Self, label: []const u8) !embed.bt.Host {
+    if (!esp.grt.std.mem.eql(u8, label, "bt")) return error.NotFound;
+    switch (self.state_value) {
+        .powered_on, .started => {},
+        else => return error.InvalidState,
+    }
+    if (self.bt_host == null) {
+        const allocator = self.bt_allocator orelse return error.InvalidState;
+        self.bt_host = try BtHost.init(.{ .allocator = allocator, .source_id = 1 });
+    }
+    return self.bt_host.?.handle();
 }
 
 fn check(call_name: []const u8, rc: c_int) !void {

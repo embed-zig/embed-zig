@@ -4,9 +4,9 @@ const esp = @import("esp");
 pub const esp_ok: c_int = 0;
 pub const esp_timeout: c_int = 0x107;
 
-pub extern fn esp_embed_bt_vhci_init() c_int;
-pub extern fn esp_embed_bt_vhci_send(data: [*]const u8, len: usize, timeout_ms: u32) c_int;
-pub extern fn esp_embed_bt_vhci_recv(out: [*]u8, cap: usize, out_len: *usize, timeout_ms: u32) c_int;
+pub extern fn esp_embed_bt_local_hci_init() c_int;
+pub extern fn esp_embed_bt_local_hci_send(data: [*]const u8, len: usize, timeout_ms: u32) c_int;
+pub extern fn esp_embed_bt_local_hci_recv(out: [*]u8, cap: usize, out_len: *usize, timeout_ms: u32) c_int;
 
 pub const Transport = struct {
     read_deadline: ?esp.grt.time.instant.Time = null,
@@ -22,14 +22,14 @@ pub const Transport = struct {
 
     pub fn read(self: *Transport, buf: []u8) embed.bt.Transport.ReadError!usize {
         var len: usize = 0;
-        const rc = esp_embed_bt_vhci_recv(buf.ptr, buf.len, &len, timeoutMs(self.read_deadline));
+        const rc = esp_embed_bt_local_hci_recv(buf.ptr, buf.len, &len, timeoutMs(self.read_deadline));
         if (rc == esp_ok) return len;
         if (rc == esp_timeout) return error.Timeout;
         return error.HwError;
     }
 
     pub fn write(self: *Transport, buf: []const u8) embed.bt.Transport.WriteError!usize {
-        const rc = esp_embed_bt_vhci_send(buf.ptr, buf.len, timeoutMs(self.write_deadline));
+        const rc = esp_embed_bt_local_hci_send(buf.ptr, buf.len, timeoutMs(self.write_deadline));
         if (rc == esp_ok) return buf.len;
         if (rc == esp_timeout) return error.Timeout;
         return error.HwError;
@@ -48,7 +48,7 @@ pub const Transport = struct {
 };
 
 pub fn init() !void {
-    try check("esp_embed_bt_vhci_init", esp_embed_bt_vhci_init());
+    try check("esp_embed_bt_local_hci_init", esp_embed_bt_local_hci_init());
 }
 
 fn timeoutMs(deadline: ?esp.grt.time.instant.Time) u32 {
@@ -63,6 +63,6 @@ fn timeoutMs(deadline: ?esp.grt.time.instant.Time) u32 {
 
 fn check(name: []const u8, rc: c_int) !void {
     if (rc == esp_ok) return;
-    esp.grt.std.log.scoped(.esp_bt_vhci).err("{s} failed with rc={d}", .{ name, rc });
-    return error.VhciFailed;
+    esp.grt.std.log.scoped(.esp_bt_local_hci).err("{s} failed with rc={d}", .{ name, rc });
+    return error.LocalHciFailed;
 }

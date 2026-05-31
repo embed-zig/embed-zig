@@ -1,1 +1,2 @@
-pub const Sta = @import("wifi/Sta.zig");
+pub const Local = @import("wifi/Local.zig");
+pub const Remote = @import("wifi/Remote.zig");

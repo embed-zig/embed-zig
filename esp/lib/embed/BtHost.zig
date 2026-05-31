@@ -1,7 +1,7 @@
 const embed = @import("embed_core");
 const esp = @import("esp");
 
-const Vhci = @import("bt/Vhci.zig");
+const LocalHci = @import("bt/LocalHci.zig");
 
 const BtHost = @This();
 const thread_allocator = esp.heap.Allocator(.{ .caps = .internal_8bit, .alignment = .align_u32 });
@@ -12,14 +12,14 @@ pub const Config = struct {
 };
 
 allocator: esp.grt.std.mem.Allocator,
-transport: *Vhci.Transport,
+transport: *LocalHci.Transport,
 host: embed.bt.Host,
 
 pub fn init(config: Config) !BtHost {
-    try Vhci.init();
-    const transport = try config.allocator.create(Vhci.Transport);
+    try LocalHci.init();
+    const transport = try config.allocator.create(LocalHci.Transport);
     errdefer config.allocator.destroy(transport);
-    transport.* = Vhci.Transport.init();
+    transport.* = LocalHci.Transport.init();
     errdefer transport.deinit();
 
     const Host = embed.bt.Host.makeHciTransport(esp.grt);

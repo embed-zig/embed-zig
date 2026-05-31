@@ -5,12 +5,7 @@
 #include "esp_check.h"
 #include "esp_err.h"
 #include "esp_lcd_panel_io.h"
-#include "esp_lcd_panel_ops.h"
-#include "esp_lcd_panel_vendor.h"
 #include "esp_log.h"
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
 
 #define LCD_HOST SPI3_HOST
 #define LCD_WIDTH 320
@@ -22,14 +17,9 @@
 #define LCD_LEDC_CHANNEL LEDC_CHANNEL_0
 #define LCD_LEDC_TIMER LEDC_TIMER_1
 #define LCD_DRAW_ROWS 10
-#define LCD_DRAW_SLOW_US 20000
-#define LCD_DRAW_WAIT_TIMEOUT_MS 1000
 
 static const char *TAG = "szp_display";
-static esp_lcd_panel_handle_t panel;
-static SemaphoreHandle_t color_done_sem;
-static uint8_t backlight_brightness = 255;
-static uint32_t draw_seq;
+static esp_lcd_panel_io_handle_t panel_io;
 
 int szp_pca9557_set_lcd_cs(bool high);
 
@@ -70,27 +60,12 @@ static esp_err_t backlight_set_brightness(uint8_t brightness)
     return ledc_update_duty(LEDC_LOW_SPEED_MODE, LCD_LEDC_CHANNEL);
 }
 
-static bool color_transfer_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
-{
-    (void)io;
-    (void)edata;
-    SemaphoreHandle_t sem = (SemaphoreHandle_t)user_ctx;
-    if (sem == NULL) return false;
-
-    BaseType_t high_task_woken = pdFALSE;
-    xSemaphoreGiveFromISR(sem, &high_task_woken);
-    return high_task_woken == pdTRUE;
-}
-
 int szp_display_native_init(void)
 {
-    if (panel != NULL) return ESP_OK;
+    if (panel_io != NULL) return ESP_OK;
 
     ESP_LOGI(TAG, "init display");
     ESP_RETURN_ON_ERROR(backlight_init(), TAG, "backlight init");
-
-    color_done_sem = xSemaphoreCreateBinary();
-    ESP_RETURN_ON_FALSE(color_done_sem != NULL, ESP_ERR_NO_MEM, TAG, "color semaphore");
 
     spi_bus_config_t bus_cfg = {
         .mosi_io_num = LCD_MOSI_GPIO,
@@ -102,7 +77,6 @@ int szp_display_native_init(void)
     };
     ESP_RETURN_ON_ERROR(spi_bus_initialize(LCD_HOST, &bus_cfg, SPI_DMA_CH_AUTO), TAG, "spi bus");
 
-    esp_lcd_panel_io_handle_t io = NULL;
     esp_lcd_panel_io_spi_config_t io_cfg = {
         .dc_gpio_num = LCD_DC_GPIO,
         .cs_gpio_num = GPIO_NUM_NC,
@@ -111,92 +85,20 @@ int szp_display_native_init(void)
         .lcd_param_bits = 8,
         .spi_mode = 2,
         .trans_queue_depth = 10,
-        .on_color_trans_done = color_transfer_done,
-        .user_ctx = color_done_sem,
     };
-    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_cfg, &io), TAG, "lcd io");
+    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_cfg, &panel_io), TAG, "lcd io");
 
-    esp_lcd_panel_dev_config_t panel_cfg = {
-        .reset_gpio_num = GPIO_NUM_NC,
-        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
-        .bits_per_pixel = 16,
-    };
-    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_st7789(io, &panel_cfg, &panel), TAG, "st7789 panel");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(panel), TAG, "panel reset");
-    ESP_RETURN_ON_ERROR(szp_pca9557_set_lcd_cs(false), TAG, "lcd cs low");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel), TAG, "panel init");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_invert_color(panel, true), TAG, "panel invert");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_swap_xy(panel, true), TAG, "panel swap xy");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_mirror(panel, true, false), TAG, "panel mirror");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(panel, true), TAG, "panel on");
+    ESP_RETURN_ON_ERROR(szp_pca9557_set_lcd_cs(true), TAG, "lcd cs high");
     return backlight_on();
 }
 
-int szp_display_native_set_enabled(bool enabled)
+void *szp_display_native_panel_io(void)
 {
-    if (panel == NULL) return ESP_ERR_INVALID_STATE;
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(panel, enabled), TAG, "panel enabled");
-    if (!enabled) {
-        return backlight_set_brightness(0);
-    }
-    return backlight_set_brightness(backlight_brightness);
+    return panel_io;
 }
 
 int szp_display_native_set_brightness(uint8_t brightness)
 {
-    if (panel == NULL) return ESP_ERR_INVALID_STATE;
-    backlight_brightness = brightness;
+    if (panel_io == NULL) return ESP_ERR_INVALID_STATE;
     return backlight_set_brightness(brightness);
-}
-
-int szp_display_native_draw_rgb565(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels, size_t len)
-{
-    if (panel == NULL || pixels == NULL) return ESP_ERR_INVALID_STATE;
-    if ((size_t)w * (size_t)h > len) return ESP_ERR_INVALID_SIZE;
-    if ((uint32_t)x + w > LCD_WIDTH || (uint32_t)y + h > LCD_HEIGHT) return ESP_ERR_INVALID_ARG;
-
-    while (xSemaphoreTake(color_done_sem, 0) == pdTRUE) {}
-    uint32_t seq = ++draw_seq;
-    int64_t started_us = esp_timer_get_time();
-    ESP_LOGI(
-        TAG,
-        "draw begin seq=%u x=%u y=%u w=%u h=%u len=%u",
-        (unsigned)seq,
-        (unsigned)x,
-        (unsigned)y,
-        (unsigned)w,
-        (unsigned)h,
-        (unsigned)len);
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_draw_bitmap(panel, x, y, x + w, y + h, pixels), TAG, "draw bitmap");
-    ESP_LOGI(TAG, "draw queued seq=%u", (unsigned)seq);
-    if (xSemaphoreTake(color_done_sem, pdMS_TO_TICKS(LCD_DRAW_WAIT_TIMEOUT_MS)) != pdTRUE) {
-        int64_t elapsed_us = esp_timer_get_time() - started_us;
-        ESP_LOGE(
-            TAG,
-            "draw wait timeout seq=%u x=%u y=%u w=%u h=%u len=%u elapsed_ms=%lld",
-            (unsigned)seq,
-            (unsigned)x,
-            (unsigned)y,
-            (unsigned)w,
-            (unsigned)h,
-            (unsigned)len,
-            (long long)(elapsed_us / 1000));
-        return ESP_ERR_TIMEOUT;
-    }
-
-    int64_t elapsed_us = esp_timer_get_time() - started_us;
-    ESP_LOGI(TAG, "draw done seq=%u elapsed_ms=%lld", (unsigned)seq, (long long)(elapsed_us / 1000));
-    if (elapsed_us >= LCD_DRAW_SLOW_US) {
-        ESP_LOGW(
-            TAG,
-            "draw slow seq=%u x=%u y=%u w=%u h=%u len=%u elapsed_ms=%lld",
-            (unsigned)seq,
-            (unsigned)x,
-            (unsigned)y,
-            (unsigned)w,
-            (unsigned)h,
-            (unsigned)len,
-            (long long)(elapsed_us / 1000));
-    }
-    return ESP_OK;
 }

@@ -36,6 +36,12 @@ pub const partition_table = esp_idf.PartitionTable.make(.{
             .subtype = .factory,
             .size = 0x600000,
         },
+        .{
+            .name = "model",
+            .kind = .data,
+            .subtype = .spiffs,
+            .size = 0x50c000,
+        },
     },
 });
 

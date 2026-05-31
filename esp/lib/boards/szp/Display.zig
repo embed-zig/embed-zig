@@ -1,176 +1,109 @@
 const embed = @import("embed_core");
+const esp = @import("esp");
+
+const EspDisplay = @import("../../embed/display.zig");
 const binding = @import("bindings/common.zig");
 
 const Display = @This();
+const St7789 = embed.drivers.Display.St7789;
 
-const width_px: u16 = 320;
-const height_px: u16 = 240;
-const chunk_rows: u16 = 10;
-const max_chunk_pixels = @as(usize, width_px) * @as(usize, chunk_rows);
+const panel_config = St7789.Config{
+    .width = 320,
+    .height = 240,
+    .orientation = .{
+        .swap_xy = true,
+        .mirror_x = true,
+    },
+    .pixel_format = .rgb565,
+    .data_endian = .big,
+    .invert_color = true,
+};
+const width_px: u16 = panel_config.width;
+const height_px: u16 = panel_config.height;
+const max_native_flush_rows: u16 = 10;
+const dma_allocator = esp.heap.Allocator(.{ .caps = .internal_dma_8bit, .alignment = .align_u32 });
 
-initialized: bool = false,
-enabled: bool = true,
-brightness: u8 = 255,
-rgb565_buffer: [max_chunk_pixels]u16 = undefined,
+const DelayImpl = struct {
+    pub fn sleep(_: *DelayImpl, duration: esp.grt.time.duration.Duration) void {
+        if (duration <= 0) return;
+        esp.grt.std.Thread.sleep(@intCast(duration));
+    }
+};
+
+pub const Config = struct {
+    max_flush_rows: u16 = 10,
+};
+
+config: Config = .{},
+native_dbi: EspDisplay.NativeDbi = undefined,
+delay: DelayImpl = .{},
+display: ?embed.drivers.Display = null,
 
 pub fn init(self: *Display) !void {
+    if (self.display != null) return;
+
     try checkNative(binding.szp_display_native_init());
-    self.initialized = true;
+    const panel_io = binding.szp_display_native_panel_io() orelse return error.DisplayError;
+    self.native_dbi = EspDisplay.NativeDbi.init(.{
+        .panel_io = panel_io,
+    });
+    self.delay = .{};
+
+    self.display = try St7789.display(.{
+        .allocator = dma_allocator,
+        .dbi = self.native_dbi.handle(),
+        .delay = embed.drivers.Delay.init(&self.delay),
+        .controller = panel_config,
+        .flush = self.flushConfig(),
+        .open = openController,
+        .set_brightness = setBrightness,
+    });
 }
 
 pub fn deinit(self: *Display) void {
-    self.initialized = false;
+    if (self.display) |display| {
+        display.deinit();
+        self.display = null;
+    }
 }
 
 pub fn handle(self: *Display) embed.drivers.Display {
+    return self.display.?;
+}
+
+fn flushConfig(self: *Display) embed.drivers.Display.Flush.Config {
+    return defaultFlushConfig(self.config);
+}
+
+fn defaultFlushConfig(config: Config) embed.drivers.Display.Flush.Config {
+    const rows = if (config.max_flush_rows == 0)
+        1
+    else if (config.max_flush_rows > max_native_flush_rows)
+        max_native_flush_rows
+    else
+        config.max_flush_rows;
     return .{
-        .ptr = self,
-        .vtable = &display_vtable,
+        .native_width = width_px,
+        .native_height = height_px,
+        .logical_width = width_px,
+        .logical_height = height_px,
+        .max_flush_rows = rows,
+        .rgb565_byte_order = .swapped,
     };
 }
 
-fn width(self: *Display) u16 {
-    _ = self;
-    return width_px;
+fn openController(controller: *St7789) embed.drivers.Display.Error!void {
+    try checkNative(binding.szp_pca9557_set_lcd_cs(true));
+    controller.softwareReset() catch return error.DisplayError;
+    try checkNative(binding.szp_pca9557_set_lcd_cs(false));
+    controller.open() catch return error.DisplayError;
 }
 
-fn height(self: *Display) u16 {
-    _ = self;
-    return height_px;
+fn setBrightness(level: u8) embed.drivers.Display.Error!void {
+    try checkNative(binding.szp_display_native_set_brightness(level));
 }
 
-fn setEnabled(self: *Display, enabled: bool) embed.drivers.Display.Error!void {
-    if (!self.initialized) {
-        self.init() catch return error.DisplayError;
-    }
-    checkNative(binding.szp_display_native_set_enabled(enabled)) catch return error.DisplayError;
-    self.enabled = enabled;
-}
-
-fn getEnabled(self: *Display) embed.drivers.Display.Error!bool {
-    return self.enabled;
-}
-
-fn setBrightness(self: *Display, brightness: u8) embed.drivers.Display.Error!void {
-    if (!self.initialized) {
-        self.init() catch return error.DisplayError;
-    }
-    checkNative(binding.szp_display_native_set_brightness(brightness)) catch return error.DisplayError;
-    self.brightness = brightness;
-}
-
-fn getBrightness(self: *Display) embed.drivers.Display.Error!u8 {
-    return self.brightness;
-}
-
-fn drawBitmap(
-    self: *Display,
-    x: u16,
-    y: u16,
-    w: u16,
-    h: u16,
-    pixels: []const embed.drivers.Display.Rgb,
-) embed.drivers.Display.Error!void {
-    if (!self.initialized) {
-        self.init() catch return error.DisplayError;
-    }
-    if (w == 0 or h == 0) return;
-
-    const x_end = @as(u32, x) + @as(u32, w);
-    const y_end = @as(u32, y) + @as(u32, h);
-    const pixel_count = @as(usize, w) * @as(usize, h);
-    if (x_end > width_px or y_end > height_px or pixels.len < pixel_count) return error.OutOfBounds;
-
-    var row: u16 = 0;
-    var offset: usize = 0;
-    while (row < h) {
-        const remaining = h - row;
-        const rows = if (remaining > chunk_rows) chunk_rows else remaining;
-        const count = @as(usize, w) * @as(usize, rows);
-
-        for (0..count) |index| {
-            self.rgb565_buffer[index] = toPanelRgb565(pixels[offset + index]);
-        }
-        checkNative(binding.szp_display_native_draw_rgb565(
-            x,
-            y + row,
-            w,
-            rows,
-            self.rgb565_buffer[0..count].ptr,
-            count,
-        )) catch return error.DisplayError;
-
-        row += rows;
-        offset += count;
-    }
-}
-
-fn toPanelRgb565(color: embed.drivers.Display.Rgb) u16 {
-    const value = (@as(u16, color.r & 0xf8) << 8) |
-        (@as(u16, color.g & 0xfc) << 3) |
-        (@as(u16, color.b) >> 3);
-    return (value << 8) | (value >> 8);
-}
-
-fn checkNative(rc: c_int) !void {
+fn checkNative(rc: c_int) embed.drivers.Display.Error!void {
     if (rc == binding.esp_ok) return;
     return error.DisplayError;
 }
-
-fn displayDeinit(ptr: *anyopaque) void {
-    const self: *Display = @ptrCast(@alignCast(ptr));
-    self.deinit();
-}
-
-fn displayWidth(ptr: *anyopaque) u16 {
-    const self: *Display = @ptrCast(@alignCast(ptr));
-    return self.width();
-}
-
-fn displayHeight(ptr: *anyopaque) u16 {
-    const self: *Display = @ptrCast(@alignCast(ptr));
-    return self.height();
-}
-
-fn displaySetEnabled(ptr: *anyopaque, enabled: bool) embed.drivers.Display.Error!void {
-    const self: *Display = @ptrCast(@alignCast(ptr));
-    return self.setEnabled(enabled);
-}
-
-fn displayGetEnabled(ptr: *anyopaque) embed.drivers.Display.Error!bool {
-    const self: *Display = @ptrCast(@alignCast(ptr));
-    return self.getEnabled();
-}
-
-fn displaySetBrightness(ptr: *anyopaque, brightness: u8) embed.drivers.Display.Error!void {
-    const self: *Display = @ptrCast(@alignCast(ptr));
-    return self.setBrightness(brightness);
-}
-
-fn displayGetBrightness(ptr: *anyopaque) embed.drivers.Display.Error!u8 {
-    const self: *Display = @ptrCast(@alignCast(ptr));
-    return self.getBrightness();
-}
-
-fn displayDrawBitmap(
-    ptr: *anyopaque,
-    x: u16,
-    y: u16,
-    w: u16,
-    h: u16,
-    pixels: []const embed.drivers.Display.Rgb,
-) embed.drivers.Display.Error!void {
-    const self: *Display = @ptrCast(@alignCast(ptr));
-    return self.drawBitmap(x, y, w, h, pixels);
-}
-
-const display_vtable = embed.drivers.Display.VTable{
-    .deinit = displayDeinit,
-    .width = displayWidth,
-    .height = displayHeight,
-    .setEnabled = displaySetEnabled,
-    .getEnabled = displayGetEnabled,
-    .setBrightness = displaySetBrightness,
-    .getBrightness = displayGetBrightness,
-    .drawBitmap = displayDrawBitmap,
-};

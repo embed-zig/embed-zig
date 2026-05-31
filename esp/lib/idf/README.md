@@ -98,6 +98,7 @@ Where:
 Runtime options are currently read from build options rather than `AddOptions`:
 
 - `-Dport=<device>` controls flash/monitor serial port selection
+- `-Djtag=<adapter-serial>` makes `flash` use OpenOCD/JTAG instead of serial flashing
 - `-Dtimeout=<seconds>` controls monitor auto-exit timeout
 
 ### What It Stages
@@ -143,7 +144,7 @@ These are the public steps exposed today.
 | `sdkconfig_configure` | Runs `idf.py reconfigure` in the staged project |
 | `combine_binaries` | Builds the staged app, exports flashable outputs to `build_dir/out/`, and merges them into `build_dir/out/combined.bin` |
 | `elf_layout` | Runs `lib/idf/tools/elf_layout.zig` after a successful build and writes `build_dir/elf_layout.txt` |
-| `flash` | Flashes the already-combined firmware image |
+| `flash` | Flashes the already-combined firmware image; `-Dport` uses the serial ROM bootloader, `-Djtag` uses OpenOCD/JTAG |
 | `monitor` | Runs `idf.py monitor` without flashing first |
 
 ### Internal Steps Not Exposed Directly

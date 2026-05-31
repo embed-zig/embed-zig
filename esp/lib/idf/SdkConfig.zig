@@ -73,6 +73,7 @@ pub fn raw(comptime text: []const u8) RawValue {
 }
 
 pub fn make(comptime macros: anytype) @TypeOf(macros) {
+    @setEvalBranchQuota(10_000);
     validateMacroSet(@TypeOf(macros), "esp_idf.SdkConfig.make() input");
     return macros;
 }
@@ -114,6 +115,7 @@ pub fn render(
 }
 
 pub fn validateMacroSet(comptime MacroSet: type, comptime label: []const u8) void {
+    @setEvalBranchQuota(10_000);
     switch (@typeInfo(MacroSet)) {
         .@"struct" => |struct_info| {
             inline for (struct_info.fields) |field| {

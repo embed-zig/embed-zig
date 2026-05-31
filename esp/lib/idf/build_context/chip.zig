@@ -14,7 +14,7 @@ pub const chip_targets = [_]ChipTarget{
     .{ .name = "esp32c3", .cpu_arch = .riscv32, .cpu_model = .{ .explicit = &std.Target.riscv.cpu.generic_rv32 }, .supported = false },
     .{ .name = "esp32c6", .cpu_arch = .riscv32, .cpu_model = .{ .explicit = &std.Target.riscv.cpu.generic_rv32 }, .supported = false },
     .{ .name = "esp32h2", .cpu_arch = .riscv32, .cpu_model = .{ .explicit = &std.Target.riscv.cpu.generic_rv32 }, .supported = false },
-    .{ .name = "esp32p4", .cpu_arch = .riscv32, .cpu_model = .{ .explicit = &std.Target.riscv.cpu.generic_rv32 }, .supported = false },
+    .{ .name = "esp32p4", .cpu_arch = .riscv32, .cpu_model = .{ .explicit = &std.Target.riscv.cpu.generic_rv32 }, .supported = true },
 };
 
 pub fn resolveChipTarget(b: *std.Build, chip: []const u8) std.Build.ResolvedTarget {
@@ -22,6 +22,22 @@ pub fn resolveChipTarget(b: *std.Build, chip: []const u8) std.Build.ResolvedTarg
         if (std.mem.eql(u8, chip, entry.name)) {
             if (!entry.supported) {
                 std.debug.panic("chip '{s}' is known but not yet supported", .{chip});
+            }
+            if (std.mem.eql(u8, chip, "esp32p4")) {
+                return b.resolveTargetQuery(.{
+                    .cpu_arch = entry.cpu_arch,
+                    .os_tag = .freestanding,
+                    .abi = .none,
+                    .cpu_model = entry.cpu_model,
+                    .cpu_features_add = std.Target.riscv.featureSet(&.{
+                        .a,
+                        .c,
+                        .f,
+                        .m,
+                        .zicsr,
+                        .zifencei,
+                    }),
+                });
             }
             return b.resolveTargetQuery(.{
                 .cpu_arch = entry.cpu_arch,

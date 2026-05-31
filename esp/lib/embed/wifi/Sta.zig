@@ -72,11 +72,37 @@ pub fn getState(self: *StaImpl) Sta.State {
     };
 }
 
+pub fn setPowerSave(self: *StaImpl, mode: Sta.PowerSave) Sta.PowerSaveError!void {
+    _ = self;
+    const config = try powerSaveValue(mode);
+    const rc = binding.esp_embed_wifi_sta_set_power_save(config.mode, config.listen_interval);
+    return switch (rc) {
+        binding.esp_ok => {},
+        binding.esp_invalid_arg => error.InvalidConfig,
+        binding.esp_invalid_state => error.Busy,
+        else => error.Unexpected,
+    };
+}
+
+pub fn getPowerSave(self: *StaImpl) Sta.PowerSaveError!Sta.PowerSave {
+    _ = self;
+    var mode: c_int = binding.power_save_default;
+    var listen_interval: u16 = 0;
+    const rc = binding.esp_embed_wifi_sta_get_power_save(&mode, &listen_interval);
+    return switch (rc) {
+        binding.esp_ok => powerSaveFromValue(mode, listen_interval) orelse error.Unexpected,
+        binding.esp_invalid_arg => error.InvalidConfig,
+        binding.esp_invalid_state => error.Busy,
+        else => error.Unexpected,
+    };
+}
+
 pub fn addEventHook(
     self: *StaImpl,
     ctx: ?*anyopaque,
     cb: *const fn (?*anyopaque, Sta.Event) void,
 ) void {
+    esp.grt.std.log.scoped(.esp_wifi_sta).info("add event hook", .{});
     self.hook_ctx = ctx;
     self.hook_cb = cb;
 }
@@ -119,11 +145,42 @@ fn check(call_name: []const u8, rc: c_int) !void {
     return error.BoardCallFailed;
 }
 
+const PowerSaveValue = struct {
+    mode: c_int,
+    listen_interval: u16 = 0,
+};
+
+fn powerSaveValue(mode: Sta.PowerSave) Sta.PowerSaveError!PowerSaveValue {
+    return switch (mode) {
+        .none => .{ .mode = binding.power_save_none },
+        .default => .{ .mode = binding.power_save_default },
+        .listen_interval => |listen_interval| blk: {
+            if (listen_interval == 0) return error.InvalidConfig;
+            break :blk .{
+                .mode = binding.power_save_listen_interval,
+                .listen_interval = listen_interval,
+            };
+        },
+    };
+}
+
+fn powerSaveFromValue(mode: c_int, listen_interval: u16) ?Sta.PowerSave {
+    return switch (mode) {
+        binding.power_save_none => .none,
+        binding.power_save_default => .default,
+        binding.power_save_listen_interval => if (listen_interval == 0) null else .{ .listen_interval = listen_interval },
+        else => null,
+    };
+}
+
 fn dispatchEvent(ctx: ?*anyopaque, event: *const binding.Event) callconv(.c) void {
     const self: *StaImpl = @ptrCast(@alignCast(ctx orelse return));
     const sta_event = self.makeEvent(event) orelse return;
     if (self.hook_cb) |cb| {
+        esp.grt.std.log.scoped(.esp_wifi_sta).info("dispatch hook event={s}", .{@tagName(sta_event)});
         cb(self.hook_ctx, sta_event);
+    } else {
+        esp.grt.std.log.scoped(.esp_wifi_sta).warn("drop event without hook event={s}", .{@tagName(sta_event)});
     }
 }
 

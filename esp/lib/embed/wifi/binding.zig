@@ -20,6 +20,10 @@ pub const security_wpa: c_int = 3;
 pub const security_wpa2: c_int = 4;
 pub const security_wpa3: c_int = 5;
 
+pub const power_save_none: c_int = 0;
+pub const power_save_default: c_int = 1;
+pub const power_save_listen_interval: c_int = 2;
+
 pub const Event = extern struct {
     event: c_int,
     ssid: [32]u8,
@@ -54,3 +58,5 @@ pub extern fn esp_embed_wifi_sta_connect(
 ) c_int;
 pub extern fn esp_embed_wifi_sta_disconnect() void;
 pub extern fn esp_embed_wifi_sta_state() c_int;
+pub extern fn esp_embed_wifi_sta_set_power_save(mode: c_int, listen_interval: u16) c_int;
+pub extern fn esp_embed_wifi_sta_get_power_save(mode: *c_int, listen_interval: *u16) c_int;

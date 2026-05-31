@@ -41,6 +41,7 @@ const Module = std.Build.Module;
 
 pub const RuntimeOptions = struct {
     port: ?[]const u8 = null,
+    jtag: ?[]const u8 = null,
     timeout: u32 = 15,
 };
 
@@ -84,6 +85,7 @@ pub fn addApp(b: *std.Build, app_name: []const u8, opts: AddOptions) Self {
     );
     const runtime: RuntimeOptions = .{
         .port = b.option([]const u8, "port", "Serial port used by flash/monitor"),
+        .jtag = b.option([]const u8, "jtag", "OpenOCD JTAG adapter serial used by flash"),
         .timeout = b.option(u32, "timeout", "Auto-exit monitor after N seconds") orelse 15,
     };
 
@@ -130,14 +132,20 @@ pub fn addApp(b: *std.Build, app_name: []const u8, opts: AddOptions) Self {
     const combine_binaries = tools.addCombineFlashImageTool(b, opts.context);
     combine_binaries.dependOn(copy_binaries);
 
-    // Fifth stage: flash the combined binary
+    // Fifth stage: flash the combined binary. `-Djtag` selects OpenOCD/JTAG;
+    // otherwise `-Dport` selects the serial ROM bootloader.
     const flash = blk: {
+        if (runtime.jtag) |adapter_serial| {
+            const step = tools.addOpenOcdFlashCombinedImageTool(b, opts.context, adapter_serial);
+            step.dependOn(combine_binaries);
+            break :blk step;
+        }
         if (runtime.port) |port| {
             const step = tools.addFlashCombinedImageTool(b, opts.context, port);
             step.dependOn(combine_binaries);
             break :blk step;
         }
-        break :blk &b.addFail("missing serial port; pass -Dport=<device> for flash/monitor steps").step;
+        break :blk &b.addFail("missing flash target; pass -Dport=<device> for serial flash or -Djtag=<adapter-serial> for OpenOCD flash").step;
     };
 
     // Sixth stage: monitor the serial output

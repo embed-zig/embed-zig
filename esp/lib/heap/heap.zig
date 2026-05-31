@@ -5,6 +5,7 @@ pub const Caps = enum {
     spiram,
     internal_8bit,
     spiram_8bit,
+    internal_dma_8bit,
 };
 
 pub const Alignment = enum {
@@ -32,6 +33,7 @@ extern fn espz_heap_caps_malloc(size: usize, caps: u32) ?*anyopaque;
 extern fn espz_heap_caps_free(ptr: ?*anyopaque) void;
 
 extern const espz_heap_cap_8bit: u32;
+extern const espz_heap_cap_dma: u32;
 extern const espz_heap_cap_spiram: u32;
 extern const espz_heap_cap_internal: u32;
 
@@ -167,5 +169,6 @@ fn resolveCaps(comptime caps: Caps) u32 {
         .spiram => espz_heap_cap_spiram,
         .internal_8bit => espz_heap_cap_internal | espz_heap_cap_8bit,
         .spiram_8bit => espz_heap_cap_spiram | espz_heap_cap_8bit,
+        .internal_dma_8bit => espz_heap_cap_internal | espz_heap_cap_dma | espz_heap_cap_8bit,
     };
 }

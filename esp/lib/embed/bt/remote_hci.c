@@ -1,5 +1,6 @@
-#include "esp_bt.h"
 #include "esp_err.h"
+#include "esp_hosted.h"
+#include "esp_hosted_os_abstraction.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -9,6 +10,10 @@
 
 #define ESP_EMBED_BT_PACKET_MAX 1024
 #define ESP_EMBED_BT_RX_QUEUE_LEN 16
+#define ESP_EMBED_BT_HOSTED_HCI_IF 4
+#define ESP_EMBED_BT_HOSTED_NO_ZEROCOPY 0
+
+extern int esp_hosted_tx(uint8_t iface_type, uint8_t iface_num, uint8_t *payload_buf, uint16_t payload_len, uint8_t buff_zerocopy, uint8_t *buffer_to_free, void (*free_buf_func)(void *ptr), uint8_t flags);
 
 typedef struct {
     uint16_t len;
@@ -16,14 +21,7 @@ typedef struct {
 } esp_embed_bt_packet_t;
 
 static QueueHandle_t s_rx_queue;
-static SemaphoreHandle_t s_send_ready;
 static bool s_initialized;
-
-static void esp_embed_bt_notify_host_send_available(void) {
-    if (s_send_ready != NULL) {
-        xSemaphoreGive(s_send_ready);
-    }
-}
 
 static int esp_embed_bt_notify_host_recv(uint8_t *data, uint16_t len) {
     if (s_rx_queue == NULL || data == NULL || len > ESP_EMBED_BT_PACKET_MAX) {
@@ -36,43 +34,44 @@ static int esp_embed_bt_notify_host_recv(uint8_t *data, uint16_t len) {
     return 0;
 }
 
-int esp_embed_bt_vhci_init(void) {
+int hci_rx_handler(uint8_t *data, size_t len) {
+    if (len > UINT16_MAX) return ESP_FAIL;
+    esp_embed_bt_notify_host_recv(data, (uint16_t)len);
+    return ESP_OK;
+}
+
+int esp_embed_bt_remote_hci_init(void) {
     if (s_initialized) return ESP_OK;
 
     s_rx_queue = xQueueCreate(ESP_EMBED_BT_RX_QUEUE_LEN, sizeof(esp_embed_bt_packet_t));
-    s_send_ready = xSemaphoreCreateBinary();
-    if (s_rx_queue == NULL || s_send_ready == NULL) return ESP_FAIL;
+    if (s_rx_queue == NULL) return ESP_FAIL;
 
-    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    esp_err_t err = esp_bt_controller_init(&bt_cfg);
+    esp_err_t err = esp_hosted_init();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
 
-    err = esp_bt_controller_enable(ESP_BT_MODE_BLE);
+    err = esp_hosted_connect_to_slave();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
 
-    static const esp_vhci_host_callback_t cb = {
-        .notify_host_send_available = esp_embed_bt_notify_host_send_available,
-        .notify_host_recv = esp_embed_bt_notify_host_recv,
-    };
-    err = esp_vhci_host_register_callback(&cb);
-    if (err != ESP_OK) return err;
+    err = esp_hosted_bt_controller_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
 
-    xSemaphoreGive(s_send_ready);
+    err = esp_hosted_bt_controller_enable();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
+
     s_initialized = true;
     return ESP_OK;
 }
 
-int esp_embed_bt_vhci_send(const uint8_t *data, size_t len, uint32_t timeout_ms) {
+int esp_embed_bt_remote_hci_send(const uint8_t *data, size_t len, uint32_t timeout_ms) {
     if (!s_initialized || data == NULL || len > UINT16_MAX) return ESP_FAIL;
-    const TickType_t deadline = timeout_ms == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
-    while (!esp_vhci_host_check_send_available()) {
-        if (xSemaphoreTake(s_send_ready, deadline) != pdTRUE) return ESP_ERR_TIMEOUT;
-    }
-    esp_vhci_host_send_packet((uint8_t *)data, (uint16_t)len);
-    return ESP_OK;
+    (void)timeout_ms;
+    uint8_t *copy = (uint8_t *)g_h.funcs->_h_malloc(len);
+    if (copy == NULL) return ESP_FAIL;
+    memcpy(copy, data, len);
+    return esp_hosted_tx(ESP_EMBED_BT_HOSTED_HCI_IF, 0, copy, (uint16_t)len, ESP_EMBED_BT_HOSTED_NO_ZEROCOPY, copy, g_h.funcs->_h_free, 0);
 }
 
-int esp_embed_bt_vhci_recv(uint8_t *out, size_t cap, size_t *out_len, uint32_t timeout_ms) {
+int esp_embed_bt_remote_hci_recv(uint8_t *out, size_t cap, size_t *out_len, uint32_t timeout_ms) {
     if (!s_initialized || out == NULL || out_len == NULL) return ESP_FAIL;
     esp_embed_bt_packet_t packet = {0};
     const TickType_t ticks = timeout_ms == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);

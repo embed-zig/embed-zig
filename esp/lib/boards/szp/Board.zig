@@ -1,17 +1,15 @@
 const embed = @import("embed_core");
 const esp = @import("esp");
 const binding = @import("bindings/common.zig");
-const Audio = @import("Audio.zig").make(Self);
-const BtHost = esp.embed.BtHost;
+const Audio = @import("Audio.zig").Type;
+const BtHost = esp.embed.bt.Local;
 const Display = @import("Display.zig");
 const Imu = @import("Imu.zig");
 const PowerButton = @import("PowerButton.zig");
 const Touch = @import("Touch.zig");
-const Wifi = esp.embed.Wifi;
+const Wifi = esp.embed.wifi.Local;
 
 const Self = @This();
-const Es7210 = embed.drivers.audio.Es7210;
-const Es8311 = embed.drivers.audio.Es8311;
 const log = esp.grt.std.log.scoped(.szp_board);
 
 pub const Board = Self;
@@ -41,26 +39,16 @@ pub const StorageInfo = struct {
     used: usize,
 };
 
-const es7210_address = @intFromEnum(Es7210.Address.ad1_ad0_01);
-const es8311_address = @intFromEnum(Es8311.Address.ad0_low);
-const default_volume: u8 = 0xb0;
-const es7210_ref_channel: u2 = 2;
-
 power_button: PowerButton = .{},
 display_device: Display = .{},
 imu_device: Imu = .{},
 touch_device: Touch = .{},
 wifi_sta: Wifi.Sta = .{},
 bt_host: ?BtHost = null,
-audio_adc: ?Es7210 = null,
-audio_codec: ?Es8311 = null,
-audio_mic: Audio.MicDevice = .{},
-audio_speaker: Audio.SpeakerDevice = .{},
-audio_system: ?Audio.Type = null,
+audio: ?Audio = null,
 audio_allocator: ?esp.grt.std.mem.Allocator = null,
 audio_system_config: Audio.Type.Config = .{},
 bt_allocator: ?esp.grt.std.mem.Allocator = null,
-audio_ready: bool = false,
 state_value: embed.board.State = .uninitialized,
 
 pub fn init(config: InitConfig) !Self {
@@ -75,8 +63,8 @@ pub fn deinit(self: *Self) void {
     if (self.bt_host) |*bt_host| {
         bt_host.deinit();
     }
-    if (self.audio_system) |*audio_system| {
-        audio_system.deinit();
+    if (self.audio) |*audio| {
+        audio.deinit();
     }
     self.wifi_sta.deinit();
     self.display_device.deinit();
@@ -93,6 +81,7 @@ pub fn state(self: *Self) embed.board.State {
 
 pub fn powerOn(self: *Self) !void {
     try check("szp_board_init", binding.szp_board_init());
+    try check("szp_audio_set_pa", binding.szp_audio_set_pa(true));
     try self.touch_device.init();
     self.state_value = .powered_on;
 }
@@ -143,7 +132,7 @@ pub fn display(self: *Self, label: []const u8) !embed.drivers.Display {
 }
 
 pub fn singleButton(self: *Self, label: []const u8) !embed.drivers.button.Single {
-    if (!esp.grt.std.mem.eql(u8, label, "button")) return error.NotFound;
+    if (!esp.grt.std.mem.eql(u8, label, "boot")) return error.NotFound;
     switch (self.state_value) {
         .powered_on, .started => {},
         else => return error.InvalidState,
@@ -203,129 +192,17 @@ pub fn audioSystem(self: *Self, label: []const u8) !*Audio.Type {
     return self.ensureAudioSystem();
 }
 
-pub fn initAudio(self: *Self) !void {
-    if (self.audio_ready) return;
-
-    try check("szp_audio_init", binding.szp_audio_init());
-
-    const i2c = try binding.i2cDevice(es8311_address);
-    var codec = Es8311.init(i2c, .{
-        .address = es8311_address,
-        .codec_mode = .dac_only,
-    });
-
-    try codec.open();
-    const chip_id = try codec.readChipId();
-    log.info("es8311 chip_id=0x{x}", .{chip_id});
-    try codec.setSampleRate(audio_sample_rate);
-    try codec.setBitsPerSample(.@"16bit");
-    try codec.setFormat(.i2s);
-    try codec.enable(true);
-    try codec.setVolume(default_volume);
-    try codec.setMute(false);
-
-    const adc_i2c = try binding.i2cDevice(es7210_address);
-    var adc = Es7210.init(adc_i2c, .{
-        .address = es7210_address,
-        .mic_select = .{ .mic1 = true, .mic2 = true, .mic3 = true, .mic4 = true },
-    });
-    try adc.open();
-    try adc.enable(true);
-    try adc.setChannelGain(es7210_ref_channel, .@"0dB");
-
-    self.audio_adc = adc;
-    self.audio_codec = codec;
-    try check("szp_audio_set_pa", binding.szp_audio_set_pa(true));
-    self.audio_ready = true;
-}
-
-pub fn writePcm(self: *Self, samples: []const i16) !void {
-    if (samples.len == 0) return;
-    try self.initAudio();
-    try check("szp_audio_write_i16", binding.szp_audio_write_i16(samples.ptr, samples.len));
-}
-
-pub fn startMicrophoneCapture(self: *Self) !void {
-    try self.initAudio();
-    try check("szp_audio_mic_capture_start", binding.szp_audio_mic_capture_start());
-}
-
-pub fn readMicrophoneFrame(self: *Self, mic0: []i16, mic1: []i16, ref: []i16) !usize {
-    _ = self;
-    if (mic0.len == 0) return 0;
-    if (mic1.len < mic0.len or ref.len < mic0.len) return error.BoardCallFailed;
-    var sample_count: usize = 0;
-    try check("szp_audio_mic_read_i16", binding.szp_audio_mic_read_i16(mic0.ptr, mic1.ptr, ref.ptr, mic0.len, &sample_count));
-    return sample_count;
-}
-
-pub fn stopMicrophoneCapture(self: *Self) void {
-    _ = self;
-    check("szp_audio_mic_capture_stop", binding.szp_audio_mic_capture_stop()) catch |err| {
-        log.warn("mic capture stop failed: {s}", .{@errorName(err)});
-    };
-}
-
-pub fn setVolume(self: *Self, volume: u8) !void {
-    if (self.audio_codec == null) try self.initAudio();
-    if (self.audio_codec) |*codec| {
-        try codec.setVolume(volume);
-        return;
-    }
-    return error.BoardCallFailed;
-}
-
-pub fn setSpeakerEnabled(self: *Self, enabled: bool) !void {
-    if (enabled) try self.initAudio();
-    if (!self.audio_ready and !enabled) return;
-    try check("szp_audio_set_pa", binding.szp_audio_set_pa(enabled));
-}
-
-pub fn setMicrophoneGain(self: *Self, gain_db: i8) !void {
-    if (self.audio_adc == null) try self.initAudio();
-    if (self.audio_adc) |*adc| {
-        try adc.setGainAll(microphoneGainFromDb(gain_db));
-        try adc.setChannelGain(es7210_ref_channel, .@"0dB");
-        return;
-    }
-    return error.BoardCallFailed;
-}
-
 fn ensureAudioSystem(self: *Self) !*Audio.Type {
-    if (self.audio_system == null) {
+    if (self.audio == null) {
         const allocator = self.audio_allocator orelse return error.InvalidState;
-        var audio_system = try Audio.Type.init(allocator, self.audio_system_config);
-        errdefer audio_system.deinit();
-
-        self.audio_mic.bind(self);
-        self.audio_speaker.bind(self);
-        try audio_system.setMic(self.audio_mic.driver());
-        try audio_system.setSpeaker(self.audio_speaker.driver());
-        self.audio_system = audio_system;
+        self.audio = try Audio.init(allocator, self.audio_system_config);
     }
-    return &(self.audio_system orelse unreachable);
+    if (self.audio) |*audio| return audio.system();
+    return error.InvalidState;
 }
 
 fn check(name: []const u8, rc: c_int) !void {
     if (rc == binding.esp_ok) return;
     log.err("{s} failed with rc={d}", .{ name, rc });
     return error.BoardCallFailed;
-}
-
-fn microphoneGainFromDb(gain_db: i8) Es7210.Gain {
-    if (gain_db < 3) return .@"0dB";
-    if (gain_db < 6) return .@"3dB";
-    if (gain_db < 9) return .@"6dB";
-    if (gain_db < 12) return .@"9dB";
-    if (gain_db < 15) return .@"12dB";
-    if (gain_db < 18) return .@"15dB";
-    if (gain_db < 21) return .@"18dB";
-    if (gain_db < 24) return .@"21dB";
-    if (gain_db < 27) return .@"24dB";
-    if (gain_db < 30) return .@"27dB";
-    if (gain_db < 33) return .@"30dB";
-    if (gain_db < 34) return .@"33dB";
-    if (gain_db < 36) return .@"34.5dB";
-    if (gain_db < 37) return .@"36dB";
-    return .@"37.5dB";
 }

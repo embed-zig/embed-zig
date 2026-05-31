@@ -6,6 +6,8 @@ const log = grt.std.log.scoped(.esp_launcher);
 const launcher_mod = @This();
 
 pub const Config = struct {
+    audio_read_thread_spawn_config: grt.std.Thread.SpawnConfig = .{},
+    audio_write_thread_spawn_config: grt.std.Thread.SpawnConfig = .{},
     pipeline_tick_interval: grt.time.duration.Duration = 10 * grt.time.duration.MilliSecond,
     pipeline_spawn_config: grt.std.Thread.SpawnConfig = .{},
     poller_poll_interval: grt.time.duration.Duration = 10 * grt.time.duration.MilliSecond,
@@ -33,7 +35,7 @@ pub fn make(
             const board_impl = try allocator.create(Board);
             errdefer allocator.destroy(board_impl);
 
-            board_impl.* = try Board.init(makeBoardInitConfig(Board, allocator));
+            board_impl.* = try Board.init(makeBoardInitConfig(Board, allocator, config));
             errdefer board_impl.deinit();
 
             if (@hasDecl(Board, "initNvs")) {
@@ -64,6 +66,11 @@ pub fn make(
 
         pub fn start(self: *Launcher) !void {
             try self.app.zux().start(.{});
+            errdefer self.app.zux().stop() catch {};
+
+            if (comptime @hasDecl(ZuxAppType.AppHost, "start")) {
+                try self.app.app().start();
+            }
 
             log.info("{s} running on {s} board", .{
                 comptime appTitle(ZuxAppType.AppHost),
@@ -72,6 +79,9 @@ pub fn make(
         }
 
         pub fn stop(self: *Launcher) !void {
+            if (comptime @hasDecl(ZuxAppType.AppHost, "stop")) {
+                self.app.app().stop();
+            }
             try self.app.zux().stop();
         }
 
@@ -83,10 +93,20 @@ pub fn make(
 
             inline for (0..registries.single_button.len) |i| {
                 const periph = registries.single_button.periphs[i];
-                if (@hasField(@TypeOf(periph), "input_type") and periph.input_type == .virtual) continue;
+                if (comptime isVirtualPeriph(periph)) continue;
                 const label_name = comptime labelText(periph.label);
                 @field(init_config, label_name) = board.singleButton(label_name) catch |err| {
                     log.err("board missing single button component '{s}': {s}", .{ label_name, @errorName(err) });
+                    return err;
+                };
+            }
+
+            inline for (0..registries.adc_button.len) |i| {
+                const periph = registries.adc_button.periphs[i];
+                if (comptime isVirtualPeriph(periph)) continue;
+                const label_name = comptime labelText(periph.label);
+                @field(init_config, label_name) = board.groupedButton(label_name) catch |err| {
+                    log.err("board missing grouped button component '{s}': {s}", .{ label_name, @errorName(err) });
                     return err;
                 };
             }
@@ -151,16 +171,21 @@ pub fn make(
 }
 
 fn validateSupportedRegistries(comptime registries: anytype) void {
-    if (registries.adc_button.len != 0) @compileError("ESP launcher does not support grouped buttons yet");
     if (registries.imu.len != 0) @compileError("ESP launcher does not support imu yet");
     if (registries.modem.len != 0) @compileError("ESP launcher does not support modem yet");
     if (registries.nfc.len != 0) @compileError("ESP launcher does not support nfc yet");
     if (registries.wifi_ap.len != 0) @compileError("ESP launcher does not support wifi ap yet");
 }
 
-fn makeBoardInitConfig(comptime Board: type, allocator: grt.std.mem.Allocator) Board.InitConfig {
+fn makeBoardInitConfig(comptime Board: type, allocator: grt.std.mem.Allocator, launcher_config: Config) Board.InitConfig {
     var config: Board.InitConfig = .{};
     if (@hasField(Board.InitConfig, "audio_allocator")) config.audio_allocator = allocator;
+    if (@hasField(Board.InitConfig, "audio_system_config")) {
+        config.audio_system_config = .{
+            .read_thread = launcher_config.audio_read_thread_spawn_config,
+            .write_thread = launcher_config.audio_write_thread_spawn_config,
+        };
+    }
     if (@hasField(Board.InitConfig, "bt_allocator")) config.bt_allocator = allocator;
     return config;
 }
@@ -194,4 +219,8 @@ fn labelText(comptime label: anytype) []const u8 {
         .array => label[0..],
         else => @compileError("ESP launcher label must be an enum literal, enum value, or []const u8"),
     };
+}
+
+fn isVirtualPeriph(comptime periph: anytype) bool {
+    return @hasField(@TypeOf(periph), "input_type") and periph.input_type == .virtual;
 }
