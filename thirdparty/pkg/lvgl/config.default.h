@@ -41,4 +41,13 @@
 #define LV_USE_MATRIX 0
 #define LV_USE_OBSERVER 1
 
+/*=================
+ * Font features
+ *=================*/
+
+#define LV_USE_TINY_TTF 1
+#define LV_TINY_TTF_FILE_SUPPORT 1
+#define LV_TINY_TTF_CACHE_GLYPH_CNT 64
+#define LV_TINY_TTF_CACHE_KERNING_CNT 128
+
 #endif /* LV_CONF_H */

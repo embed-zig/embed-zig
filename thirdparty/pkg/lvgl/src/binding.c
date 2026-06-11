@@ -62,3 +62,22 @@ lv_subject_t * embed_lv_subject_create(void) {
 void embed_lv_subject_destroy(lv_subject_t * subject) {
     lv_free(subject);
 }
+
+uint32_t embed_lv_indev_data_read_state(const lv_indev_data_t * data) {
+    return (uint32_t)data->state;
+}
+
+int32_t embed_lv_indev_data_read_point_x(const lv_indev_data_t * data) {
+    return data->point.x;
+}
+
+int32_t embed_lv_indev_data_read_point_y(const lv_indev_data_t * data) {
+    return data->point.y;
+}
+
+void embed_lv_indev_data_set_pointer(lv_indev_data_t * data, int32_t x, int32_t y, uint8_t pressed, uint8_t continue_reading) {
+    data->point.x = x;
+    data->point.y = y;
+    data->state = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    data->continue_reading = continue_reading != 0u;
+}

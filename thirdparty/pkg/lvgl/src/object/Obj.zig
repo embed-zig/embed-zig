@@ -2,6 +2,7 @@ const glib = @import("glib");
 const binding = @import("../binding.zig");
 const embed = @import("embed");
 const Color = @import("../Color.zig");
+const Font = @import("../Font.zig");
 const Style = @import("../Style.zig");
 const types = @import("../types.zig");
 const Event = @import("../Event.zig");
@@ -204,6 +205,28 @@ pub fn setStyleRadius(self: *const Self, radius: i32, selector: Selector) void {
 
 pub fn setStyleTextColor(self: *const Self, color: Color, selector: Selector) void {
     binding.embed_lv_obj_set_style_text_color_rgb(self.handle, color.red, color.green, color.blue, selector);
+}
+
+pub fn setStyleTextFont(self: *const Self, font: *const Font, selector: Selector) void {
+    binding.lv_obj_set_style_text_font(self.handle, font.rawConstPtr(), selector);
+}
+
+pub fn setFlexFlow(self: *const Self, flow: types.FlexFlow) void {
+    binding.lv_obj_set_flex_flow(self.handle, @as(binding.FlexFlow, @intCast(@intFromEnum(flow))));
+}
+
+pub fn setFlexAlign(
+    self: *const Self,
+    main_place: types.FlexAlign,
+    cross_place: types.FlexAlign,
+    track_cross_place: types.FlexAlign,
+) void {
+    binding.lv_obj_set_flex_align(
+        self.handle,
+        @as(binding.FlexAlign, @intCast(@intFromEnum(main_place))),
+        @as(binding.FlexAlign, @intCast(@intFromEnum(cross_place))),
+        @as(binding.FlexAlign, @intCast(@intFromEnum(track_cross_place))),
+    );
 }
 
 pub fn hasStyleProp(self: *const Self, selector: Selector, prop: binding.StyleProp) bool {

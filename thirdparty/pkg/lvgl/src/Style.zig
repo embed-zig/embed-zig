@@ -1,5 +1,6 @@
 const glib = @import("glib");
 const binding = @import("binding.zig");
+const Font = @import("Font.zig");
 
 const Self = @This();
 
@@ -38,6 +39,10 @@ pub fn mergeFrom(self: *Self, other: *const Self) void {
 
 pub fn setWidth(self: *Self, width: i32) void {
     binding.lv_style_set_width(&self.raw, width);
+}
+
+pub fn setTextFont(self: *Self, font: *const Font) void {
+    binding.lv_style_set_text_font(&self.raw, font.rawConstPtr());
 }
 
 pub fn isEmpty(self: *const Self) bool {

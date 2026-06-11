@@ -14,6 +14,7 @@ const Indev = @import("../src/Indev.zig");
 const Tick = @import("../src/Tick.zig");
 const Event = @import("../src/Event.zig");
 const Anim = @import("../src/Anim.zig");
+const Font = @import("../src/Font.zig");
 const Subject = @import("../src/Subject.zig");
 const Observer = @import("../src/Observer.zig");
 const lvgl_embed = @import("../src/embed.zig");
@@ -22,7 +23,10 @@ const Tree = @import("../src/object/Tree.zig");
 const Flags = @import("../src/object/Flags.zig");
 const State = @import("../src/object/State.zig");
 const Label = @import("../src/widget/Label.zig");
+const Image = @import("../src/widget/Image.zig");
 const Button = @import("../src/widget/Button.zig");
+const TextArea = @import("../src/widget/TextArea.zig");
+const Keyboard = @import("../src/widget/Keyboard.zig");
 const Bar = @import("../src/widget/Bar.zig");
 const TestingDisplay = @import("integration/bitmap/test_utils/TestingDisplay.zig");
 
@@ -48,6 +52,7 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("Tick", Tick.TestRunner(grt));
             t.run("Event", Event.TestRunner(grt));
             t.run("Anim", Anim.TestRunner(grt));
+            t.run("Font", Font.TestRunner(grt));
             t.run("Subject", Subject.TestRunner(grt));
             t.run("Observer", Observer.TestRunner(grt));
             t.run("embed/LvglDisplay", lvgl_embed.LvglDisplay.TestRunner(grt));
@@ -57,7 +62,10 @@ pub fn make(comptime grt: type) glib.testing.TestRunner {
             t.run("object/Flags", Flags.TestRunner(grt));
             t.run("object/State", State.TestRunner(grt));
             t.run("widget/Label", Label.TestRunner(grt));
+            t.run("widget/Image", Image.TestRunner(grt));
             t.run("widget/Button", Button.TestRunner(grt));
+            t.run("widget/TextArea", TextArea.TestRunner(grt));
+            t.run("widget/Keyboard", Keyboard.TestRunner(grt));
             t.run("widget/Bar", Bar.TestRunner(grt));
             t.run("display/TestingDisplay", TestingDisplay.TestRunner(grt));
 

@@ -14,16 +14,12 @@ const Message = embed_pkg.zux.pipeline.Message;
 pub const Config = struct {
     allocator: glib.std.mem.Allocator,
     threaded: bool = true,
-    display_rows: usize = 40,
     command_capacity: usize = 32,
     command_timeout: glib.time.duration.Duration = 1 * glib.time.duration.MilliSecond,
     rgb888_byte_order: LvglDisplay.Rgb888ByteOrder = .bgr,
 };
 
 pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
-    const log = grt.std.log.scoped(.lvgl_zux_runtime);
-    const slow_render_threshold = 20 * glib.time.duration.MilliSecond;
-
     return struct {
         const LvglZuxRuntime = @This();
         const RawTouch = @FieldType(Message.Event, "raw_touch");
@@ -82,6 +78,14 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
             label: ZuxAppType.PeriphLabel,
         };
 
+        const GroupedButtonBinding = struct {
+            pressed_dsc: ?*binding.EventDsc = null,
+            released_dsc: ?*binding.EventDsc = null,
+            runtime: *LvglZuxRuntime,
+            label: ZuxAppType.PeriphLabel,
+            button_id: u32,
+        };
+
         allocator: glib.std.mem.Allocator = undefined,
         config: Config = undefined,
         commands: CommandChannel = undefined,
@@ -91,6 +95,7 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
         draw_buffer: []u8 = &.{},
         flush_buffer: []embed_pkg.drivers.Display.Rgb = &.{},
         single_button_bindings: grt.std.ArrayList(*SingleButtonBinding) = .empty,
+        grouped_button_bindings: grt.std.ArrayList(*GroupedButtonBinding) = .empty,
         state_mu: grt.std.Thread.Mutex = .{},
         zux_app: ?*ZuxAppType = null,
         render_hook: ?RenderHook = null,
@@ -117,6 +122,7 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
             self.deinitInput();
             self.lvgl_display.deinit();
             self.clearSingleButtonBindings();
+            self.clearGroupedButtonBindings();
             if (self.draw_buffer.len != 0) {
                 self.allocator.free(self.draw_buffer);
             }
@@ -157,6 +163,19 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
             }
 
             try self.renderNow(app);
+        }
+
+        pub fn renderAsync(self: *LvglZuxRuntime, app: *ZuxAppType) !bool {
+            if (self.config.threaded) {
+                if (!self.command_open) return error.RuntimeClosed;
+                const sent = try self.commands.sendTimeout(.{ .render = .{
+                    .app = app,
+                } }, 0);
+                return sent.ok;
+            }
+
+            try self.renderNow(app);
+            return true;
         }
 
         pub fn reduce(self: *LvglZuxRuntime, stores: anytype, message: Message, emit: anytype) !usize {
@@ -219,9 +238,9 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
                 self.owns_lvgl = true;
             }
 
-            const width: usize = display.width();
-            const draw_size = width * self.config.display_rows * 3;
-            const flush_size = width * self.config.display_rows;
+            const flush_size = try display.maxFlushPixels();
+            if (flush_size == 0) return error.InvalidDisplay;
+            const draw_size = flush_size * 3;
             const draw_buffer = try self.allocator.alloc(u8, draw_size);
             errdefer self.allocator.free(draw_buffer);
             const flush_buffer = try self.allocator.alloc(embed_pkg.drivers.Display.Rgb, flush_size);
@@ -266,6 +285,24 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
             try self.single_button_bindings.append(self.allocator, binding_record);
         }
 
+        pub fn bindGroupedButton(self: *LvglZuxRuntime, button: Button, label: ZuxAppType.PeriphLabel, button_id: u32) !void {
+            const binding_record = try self.allocator.create(GroupedButtonBinding);
+            errdefer self.allocator.destroy(binding_record);
+
+            var obj = button.asObj();
+            binding_record.* = .{
+                .runtime = self,
+                .label = label,
+                .button_id = button_id,
+            };
+            binding_record.pressed_dsc = obj.addEventCallbackRaw(groupedButtonEventCb, Event.pressed, binding_record) orelse return error.OutOfMemory;
+            errdefer if (binding_record.pressed_dsc) |descriptor| obj.removeEventDescriptor(descriptor);
+            binding_record.released_dsc = obj.addEventCallbackRaw(groupedButtonEventCb, Event.released, binding_record) orelse return error.OutOfMemory;
+            errdefer if (binding_record.released_dsc) |descriptor| obj.removeEventDescriptor(descriptor);
+
+            try self.grouped_button_bindings.append(self.allocator, binding_record);
+        }
+
         pub fn refresh(self: *LvglZuxRuntime) void {
             if (!self.initialized) return;
             binding.lv_refr_now(self.displayRaw());
@@ -305,36 +342,8 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
         fn renderNow(self: *LvglZuxRuntime, app: *ZuxAppType) !void {
             const hook = self.render_hook orelse return error.MissingRenderFunc;
             self.render_seq += 1;
-            const seq = self.render_seq;
-            const started = grt.time.instant.now();
-            log.info("render begin seq={d}", .{seq});
-
-            const hook_started = grt.time.instant.now();
             try hook.render(self, app);
-            const hook_elapsed = elapsedSince(hook_started);
-            log.info("render hook done seq={d} elapsed_ms={d}", .{ seq, durationMs(hook_elapsed) });
-            if (hook_elapsed >= slow_render_threshold) {
-                log.warn("render hook slow seq={d} elapsed_ms={d}", .{ seq, durationMs(hook_elapsed) });
-            }
-
-            const refresh_started = grt.time.instant.now();
-            log.info("refresh begin seq={d}", .{seq});
             self.refresh();
-            const refresh_elapsed = elapsedSince(refresh_started);
-            log.info("refresh done seq={d} elapsed_ms={d}", .{ seq, durationMs(refresh_elapsed) });
-            if (refresh_elapsed >= slow_render_threshold) {
-                log.warn("refresh slow seq={d} elapsed_ms={d}", .{ seq, durationMs(refresh_elapsed) });
-            }
-
-            log.info("render end seq={d} elapsed_ms={d}", .{ seq, durationMs(elapsedSince(started)) });
-        }
-
-        fn elapsedSince(started: glib.time.instant.Time) glib.time.duration.Duration {
-            return @intCast(grt.time.instant.now() - started);
-        }
-
-        fn durationMs(duration: glib.time.duration.Duration) i64 {
-            return @divTrunc(duration, glib.time.duration.MilliSecond);
         }
 
         fn initInput(self: *LvglZuxRuntime, display: Display) !void {
@@ -380,14 +389,13 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
 
         fn read(self: *LvglZuxRuntime, data: *binding.IndevData) void {
             self.state_mu.lock();
-            defer self.state_mu.unlock();
+            const point_snapshot = self.last_point;
+            const pressed_snapshot = self.pressed;
+            self.state_mu.unlock();
 
-            data.point.x = @intCast(self.last_point.x);
-            data.point.y = @intCast(self.last_point.y);
-            data.state = @as(binding.IndevState, @intCast(@intFromEnum(if (self.pressed)
-                Indev.State.pressed
-            else
-                Indev.State.released)));
+            const state = if (pressed_snapshot) Indev.State.pressed else Indev.State.released;
+            var indev_data = Indev.Data.fromRaw(data);
+            indev_data.setPointer(@intCast(point_snapshot.x), @intCast(point_snapshot.y), state);
         }
 
         fn tick(self: *LvglZuxRuntime) void {
@@ -403,12 +411,29 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
             self.single_button_bindings = .empty;
         }
 
+        fn clearGroupedButtonBindings(self: *LvglZuxRuntime) void {
+            for (self.grouped_button_bindings.items) |binding_record| {
+                self.allocator.destroy(binding_record);
+            }
+            self.grouped_button_bindings.deinit(self.allocator);
+            self.grouped_button_bindings = .empty;
+        }
+
         fn emitSingleButton(self: *LvglZuxRuntime, label: ZuxAppType.PeriphLabel, pressed_value: bool) void {
             const app = self.zux_app orelse return;
             if (pressed_value) {
                 app.press_single_button(label) catch {};
             } else {
                 app.release_single_button(label) catch {};
+            }
+        }
+
+        fn emitGroupedButton(self: *LvglZuxRuntime, label: ZuxAppType.PeriphLabel, button_id: u32, pressed_value: bool) void {
+            const app = self.zux_app orelse return;
+            if (pressed_value) {
+                app.press_grouped_button(label, button_id) catch {};
+            } else {
+                app.release_grouped_button(label) catch {};
             }
         }
 
@@ -434,6 +459,21 @@ pub fn make(comptime grt: type, comptime ZuxAppType: type) type {
                 binding_record.runtime.emitSingleButton(binding_record.label, false);
             }
         }
+
+        fn groupedButtonEventCb(event: ?*binding.Event) callconv(.c) void {
+            const raw_event = event orelse return;
+            var wrapped = Event.fromRaw(raw_event);
+            const user_data = wrapped.userData() orelse return;
+            const binding_record: *GroupedButtonBinding = @ptrCast(@alignCast(user_data));
+            const event_code = wrapped.code();
+            if (event_code == Event.pressed) {
+                binding_record.runtime.emitGroupedButton(binding_record.label, binding_record.button_id, true);
+                return;
+            }
+            if (event_code == Event.released) {
+                binding_record.runtime.emitGroupedButton(binding_record.label, binding_record.button_id, false);
+            }
+        }
     };
 }
 
@@ -442,10 +482,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
     const TestCase = struct {
         const TestApp = struct {
-            pub const PeriphLabel = enum { button };
+            pub const PeriphLabel = enum { button, group };
 
             pressed_count: usize = 0,
             released_count: usize = 0,
+            grouped_pressed_count: usize = 0,
+            grouped_released_count: usize = 0,
+            last_grouped_button_id: ?u32 = null,
             render_count: usize = 0,
 
             pub fn press_single_button(self: *@This(), label: PeriphLabel) !void {
@@ -454,6 +497,17 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             pub fn release_single_button(self: *@This(), label: PeriphLabel) !void {
                 if (label == .button) self.released_count += 1;
+            }
+
+            pub fn press_grouped_button(self: *@This(), label: PeriphLabel, button_id: u32) !void {
+                if (label != .group) return;
+                self.grouped_pressed_count += 1;
+                self.last_grouped_button_id = button_id;
+            }
+
+            pub fn release_grouped_button(self: *@This(), label: PeriphLabel) !void {
+                if (label != .group) return;
+                self.grouped_released_count += 1;
             }
         };
 
@@ -472,7 +526,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return 3;
             }
 
-            fn drawBitmapFn(
+            fn maxFlushPixelsFn(_: *anyopaque) DisplayApi.Error!usize {
+                return 4 * 3;
+            }
+
+            fn flushFn(
                 ptr: *anyopaque,
                 _: u16,
                 _: u16,
@@ -488,7 +546,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 .deinit = deinitFn,
                 .width = widthFn,
                 .height = heightFn,
-                .drawBitmap = drawBitmapFn,
+                .maxFlushPixels = maxFlushPixelsFn,
+                .flush = flushFn,
             };
 
             fn api(self: *@This()) DisplayApi {
@@ -504,7 +563,6 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var runtime = try Runtime.init(.{
                 .allocator = allocator,
                 .threaded = false,
-                .display_rows = 2,
             });
             defer runtime.deinit();
 
@@ -512,8 +570,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expect(runtime.initialized);
             try grt.std.testing.expect(runtime.indev != null);
-            try grt.std.testing.expectEqual(@as(usize, 4 * 2 * 3), runtime.draw_buffer.len);
-            try grt.std.testing.expectEqual(@as(usize, 4 * 2), runtime.flush_buffer.len);
+            try grt.std.testing.expectEqual(@as(usize, 4 * 3 * 3), runtime.draw_buffer.len);
+            try grt.std.testing.expectEqual(@as(usize, 4 * 3), runtime.flush_buffer.len);
         }
 
         fn reduceRawTouchUpdatesInputState(_: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
@@ -541,13 +599,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var data: binding.IndevData = undefined;
             runtime.read(&data);
+            var indev_data = Indev.Data.fromRaw(&data);
 
-            try grt.std.testing.expectEqual(@as(i32, 12), data.point.x);
-            try grt.std.testing.expectEqual(@as(i32, 34), data.point.y);
-            try grt.std.testing.expectEqual(
-                @as(binding.IndevState, @intCast(@intFromEnum(Indev.State.pressed))),
-                data.state,
-            );
+            try grt.std.testing.expectEqual(@as(i32, 12), indev_data.pointX());
+            try grt.std.testing.expectEqual(@as(i32, 34), indev_data.pointY());
+            try grt.std.testing.expectEqual(Indev.State.pressed, indev_data.state());
 
             _ = try runtime.reduce({}, .{
                 .origin = .source,
@@ -562,12 +618,9 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             }, {});
             runtime.read(&data);
 
-            try grt.std.testing.expectEqual(@as(i32, 12), data.point.x);
-            try grt.std.testing.expectEqual(@as(i32, 34), data.point.y);
-            try grt.std.testing.expectEqual(
-                @as(binding.IndevState, @intCast(@intFromEnum(Indev.State.released))),
-                data.state,
-            );
+            try grt.std.testing.expectEqual(@as(i32, 12), indev_data.pointX());
+            try grt.std.testing.expectEqual(@as(i32, 34), indev_data.pointY());
+            try grt.std.testing.expectEqual(Indev.State.released, indev_data.state());
         }
 
         fn buttonEventsDispatchToBoundApp(_: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
@@ -595,6 +648,34 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             try grt.std.testing.expectEqual(@as(usize, 1), app.pressed_count);
             try grt.std.testing.expectEqual(@as(usize, 1), app.released_count);
+        }
+
+        fn groupedButtonEventsDispatchToBoundApp(_: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
+            var backend = DisplayBackend{};
+            var runtime = try Runtime.init(.{
+                .allocator = allocator,
+                .threaded = false,
+            });
+            defer runtime.deinit();
+            try runtime.ensureDisplay(backend.api());
+
+            var app = TestApp{};
+            runtime.bindZuxApp(&app);
+
+            var screen = runtime.displayHandle().activeScreen();
+            var button = Button.create(&screen) orelse return error.OutOfMemory;
+            var button_obj = button.asObj();
+            button_obj.setPos(10, 10);
+            button_obj.setSize(80, 40);
+            button_obj.updateLayout();
+
+            try runtime.bindGroupedButton(button, .group, 3);
+            _ = button_obj.sendEvent(Event.pressed, null);
+            _ = button_obj.sendEvent(Event.released, null);
+
+            try grt.std.testing.expectEqual(@as(usize, 1), app.grouped_pressed_count);
+            try grt.std.testing.expectEqual(@as(usize, 1), app.grouped_released_count);
+            try grt.std.testing.expectEqual(@as(?u32, 3), app.last_grouped_button_id);
         }
 
         fn renderCallsHookAndTracksSequence(_: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
@@ -652,6 +733,30 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(u64, 1), runtime.render_seq);
         }
 
+        fn threadedRenderAsyncQueuesWithoutWaiting(_: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
+            const Hook = struct {
+                fn render(_: *@This(), _: *Runtime, app: *TestApp) !void {
+                    app.render_count += 1;
+                }
+            };
+
+            var app = TestApp{};
+            var hook = Hook{};
+            var runtime = try Runtime.init(.{
+                .allocator = allocator,
+                .threaded = true,
+            });
+            defer runtime.deinit();
+            runtime.setRenderFunc(&hook, Hook.render);
+
+            try grt.std.testing.expect(try runtime.renderAsync(&app));
+            try grt.std.testing.expectEqual(@as(usize, 0), app.render_count);
+            try grt.std.testing.expect(runtime.runOnce(null));
+
+            try grt.std.testing.expectEqual(@as(usize, 1), app.render_count);
+            try grt.std.testing.expectEqual(@as(u64, 1), runtime.render_seq);
+        }
+
         fn threadedRenderReportsFullCommandQueue(_: *glib.testing.T, allocator: glib.std.mem.Allocator) !void {
             var app = TestApp{};
             var runtime = try Runtime.init(.{
@@ -702,12 +807,20 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, TestCase.buttonEventsDispatchToBoundApp),
             );
             t.run(
+                "lvgl/unit_tests/embed.LvglZuxRuntime/grouped_button_events_dispatch_to_bound_app",
+                glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, TestCase.groupedButtonEventsDispatchToBoundApp),
+            );
+            t.run(
                 "lvgl/unit_tests/embed.LvglZuxRuntime/render_calls_hook_and_tracks_sequence",
                 glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, TestCase.renderCallsHookAndTracksSequence),
             );
             t.run(
                 "lvgl/unit_tests/embed.LvglZuxRuntime/threaded_render_uses_render_argument",
                 glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, TestCase.threadedRenderUsesRenderArgument),
+            );
+            t.run(
+                "lvgl/unit_tests/embed.LvglZuxRuntime/threaded_render_async_queues_without_waiting",
+                glib.testing.TestRunner.fromFn(grt.std, 1024 * 1024, TestCase.threadedRenderAsyncQueuesWithoutWaiting),
             );
             t.run(
                 "lvgl/unit_tests/embed.LvglZuxRuntime/threaded_render_reports_full_command_queue",

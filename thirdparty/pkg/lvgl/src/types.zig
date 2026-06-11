@@ -36,6 +36,26 @@ pub const Align = enum(c_int) {
     out_right_bottom,
 };
 
+pub const FlexAlign = enum(c_int) {
+    start = 0,
+    end,
+    center,
+    space_evenly,
+    space_around,
+    space_between,
+};
+
+pub const FlexFlow = enum(c_int) {
+    row = 0,
+    column,
+    row_wrap = 4,
+    row_reverse = 8,
+    row_wrap_reverse = 12,
+    column_wrap = 5,
+    column_reverse = 9,
+    column_wrap_reverse = 13,
+};
+
 pub const Dir = packed struct(u8) {
     left: bool = false,
     right: bool = false,
@@ -83,6 +103,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(@intFromEnum(StyleRes.found) == 1);
 
             try grt.std.testing.expect(@intFromEnum(Align.center) == 9);
+            try grt.std.testing.expect(@intFromEnum(FlexAlign.center) == binding.LV_FLEX_ALIGN_CENTER);
+            try grt.std.testing.expect(@intFromEnum(FlexFlow.row) == binding.LV_FLEX_FLOW_ROW);
             try grt.std.testing.expectEqual(@as(u8, 0x0F), Dir.all.toInt());
             try grt.std.testing.expectEqual(@as(binding.Opa, 255), opa.cover);
         }

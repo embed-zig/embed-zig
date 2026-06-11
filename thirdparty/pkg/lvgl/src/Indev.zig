@@ -29,7 +29,44 @@ pub const Mode = enum(c_int) {
     event = 2,
 };
 
-pub const Data = binding.IndevData;
+pub const RawData = binding.IndevData;
+pub const Data = struct {
+    handle: *binding.IndevData,
+
+    pub fn fromRaw(handle: *binding.IndevData) Data {
+        return .{ .handle = handle };
+    }
+
+    pub fn raw(self: *const Data) *binding.IndevData {
+        return self.handle;
+    }
+
+    pub fn setPointer(self: *Data, x: i32, y: i32, next_state: State) void {
+        binding.embed_lv_indev_data_set_pointer(
+            self.handle,
+            x,
+            y,
+            if (next_state == .pressed) 1 else 0,
+            0,
+        );
+    }
+
+    pub fn pointX(self: *const Data) i32 {
+        return binding.embed_lv_indev_data_read_point_x(self.handle);
+    }
+
+    pub fn pointY(self: *const Data) i32 {
+        return binding.embed_lv_indev_data_read_point_y(self.handle);
+    }
+
+    pub fn stateRaw(self: *const Data) u32 {
+        return binding.embed_lv_indev_data_read_state(self.handle);
+    }
+
+    pub fn state(self: *const Data) State {
+        return @enumFromInt(self.stateRaw());
+    }
+};
 pub const ReadCb = binding.IndevReadCb;
 pub const KeyRemapCb = binding.IndevKeyRemapCb;
 pub const Group = binding.Group;
@@ -173,6 +210,10 @@ pub fn getPoint(self: *const Self) binding.Point {
     var p: binding.Point = undefined;
     binding.lv_indev_get_point(self.handle, &p);
     return p;
+}
+
+pub fn getState(self: *const Self) State {
+    return @enumFromInt(binding.lv_indev_get_state(self.handle));
 }
 
 pub fn getKey(self: *const Self) u32 {

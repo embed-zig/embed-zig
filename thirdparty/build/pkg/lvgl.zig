@@ -7,6 +7,8 @@ var osal_module: ?*std.Build.Module = null;
 var resolved_target: ?std.Build.ResolvedTarget = null;
 var resolved_optimize: ?std.builtin.OptimizeMode = null;
 var has_custom_config_header: bool = false;
+var c_sysroot: ?[]const u8 = null;
+var c_short_enums: bool = false;
 var upstream_archive: ?buildtools.Archive = null;
 
 /// Pinned upstream tree, fetched over HTTPS from GitHub codeload.
@@ -494,6 +496,17 @@ pub fn create(
         "lvgl_config_header",
         "Optional path to a complete LVGL config header; otherwise use pkg/lvgl/config.default.h",
     );
+    const selected_c_sysroot = b.option(
+        []const u8,
+        "lvgl_c_sysroot",
+        "Optional C sysroot used when compiling LVGL for freestanding embedded targets",
+    ) orelse "";
+    c_short_enums = b.option(
+        bool,
+        "lvgl_c_short_enums",
+        "Compile LVGL C sources with -fshort-enums to match embedded GCC ABI settings",
+    ) orelse false;
+    c_sysroot = if (selected_c_sysroot.len == 0) null else b.dupe(selected_c_sysroot);
     has_custom_config_header = custom_config_header != null;
     const config_header = createConfigHeader(
         b,
@@ -511,12 +524,17 @@ pub fn create(
         }),
     });
     addCommonIncludes(b, lib.root_module, repo, config_header);
+    const c_flags: []const []const u8 = if (c_short_enums)
+        &.{ "-g0", "-fshort-enums" }
+    else
+        &.{"-g0"};
     lib.root_module.addCSourceFiles(.{
         .root = repo.root(),
         .files = c_sources,
-        .flags = &.{"-g0"},
+        .flags = c_flags,
     });
-    lib.root_module.addCSourceFile(.{ .file = b.path("pkg/lvgl/src/binding.c"), .flags = &.{"-g0"} });
+    lib.root_module.addCSourceFile(.{ .file = b.path("pkg/lvgl/src/binding.c"), .flags = c_flags });
+    b.installArtifact(lib);
     repo.dependOn(&lib.step);
 
     const mod = b.createModule(.{
@@ -576,6 +594,11 @@ fn addCommonIncludes(
     mod.addIncludePath(repo.includePath("."));
     mod.addIncludePath(b.path("pkg/lvgl/include"));
     if (b.sysroot) |sysroot| {
+        mod.addSystemIncludePath(.{
+            .cwd_relative = b.pathJoin(&.{ sysroot, "include" }),
+        });
+    }
+    if (c_sysroot) |sysroot| {
         mod.addSystemIncludePath(.{
             .cwd_relative = b.pathJoin(&.{ sysroot, "include" }),
         });

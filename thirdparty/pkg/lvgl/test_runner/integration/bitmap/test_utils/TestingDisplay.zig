@@ -54,7 +54,11 @@ const Adapter = struct {
         return self.testing_display.height_px;
     }
 
-    pub fn drawBitmap(
+    pub fn maxFlushPixels(self: *@This()) Error!usize {
+        return @as(usize, self.testing_display.width_px) * @as(usize, self.testing_display.height_px);
+    }
+
+    pub fn flush(
         self: *@This(),
         x: u16,
         y: u16,

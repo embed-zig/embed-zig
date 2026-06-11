@@ -158,7 +158,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     return 3;
                 }
 
-                fn drawBitmapFn(
+                fn maxFlushPixelsFn(_: *anyopaque) DisplayApi.Error!usize {
+                    return 4 * 3;
+                }
+
+                fn flushFn(
                     ptr: *anyopaque,
                     x: u16,
                     y: u16,
@@ -180,7 +184,8 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                     .deinit = deinitFn,
                     .width = widthFn,
                     .height = heightFn,
-                    .drawBitmap = drawBitmapFn,
+                    .maxFlushPixels = maxFlushPixelsFn,
+                    .flush = flushFn,
                 };
 
                 fn api(self: *@This()) DisplayApi {

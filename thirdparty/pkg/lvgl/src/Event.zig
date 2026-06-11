@@ -6,8 +6,13 @@ const Self = @This();
 handle: *binding.Event,
 
 pub const Code = binding.EventCode;
+pub const all: Code = codeFromInt(binding.LV_EVENT_ALL);
 pub const clicked: Code = codeFromInt(binding.LV_EVENT_CLICKED);
 pub const pressed: Code = codeFromInt(binding.LV_EVENT_PRESSED);
+pub const pressing: Code = codeFromInt(binding.LV_EVENT_PRESSING);
+pub const press_lost: Code = codeFromInt(binding.LV_EVENT_PRESS_LOST);
+pub const short_clicked: Code = codeFromInt(binding.LV_EVENT_SHORT_CLICKED);
+pub const long_pressed: Code = codeFromInt(binding.LV_EVENT_LONG_PRESSED);
 pub const released: Code = codeFromInt(binding.LV_EVENT_RELEASED);
 
 pub fn fromRaw(handle: *binding.Event) Self {

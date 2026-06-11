@@ -7,6 +7,7 @@ pub const Value = u32;
 pub const default: Value = @intCast(binding.LV_STATE_DEFAULT);
 pub const pressed: Value = @intCast(binding.LV_STATE_PRESSED);
 pub const focused: Value = @intCast(binding.LV_STATE_FOCUSED);
+pub const focus_key: Value = @intCast(binding.LV_STATE_FOCUS_KEY);
 pub const disabled: Value = @intCast(binding.LV_STATE_DISABLED);
 pub const checked: Value = @intCast(binding.LV_STATE_CHECKED);
 pub const user_4: Value = @intCast(binding.LV_STATE_USER_4);

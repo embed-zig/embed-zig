@@ -22,6 +22,8 @@ pub const PointPrecise = c.lv_point_precise_t;
 pub const Area = c.lv_area_t;
 pub const Align = c.lv_align_t;
 pub const Dir = c.lv_dir_t;
+pub const FlexAlign = c.lv_flex_align_t;
+pub const FlexFlow = c.lv_flex_flow_t;
 
 pub const Style = c.lv_style_t;
 pub const StyleSelector = c.lv_style_selector_t;
@@ -41,7 +43,35 @@ pub const Obj = c.lv_obj_t;
 pub const ObjFlag = c.lv_obj_flag_t;
 pub const State = c.lv_state_t;
 pub const Part = c.lv_part_t;
+pub const Font = c.lv_font_t;
+pub const FontKerning = c.lv_font_kerning_t;
 pub const LabelLongMode = c.lv_label_long_mode_t;
+pub const ImageHeader = extern struct {
+    word0: u32,
+    word1: u32,
+    word2: u32,
+};
+
+pub const ImageDsc = extern struct {
+    header: ImageHeader,
+    data_size: u32,
+    data: [*c]const u8,
+    reserved: ?*const anyopaque = null,
+    reserved_2: ?*const anyopaque = null,
+};
+
+pub fn imageHeader(color_format: ColorFormat, width: u32, height: u32, stride: u32, flags: u16) ImageHeader {
+    return .{
+        .word0 = (@as(u32, @intCast(LV_IMAGE_HEADER_MAGIC)) & 0xff) |
+            ((@as(u32, @intCast(color_format)) & 0xff) << 8) |
+            (@as(u32, flags) << 16),
+        .word1 = (@as(u32, @intCast(width)) & 0xffff) |
+            ((@as(u32, @intCast(height)) & 0xffff) << 16),
+        .word2 = @as(u32, @intCast(stride)) & 0xffff,
+    };
+}
+pub const ButtonMatrixCtrl = c.lv_buttonmatrix_ctrl_t;
+pub const KeyboardMode = c.lv_keyboard_mode_t;
 pub const Event = c.lv_event_t;
 pub const EventDsc = c.lv_event_dsc_t;
 pub const EventCallback = c.lv_event_cb_t;
@@ -65,7 +95,10 @@ pub const LV_COLOR_DEPTH = c.LV_COLOR_DEPTH;
 pub const LV_RESULT_OK: Result = @intCast(c.LV_RESULT_OK);
 pub const LV_RESULT_INVALID: Result = @intCast(c.LV_RESULT_INVALID);
 pub const LV_COLOR_FORMAT_RGB565 = c.LV_COLOR_FORMAT_RGB565;
+pub const LV_COLOR_FORMAT_RGB565A8 = c.LV_COLOR_FORMAT_RGB565A8;
 pub const LV_COLOR_FORMAT_RGB888 = c.LV_COLOR_FORMAT_RGB888;
+pub const LV_COLOR_FORMAT_ARGB8888 = c.LV_COLOR_FORMAT_ARGB8888;
+pub const LV_IMAGE_HEADER_MAGIC = c.LV_IMAGE_HEADER_MAGIC;
 pub const LV_NO_TIMER_READY = c.LV_NO_TIMER_READY;
 pub const LV_ANIM_REPEAT_INFINITE = c.LV_ANIM_REPEAT_INFINITE;
 pub const LV_ANIM_PLAYTIME_INFINITE = c.LV_ANIM_PLAYTIME_INFINITE;
@@ -76,10 +109,12 @@ pub const LV_DISPLAY_RENDER_MODE_FULL = c.LV_DISPLAY_RENDER_MODE_FULL;
 pub const LV_STYLE_WIDTH = c.LV_STYLE_WIDTH;
 pub const LV_PART_MAIN = c.LV_PART_MAIN;
 pub const LV_PART_INDICATOR = c.LV_PART_INDICATOR;
+pub const LV_PART_ITEMS = c.LV_PART_ITEMS;
 pub const LV_PART_ANY = c.LV_PART_ANY;
 pub const LV_STATE_DEFAULT = c.LV_STATE_DEFAULT;
 pub const LV_STATE_PRESSED = c.LV_STATE_PRESSED;
 pub const LV_STATE_FOCUSED = c.LV_STATE_FOCUSED;
+pub const LV_STATE_FOCUS_KEY = c.LV_STATE_FOCUS_KEY;
 pub const LV_STATE_DISABLED = c.LV_STATE_DISABLED;
 pub const LV_STATE_CHECKED = c.LV_STATE_CHECKED;
 pub const LV_STATE_USER_4 = c.LV_STATE_USER_4;
@@ -94,9 +129,28 @@ pub const LV_LABEL_LONG_MODE_DOTS = c.LV_LABEL_LONG_MODE_DOTS;
 pub const LV_LABEL_LONG_MODE_SCROLL = c.LV_LABEL_LONG_MODE_SCROLL;
 pub const LV_LABEL_LONG_MODE_SCROLL_CIRCULAR = c.LV_LABEL_LONG_MODE_SCROLL_CIRCULAR;
 pub const LV_LABEL_LONG_MODE_CLIP = c.LV_LABEL_LONG_MODE_CLIP;
+pub const LV_BUTTONMATRIX_CTRL_WIDTH_1 = c.LV_BUTTONMATRIX_CTRL_WIDTH_1;
+pub const LV_BUTTONMATRIX_CTRL_CLICK_TRIG = c.LV_BUTTONMATRIX_CTRL_CLICK_TRIG;
+pub const LV_BUTTONMATRIX_CTRL_CHECKED = c.LV_BUTTONMATRIX_CTRL_CHECKED;
+pub const LV_BUTTONMATRIX_BUTTON_NONE = c.LV_BUTTONMATRIX_BUTTON_NONE;
+pub const LV_KEYBOARD_MODE_TEXT_LOWER = c.LV_KEYBOARD_MODE_TEXT_LOWER;
+pub const LV_KEYBOARD_MODE_TEXT_UPPER = c.LV_KEYBOARD_MODE_TEXT_UPPER;
+pub const LV_KEYBOARD_MODE_SPECIAL = c.LV_KEYBOARD_MODE_SPECIAL;
+pub const LV_KEYBOARD_MODE_NUMBER = c.LV_KEYBOARD_MODE_NUMBER;
+pub const LV_EVENT_ALL = c.LV_EVENT_ALL;
 pub const LV_EVENT_CLICKED = c.LV_EVENT_CLICKED;
 pub const LV_EVENT_PRESSED = c.LV_EVENT_PRESSED;
+pub const LV_EVENT_PRESSING = c.LV_EVENT_PRESSING;
+pub const LV_EVENT_PRESS_LOST = c.LV_EVENT_PRESS_LOST;
+pub const LV_EVENT_SHORT_CLICKED = c.LV_EVENT_SHORT_CLICKED;
+pub const LV_EVENT_LONG_PRESSED = c.LV_EVENT_LONG_PRESSED;
 pub const LV_EVENT_RELEASED = c.LV_EVENT_RELEASED;
+pub const LV_EVENT_VALUE_CHANGED = c.LV_EVENT_VALUE_CHANGED;
+pub const LV_EVENT_READY = c.LV_EVENT_READY;
+pub const LV_FLEX_ALIGN_CENTER = c.LV_FLEX_ALIGN_CENTER;
+pub const LV_FLEX_FLOW_ROW = c.LV_FLEX_FLOW_ROW;
+pub const LV_FONT_KERNING_NORMAL = c.LV_FONT_KERNING_NORMAL;
+pub const LV_FONT_KERNING_NONE = c.LV_FONT_KERNING_NONE;
 
 pub const lv_init = c.lv_init;
 pub const lv_deinit = c.lv_deinit;
@@ -156,6 +210,12 @@ pub const lv_style_set_prop = c.lv_style_set_prop;
 pub const lv_style_get_prop = c.lv_style_get_prop;
 pub const lv_style_is_empty = c.lv_style_is_empty;
 pub const lv_style_set_width = c.lv_style_set_width;
+pub const lv_style_set_text_font = c.lv_style_set_text_font;
+
+pub const lv_font_get_default = c.lv_font_get_default;
+pub const lv_font_get_line_height = c.lv_font_get_line_height;
+pub const lv_font_get_glyph_width = c.lv_font_get_glyph_width;
+pub const lv_font_set_kerning = c.lv_font_set_kerning;
 
 pub const lv_display_create = c.lv_display_create;
 pub const lv_display_delete = c.lv_display_delete;
@@ -182,6 +242,9 @@ pub const lv_display_get_physical_vertical_resolution = c.lv_display_get_physica
 pub const lv_display_get_offset_x = c.lv_display_get_offset_x;
 pub const lv_display_get_offset_y = c.lv_display_get_offset_y;
 pub const lv_display_get_rotation = c.lv_display_get_rotation;
+pub const lv_display_get_layer_top = c.lv_display_get_layer_top;
+pub const lv_display_get_layer_sys = c.lv_display_get_layer_sys;
+pub const lv_display_get_layer_bottom = c.lv_display_get_layer_bottom;
 pub const lv_display_get_dpi = c.lv_display_get_dpi;
 
 pub const lv_indev_create = c.lv_indev_create;
@@ -211,6 +274,7 @@ pub const lv_indev_set_cursor = c.lv_indev_set_cursor;
 pub const lv_indev_set_group = c.lv_indev_set_group;
 pub const lv_indev_get_group = c.lv_indev_get_group;
 pub const lv_indev_set_button_points = c.lv_indev_set_button_points;
+pub const lv_indev_get_state = c.lv_indev_get_state;
 pub const lv_indev_get_point = c.lv_indev_get_point;
 pub const lv_indev_get_key = c.lv_indev_get_key;
 pub const lv_indev_get_scroll_dir = c.lv_indev_get_scroll_dir;
@@ -275,6 +339,9 @@ pub const lv_obj_set_style_pad_hor = c.lv_obj_set_style_pad_hor;
 pub const lv_obj_set_style_pad_ver = c.lv_obj_set_style_pad_ver;
 pub const lv_obj_set_style_radius = c.lv_obj_set_style_radius;
 pub const lv_obj_set_style_text_color = c.lv_obj_set_style_text_color;
+pub const lv_obj_set_style_text_font = c.lv_obj_set_style_text_font;
+pub const lv_obj_set_flex_flow = c.lv_obj_set_flex_flow;
+pub const lv_obj_set_flex_align = c.lv_obj_set_flex_align;
 pub const lv_obj_refresh_style = c.lv_obj_refresh_style;
 pub const lv_obj_get_style_prop = c.lv_obj_get_style_prop;
 pub const lv_obj_has_style_prop = c.lv_obj_has_style_prop;
@@ -301,10 +368,41 @@ pub const lv_label_set_text_static = c.lv_label_set_text_static;
 pub const lv_label_get_text = c.lv_label_get_text;
 pub const lv_label_set_long_mode = c.lv_label_set_long_mode;
 pub const lv_label_get_long_mode = c.lv_label_get_long_mode;
+pub const lv_image_create = c.lv_image_create;
+pub const lv_image_set_src = c.lv_image_set_src;
+pub const lv_image_get_src = c.lv_image_get_src;
 pub const lv_button_create = c.lv_button_create;
+pub const lv_buttonmatrix_create = c.lv_buttonmatrix_create;
+pub const lv_buttonmatrix_set_map = c.lv_buttonmatrix_set_map;
+pub const lv_buttonmatrix_set_ctrl_map = c.lv_buttonmatrix_set_ctrl_map;
+pub const lv_buttonmatrix_set_selected_button = c.lv_buttonmatrix_set_selected_button;
+pub const lv_buttonmatrix_get_selected_button = c.lv_buttonmatrix_get_selected_button;
+pub const lv_buttonmatrix_get_button_text = c.lv_buttonmatrix_get_button_text;
+pub const lv_keyboard_create = c.lv_keyboard_create;
+pub const lv_keyboard_set_textarea = c.lv_keyboard_set_textarea;
+pub const lv_keyboard_set_mode = c.lv_keyboard_set_mode;
+pub const lv_keyboard_get_mode = c.lv_keyboard_get_mode;
+pub const lv_keyboard_set_popovers = c.lv_keyboard_set_popovers;
+pub const lv_keyboard_set_map = c.lv_keyboard_set_map;
+pub const lv_keyboard_get_selected_button = c.lv_keyboard_get_selected_button;
+pub const lv_keyboard_get_button_text = c.lv_keyboard_get_button_text;
+pub const lv_textarea_create = c.lv_textarea_create;
+pub const lv_textarea_set_text = c.lv_textarea_set_text;
+pub const lv_textarea_get_text = c.lv_textarea_get_text;
+pub const lv_textarea_add_char = c.lv_textarea_add_char;
+pub const lv_textarea_delete_char = c.lv_textarea_delete_char;
+pub const lv_textarea_set_one_line = c.lv_textarea_set_one_line;
+pub const lv_textarea_set_password_mode = c.lv_textarea_set_password_mode;
 pub const lv_bar_create = c.lv_bar_create;
 pub const lv_bar_set_range = c.lv_bar_set_range;
 pub const lv_bar_set_value = c.lv_bar_set_value;
+
+pub extern fn lv_tiny_ttf_create_file(path: [*:0]const u8, font_size: i32) ?*Font;
+pub extern fn lv_tiny_ttf_create_file_ex(path: [*:0]const u8, font_size: i32, kerning: FontKerning, cache_size: usize) ?*Font;
+pub extern fn lv_tiny_ttf_create_data(data: [*]const u8, data_size: usize, font_size: i32) ?*Font;
+pub extern fn lv_tiny_ttf_create_data_ex(data: [*]const u8, data_size: usize, font_size: i32, kerning: FontKerning, cache_size: usize) ?*Font;
+pub extern fn lv_tiny_ttf_set_size(font: ?*Font, font_size: i32) void;
+pub extern fn lv_tiny_ttf_destroy(font: ?*Font) void;
 
 pub const lv_event_get_target = c.lv_event_get_target;
 pub const lv_event_get_current_target = c.lv_event_get_current_target;
@@ -318,6 +416,11 @@ pub const lv_event_stop_trickling = c.lv_event_stop_trickling;
 pub const lv_event_stop_processing = c.lv_event_stop_processing;
 pub const lv_event_register_id = c.lv_event_register_id;
 pub const lv_event_code_get_name = c.lv_event_code_get_name;
+
+pub extern fn embed_lv_indev_data_read_state(data: *const IndevData) u32;
+pub extern fn embed_lv_indev_data_read_point_x(data: *const IndevData) i32;
+pub extern fn embed_lv_indev_data_read_point_y(data: *const IndevData) i32;
+pub extern fn embed_lv_indev_data_set_pointer(data: *IndevData, x: i32, y: i32, pressed: u8, continue_reading: u8) void;
 
 pub extern fn embed_lv_obj_set_style_bg_color_rgb(obj: ?*Obj, red: u8, green: u8, blue: u8, selector: StyleSelector) void;
 pub extern fn embed_lv_obj_set_style_text_color_rgb(obj: ?*Obj, red: u8, green: u8, blue: u8, selector: StyleSelector) void;
@@ -411,6 +514,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             _ = lv_label_create;
             _ = lv_label_get_text;
             _ = lv_button_create;
+            _ = lv_keyboard_create;
+            _ = lv_keyboard_set_map;
+            _ = lv_keyboard_set_textarea;
+            _ = lv_textarea_create;
+            _ = lv_textarea_set_text;
+            _ = lv_buttonmatrix_set_selected_button;
             _ = lv_event_get_code;
             _ = lv_event_get_target_obj;
             _ = lv_anim_init;
