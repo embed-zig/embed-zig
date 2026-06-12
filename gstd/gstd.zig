@@ -1,15 +1,19 @@
 const glib = @import("glib");
 const mbedtls_osal = @import("mbedtls_osal");
 const ChannelType = @import("src/sync/Channel.zig");
+const fs_backend = @import("src/fs.zig");
 const net_backend = @import("src/net.zig");
 const stdz_backend = @import("src/stdz.zig");
 const time_backend = @import("src/time.zig");
+
+pub const fs = fs_backend;
 
 pub const runtime = glib.runtime.make(.{
     .stdz_impl = stdz_backend,
     .time_impl = time_backend.impl,
     .channel_factory = ChannelType.ChannelFactory,
     .net_impl = net_backend.impl,
+    .fs_impl = fs_backend.impl,
 });
 
 const mbedtls_exports = mbedtls_osal.make(runtime);
@@ -20,4 +24,5 @@ comptime {
 
 pub const test_support = struct {
     pub const net = net_backend.posix_impl;
+    pub const fs = fs_backend.impl;
 };

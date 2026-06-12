@@ -22,5 +22,6 @@ pub fn link(mod: *std.Build.Module, deps: anytype) void {
     mod.addImport("encoding", deps.encoding);
     mod.addImport("mime", deps.mime);
     mod.addImport("net", deps.net);
+    mod.addImport("fs", deps.fs);
     mod.addImport("crypto", deps.crypto);
 }

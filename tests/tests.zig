@@ -19,6 +19,7 @@ const glib_unit_base_modules = .{
     @import("glib_unit/context_gstd.zig"),
     @import("glib_unit/crypto_gstd.zig"),
     @import("glib_unit/encoding_gstd.zig"),
+    @import("glib_unit/fs_gstd.zig"),
     @import("glib_unit/io_gstd.zig"),
     @import("glib_unit/mime_gstd.zig"),
     @import("glib_unit/net_gstd.zig"),
@@ -31,6 +32,7 @@ const glib_unit_base_modules = .{
 const glib_unit_non_linux_modules = .{
     @import("glib_unit/context_std.zig"),
     @import("glib_unit/encoding_std.zig"),
+    @import("glib_unit/fs_std.zig"),
     @import("glib_unit/io_std.zig"),
     @import("glib_unit/mime_std.zig"),
     @import("glib_unit/net_std.zig"),
@@ -89,6 +91,7 @@ const apps_integration_base_modules = .{
 
 const apps_zux_base_modules = .{
     @import("apps_zux/button_ledstrip.zig"),
+    @import("apps_zux/fs_smoke.zig"),
 };
 
 const openapi_codegen_unit_base_modules = .{

@@ -18,6 +18,7 @@ else
 
 const PlatformCtx = struct {
     pub const AudioSystem = Board.AudioSystem;
+    pub const fs = esp.fs;
 
     pub fn bleSpeedThreadSpawnConfig() esp.grt.std.Thread.SpawnConfig {
         return .{

@@ -128,6 +128,7 @@ pub const io = @import("io");
 pub const encoding = @import("encoding");
 pub const mime = @import("mime");
 pub const net = @import("net");
+pub const fs = @import("fs");
 pub const crypto = @import("crypto");
 pub const runtime = struct {
     const Runtime = @This();
@@ -137,6 +138,7 @@ pub const runtime = struct {
         time_impl: type,
         channel_factory: @import("sync").channel.FactoryType,
         net_impl: type,
+        fs_impl: type,
     };
 
     pub fn make(comptime options: Options) type {
@@ -144,6 +146,7 @@ pub const runtime = struct {
         const runtime_time = @import("time").make(options.time_impl);
         const channel_factory = options.channel_factory;
         const net_impl = options.net_impl;
+        const fs_impl = options.fs_impl;
 
         return struct {
             const runtime_marker: TypeMarker = .{};
@@ -161,6 +164,7 @@ pub const runtime = struct {
                 }
             };
             pub const net = @import("net").make(runtime_std, runtime_time, net_impl);
+            pub const fs = @import("fs").make(runtime_std, fs_impl);
         };
     }
 
