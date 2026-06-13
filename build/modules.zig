@@ -39,6 +39,7 @@ pub const apps_modules = [_]ModuleSpec{
     module2("apps", "glib_integration-test-sync"),
     module2("apps", "glib_integration-test-net"),
     module2("apps", "zux_button-ledstrip"),
+    module2("apps", "zux_compress-smoke"),
     module2("apps", "zux_fs-smoke"),
 };
 

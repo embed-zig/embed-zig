@@ -6,6 +6,7 @@ pub const task = @import("grt/task.zig");
 pub const time = @import("grt/time.zig");
 pub const net = @import("grt/net.zig");
 pub const fs = @import("grt/fs.zig");
+pub const compress = @import("grt/compress.zig");
 
 const stdz_impl = struct {
     pub const heap = std.heap;
@@ -23,5 +24,6 @@ pub const runtime: glib.runtime.Options = .{
     .channel_factory = sync.ChannelFactory,
     .net_impl = net.Runtime,
     .fs_impl = fs.impl,
+    .compress_impl = compress.impl,
     .task_impl = task.impl,
 };

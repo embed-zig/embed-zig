@@ -23,6 +23,7 @@ const Component = @import("Component.zig");
 const Self = @This();
 const Module = std.Build.Module;
 const grt_idf_requires = [_][]const u8{
+    "esp_rom",
     "freertos",
     "heap",
     "esp_hw_support",
@@ -37,6 +38,7 @@ const grt_source_files = [_][]const u8{
     "sync/channel/binding.c",
     "time/binding.c",
     "net/binding.c",
+    "compress/binding.c",
 };
 const embed_idf_requires = [_][]const u8{
     "esp_driver_i2c",

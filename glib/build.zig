@@ -10,6 +10,7 @@ const lib_encoding = @import("build/lib/encoding.zig");
 const lib_mime = @import("build/lib/mime.zig");
 const lib_net = @import("build/lib/net.zig");
 const lib_fs = @import("build/lib/fs.zig");
+const lib_compress = @import("build/lib/compress.zig");
 const lib_crypto = @import("build/lib/crypto.zig");
 const lib_glib = @import("build/lib/glib.zig");
 
@@ -27,6 +28,7 @@ pub fn build(b: *std.Build) void {
     const mime_mod = lib_mime.create(b, target, optimize);
     const net_mod = lib_net.create(b, target, optimize);
     const fs_mod = lib_fs.create(b, target, optimize);
+    const compress_mod = lib_compress.create(b, target, optimize);
     const crypto_mod = lib_crypto.create(b, target, optimize);
 
     lib_stdz.link(stdz_mod);
@@ -71,6 +73,9 @@ pub fn build(b: *std.Build) void {
     lib_fs.link(fs_mod, .{
         .testing = testing_mod,
     });
+    lib_compress.link(compress_mod, .{
+        .testing = testing_mod,
+    });
     lib_crypto.link(crypto_mod, .{
         .testing = testing_mod,
     });
@@ -84,6 +89,7 @@ pub fn build(b: *std.Build) void {
     b.modules.put("mime", mime_mod) catch @panic("OOM");
     b.modules.put("net", net_mod) catch @panic("OOM");
     b.modules.put("fs", fs_mod) catch @panic("OOM");
+    b.modules.put("compress", compress_mod) catch @panic("OOM");
     b.modules.put("crypto", crypto_mod) catch @panic("OOM");
 
     const glib_mod = lib_glib.create(b, target, optimize);
@@ -98,6 +104,7 @@ pub fn build(b: *std.Build) void {
         .mime = mime_mod,
         .net = net_mod,
         .fs = fs_mod,
+        .compress = compress_mod,
         .crypto = crypto_mod,
     });
     b.modules.put("glib", glib_mod) catch @panic("OOM");

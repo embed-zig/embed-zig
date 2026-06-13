@@ -129,6 +129,7 @@ pub const encoding = @import("encoding");
 pub const mime = @import("mime");
 pub const net = @import("net");
 pub const fs = @import("fs");
+pub const compress = @import("compress");
 pub const crypto = @import("crypto");
 pub const runtime = struct {
     const Runtime = @This();
@@ -139,6 +140,7 @@ pub const runtime = struct {
         channel_factory: @import("sync").channel.FactoryType,
         net_impl: type,
         fs_impl: type,
+        compress_impl: type = void,
     };
 
     pub fn make(comptime options: Options) type {
@@ -165,6 +167,7 @@ pub const runtime = struct {
             };
             pub const net = @import("net").make(runtime_std, runtime_time, net_impl);
             pub const fs = @import("fs").make(runtime_std, fs_impl);
+            pub const compress = if (options.compress_impl == void) void else @import("compress").make(runtime_std, options.compress_impl);
         };
     }
 
