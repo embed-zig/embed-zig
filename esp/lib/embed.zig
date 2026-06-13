@@ -7,6 +7,7 @@ pub const bt = @import("embed/bt.zig");
 pub const drivers = embed_core.drivers;
 pub const ledstrip = embed_core.ledstrip;
 pub const motion = embed_core.motion;
+pub const system = @import("embed/system.zig");
 pub const zux = embed_core.zux;
 pub const audio_adapter = @import("embed/audio.zig");
 pub const BtHost = @import("embed/BtHost.zig");

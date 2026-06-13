@@ -12,6 +12,7 @@ const glib_unit_test_testing = @import("glib/unit-test/testing/build.zig");
 const zux_button_ledstrip = @import("zux/button-ledstrip/build.zig");
 const zux_compress_smoke = @import("zux/compress-smoke/build.zig");
 const zux_fs_smoke = @import("zux/fs-smoke/build.zig");
+const zux_preferences_smoke = @import("zux/preferences-smoke/build.zig");
 
 const AppRegistry = struct {
     b: *std.Build,
@@ -92,4 +93,5 @@ pub fn build(b: *std.Build) void {
     zux_button_ledstrip.register(&registry);
     zux_compress_smoke.register(&registry);
     zux_fs_smoke.register(&registry);
+    zux_preferences_smoke.register(&registry);
 }

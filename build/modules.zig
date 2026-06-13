@@ -41,6 +41,7 @@ pub const apps_modules = [_]ModuleSpec{
     module2("apps", "zux_button-ledstrip"),
     module2("apps", "zux_compress-smoke"),
     module2("apps", "zux_fs-smoke"),
+    module2("apps", "zux_preferences-smoke"),
 };
 
 fn module(name: []const u8) ModuleSpec {

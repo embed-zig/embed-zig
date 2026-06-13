@@ -95,6 +95,7 @@ const apps_zux_base_modules = .{
     @import("apps_zux/button_ledstrip.zig"),
     @import("apps_zux/compress_smoke.zig"),
     @import("apps_zux/fs_smoke.zig"),
+    @import("apps_zux/preferences_smoke.zig"),
 };
 
 const openapi_codegen_unit_base_modules = .{
@@ -113,6 +114,7 @@ const embed_unit_base_modules = .{
     @import("embed_unit/drivers_gstd.zig"),
     @import("embed_unit/ledstrip_gstd.zig"),
     @import("embed_unit/motion_gstd.zig"),
+    @import("embed_unit/system_gstd.zig"),
     @import("embed_unit/zux_gstd.zig"),
 };
 
@@ -122,6 +124,7 @@ const embed_unit_non_linux_modules = .{
     @import("embed_unit/drivers_std.zig"),
     @import("embed_unit/ledstrip_std.zig"),
     @import("embed_unit/motion_std.zig"),
+    @import("embed_unit/system_std.zig"),
     @import("embed_unit/zux_std.zig"),
 };
 

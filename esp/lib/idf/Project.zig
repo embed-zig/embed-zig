@@ -52,6 +52,7 @@ const embed_idf_requires = [_][]const u8{
 const embed_source_files = [_][]const u8{
     "display/native_dbi.c",
     "i2c/binding.c",
+    "system/preferences_binding.c",
     "wifi/sta_binding.c",
 };
 
