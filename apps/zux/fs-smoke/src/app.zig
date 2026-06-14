@@ -3,6 +3,8 @@ const launcher = @import("launcher");
 
 const smoke_payload = "hello from zux fs smoke";
 const stream_payload = "streamed zux fs payload across small chunks";
+const speed_test_bytes: usize = 64 * 1024;
+const speed_chunk_bytes: usize = 1024;
 
 fn EmptyRegistry(comptime T: type) type {
     return struct {
@@ -126,6 +128,8 @@ pub fn make(comptime platform_ctx: type, comptime platform_grt: type) type {
 
 pub fn testRunner(comptime platform_ctx: type, comptime platform_grt: type) glib.testing.TestRunner {
     const Runner = struct {
+        spawn_config: glib.std.Thread.SpawnConfig = .{ .stack_size = 24 * 1024 },
+
         pub fn init(self: *@This(), allocator: platform_grt.std.mem.Allocator) !void {
             _ = self;
             _ = allocator;
@@ -199,6 +203,9 @@ fn runSmoke(comptime platform_ctx: type, comptime platform_grt: type, allocator:
 
     log.info("streaming fs smoke payload to {s}", .{stream_path});
     try runStreamingSmoke(platform_grt, Fs, stream_path);
+
+    try runSpeedSmoke(platform_ctx, platform_grt, Fs);
+    try runEnsureParentDirsSmoke(platform_ctx, platform_grt, Fs, allocator);
     log.info("fs smoke passed", .{});
 }
 
@@ -245,6 +252,139 @@ fn runStreamingSmoke(comptime platform_grt: type, comptime Fs: type, path: []con
 
     const eof = try file.read(&scratch);
     if (eof != 0) return error.ExpectedEof;
+}
+
+fn runSpeedSmoke(
+    comptime platform_ctx: type,
+    comptime platform_grt: type,
+    comptime Fs: type,
+) !void {
+    const log = platform_grt.std.log.scoped(.zux_fs_smoke);
+    const path = comptime smokePath(platform_ctx, "fsbench.bin");
+    Fs.deleteFile(path) catch {};
+    defer Fs.deleteFile(path) catch {};
+
+    var chunk: [speed_chunk_bytes]u8 = undefined;
+    fillSpeedChunk(&chunk);
+    const expected_checksum = checksumForRepeatedChunk(&chunk, speed_test_bytes / chunk.len);
+
+    log.info("fs speed write start path={s} bytes={}", .{ path, speed_test_bytes });
+    const write_started = platform_grt.time.instant.now();
+    var written_total: usize = 0;
+    {
+        var write_file = try Fs.createFile(path, .{
+            .read = false,
+            .truncate = true,
+            .exclusive = false,
+        });
+        defer write_file.deinit();
+
+        while (written_total < speed_test_bytes) {
+            const write_len = @min(chunk.len, speed_test_bytes - written_total);
+            var written_chunk: usize = 0;
+            while (written_chunk < write_len) {
+                const n = try write_file.write(chunk[written_chunk..write_len]);
+                if (n == 0) return error.UnexpectedWrite;
+                written_chunk += n;
+            }
+            written_total += write_len;
+        }
+        try write_file.sync();
+    }
+    const write_ms = durationMs(platform_grt, platform_grt.time.instant.now() - write_started);
+    log.info("fs speed write done bytes={} elapsed_ms={} kib_s={}", .{
+        written_total,
+        write_ms,
+        kibPerSecond(written_total, write_ms),
+    });
+
+    log.info("fs speed read start path={s} bytes={}", .{ path, speed_test_bytes });
+    const read_started = platform_grt.time.instant.now();
+    var read_file = try Fs.openFile(path, .{ .mode = .read_only });
+    defer read_file.deinit();
+
+    var read_total: usize = 0;
+    var read_checksum: u32 = 0;
+    while (true) {
+        var read_buf: [speed_chunk_bytes]u8 = undefined;
+        const n = try read_file.read(&read_buf);
+        if (n == 0) break;
+        read_total += n;
+        read_checksum +%= checksumBytes(read_buf[0..n]);
+    }
+    const read_ms = durationMs(platform_grt, platform_grt.time.instant.now() - read_started);
+    if (read_total != speed_test_bytes) return error.UnexpectedSpeedReadSize;
+    if (read_checksum != expected_checksum) return error.UnexpectedSpeedReadChecksum;
+    log.info("fs speed read done bytes={} elapsed_ms={} kib_s={}", .{
+        read_total,
+        read_ms,
+        kibPerSecond(read_total, read_ms),
+    });
+}
+
+fn runEnsureParentDirsSmoke(
+    comptime platform_ctx: type,
+    comptime platform_grt: type,
+    comptime Fs: type,
+    allocator: platform_grt.std.mem.Allocator,
+) !void {
+    const log = platform_grt.std.log.scoped(.zux_fs_smoke);
+    const root_path = comptime smokePath(platform_ctx, "fsd");
+    const nested_path = comptime smokePath(platform_ctx, "fsd/a/p.txt");
+
+    Fs.deleteFile(nested_path) catch {};
+    defer Fs.deleteFile(nested_path) catch {};
+
+    log.info("ensuring fs smoke parent dirs root={s} file={s}", .{ root_path, nested_path });
+    Fs.ensureParentDirs(root_path, nested_path) catch |err| {
+        log.err("ensure parent dirs failed: {s}", .{@errorName(err)});
+        return err;
+    };
+    log.info("writing nested fs smoke payload to {s}", .{nested_path});
+    Fs.writeFile(nested_path, "nested payload") catch |err| {
+        log.err("write nested fs smoke payload failed: {s}", .{@errorName(err)});
+        return err;
+    };
+
+    const data = Fs.readFileAlloc(allocator, nested_path, 64) catch |err| {
+        log.err("read nested fs smoke payload failed: {s}", .{@errorName(err)});
+        return err;
+    };
+    defer allocator.free(data);
+    if (!platform_grt.std.mem.eql(u8, data, "nested payload")) return error.UnexpectedNestedData;
+}
+
+fn fillSpeedChunk(chunk: []u8) void {
+    for (chunk, 0..) |*byte, i| {
+        byte.* = @intCast((i * 31 + 17) & 0xff);
+    }
+}
+
+fn checksumForRepeatedChunk(chunk: []const u8, repeat_count: usize) u32 {
+    const chunk_checksum = checksumBytes(chunk);
+    var total: u32 = 0;
+    var i: usize = 0;
+    while (i < repeat_count) : (i += 1) {
+        total +%= chunk_checksum;
+    }
+    return total;
+}
+
+fn checksumBytes(bytes: []const u8) u32 {
+    var total: u32 = 0;
+    for (bytes) |byte| {
+        total +%= byte;
+    }
+    return total;
+}
+
+fn durationMs(comptime platform_grt: type, duration: u64) u64 {
+    return @divTrunc(duration, platform_grt.time.duration.MilliSecond);
+}
+
+fn kibPerSecond(bytes: usize, elapsed_ms: u64) u64 {
+    if (elapsed_ms == 0) return 0;
+    return @divTrunc(@as(u64, @intCast(bytes)) * 1000, elapsed_ms * 1024);
 }
 
 fn RuntimeFs(comptime platform_grt: type) type {

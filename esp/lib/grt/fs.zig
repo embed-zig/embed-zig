@@ -19,6 +19,7 @@ extern fn fflush(stream: *CFile) c_int;
 extern fn fclose(stream: *CFile) c_int;
 extern fn remove(path: [*:0]const u8) c_int;
 extern fn mkdir(path: [*:0]const u8, mode: c_int) c_int;
+extern fn __errno() *c_int;
 extern fn esp_vfs_spiffs_register(conf: *const SpiffsConf) c_int;
 extern fn esp_vfs_spiffs_unregister(partition_label: [*:0]const u8) c_int;
 
@@ -35,6 +36,7 @@ const worker_core_id: i32 = 0;
 const worker_queue_len = 8;
 const worker_uninitialized: usize = 0;
 const worker_initializing: usize = 1;
+const errno_eexist: c_int = 17;
 
 var worker_queue_bits = glib.std.atomic.Value(usize).init(worker_uninitialized);
 var worker_handle: thread_binding.Handle = null;
@@ -60,9 +62,7 @@ pub fn mountAssets() MountError!void {
 
 pub fn unmountAssets() void {
     if (!hasAssetsSpiffsPartition()) return;
-    var label_buf: [256:0]u8 = undefined;
-    const c_partition_label = pathZ(assets_partition_label, &label_buf) catch return;
-    _ = esp_vfs_spiffs_unregister(c_partition_label);
+    workerUnmountSpiffsPartition(assets_partition_label);
 }
 
 pub fn hasAssetsPartition() bool {
@@ -79,9 +79,7 @@ pub fn mountStorage() MountError!void {
 
 pub fn unmountStorage() void {
     if (!hasStorageSpiffsPartition()) return;
-    var label_buf: [256:0]u8 = undefined;
-    const c_partition_label = pathZ(storage_partition_label, &label_buf) catch return;
-    _ = esp_vfs_spiffs_unregister(c_partition_label);
+    workerUnmountSpiffsPartition(storage_partition_label);
 }
 
 pub fn hasStoragePartition() bool {
@@ -98,17 +96,9 @@ pub fn mountSpiffsPartition(
     base_path: []const u8,
     options: MountOptions,
 ) MountError!void {
-    var label_buf: [256:0]u8 = undefined;
-    var base_buf: [256:0]u8 = undefined;
-    const c_partition_label = pathZ(partition_label, &label_buf) catch return error.Unexpected;
-    const c_base_path = pathZ(base_path, &base_buf) catch return error.Unexpected;
-    const conf: SpiffsConf = .{
-        .base_path = c_base_path,
-        .partition_label = c_partition_label,
-        .max_files = options.max_files,
-        .format_if_mount_failed = options.format_if_mount_failed,
-    };
-    if (esp_vfs_spiffs_register(&conf) != 0) return error.Unexpected;
+    if (partition_label.len >= 256 or base_path.len >= 256) return error.Unexpected;
+    const result = workerMountSpiffsPartition(partition_label, base_path, options) catch return error.Unexpected;
+    if (result.rc != 0) return error.Unexpected;
 }
 
 pub const impl = struct {
@@ -148,12 +138,18 @@ pub const impl = struct {
 
     pub fn deleteFile(path: []const u8) fs.DeleteFileError!void {
         if (path.len >= 256) return error.Unexpected;
-        if ((workerPathOp(.delete_file, path) catch return error.Unexpected) != 0) return error.NotFound;
+        const result = workerPathOp(.delete_file, path) catch return error.Unexpected;
+        if (result.rc != 0) return error.NotFound;
     }
 
     pub fn makeDir(path: []const u8) fs.MakeDirError!void {
         if (path.len >= 256) return error.NameTooLong;
-        if ((workerPathOp(.make_dir, path) catch return error.Unexpected) != 0) return error.Unexpected;
+        const result = workerPathOp(.make_dir, path) catch return error.Unexpected;
+        if (result.rc == 0) return;
+        return switch (result.err_no) {
+            errno_eexist => error.AlreadyExists,
+            else => error.Unsupported,
+        };
     }
 
     pub fn stat(path: []const u8) fs.StatError!fs.Stat {
@@ -228,6 +224,8 @@ const FileMode = enum {
 };
 
 const WorkerOp = enum {
+    mount_spiffs,
+    unmount_spiffs,
     open,
     read,
     write,
@@ -242,6 +240,7 @@ const WorkerRequest = struct {
     op: WorkerOp,
     done: thread_binding.Handle,
     path: []const u8 = "",
+    base_path: []const u8 = "",
     mode: FileMode = .rb,
     handle: ?*CFile = null,
     buf: []u8 = &.{},
@@ -251,6 +250,14 @@ const WorkerRequest = struct {
     bytes: usize = 0,
     pos: c_long = 0,
     rc: c_int = 0,
+    err_no: c_int = 0,
+    max_files: usize = 0,
+    format_if_mount_failed: bool = false,
+};
+
+const PathOpResult = struct {
+    rc: c_int,
+    err_no: c_int,
 };
 
 fn workerOpen(path: []const u8, mode: FileMode) error{Unexpected}!?*CFile {
@@ -326,7 +333,7 @@ fn workerClose(handle: *CFile) void {
     submitWorkerRequest(&request) catch {};
 }
 
-fn workerPathOp(op: WorkerOp, path: []const u8) error{Unexpected}!c_int {
+fn workerPathOp(op: WorkerOp, path: []const u8) error{Unexpected}!PathOpResult {
     var request = WorkerRequest{
         .op = op,
         .done = thread_binding.espz_semaphore_create_binary() orelse return error.Unexpected,
@@ -334,7 +341,35 @@ fn workerPathOp(op: WorkerOp, path: []const u8) error{Unexpected}!c_int {
     };
     defer thread_binding.espz_semaphore_delete(request.done);
     try submitWorkerRequest(&request);
-    return request.rc;
+    return .{ .rc = request.rc, .err_no = request.err_no };
+}
+
+fn workerMountSpiffsPartition(
+    partition_label: []const u8,
+    base_path: []const u8,
+    options: MountOptions,
+) error{Unexpected}!PathOpResult {
+    var request = WorkerRequest{
+        .op = .mount_spiffs,
+        .done = thread_binding.espz_semaphore_create_binary() orelse return error.Unexpected,
+        .path = partition_label,
+        .base_path = base_path,
+        .max_files = options.max_files,
+        .format_if_mount_failed = options.format_if_mount_failed,
+    };
+    defer thread_binding.espz_semaphore_delete(request.done);
+    try submitWorkerRequest(&request);
+    return .{ .rc = request.rc, .err_no = request.err_no };
+}
+
+fn workerUnmountSpiffsPartition(partition_label: []const u8) void {
+    var request = WorkerRequest{
+        .op = .unmount_spiffs,
+        .done = thread_binding.espz_semaphore_create_binary() orelse return,
+        .path = partition_label,
+    };
+    defer thread_binding.espz_semaphore_delete(request.done);
+    submitWorkerRequest(&request) catch {};
 }
 
 fn submitWorkerRequest(request: *WorkerRequest) error{Unexpected}!void {
@@ -399,6 +434,8 @@ fn workerMain(ctx: ?*anyopaque) callconv(.c) void {
 
 fn executeWorkerRequest(request: *WorkerRequest) void {
     switch (request.op) {
+        .mount_spiffs => workerDoMountSpiffs(request),
+        .unmount_spiffs => workerDoUnmountSpiffs(request),
         .open => request.handle = workerDoOpen(request.path, request.mode),
         .read => request.bytes = if (request.handle) |handle| workerDoRead(handle, request.buf) else 0,
         .write => request.bytes = if (request.handle) |handle| workerDoWrite(handle, request.data) else 0,
@@ -411,9 +448,45 @@ fn executeWorkerRequest(request: *WorkerRequest) void {
         },
         .sync => request.rc = if (request.handle) |handle| fflush(handle) else -1,
         .close => request.rc = if (request.handle) |handle| fclose(handle) else -1,
-        .delete_file => request.rc = workerDoPathOp(request.path, remove),
-        .make_dir => request.rc = workerDoMkdir(request.path),
+        .delete_file => workerDoPathOp(request, remove),
+        .make_dir => workerDoMkdir(request),
     }
+}
+
+fn workerDoMountSpiffs(request: *WorkerRequest) void {
+    var label_buf: [256:0]u8 = undefined;
+    var base_buf: [256:0]u8 = undefined;
+    const c_partition_label = pathZ(request.path, &label_buf) catch {
+        request.rc = -1;
+        request.err_no = 0;
+        return;
+    };
+    const c_base_path = pathZ(request.base_path, &base_buf) catch {
+        request.rc = -1;
+        request.err_no = 0;
+        return;
+    };
+    const conf: SpiffsConf = .{
+        .base_path = c_base_path,
+        .partition_label = c_partition_label,
+        .max_files = request.max_files,
+        .format_if_mount_failed = request.format_if_mount_failed,
+    };
+    __errno().* = 0;
+    request.rc = esp_vfs_spiffs_register(&conf);
+    request.err_no = if (request.rc == 0) 0 else __errno().*;
+}
+
+fn workerDoUnmountSpiffs(request: *WorkerRequest) void {
+    var label_buf: [256:0]u8 = undefined;
+    const c_partition_label = pathZ(request.path, &label_buf) catch {
+        request.rc = -1;
+        request.err_no = 0;
+        return;
+    };
+    __errno().* = 0;
+    request.rc = esp_vfs_spiffs_unregister(c_partition_label);
+    request.err_no = if (request.rc == 0) 0 else __errno().*;
 }
 
 fn workerDoOpen(path: []const u8, mode: FileMode) ?*CFile {
@@ -422,16 +495,28 @@ fn workerDoOpen(path: []const u8, mode: FileMode) ?*CFile {
     return fopen(c_path, mode.text());
 }
 
-fn workerDoPathOp(path: []const u8, comptime op: fn ([*:0]const u8) callconv(.c) c_int) c_int {
+fn workerDoPathOp(request: *WorkerRequest, comptime op: fn ([*:0]const u8) callconv(.c) c_int) void {
     var path_buf: [256:0]u8 = undefined;
-    const c_path = pathZ(path, &path_buf) catch return -1;
-    return op(c_path);
+    const c_path = pathZ(request.path, &path_buf) catch {
+        request.rc = -1;
+        request.err_no = 0;
+        return;
+    };
+    __errno().* = 0;
+    request.rc = op(c_path);
+    request.err_no = if (request.rc == 0) 0 else __errno().*;
 }
 
-fn workerDoMkdir(path: []const u8) c_int {
+fn workerDoMkdir(request: *WorkerRequest) void {
     var path_buf: [256:0]u8 = undefined;
-    const c_path = pathZ(path, &path_buf) catch return -1;
-    return mkdir(c_path, 0o755);
+    const c_path = pathZ(request.path, &path_buf) catch {
+        request.rc = -1;
+        request.err_no = 0;
+        return;
+    };
+    __errno().* = 0;
+    request.rc = mkdir(c_path, 0o755);
+    request.err_no = if (request.rc == 0) 0 else __errno().*;
 }
 
 fn workerDoRead(handle: *CFile, buf: []u8) usize {

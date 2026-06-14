@@ -9,6 +9,7 @@ const glib_unit_test_net = @import("glib/unit-test/net/build.zig");
 const glib_unit_test_std = @import("glib/unit-test/std/build.zig");
 const glib_unit_test_sync = @import("glib/unit-test/sync/build.zig");
 const glib_unit_test_testing = @import("glib/unit-test/testing/build.zig");
+const zux_archive_smoke = @import("zux/archive-smoke/build.zig");
 const zux_button_ledstrip = @import("zux/button-ledstrip/build.zig");
 const zux_compress_smoke = @import("zux/compress-smoke/build.zig");
 const zux_fs_smoke = @import("zux/fs-smoke/build.zig");
@@ -90,6 +91,7 @@ pub fn build(b: *std.Build) void {
     glib_unit_test_net.register(&registry);
     glib_integration_test_sync.register(&registry);
     glib_integration_test_net.register(&registry);
+    zux_archive_smoke.register(&registry);
     zux_button_ledstrip.register(&registry);
     zux_compress_smoke.register(&registry);
     zux_fs_smoke.register(&registry);

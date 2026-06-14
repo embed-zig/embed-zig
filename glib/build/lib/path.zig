@@ -6,13 +6,12 @@ pub fn create(
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Module {
     return b.createModule(.{
-        .root_source_file = b.path("lib/fs.zig"),
+        .root_source_file = b.path("lib/path.zig"),
         .target = target,
         .optimize = optimize,
     });
 }
 
 pub fn link(mod: *std.Build.Module, deps: anytype) void {
-    mod.addImport("path", deps.path);
     mod.addImport("testing", deps.testing);
 }

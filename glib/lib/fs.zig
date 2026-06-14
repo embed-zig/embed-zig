@@ -2,6 +2,7 @@
 
 const builtin_std = @import("std");
 const testing_api = @import("testing");
+const path_mod = @import("path");
 
 pub const File = @import("fs/File.zig");
 pub const SeekWhence = File.SeekWhence;
@@ -82,6 +83,7 @@ pub const ReadFileAllocError = OpenFileError || File.ReadError || builtin_std.me
 };
 
 pub const WriteFileError = CreateFileError || File.WriteError || File.SyncError;
+pub const EnsureParentDirsError = MakeDirError;
 
 pub const unsupported_impl = struct {
     pub fn openFile(path: []const u8, options: OpenOptions) OpenFileError!File {
@@ -201,6 +203,31 @@ pub fn make(comptime std: type, comptime impl: type) type {
                 written += n;
             }
             try file.sync();
+        }
+
+        pub fn ensureParentDirs(root_path: []const u8, full_path: []const u8) EnsureParentDirsError!void {
+            const root = path_mod.trimTrailingSlash(root_path);
+            const file_dir = path_mod.dirName(full_path);
+            if (file_dir.len == 0 or builtin_std.mem.eql(u8, file_dir, ".") or builtin_std.mem.eql(u8, file_dir, root)) return;
+
+            var search_from: usize = if (root.len > 0 and builtin_std.mem.startsWith(u8, file_dir, root)) root.len else 0;
+            if (search_from == 0 and path_mod.isAbs(file_dir)) search_from = 1;
+            while (search_from < file_dir.len and file_dir[search_from] == '/') : (search_from += 1) {}
+
+            while (builtin_std.mem.indexOfScalarPos(u8, file_dir, search_from, '/')) |slash| {
+                if (slash > 0) try makeDirIfNeeded(file_dir[0..slash]);
+                search_from = slash + 1;
+            }
+            try makeDirIfNeeded(file_dir);
+        }
+
+        fn makeDirIfNeeded(path: []const u8) EnsureParentDirsError!void {
+            if (path.len == 0 or builtin_std.mem.eql(u8, path, "/")) return;
+            makeDir(path) catch |err| switch (err) {
+                error.AlreadyExists => {},
+                error.Unsupported => {},
+                else => return err,
+            };
         }
     };
 }
