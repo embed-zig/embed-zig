@@ -6,6 +6,8 @@ runtime layer.
 Today it has a few main pieces:
 
 - `Arc.make(std, T)` for atomically reference-counted ownership of heap values
+- `Mutex.make(Impl)`, `Condition.make(Impl)`, and `RwLock.make(Impl)` for
+  runtime-owned synchronization primitive contracts
 - `Channel(std, factory)` for typed channels with close semantics
 - `Pool.make(std, T)` for thread-safe object reuse
 - `Racer(std, time, T)` for "first result wins" task coordination
@@ -17,6 +19,9 @@ Today it has a few main pieces:
 ```zig
 const sync = @import("sync");
 
+const Mutex = sync.Mutex.make(platform.Mutex);
+const Condition = sync.Condition.make(platform.Condition);
+const RwLock = sync.RwLock.make(platform.RwLock);
 const SharedBytes = sync.Arc.make(std, Bytes);
 const Channel = sync.Channel(std, platform.ChannelFactory);
 const IntChan = Channel(u32);
@@ -26,6 +31,9 @@ const TimerImpl = sync.Timer.make(std, time);
 const WakeFdImpl = sync.WakeFd.make(std);
 ```
 
+`Mutex`, `Condition`, and `RwLock` are concrete/comptime-bound wrappers around
+platform implementations. They are intentionally not per-instance dynamic vtable
+objects because conditions must only wait on mutexes from the matching backend.
 `Channel` is parameterized by a platform channel factory, which is first bound to
 the sealed `std` namespace and then exposed as a typed channel constructor.
 `Pool.make(std, T)` is built from the sealed `std`
@@ -42,6 +50,9 @@ interrupting blocking waits from another thread or cancellation path.
 ```text
 lib/sync/
   Arc.zig
+  Mutex.zig
+  Condition.zig
+  RwLock.zig
   Channel.zig
   Pool.zig
   Racer.zig
@@ -59,7 +70,8 @@ lib/sync/
 
 `lib/sync` follows the shared runner layout:
 
-- unit tests live next to `Arc.zig`, `Channel.zig`, `Pool.zig`, `Racer.zig`, `Timer.zig`, and `WakeFd.zig`
+- unit tests live next to `Arc.zig`, `Mutex.zig`, `Condition.zig`, `RwLock.zig`,
+  `Channel.zig`, `Pool.zig`, `Racer.zig`, `Timer.zig`, and `WakeFd.zig`
 - aggregate runners live under `sync/test_runner/`
 - integration cases live under `sync/test_runner/integration/`
 - integration or compatibility entrypoints call those runners from the shared

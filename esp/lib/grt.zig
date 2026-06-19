@@ -21,6 +21,7 @@ const stdz_impl = struct {
 pub const runtime: glib.runtime.Options = .{
     .stdz_impl = stdz_impl,
     .time_impl = time,
+    .sync_impl = sync.impl,
     .channel_factory = sync.ChannelFactory,
     .net_impl = net.Runtime,
     .fs_impl = fs.impl,

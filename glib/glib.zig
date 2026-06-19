@@ -140,6 +140,7 @@ pub const runtime = struct {
     pub const Options = struct {
         stdz_impl: type,
         time_impl: type,
+        sync_impl: type,
         channel_factory: @import("sync").channel.FactoryType,
         net_impl: type,
         fs_impl: type,
@@ -150,6 +151,7 @@ pub const runtime = struct {
     pub fn make(comptime options: Options) type {
         const runtime_std = @import("stdz").make(options.stdz_impl);
         const runtime_time = @import("time").make(options.time_impl);
+        const runtime_sync = options.sync_impl;
         const channel_factory = options.channel_factory;
         const net_impl = options.net_impl;
         const fs_impl = options.fs_impl;
@@ -163,6 +165,9 @@ pub const runtime = struct {
             pub const task = if (options.task_impl == void) void else options.task_impl.make(@This());
             pub const sync = struct {
                 pub const Arc = @import("sync").Arc;
+                pub const Mutex = @import("sync").Mutex.make(runtime_sync.Mutex);
+                pub const Condition = @import("sync").Condition.make(runtime_sync.Condition);
+                pub const RwLock = @import("sync").RwLock.make(runtime_sync.RwLock);
                 pub const ChannelFactory = channel_factory;
                 pub const Channel = @import("sync").Channel(runtime_std, channel_factory);
 

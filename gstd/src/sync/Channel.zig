@@ -18,6 +18,9 @@ pub const ChannelFactory: glib.sync.channel.FactoryType = struct {
 }.factory;
 
 fn Channel(comptime std: type, comptime T: type) type {
+    const Mutex = glib.sync.Mutex.make(@import("Mutex.zig"));
+    const Condition = glib.sync.Condition.make(@import("Condition.zig"));
+
     return struct {
         inner: *Inner,
 
@@ -25,9 +28,9 @@ fn Channel(comptime std: type, comptime T: type) type {
 
         const Inner = struct {
             allocator: std.mem.Allocator,
-            mutex: std.Thread.Mutex,
-            can_send: std.Thread.Condition,
-            can_recv: std.Thread.Condition,
+            mutex: Mutex,
+            can_send: Condition,
+            can_recv: Condition,
             ring: []T,
             head: usize,
             tail: usize,
@@ -36,7 +39,7 @@ fn Channel(comptime std: type, comptime T: type) type {
             closed: bool,
             slot: T,
             slot_full: bool,
-            send_mutex: std.Thread.Mutex,
+            send_mutex: Mutex,
         };
 
         pub fn init(allocator: std.mem.Allocator, capacity: usize) !Self {
