@@ -1,5 +1,6 @@
 const glib = @import("glib");
 pub const instant_impl = @import("time/instant.zig");
+pub const sleep = @import("time/sleep.zig");
 
 pub const instant = struct {
     pub fn now() glib.time.instant.Time {

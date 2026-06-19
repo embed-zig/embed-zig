@@ -17,6 +17,11 @@ var wall_clock_override: ?WallClockOverride = null;
 
 pub const impl: type = struct {
     pub const instant: type = @import("time/instant.zig").impl;
+    pub const sleep: type = struct {
+        pub fn sleep(ns: u64) void {
+            std.Thread.sleep(ns);
+        }
+    };
     pub const wall: type = struct {
         pub fn now() glib.Time {
             return glib.time.fromUnixNano(wallNowNano());

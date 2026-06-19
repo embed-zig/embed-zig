@@ -110,6 +110,7 @@ pub const context = struct {
 pub const time = struct {
     pub const duration = time_mod.duration;
     pub const instant = time_mod.instant;
+    pub const sleep = time_mod.sleep;
     pub const wall = time_mod.wall;
     pub const Time = time_mod.Time;
     pub const unix = time_mod.unix;

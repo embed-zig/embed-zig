@@ -2,6 +2,7 @@ const testing_api = @import("testing");
 
 const duration = @import("../duration.zig");
 const instant = @import("../instant.zig");
+const sleep = @import("../sleep.zig");
 const wall = @import("../wall.zig");
 
 pub fn make(comptime std: type) testing_api.TestRunner {
@@ -17,6 +18,7 @@ pub fn make(comptime std: type) testing_api.TestRunner {
 
             t.run("duration", duration.TestRunner(std));
             t.run("instant", instant.TestRunner(std));
+            t.run("sleep", sleep.TestRunner(std));
             t.run("wall", wall.TestRunner(std));
             return t.wait();
         }

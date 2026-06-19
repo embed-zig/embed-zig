@@ -1,4 +1,5 @@
 const glib = @import("glib");
+const time_sleep = @import("../time/sleep.zig");
 const binding = @import("thread/binding.zig");
 const heap_binding = @import("heap/binding.zig");
 const PacketMutex = @import("thread/PacketMutex.zig");
@@ -156,13 +157,11 @@ pub fn yield() glib.std.Thread.YieldError!void {
 }
 
 pub fn sleep(ns: u64) void {
-    const ticks = nsToTicksCeil(ns);
-    sleepTicks(ticks);
+    time_sleep.sleep(ns);
 }
 
 pub fn sleepTicks(ticks: u32) void {
-    if (ticks == 0) return;
-    binding.espz_freertos_task_delay(ticks);
+    time_sleep.sleepTicks(ticks);
 }
 
 pub fn getCpuCount() glib.std.Thread.CpuCountError!usize {

@@ -5,10 +5,12 @@
 
 const duration_mod = @import("time/duration.zig");
 const instant_mod = @import("time/instant.zig");
+const sleep_contract = @import("time/sleep.zig");
 const wall_mod = @import("time/wall.zig");
 
 pub const duration = duration_mod;
 pub const instant = instant_mod;
+pub const sleep = sleep_contract;
 pub const wall = wall_mod;
 pub const Time = wall_mod.Time;
 pub const unix = wall_mod.unix;
@@ -19,6 +21,7 @@ pub const fromUnixNano = wall_mod.fromUnixNano;
 pub fn make(comptime Impl: type) type {
     const RuntimeWall = wall_mod.make(Impl.wall);
     const RuntimeInstant = instant_mod.make(Impl.instant);
+    const RuntimeSleep = sleep_contract.make(Impl.sleep);
 
     return struct {
         pub const Time = wall_mod.Time;
@@ -37,6 +40,10 @@ pub fn make(comptime Impl: type) type {
         pub fn since(earlier: wall_mod.Time) duration_mod.Duration {
             return RuntimeWall.since(earlier);
         }
+
+        pub const sleep = RuntimeSleep.sleep;
+        pub const sleepMillis = RuntimeSleep.sleepMillis;
+        pub const sleepNanos = RuntimeSleep.sleepNanos;
     };
 }
 

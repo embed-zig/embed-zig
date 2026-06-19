@@ -81,10 +81,10 @@ pub fn make(comptime std: type, comptime time: type) type {
         fn waitFn(_: *anyopaque, timeout: ?time_mod.duration.Duration) ?anyerror {
             if (timeout) |duration| {
                 if (duration <= 0) return null;
-                std.Thread.sleep(@intCast(duration));
+                time.sleep(duration);
                 return null;
             }
-            while (true) std.Thread.sleep(stdz.math.maxInt(u64));
+            while (true) time.sleepNanos(stdz.math.maxInt(u64));
         }
 
         fn cancelFn(_: *anyopaque) void {}

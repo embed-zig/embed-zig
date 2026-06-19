@@ -104,6 +104,7 @@ const apps_zux_base_modules = .{
     @import("apps_zux/fs_smoke.zig"),
     @import("apps_zux/preferences_smoke.zig"),
     @import("apps_zux/task_smoke.zig"),
+    @import("apps_zux/time_smoke.zig"),
 };
 
 const openapi_codegen_unit_base_modules = .{

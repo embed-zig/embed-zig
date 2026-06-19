@@ -28,5 +28,12 @@ test "gstd/runtime/unit/time/gstd" {
     try std.testing.expect(elapsed >= 0);
     try std.testing.expect(elapsed < glib.time.duration.Second);
 
+    gstd.runtime.time.sleep(0);
+    gstd.runtime.time.sleepNanos(0);
+    gstd.runtime.time.sleepMillis(0);
+    const sleep_start = gstd.runtime.time.instant.now();
+    gstd.runtime.time.sleep(1 * glib.time.duration.MilliSecond);
+    try std.testing.expect(gstd.runtime.time.instant.since(sleep_start) >= 0);
+
     try gstd.runtime.time.wall.set(restore);
 }

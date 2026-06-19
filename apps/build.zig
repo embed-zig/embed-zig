@@ -16,6 +16,7 @@ const zux_fs_smoke = @import("zux/fs-smoke/build.zig");
 const zux_preferences_smoke = @import("zux/preferences-smoke/build.zig");
 const zux_sync_smoke = @import("zux/sync-smoke/build.zig");
 const zux_task_smoke = @import("zux/task-smoke/build.zig");
+const zux_time_smoke = @import("zux/time-smoke/build.zig");
 
 const AppRegistry = struct {
     b: *std.Build,
@@ -100,4 +101,5 @@ pub fn build(b: *std.Build) void {
     zux_preferences_smoke.register(&registry);
     zux_sync_smoke.register(&registry);
     zux_task_smoke.register(&registry);
+    zux_time_smoke.register(&registry);
 }
