@@ -120,14 +120,24 @@ pub fn startScan(self: *CWSta, config: Sta.ScanConfig) Sta.ScanError!void {
     const array = objc.msgSend(objc.Id, networks, objc.sel("allObjects"), .{});
     const count: objc.NSUInteger = objc.msgSend(objc.NSUInteger, array, objc.sel("count"), .{});
     std.log.info("core_wlan scan result count={d}", .{count});
+    var converted: usize = 0;
+    var skipped: usize = 0;
     var index: objc.NSUInteger = 0;
     while (index < count) : (index += 1) {
         const network = objc.msgSend(objc.Id, array, objc.sel("objectAtIndex:"), .{index});
         var ssid_buf: [Sta.max_ssid_len]u8 = [_]u8{0} ** Sta.max_ssid_len;
-        const result = scanResultFromNetwork(network, &ssid_buf) orelse continue;
-        if (config.channel != 0 and result.channel != config.channel) continue;
+        const result = scanResultFromNetwork(network, index, &ssid_buf) orelse {
+            skipped += 1;
+            continue;
+        };
+        if (config.channel != 0 and result.channel != config.channel) {
+            skipped += 1;
+            continue;
+        }
+        converted += 1;
         self.fireEvent(.{ .scan_result = result });
     }
+    std.log.info("core_wlan scan converted={d} skipped={d}", .{ converted, skipped });
 }
 
 pub fn stopScan(self: *CWSta) void {
@@ -412,12 +422,25 @@ fn isUsableIpv4(addr: [4]u8) bool {
     return true;
 }
 
-fn scanResultFromNetwork(network: objc.Id, ssid_buf: *[Sta.max_ssid_len]u8) ?Sta.ScanResult {
-    const ssid = ssidFromObject(network, ssid_buf) orelse return null;
+fn scanResultFromNetwork(network: objc.Id, index: objc.NSUInteger, ssid_buf: *[Sta.max_ssid_len]u8) ?Sta.ScanResult {
+    const ssid = ssidFromObject(network, ssid_buf) orelse {
+        std.log.info("core_wlan scan result ssid redacted index={d}", .{index});
+        return scanResultFromNetworkWithSsid(network, redactedSsid(index, ssid_buf));
+    };
 
-    const bssid_obj = objc.msgSend(?objc.Id, network, objc.sel("bssid"), .{}) orelse return null;
+    return scanResultFromNetworkWithSsid(network, ssid);
+}
+
+fn scanResultFromNetworkWithSsid(network: objc.Id, ssid: []const u8) ?Sta.ScanResult {
+    const bssid_obj = objc.msgSend(?objc.Id, network, objc.sel("bssid"), .{}) orelse {
+        std.log.info("core_wlan scan result ssid={s} missing_bssid", .{ssid});
+        return null;
+    };
     var bssid_buf: [17]u8 = undefined;
-    const bssid = parseMacAddress(objc.nsStringGetBytes(bssid_obj, &bssid_buf)) orelse return null;
+    const bssid = parseMacAddress(objc.nsStringGetBytes(bssid_obj, &bssid_buf)) orelse {
+        std.log.info("core_wlan scan result ssid={s} invalid_bssid", .{ssid});
+        return null;
+    };
 
     const channel_obj = objc.msgSend(?objc.Id, network, objc.sel("wlanChannel"), .{});
     const channel = if (channel_obj) |obj|
@@ -435,7 +458,16 @@ fn scanResultFromNetwork(network: objc.Id, ssid_buf: *[Sta.max_ssid_len]u8) ?Sta
     };
 }
 
+fn redactedSsid(index: objc.NSUInteger, buf: *[Sta.max_ssid_len]u8) []const u8 {
+    return std.fmt.bufPrint(buf, "(redacted {d})", .{index}) catch "(redacted)";
+}
+
 fn ssidFromObject(obj: objc.Id, buf: *[Sta.max_ssid_len]u8) ?[]const u8 {
+    if (objc.msgSend(?objc.Id, obj, objc.sel("ssid"), .{})) |ssid_obj| {
+        const ssid = objc.nsStringGetBytes(ssid_obj, buf);
+        if (ssid.len != 0) return ssid;
+    }
+
     const ssid_data_sel = objc.sel("ssidData");
     if (objc.respondsToSelector(obj, ssid_data_sel)) {
         if (objc.msgSend(?objc.Id, obj, ssid_data_sel, .{})) |data| {
@@ -448,11 +480,7 @@ fn ssidFromObject(obj: objc.Id, buf: *[Sta.max_ssid_len]u8) ?[]const u8 {
             }
         }
     }
-
-    const ssid_obj = objc.msgSend(?objc.Id, obj, objc.sel("ssid"), .{}) orelse return null;
-    const ssid = objc.nsStringGetBytes(ssid_obj, buf);
-    if (ssid.len == 0) return null;
-    return ssid;
+    return null;
 }
 
 fn fireEvent(self: *CWSta, event: Sta.Event) void {
@@ -536,6 +564,13 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             );
         }
 
+        fn parseMacAddressRejectsMalformedValues() !void {
+            try grt.std.testing.expectEqual(@as(?Sta.MacAddr, null), parseMacAddress(""));
+            try grt.std.testing.expectEqual(@as(?Sta.MacAddr, null), parseMacAddress("10:20:30:40:50"));
+            try grt.std.testing.expectEqual(@as(?Sta.MacAddr, null), parseMacAddress("10:20:30:40:50:60:70"));
+            try grt.std.testing.expectEqual(@as(?Sta.MacAddr, null), parseMacAddress("10:20:30:40:50:zz"));
+        }
+
         fn ipv4FromSockaddrReadsDarwinSockaddrInBytes() !void {
             var sock_addr = std.c.sockaddr.in{
                 .port = 0,
@@ -581,6 +616,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             _ = allocator;
 
             TestCase.parseMacAddressParsesColonSeparatedHexBytes() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.parseMacAddressRejectsMalformedValues() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
