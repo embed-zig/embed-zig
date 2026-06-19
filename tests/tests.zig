@@ -122,6 +122,7 @@ const embed_unit_base_modules = .{
     @import("embed_unit/drivers_gstd.zig"),
     @import("embed_unit/ledstrip_gstd.zig"),
     @import("embed_unit/motion_gstd.zig"),
+    @import("embed_unit/nfc_gstd.zig"),
     @import("embed_unit/system_gstd.zig"),
     @import("embed_unit/zux_gstd.zig"),
 };
@@ -132,6 +133,7 @@ const embed_unit_non_linux_modules = .{
     @import("embed_unit/drivers_std.zig"),
     @import("embed_unit/ledstrip_std.zig"),
     @import("embed_unit/motion_std.zig"),
+    @import("embed_unit/nfc_std.zig"),
     @import("embed_unit/system_std.zig"),
     @import("embed_unit/zux_std.zig"),
 };

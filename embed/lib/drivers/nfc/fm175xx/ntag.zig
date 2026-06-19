@@ -1,5 +1,5 @@
 const glib = @import("glib");
-const TypeA = @import("../io/TypeA.zig");
+const TypeA = @import("nfc").TypeA;
 
 pub fn read(type_a: TypeA, addr: u8, out: []u8) TypeA.Error!void {
     if ((addr % 16) != 0) return error.InvalidArgument;

@@ -1,6 +1,6 @@
-const drivers = @import("drivers");
-const zux_event = @import("../event.zig");
+const nfc_api = @import("nfc");
 const glib = @import("glib");
+const zux_event = @import("../event.zig");
 
 pub const event = @import("nfc/event.zig");
 pub const State = @import("nfc/State.zig");
@@ -10,7 +10,7 @@ pub const Reducer = @import("nfc/Reducer.zig");
 const EventReceiver = zux_event.EventReceiver;
 const root = @This();
 
-reader: drivers.nfc.Reader,
+reader: nfc_api.Reader,
 
 pub const max_uid_len = event.max_uid_len;
 pub const max_payload_len = event.max_payload_len;
@@ -19,7 +19,7 @@ pub const CardType = event.CardType;
 pub const FoundEvent = event.Found;
 pub const ReadEvent = event.Read;
 
-pub fn init(reader: drivers.nfc.Reader) root {
+pub fn init(reader: nfc_api.Reader) root {
     return .{
         .reader = reader,
     };
@@ -33,7 +33,15 @@ pub fn clearEventReceiver(self: root) void {
     self.reader.clearEventCallback();
 }
 
-fn eventReceiverEmitUpdate(ctx: *const anyopaque, update: drivers.nfc.Update) void {
+pub fn startScan(self: root, config: nfc_api.ScanConfig) nfc_api.ScanError!void {
+    return self.reader.startScan(config);
+}
+
+pub fn stopScan(self: root) void {
+    self.reader.stopScan();
+}
+
+fn eventReceiverEmitUpdate(ctx: *const anyopaque, update: nfc_api.Update) void {
     const receiver: *const EventReceiver = @ptrCast(@alignCast(ctx));
     const value = event.make(zux_event.Event, update) catch @panic("zux.component.nfc received invalid adapter event");
     receiver.emit(value);
@@ -76,9 +84,18 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             const Impl = struct {
                 receiver_ctx: ?*const anyopaque = null,
-                emit_fn: ?drivers.nfc.CallbackFn = null,
+                emit_fn: ?nfc_api.CallbackFn = null,
+                scanning: bool = false,
 
-                pub fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: drivers.nfc.CallbackFn) void {
+                pub fn startScan(self: *@This(), _: nfc_api.ScanConfig) nfc_api.ScanError!void {
+                    self.scanning = true;
+                }
+
+                pub fn stopScan(self: *@This()) void {
+                    self.scanning = false;
+                }
+
+                pub fn setEventCallback(self: *@This(), ctx: *const anyopaque, emit_fn: nfc_api.CallbackFn) void {
                     self.receiver_ctx = ctx;
                     self.emit_fn = emit_fn;
                 }
@@ -120,9 +137,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const receiver = EventReceiver.init(@ptrCast(&sink), Sink.emitFn);
 
             var impl = Impl{};
-            const reader = drivers.nfc.Reader.init(&impl);
-            const nfc = root.init(reader);
-            nfc.setEventReceiver(&receiver);
+            const reader = nfc_api.Reader.init(&impl);
+            const component = root.init(reader);
+            try component.startScan(.{});
+            try grt.std.testing.expect(impl.scanning);
+            component.setEventReceiver(&receiver);
             try impl.emit();
 
             try grt.std.testing.expect(sink.called);
@@ -133,9 +152,11 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 1), sink.found_count);
             try grt.std.testing.expectEqual(@as(usize, 1), sink.read_count);
 
-            nfc.clearEventReceiver();
+            component.clearEventReceiver();
             try grt.std.testing.expect(impl.receiver_ctx == null);
             try grt.std.testing.expect(impl.emit_fn == null);
+            component.stopScan();
+            try grt.std.testing.expect(!impl.scanning);
         }
     };
 

@@ -1,8 +1,8 @@
-const drivers = @import("drivers");
+const nfc_api = @import("nfc");
+const glib = @import("glib");
 const nfc_event = @import("event.zig");
 const Emitter = @import("../../pipeline/Emitter.zig");
 const zux_event = @import("../../event.zig");
-const glib = @import("glib");
 
 const EventHook = @This();
 
@@ -20,15 +20,15 @@ pub fn clearOutput(self: *EventHook) void {
     self.out = null;
 }
 
-pub fn attach(self: *const EventHook, reader: drivers.nfc.Reader) void {
+pub fn attach(self: *const EventHook, reader: nfc_api.Reader) void {
     reader.setEventCallback(@ptrCast(self), emitFn);
 }
 
-pub fn detach(_: *const EventHook, reader: drivers.nfc.Reader) void {
+pub fn detach(_: *const EventHook, reader: nfc_api.Reader) void {
     reader.clearEventCallback();
 }
 
-pub fn emitFn(ctx: *const anyopaque, update: drivers.nfc.Update) void {
+pub fn emitFn(ctx: *const anyopaque, update: nfc_api.Update) void {
     const self: *const EventHook = @ptrCast(@alignCast(ctx));
     const out = self.out orelse return;
     const value = nfc_event.make(zux_event.Event, update) catch @panic("zux.component.nfc.EventHook received invalid nfc update");
@@ -112,6 +112,38 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 4), sink.last_uid_len);
             try grt.std.testing.expectEqual(@as(usize, 4), sink.last_payload_len);
         }
+
+        fn emitFnForwardsLostThroughEmitter() !void {
+            const Sink = struct {
+                called: bool = false,
+                last_source_id: u32 = 0,
+
+                pub fn emit(self: *@This(), message: @import("../../pipeline/Message.zig")) !void {
+                    self.called = true;
+                    switch (message.body) {
+                        .nfc_lost => |value| {
+                            self.last_source_id = value.source_id;
+                        },
+                        else => return error.UnexpectedMessage,
+                    }
+                }
+            };
+
+            var sink = Sink{};
+            var hook = EventHook.init();
+            hook.bindOutput(Emitter.init(&sink));
+
+            EventHook.emitFn(@ptrCast(&hook), .{
+                .source_id = 23,
+                .uid = &.{},
+                .payload = null,
+                .card_type = .unknown,
+                .present = false,
+            });
+
+            try grt.std.testing.expect(sink.called);
+            try grt.std.testing.expectEqual(@as(u32, 23), sink.last_source_id);
+        }
     };
 
     const Runner = struct {
@@ -129,6 +161,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.emitFnForwardsReadThroughEmitter() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.emitFnForwardsLostThroughEmitter() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

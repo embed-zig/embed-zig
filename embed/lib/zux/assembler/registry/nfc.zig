@@ -1,4 +1,4 @@
-const drivers = @import("drivers");
+const nfc_api = @import("nfc");
 const registry_unique = @import("unique.zig");
 
 pub fn make(comptime max_nfc: usize) type {
@@ -39,7 +39,7 @@ pub fn make(comptime max_nfc: usize) type {
             self.periphs[self.len] = .{
                 .label = label_name,
                 .id = id,
-                .control_type = drivers.nfc.Reader,
+                .control_type = nfc_api.Reader,
             };
             self.len += 1;
         }

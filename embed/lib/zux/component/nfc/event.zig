@@ -1,9 +1,9 @@
-const drivers = @import("drivers");
+const nfc_api = @import("nfc");
 
-pub const max_uid_len = drivers.nfc.max_uid_len;
-pub const max_payload_len = drivers.nfc.max_payload_len;
+pub const max_uid_len = nfc_api.max_uid_len;
+pub const max_payload_len = nfc_api.max_payload_len;
 pub const max_buf_len = max_uid_len + max_payload_len;
-pub const CardType = drivers.nfc.CardType;
+pub const CardType = nfc_api.CardType;
 
 pub const Found = struct {
     pub const kind = .nfc_found;
@@ -36,6 +36,12 @@ pub const Read = struct {
     }
 };
 
+pub const Lost = struct {
+    pub const kind = .nfc_lost;
+
+    source_id: u32,
+};
+
 pub const Update = struct {
     source_id: u32,
     uid: []const u8,
@@ -43,7 +49,15 @@ pub const Update = struct {
     card_type: CardType,
 };
 
-pub fn make(comptime EventType: type, driver_update: drivers.nfc.Update) !EventType {
+pub fn make(comptime EventType: type, driver_update: nfc_api.Update) !EventType {
+    if (!driver_update.present) {
+        return .{
+            .nfc_lost = .{
+                .source_id = driver_update.source_id,
+            },
+        };
+    }
+
     const update: Update = .{
         .source_id = driver_update.source_id,
         .uid = driver_update.uid,

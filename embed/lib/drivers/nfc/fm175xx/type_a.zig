@@ -1,5 +1,5 @@
 const glib = @import("glib");
-const TypeA = @import("../io/TypeA.zig");
+const TypeA = @import("nfc").TypeA;
 
 pub const Card = struct {
     atqa: [2]u8 = .{ 0, 0 },

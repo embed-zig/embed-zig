@@ -6,7 +6,7 @@ pub fn create(
     optimize: std.builtin.OptimizeMode,
 ) *std.Build.Module {
     return b.createModule(.{
-        .root_source_file = b.path("lib/drivers.zig"),
+        .root_source_file = b.path("lib/nfc.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -17,14 +17,10 @@ pub fn link(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     mod: *std.Build.Module,
-    deps: struct {
-        nfc: *std.Build.Module,
-    },
 ) void {
     const glib_dep = b.dependency("glib", .{
         .target = target,
         .optimize = optimize,
     });
     mod.addImport("glib", glib_dep.module("glib"));
-    mod.addImport("nfc", deps.nfc);
 }

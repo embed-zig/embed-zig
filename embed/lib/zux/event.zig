@@ -90,6 +90,7 @@ pub const Event = make(.{
     modem_event.GnssFixChanged,
     nfc_event.Found,
     nfc_event.Read,
+    nfc_event.Lost,
     touch_event.Raw,
     wifi_event.StaScanResult,
     wifi_event.StaConnected,

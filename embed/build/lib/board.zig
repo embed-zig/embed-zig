@@ -19,6 +19,7 @@ pub fn link(
         audio: *std.Build.Module,
         bt: *std.Build.Module,
         drivers: *std.Build.Module,
+        nfc: *std.Build.Module,
         ledstrip: *std.Build.Module,
     },
 ) void {
@@ -26,5 +27,6 @@ pub fn link(
     mod.addImport("audio", deps.audio);
     mod.addImport("bt", deps.bt);
     mod.addImport("drivers", deps.drivers);
+    mod.addImport("nfc", deps.nfc);
     mod.addImport("ledstrip", deps.ledstrip);
 }

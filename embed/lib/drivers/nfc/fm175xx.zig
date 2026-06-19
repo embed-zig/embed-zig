@@ -7,7 +7,7 @@ const glib = @import("glib");
 const Delay = @import("../Delay.zig");
 const I2c = @import("../I2c.zig");
 const Spi = @import("../Spi.zig");
-const TypeA = @import("io/TypeA.zig");
+const TypeA = @import("nfc").TypeA;
 const regs = @import("fm175xx/regs.zig");
 const type_a = @import("fm175xx/type_a.zig");
 const ntag = @import("fm175xx/ntag.zig");
@@ -294,7 +294,9 @@ pub fn transceive(self: *Fm175xx, exchange: TypeA.Exchange, rx: []u8) TypeA.Erro
         }
     }
 
-    const out_bits: usize = if (last_bits > 0)
+    const out_bits: usize = if (out_len == 0)
+        0
+    else if (last_bits > 0)
         (out_len - 1) * 8 + last_bits
     else
         out_len * 8;
@@ -790,6 +792,49 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expect(delay.sleep_calls >= 1);
         }
 
+        fn transceiveTimeoutWithPartialBitsDoesNotUnderflow() !void {
+            const FakeI2c = struct {
+                regs_map: [256]u8 = [_]u8{0} ** 256,
+
+                pub fn write(self: *@This(), _: I2c.Address, data: []const u8) I2c.Error!void {
+                    if (data.len < 2) return;
+                    if ((data[0] == regs.fifo_level) and (data[1] == 0x80)) {
+                        self.regs_map[data[0]] = 0;
+                        return;
+                    }
+                    self.regs_map[data[0]] = data[1];
+                }
+
+                pub fn read(_: *@This(), _: I2c.Address, buf: []u8) I2c.Error!void {
+                    @memset(buf, 0);
+                }
+
+                pub fn writeRead(self: *@This(), _: I2c.Address, tx: []const u8, rx: []u8) I2c.Error!void {
+                    switch (tx[0]) {
+                        regs.com_irq => rx[0] = 0x01,
+                        regs.fifo_level => rx[0] = 0,
+                        regs.control => rx[0] = 0x03,
+                        else => rx[0] = self.regs_map[tx[0]],
+                    }
+                }
+            };
+
+            const FakeDelay = struct {
+                pub fn sleep(_: *@This(), _: glib.time.duration.Duration) void {}
+            };
+
+            var i2c = FakeI2c{};
+            var delay = FakeDelay{};
+            var reader = Fm175xx.initI2c(I2c.init(&i2c), Delay.init(&delay), .{});
+            var rx: [1]u8 = undefined;
+
+            try grt.std.testing.expectError(error.Timeout, reader.transceive(.{
+                .tx = &.{0x26},
+                .tx_bits = 7,
+                .timeout = glib.time.duration.MilliSecond,
+            }, &rx));
+        }
+
         fn transceiveRejectsInvalidExchangeInputs() !void {
             const FakeI2c = struct {
                 pub fn write(_: *@This(), _: I2c.Address, _: []const u8) I2c.Error!void {}
@@ -851,6 +896,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.transceiveUsesSoftwareTimeoutGuard() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.transceiveTimeoutWithPartialBitsDoesNotUnderflow() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };
