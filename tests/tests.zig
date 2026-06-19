@@ -28,6 +28,7 @@ const glib_unit_base_modules = .{
     @import("glib_unit/path_gstd.zig"),
     @import("glib_unit/stdz_gstd.zig"),
     @import("glib_unit/sync_gstd.zig"),
+    @import("glib_unit/task_gstd.zig"),
     @import("glib_unit/testing_gstd.zig"),
     @import("glib_unit/time_gstd.zig"),
 };
@@ -63,6 +64,7 @@ const glib_integration_non_linux_modules = .{
 const glib_integration_macos_modules = .{};
 
 const gstd_unit_base_modules = .{
+    @import("gstd_unit/runtime_task_gstd.zig"),
     @import("gstd_unit/runtime_thread_gstd_small_explicit_stack.zig"),
     @import("gstd_unit/runtime_time_gstd.zig"),
 };
@@ -101,6 +103,7 @@ const apps_zux_base_modules = .{
     @import("apps_zux/compress_smoke.zig"),
     @import("apps_zux/fs_smoke.zig"),
     @import("apps_zux/preferences_smoke.zig"),
+    @import("apps_zux/task_smoke.zig"),
 };
 
 const openapi_codegen_unit_base_modules = .{

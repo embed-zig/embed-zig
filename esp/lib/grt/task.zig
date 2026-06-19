@@ -14,19 +14,24 @@ pub fn DefaultHandler(comptime grt: type) type {
         pub const Handle = grt.std.Thread;
         pub const SpawnError = grt.std.Thread.SpawnError;
 
-        pub fn spawn(
+        pub fn go(
             name: []const u8,
-            comptime run: anytype,
-            args: anytype,
+            options: glib.task.Options,
+            routine: glib.task.Routine,
         ) grt.std.Thread.SpawnError!grt.std.Thread {
             var name_buf: [grt.std.Thread.max_name_len:0]u8 = undefined;
             const task_name = taskName(grt, name, &name_buf);
 
             return grt.std.Thread.spawn(.{
                 .name = task_name.ptr,
-            }, run, args);
+                .stack_size = options.min_stack_size,
+            }, runRoutine, .{routine});
         }
     };
+}
+
+fn runRoutine(routine: glib.task.Routine) void {
+    routine.run();
 }
 
 const ErrorHandler = struct {

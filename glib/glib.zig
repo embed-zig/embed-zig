@@ -124,6 +124,7 @@ pub const time = struct {
     pub const test_runner = tests_mod.time;
 };
 pub const sync = @import("sync");
+pub const task = @import("task");
 pub const io = @import("io");
 pub const encoding = @import("encoding");
 pub const mime = @import("mime");
@@ -142,6 +143,7 @@ pub const runtime = struct {
         channel_factory: @import("sync").channel.FactoryType,
         net_impl: type,
         fs_impl: type,
+        task_impl: type = void,
         compress_impl: type = void,
     };
 
@@ -158,6 +160,7 @@ pub const runtime = struct {
             pub const std = runtime_std;
             pub const time = runtime_time;
             pub const context = @import("context").make(runtime_std, runtime_time);
+            pub const task = if (options.task_impl == void) void else options.task_impl.make(@This());
             pub const sync = struct {
                 pub const Arc = @import("sync").Arc;
                 pub const ChannelFactory = channel_factory;

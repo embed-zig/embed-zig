@@ -5,6 +5,7 @@ const compress_backend = @import("src/compress.zig");
 const fs_backend = @import("src/fs.zig");
 const net_backend = @import("src/net.zig");
 const stdz_backend = @import("src/stdz.zig");
+const task_backend = @import("src/task.zig");
 const time_backend = @import("src/time.zig");
 
 pub const fs = fs_backend;
@@ -16,6 +17,7 @@ pub const runtime = glib.runtime.make(.{
     .channel_factory = ChannelType.ChannelFactory,
     .net_impl = net_backend.impl,
     .fs_impl = fs_backend.impl,
+    .task_impl = task_backend.impl,
     .compress_impl = compress_backend.impl,
 });
 

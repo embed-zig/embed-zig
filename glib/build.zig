@@ -4,6 +4,7 @@ const lib_stdz = @import("build/lib/stdz.zig");
 const lib_testing = @import("build/lib/testing.zig");
 const lib_context = @import("build/lib/context.zig");
 const lib_time = @import("build/lib/time.zig");
+const lib_task = @import("build/lib/task.zig");
 const lib_sync = @import("build/lib/sync.zig");
 const lib_io = @import("build/lib/io.zig");
 const lib_encoding = @import("build/lib/encoding.zig");
@@ -24,6 +25,7 @@ pub fn build(b: *std.Build) void {
     const testing_mod = lib_testing.create(b, target, optimize);
     const context_mod = lib_context.create(b, target, optimize);
     const time_mod = lib_time.create(b, target, optimize);
+    const task_mod = lib_task.create(b, target, optimize);
     const sync_mod = lib_sync.create(b, target, optimize);
     const io_mod = lib_io.create(b, target, optimize);
     const encoding_mod = lib_encoding.create(b, target, optimize);
@@ -46,6 +48,9 @@ pub fn build(b: *std.Build) void {
         .time = time_mod,
     });
     lib_time.link(time_mod, .{
+        .testing = testing_mod,
+    });
+    lib_task.link(task_mod, .{
         .testing = testing_mod,
     });
     lib_sync.link(sync_mod, .{
@@ -97,6 +102,7 @@ pub fn build(b: *std.Build) void {
     b.modules.put("testing", testing_mod) catch @panic("OOM");
     b.modules.put("context", context_mod) catch @panic("OOM");
     b.modules.put("time", time_mod) catch @panic("OOM");
+    b.modules.put("task", task_mod) catch @panic("OOM");
     b.modules.put("sync", sync_mod) catch @panic("OOM");
     b.modules.put("io", io_mod) catch @panic("OOM");
     b.modules.put("encoding", encoding_mod) catch @panic("OOM");
@@ -114,6 +120,7 @@ pub fn build(b: *std.Build) void {
         .testing = testing_mod,
         .context = context_mod,
         .time = time_mod,
+        .task = task_mod,
         .sync = sync_mod,
         .io = io_mod,
         .encoding = encoding_mod,
