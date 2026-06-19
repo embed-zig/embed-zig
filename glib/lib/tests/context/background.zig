@@ -32,9 +32,9 @@ pub fn make(comptime std: type, comptime time: type) testing_mod.TestRunner {
                     try backgroundDeadlineIsNullCase(std, time, case_allocator);
                 }
             }.run));
-            t.run("wait_uses_thread_sleep", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
+            t.run("wait_uses_time_sleep", testing_mod.TestRunner.fromFn(std, 32 * 1024, struct {
                 fn run(_: *testing_mod.T, case_allocator: std.mem.Allocator) !void {
-                    try backgroundWaitUsesThreadSleepCase(std, time, case_allocator);
+                    try backgroundWaitUsesTimeSleepCase(std, time, case_allocator);
                 }
             }.run));
             return t.wait();
@@ -80,16 +80,34 @@ fn backgroundDeadlineIsNullCase(comptime std: type, comptime time: type, allocat
     if (bg.deadline() != null) return error.BackgroundShouldHaveNoDeadline;
 }
 
-fn backgroundWaitUsesThreadSleepCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
-    const CapturingThread = context_std.CapturingThread.make(std);
-    const FakeLib = context_std.make(std, .{ .Thread = CapturingThread });
-    const FakeCtxApi = context_root.make(FakeLib, time);
+fn backgroundWaitUsesTimeSleepCase(comptime std: type, comptime time: type, allocator: std.mem.Allocator) !void {
+    const CapturingTime = struct {
+        pub const instant = time.instant;
+
+        pub var sleep_calls: usize = 0;
+        pub var last_sleep_ns: u64 = 0;
+
+        pub fn sleep(duration: time_mod.duration.Duration) void {
+            sleep_calls += 1;
+            last_sleep_ns = @intCast(duration);
+            time.sleep(duration);
+        }
+
+        pub fn sleepNanos(ns: u64) void {
+            sleep_calls += 1;
+            last_sleep_ns = ns;
+            time.sleepNanos(ns);
+        }
+    };
+
+    const FakeLib = context_std.make(std, .{});
+    const FakeCtxApi = context_root.make(FakeLib, CapturingTime);
     var fake_ctx_api = try FakeCtxApi.init(allocator);
     defer fake_ctx_api.deinit();
 
-    CapturingThread.sleep_calls = 0;
-    CapturingThread.last_sleep_ns = 0;
+    CapturingTime.sleep_calls = 0;
+    CapturingTime.last_sleep_ns = 0;
     if (fake_ctx_api.background().wait(5 * time_mod.duration.MilliSecond) != null) return error.BackgroundWaitShouldReturnNull;
-    if (CapturingThread.sleep_calls == 0) return error.BackgroundWaitShouldUseLibThreadSleep;
-    if (CapturingThread.last_sleep_ns != 5 * time_mod.duration.MilliSecond) return error.BackgroundWaitWrongSleepDuration;
+    if (CapturingTime.sleep_calls == 0) return error.BackgroundWaitShouldUseRuntimeTimeSleep;
+    if (CapturingTime.last_sleep_ns != 5 * time_mod.duration.MilliSecond) return error.BackgroundWaitWrongSleepDuration;
 }
