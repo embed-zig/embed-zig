@@ -1,4 +1,5 @@
 const testing_api = @import("testing");
+const extract = @import("../extract.zig");
 const tar = @import("../tar.zig");
 
 pub fn make(comptime std: type) testing_api.TestRunner {
@@ -13,6 +14,7 @@ pub fn make(comptime std: type) testing_api.TestRunner {
             _ = allocator;
 
             t.run("tar", tar.TestRunner(std));
+            t.run("extract", extract.TestRunner(std));
             return t.wait();
         }
 

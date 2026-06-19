@@ -21,6 +21,8 @@ pub const InflateAllocError = InflateError || builtin_std.mem.Allocator.Error ||
 };
 
 pub const unsupported_impl = struct {
+    pub const supports_stream = false;
+
     pub fn inflate(container: Container, compressed: []const u8, out: []u8) InflateError!usize {
         _ = container;
         _ = compressed;
@@ -37,9 +39,15 @@ pub fn make(comptime std: type, comptime impl: type) type {
         pub const Container = root.Container;
         pub const InflateError = root.InflateError;
         pub const InflateAllocError = root.InflateAllocError;
+        pub const supports_stream = @hasDecl(impl, "inflateStream");
 
         pub fn inflate(container: root.Container, compressed: []const u8, out: []u8) root.InflateError!usize {
             return impl.inflate(container, compressed, out);
+        }
+
+        pub fn inflateStream(container: root.Container, compressed: []const u8, sink: anytype) !usize {
+            if (comptime !supports_stream) @compileError("compress impl does not support inflateStream");
+            return impl.inflateStream(container, compressed, sink);
         }
 
         pub fn inflateAlloc(allocator: std.mem.Allocator, container: root.Container, compressed: []const u8, raw_len: usize) root.InflateAllocError![]u8 {
