@@ -7,21 +7,55 @@ const glib = @import("glib");
 
 pub const instant = @import("time/instant.zig");
 
+const WallClockOverride = struct {
+    base_wall_ns: i128,
+    base_instant_ns: u64,
+};
+
+var wall_clock_lock: std.Thread.Mutex = .{};
+var wall_clock_override: ?WallClockOverride = null;
+
 pub const impl: type = struct {
     pub const instant: type = @import("time/instant.zig").impl;
+    pub const wall: type = struct {
+        pub fn now() glib.Time {
+            return glib.time.fromUnixNano(wallNowNano());
+        }
+
+        pub fn set(value: glib.Time) !void {
+            wall_clock_lock.lock();
+            defer wall_clock_lock.unlock();
+            wall_clock_override = .{
+                .base_wall_ns = value.unixNano(),
+                .base_instant_ns = impl.instant.now(),
+            };
+        }
+    };
 
     pub fn now() glib.Time {
-        return glib.time.fromUnixNano(wallNowNano());
+        return wall.now();
     }
 };
 
 fn wallNowNano() i128 {
+    if (wallClockOverrideNowNano()) |value| return value;
     return switch (builtin.os.tag) {
         .windows => windowsWallNowNano(),
         .wasi => wasiWallNowNano(),
         .uefi => uefiWallNowNano(),
         else => posixWallNowNano(),
     };
+}
+
+fn wallClockOverrideNowNano() ?i128 {
+    wall_clock_lock.lock();
+    defer wall_clock_lock.unlock();
+    const value = wall_clock_override orelse return null;
+    const now_ns = impl.instant.now();
+    if (now_ns >= value.base_instant_ns) {
+        return value.base_wall_ns + @as(i128, now_ns - value.base_instant_ns);
+    }
+    return value.base_wall_ns - @as(i128, value.base_instant_ns - now_ns);
 }
 
 fn posixWallNowNano() i128 {

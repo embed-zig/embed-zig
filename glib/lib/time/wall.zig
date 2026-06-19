@@ -95,6 +95,37 @@ pub fn fromUnixNano(timestamp: i128) Time {
     return normalize(@divFloor(timestamp, nanos_per_second), @mod(timestamp, nanos_per_second));
 }
 
+pub fn make(comptime Impl: type) type {
+    const wall_mod = @import("wall.zig");
+
+    comptime {
+        _ = @as(*const fn () wall_mod.Time, &Impl.now);
+        _ = @as(*const fn (wall_mod.Time) anyerror!void, &Impl.set);
+    }
+
+    return struct {
+        pub const Time = wall_mod.Time;
+        pub const Maximum = wall_mod.Maximum;
+        pub const Minimum = wall_mod.Minimum;
+        pub const unix = wall_mod.unix;
+        pub const fromUnixMilli = wall_mod.fromUnixMilli;
+        pub const fromUnixMicro = wall_mod.fromUnixMicro;
+        pub const fromUnixNano = wall_mod.fromUnixNano;
+
+        pub fn now() wall_mod.Time {
+            return Impl.now();
+        }
+
+        pub fn set(value: wall_mod.Time) anyerror!void {
+            return Impl.set(value);
+        }
+
+        pub fn since(earlier: wall_mod.Time) Duration {
+            return now().sub(earlier);
+        }
+    };
+}
+
 fn normalize(sec: i128, nsec: i128) Time {
     const normalized_sec = sec + @divFloor(nsec, nanos_per_second);
     const normalized_nsec = @mod(nsec, nanos_per_second);

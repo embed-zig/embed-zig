@@ -17,20 +17,25 @@ pub const fromUnixMicro = wall_mod.fromUnixMicro;
 pub const fromUnixNano = wall_mod.fromUnixNano;
 
 pub fn make(comptime Impl: type) type {
-    comptime {
-        _ = @as(*const fn () Time, &Impl.now);
-    }
+    const RuntimeWall = wall_mod.make(Impl.wall);
+    const RuntimeInstant = instant_mod.make(Impl.instant);
 
     return struct {
+        pub const Time = wall_mod.Time;
         pub const duration = duration_mod;
-        pub const instant = instant_mod.make(Impl.instant);
+        pub const wall = RuntimeWall;
+        pub const instant = RuntimeInstant;
+        pub const unix = wall_mod.unix;
+        pub const fromUnixMilli = wall_mod.fromUnixMilli;
+        pub const fromUnixMicro = wall_mod.fromUnixMicro;
+        pub const fromUnixNano = wall_mod.fromUnixNano;
 
         pub fn now() wall_mod.Time {
-            return Impl.now();
+            return RuntimeWall.now();
         }
 
         pub fn since(earlier: wall_mod.Time) duration_mod.Duration {
-            return now().sub(earlier);
+            return RuntimeWall.since(earlier);
         }
     };
 }

@@ -10,5 +10,5 @@ pub const instant = struct {
 pub const wall = @import("time/wall.zig");
 
 pub fn now() glib.Time {
-    return glib.time.fromUnixNano(wall.wallNanoTimestamp());
+    return wall.now();
 }

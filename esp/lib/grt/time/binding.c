@@ -17,3 +17,8 @@ int espz_newlib_clock_gettime_realtime(struct timespec *ts)
 {
     return clock_gettime(CLOCK_REALTIME, ts);
 }
+
+int espz_newlib_clock_settime_realtime(const struct timespec *ts)
+{
+    return clock_settime(CLOCK_REALTIME, ts);
+}

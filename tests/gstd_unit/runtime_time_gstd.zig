@@ -17,4 +17,16 @@ test "gstd/runtime/unit/time/gstd" {
 
     const now = gstd.runtime.time.instant.now();
     try std.testing.expect(gstd.runtime.time.instant.sub(now, now) == 0);
+
+    const restore = glib.time.fromUnixNano(std.time.nanoTimestamp());
+    defer gstd.runtime.time.wall.set(glib.time.fromUnixNano(std.time.nanoTimestamp())) catch {};
+
+    const target = glib.time.fromUnixMilli(1_700_000_000_000);
+    try gstd.runtime.time.wall.set(target);
+    const adjusted = gstd.runtime.time.now();
+    const elapsed = adjusted.sub(target);
+    try std.testing.expect(elapsed >= 0);
+    try std.testing.expect(elapsed < glib.time.duration.Second);
+
+    try gstd.runtime.time.wall.set(restore);
 }

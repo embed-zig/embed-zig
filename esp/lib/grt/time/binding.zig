@@ -8,3 +8,4 @@ pub const timespec = extern struct {
 pub extern fn espz_grt_time_uptime_us() i64;
 pub extern fn espz_newlib_clock_gettime_monotonic(ts: *timespec) c_int;
 pub extern fn espz_newlib_clock_gettime_realtime(ts: *timespec) c_int;
+pub extern fn espz_newlib_clock_settime_realtime(ts: *const timespec) c_int;

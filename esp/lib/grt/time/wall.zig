@@ -35,7 +35,19 @@ pub fn nanoTimestamp() i128 {
     return sample.ns;
 }
 
-pub fn wallNanoTimestamp() i128 {
+pub fn now() glib.Time {
+    return glib.time.fromUnixNano(wallNanoTimestamp());
+}
+
+pub fn set(value: glib.Time) error{Unexpected}!void {
+    const ts: binding.timespec = .{
+        .tv_sec = value.sec,
+        .tv_nsec = @intCast(value.nsec),
+    };
+    if (binding.espz_newlib_clock_settime_realtime(&ts) != 0) return error.Unexpected;
+}
+
+fn wallNanoTimestamp() i128 {
     var ts: binding.timespec = undefined;
     if (binding.espz_newlib_clock_gettime_realtime(&ts) != 0) return 0;
     return timespecToNanoI128(ts);
