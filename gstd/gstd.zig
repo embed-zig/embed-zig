@@ -5,16 +5,19 @@ const fs_backend = @import("src/fs.zig");
 const net_backend = @import("src/net.zig");
 const stdz_backend = @import("src/stdz.zig");
 const sync_backend = @import("src/sync.zig");
+const system_backend = @import("src/system.zig");
 const task_backend = @import("src/task.zig");
 const time_backend = @import("src/time.zig");
 
 pub const fs = fs_backend;
 pub const compress = compress_backend;
 pub const sync = sync_backend;
+pub const system = system_backend;
 
 pub const runtime = glib.runtime.make(.{
     .stdz_impl = stdz_backend,
     .time_impl = time_backend.impl,
+    .system_impl = system_backend.impl,
     .sync_impl = sync_backend.impl,
     .channel_factory = sync_backend.ChannelFactory,
     .net_impl = net_backend.impl,

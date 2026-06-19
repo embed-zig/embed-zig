@@ -1,5 +1,6 @@
 const glib = @import("glib");
 const time_sleep = @import("../time/sleep.zig");
+const system = @import("../system.zig");
 const binding = @import("thread/binding.zig");
 const heap_binding = @import("heap/binding.zig");
 const PacketMutex = @import("thread/PacketMutex.zig");
@@ -165,9 +166,7 @@ pub fn sleepTicks(ticks: u32) void {
 }
 
 pub fn getCpuCount() glib.std.Thread.CpuCountError!usize {
-    const count = binding.espz_freertos_cpu_count();
-    if (count == 0) return error.Unsupported;
-    return count;
+    return try system.cpuCount();
 }
 
 pub fn getCurrentId() Id {

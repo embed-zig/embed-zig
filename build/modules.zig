@@ -44,6 +44,7 @@ pub const apps_modules = [_]ModuleSpec{
     module2("apps", "zux_fs-smoke"),
     module2("apps", "zux_preferences-smoke"),
     module2("apps", "zux_sync-smoke"),
+    module2("apps", "zux_system-smoke"),
     module2("apps", "zux_task-smoke"),
     module2("apps", "zux_time-smoke"),
 };

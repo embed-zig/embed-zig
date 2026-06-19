@@ -180,7 +180,7 @@ pub fn ThreadPool(comptime grt: type) type {
         }
 
         fn defaultWorkerCount() usize {
-            const cpu_count = grt.std.Thread.getCpuCount() catch 4;
+            const cpu_count = grt.system.cpuCount() catch 4;
             return @max(@as(usize, 1), @min(cpu_count, @as(usize, 4)));
         }
 

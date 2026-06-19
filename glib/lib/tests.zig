@@ -14,6 +14,10 @@ pub const time = struct {
     pub const unit = @import("time").test_runner.unit;
 };
 
+pub const system = struct {
+    pub const unit = @import("glib_system").test_runner.unit;
+};
+
 pub const archive = struct {
     pub const unit = @import("archive").test_runner.unit;
 };

@@ -28,6 +28,7 @@ const glib_unit_base_modules = .{
     @import("glib_unit/path_gstd.zig"),
     @import("glib_unit/stdz_gstd.zig"),
     @import("glib_unit/sync_gstd.zig"),
+    @import("glib_unit/system_gstd.zig"),
     @import("glib_unit/task_gstd.zig"),
     @import("glib_unit/testing_gstd.zig"),
     @import("glib_unit/time_gstd.zig"),
@@ -45,6 +46,7 @@ const glib_unit_non_linux_modules = .{
     @import("glib_unit/path_std.zig"),
     @import("glib_unit/stdz_std.zig"),
     @import("glib_unit/sync_std.zig"),
+    @import("glib_unit/system_std.zig"),
     @import("glib_unit/testing_std.zig"),
     @import("glib_unit/time_std.zig"),
 };
@@ -64,6 +66,7 @@ const glib_integration_non_linux_modules = .{
 const glib_integration_macos_modules = .{};
 
 const gstd_unit_base_modules = .{
+    @import("gstd_unit/runtime_system_gstd.zig"),
     @import("gstd_unit/runtime_task_gstd.zig"),
     @import("gstd_unit/runtime_thread_gstd_small_explicit_stack.zig"),
     @import("gstd_unit/runtime_time_gstd.zig"),
@@ -103,6 +106,7 @@ const apps_zux_base_modules = .{
     @import("apps_zux/compress_smoke.zig"),
     @import("apps_zux/fs_smoke.zig"),
     @import("apps_zux/preferences_smoke.zig"),
+    @import("apps_zux/system_smoke.zig"),
     @import("apps_zux/task_smoke.zig"),
     @import("apps_zux/time_smoke.zig"),
 };

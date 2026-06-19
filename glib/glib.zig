@@ -9,6 +9,7 @@ const context_mod = @import("context");
 const context_facade = @import("lib/context/facade.zig");
 const testing_mod = @import("testing");
 const time_mod = @import("time");
+const system_mod = @import("glib_system");
 const tests_mod = @import("lib/tests.zig");
 
 pub const Time = time_mod.Time;
@@ -124,6 +125,16 @@ pub const time = struct {
 
     pub const test_runner = tests_mod.time;
 };
+pub const system = struct {
+    pub const cpu = system_mod.cpu;
+    pub const CpuCountError = system_mod.CpuCountError;
+
+    pub fn make(comptime Impl: type) type {
+        return system_mod.make(Impl);
+    }
+
+    pub const test_runner = tests_mod.system;
+};
 pub const sync = @import("sync");
 pub const task = @import("task");
 pub const io = @import("io");
@@ -141,6 +152,7 @@ pub const runtime = struct {
     pub const Options = struct {
         stdz_impl: type,
         time_impl: type,
+        system_impl: type,
         sync_impl: type,
         channel_factory: @import("sync").channel.FactoryType,
         net_impl: type,
@@ -152,6 +164,7 @@ pub const runtime = struct {
     pub fn make(comptime options: Options) type {
         const runtime_std = @import("stdz").make(options.stdz_impl);
         const runtime_time = @import("time").make(options.time_impl);
+        const runtime_system = @import("glib_system").make(options.system_impl);
         const runtime_sync = options.sync_impl;
         const channel_factory = options.channel_factory;
         const net_impl = options.net_impl;
@@ -162,6 +175,7 @@ pub const runtime = struct {
             pub const runtime = Runtime;
             pub const std = runtime_std;
             pub const time = runtime_time;
+            pub const system = runtime_system;
             pub const context = @import("context").make(runtime_std, runtime_time);
             pub const task = if (options.task_impl == void) void else options.task_impl.make(@This());
             pub const sync = struct {

@@ -3,6 +3,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const glib = @import("glib");
+const system_backend = @import("../system.zig");
 
 const posix = std.posix;
 const windows = std.os.windows;
@@ -67,7 +68,7 @@ pub fn sleep(ns: u64) void {
 }
 
 pub fn getCpuCount() glib.std.Thread.CpuCountError!usize {
-    return try std.Thread.getCpuCount();
+    return try system_backend.impl.cpuCount();
 }
 
 pub fn getCurrentId() Id {

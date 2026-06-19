@@ -4,6 +4,7 @@ const lib_stdz = @import("build/lib/stdz.zig");
 const lib_testing = @import("build/lib/testing.zig");
 const lib_context = @import("build/lib/context.zig");
 const lib_time = @import("build/lib/time.zig");
+const lib_system = @import("build/lib/system.zig");
 const lib_task = @import("build/lib/task.zig");
 const lib_sync = @import("build/lib/sync.zig");
 const lib_io = @import("build/lib/io.zig");
@@ -25,6 +26,7 @@ pub fn build(b: *std.Build) void {
     const testing_mod = lib_testing.create(b, target, optimize);
     const context_mod = lib_context.create(b, target, optimize);
     const time_mod = lib_time.create(b, target, optimize);
+    const system_mod = lib_system.create(b, target, optimize);
     const task_mod = lib_task.create(b, target, optimize);
     const sync_mod = lib_sync.create(b, target, optimize);
     const io_mod = lib_io.create(b, target, optimize);
@@ -48,6 +50,9 @@ pub fn build(b: *std.Build) void {
         .time = time_mod,
     });
     lib_time.link(time_mod, .{
+        .testing = testing_mod,
+    });
+    lib_system.link(system_mod, .{
         .testing = testing_mod,
     });
     lib_task.link(task_mod, .{
@@ -120,6 +125,7 @@ pub fn build(b: *std.Build) void {
         .testing = testing_mod,
         .context = context_mod,
         .time = time_mod,
+        .system = system_mod,
         .task = task_mod,
         .sync = sync_mod,
         .io = io_mod,
