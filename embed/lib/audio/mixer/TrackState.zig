@@ -13,7 +13,12 @@ pub fn make(comptime grt: type) type {
         allocator: Allocator,
         output: Format,
         label_buf: []u8,
-        gain_bits: u32 = @bitCast(@as(f32, 1.0)),
+        gain_mu: grt.std.Thread.Mutex = .{},
+        current_gain: f32 = 1.0,
+        target_gain: f32 = 1.0,
+        gain_step: f32 = 0,
+        gain_ramp_remaining: usize = 0,
+        reference: bool,
         read_bytes_val: usize = 0,
         fade_out_mu: grt.std.Thread.Mutex = .{},
         fade_out_duration_val: glib.time.duration.Duration = 0,
@@ -42,6 +47,7 @@ pub fn make(comptime grt: type) type {
                 .allocator = allocator,
                 .output = output,
                 .label_buf = label_buf,
+                .reference = config.reference,
                 .buffer = buffer,
             };
             state.setGain(config.gain);
@@ -79,11 +85,18 @@ pub fn make(comptime grt: type) type {
 
         pub fn setGain(self: *@This(), value: f32) void {
             const sanitized = if (value == value) value else 0;
-            @atomicStore(u32, &self.gain_bits, @bitCast(sanitized), .release);
+            self.gain_mu.lock();
+            self.current_gain = sanitized;
+            self.target_gain = sanitized;
+            self.gain_step = 0;
+            self.gain_ramp_remaining = 0;
+            self.gain_mu.unlock();
         }
 
         pub fn gain(self: *@This()) f32 {
-            return @bitCast(@atomicLoad(u32, &self.gain_bits, .acquire));
+            self.gain_mu.lock();
+            defer self.gain_mu.unlock();
+            return self.target_gain;
         }
 
         pub fn label(self: *@This()) []const u8 {
@@ -109,9 +122,11 @@ pub fn make(comptime grt: type) type {
             const fade_out_duration = self.fade_out_duration_val;
             self.fade_out_mu.unlock();
             if (fade_out_duration > 0) {
-                self.setGain(0);
+                self.setGainLinearTo(0, fade_out_duration);
+                self.closeWriteWithSilence(fade_out_duration) catch {};
+            } else {
+                self.closeWrite();
             }
-            self.closeWrite();
         }
 
         pub fn closeWithError(self: *@This()) void {
@@ -137,8 +152,22 @@ pub fn make(comptime grt: type) type {
             self.closeWrite();
         }
 
-        pub fn setGainLinearTo(self: *@This(), to: f32, _: glib.time.duration.Duration) void {
-            self.setGain(to);
+        pub fn setGainLinearTo(self: *@This(), to: f32, duration: glib.time.duration.Duration) void {
+            const sanitized = if (to == to) to else 0;
+            const total_samples = self.durationSamples(duration) catch {
+                self.setGain(sanitized);
+                return;
+            };
+            if (total_samples == 0) {
+                self.setGain(sanitized);
+                return;
+            }
+
+            self.gain_mu.lock();
+            self.target_gain = sanitized;
+            self.gain_ramp_remaining = total_samples;
+            self.gain_step = (sanitized - self.current_gain) / @as(f32, @floatFromInt(total_samples));
+            self.gain_mu.unlock();
         }
 
         pub fn write(self: *@This(), format: Format, samples: []const i16) !void {
@@ -160,6 +189,30 @@ pub fn make(comptime grt: type) type {
             return n;
         }
 
+        pub fn mixIntoReference(self: *@This(), out: []i16, ref_out: []i16) usize {
+            const reference = if (self.reference) ref_out else null;
+            const n = self.buffer.mixIntoReference(out, reference, self.gain());
+            if (n > 0) self.addReadBytes(n * @sizeOf(i16));
+            return n;
+        }
+
+        pub fn mixFloatInto(self: *@This(), out: []f32) usize {
+            const span = self.nextGainSpan(out.len);
+            const n = self.buffer.mixFloatLinearInto(out, span.start, span.step);
+            self.commitGainSpan(n, span);
+            if (n > 0) self.addReadBytes(n * @sizeOf(i16));
+            return n;
+        }
+
+        pub fn mixFloatIntoReference(self: *@This(), out: []f32, ref_out: []f32) usize {
+            const reference = if (self.reference) ref_out else null;
+            const span = self.nextGainSpan(out.len);
+            const n = self.buffer.mixFloatLinearIntoReference(out, reference, span.start, span.step);
+            self.commitGainSpan(n, span);
+            if (n > 0) self.addReadBytes(n * @sizeOf(i16));
+            return n;
+        }
+
         pub fn isDrained(self: *@This()) bool {
             return self.buffer.isDrained();
         }
@@ -172,6 +225,48 @@ pub fn make(comptime grt: type) type {
 
         fn addReadBytes(self: *@This(), count: usize) void {
             _ = @atomicRmw(usize, &self.read_bytes_val, .Add, count, .acq_rel);
+        }
+
+        const GainSpan = struct {
+            start: f32,
+            step: f32,
+            ramp_samples: usize,
+        };
+
+        fn nextGainSpan(self: *@This(), max_samples: usize) GainSpan {
+            self.gain_mu.lock();
+            defer self.gain_mu.unlock();
+            const ramp_samples = @min(max_samples, self.gain_ramp_remaining);
+            return .{
+                .start = self.current_gain,
+                .step = if (ramp_samples > 0) self.gain_step else 0,
+                .ramp_samples = ramp_samples,
+            };
+        }
+
+        fn commitGainSpan(self: *@This(), mixed_samples: usize, span: GainSpan) void {
+            if (mixed_samples == 0) return;
+
+            self.gain_mu.lock();
+            defer self.gain_mu.unlock();
+            const ramped = @min(mixed_samples, span.ramp_samples);
+            if (ramped > 0) {
+                self.current_gain += self.gain_step * @as(f32, @floatFromInt(ramped));
+                self.gain_ramp_remaining -= ramped;
+                if (self.gain_ramp_remaining == 0) {
+                    self.current_gain = self.target_gain;
+                    self.gain_step = 0;
+                }
+            }
+        }
+
+        fn durationSamples(self: *@This(), duration: glib.time.duration.Duration) !usize {
+            if (duration <= 0) return 0;
+            const total = (@as(u128, self.output.rate) *
+                @as(u128, self.output.channelCount()) *
+                @as(u128, @intCast(duration))) / @as(u128, @intCast(glib.time.duration.Second));
+            if (total > grt.std.math.maxInt(usize)) return error.Overflow;
+            return @intCast(total);
         }
 
         fn convertAndWrite(self: *@This(), input_format: Format, input_samples: []const i16) !void {
@@ -280,6 +375,21 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             try grt.std.testing.expectEqual(@as(usize, 4), n);
             try grt.std.testing.expectEqualSlices(i16, &.{ 20, 20, 30, 30 }, out[0..4]);
         }
+
+        fn rampsGainAcrossMixedSamples() !void {
+            const state = try State.create(grt.std.testing.allocator, .{ .rate = 1000, .channels = .mono }, .{});
+            defer state.destroy();
+
+            state.setGain(0);
+            state.setGainLinearTo(1, 4 * glib.time.duration.MilliSecond);
+            try state.write(.{ .rate = 1000, .channels = .mono }, &.{ 1000, 1000, 1000, 1000, 1000 });
+
+            var out: [5]f32 = @splat(0);
+            const n = state.mixFloatInto(&out);
+            try grt.std.testing.expectEqual(@as(usize, 5), n);
+            try grt.std.testing.expectEqualSlices(f32, &.{ 0, 250, 500, 750, 1000 }, out[0..5]);
+            try grt.std.testing.expectEqual(@as(f32, 1), state.gain());
+        }
     };
 
     const Runner = struct {
@@ -301,6 +411,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.convertsFormat() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.rampsGainAcrossMixedSamples() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

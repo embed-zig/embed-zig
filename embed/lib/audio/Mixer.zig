@@ -28,6 +28,7 @@ pub const VTable = struct {
     deinit: *const fn (ptr: *anyopaque) void,
     createTrack: *const fn (ptr: *anyopaque, config: Track.Config) CreateTrackError!TrackHandle,
     read: *const fn (ptr: *anyopaque, out: []i16) ?usize,
+    readWithReference: *const fn (ptr: *anyopaque, out: []i16, ref_out: []i16) ?usize,
     closeWrite: *const fn (ptr: *anyopaque) void,
     close: *const fn (ptr: *anyopaque) void,
     closeWithError: *const fn (ptr: *anyopaque) void,
@@ -46,6 +47,10 @@ pub fn createTrack(self: root, config: Track.Config) CreateTrackError!TrackHandl
 
 pub fn read(self: root, out: []i16) ?usize {
     return self.vtable.read(self.ptr, out);
+}
+
+pub fn readWithReference(self: root, out: []i16, ref_out: []i16) ?usize {
+    return self.vtable.readWithReference(self.ptr, out, ref_out);
 }
 
 pub fn closeWrite(self: root) void {
@@ -152,12 +157,18 @@ pub fn make(comptime grt: type) type {
         pub const Config = struct {
             allocator: Allocator,
             output: Format,
+            headroom_gain: f32 = 0.5,
+            limiter_threshold: f32 = 0.9,
         };
 
         allocator: Allocator,
         output: Format,
+        headroom_gain: f32,
+        limiter_threshold: f32,
         mutex: Thread.Mutex = .{},
         tracks: ArrayListUnmanaged(*TrackState) = .{},
+        mix_accum: ArrayListUnmanaged(f32) = .{},
+        ref_accum: ArrayListUnmanaged(f32) = .{},
         close_write: bool = false,
         closed: bool = false,
         close_error: bool = false,
@@ -176,6 +187,11 @@ pub fn make(comptime grt: type) type {
             fn readFn(ptr: *anyopaque, out: []i16) ?usize {
                 const self: *Self = @ptrCast(@alignCast(ptr));
                 return self.read(out);
+            }
+
+            fn readWithReferenceFn(ptr: *anyopaque, out: []i16, ref_out: []i16) ?usize {
+                const self: *Self = @ptrCast(@alignCast(ptr));
+                return self.readWithReference(out, ref_out);
             }
 
             fn closeWriteFn(ptr: *anyopaque) void {
@@ -197,6 +213,7 @@ pub fn make(comptime grt: type) type {
                 .deinit = deinitFn,
                 .createTrack = createTrackFn,
                 .read = readFn,
+                .readWithReference = readWithReferenceFn,
                 .closeWrite = closeWriteFn,
                 .close = closeFn,
                 .closeWithError = closeWithErrorFn,
@@ -211,6 +228,8 @@ pub fn make(comptime grt: type) type {
             self.* = .{
                 .allocator = config.allocator,
                 .output = config.output,
+                .headroom_gain = sanitizeHeadroomGain(config.headroom_gain),
+                .limiter_threshold = sanitizeLimiterThreshold(config.limiter_threshold),
             };
 
             return .{
@@ -230,6 +249,8 @@ pub fn make(comptime grt: type) type {
                 state.releaseMixerRef();
             }
             self.tracks.deinit(self.allocator);
+            self.mix_accum.deinit(self.allocator);
+            self.ref_accum.deinit(self.allocator);
             self.mutex.unlock();
             self.allocator.destroy(self);
         }
@@ -285,18 +306,34 @@ pub fn make(comptime grt: type) type {
         }
 
         pub fn read(self: *Self, out: []i16) ?usize {
-            if (out.len == 0) return 0;
+            return self.readWithReferenceMaybe(out, null);
+        }
 
-            @memset(out, 0);
+        pub fn readWithReference(self: *Self, out: []i16, ref_out: []i16) ?usize {
+            return self.readWithReferenceMaybe(out, ref_out);
+        }
+
+        fn readWithReferenceMaybe(self: *Self, out: []i16, ref_out: ?[]i16) ?usize {
+            if (out.len == 0) return 0;
+            if (ref_out) |reference| glib.std.debug.assert(reference.len >= out.len);
 
             self.mutex.lock();
             defer self.mutex.unlock();
+
+            const mix = self.prepareAccum(&self.mix_accum, out.len) catch return null;
+            const reference_mix = if (ref_out != null)
+                self.prepareAccum(&self.ref_accum, out.len) catch return null
+            else
+                null;
 
             var read_n: usize = 0;
             var i: usize = 0;
             while (i < self.tracks.items.len) {
                 const state = self.tracks.items[i];
-                const mixed_n = state.mixInto(out);
+                const mixed_n = if (ref_out != null)
+                    state.mixFloatIntoReference(mix, reference_mix.?[0..out.len])
+                else
+                    state.mixFloatInto(mix);
                 if (mixed_n > read_n) read_n = mixed_n;
 
                 if (state.isDrained()) {
@@ -307,10 +344,26 @@ pub fn make(comptime grt: type) type {
                 i += 1;
             }
 
+            self.finalizeAccum(out, mix);
+            if (ref_out) |reference| self.finalizeAccum(reference[0..out.len], reference_mix.?);
+
             if (read_n > 0) return read_n;
             if (self.closed or self.close_error) return null;
             if (self.close_write and self.tracks.items.len == 0) return null;
             return 0;
+        }
+
+        fn prepareAccum(self: *Self, accum: *ArrayListUnmanaged(f32), len: usize) ![]f32 {
+            try accum.ensureTotalCapacity(self.allocator, len);
+            accum.items.len = len;
+            @memset(accum.items, 0);
+            return accum.items;
+        }
+
+        fn finalizeAccum(self: *Self, out: []i16, accum: []const f32) void {
+            for (out, accum) |*sample, value| {
+                sample.* = softLimitToI16(value * self.headroom_gain, self.limiter_threshold);
+            }
         }
 
         pub fn closeWrite(self: *Self) void {
@@ -371,6 +424,43 @@ pub fn make(comptime grt: type) type {
     };
 }
 
+fn sanitizeHeadroomGain(value: f32) f32 {
+    if (value != value or value <= 0) return 1.0;
+    if (value > 1.0) return 1.0;
+    return value;
+}
+
+fn sanitizeLimiterThreshold(value: f32) f32 {
+    if (value != value) return 0.9;
+    if (value < 0.1) return 0.1;
+    if (value > 1.0) return 1.0;
+    return value;
+}
+
+fn softLimitToI16(value: f32, threshold: f32) i16 {
+    if (value != value) return 0;
+
+    const full_scale = 32767.0;
+    const sign: f32 = if (value < 0) -1.0 else 1.0;
+    const abs_value = if (value < 0) -value else value;
+    const normalized = abs_value / full_scale;
+    const limited = softLimitNormalized(normalized, threshold);
+    const scaled = sign * limited * full_scale;
+
+    if (scaled > 32767.0) return 32767;
+    if (scaled < -32768.0) return -32768;
+    return @intFromFloat(scaled);
+}
+
+fn softLimitNormalized(value: f32, threshold: f32) f32 {
+    if (value <= threshold) return value;
+    if (threshold >= 1.0) return 1.0;
+
+    const knee = 1.0 - threshold;
+    const over = value - threshold;
+    return threshold + (knee * over) / (over + knee);
+}
+
 pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
     const MixerType = make(grt);
 
@@ -421,7 +511,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var out: [4]i16 = undefined;
             const n = mixer.read(&out) orelse unreachable;
             try grt.std.testing.expectEqual(@as(usize, 3), n);
-            try grt.std.testing.expectEqualSlices(i16, &.{ 10, 20, 30 }, out[0..3]);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 5, 10, 15 }, out[0..3]);
             try grt.std.testing.expectEqual(@as(usize, 6), handle.ctrl.readBytes());
         }
 
@@ -446,7 +536,33 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var out: [4]i16 = undefined;
             const n = mixer.read(&out) orelse unreachable;
             try grt.std.testing.expectEqual(@as(usize, 2), n);
-            try grt.std.testing.expectEqualSlices(i16, &.{ 150, 300 }, out[0..2]);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 75, 150 }, out[0..2]);
+        }
+
+        fn defaultBackendSoftLimitsFullScaleMix() !void {
+            const mixer = try MixerType.init(.{
+                .allocator = grt.std.testing.allocator,
+                .output = .{ .rate = 16000, .channels = .mono },
+            });
+            defer mixer.deinit();
+
+            const a = try mixer.createTrack(.{ .label = "a" });
+            defer a.track.deinit();
+            defer a.ctrl.deinit();
+            const b = try mixer.createTrack(.{ .label = "b" });
+            defer b.track.deinit();
+            defer b.ctrl.deinit();
+
+            try a.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 32767, -32768 });
+            try b.track.write(.{ .rate = 16000, .channels = .mono }, &.{ 32767, -32768 });
+
+            var out: [2]i16 = undefined;
+            const n = mixer.read(&out) orelse unreachable;
+            try grt.std.testing.expectEqual(@as(usize, 2), n);
+            try grt.std.testing.expect(out[0] > 30000);
+            try grt.std.testing.expect(out[0] <= 32767);
+            try grt.std.testing.expect(out[1] < -30000);
+            try grt.std.testing.expect(out[1] >= -32768);
         }
 
         fn defaultBackendDrainsAfterCloseWrite() !void {
@@ -512,7 +628,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
 
             var out: [4]i16 = undefined;
             try grt.std.testing.expectEqual(@as(?usize, 2), mixer.read(&out));
-            try grt.std.testing.expectEqualSlices(i16, &.{ 4, 5 }, out[0..2]);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 2, 2 }, out[0..2]);
             try grt.std.testing.expectEqual(@as(?usize, 0), mixer.read(&out));
         }
 
@@ -535,7 +651,7 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             var out: [8]i16 = undefined;
             const n = mixer.read(&out) orelse unreachable;
             try grt.std.testing.expectEqual(@as(usize, 2), n);
-            try grt.std.testing.expectEqualSlices(i16, &.{ 1, 2 }, out[0..2]);
+            try grt.std.testing.expectEqualSlices(i16, &.{ 0, 1 }, out[0..2]);
             try grt.std.testing.expectEqual(@as(?usize, 0), mixer.read(&out));
         }
     };
@@ -556,6 +672,10 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
                 return false;
             };
             TestCase.defaultBackendMixesGain() catch |err| {
+                t.logFatal(@errorName(err));
+                return false;
+            };
+            TestCase.defaultBackendSoftLimitsFullScaleMix() catch |err| {
                 t.logFatal(@errorName(err));
                 return false;
             };

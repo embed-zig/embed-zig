@@ -69,6 +69,8 @@ pub fn Builder(comptime grt: type) type {
                 const log = grt.std.log.scoped(.audio_system);
                 const capture_buffer_capacity = samples_per_channel * 16;
                 const ref_buffer_capacity = samples_per_channel * 16;
+                const raw_frame_buffer_capacity = 4;
+                const debug_report_interval = 100;
 
                 pub const Mic = MicType;
                 pub const Speaker = SpeakerType;
@@ -83,9 +85,72 @@ pub fn Builder(comptime grt: type) type {
                 pub const frame_samples_per_channel: usize = samples_per_channel;
 
                 pub const Config = struct {
-                    read_thread: grt.std.Thread.SpawnConfig = .{},
-                    write_thread: grt.std.Thread.SpawnConfig = .{},
+                    read_task: glib.task.Options = .{},
+                    processor_task: glib.task.Options = .{},
+                    write_task: glib.task.Options = .{},
                     soft_ref_delay_samples: usize = 0,
+                };
+
+                const RawFrameBuffer = struct {
+                    allocator: glib.std.mem.Allocator,
+                    items: []Frame,
+                    head: usize = 0,
+                    len: usize = 0,
+                    mutex: grt.std.Thread.Mutex = .{},
+
+                    fn init(allocator: glib.std.mem.Allocator, capacity: usize) !RawFrameBuffer {
+                        return .{
+                            .allocator = allocator,
+                            .items = try allocator.alloc(Frame, capacity),
+                        };
+                    }
+
+                    fn deinit(self: *RawFrameBuffer) void {
+                        self.allocator.free(self.items);
+                        self.* = undefined;
+                    }
+
+                    fn writeDroppingOldest(self: *RawFrameBuffer, frame: Frame) bool {
+                        self.mutex.lock();
+                        defer self.mutex.unlock();
+
+                        if (self.items.len == 0) return true;
+                        var dropped = false;
+                        if (self.len == self.items.len) {
+                            self.consumeLocked(1);
+                            dropped = true;
+                        }
+
+                        const tail = (self.head + self.len) % self.items.len;
+                        self.items[tail] = frame;
+                        self.len += 1;
+                        return dropped;
+                    }
+
+                    fn read(self: *RawFrameBuffer, frame: *Frame) bool {
+                        self.mutex.lock();
+                        defer self.mutex.unlock();
+
+                        if (self.len == 0) return false;
+                        frame.* = self.items[self.head];
+                        self.consumeLocked(1);
+                        return true;
+                    }
+
+                    fn discard(self: *RawFrameBuffer) void {
+                        self.mutex.lock();
+                        defer self.mutex.unlock();
+                        self.head = 0;
+                        self.len = 0;
+                    }
+
+                    fn consumeLocked(self: *RawFrameBuffer, n: usize) void {
+                        const actual = @min(n, self.len);
+                        if (actual == 0) return;
+                        self.head = (self.head + actual) % self.items.len;
+                        self.len -= actual;
+                        if (self.len == 0) self.head = 0;
+                    }
                 };
 
                 allocator: glib.std.mem.Allocator,
@@ -93,22 +158,31 @@ pub fn Builder(comptime grt: type) type {
                 speaker_impl: ?AudioSystem.Speaker = null,
                 playback: ?Mixer = null,
                 capture_rb: SampleRingBuffer,
+                raw_rb: RawFrameBuffer,
                 ref_rb: SampleRingBuffer,
                 ref_write_scratch: []i16,
                 state_mu: grt.std.Thread.Mutex = .{},
                 running: bool = false,
                 async_failed: bool = false,
                 playback_config_locked: bool = false,
-                read_thread: ?grt.std.Thread = null,
-                write_thread: ?grt.std.Thread = null,
-                read_thread_config: grt.std.Thread.SpawnConfig = .{},
-                write_thread_config: grt.std.Thread.SpawnConfig = .{},
+                read_task: ?grt.task.Handle = null,
+                processor_task: ?grt.task.Handle = null,
+                write_task: ?grt.task.Handle = null,
+                read_task_options: glib.task.Options = .{},
+                processor_task_options: glib.task.Options = .{},
+                write_task_options: glib.task.Options = .{},
                 soft_ref_delay_samples: usize = 0,
 
                 pub fn init(allocator: glib.std.mem.Allocator, config: Config) !AudioSystem {
                     const capture_rb = try SampleRingBuffer.init(allocator, capture_buffer_capacity);
                     errdefer {
                         var cleanup = capture_rb;
+                        cleanup.deinit();
+                    }
+
+                    const raw_rb = try RawFrameBuffer.init(allocator, raw_frame_buffer_capacity);
+                    errdefer {
+                        var cleanup = raw_rb;
                         cleanup.deinit();
                     }
 
@@ -121,10 +195,12 @@ pub fn Builder(comptime grt: type) type {
                     return .{
                         .allocator = allocator,
                         .capture_rb = capture_rb,
+                        .raw_rb = raw_rb,
                         .ref_rb = ref_rb,
                         .ref_write_scratch = &[_]i16{},
-                        .read_thread_config = config.read_thread,
-                        .write_thread_config = config.write_thread,
+                        .read_task_options = config.read_task,
+                        .processor_task_options = config.processor_task,
+                        .write_task_options = config.write_task,
                         .soft_ref_delay_samples = config.soft_ref_delay_samples,
                     };
                 }
@@ -135,6 +211,7 @@ pub fn Builder(comptime grt: type) type {
                     _ = self.stop() catch {};
                     if (self.ref_write_scratch.len > 0) self.allocator.free(self.ref_write_scratch);
                     self.capture_rb.deinit();
+                    self.raw_rb.deinit();
                     self.ref_rb.deinit();
                     if (self.playback) |playback| playback.deinit();
                     if (self.speaker_impl) |current_speaker| current_speaker.deinit();
@@ -200,7 +277,7 @@ pub fn Builder(comptime grt: type) type {
                 }
 
                 /// `read(out)` drains processed microphone samples from the system's
-                /// internal ring buffer populated by `readLoop`.
+                /// internal ring buffer populated by `processLoop`.
                 pub fn read(self: *AudioSystem, out: []i16) Error!usize {
                     if (self.mic_impl == null) return error.InvalidState;
                     if (out.len == 0) return 0;
@@ -219,6 +296,7 @@ pub fn Builder(comptime grt: type) type {
                 }
 
                 pub fn discardReadBuffer(self: *AudioSystem) void {
+                    self.raw_rb.discard();
                     discardBuffered(&self.capture_rb);
                 }
 
@@ -244,7 +322,7 @@ pub fn Builder(comptime grt: type) type {
                     return speaker_impl.setGain(gain_db);
                 }
 
-                /// `start()` enables devices, then spawns a mic-side read loop and a
+                /// `start()` enables devices, then starts a mic-side read task and a
                 /// speaker-side write loop so user `read()` calls only touch the internal
                 /// ring buffer and never drive the I/O clocks directly.
                 pub fn start(self: *AudioSystem) Error!void {
@@ -276,8 +354,9 @@ pub fn Builder(comptime grt: type) type {
                     errdefer {
                         self.state_mu.lock();
                         self.running = false;
-                        self.read_thread = null;
-                        self.write_thread = null;
+                        self.read_task = null;
+                        self.processor_task = null;
+                        self.write_task = null;
                         self.state_mu.unlock();
                     }
                     errdefer {
@@ -294,9 +373,9 @@ pub fn Builder(comptime grt: type) type {
                         mic_enabled = true;
                     }
 
-                    const read_thread = if (read_enabled)
-                        grt.std.Thread.spawn(self.read_thread_config, AudioSystem.readLoop, .{self}) catch |err| {
-                            log.err("spawn read loop failed: {s}", .{@errorName(err)});
+                    const read_task = if (read_enabled)
+                        grt.task.go("audio/read", self.read_task_options, glib.task.Routine.init(self, AudioSystem.readLoop)) catch |err| {
+                            log.err("start audio/read task failed: {s}", .{@errorName(err)});
                             self.state_mu.lock();
                             self.running = false;
                             self.state_mu.unlock();
@@ -305,23 +384,39 @@ pub fn Builder(comptime grt: type) type {
                     else
                         null;
 
-                    const write_thread = if (write_enabled)
-                        grt.std.Thread.spawn(self.write_thread_config, AudioSystem.writeLoop, .{self}) catch |err| {
-                            log.err("spawn write loop failed: {s}", .{@errorName(err)});
+                    const processor_task = if (read_enabled)
+                        grt.task.go("audio/processor", self.processor_task_options, glib.task.Routine.init(self, AudioSystem.processLoop)) catch |err| {
+                            log.err("start audio/processor task failed: {s}", .{@errorName(err)});
                             self.state_mu.lock();
                             self.running = false;
                             self.state_mu.unlock();
                             if (maybe_mic) |mic_impl| mic_impl.disable() catch {};
                             if (maybe_speaker) |speaker_impl| speaker_impl.disable() catch {};
-                            if (read_thread) |thread| thread.join();
+                            if (read_task) |task| task.join();
+                            return error.Unexpected;
+                        }
+                    else
+                        null;
+
+                    const write_task = if (write_enabled)
+                        grt.task.go("audio/write", self.write_task_options, glib.task.Routine.init(self, AudioSystem.writeLoop)) catch |err| {
+                            log.err("start audio/write task failed: {s}", .{@errorName(err)});
+                            self.state_mu.lock();
+                            self.running = false;
+                            self.state_mu.unlock();
+                            if (maybe_mic) |mic_impl| mic_impl.disable() catch {};
+                            if (maybe_speaker) |speaker_impl| speaker_impl.disable() catch {};
+                            if (read_task) |task| task.join();
+                            if (processor_task) |task| task.join();
                             return error.Unexpected;
                         }
                     else
                         null;
 
                     self.state_mu.lock();
-                    self.read_thread = read_thread;
-                    self.write_thread = write_thread;
+                    self.read_task = read_task;
+                    self.processor_task = processor_task;
+                    self.write_task = write_task;
                     self.state_mu.unlock();
                     mic_enabled = false;
                     speaker_enabled = false;
@@ -333,23 +428,26 @@ pub fn Builder(comptime grt: type) type {
 
                     self.state_mu.lock();
                     self.running = false;
-                    const read_thread = self.read_thread;
-                    const write_thread = self.write_thread;
-                    self.read_thread = null;
-                    self.write_thread = null;
+                    const read_task = self.read_task;
+                    const processor_task = self.processor_task;
+                    const write_task = self.write_task;
+                    self.read_task = null;
+                    self.processor_task = null;
+                    self.write_task = null;
                     self.state_mu.unlock();
 
                     if (mic_impl) |current_mic| current_mic.disable() catch {};
                     if (speaker_impl) |current_speaker| current_speaker.disable() catch {};
 
-                    if (read_thread) |thread| thread.join();
-                    if (write_thread) |thread| thread.join();
+                    if (read_task) |task| task.join();
+                    if (processor_task) |task| task.join();
+                    if (write_task) |task| task.join();
                 }
 
                 fn hasActiveThreads(self: *AudioSystem) bool {
                     self.state_mu.lock();
                     defer self.state_mu.unlock();
-                    return self.running or self.read_thread != null or self.write_thread != null;
+                    return self.running or self.read_task != null or self.processor_task != null or self.write_task != null;
                 }
 
                 fn isRunning(self: *AudioSystem) bool {
@@ -371,13 +469,15 @@ pub fn Builder(comptime grt: type) type {
 
                 fn prepareLoopBuffers(self: *AudioSystem, mic_rate: u32, speaker_rate: u32) Error!void {
                     discardBuffered(&self.capture_rb);
+                    self.raw_rb.discard();
                     discardBuffered(&self.ref_rb);
                     try self.seedSoftRefDelay();
 
-                    const needed = referenceChunkLen(Speaker.frame_samples_per_channel, speaker_rate, mic_rate) catch |err| switch (err) {
+                    const converted_len = referenceChunkLen(Speaker.frame_samples_per_channel, speaker_rate, mic_rate) catch |err| switch (err) {
                         error.Overflow => return error.Overflow,
                         else => return error.InvalidState,
                     };
+                    const needed = @max(Speaker.frame_samples_per_channel, converted_len);
 
                     if (self.ref_write_scratch.len == needed) return;
                     if (self.ref_write_scratch.len > 0) self.allocator.free(self.ref_write_scratch);
@@ -405,7 +505,10 @@ pub fn Builder(comptime grt: type) type {
                         .ref = null,
                     };
                     var ref_chunk: [samples_per_channel]i16 = @splat(0);
-                    var processed: [samples_per_channel]i16 = undefined;
+                    var frames: usize = 0;
+                    var raw_drops: usize = 0;
+                    var soft_refs: usize = 0;
+                    var soft_ref_samples: usize = 0;
 
                     while (self.isRunning()) {
                         frame.ref = null;
@@ -418,16 +521,53 @@ pub fn Builder(comptime grt: type) type {
 
                         if (frame.ref == null) {
                             @memset(ref_chunk[0..], 0);
-                            _ = readBuffered(&self.ref_rb, ref_chunk[0..]);
+                            soft_ref_samples += readBuffered(&self.ref_rb, ref_chunk[0..]);
+                            soft_refs += 1;
                             frame.ref = ref_chunk;
                         }
 
+                        frames += 1;
+                        if (self.raw_rb.writeDroppingOldest(frame)) raw_drops += 1;
+                        if (frames % debug_report_interval == 0) {
+                            log.info(
+                                "audio dbg read frames={d} raw_drop={d} soft_ref={d} soft_ref_samples={d}",
+                                .{ frames, raw_drops, soft_refs, soft_ref_samples },
+                            );
+                        }
+                        yieldToScheduler();
+                    }
+                }
+
+                fn processLoop(self: *AudioSystem) void {
+                    var frame: Frame = .{
+                        .mic = undefined,
+                        .ref = null,
+                    };
+                    var processed: [samples_per_channel]i16 = undefined;
+                    var frames: usize = 0;
+                    var processed_samples: usize = 0;
+                    var raw_empty: usize = 0;
+                    var process_total_ns: glib.time.duration.Duration = 0;
+                    var process_max_ns: glib.time.duration.Duration = 0;
+
+                    while (self.isRunning()) {
+                        if (!self.raw_rb.read(&frame)) {
+                            raw_empty += 1;
+                            yieldToScheduler();
+                            continue;
+                        }
+
+                        const process_started = grt.time.instant.now();
                         const n = ProcessorType.process(frame, processed[0..]) catch |err| {
                             if (!self.isRunning()) return;
                             log.err("processor failed: {s}", .{@errorName(err)});
                             self.failAsync();
                             return;
                         };
+                        const process_elapsed = glib.time.instant.sub(grt.time.instant.now(), process_started);
+                        process_total_ns += process_elapsed;
+                        process_max_ns = @max(process_max_ns, process_elapsed);
+                        frames += 1;
                         if (n == 0) {
                             yieldToScheduler();
                             continue;
@@ -437,7 +577,20 @@ pub fn Builder(comptime grt: type) type {
                             return;
                         }
 
+                        processed_samples += n;
                         self.capture_rb.writeDroppingOldest(processed[0..n]);
+                        if (frames % debug_report_interval == 0) {
+                            log.info(
+                                "audio dbg process frames={d} samples={d} raw_empty={d} avg_us={d} max_us={d}",
+                                .{
+                                    frames,
+                                    processed_samples,
+                                    raw_empty,
+                                    durationToUs(@divTrunc(process_total_ns, @as(glib.time.duration.Duration, @intCast(frames)))),
+                                    durationToUs(process_max_ns),
+                                },
+                            );
+                        }
                         yieldToScheduler();
                     }
                 }
@@ -450,18 +603,30 @@ pub fn Builder(comptime grt: type) type {
                     const mic_rate = if (maybe_mic) |mic_impl| mic_impl.sampleRate() else 0;
 
                     var mix_chunk: Speaker.Frame = @splat(0);
+                    var ref_mix_chunk: Speaker.Frame = @splat(0);
+                    var frames: usize = 0;
+                    var mixed_samples: usize = 0;
+                    var ref_samples: usize = 0;
+                    var idle: usize = 0;
 
                     while (self.isRunning()) {
                         @memset(mix_chunk[0..], 0);
-                        const mixed_n = playback.read(mix_chunk[0..]) orelse 0;
+                        @memset(ref_mix_chunk[0..], 0);
+                        const mixed_n = if (maybe_mic != null)
+                            playback.readWithReference(mix_chunk[0..], ref_mix_chunk[0..]) orelse 0
+                        else
+                            playback.read(mix_chunk[0..]) orelse 0;
                         if (mixed_n == 0) {
+                            idle += 1;
                             sleepForSamples(mix_chunk.len, speaker_rate);
                             continue;
                         }
 
+                        frames += 1;
+                        mixed_samples += mixed_n;
                         if (maybe_mic != null) {
                             const ref_n = convertSpeakerChunkToMicRate(
-                                mix_chunk[0..mixed_n],
+                                ref_mix_chunk[0..mixed_n],
                                 speaker_rate,
                                 self.ref_write_scratch,
                                 mic_rate,
@@ -473,6 +638,7 @@ pub fn Builder(comptime grt: type) type {
                             };
                             if (ref_n > 0) {
                                 self.ref_rb.writeDroppingOldest(self.ref_write_scratch[0..ref_n]);
+                                ref_samples += ref_n;
                             }
                         }
 
@@ -482,6 +648,12 @@ pub fn Builder(comptime grt: type) type {
                             self.failAsync();
                             return;
                         };
+                        if (frames % debug_report_interval == 0) {
+                            log.info(
+                                "audio dbg write frames={d} mixed_samples={d} ref_samples={d} idle={d}",
+                                .{ frames, mixed_samples, ref_samples, idle },
+                            );
+                        }
                     }
                 }
 
@@ -522,6 +694,10 @@ pub fn Builder(comptime grt: type) type {
                     const duration_128 = (@as(u128, sample_count) * @as(u128, @intCast(grt.time.duration.Second))) /
                         @as(u128, sample_rate);
                     return @intCast(@min(duration_128, @as(u128, @intCast(glib.time.duration.Maximum))));
+                }
+
+                fn durationToUs(duration: glib.time.duration.Duration) i64 {
+                    return @divTrunc(duration, glib.time.duration.MicroSecond);
                 }
 
                 fn referenceChunkLen(input_len: usize, input_rate: u32, output_rate: u32) Error!usize {
@@ -952,6 +1128,98 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             const speaker_writes = speaker_ctx.writes;
             speaker_ctx.mu.unlock();
             try grt.std.testing.expectEqual(@as(usize, 0), speaker_writes);
+        }
+
+        fn slowProcessorDoesNotBlockMicReads(alloc: glib.std.mem.Allocator) !void {
+            const Thread = grt.std.Thread;
+            const TestMic = MicMod.make(grt, 1, 4);
+            const ProcessorBackend = struct {
+                fn process(frame: TestMic.Frame, out: []i16) Error!usize {
+                    Thread.sleep(@intCast(30 * grt.time.duration.MilliSecond));
+                    const n = @min(frame.mic[0].len, out.len);
+                    @memcpy(out[0..n], frame.mic[0][0..n]);
+                    return n;
+                }
+            };
+
+            const Built = comptime blk: {
+                var builder = Builder(grt).init();
+                builder.configMic(1, 4);
+                builder.configSpeaker(4);
+                builder.setProcessor(&ProcessorBackend.process);
+                break :blk builder.build();
+            };
+
+            const MicCtx = struct {
+                reads: usize = 0,
+                next: i16 = 1,
+                enabled: bool = false,
+                mu: Thread.Mutex = .{},
+            };
+
+            const MicBackend = struct {
+                fn deinit(_: *anyopaque) void {}
+                fn sampleRate(_: *anyopaque) u32 {
+                    return 16000;
+                }
+                fn micCount(_: *anyopaque) u8 {
+                    return 1;
+                }
+                fn read(ptr: *anyopaque, frame: *TestMic.Frame) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    defer ctx.mu.unlock();
+                    if (!ctx.enabled) return error.InvalidState;
+
+                    var i: usize = 0;
+                    while (i < frame.mic[0].len) : (i += 1) {
+                        frame.mic[0][i] = ctx.next;
+                        ctx.next = if (ctx.next == 30_000) 1 else ctx.next + 1;
+                    }
+                    frame.ref = null;
+                    ctx.reads += 1;
+                }
+                fn gains(_: *anyopaque) TestMic.Gains {
+                    return .{null};
+                }
+                fn setGains(_: *anyopaque, _: []const ?i8) Error!void {
+                    return;
+                }
+                fn enable(ptr: *anyopaque) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = true;
+                    ctx.mu.unlock();
+                }
+                fn disable(ptr: *anyopaque) Error!void {
+                    const ctx: *MicCtx = @ptrCast(@alignCast(ptr));
+                    ctx.mu.lock();
+                    ctx.enabled = false;
+                    ctx.mu.unlock();
+                }
+
+                const vtable = TestMic.VTable{
+                    .deinit = deinit,
+                    .sampleRate = sampleRate,
+                    .micCount = micCount,
+                    .read = read,
+                    .gains = gains,
+                    .setGains = setGains,
+                    .enable = enable,
+                    .disable = disable,
+                };
+            };
+
+            var mic_ctx = MicCtx{};
+            var system = try Built.init(alloc, .{});
+            defer system.deinit();
+            try system.setMic(TestMic.init(&mic_ctx, &MicBackend.vtable));
+
+            try system.start();
+            defer system.stop() catch {};
+
+            const deadline = glib.time.instant.add(grt.time.instant.now(), 120 * grt.time.duration.MilliSecond);
+            try grt.std.testing.expect(waitMicReads(&mic_ctx, 8, deadline));
         }
 
         fn readReturnsWouldBlockWhenRunningAndEmpty(alloc: glib.std.mem.Allocator) !void {
@@ -1451,6 +1719,12 @@ pub fn TestRunner(comptime grt: type) glib.testing.TestRunner {
             t.run("readLoop_buffers_processed_audio", glib.testing.TestRunner.fromFn(grt.std, 256 * 1024, struct {
                 fn run(_: *glib.testing.T, case_allocator: glib.std.mem.Allocator) !void {
                     try TestCase.readLoopBuffersProcessedAudio(case_allocator);
+                }
+            }.run));
+            if (!t.wait()) return false;
+            t.run("slow_processor_does_not_block_mic_reads", glib.testing.TestRunner.fromFn(grt.std, 256 * 1024, struct {
+                fn run(_: *glib.testing.T, case_allocator: glib.std.mem.Allocator) !void {
+                    try TestCase.slowProcessorDoesNotBlockMicReads(case_allocator);
                 }
             }.run));
             if (!t.wait()) return false;

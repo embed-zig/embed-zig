@@ -94,16 +94,71 @@ pub fn make(comptime grt: type) type {
         }
 
         pub fn mixInto(self: *@This(), out: []i16, gain: f32) usize {
+            return self.mixIntoReference(out, null, gain);
+        }
+
+        pub fn mixIntoReference(self: *@This(), out: []i16, ref_out: ?[]i16, gain: f32) usize {
             self.mutex.lock();
             defer self.mutex.unlock();
 
             const n = @min(out.len, self.len);
+            if (ref_out) |reference| {
+                glib.std.debug.assert(reference.len >= n);
+            }
             var i: usize = 0;
             while (i < n) : (i += 1) {
                 const sample = self.peekLocked(i);
                 const scaled = @as(f32, @floatFromInt(sample)) * gain;
                 const mixed = @as(f32, @floatFromInt(out[i])) + scaled;
                 out[i] = clampToI16(mixed);
+                if (ref_out) |reference| {
+                    const ref_mixed = @as(f32, @floatFromInt(reference[i])) + scaled;
+                    reference[i] = clampToI16(ref_mixed);
+                }
+            }
+            self.consumeLocked(n);
+            if (n > 0) self.cond.broadcast();
+            return n;
+        }
+
+        pub fn mixFloatInto(self: *@This(), out: []f32, gain: f32) usize {
+            return self.mixFloatIntoReference(out, null, gain);
+        }
+
+        pub fn mixFloatIntoReference(self: *@This(), out: []f32, ref_out: ?[]f32, gain: f32) usize {
+            return self.mixFloatLinearIntoReference(out, ref_out, gain, 0);
+        }
+
+        pub fn mixFloatLinearInto(
+            self: *@This(),
+            out: []f32,
+            start_gain: f32,
+            gain_step: f32,
+        ) usize {
+            return self.mixFloatLinearIntoReference(out, null, start_gain, gain_step);
+        }
+
+        pub fn mixFloatLinearIntoReference(
+            self: *@This(),
+            out: []f32,
+            ref_out: ?[]f32,
+            start_gain: f32,
+            gain_step: f32,
+        ) usize {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+
+            const n = @min(out.len, self.len);
+            if (ref_out) |reference| {
+                glib.std.debug.assert(reference.len >= n);
+            }
+            var i: usize = 0;
+            while (i < n) : (i += 1) {
+                const sample = self.peekLocked(i);
+                const gain = start_gain + gain_step * @as(f32, @floatFromInt(i));
+                const scaled = @as(f32, @floatFromInt(sample)) * gain;
+                out[i] += scaled;
+                if (ref_out) |reference| reference[i] += scaled;
             }
             self.consumeLocked(n);
             if (n > 0) self.cond.broadcast();

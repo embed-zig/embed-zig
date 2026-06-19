@@ -11,6 +11,9 @@ const Wifi = esp.embed.wifi.Local;
 
 const Self = @This();
 const log = esp.grt.std.log.scoped(.szp_board);
+const audio_read_task_stack_size = 16 * 1024;
+const audio_processor_task_stack_size = 24 * 1024;
+const audio_write_task_stack_size = 8 * 1024;
 
 pub const Board = Self;
 pub const metadata = embed.board.Metadata{
@@ -52,9 +55,12 @@ bt_allocator: ?esp.grt.std.mem.Allocator = null,
 state_value: embed.board.State = .uninitialized,
 
 pub fn init(config: InitConfig) !Self {
+    var audio_system_config = config.audio_system_config;
+    applyDefaultAudioTaskOptions(&audio_system_config);
+
     return .{
         .audio_allocator = config.audio_allocator,
-        .audio_system_config = config.audio_system_config,
+        .audio_system_config = audio_system_config,
         .bt_allocator = config.bt_allocator,
     };
 }
@@ -199,6 +205,18 @@ fn ensureAudioSystem(self: *Self) !*Audio.Type {
     }
     if (self.audio) |*audio| return audio.system();
     return error.InvalidState;
+}
+
+fn applyDefaultAudioTaskOptions(config: *Audio.Type.Config) void {
+    if (config.read_task.min_stack_size == 0) {
+        config.read_task.min_stack_size = audio_read_task_stack_size;
+    }
+    if (config.processor_task.min_stack_size == 0) {
+        config.processor_task.min_stack_size = audio_processor_task_stack_size;
+    }
+    if (config.write_task.min_stack_size == 0) {
+        config.write_task.min_stack_size = audio_write_task_stack_size;
+    }
 }
 
 fn check(name: []const u8, rc: c_int) !void {

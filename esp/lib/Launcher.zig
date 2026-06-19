@@ -6,8 +6,6 @@ const log = grt.std.log.scoped(.esp_launcher);
 const launcher_mod = @This();
 
 pub const Config = struct {
-    audio_read_thread_spawn_config: grt.std.Thread.SpawnConfig = .{},
-    audio_write_thread_spawn_config: grt.std.Thread.SpawnConfig = .{},
     pipeline_tick_interval: grt.time.duration.Duration = 10 * grt.time.duration.MilliSecond,
     pipeline_spawn_config: grt.std.Thread.SpawnConfig = .{},
     poller_poll_interval: grt.time.duration.Duration = 10 * grt.time.duration.MilliSecond,
@@ -177,15 +175,10 @@ fn validateSupportedRegistries(comptime registries: anytype) void {
     if (registries.wifi_ap.len != 0) @compileError("ESP launcher does not support wifi ap yet");
 }
 
-fn makeBoardInitConfig(comptime Board: type, allocator: grt.std.mem.Allocator, launcher_config: Config) Board.InitConfig {
+fn makeBoardInitConfig(comptime Board: type, allocator: grt.std.mem.Allocator, _: Config) Board.InitConfig {
     var config: Board.InitConfig = .{};
     if (@hasField(Board.InitConfig, "audio_allocator")) config.audio_allocator = allocator;
-    if (@hasField(Board.InitConfig, "audio_system_config")) {
-        config.audio_system_config = .{
-            .read_thread = launcher_config.audio_read_thread_spawn_config,
-            .write_thread = launcher_config.audio_write_thread_spawn_config,
-        };
-    }
+    if (@hasField(Board.InitConfig, "audio_system_config")) config.audio_system_config = .{};
     if (@hasField(Board.InitConfig, "bt_allocator")) config.bt_allocator = allocator;
     return config;
 }

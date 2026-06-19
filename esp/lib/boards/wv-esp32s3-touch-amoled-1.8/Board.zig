@@ -11,6 +11,9 @@ const Self = @This();
 const Es8311 = embed.drivers.audio.Es8311;
 const log = esp.grt.std.log.scoped(.wv_board);
 const default_soft_ref_delay_samples: usize = 0;
+const audio_read_task_stack_size = 16 * 1024;
+const audio_processor_task_stack_size = 24 * 1024;
+const audio_write_task_stack_size = 8 * 1024;
 const Audio = esp.embed.audio_adapter.Es8311System.make(.{
     .sample_rate = 16_000,
     .frame_samples_per_channel = 256,
@@ -96,6 +99,7 @@ state_value: embed.board.State = .uninitialized,
 
 pub fn init(config: InitConfig) !Self {
     var audio_system_config = config.audio_system_config;
+    applyDefaultAudioTaskOptions(&audio_system_config);
     if (audio_system_config.soft_ref_delay_samples == 0) {
         audio_system_config.soft_ref_delay_samples = default_soft_ref_delay_samples;
     }
@@ -220,6 +224,18 @@ fn ensureAudioSystem(self: *Self) !*Audio.Type {
     }
     if (self.audio) |*audio| return audio.system();
     return error.InvalidState;
+}
+
+fn applyDefaultAudioTaskOptions(config: *Audio.Type.Config) void {
+    if (config.read_task.min_stack_size == 0) {
+        config.read_task.min_stack_size = audio_read_task_stack_size;
+    }
+    if (config.processor_task.min_stack_size == 0) {
+        config.processor_task.min_stack_size = audio_processor_task_stack_size;
+    }
+    if (config.write_task.min_stack_size == 0) {
+        config.write_task.min_stack_size = audio_write_task_stack_size;
+    }
 }
 
 fn check(name: []const u8, rc: c_int) !void {

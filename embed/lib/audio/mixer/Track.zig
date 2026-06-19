@@ -8,6 +8,7 @@ pub const Config = struct {
     label: []const u8 = "",
     gain: f32 = 1.0,
     buffer_capacity: usize = 32000,
+    reference: bool = true,
 };
 
 ptr: *anyopaque,
