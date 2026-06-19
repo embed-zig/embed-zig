@@ -214,6 +214,9 @@ fn aeadTests(comptime std: type) !void {
 
         var decrypted: [plaintext.len]u8 = undefined;
         try A.decrypt(&decrypted, &ciphertext, tag, "", nonce, key);
+        if (@hasDecl(A, "State")) {
+            try aeadStateRoundtrip(std, A, key, nonce, plaintext);
+        }
 
         if (!std.mem.eql(u8, plaintext, &decrypted)) return error.AeadDecryptMismatch;
 
@@ -222,6 +225,100 @@ fn aeadTests(comptime std: type) !void {
             return error.AeadShouldFailBadTag;
         } else |_| {}
     }
+
+    try providedAeadStateTests(std);
+}
+
+fn aeadStateRoundtrip(
+    comptime std: type,
+    comptime A: type,
+    key: [A.key_length]u8,
+    nonce: [A.nonce_length]u8,
+    comptime plaintext: []const u8,
+) !void {
+    var state = try A.State.init(key);
+    defer state.deinit();
+
+    var ciphertext: [plaintext.len]u8 = undefined;
+    var tag: [A.tag_length]u8 = undefined;
+    state.encrypt(&ciphertext, &tag, plaintext, "ad", nonce);
+
+    var decrypted: [plaintext.len]u8 = undefined;
+    try state.decrypt(&decrypted, &ciphertext, tag, "ad", nonce);
+    if (!std.mem.eql(u8, plaintext, &decrypted)) return error.AeadStateDecryptMismatch;
+
+    tag[0] ^= 0xff;
+    if (state.decrypt(&decrypted, &ciphertext, tag, "ad", nonce)) |_| {
+        return error.AeadStateShouldFailBadTag;
+    } else |_| {}
+}
+
+fn providedAeadStateTests(comptime std: type) !void {
+    const Wrapped = stdz.crypto.make(struct {
+        pub const Aes128Gcm = providedAeadImpl(std);
+        pub const Aes256Gcm = providedAeadImpl(std);
+        pub const ChaCha20Poly1305 = providedAeadImpl(std);
+    });
+    const A = Wrapped.aead.aes_gcm.Aes128Gcm;
+
+    const key: [A.key_length]u8 = .{ 0x11, 0x22 };
+    const nonce: [A.nonce_length]u8 = .{ 0x33, 0x44, 0x55 };
+    try aeadStateRoundtrip(std, A, key, nonce, "provided state");
+}
+
+fn providedAeadImpl(comptime std: type) type {
+    return struct {
+        pub const tag_length = 4;
+        pub const nonce_length = 3;
+        pub const key_length = 2;
+
+        pub const State = struct {
+            key: [key_length]u8,
+
+            pub fn init(key: [key_length]u8) !State {
+                return .{ .key = key };
+            }
+
+            pub fn deinit(self: *State) void {
+                self.* = undefined;
+            }
+
+            pub fn encrypt(self: *State, c: []u8, tag: *[tag_length]u8, m: []const u8, ad: []const u8, npub: [nonce_length]u8) void {
+                encryptWithKey(c, tag, m, ad, npub, self.key);
+            }
+
+            pub fn decrypt(self: *State, m: []u8, c: []const u8, tag: [tag_length]u8, ad: []const u8, npub: [nonce_length]u8) std.crypto.errors.AuthenticationError!void {
+                return decryptWithKey(m, c, tag, ad, npub, self.key);
+            }
+        };
+
+        pub fn encrypt(c: []u8, tag: *[tag_length]u8, m: []const u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) void {
+            encryptWithKey(c, tag, m, ad, npub, key);
+        }
+
+        pub fn decrypt(m: []u8, c: []const u8, tag: [tag_length]u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) std.crypto.errors.AuthenticationError!void {
+            return decryptWithKey(m, c, tag, ad, npub, key);
+        }
+
+        fn encryptWithKey(c: []u8, tag: *[tag_length]u8, m: []const u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) void {
+            for (m, 0..) |b, i| c[i] = b ^ key[i % key.len] ^ npub[i % npub.len];
+            tag.* = makeTag(c, ad, npub, key);
+        }
+
+        fn decryptWithKey(m: []u8, c: []const u8, tag: [tag_length]u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) std.crypto.errors.AuthenticationError!void {
+            if (!std.mem.eql(u8, &tag, &makeTag(c, ad, npub, key))) return error.AuthenticationFailed;
+            for (c, 0..) |b, i| m[i] = b ^ key[i % key.len] ^ npub[i % npub.len];
+        }
+
+        fn makeTag(c: []const u8, ad: []const u8, npub: [nonce_length]u8, key: [key_length]u8) [tag_length]u8 {
+            var tag: [tag_length]u8 = .{ 0, 0, 0, 0 };
+            for (c, 0..) |b, i| tag[i % tag.len] ^= b;
+            for (ad, 0..) |b, i| tag[i % tag.len] ^= b;
+            for (npub, 0..) |b, i| tag[i % tag.len] ^= b;
+            for (key, 0..) |b, i| tag[i % tag.len] ^= b;
+            return tag;
+        }
+    };
 }
 
 fn randomTests(comptime std: type) !void {
