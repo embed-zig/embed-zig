@@ -915,7 +915,7 @@ fn Suite(comptime std: type, comptime net: type) type {
             const ip = addrs[0].as4().?;
             try expectEqual([4]u8{ 10, 20, 30, 40 }, ip);
 
-            try waitForTrue(std, &slow_server.client_hello_received, 200 * net.time.duration.MilliSecond);
+            try waitForTrue(std, net, &slow_server.client_hello_received, 200 * net.time.duration.MilliSecond);
 
             var wait_done = BoolAtomic.init(false);
             var wait_thread = try std.Thread.spawn(threadSpawn(worker_stack), struct {
@@ -931,7 +931,7 @@ fn Suite(comptime std: type, comptime net: type) type {
             try expect(!wait_done.load(.acquire));
 
             slow_server.release.store(true, .release);
-            try waitForTrue(std, &wait_done, 500 * net.time.duration.MilliSecond);
+            try waitForTrue(std, net, &wait_done, 500 * net.time.duration.MilliSecond);
             wait_thread.join();
             fast_thread.join();
             slow_thread.join();
@@ -1100,7 +1100,7 @@ fn Suite(comptime std: type, comptime net: type) type {
             errdefer slow_server.release.store(true, .release);
             errdefer lookup_thread.join();
 
-            try waitForTrue(std, &slow_server.accepted, 200 * net.time.duration.MilliSecond);
+            try waitForTrue(std, net, &slow_server.accepted, 200 * net.time.duration.MilliSecond);
 
             var deinit_done = BoolAtomic.init(false);
             var deinit_thread = try std.Thread.spawn(threadSpawn(worker_stack), struct {
@@ -1113,15 +1113,15 @@ fn Suite(comptime std: type, comptime net: type) type {
             errdefer slow_server.release.store(true, .release);
             errdefer deinit_thread.join();
 
-            try waitUntilDeiniting(std, &resolver, 200 * net.time.duration.MilliSecond);
+            try waitUntilDeiniting(std, net, &resolver, 200 * net.time.duration.MilliSecond);
 
             var second_addrs: [4]Addr = undefined;
             try expectError(error.Closed, resolver.lookupHost("closed-again.test", &second_addrs));
             try expect(!deinit_done.load(.acquire));
 
             slow_server.release.store(true, .release);
-            try waitForTrue(std, &first_lookup_done, 500 * net.time.duration.MilliSecond);
-            try waitForTrue(std, &deinit_done, 500 * net.time.duration.MilliSecond);
+            try waitForTrue(std, net, &first_lookup_done, 500 * net.time.duration.MilliSecond);
+            try waitForTrue(std, net, &deinit_done, 500 * net.time.duration.MilliSecond);
             lookup_thread.join();
             deinit_thread.join();
             slow_thread.join();
@@ -1329,7 +1329,7 @@ fn readU16(bytes: *const [2]u8) u16 {
     return @as(u16, bytes[0]) << 8 | bytes[1];
 }
 
-fn waitForTrue(comptime std: type, flag: *std.atomic.Value(bool), timeout: @import("time").duration.Duration) !void {
+fn waitForTrue(comptime std: type, comptime net: type, flag: *std.atomic.Value(bool), timeout: @import("time").duration.Duration) !void {
     var elapsed: @import("time").duration.Duration = 0;
     while (elapsed < timeout) : (elapsed += @import("time").duration.MilliSecond) {
         if (flag.load(.acquire)) return;
@@ -1338,7 +1338,7 @@ fn waitForTrue(comptime std: type, flag: *std.atomic.Value(bool), timeout: @impo
     return error.TimeoutWaitingForFlag;
 }
 
-fn waitUntilDeiniting(comptime std: type, resolver: anytype, timeout: @import("time").duration.Duration) !void {
+fn waitUntilDeiniting(comptime _: type, comptime net: type, resolver: anytype, timeout: @import("time").duration.Duration) !void {
     var elapsed: @import("time").duration.Duration = 0;
     while (elapsed < timeout) : (elapsed += @import("time").duration.MilliSecond) {
         resolver.mutex.lock();

@@ -192,7 +192,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
 
                 const FakeUdpConn = UdpConnMod.UdpConn(std, FakeNet);
 
-                fn waitUntilWriteWaiting(impl: *FakeUdpConn, comptime thread_lib: type) void {
+                fn waitUntilWriteWaiting(impl: *FakeUdpConn, comptime _: type) void {
                     while (true) {
                         impl.write_mu.lock();
                         const waiting = impl.write_waiting;

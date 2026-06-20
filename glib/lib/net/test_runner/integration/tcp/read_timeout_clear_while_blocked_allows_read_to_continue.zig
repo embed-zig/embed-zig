@@ -15,7 +15,7 @@ pub fn make(comptime std: type, comptime net: type) testing_api.TestRunner {
         pub fn run(self: *@This(), t: *testing_api.T, allocator: std.mem.Allocator) bool {
             _ = self;
             const Body = struct {
-                fn waitUntilReadWaiting(conn: *net.TcpConn, comptime thread_lib: type) void {
+                fn waitUntilReadWaiting(conn: *net.TcpConn, comptime _: type) void {
                     while (true) {
                         conn.read_mu.lock();
                         const waiting = conn.read_waiting;

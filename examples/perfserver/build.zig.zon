@@ -1,0 +1,22 @@
+.{
+    .name = .netperf,
+    .version = "0.1.0",
+    .fingerprint = 0x8e75466e40e3cf09,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .glib = .{
+            .path = "../../glib",
+        },
+        .gstd = .{
+            .path = "../../gstd",
+        },
+        .thirdparty = .{
+            .path = "../../thirdparty",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "bin",
+    },
+}

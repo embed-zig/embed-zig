@@ -377,7 +377,7 @@ fn runImpl(comptime std: type, comptime Net: type, t: *testing_api.T, alloc: std
     try Runner.concurrentAliyunQueries();
 }
 
-fn waitUntilDeiniting(comptime l: type, comptime Net: type, client: anytype, timeout: Net.time.duration.Duration) !void {
+fn waitUntilDeiniting(comptime _: type, comptime Net: type, client: anytype, timeout: Net.time.duration.Duration) !void {
     var waited: Net.time.duration.Duration = 0;
     while (waited < timeout) : (waited += Net.time.duration.MilliSecond) {
         client.mutex.lock();
