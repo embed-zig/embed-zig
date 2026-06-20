@@ -44,23 +44,8 @@ pub fn build(b: *std.Build) void {
     const glib = glib_dep.module("glib");
     const gstd = gstd_dep.module("gstd");
     const embed = embed_dep.module("embed");
-    const openapi = b.createModule(.{
-        .root_source_file = openapi_codegen_dep.path("lib/openapi.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "glib", .module = glib },
-        },
-    });
-    const codegen = b.createModule(.{
-        .root_source_file = openapi_codegen_dep.path("lib/codegen.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "openapi", .module = openapi },
-            .{ .name = "glib", .module = glib },
-        },
-    });
+    const openapi = openapi_codegen_dep.module("openapi");
+    const codegen = openapi_codegen_dep.module("codegen");
     const desktop_module = desktop_dep.module("desktop");
     const esp = esp_dep.module("esp");
 
@@ -78,6 +63,16 @@ pub fn build(b: *std.Build) void {
     for (build_modules.apps_modules) |module_spec| {
         b.modules.put(module_spec.export_name, apps_dep.module(module_spec.dependency_module_name)) catch @panic("OOM");
     }
+
+    desktop_module.addImport("embed", embed);
+    desktop_module.addImport("glib", glib);
+    desktop_module.addImport("gstd", gstd);
+    desktop_module.addImport("openapi", openapi);
+    desktop_module.addImport("codegen", codegen);
+    desktop_module.addImport("core_bluetooth", thirdparty_dep.module("core_bluetooth"));
+    desktop_module.addImport("core_wlan", thirdparty_dep.module("core_wlan"));
+    desktop_module.addImport("portaudio", thirdparty_dep.module("portaudio"));
+    desktop_module.addImport("speexdsp", thirdparty_dep.module("speexdsp"));
 
     build_tests.create(b, target, optimize);
 }
