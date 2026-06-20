@@ -89,6 +89,8 @@ pub const SocketLevelOption = union(enum) {
     reuse_addr: bool,
     reuse_port: bool,
     broadcast: bool,
+    recv_buffer_size: usize,
+    send_buffer_size: usize,
 };
 
 pub const TcpLevelOption = union(enum) {

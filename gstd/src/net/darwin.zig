@@ -617,6 +617,12 @@ fn applySocketLevelOpt(sock: posix.socket_t, opt: glib.net.runtime.SocketLevelOp
         .broadcast => |enabled| {
             try setSockOptBool(sock, posix.SOL.SOCKET, posix.SO.BROADCAST, enabled);
         },
+        .recv_buffer_size => |size| {
+            try setSockOptSize(sock, posix.SOL.SOCKET, posix.SO.RCVBUF, size);
+        },
+        .send_buffer_size => |size| {
+            try setSockOptSize(sock, posix.SOL.SOCKET, posix.SO.SNDBUF, size);
+        },
     }
 }
 
@@ -652,6 +658,12 @@ fn translateSetSockOptErr(err: anyerror) glib.net.runtime.SetSockOptError {
 fn setSockOptBool(fd: posix.socket_t, level: anytype, opt: anytype, enable: bool) glib.net.runtime.SetSockOptError!void {
     const value: [4]u8 = @bitCast(@as(i32, if (enable) 1 else 0));
     posix.setsockopt(fd, level, opt, &value) catch |err| return translateSetSockOptErr(err);
+}
+
+fn setSockOptSize(fd: posix.socket_t, level: anytype, opt: anytype, size: usize) glib.net.runtime.SetSockOptError!void {
+    const capped = @min(size, @as(usize, @intCast(std.math.maxInt(i32))));
+    const value: i32 = @intCast(capped);
+    posix.setsockopt(fd, level, opt, std.mem.asBytes(&value)) catch |err| return translateSetSockOptErr(err);
 }
 
 fn socketError(err: anyerror) glib.net.runtime.SocketError {

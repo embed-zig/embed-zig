@@ -562,7 +562,15 @@ fn applySocketLevelOpt(sock: posix.socket_t, opt: glib.net.runtime.SocketLevelOp
             const v: i32 = if (enabled) 1 else 0;
             posix.setsockopt(sock, posix.SOL.SOCKET, posix.SO.BROADCAST, std.mem.asBytes(&v)) catch |err| return translateSetSockOptErr(err);
         },
+        .recv_buffer_size => |size| try setSocketBufferSize(sock, posix.SO.RCVBUF, size),
+        .send_buffer_size => |size| try setSocketBufferSize(sock, posix.SO.SNDBUF, size),
     }
+}
+
+fn setSocketBufferSize(sock: posix.socket_t, opt: anytype, size: usize) glib.net.runtime.SetSockOptError!void {
+    const capped = @min(size, @as(usize, @intCast(std.math.maxInt(i32))));
+    const v: i32 = @intCast(capped);
+    posix.setsockopt(sock, posix.SOL.SOCKET, opt, std.mem.asBytes(&v)) catch |err| return translateSetSockOptErr(err);
 }
 
 fn sockaddrToAddrPort(storage: *const posix.sockaddr.storage, len: posix.socklen_t) !glib.net.netip.AddrPort {

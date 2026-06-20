@@ -624,6 +624,16 @@ fn applySocketLevelOpt(sock: posix.socket_t, opt: glib.net.runtime.SocketLevelOp
                 return lastSetSockOptError();
             }
         },
+        .recv_buffer_size => |size| try setSocketBufferSize(sock, ws2_32.SO.RCVBUF, size),
+        .send_buffer_size => |size| try setSocketBufferSize(sock, ws2_32.SO.SNDBUF, size),
+    }
+}
+
+fn setSocketBufferSize(sock: posix.socket_t, opt: i32, size: usize) glib.net.runtime.SetSockOptError!void {
+    const capped = @min(size, @as(usize, @intCast(std.math.maxInt(i32))));
+    const v: i32 = @intCast(capped);
+    if (ws2_32.setsockopt(sock, ws2_32.SOL.SOCKET, opt, @ptrCast(&v), @sizeOf(i32)) == ws2_32.SOCKET_ERROR) {
+        return lastSetSockOptError();
     }
 }
 

@@ -241,6 +241,8 @@ pub const Tcp = struct {
                     try setSockOptBool(self.fd, posix.SOL.SOCKET, posix.SO.REUSEPORT, enable);
                 },
                 .broadcast => |enable| try setSockOptBool(self.fd, posix.SOL.SOCKET, posix.SO.BROADCAST, enable),
+                .recv_buffer_size => |size| try setSockOptSize(self.fd, posix.SOL.SOCKET, posix.SO.RCVBUF, size),
+                .send_buffer_size => |size| try setSockOptSize(self.fd, posix.SOL.SOCKET, posix.SO.SNDBUF, size),
             },
             .tcp => |tcp_opt| switch (tcp_opt) {
                 .no_delay => |enable| {
@@ -362,6 +364,8 @@ pub const Udp = struct {
                     try setSockOptBool(self.fd, posix.SOL.SOCKET, posix.SO.REUSEPORT, enable);
                 },
                 .broadcast => |enable| try setSockOptBool(self.fd, posix.SOL.SOCKET, posix.SO.BROADCAST, enable),
+                .recv_buffer_size => |size| try setSockOptSize(self.fd, posix.SOL.SOCKET, posix.SO.RCVBUF, size),
+                .send_buffer_size => |size| try setSockOptSize(self.fd, posix.SOL.SOCKET, posix.SO.SNDBUF, size),
             },
         }
     }
@@ -682,6 +686,12 @@ fn setNoSigPipe(fd: posix.socket_t) void {
 fn setSockOptBool(fd: posix.socket_t, level: anytype, opt: anytype, enable: bool) glib.net.runtime.SetSockOptError!void {
     const value: [4]u8 = @bitCast(@as(i32, if (enable) 1 else 0));
     posix.setsockopt(fd, level, opt, &value) catch |err| return setSockOptError(err);
+}
+
+fn setSockOptSize(fd: posix.socket_t, level: anytype, opt: anytype, size: usize) glib.net.runtime.SetSockOptError!void {
+    const capped = @min(size, @as(usize, @intCast(std.math.maxInt(i32))));
+    const value: i32 = @intCast(capped);
+    posix.setsockopt(fd, level, opt, std.mem.asBytes(&value)) catch |err| return setSockOptError(err);
 }
 
 fn translateCreateErr(err: anyerror) glib.net.runtime.CreateError {
